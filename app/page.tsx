@@ -2,7 +2,17 @@
 import Image from 'next/image';
 import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
+interface Cell {
+  col: number;
+  row: number;
+}
 
+interface TransientCode {
+  id: number;
+  text: string;
+  hasBurst: boolean;
+  fontSize: number;
+}
 const HORSEMAN_CODES = [
   '[TARGET]',
   'Keven_Hart',
@@ -147,8 +157,8 @@ const GRID_ROWS = 8;
 const CELL_WIDTH_VW = 92 / GRID_COLS;
 const CELL_HEIGHT_VH = 88 / GRID_ROWS;
 
-function generateGridCells() {
-  const cells = [];
+function generateGridCells(): Cell[] {
+  const cells: Cell[] = [];
   for (let row = 0; row < GRID_ROWS; row++) {
     for (let col = 0; col < GRID_COLS; col++) {
       cells.push({ col, row });
@@ -157,11 +167,11 @@ function generateGridCells() {
   return cells;
 }
 
-function pickRandomCells(n, excludeCells = []) {
+function pickRandomCells(n: number, excludeCells: Cell[] = []): Cell[] {
   const cells = generateGridCells().filter(
     (c) => !excludeCells.some((ec) => ec.col === c.col && ec.row === c.row)
   );
-  const picked = [];
+  const picked: Cell[] = [];
   while (picked.length < n && cells.length > 0) {
     const idx = Math.floor(Math.random() * cells.length);
     picked.push(cells.splice(idx, 1)[0]);
@@ -169,7 +179,7 @@ function pickRandomCells(n, excludeCells = []) {
   return picked;
 }
 
-function cellToPosition(cell) {
+function cellToPosition(cell: Cell): { left: number; top: number } {
   return {
     left: 4 + cell.col * CELL_WIDTH_VW + CELL_WIDTH_VW / 2,
     top: 6 + cell.row * CELL_HEIGHT_VH + CELL_HEIGHT_VH / 2,
@@ -178,14 +188,21 @@ function cellToPosition(cell) {
 
 export default function Home() {
   const router = useRouter();
-  const canvasRef = useRef(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
 
   // Matrix background effect canvas
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (!canvas) return;
+    if (!canvas) 
+    {
+      return;
+    }
     const ctx = canvas.getContext('2d');
-    let animationFrameId;
+    if (!ctx)
+    {
+      return;
+    }
+    let animationFrameId: number;
 
     const width = window.innerWidth;
     const height = window.innerHeight;
@@ -198,7 +215,12 @@ export default function Home() {
 
     const chars = '0123456789ABCDEFλΔΨ⌬▢▣▤▥▦▧';
 
-    function draw() {
+    function draw()
+    {
+      if (!ctx)
+      {
+        return;
+      }
       ctx.fillStyle = 'rgba(0, 10, 0, 0.1)';
       ctx.fillRect(0, 0, width, height);
       ctx.font = `${fontSize}px monospace`;
@@ -231,15 +253,15 @@ export default function Home() {
     };
   }, []);
 
-  const [persistentCodes, setPersistentCodes] = useState(
+  const [persistentCodes, setPersistentCodes] = useState<string[]>(
     HORSEMAN_CODES.slice(0, PERSISTENT_COUNT).map(() => '')
   );
-  const [persistentPositions, setPersistentPositions] = useState([]);
-  const [persistentIndices, setPersistentIndices] = useState(
+  const [persistentPositions, setPersistentPositions] = useState<{ left: number; top: number }[]>([]);
+  const [persistentIndices, setPersistentIndices] = useState<number[]>(
     Array(PERSISTENT_COUNT).fill(0)
   );
-  const [transientCodes, setTransientCodes] = useState([]);
-  const [transientPositions, setTransientPositions] = useState([]);
+  const [transientCodes, setTransientCodes] = useState<TransientCode[]>([]);
+  const [transientPositions, setTransientPositions] = useState<{ left: number; top: number }[]>([]);
 
   useEffect(() => {
     const persistentCells = pickRandomCells(PERSISTENT_COUNT);
@@ -248,11 +270,11 @@ export default function Home() {
 
   useEffect(() => {
     let running = true;
-    const intervals = [];
+    const intervals: number[] = [];
 
     for (let i = 0; i < PERSISTENT_COUNT; i++) {
       intervals.push(
-        setInterval(() => {
+        window.setInterval(() => {
           if (!running) return;
 
           setPersistentIndices((prevIndices) => {
@@ -336,7 +358,7 @@ export default function Home() {
       });
     }
 
-    const interval = setInterval(() => {
+    const interval = window.setInterval(() => {
       addTransient();
     }, 160 + Math.random() * 320);
 
@@ -614,4 +636,3 @@ export default function Home() {
     </main>
   );
 }
-
