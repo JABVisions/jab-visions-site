@@ -2,6 +2,59 @@
 @tailwind components;
 @tailwind utilities;
 
+/* === Global Typography / Fonts === */
 body {
-  @apply bg-black text-white;
+  font-family: 'Inter', sans-serif;
+  background-color: #0e0e0e;
+  color: #e0e0e0;
+  overflow-x: hidden;
+}
+
+/* === Navbar Glowing Styles === */
+@keyframes flicker {
+  0% { opacity: 1; text-shadow: 0 0 6px #66fcf1, 0 0 12px #33faff; }
+  15% { opacity: 0.85; text-shadow: 0 0 4px #66fcf1; }
+  30% { opacity: 1; text-shadow: 0 0 8px #66fcf1; }
+  50% { opacity: 0.9; text-shadow: 0 0 10px #33faff; }
+  70% { opacity: 1; text-shadow: 0 0 12px #66fcf1, 0 0 20px #9efeff; }
+  100% { opacity: 1; }
+}
+
+@keyframes pulse-slow {
+  0%, 100% {
+    text-shadow: 0 0 6px #00ff88, 0 0 10px #00ff88;
+  }
+  50% {
+    text-shadow: 0 0 10px #00ff88, 0 0 20px #00ff88;
+  }
+}
+
+.animate-pulse-slow {
+  animation: pulse-slow 2.4s ease-in-out infinite;
+}
+
+.nav-glow {
+  color: #00ff88;
+  text-shadow: 0 0 6px #00ff88, 0 0 12px #00ff88, 0 0 20px #00ff88;
+  transition: all 0.3s ease-in-out;
+  position: relative;
+}
+
+.nav-glow:hover {
+  color: #66fcf1;
+  animation: flicker 1.4s infinite;
+}
+
+.nav-glow::after {
+  content: '';
+  display: block;
+  width: 0%;
+  height: 2px;
+  background: #66fcf1;
+  transition: width 0.3s ease-in-out;
+  margin-top: 4px;
+}
+
+.nav-glow:hover::after {
+  width: 100%;
 }
