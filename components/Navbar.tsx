@@ -1,41 +1,45 @@
 'use client';
-
 import Link from 'next/link';
 import Image from 'next/image';
 
 export default function Navbar() {
   return (
-    <nav className="w-full bg-black py-4 px-6 flex justify-between items-center shadow-md z-50 border-b border-neutral-800">
-      {/* Logo and Text */}
-      <Link href="/" className="flex items-center space-x-3 group">
+    <nav className="w-full flex justify-between items-center px-6 py-4 bg-transparent z-50 relative">
+      {/* Logo and Brand */}
+      <div className="flex items-center gap-3">
         <Image
           src="/assets/jab-logo@2x.png"
           alt="JAB Visions Logo"
           width={40}
           height={40}
-          className="hover:scale-105 transition-transform"
         />
-        <span className="text-[#00ff88] text-lg font-bold tracking-widest uppercase font-mono animate-pulse-slow">
+        <span className="text-green-300 font-bold text-xl glowing-text">
           JAB Visions
         </span>
-      </Link>
+      </div>
 
       {/* Navigation Links */}
-      <div className="flex space-x-6 text-sm md:text-base uppercase font-mono tracking-widest">
-        <NavItem href="/" text="Home" />
-        <NavItem href="/those-ryderz" text="Those Ryderz" />
-        <NavItem href="/register" text="Join Us" />
+      <div className="flex space-x-6">
+        <Link href="/those-ryderz">
+          <span className="glowing-link text-green-300">Those Ryderz</span>
+        </Link>
+        <Link href="/join-us">
+          <span className="glowing-link text-green-300">Join Us</span>
+        </Link>
       </div>
-    </nav>
-  );
-}
 
-function NavItem({ href, text }: { href: string; text: string }) {
-  return (
-    <Link href={href}>
-      <span className="nav-glow cursor-pointer font-semibold tracking-wide group">
-        {text}
-      </span>
-    </Link>
+      {/* Glow effect */}
+      <style jsx global>{`
+        .glowing-link {
+          cursor: pointer;
+          transition: all 0.3s ease;
+          text-shadow: 0 0 6px #00ffcc;
+        }
+        .glowing-link:hover {
+          color: #a2f7ff;
+          text-shadow: 0 0 12px #00ffe7, 0 0 20px #00ffe7;
+        }
+      `}</style>
+    </nav>
   );
 }
