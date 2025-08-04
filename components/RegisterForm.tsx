@@ -17,11 +17,13 @@ export default function RegisterForm() {
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
+    console.log(`Field changed: ${name} -> ${value}`);
     setFormData(prev => ({ ...prev, [name]: value }));
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    console.log('Submitting formData:', formData);
     setStatus('idle');
 
     try {
@@ -34,7 +36,8 @@ export default function RegisterForm() {
       if (response.ok) {
         setFormData({ fullName: '', castOrCrew: '', role: '', email: '', phone: '', emergencyContact: '', emergencyNumber: '' });
       }
-    } catch {
+    } catch (err) {
+      console.error(err);
       setStatus('error');
     }
   };
