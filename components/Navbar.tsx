@@ -1,45 +1,50 @@
-'use client';
+import React from 'react';
 import Link from 'next/link';
-import Image from 'next/image';
 
 export default function Navbar() {
   return (
-    <nav className="w-full flex justify-between items-center px-6 py-4 bg-transparent z-50 relative">
-      {/* Logo and Brand */}
-      <div className="flex items-center gap-3">
-        <Image
-          src="/assets/jab-logo@2x.png"
-          alt="JAB Visions Logo"
-          width={40}
-          height={40}
-        />
-        <span className="text-green-300 font-bold text-xl glowing-text">
-          JAB Visions
-        </span>
+    <nav className="fixed top-0 left-0 w-full bg-black border-b-2 border-green-500 z-50">
+      <div className="relative max-w-6xl mx-auto h-16">
+        {/* Logo pinned above navbar */}
+        <div className="absolute top-0 left-0 transform -translate-y-[37%] z-50">
+          <img
+            src="/assets/jab-logo@2x.png"
+            alt="JAB Visions Logo"
+            className="w-96 h-96 object-contain"
+          />
+        </div>
+
+        {/* Business Title centered */}
+        <div className="absolute left-1/2 top-1/2 transform -translate-x-1/2 -translate-y-1/2 z-40">
+          <span className="text-green-400 font-semibold text-2xl uppercase">
+            JAB Visions™
+          </span>
+        </div>
+
+        {/* Navigation Links aligned right */}
+        <div className="absolute right-4 top-1/2 transform -translate-y-1/2 flex items-center space-x-4 text-green-400 font-medium">
+          <Link href="/" className="hover:text-green-300 transition">
+            Home
+          </Link>
+          <span className="text-green-600">|</span>
+          <Link href="/those-ryderz" className="hover:text-green-300 transition">
+            Those Ryderz
+          </Link>
+          <span className="text-green-600">|</span>
+          <Link href="/join-us" className="hover:text-green-300 transition">
+            Join Us
+          </Link>
+        </div>
       </div>
 
-      {/* Navigation Links */}
-      <div className="flex space-x-6">
-        <Link href="/those-ryderz">
-          <span className="glowing-link text-green-300">Those Ryderz</span>
-        </Link>
-        <Link href="/join-us">
-          <span className="glowing-link text-green-300">Join Us</span>
-        </Link>
-      </div>
-
-      {/* Glow effect */}
-      <style jsx global>{`
-        .glowing-link {
-          cursor: pointer;
-          transition: all 0.3s ease;
-          text-shadow: 0 0 6px #00ffcc;
-        }
-        .glowing-link:hover {
-          color: #a2f7ff;
-          text-shadow: 0 0 12px #00ffe7, 0 0 20px #00ffe7;
-        }
-      `}</style>
+      {/* Circuit-style border lights */}
+      <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-green-500 via-transparent to-green-500" />
+      <div className="absolute bottom-0 left-0 w-full h-1 bg-gradient-to-r from-green-500 via-transparent to-green-500" />
     </nav>
   );
 }
+
+/*
+Note:
+- Logo now w-96 h-96 and translated -50% vertically so it sits evenly above the navbar edge.
+*/
