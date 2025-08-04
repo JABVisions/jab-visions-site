@@ -1,7 +1,7 @@
 'use client';
 
 import Navbar from '@/components/Navbar';
-import Form from '@/components/Form';
+import RegisterForm from '@/components/RegisterForm';
 
 const heavenlyFont = "'Playfair Display', serif";
 const steelFont = "'Anton', Impact, Arial Black, sans-serif";
@@ -27,7 +27,7 @@ export default function JoinUs() {
       </p>
 
       {/* Registration Form */}
-      <Form />
+      <RegisterForm />
 
       {/* Metallic Title Styles */}
       <style jsx global>{`
@@ -56,16 +56,10 @@ export default function JoinUs() {
         }
 
         @keyframes metallicPulse {
-          0%, 100% {
-            filter: brightness(1.1);
-          }
-          50% {
-            filter: brightness(1.35);
-          }
+          0%, 100% { filter: brightness(1.1);} 
+          50% { filter: brightness(1.35);} 
         }
       `}</style>
     </main>
   );
 }
-
-/* Restart your dev server or push to GitHub → let Vercel auto-deploy. */

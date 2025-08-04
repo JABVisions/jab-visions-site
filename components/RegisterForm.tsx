@@ -1,109 +1,166 @@
+// File: components/RegisterForm.tsx
 'use client';
 
 import { useState } from 'react';
 
 export default function RegisterForm() {
-  const [submitted, setSubmitted] = useState(false);
   const [formData, setFormData] = useState({
     fullName: '',
-    role: 'Cast',
-    character: '',
+    castOrCrew: '',
+    role: '',
     email: '',
     phone: '',
     emergencyContact: '',
-    emergencyNumber: '',
-    headshot: '',
-    resume: '',
-    idUpload: '',
-    nda: '',
-    agreeToTerms: false,
+    emergencyNumber: ''
   });
+  const [status, setStatus] = useState<'idle'|'success'|'error'>('idle');
 
-  const webhookUrl = 'https://script.google.com/macros/s/AKfycbzza_t93CjPsdPjea_CjY4zwJjusqrk_dAckfv7zFHMn2uuotsFOI-BNvyXqnyTG5a8Aw/exec';
-
-  const handleChange = (e: any) => {
-    const { name, value, type, checked } = e.target;
-    setFormData({
-      ...formData,
-      [name]: type === 'checkbox' ? checked : value,
-    });
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+    const { name, value } = e.target;
+    setFormData(prev => ({ ...prev, [name]: value }));
   };
 
-  const handleSubmit = async (e: any) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setStatus('idle');
 
-    const response = await fetch(webhookUrl, {
-      method: 'POST',
-      body: JSON.stringify(formData),
-      headers: {
-        'Content-Type': 'application/json',
-      },
-    });
-
-    if (response.ok) {
-      setSubmitted(true);
-      setFormData({
-        fullName: '',
-        role: 'Cast',
-        character: '',
-        email: '',
-        phone: '',
-        emergencyContact: '',
-        emergencyNumber: '',
-        headshot: '',
-        resume: '',
-        idUpload: '',
-        nda: '',
-        agreeToTerms: false,
+    try {
+      const response = await fetch('/api/submit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(formData)
       });
+      setStatus(response.ok ? 'success' : 'error');
+      if (response.ok) {
+        setFormData({ fullName: '', castOrCrew: '', role: '', email: '', phone: '', emergencyContact: '', emergencyNumber: '' });
+      }
+    } catch {
+      setStatus('error');
     }
   };
 
-  if (submitted) {
-    return (
-      <div className="p-8 text-green-600 font-semibold text-lg">
-        ✅ Thank you! Your registration has been received.
-      </div>
-    );
-  }
-
   return (
-    <form onSubmit={handleSubmit} className="max-w-2xl mx-auto p-6 space-y-6 bg-white shadow-md rounded-md">
-      <h2 className="text-2xl font-bold">Cast & Crew Registration</h2>
+    <form onSubmit={handleSubmit} className="space-y-6 max-w-xl mx-auto">
+      {/* Full Name */}
+      <div className="flex flex-col">
+        <label htmlFor="fullName" className="mb-1 text-white">Full Name</label>
+        <input
+          id="fullName"
+          name="fullName"
+          type="text"
+          value={formData.fullName}
+          onChange={handleChange}
+          placeholder="Full Name"
+          required
+          className="p-3 bg-white text-black border border-gray-300 rounded"
+        />
+      </div>
 
-      <input name="fullName" value={formData.fullName} onChange={handleChange} placeholder="Full Name" required className="w-full border px-4 py-2 rounded" />
+      {/* Cast or Crew? */}
+      <div className="flex flex-col">
+        <label htmlFor="castOrCrew" className="mb-1 text-white">Cast or Crew?</label>
+        <select
+          id="castOrCrew"
+          name="castOrCrew"
+          value={formData.castOrCrew}
+          onChange={handleChange}
+          required
+          className="p-3 bg-white text-black border border-gray-300 rounded"
+        >
+          <option value="" disabled>Select Cast or Crew</option>
+          <option value="Cast">Cast</option>
+          <option value="Crew">Crew</option>
+        </select>
+      </div>
 
-      <select name="role" value={formData.role} onChange={handleChange} className="w-full border px-4 py-2 rounded">
-        <option value="Cast">Cast</option>
-        <option value="Crew">Crew</option>
-      </select>
+      {/* Role */}
+      <div className="flex flex-col">
+        <label htmlFor="role" className="mb-1 text-white">Role</label>
+        <input
+          id="role"
+          name="role"
+          type="text"
+          value={formData.role}
+          onChange={handleChange}
+          placeholder="Role"
+          required
+          className="p-3 bg-white text-black border border-gray-300 rounded"
+        />
+      </div>
 
-      <input name="character" value={formData.character} onChange={handleChange} placeholder="Character (if applicable)" className="w-full border px-4 py-2 rounded" />
+      {/* Email */}
+      <div className="flex flex-col">
+        <label htmlFor="email" className="mb-1 text-white">Email</label>
+        <input
+          id="email"
+          name="email"
+          type="email"
+          value={formData.email}
+          onChange={handleChange}
+          placeholder="Email"
+          required
+          className="p-3 bg-white text-black border border-gray-300 rounded"
+        />
+      </div>
 
-      <input name="email" type="email" value={formData.email} onChange={handleChange} placeholder="Email" required className="w-full border px-4 py-2 rounded" />
+      {/* Phone */}
+      <div className="flex flex-col">
+        <label htmlFor="phone" className="mb-1 text-white">Phone</label>
+        <input
+          id="phone"
+          name="phone"
+          type="tel"
+          value={formData.phone}
+          onChange={handleChange}
+          placeholder="Phone"
+          required
+          className="p-3 bg-white text-black border border-gray-300 rounded"
+        />
+      </div>
 
-      <input name="phone" value={formData.phone} onChange={handleChange} placeholder="Phone Number" required className="w-full border px-4 py-2 rounded" />
+      {/* Emergency Contact (optional) */}
+      <div className="flex flex-col">
+        <label htmlFor="emergencyContact" className="mb-1 text-white">Emergency Contact (optional)</label>
+        <input
+          id="emergencyContact"
+          name="emergencyContact"
+          type="text"
+          value={formData.emergencyContact}
+          onChange={handleChange}
+          placeholder="Emergency Contact"
+          className="p-3 bg-white text-black border border-gray-300 rounded"
+        />
+      </div>
 
-      <input name="emergencyContact" value={formData.emergencyContact} onChange={handleChange} placeholder="Emergency Contact Name" className="w-full border px-4 py-2 rounded" />
+      {/* Emergency Number (optional) */}
+      <div className="flex flex-col">
+        <label htmlFor="emergencyNumber" className="mb-1 text-white">Emergency Number (optional)</label>
+        <input
+          id="emergencyNumber"
+          name="emergencyNumber"
+          type="tel"
+          value={formData.emergencyNumber}
+          onChange={handleChange}
+          placeholder="Emergency Number"
+          className="p-3 bg-white text-black border border-gray-300 rounded"
+        />
+      </div>
 
-      <input name="emergencyNumber" value={formData.emergencyNumber} onChange={handleChange} placeholder="Emergency Contact Number" className="w-full border px-4 py-2 rounded" />
-
-      <input name="headshot" value={formData.headshot} onChange={handleChange} placeholder="Headshot URL (Dropbox, Google Drive, etc.)" required className="w-full border px-4 py-2 rounded" />
-
-      <input name="resume" value={formData.resume} onChange={handleChange} placeholder="Resume URL (optional)" className="w-full border px-4 py-2 rounded" />
-
-      <input name="idUpload" value={formData.idUpload} onChange={handleChange} placeholder="Government ID URL (optional)" className="w-full border px-4 py-2 rounded" />
-
-      <input name="nda" value={formData.nda} onChange={handleChange} placeholder="NDA Upload URL (if signed)" className="w-full border px-4 py-2 rounded" />
-
-      <label className="flex items-center space-x-2">
-        <input type="checkbox" name="agreeToTerms" checked={formData.agreeToTerms} onChange={handleChange} required />
-        <span>I agree to the terms and NDA policy.</span>
-      </label>
-
-      <button type="submit" className="bg-black text-white px-6 py-2 rounded hover:bg-gray-800 transition">
+      {/* Submit Button */}
+      <button
+        type="submit"
+        className="w-full bg-green-600 hover:bg-green-700 text-white py-2 rounded"
+      >
         Submit
       </button>
+
+      {/* Status Messages */}
+      {status === 'success' && (
+        <p className="text-green-400 text-center">Submitted successfully!</p>
+      )}
+      {status === 'error' && (
+        <p className="text-red-500 text-center">Submission failed. Please try again.</p>
+      )}
     </form>
   );
 }
