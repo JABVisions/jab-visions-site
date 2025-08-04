@@ -1,21 +1,21 @@
 // File: app/api/submit/route.ts
 
 export async function POST(request: Request) {
-  // Parse the JSON body sent from the client form
+  // Parse the JSON body from your client form
   const data = await request.json();
 
-  // Log the received payload to server console (locally visible)
-  console.log('API Route received payload:', data);
+  // Log payload (local server console)
+  console.log('API Route received payload →', data);
 
-  // Forward the payload to your Google Apps Script Web App
-  const scriptUrl = 'https://script.google.com/macros/s/AKfycbyL8fjfH4T9Tcrcd7p2o9rrB9u4E2-O4EXynDgjdcmatNDtsfUOek-HAacNdqLrPBvxFg/exec';
+  // Forward payload to the new Google Apps Script Web App URL
+  const scriptUrl = 'https://script.google.com/macros/s/AKfycbwgYHE16n0UlD4yltfVmvl1vt8OzQRNrCicKY4ztiVNXZqZZ7wKy1eBR5CtSHdAuha_CQ/exec';
   await fetch(scriptUrl, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
   });
 
-  // Respond with the same payload for verification
+  // Echo back what we received for confirmation
   return new Response(JSON.stringify({ success: true, received: data }), {
     status: 200,
     headers: { 'Content-Type': 'application/json' }
