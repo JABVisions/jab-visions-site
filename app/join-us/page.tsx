@@ -1,7 +1,7 @@
 'use client';
+
 import Navbar from '@/components/Navbar';
-import Form from '@/components/form';
-import Link from 'next/link';
+import Form from '@/components/Form';
 
 const heavenlyFont = "'Playfair Display', serif";
 const steelFont = "'Anton', Impact, Arial Black, sans-serif";
@@ -11,7 +11,7 @@ export default function JoinUs() {
     <main className="min-h-screen bg-neutral-900 text-white flex flex-col items-center px-4 pt-6">
       <Navbar />
 
-      {/* Title */}
+      {/* Metallic JOIN US Title */}
       <h1
         className="text-5xl md:text-6xl font-extrabold metallic-title uppercase mt-10 mb-4"
         style={{ fontFamily: steelFont, letterSpacing: '0.12em' }}
@@ -23,12 +23,13 @@ export default function JoinUs() {
       <p className="text-center text-zinc-300 max-w-2xl text-base md:text-lg mb-10 px-2">
         Thank you for your interest in being part of <span className="text-green-400">JAB Visions™</span>.
         Whether you're a cast member, crew technician, or volunteer, please register below so we can keep track of everyone involved in the filming of <i>Those Ryderz</i>.
-        You can also <Link href="https://signnow.com/s/t7rt43y5" target="_blank" className="text-sky-400 hover:underline">sign our General Talent Release Form</Link> after registering.
+        You can also <a href="https://signnow.com/s/t7rt43y5" target="_blank" className="text-sky-400 hover:underline">sign our General Talent Release Form</a> after registering.
       </p>
 
-      {/* Form */}
+      {/* Registration Form */}
       <Form />
 
+      {/* Metallic Title Styles */}
       <style jsx global>{`
         .metallic-title {
           background: none !important;
@@ -66,3 +67,5 @@ export default function JoinUs() {
     </main>
   );
 }
+
+/* Restart your dev server or push to GitHub → let Vercel auto-deploy. */
