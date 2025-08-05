@@ -1,3 +1,4 @@
+// components/Navbar.tsx
 import React from 'react';
 import Link from 'next/link';
 
@@ -5,15 +6,6 @@ export default function Navbar() {
   return (
     <nav className="fixed top-0 left-0 w-full bg-black border-b-2 border-green-500 z-50">
       <div className="relative max-w-6xl mx-auto h-16">
-        {/* Logo pinned above navbar */}
-        <div className="absolute top-0 left-0 transform -translate-y-[37%] z-50">
-          <img
-            src="/assets/jab-logo@2x.png"
-            alt="JAB Visions Logo"
-            className="w-96 h-96 object-contain"
-          />
-        </div>
-
         {/* Business Title centered */}
         <div className="absolute left-1/2 top-1/2 transform -translate-x-1/2 -translate-y-1/2 z-40">
           <span className="text-green-400 font-semibold text-2xl uppercase">
@@ -37,14 +29,9 @@ export default function Navbar() {
         </div>
       </div>
 
-      {/* Circuit-style border lights */}
+      {/* Circuit-style top & bottom borders */}
       <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-green-500 via-transparent to-green-500" />
       <div className="absolute bottom-0 left-0 w-full h-1 bg-gradient-to-r from-green-500 via-transparent to-green-500" />
     </nav>
   );
 }
-
-/*
-Note:
-- Logo now w-96 h-96 and translated -50% vertically so it sits evenly above the navbar edge.
-*/
