@@ -5,8 +5,8 @@ import Link from 'next/link';
 export default function Navbar() {
   return (
     <nav className="fixed top-0 left-0 w-full bg-black border-b-2 border-green-500 z-50">
-      <div className="relative max-w-6xl mx-auto h-16">
-        {/* Business Title centered (hidden on mobile) */}
+      <div className="relative max-w-6xl mx-auto h-16 px-4 md:px-0">
+        {/* Business Title centered (visible on md+) */}
         <div className="absolute left-1/2 top-1/2 transform -translate-x-1/2 -translate-y-1/2 z-40 hidden md:block">
           <span className="text-green-400 font-semibold text-2xl uppercase">
             JAB Visions™
