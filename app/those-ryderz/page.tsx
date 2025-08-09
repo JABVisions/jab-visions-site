@@ -42,7 +42,7 @@ const RYDERZ = [
   {
     name: 'Keven Hart',
     title: 'The Pink Ryder',
-    img: '/assets/john-andy-headshot.jpg',
+    img: '/assets/john_andy_headshot.jpg',
     aura: 'pink',
   },
 ];
