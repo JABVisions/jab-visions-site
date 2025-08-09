@@ -16,10 +16,10 @@ function splitTitle(text: string) {
 
 const RYDERZ = [
   {
-    name: 'Keven Hart',
-    title: 'The Pink Ryder',
-    img: '/assets/john_andy_headshot.jpg', // cache-buster so the new file shows
-    aura: 'pink',
+    name: 'Ruby Wong',
+    title: 'The Red Ryder',
+    img: '/assets/simran-k-headshot3.jpg',
+    aura: 'red',
   },
   {
     name: 'Leo Montana',
@@ -34,16 +34,16 @@ const RYDERZ = [
     aura: 'black',
   },
   {
-    name: 'Ruby Wong',
-    title: 'The Red Ryder',
-    img: '/assets/simran-k-headshot3.jpg',
-    aura: 'red',
-  },
-  {
     name: 'Zoe Folie',
     title: 'The Blue Ryder',
     img: '/assets/aria-patterson-headshot.jpg',
     aura: 'blue',
+  },
+  {
+    name: 'Keven Hart',
+    title: 'The Pink Ryder',
+    img: '/assets/john-andy-headshot.jpg',
+    aura: 'pink',
   },
 ];
 
@@ -93,7 +93,7 @@ export default function ThoseRyderz() {
         In a world unraveling at the seams, five unlikely heroes inherit powers from beyond—their destinies forever linked by forces older than time.
       </p>
 
-      {/* Chrome Title */}
+      {/* Chrome Title - subtle chromatic aberration, animated */}
       <h1
         className="mt-4 mb-8 text-6xl font-extrabold tracking-widest metallic-title text-center z-10 uppercase select-none steel-font"
         style={{
@@ -115,7 +115,10 @@ export default function ThoseRyderz() {
               className={`relative flex items-center justify-center rounded-full overflow-hidden
                 ${auraGlow[r.aura as keyof typeof auraGlow]}
                 group-hover:scale-110 transition-transform duration-300 ease-in-out`}
-              style={{ width: 128, height: 128 }}
+              style={{
+                width: 128,
+                height: 128,
+              }}
             >
               <Image
                 src={r.img}
@@ -125,6 +128,7 @@ export default function ThoseRyderz() {
                 className="rounded-full object-cover w-full h-full"
                 priority
               />
+              {/* Extra feathered glow */}
               <div
                 className="pointer-events-none absolute inset-0 rounded-full"
                 style={{
@@ -149,10 +153,15 @@ export default function ThoseRyderz() {
             </span>
             <span
               className={`text-sm md:text-base font-medium mt-1 ${
-                r.aura === 'pink'  ? 'text-pink-400'  :
-                r.aura === 'black' ? 'text-neutral-400' :
-                r.aura === 'yellow'? 'text-yellow-300' :
-                r.aura === 'red'   ? 'text-red-400'    : 'text-sky-300'
+                r.aura === 'pink'
+                  ? 'text-pink-400'
+                  : r.aura === 'black'
+                  ? 'text-neutral-400'
+                  : r.aura === 'yellow'
+                  ? 'text-yellow-300'
+                  : r.aura === 'red'
+                  ? 'text-red-400'
+                  : 'text-sky-300'
               } drop-shadow`}
               style={{ letterSpacing: '0.05em' }}
             >
@@ -164,36 +173,88 @@ export default function ThoseRyderz() {
 
       <style jsx global>{`
         .heavenly-tagline {
-          text-shadow: 0 0 16px #e0f4ff, 0 0 28px #f4f4ff, 0 0 38px #b2e6ff, 0 1px 2px #8ecae6;
+          text-shadow:
+            0 0 16px #e0f4ff,
+            0 0 28px #f4f4ff,
+            0 0 38px #b2e6ff,
+            0 1px 2px #8ecae6;
           letter-spacing: 0.06em;
           filter: brightness(1.19) blur(0.02em);
           animation: heavenFade 3.2s ease-in-out infinite alternate;
         }
         @keyframes heavenFade {
-          0% { opacity: 0.91; filter: brightness(1.08); }
-          50% { opacity: 1;   filter: brightness(1.27); }
-          100%{ opacity: 0.91; filter: brightness(1.08); }
+          0% { opacity: 0.91; filter: brightness(1.08);}
+          50% { opacity: 1; filter: brightness(1.27);}
+          100% { opacity: 0.91; filter: brightness(1.08);}
         }
-        .steel-font { font-family: 'Anton', Impact, Arial Black, sans-serif !important; }
-        .metallic-title { background: none !important; color: transparent; }
+        .steel-font {
+          font-family: 'Anton', Impact, Arial Black, sans-serif !important;
+        }
+        .metallic-title {
+          background: none !important;
+          color: transparent;
+        }
         .shine-in-text {
-          display: inline-block; position: relative;
+          display: inline-block;
+          position: relative;
           background:
-            linear-gradient(112deg,#fdfdfd 0%,#c7cbd1 16%,#b1b3b6 29%,#ededed 36%,#f8f8fc 49%,#c9dbfe 56%,#f9f4ff 60%,#c1f8ff 68%,#dadada 76%,#f4cadf 85%,#ffffff 100%),
-            linear-gradient(112deg,transparent 72%,#fff 85%,transparent 100%);
+            linear-gradient(
+              112deg,
+              #fdfdfd 0%,
+              #c7cbd1 16%,
+              #b1b3b6 29%,
+              #ededed 36%,
+              #f8f8fc 49%,
+              #c9dbfe 56%,
+              #f9f4ff 60%,
+              #c1f8ff 68%,
+              #dadada 76%,
+              #f4cadf 85%,
+              #ffffff 100%
+            ),
+            linear-gradient(
+              112deg,
+              transparent 72%,
+              #fff 85%,
+              transparent 100%
+            );
           background-size: 160% 100%, 220% 100%;
           background-position: 80% 0, -120% 0;
-          -webkit-background-clip: text; -webkit-text-fill-color: transparent;
-          background-clip: text; color: transparent;
+          -webkit-background-clip: text;
+          -webkit-text-fill-color: transparent;
+          background-clip: text;
+          color: transparent;
           animation: shine-in-text 2.5s cubic-bezier(.63,0,.17,1) infinite;
           animation-delay: calc(0.12s * var(--i, 0));
-          transition: background 0.5s; filter: drop-shadow(0 1.5px 1px #e9e9f7aa);
+          transition: background 0.5s;
+          filter: drop-shadow(0 1.5px 1px #e9e9f7aa);
         }
+        .shine-in-text:nth-child(1) { --i: 0; }
+        .shine-in-text:nth-child(2) { --i: 1; }
+        .shine-in-text:nth-child(3) { --i: 2; }
+        .shine-in-text:nth-child(4) { --i: 3; }
+        .shine-in-text:nth-child(5) { --i: 4; }
+        .shine-in-text:nth-child(6) { --i: 5; }
+        .shine-in-text:nth-child(7) { --i: 6; }
+        .shine-in-text:nth-child(8) { --i: 7; }
+        .shine-in-text:nth-child(9) { --i: 8; }
+        .shine-in-text:nth-child(10) { --i: 9; }
+        .shine-in-text:nth-child(11) { --i: 10; }
+        .shine-in-text:nth-child(12) { --i: 11; }
+        .shine-in-text:nth-child(13) { --i: 12; }
         @keyframes shine-in-text {
-          0%{ background-position: 80% 0, -120% 0; }
-          30%{ background-position: 30% 0, 50% 0; }
-          60%{ background-position: 0% 0, 120% 0; }
-          100%{ background-position: 80% 0, -120% 0; }
+          0% {
+            background-position: 80% 0, -120% 0;
+          }
+          30% {
+            background-position: 30% 0, 50% 0;
+          }
+          60% {
+            background-position: 0% 0, 120% 0;
+          }
+          100% {
+            background-position: 80% 0, -120% 0;
+          }
         }
       `}</style>
     </main>
