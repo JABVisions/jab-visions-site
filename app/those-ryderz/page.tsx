@@ -14,6 +14,7 @@ function splitTitle(text: string) {
   );
 }
 
+// Reordered: Ruby first, Keven last (right end)
 const RYDERZ = [
   {
     name: 'Ruby Wong',
@@ -49,7 +50,8 @@ const RYDERZ = [
 
 const auraGlow: Record<string, string> = {
   pink: 'shadow-[0_0_32px_8px_rgba(255,85,204,0.7)] ring-4 ring-pink-400',
-  black: 'shadow-[0_0_32px_8px_rgba(40,40,40,0.7)] ring-4 ring-neutral-800',
+  // Enhanced black rim for Aaron
+  black: 'shadow-[0_0_48px_20px_rgba(0,0,0,0.85)] ring-8 ring-neutral-900 ring-offset-2 ring-offset-neutral-700',
   yellow: 'shadow-[0_0_32px_8px_rgba(255,230,0,0.7)] ring-4 ring-yellow-300',
   red: 'shadow-[0_0_32px_8px_rgba(255,48,48,0.7)] ring-4 ring-red-400',
   blue: 'shadow-[0_0_32px_8px_rgba(40,180,255,0.7)] ring-4 ring-sky-400',
@@ -115,10 +117,7 @@ export default function ThoseRyderz() {
               className={`relative flex items-center justify-center rounded-full overflow-hidden
                 ${auraGlow[r.aura as keyof typeof auraGlow]}
                 group-hover:scale-110 transition-transform duration-300 ease-in-out`}
-              style={{
-                width: 128,
-                height: 128,
-              }}
+              style={{ width: 128, height: 128 }}
             >
               <Image
                 src={r.img}
@@ -136,7 +135,7 @@ export default function ThoseRyderz() {
                     r.aura === 'pink'
                       ? 'rgba(255,85,204,0.45)'
                       : r.aura === 'black'
-                      ? 'rgba(40,40,40,0.45)'
+                      ? 'rgba(0,0,0,0.65)'
                       : r.aura === 'yellow'
                       ? 'rgba(255,230,0,0.28)'
                       : r.aura === 'red'
@@ -144,7 +143,7 @@ export default function ThoseRyderz() {
                       : 'rgba(40,180,255,0.38)'
                   }`,
                   zIndex: 2,
-                  opacity: 0.7,
+                  opacity: 0.85,
                 }}
               />
             </div>
@@ -243,18 +242,10 @@ export default function ThoseRyderz() {
         .shine-in-text:nth-child(12) { --i: 11; }
         .shine-in-text:nth-child(13) { --i: 12; }
         @keyframes shine-in-text {
-          0% {
-            background-position: 80% 0, -120% 0;
-          }
-          30% {
-            background-position: 30% 0, 50% 0;
-          }
-          60% {
-            background-position: 0% 0, 120% 0;
-          }
-          100% {
-            background-position: 80% 0, -120% 0;
-          }
+          0% { background-position: 80% 0, -120% 0; }
+          30% { background-position: 30% 0, 50% 0; }
+          60% { background-position: 0% 0, 120% 0; }
+          100% { background-position: 80% 0, -120% 0; }
         }
       `}</style>
     </main>
