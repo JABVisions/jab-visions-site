@@ -35,7 +35,7 @@ const RYDERZ = [
     aura: 'black',
   },
   {
-    name: 'Zoe Folie',
+    name: 'Zoe Jolie',
     title: 'The Blue Ryder',
     img: '/assets/aria-patterson-headshot.jpg',
     aura: 'blue',
