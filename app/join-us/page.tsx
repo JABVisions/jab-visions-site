@@ -1,177 +1,247 @@
-// app/join-us/page.tsx
 'use client';
 
-import React from 'react';
-import Navbar from '@/components/Navbar';
-import RegisterForm from '@/components/RegisterForm';
+import React, { useRef, useState } from 'react';
 
-const steelFont = "'Anton', Impact, Arial Black, sans-serif";
+const SIGNNOW_URL = 'https://signnow.com/s/M1MdKxRK';
+const FORM_ENDPOINT =
+  'https://script.google.com/macros/s/AKfycbyzHY-4g8pIKhIWjAH0pDe4ABG42_-DycBk-2pzNe97jHnMokRsuOc3IE7fR6Ff11OT/exec';
 
-function splitTitle(text: string) {
-  return Array.from(text).map((char, i) =>
-    char === ' '
-      ? <span key={i} style={{ width: '0.45em', display: 'inline-block' }} />
-      : <span
-          key={i}
-          className="shine-in-text steel-font"
-          style={{ ['--i' as any]: i } as React.CSSProperties}
+type FormState = {
+  fullName: string;
+  email: string;
+  phone: string;
+  location: string;
+  castOrCrew: 'Cast' | 'Crew' | '';
+  emergencyName: string;
+  emergencyPhone: string;
+  availability: string;
+  links: string;
+  notes: string;
+  company?: string; // honeypot
+};
+
+export default function JoinUsPage() {
+  const [form, setForm] = useState<FormState>({
+    fullName: '',
+    email: '',
+    phone: '',
+    location: '',
+    castOrCrew: '',
+    emergencyName: '',
+    emergencyPhone: '',
+    availability: '',
+    links: '',
+    notes: '',
+    company: '',
+  });
+  const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null);
+  const fileRef = useRef<HTMLInputElement | null>(null);
+
+  const onChange =
+    (key: keyof FormState) =>
+    (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
+      setForm((s) => ({ ...s, [key]: e.target.value }));
+    };
+
+  const onIframeLoad = () => {
+    setResult({ ok: true, message: 'Thanks! Your registration was sent.' });
+    setForm({
+      fullName: '',
+      email: '',
+      phone: '',
+      location: '',
+      castOrCrew: '',
+      emergencyName: '',
+      emergencyPhone: '',
+      availability: '',
+      links: '',
+      notes: '',
+      company: '',
+    });
+    if (fileRef.current) fileRef.current.value = '';
+  };
+
+  function onSubmit(e: React.FormEvent) {
+    // Require headshot for Cast
+    if (form.castOrCrew === 'Cast' && (!fileRef.current?.files || fileRef.current.files.length === 0)) {
+      e.preventDefault();
+      setResult({ ok: false, message: 'A current headshot is required for talent. Please upload your headshot.' });
+      return;
+    }
+    // Max size 10MB
+    const f = fileRef.current?.files?.[0];
+    if (f && f.size > 10 * 1024 * 1024) {
+      e.preventDefault();
+      setResult({ ok: false, message: 'Headshot is too large (>10MB).' });
+      return;
+    }
+    setResult({ ok: true, message: 'Submitting…' });
+  }
+
+  return (
+    <main className="min-h-screen bg-neutral-950 text-emerald-200">
+      {/* Hidden iframe to keep the page in place after submit */}
+      <iframe name="hidden_iframe" onLoad={onIframeLoad} className="hidden" title="hidden_iframe" />
+
+      <section className="mx-auto max-w-4xl px-4 py-10">
+        <h1 className="text-4xl md:text-5xl font-extrabold tracking-tight text-emerald-200 drop-shadow-[0_0_12px_rgba(16,185,129,0.65)]">
+          Join Us
+        </h1>
+        <p className="mt-3 text-emerald-300/80">
+          Be part of <span className="font-semibold text-emerald-200">Those Ryderz</span> and future JAB Visions productions.
+          Please sign the release below and complete the registration form.
+        </p>
+
+        {/* Release */}
+        <div className="mt-8 rounded-2xl border border-emerald-500/20 bg-emerald-400/5 p-5 backdrop-blur-sm">
+          <h2 className="text-xl font-semibold text-emerald-200">General Talent Release</h2>
+          <p className="mt-2 text-sm text-emerald-300/80">
+            Our talent release now includes a <span className="font-medium text-emerald-200">confidentiality clause</span>.
+          </p>
+          <div className="mt-4">
+            <a
+              href={SIGNNOW_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center rounded-2xl px-4 py-2 text-sm font-semibold
+                         ring-1 ring-emerald-500/30 hover:ring-emerald-400/50
+                         bg-emerald-400/10 hover:bg-emerald-400/15 transition"
+            >
+              Sign the General Talent Release (with Confidentiality Clause)
+            </a>
+          </div>
+          <p className="mt-3 text-xs text-emerald-300/70">After signing, return here to submit your registration details.</p>
+        </div>
+
+        {/* Native HTML form posts directly to Apps Script */}
+        <form
+          action={FORM_ENDPOINT}
+          method="POST"
+          encType="multipart/form-data"
+          target="hidden_iframe"
+          onSubmit={onSubmit}
+          className="mt-10 space-y-6"
         >
-          {char}
-        </span>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <Input name="FullName" label="Full Name" value={form.fullName} onChange={onChange('fullName')} required placeholder="First Last" />
+            <Input name="Email" label="Email" type="email" value={form.email} onChange={onChange('email')} required placeholder="name@example.com" />
+            <Input name="Phone" label="Phone" type="tel" value={form.phone} onChange={onChange('phone')} required placeholder="(555) 555-5555" />
+            <Input name="Location" label="City / State" value={form.location} onChange={onChange('location')} placeholder="New York, NY" />
+          </div>
+
+          <div>
+            <label className="block text-sm mb-1">Are you applying for Cast or Crew?</label>
+            <select
+              name="CastOrCrew"
+              value={form.castOrCrew}
+              onChange={onChange('castOrCrew')}
+              required
+              className="w-full rounded-xl bg-neutral-900/70 border border-emerald-500/20 px-3 py-2 outline-none
+                         focus:border-emerald-400/60 focus:ring-2 focus:ring-emerald-400/30 text-emerald-100"
+            >
+              <option value="" disabled>Select one</option>
+              <option value="Cast">Cast</option>
+              <option value="Crew">Crew</option>
+            </select>
+          </div>
+
+          {/* Emergency (optional) */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <Input name="EmergencyContactName" label="Emergency Contact – Name (optional)" value={form.emergencyName} onChange={onChange('emergencyName')} />
+            <Input name="EmergencyContactPhone" label="Emergency Contact – Phone (optional)" type="tel" value={form.emergencyPhone} onChange={onChange('emergencyPhone')} />
+          </div>
+
+          <Textarea name="Availability" label="Availability (dates/times)" value={form.availability} onChange={onChange('availability')} placeholder="e.g., Weeknights after 6pm; weekends; blackout dates" />
+          <Input name="Links" label="Links (website, Instagram, portfolio, reels)" value={form.links} onChange={onChange('links')} placeholder="https://..., @handle" />
+
+          {/* Headshot (required for Cast) */}
+          <div>
+            <label className="block text-sm mb-1">Headshot</label>
+            <input
+              ref={fileRef}
+              name="HeadshotFile"
+              type="file"
+              accept="image/*"
+              className="w-full rounded-xl bg-neutral-900/70 border border-emerald-500/20 px-3 py-2 outline-none
+                         focus:border-emerald-400/60 focus:ring-2 focus:ring-emerald-400/30 text-emerald-100"
+            />
+            <p className="mt-1 text-xs text-emerald-300/80">
+              <span className="font-medium text-emerald-200">Talent note:</span> A current, professional headshot is required for casting (Cast applicants). JPG/PNG/WEBP/HEIC, up to 10MB.
+            </p>
+          </div>
+
+          <Textarea name="Notes" label="Notes" value={form.notes} onChange={onChange('notes')} placeholder="Anything else we should know?" />
+
+          {/* Honeypot */}
+          <div className="hidden"><input name="company" value={form.company} onChange={onChange('company')} readOnly /></div>
+
+          <div className="flex items-center gap-3">
+            <button
+              type="submit"
+              className="inline-flex items-center rounded-2xl px-4 py-2 text-sm font-semibold
+                         ring-1 ring-emerald-500/30 hover:ring-emerald-400/50
+                         bg-emerald-400/10 hover:bg-emerald-400/15 transition"
+            >
+              Submit Registration
+            </button>
+            <span className="text-xs text-emerald-300/70">Please sign the release above prior to or right after submitting this form.</span>
+          </div>
+
+          {result && (
+            <p className={`text-sm ${result.ok ? 'text-emerald-300' : 'text-red-300'}`}>{result.message}</p>
+          )}
+        </form>
+      </section>
+    </main>
   );
 }
 
-export default function JoinUs() {
+/* --- UI helpers --- */
+function Input({
+  name, label, value, onChange, type = 'text', required = false, placeholder = ''
+}: {
+  name: string; label: string; value: string;
+  onChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  type?: string; required?: boolean; placeholder?: string;
+}) {
   return (
-    <main className="bg-neutral-900 text-white flex flex-col items-center px-0 py-8">
-      {/* Shared Navbar */}
-      <Navbar />
+    <div>
+      <label className="block text-sm mb-1">{label}</label>
+      <input
+        name={name}
+        type={type}
+        value={value}
+        onChange={onChange}
+        required={required}
+        className="w-full rounded-xl bg-neutral-900/70 border border-emerald-500/20 px-3 py-2 outline-none
+                   focus:border-emerald-400/60 focus:ring-2 focus:ring-emerald-400/30
+                   placeholder:text-emerald-300/40 text-emerald-100"
+        placeholder={placeholder}
+      />
+    </div>
+  );
+}
 
-      {/* Hero Video */}
-      <div className="relative z-10 w-full">
-        <video
-          src="/assets/ryderz-hero.mov"
-          autoPlay
-          loop
-          muted
-          playsInline
-          className="w-full h-[200px] md:h-[280px] lg:h-[340px] object-cover object-center md:object-[center_70%]"
-        />
-      </div>
-
-      {/* JOIN US Title & Animated Wings */}
-      <div className="flex items-center gap-4 mt-8 mb-6">
-        <img
-          src="/assets/Left_Wing.png"
-          alt="Left Wing"
-          className="wing-left w-36 h-36 object-contain"
-        />
-        <h1
-          className="flex text-6xl md:text-7xl font-extrabold tracking-widest uppercase metallic-title steel-font"
-          style={{ letterSpacing: '0.13em', justifyContent: 'center' }}
-        >
-          {splitTitle('JOIN US')}
-        </h1>
-        <img
-          src="/assets/Right_Wing.png"
-          alt="Right Wing"
-          className="wing-right w-36 h-36 object-contain"
-        />
-      </div>
-
-      {/* Features */}
-      <div className="px-4 max-w-2xl text-center mb-12">
-        <p className="text-zinc-300 text-lg mb-4">
-          Welcome to the <span className="text-green-400">Those Ryderz</span> registration portal! Please complete the form below.
-        </p>
-        <ul className="list-disc list-inside text-green-400 space-y-2">
-          <li>Secure and instant data submission</li>
-          <li>Real-time confirmation and feedback</li>
-          <li>Many more features coming soon!</li>
-        </ul>
-      </div>
-
-      {/* Release Link */}
-      <p className="px-4 text-center text-zinc-300 text-base mb-10 max-w-2xl">
-        You can also{' '}
-        <a
-          href="https://signnow.com/s/t7rt43y5"
-          target="_blank"
-          className="text-sky-400 hover:underline"
-        >
-          sign our General Talent Release Form
-        </a>{' '}
-        before or after registering.
-      </p>
-
-      {/* Registration Board */}
-      <div className="relative w-full max-w-3xl mb-16 registration-board">
-        <RegisterForm />
-      </div>
-
-      {/* Footer */}
-      <footer className="w-full text-center text-zinc-500 text-sm py-4">
-        © JAB Visions™ 2025. All rights reserved.
-      </footer>
-
-      {/* Global Styles */}
-      <style jsx global>{`
-        .steel-font { font-family: ${steelFont} !important; }
-        .metallic-title { background: none !important; color: transparent; }
-        .shine-in-text {
-          display: inline-block;
-          position: relative;
-          background:
-            linear-gradient(
-              112deg,
-              #fdfdfd 0%,
-              #c7cbd1 16%,
-              #b1b3b6 29%,
-              #ededed 36%,
-              #f4f4fc 49%,
-              #c9dbfe 56%,
-              #f9f4ff 60%,
-              #c1f8ff 68%,
-              #dadada 76%,
-              #f4cadf 85%,
-              #ffffff 100%
-            ),
-            linear-gradient(
-              112deg,
-              transparent 72%,
-              #fff 85%,
-              transparent 100%
-            );
-          background-size: 160% 100%, 220% 100%;
-          background-position: 80% 0, -120% 0;
-          -webkit-background-clip: text;
-          -webkit-text-fill-color: transparent;
-          background-clip: text;
-          animation: shine-in-text 2.5s cubic-bezier(.63,0,.17,1) infinite;
-          animation-delay: calc(0.12s * var(--i));
-          filter: drop-shadow(0 1.5px 1px #e9e9f7aa);
-        }
-        @keyframes shine-in-text {
-          0% { background-position:80% 0, -120% 0; }
-          30% { background-position:30% 0, 50% 0; }
-          60% { background-position:0% 0, 120% 0; }
-          100% { background-position:80% 0, -120% 0; }
-        }
-        .wing-left { animation: flap-left 2s ease-in-out infinite; transform-origin: center bottom; }
-        .wing-right { animation: flap-right 2s ease-in-out infinite; transform-origin: center bottom; }
-        @keyframes flap-left { 0%,100% { transform: rotate(5deg); } 50% { transform: rotate(-15deg); } }
-        @keyframes flap-right { 0%,100% { transform: rotate(-5deg); } 50% { transform: rotate(15deg); } }
-        .registration-board {
-          position: relative;
-          background-color: #000;
-          border: 2px solid #00FF00;
-          border-radius: 1rem;
-          box-shadow: 0 0 16px 6px rgba(0,255,0,0.5);
-          padding: 2.5rem;
-          margin: 0 auto;
-          animation: board-glow 3s ease-in-out infinite;
-        }
-        @keyframes board-glow {
-          0%,100% { box-shadow:0 0 16px 6px rgba(0,255,0,0.5); }
-          50%  { box-shadow:0 0 24px 10px rgba(0,255,0,0.8); }
-        }
-        .registration-board::before,
-        .registration-board::after {
-          position: absolute;
-          color: #00FF00;
-          font-size: 3rem;
-        }
-        .registration-board::before {
-          content: "[";
-          top: -1rem;
-          left: -1rem;
-        }
-        .registration-board::after {
-          content: "]";
-          bottom: -1rem;
-          right: -1rem;
-        }
-      `}</style>
-    </main>
+function Textarea({
+  name, label, value, onChange, rows = 3, placeholder = ''
+}: {
+  name: string; label: string; value: string;
+  onChange: (e: React.ChangeEvent<HTMLTextAreaElement>) => void;
+  rows?: number; placeholder?: string;
+}) {
+  return (
+    <div>
+      <label className="block text-sm mb-1">{label}</label>
+      <textarea
+        name={name}
+        value={value}
+        onChange={onChange}
+        rows={rows}
+        className="w-full rounded-xl bg-neutral-900/70 border border-emerald-500/20 px-3 py-2 outline-none
+                   focus:border-emerald-400/60 focus:ring-2 focus:ring-emerald-400/30
+                   placeholder:text-emerald-300/40 text-emerald-100"
+        placeholder={placeholder}
+      />
+    </div>
   );
 }

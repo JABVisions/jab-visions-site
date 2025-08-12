@@ -1,0 +1,28 @@
+<!doctype html>
+<html>
+  <body style="font-family:system-ui;padding:20px">
+    <h3>Apps Script POST test</h3>
+    <form action="https://script.google.com/macros/s/AKfycbxD1cFdBoLHktq7PflJ1O4Znn6yO0CMTKQAvHp3F00yIpJPfRVqiBCm1LT0jPF4eWUq-A/exec"
+          method="POST" enctype="multipart/form-data" target="hidden_iframe">
+      <p><label>Full Name <input name="FullName" required value="Test User"/></label></p>
+      <p><label>Email <input name="Email" type="email" value="test@example.com"/></label></p>
+      <p><label>Phone <input name="Phone" value="555-555-5555"/></label></p>
+      <p><label>Location <input name="Location" value="NY, NY"/></label></p>
+      <p>
+        <label>Cast or Crew
+          <select name="CastOrCrew" required>
+            <option value="">Select</option>
+            <option>Cast</option>
+            <option>Crew</option>
+          </select>
+        </label>
+      </p>
+      <p><label>Availability <input name="Availability" value="Weeknights"/></label></p>
+      <p><label>Links <input name="Links" value="https://example.com"/></label></p>
+      <p><label>Notes <input name="Notes" value="Hello"/></label></p>
+      <p><label>Headshot (optional) <input name="HeadshotFile" type="file" accept="image/*"></label></p>
+      <button type="submit">Send</button>
+    </form>
+    <iframe name="hidden_iframe" style="display:none"></iframe>
+  </body>
+</html>
