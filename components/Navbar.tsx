@@ -1,30 +1,44 @@
 // components/Navbar.tsx
-import React from 'react';
-import Link from 'next/link';
+import Image from 'next/image';
 
 export default function Navbar() {
   return (
-    <nav className="fixed top-0 left-0 w-full bg-black border-b-2 border-green-500 z-50">
-      <div className="relative max-w-6xl mx-auto h-16 px-4 md:px-0">
-        {/* Navigation Links aligned right */}
-        <div className="absolute right-4 top-1/2 transform -translate-y-1/2 flex items-center space-x-4 text-green-400 font-medium">
-          <Link href="/" className="hover:text-green-300 transition">
-            Home
-          </Link>
-          <span className="text-green-600">|</span>
-          <Link href="/those-ryderz" className="hover:text-green-300 transition">
-            Those Ryderz
-          </Link>
-          <span className="text-green-600">|</span>
-          <Link href="/join-us" className="hover:text-green-300 transition">
-            Join Us
-          </Link>
-        </div>
+    <>
+      {/* Banner sits above the navbar on every page */}
+      <div className="w-full bg-[#F4ED00]">
+        <Image
+          src="/assets/jab-logo-extended.JPG" // must exist at public/assets/jab-logo-extended.JPG (case-sensitive)
+          alt="JAB Visions banner"
+          width={2048}
+          height={621}
+          priority
+          className="w-full h-auto mx-auto block select-none"
+        />
       </div>
 
-      {/* Circuit-style top & bottom borders */}
-      <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-green-500 via-transparent to-green-500" />
-      <div className="absolute bottom-0 left-0 w-full h-1 bg-gradient-to-r from-green-500 via-transparent to-green-500" />
-    </nav>
+      {/* Sticky navbar (unchanged behavior) */}
+      <header className="sticky top-0 z-50 bg-black/75 backdrop-blur border-b border-emerald-500/15">
+        <div className="mx-auto max-w-6xl px-4">
+          <div className="h-14 flex items-center justify-between">
+            <a href="/" className="font-semibold tracking-wide text-emerald-200 hover:text-emerald-100">
+              JAB Visions
+            </a>
+            <nav className="hidden sm:flex items-center gap-6 text-emerald-300/80">
+              <a href="/" className="hover:text-emerald-100">Home</a>
+              <a href="/those-ryderz" className="hover:text-emerald-100">Those Ryderz</a>
+              <a href="/join-us" className="hover:text-emerald-100">Join Us</a>
+              <a
+                href="https://signnow.com/s/t7rt43y5"
+                target="_blank"
+                rel="noreferrer"
+                className="rounded-full border border-emerald-400/40 bg-emerald-500/15 px-3 py-1 text-emerald-100 hover:bg-emerald-500/25 transition"
+              >
+                Sign Release
+              </a>
+            </nav>
+          </div>
+        </div>
+      </header>
+    </>
   );
 }

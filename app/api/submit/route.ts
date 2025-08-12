@@ -1,23 +1,37 @@
-// File: app/api/submit/route.ts
+// app/api/submit/route.ts
+import { NextRequest } from 'next/server';
 
-export async function POST(request: Request) {
-  // Parse the JSON body from your client form
-  const data = await request.json();
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
 
-  // Log payload (local server console)
-  console.log('API Route received payload →', data);
+export async function POST(req: NextRequest) {
+  // Prefer server-only GAS_URL; fall back to NEXT_PUBLIC_GAS_URL if needed
+  const GAS_URL = process.env.GAS_URL || process.env.NEXT_PUBLIC_GAS_URL;
+  if (!GAS_URL) {
+    return new Response(JSON.stringify({ ok: false, message: 'Missing GAS_URL env var' }), {
+      status: 500,
+      headers: { 'content-type': 'application/json' },
+    });
+  }
 
-  // Forward payload to the new Google Apps Script Web App URL
-  const scriptUrl = 'https://script.google.com/macros/s/AKfycbwgYHE16n0UlD4yltfVmvl1vt8OzQRNrCicKY4ztiVNXZqZZ7wKy1eBR5CtSHdAuha_CQ/exec';
-  await fetch(scriptUrl, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(data),
-  });
+  try {
+    const form = await req.formData();
 
-  // Echo back what we received for confirmation
-  return new Response(JSON.stringify({ success: true, received: data }), {
-    status: 200,
-    headers: { 'Content-Type': 'application/json' }
-  });
+    // Relay the multipart form directly to Google Apps Script
+    const gasRes = await fetch(GAS_URL, { method: 'POST', body: form, cache: 'no-store' });
+
+    const text = await gasRes.text();
+    let data: any;
+    try { data = JSON.parse(text); } catch { data = { ok: gasRes.ok, raw: text }; }
+
+    return new Response(JSON.stringify(data), {
+      status: gasRes.status,
+      headers: { 'content-type': 'application/json' },
+    });
+  } catch (err: any) {
+    return new Response(JSON.stringify({ ok: false, message: String(err?.message || err) }), {
+      status: 500,
+      headers: { 'content-type': 'application/json' },
+    });
+  }
 }
