@@ -30,7 +30,7 @@ const HORSEMAN_CODES = [
   'Ryderz_Team_v5.7',
 
   '[TARGET]',
-  'Ruby_Wong',
+  'Rubi_Wong',
   '[ID: 031]',
   'STATUS: ACTIVE',
   'AURA: RED',

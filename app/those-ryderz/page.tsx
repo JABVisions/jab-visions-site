@@ -17,7 +17,7 @@ function splitTitle(text: string) {
 // Reordered: Ruby first, Keven last (right end)
 const RYDERZ = [
   {
-    name: 'Ruby Wong',
+    name: 'Rubi Wong',
     title: 'The Red Ryder',
     img: '/assets/simran-k-headshot3.jpg',
     aura: 'red',
