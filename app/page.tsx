@@ -96,7 +96,7 @@ const HORSEMAN_CODES = [
   '[ENVIRONMENT]',
   'Current Battlefield:',
   'LOCATION:',
-  'Van Cortlandt Park',
+  'New York',
   'WEATHER:',
   'overcast',
   'slight haze',
