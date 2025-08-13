@@ -37,7 +37,7 @@ const RYDERZ = [
     aura: 'black',
   },
   { // 4 (moved Zoe before Keven)
-    name: 'Zoe Jolie',
+    name: 'Zoe Folie',
     title: 'The Blue Ryder',
     img: '/assets/aria-patterson-headshot.jpg',
     aura: 'blue',

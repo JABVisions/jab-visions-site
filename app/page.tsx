@@ -72,7 +72,7 @@ const HORSEMAN_CODES = [
   'isolation',
 
   '[TARGET]',
-  'Zoe_Jolie',
+  'Zoe_Folie',
   '[ID: 053]',
   'STATUS: ACTIVE',
   'AURA: BLUE',
