@@ -1,5 +1,4 @@
 {
-  "/join-us/page": "app/join-us/page.js",
-  "/those-ryderz/page": "app/those-ryderz/page.js",
-  "/api/submit/route": "app/api/submit/route.js"
+  "/page": "app/page.js",
+  "/those-ryderz/page": "app/those-ryderz/page.js"
 }
