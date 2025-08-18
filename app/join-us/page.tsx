@@ -4,7 +4,7 @@
 import React, { useState } from 'react';
 import Navbar from '../../components/Navbar';
 
-export default function Page() {
+const JoinUsPage: React.FC = () => {
   const [status, setStatus] = useState<'idle' | 'submitting' | 'success' | 'error'>('idle');
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
@@ -106,20 +106,34 @@ export default function Page() {
                 <option value="" disabled>Select one</option>
                 <option value="Cast">Cast</option>
                 <option value="Crew">Crew</option>
+                <option value="Both">Both</option>
               </select>
             </div>
 
             {/* Role — required for both */}
             <div>
-              <label htmlFor="Role" className={labelCls}>Role</label>
+              <label htmlFor="Role" className={labelCls}>
+                Role <span className="text-emerald-400">*</span>
+              </label>
               <input
                 id="Role"
                 name="Role"
                 type="text"
                 required
-                placeholder="e.g., Zoe (Cast) or Assistant Director (Crew)"
+                aria-required="true"
+                aria-describedby="roleHelp"
+                placeholder="e.g., Zoe (Cast), Assistant Director (Crew), or Extras"
                 className={inputCls}
+                onInvalid={(e) =>
+                  (e.currentTarget as HTMLInputElement).setCustomValidity(
+                    'Role is required. Please specify your intended position (e.g., Zoe, Assistant Director, Extras).'
+                  )
+                }
+                onInput={(e) => (e.currentTarget as HTMLInputElement).setCustomValidity('')}
               />
+              <p id="roleHelp" className="text-xs text-emerald-300/70 mt-1">
+                Role is <strong>required</strong>. Examples: Zoe (Cast), Assistant Director (Crew), Extras.
+              </p>
             </div>
 
             {/* Emergency contacts */}
@@ -134,27 +148,23 @@ export default function Page() {
               </div>
             </div>
 
-            {/* Availability */}
-            <div>
-              <label htmlFor="Availability" className={labelCls}>Availability (dates/times)</label>
-              <textarea
-                id="Availability"
-                name="Availability"
-                rows={3}
-                placeholder="e.g., Weeknights after 6pm; weekends; blackout dates"
-                className={inputCls}
-              />
-            </div>
-
             {/* Links */}
             <div>
               <label htmlFor="Links" className={labelCls}>Links (website, Instagram, portfolio, reels)</label>
               <input id="Links" name="Links" type="text" placeholder="https://…, @handle" className={inputCls} />
             </div>
 
-            {/* Headshot + note */}
+            {/* Headshot + maintenance note */}
             <div>
               <label htmlFor="HeadshotFile" className={labelCls}>Headshot</label>
+
+              {/* Maintenance note */}
+              <p className="text-xs text-amber-400 mb-2">
+                Headshot file upload is <strong>currently down for maintenance</strong>. Please submit the form without a file and either
+                paste a link in the “Links” field above or email your headshot to{' '}
+                <a href="mailto:JohnAndyBooks@gmail.com" className="underline">JohnAndyBooks@gmail.com</a>.
+              </p>
+
               <input
                 id="HeadshotFile"
                 name="HeadshotFile"
@@ -166,6 +176,18 @@ export default function Page() {
                 Talent note: A current, professional headshot is required for casting (Cast applicants).
                 JPG/PNG/WEBP/HEIC, up to 10MB.
               </p>
+            </div>
+
+            {/* Availability */}
+            <div>
+              <label htmlFor="Availability" className={labelCls}>Availability (dates/times)</label>
+              <textarea
+                id="Availability"
+                name="Availability"
+                rows={3}
+                placeholder="e.g., Weeknights after 6pm; weekends; blackout dates"
+                className={inputCls}
+              />
             </div>
 
             {/* Notes */}
@@ -222,4 +244,6 @@ export default function Page() {
       </main>
     </>
   );
-}
+};
+
+export default JoinUsPage;
