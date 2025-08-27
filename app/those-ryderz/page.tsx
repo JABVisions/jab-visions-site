@@ -25,7 +25,7 @@ function splitTitle(text: string) {
 
 const RYDERZ: Ryder[] = [
   // Zoom + focal point tuned for matching crop
-  { name: 'Rubi Wong',   title: 'The Red Ryder',   img: '/assets/rubi_wong_zyra.jpg', aura: 'red',    zoom: 1.4, objectPosition: '50% 36%' },
+  { name: 'Rubi Wong',   title: 'The Red Ryder',   img: '/assets/rubi_wong_zyra_v2.jpg', aura: 'red',    zoom: 1.4, objectPosition: '50% 36%' },
   { name: 'Leo Montana', title: 'The Yellow Ryder',img: '/assets/haylee-brown-headshot.jpeg', aura: 'yellow' },
   { name: 'Aaron Addams',title: 'The Black Ryder', img: '/assets/hadi-taloustan-headshot.jpg', aura: 'black'  },
   { name: 'Zoe Folie',   title: 'The Blue Ryder',  img: '/assets/aria-patterson-headshot.jpg',  aura: 'blue'   },
