@@ -6,6 +6,15 @@ import Navbar from '../../components/Navbar';
 const heavenlyFont = "'Playfair Display', serif";
 const steelFont = "'Anton', Impact, Arial Black, sans-serif";
 
+type Ryder = {
+  name: string;
+  title: string;
+  img: string;
+  aura: 'pink' | 'black' | 'yellow' | 'red' | 'blue';
+  zoom?: number;
+  objectPosition?: string;
+};
+
 function splitTitle(text: string) {
   return Array.from(text).map((char, i) =>
     char === ' '
@@ -14,35 +23,33 @@ function splitTitle(text: string) {
   );
 }
 
-const RYDERZ = [
+const RYDERZ: Ryder[] = [
+  // Zoom + focal point tuned for matching crop
+  { name: 'Rubi Wong',   title: 'The Red Ryder',   img: '/assets/rubi_wong_zyra.jpg', aura: 'red',    zoom: 1.4, objectPosition: '50% 36%' },
+  { name: 'Leo Montana', title: 'The Yellow Ryder',img: '/assets/haylee-brown-headshot.jpeg', aura: 'yellow' },
+  { name: 'Aaron Addams',title: 'The Black Ryder', img: '/assets/hadi-taloustan-headshot.jpg', aura: 'black'  },
+  { name: 'Zoe Folie',   title: 'The Blue Ryder',  img: '/assets/aria-patterson-headshot.jpg',  aura: 'blue'   },
+  { name: 'Keven Hart',  title: 'The Pink Ryder',  img: '/assets/john_andy_headshot.jpg',       aura: 'pink'   },
+];
 
-  { name: 'Rubi Wong',   title: 'The Red Ryder',    img: '/assets/simran-k-headshot3.jpg',      aura: 'red'    },
-  { name: 'Leo Montana', title: 'The Yellow Ryder', img: '/assets/haylee-brown-headshot.jpeg',  aura: 'yellow' },
-  { name: 'Aaron Addams',title: 'The Black Ryder',  img: '/assets/hadi-taloustan-headshot.jpg', aura: 'black'  },
-  { name: 'Zoe Folie',   title: 'The Blue Ryder',   img: '/assets/aria-patterson-headshot.jpg', aura: 'blue'   },
-    { name: 'Keven Hart',  title: 'The Pink Ryder',   img: '/assets/john_andy_headshot.jpg',      aura: 'pink'   },
-] as const;
-
-const auraGlow = {
+const auraGlow: Record<Ryder['aura'], string> = {
   pink:   'shadow-[0_0_32px_8px_rgba(255,85,204,0.7)] ring-4 ring-pink-400',
   black:  'shadow-[0_0_32px_8px_rgba(40,40,40,0.7)] ring-4 ring-neutral-800',
   yellow: 'shadow-[0_0_32px_8px_rgba(255,230,0,0.7)] ring-4 ring-yellow-300',
   red:    'shadow-[0_0_32px_8px_rgba(255,48,48,0.7)] ring-4 ring-red-400',
   blue:   'shadow-[0_0_32px_8px_rgba(40,180,255,0.7)] ring-4 ring-sky-400',
-} as const;
+};
 
 /** Taller static logo banner hero so the bottom text shows fully */
 function BannerHero() {
   return (
     <div className="relative w-full z-10" style={{ background: '#0b0b0b' }}>
-      {/* Increased heights: sm 380px / md 520px / lg 720px */}
       <div className="relative w-full h-[380px] md:h-[520px] lg:h-[720px]">
         <Image
           src="/assets/those-ryderz-logo.jpg"
           alt="Those Ryderz — logo banner"
           fill
           className="object-cover"
-          // Slightly higher focal point so the bottom reads clearly
           style={{ objectPosition: '50% 38%' }}
           priority
           unoptimized
@@ -102,7 +109,7 @@ export default function ThoseRyderz() {
           <div key={r.name} className="flex flex-col items-center group transition-transform">
             <div
               className={`relative flex items-center justify-center rounded-full overflow-hidden
-                ${auraGlow[r.aura as keyof typeof auraGlow]}
+                ${auraGlow[r.aura]}
                 group-hover:scale-110 transition-transform duration-300 ease-in-out`}
               style={{ width: 128, height: 128 }}
             >
@@ -114,16 +121,25 @@ export default function ThoseRyderz() {
                 className="rounded-full object-cover w-full h-full"
                 priority
                 unoptimized
+                style={{
+                  transform: r.zoom ? `scale(${r.zoom})` : undefined,
+                  objectPosition: r.objectPosition,
+                }}
               />
+              {/* Extra feathered glow */}
               <div
                 className="pointer-events-none absolute inset-0 rounded-full"
                 style={{
                   boxShadow: `0 0 40px 24px ${
-                    r.aura === 'pink'   ? 'rgba(255,85,204,0.45)' :
-                    r.aura === 'black'  ? 'rgba(40,40,40,0.45)'   :
-                    r.aura === 'yellow' ? 'rgba(255,230,0,0.28)'  :
-                    r.aura === 'red'    ? 'rgba(255,48,48,0.36)'  :
-                                           'rgba(40,180,255,0.38)'
+                    r.aura === 'pink'
+                      ? 'rgba(255,85,204,0.45)'
+                      : r.aura === 'black'
+                      ? 'rgba(40,40,40,0.45)'
+                      : r.aura === 'yellow'
+                      ? 'rgba(255,230,0,0.28)'
+                      : r.aura === 'red'
+                      ? 'rgba(255,48,48,0.36)'
+                      : 'rgba(40,180,255,0.38)'
                   }`,
                   zIndex: 2,
                   opacity: 0.7,
@@ -135,11 +151,15 @@ export default function ThoseRyderz() {
             </span>
             <span
               className={`text-sm md:text-base font-medium mt-1 ${
-                r.aura === 'pink'   ? 'text-pink-400'   :
-                r.aura === 'black'  ? 'text-neutral-400':
-                r.aura === 'yellow' ? 'text-yellow-300' :
-                r.aura === 'red'    ? 'text-red-400'    :
-                                      'text-sky-300'
+                r.aura === 'pink'
+                  ? 'text-pink-400'
+                  : r.aura === 'black'
+                  ? 'text-neutral-400'
+                  : r.aura === 'yellow'
+                  ? 'text-yellow-300'
+                  : r.aura === 'red'
+                  ? 'text-red-400'
+                  : 'text-sky-300'
               } drop-shadow`}
               style={{ letterSpacing: '0.05em' }}
             >
