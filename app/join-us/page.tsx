@@ -61,6 +61,14 @@ const JoinUsPage: React.FC = () => {
           {/* General Talent Release – highlighted card */}
           <section className="rounded-2xl border border-emerald-500/20 bg-emerald-900/[0.07] p-5 shadow-[0_0_40px_-15px_rgba(16,185,129,0.5)] mb-8">
             <h2 className="text-xl font-semibold text-emerald-200 mb-1">General Talent Release</h2>
+
+            {/* Indicator (brand cyan + soft glow) */}
+            <p className="text-xs md:text-sm text-cyan-300/95 mb-2 note-cyan">
+              <span className="font-semibold uppercase tracking-wide">Note:</span>{' '}
+              This online Talent Release is intended <span className="font-semibold">only for Extras and designated Production Assistants (PAs)</span>.
+              Principal/featured talent, department heads, and vendors will receive separate agreements.
+            </p>
+
             <p className="text-emerald-300/80 mb-4">Our talent release now includes a confidentiality clause.</p>
             <a
               href="https://signnow.com/s/t7rt43y5"
@@ -70,7 +78,12 @@ const JoinUsPage: React.FC = () => {
             >
               Sign the General Talent Release (with Confidentiality Clause)
             </a>
-            <p className="text-xs text-emerald-300/60 mt-2">After signing, return here to submit your registration details.</p>
+            <p className="text-xs text-emerald-300/60 mt-2">
+              After signing, return here to submit your registration details.{' '}
+              <span className="text-cyan-300/95 font-medium note-cyan">
+                Only Extras & select PAs should sign this online release.
+              </span>
+            </p>
           </section>
 
           {/* FORM */}
@@ -158,8 +171,8 @@ const JoinUsPage: React.FC = () => {
             <div>
               <label htmlFor="HeadshotFile" className={labelCls}>Headshot</label>
 
-              {/* Maintenance note */}
-              <p className="text-xs text-amber-400 mb-2">
+              {/* Maintenance note (now cyan with glow) */}
+              <p className="text-xs text-cyan-300/95 note-cyan mb-2">
                 Headshot file upload is <strong>currently down for maintenance</strong>. Please submit the form without a file and either
                 paste a link in the “Links” field above or email your headshot to{' '}
                 <a href="mailto:JohnAndyBooks@gmail.com" className="underline">JohnAndyBooks@gmail.com</a>.
@@ -237,6 +250,14 @@ const JoinUsPage: React.FC = () => {
             text-shadow: 2px 0 rgba(16,185,129,.6);
             animation: g2 1.7s infinite linear alternate-reverse;
           }
+
+          /* Soft neon-cyan glow for indicator + headshot note */
+          .note-cyan {
+            text-shadow:
+              0 0 8px rgba(34, 211, 238, 0.35),
+              0 0 18px rgba(34, 211, 238, 0.20);
+          }
+
           @keyframes flicker { 0%,19%,21%,23%,80%,100%{opacity:1} 20%,22%,24%{opacity:.92} 81%,83%{opacity:.96} }
           @keyframes g1 { 0%{clip-path:inset(0 0 0 0)} 33%{clip-path:inset(2% 0 0 0)} 66%{clip-path:inset(0 0 3% 0)} 100%{clip-path:inset(1% 0 1% 0)} }
           @keyframes g2 { 0%{clip-path:inset(0 0 0 0)} 25%{clip-path:inset(1% 0 2% 0)} 50%{clip-path:inset(0 0 1% 0)} 100%{clip-path:inset(2% 0 0 0)} }
