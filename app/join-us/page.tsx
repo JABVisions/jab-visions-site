@@ -1,270 +1,457 @@
-// app/join-us/page.tsx
-'use client';
+"use client";
 
-import React, { useState } from 'react';
-import Navbar from '../../components/Navbar';
+import React, { useState, FormEvent } from "react";
+import Link from "next/link";
 
-const JoinUsPage: React.FC = () => {
-  const [status, setStatus] = useState<'idle' | 'submitting' | 'success' | 'error'>('idle');
+const SCRIPT_URL =
+  "https://script.google.com/macros/s/AKfycby4wgM7brYEIxPVyvStr3nd9bZF4_0P_hna7Bv8WJqqDMAwfk8sbFspRDqnHwMayr-r0A/exec";
 
-  async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
+type Status = "idle" | "submitting" | "success" | "error";
+
+export default function JoinUs() {
+  const [status, setStatus] = useState<Status>("idle");
+  const [error, setError] = useState<string | null>(null);
+
+  const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    setStatus('submitting');
+    setStatus("submitting");
+    setError(null);
 
     const form = e.currentTarget;
-    const fd = new FormData(form);
-
-    // Optional: 10MB cap for headshots
-    const file = fd.get('HeadshotFile') as File | null;
-    if (file && file.size > 10 * 1024 * 1024) {
-      alert('Headshot file must be 10MB or less.');
-      setStatus('idle');
-      return;
-    }
+    const formData = new FormData(form);
 
     try {
-      const res = await fetch('/api/submit', { method: 'POST', body: fd });
-      const data = await res.json().catch(() => ({} as any));
-      if (!res.ok || (data && data.ok === false)) {
-        throw new Error(data?.message || `HTTP ${res.status}`);
+      const res = await fetch(SCRIPT_URL, {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!res.ok) {
+        throw new Error("Network response was not ok");
       }
-      setStatus('success');
+
+      setStatus("success");
       form.reset();
-      alert('Thanks! Your registration was submitted.');
     } catch (err) {
       console.error(err);
-      setStatus('error');
-      alert('There was a problem submitting the form. Please try again.');
+      setStatus("error");
+      setError(
+        "Something went wrong. Please try again or email JohnAndyBooks@gmail.com."
+      );
     }
-  }
-
-  const inputCls =
-    'w-full rounded-xl border border-emerald-500/25 bg-neutral-900 text-emerald-100 px-4 py-3 outline-none focus:ring-2 focus:ring-emerald-500/50';
-  const labelCls = 'block text-sm mb-1 text-emerald-300/90';
+  };
 
   return (
     <>
-      {/* Navbar (includes the JAB banner above it) */}
-      <Navbar />
+      {/* NAVBAR */}
+      <header className="fixed top-0 left-0 right-0 z-40 border-b border-emerald-500/40 bg-black/80 backdrop-blur-xl">
+        <div className="max-w-6xl mx-auto px-4 h-14 flex items-center justify-between">
+          {/* Brand / Logo */}
+          <Link href="/" className="flex items-center gap-2">
+            <span className="text-xs tracking-[0.35em] uppercase text-emerald-400">
+              JAB<span className="text-emerald-300">_</span>VISIONS
+            </span>
+          </Link>
 
-      <main className="min-h-screen bg-black text-emerald-200 px-4 pt-8 pb-10">
-        <div className="mx-auto w-full max-w-4xl">
-          {/* Glitch neon title */}
-          <h1 className="glitch text-5xl font-extrabold tracking-tight mb-2" data-text="Join Us">
-            Join Us
-          </h1>
-          <p className="text-emerald-300/80 mb-8">
-            Be part of <span className="font-semibold text-emerald-200">Those Ryderz</span> and future JAB Visions productions.
-            Please sign the release below and complete the registration form.
-          </p>
-
-          {/* General Talent Release – highlighted card */}
-          <section className="rounded-2xl border border-emerald-500/20 bg-emerald-900/[0.07] p-5 shadow-[0_0_40px_-15px_rgba(16,185,129,0.5)] mb-8">
-            <h2 className="text-xl font-semibold text-emerald-200 mb-1">General Talent Release</h2>
-
-            {/* Indicator (brand cyan + soft glow) */}
-            <p className="text-xs md:text-sm text-cyan-300/95 mb-2 note-cyan">
-              <span className="font-semibold uppercase tracking-wide">Note:</span>{' '}
-              This online Talent Release is intended <span className="font-semibold">only for Extras and designated Production Assistants (PAs)</span>.
-              Principal/featured talent, department heads, and vendors will receive separate agreements.
-            </p>
-
-            <p className="text-emerald-300/80 mb-4">Our talent release now includes a confidentiality clause.</p>
-            <a
-              href="https://signnow.com/s/t7rt43y5"
-              target="_blank"
-              rel="noreferrer"
-              className="inline-block rounded-full bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-100 px-5 py-2 border border-emerald-400/40 transition"
+          {/* Nav Links */}
+          <nav className="flex items-center gap-6 text-[11px] md:text-xs">
+            <Link
+              href="/"
+              className="text-emerald-100/70 hover:text-emerald-100 hover:underline underline-offset-4 transition"
             >
-              Sign the General Talent Release (with Confidentiality Clause)
-            </a>
-            <p className="text-xs text-emerald-300/60 mt-2">
-              After signing, return here to submit your registration details.{' '}
-              <span className="text-cyan-300/95 font-medium note-cyan">
-                Only Extras & select PAs should sign this online release.
-              </span>
-            </p>
-          </section>
-
-          {/* FORM */}
-          <form onSubmit={handleSubmit} encType="multipart/form-data" className="space-y-6">
-            {/* Row 1 */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div>
-                <label htmlFor="FullName" className={labelCls}>Full Name</label>
-                <input id="FullName" name="FullName" type="text" required placeholder="First Last" className={inputCls} />
-              </div>
-              <div>
-                <label htmlFor="Email" className={labelCls}>Email</label>
-                <input id="Email" name="Email" type="email" required placeholder="name@example.com" className={inputCls} />
-              </div>
-            </div>
-
-            {/* Row 2 */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div>
-                <label htmlFor="Phone" className={labelCls}>Phone</label>
-                <input id="Phone" name="Phone" type="tel" required placeholder="(555) 555-5555" className={inputCls} />
-              </div>
-              <div>
-                <label htmlFor="Location" className={labelCls}>City / State</label>
-                <input id="Location" name="Location" type="text" required placeholder="New York, NY" className={inputCls} />
-              </div>
-            </div>
-
-            {/* Cast or Crew */}
-            <div>
-              <label htmlFor="CastOrCrew" className={labelCls}>Are you applying for Cast or Crew?</label>
-              <select id="CastOrCrew" name="CastOrCrew" required defaultValue="" className={inputCls}>
-                <option value="" disabled>Select one</option>
-                <option value="Cast">Cast</option>
-                <option value="Crew">Crew</option>
-                <option value="Both">Both</option>
-              </select>
-            </div>
-
-            {/* Role — required for both */}
-            <div>
-              <label htmlFor="Role" className={labelCls}>
-                Role <span className="text-emerald-400">*</span>
-              </label>
-              <input
-                id="Role"
-                name="Role"
-                type="text"
-                required
-                aria-required="true"
-                aria-describedby="roleHelp"
-                placeholder="e.g., Zoe (Cast), Assistant Director (Crew), or Extras"
-                className={inputCls}
-                onInvalid={(e) =>
-                  (e.currentTarget as HTMLInputElement).setCustomValidity(
-                    'Role is required. Please specify your intended position (e.g., Zoe, Assistant Director, Extras).'
-                  )
-                }
-                onInput={(e) => (e.currentTarget as HTMLInputElement).setCustomValidity('')}
-              />
-              <p id="roleHelp" className="text-xs text-emerald-300/70 mt-1">
-                Role is <strong>required</strong>. Examples: Zoe (Cast), Assistant Director (Crew), Extras.
-              </p>
-            </div>
-
-            {/* Emergency contacts */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div>
-                <label htmlFor="EmergencyContactName" className={labelCls}>Emergency Contact – Name (optional)</label>
-                <input id="EmergencyContactName" name="EmergencyContactName" type="text" className={inputCls} />
-              </div>
-              <div>
-                <label htmlFor="EmergencyContactPhone" className={labelCls}>Emergency Contact – Phone (optional)</label>
-                <input id="EmergencyContactPhone" name="EmergencyContactPhone" type="tel" className={inputCls} />
-              </div>
-            </div>
-
-            {/* Links */}
-            <div>
-              <label htmlFor="Links" className={labelCls}>Links (website, Instagram, portfolio, reels)</label>
-              <input id="Links" name="Links" type="text" placeholder="https://…, @handle" className={inputCls} />
-            </div>
-
-            {/* Headshot + maintenance note */}
-            <div>
-              <label htmlFor="HeadshotFile" className={labelCls}>Headshot</label>
-
-              {/* Maintenance note (now cyan with glow) */}
-              <p className="text-xs text-cyan-300/95 note-cyan mb-2">
-                Headshot file upload is <strong>currently down for maintenance</strong>. Please submit the form without a file and either
-                paste a link in the “Links” field above or email your headshot to{' '}
-                <a href="mailto:JohnAndyBooks@gmail.com" className="underline">JohnAndyBooks@gmail.com</a>.
-              </p>
-
-              <input
-                id="HeadshotFile"
-                name="HeadshotFile"
-                type="file"
-                accept="image/jpeg,image/png,image/webp,image/heic,image/heif"
-                className="w-full text-sm"
-              />
-              <p className="text-xs text-emerald-300/70 mt-2">
-                Talent note: A current, professional headshot is required for casting (Cast applicants).
-                JPG/PNG/WEBP/HEIC, up to 10MB.
-              </p>
-            </div>
-
-            {/* Availability */}
-            <div>
-              <label htmlFor="Availability" className={labelCls}>Availability (dates/times)</label>
-              <textarea
-                id="Availability"
-                name="Availability"
-                rows={3}
-                placeholder="e.g., Weeknights after 6pm; weekends; blackout dates"
-                className={inputCls}
-              />
-            </div>
-
-            {/* Notes */}
-            <div>
-              <label htmlFor="Notes" className={labelCls}>Notes</label>
-              <textarea id="Notes" name="Notes" rows={3} placeholder="Anything else you should know?" className={inputCls} />
-            </div>
-
-            {/* Submit bar with right caption */}
-            <div className="pt-2 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-              <button
-                type="submit"
-                disabled={status === 'submitting'}
-                className="rounded-full bg-emerald-500/90 hover:bg-emerald-400 text-black font-semibold px-6 py-2 transition disabled:opacity-60"
-              >
-                {status === 'submitting' ? 'Submitting…' : 'Submit Registration'}
-              </button>
-              <span className="text-xs text-emerald-300/70">
-                Please sign the release above prior to or right after submitting this form.
-              </span>
-            </div>
-          </form>
+              Home
+            </Link>
+            <Link
+              href="/those-ryderz"
+              className="text-emerald-100/70 hover:text-emerald-100 hover:underline underline-offset-4 transition"
+            >
+              Those Ryderz
+            </Link>
+            <Link
+              href="/join-us"
+              className="text-cyan-300 font-semibold hover:text-cyan-100 hover:underline underline-offset-4 transition"
+            >
+              Join Us
+            </Link>
+            <Link
+              href="/store"
+              className="text-emerald-100/70 hover:text-emerald-100 hover:underline underline-offset-4 transition"
+            >
+              Store
+            </Link>
+          </nav>
         </div>
+      </header>
 
-        {/* Glitch/neon styles */}
-        <style jsx>{`
-          .glitch {
-            position: relative;
-            color: #d1fae5;
-            text-shadow: 0 0 12px rgba(16,185,129,.8), 0 0 36px rgba(16,185,129,.4);
-            animation: flicker 3.2s infinite;
-          }
-          .glitch::before, .glitch::after {
-            content: attr(data-text);
-            position: absolute; inset: 0;
-            mix-blend-mode: screen; opacity: .9;
-          }
-          .glitch::before {
-            transform: translateX(-1px);
-            color: rgba(16,185,129,.9);
-            text-shadow: -2px 0 rgba(52,211,153,.6);
-            animation: g1 2s infinite linear alternate-reverse;
-          }
-          .glitch::after {
-            transform: translateX(1px);
-            color: rgba(110,231,183,.9);
-            text-shadow: 2px 0 rgba(16,185,129,.6);
-            animation: g2 1.7s infinite linear alternate-reverse;
-          }
+      <main className="min-h-screen bg-black text-emerald-100 relative overflow-hidden">
+        {/* MATRIX GRID BACKGROUND */}
+        <div
+          className="pointer-events-none absolute inset-0 opacity-30"
+          style={{
+            backgroundImage:
+              "radial-gradient(circle at 1px 1px, #22c55e 1px, transparent 0)",
+            backgroundSize: "24px 24px",
+          }}
+        />
+        <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-black/70 via-emerald-950/30 to-black/90" />
 
-          /* Soft neon-cyan glow for indicator + headshot note */
-          .note-cyan {
-            text-shadow:
-              0 0 8px rgba(34, 211, 238, 0.35),
-              0 0 18px rgba(34, 211, 238, 0.20);
-          }
+        {/* CONTENT */}
+        <div className="relative max-w-6xl mx-auto px-4 pt-24 pb-16">
+          {/* HEADER */}
+          <header className="mb-8">
+            <p className="text-xs tracking-[0.35em] uppercase text-emerald-400 mb-2">
+              JAB VISIONS // ACCESS PORTAL
+            </p>
+            <h1 className="text-3xl md:text-4xl font-semibold tracking-tight mb-3">
+              Join Us<span className="text-emerald-400">_</span>
+            </h1>
+            <p className="text-sm md:text-base text-emerald-200/70 max-w-2xl">
+              Plug into the{" "}
+              <span className="text-emerald-400 font-semibold">
+                Those Ryderz
+              </span>{" "}
+              universe. Register for{" "}
+              <span className="text-emerald-300 font-semibold">cast</span> or{" "}
+              <span className="text-emerald-300 font-semibold">crew</span>{" "}
+              consideration on current and future JAB Visions projects.
+            </p>
+          </header>
 
-          @keyframes flicker { 0%,19%,21%,23%,80%,100%{opacity:1} 20%,22%,24%{opacity:.92} 81%,83%{opacity:.96} }
-          @keyframes g1 { 0%{clip-path:inset(0 0 0 0)} 33%{clip-path:inset(2% 0 0 0)} 66%{clip-path:inset(0 0 3% 0)} 100%{clip-path:inset(1% 0 1% 0)} }
-          @keyframes g2 { 0%{clip-path:inset(0 0 0 0)} 25%{clip-path:inset(1% 0 2% 0)} 50%{clip-path:inset(0 0 1% 0)} 100%{clip-path:inset(2% 0 0 0)} }
-        `}</style>
+          {/* CYAN LINK TABS */}
+          <nav className="mb-10">
+            <div className="inline-flex rounded-full bg-zinc-950/70 border border-cyan-400/40 p-1 shadow-[0_0_25px_rgba(34,211,238,0.45)] backdrop-blur">
+              <button className="px-4 md:px-5 py-1.5 text-xs md:text-sm rounded-full bg-cyan-400 text-black font-semibold shadow-[0_0_20px_rgba(34,211,238,0.9)]">
+                Registration Form
+              </button>
+              <a
+                href="https://signnow.com/s/t7rt43y5"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="px-4 md:px-5 py-1.5 text-xs md:text-sm rounded-full text-cyan-200 hover:text-cyan-50 hover:bg-cyan-500/20 transition"
+              >
+                Talent Release
+              </a>
+              <button
+                disabled
+                className="px-4 md:px-5 py-1.5 text-xs md:text-sm rounded-full text-cyan-200/50 cursor-not-allowed"
+              >
+                NDA (coming soon)
+              </button>
+            </div>
+          </nav>
+
+          <div className="grid gap-8 md:grid-cols-[2fr,1fr] items-start">
+            {/* FORM CARD */}
+            <section className="bg-zinc-950/80 rounded-2xl border border-emerald-500/40 p-6 md:p-8 shadow-[0_0_45px_rgba(16,185,129,0.35)] backdrop-blur">
+              <div className="flex items-center justify-between mb-6">
+                <h2 className="text-lg md:text-xl font-medium">
+                  Access Request:{" "}
+                  <span className="text-emerald-400">Online</span>
+                </h2>
+                <span className="text-[10px] px-2 py-1 rounded-full border border-emerald-500/60 text-emerald-300/90 bg-emerald-500/5">
+                  FORM ID: JR-2024
+                </span>
+              </div>
+
+              <form onSubmit={handleSubmit} className="space-y-6">
+                {/* BASIC INFO */}
+                <div className="grid md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs mb-1" htmlFor="full-name">
+                      Full Name *
+                    </label>
+                    <input
+                      id="full-name"
+                      name="Full Name"
+                      required
+                      className="w-full rounded-lg bg-black/60 border border-emerald-600/50 px-3 py-2 text-sm outline-none focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400/60"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs mb-1" htmlFor="email">
+                      Email *
+                    </label>
+                    <input
+                      id="email"
+                      name="Email"
+                      type="email"
+                      required
+                      className="w-full rounded-lg bg-black/60 border border-emerald-600/50 px-3 py-2 text-sm outline-none focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400/60"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid md:grid-cols-3 gap-4">
+                  <div>
+                    <label className="block text-xs mb-1" htmlFor="phone">
+                      Phone Number *
+                    </label>
+                    <input
+                      id="phone"
+                      name="Phone"
+                      required
+                      className="w-full rounded-lg bg-black/60 border border-emerald-600/50 px-3 py-2 text-sm outline-none focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400/60"
+                    />
+                  </div>
+
+                  {/* DATE OF BIRTH FIELD */}
+                  <div>
+                    <label className="block text-xs mb-1" htmlFor="dob">
+                      Date of Birth
+                    </label>
+                    <input
+                      id="dob"
+                      name="Date of Birth"
+                      type="date"
+                      className="w-full rounded-lg bg-black/60 border border-emerald-600/50 px-3 py-2 text-sm outline-none focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400/60"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs mb-1" htmlFor="city-state">
+                      City / State
+                    </label>
+                    <input
+                      id="city-state"
+                      name="City / State"
+                      className="w-full rounded-lg bg-black/60 border border-emerald-600/50 px-3 py-2 text-sm outline-none focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400/60"
+                    />
+                  </div>
+                </div>
+
+                {/* CAST OR CREW + POSITION */}
+                <div className="grid md:grid-cols-2 gap-4">
+                  <div>
+                    <label
+                      className="block text-xs mb-1"
+                      htmlFor="cast-or-crew"
+                    >
+                      Cast or Crew? *
+                    </label>
+                    <select
+                      id="cast-or-crew"
+                      name="Cast or Crew?"
+                      required
+                      className="w-full rounded-lg bg-black/60 border border-emerald-600/50 px-3 py-2 text-sm outline-none focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400/60"
+                    >
+                      <option value="">Select one</option>
+                      <option value="Cast">Cast</option>
+                      <option value="Crew">Crew</option>
+                      <option value="Either">Either / Open to both</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs mb-1" htmlFor="position">
+                      Desired Role / Position *
+                    </label>
+                    <input
+                      id="position"
+                      name="Desired Role / Position"
+                      required
+                      className="w-full rounded-lg bg-black/60 border border-emerald-600/50 px-3 py-2 text-sm outline-none focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400/60"
+                      placeholder="Example: Keven Hart, PA, HMU, etc."
+                    />
+                  </div>
+                </div>
+
+                {/* SOCIALS */}
+                <div className="grid md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs mb-1" htmlFor="instagram">
+                      Instagram Handle
+                    </label>
+                    <input
+                      id="instagram"
+                      name="Instagram"
+                      className="w-full rounded-lg bg-black/60 border border-emerald-600/50 px-3 py-2 text-sm outline-none focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400/60"
+                      placeholder="@username"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs mb-1" htmlFor="website">
+                      Website / Reel / Portfolio
+                    </label>
+                    <input
+                      id="website"
+                      name="Website / Reel"
+                      className="w-full rounded-lg bg-black/60 border border-emerald-600/50 px-3 py-2 text-sm outline-none focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400/60"
+                      placeholder="Link to your work (optional)"
+                    />
+                  </div>
+                </div>
+
+                {/* EXPERIENCE */}
+                <div>
+                  <label className="block text-xs mb-1" htmlFor="experience">
+                    Briefly describe your experience
+                  </label>
+                  <textarea
+                    id="experience"
+                    name="Experience"
+                    rows={4}
+                    className="w-full rounded-lg bg-black/60 border border-emerald-600/50 px-3 py-2 text-sm outline-none focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400/60"
+                    placeholder="Acting / crew background, training, credits, etc."
+                  />
+                </div>
+
+                {/* EMERGENCY CONTACT */}
+                <div className="pt-3 border-t border-emerald-800/50">
+                  <p className="text-[11px] uppercase tracking-[0.2em] text-emerald-400 mb-3">
+                    Emergency Contact
+                  </p>
+
+                  <div className="grid md:grid-cols-3 gap-4">
+                    <div>
+                      <label
+                        className="block text-xs mb-1"
+                        htmlFor="emergency-name"
+                      >
+                        Name *
+                      </label>
+                      <input
+                        id="emergency-name"
+                        name="Emergency Contact Name"
+                        required
+                        className="w-full rounded-lg bg-black/60 border border-emerald-600/50 px-3 py-2 text-sm outline-none focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400/60"
+                      />
+                    </div>
+
+                    <div>
+                      <label
+                        className="block text-xs mb-1"
+                        htmlFor="emergency-phone"
+                      >
+                        Phone *
+                      </label>
+                      <input
+                        id="emergency-phone"
+                        name="Emergency Contact Phone"
+                        required
+                        className="w-full rounded-lg bg-black/60 border border-emerald-600/50 px-3 py-2 text-sm outline-none focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400/60"
+                      />
+                    </div>
+
+                    <div>
+                      <label
+                        className="block text-xs mb-1"
+                        htmlFor="emergency-relation"
+                      >
+                        Relationship
+                      </label>
+                      <input
+                        id="emergency-relation"
+                        name="Emergency Contact Relationship"
+                        className="w-full rounded-lg bg-black/60 border border-emerald-600/50 px-3 py-2 text-sm outline-none focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400/60"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* NOTES */}
+                <div>
+                  <label className="block text-xs mb-1" htmlFor="notes">
+                    Anything else we should know?
+                  </label>
+                  <textarea
+                    id="notes"
+                    name="Additional Notes"
+                    rows={3}
+                    className="w-full rounded-lg bg-black/60 border border-emerald-600/50 px-3 py-2 text-sm outline-none focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400/60"
+                  />
+                </div>
+
+                {/* STATUS + SUBMIT */}
+                <div className="flex flex-col gap-3 pt-2">
+                  {status === "success" && (
+                    <p className="text-xs md:text-sm text-emerald-300">
+                      ACCESS GRANTED: Your submission was received. We’ll be in
+                      touch if there’s a fit for current or future projects.
+                    </p>
+                  )}
+                  {status === "error" && error && (
+                    <p className="text-xs md:text-sm text-red-400">{error}</p>
+                  )}
+
+                  <button
+                    type="submit"
+                    disabled={status === "submitting"}
+                    className="inline-flex items-center justify-center rounded-lg bg-emerald-400 px-5 py-2.5 text-sm font-semibold text-black hover:bg-emerald-300 disabled:opacity-60 disabled:cursor-not-allowed transition shadow-[0_0_25px_rgba(52,211,153,0.7)]"
+                  >
+                    {status === "submitting"
+                      ? "// SENDING..."
+                      : "// SUBMIT REGISTRATION"}
+                  </button>
+                </div>
+              </form>
+            </section>
+
+            {/* SIDE INFO CARD */}
+            <aside className="space-y-4">
+              <div className="bg-zinc-950/70 rounded-2xl border border-emerald-800/60 p-5 shadow-[0_0_25px_rgba(16,185,129,0.35)] backdrop-blur">
+                <h3 className="text-sm font-semibold mb-2">
+                  System Notes <span className="text-emerald-400">[Read]</span>
+                </h3>
+                <p className="text-xs text-emerald-100/80 mb-3">
+                  JAB Visions is an independent studio based in NYC. By
+                  registering here, you’re joining our internal database for
+                  casting and crew opportunities on{" "}
+                  <span className="font-semibold text-emerald-300">
+                    Those Ryderz
+                  </span>{" "}
+                  and future projects.
+                </p>
+
+                <ul className="text-[11px] text-emerald-100/80 space-y-1.5 mb-4 list-disc list-inside">
+                  <li>You must be 18+ or have a parent/guardian involved.</li>
+                  <li>
+                    Most roles require you to self-report to New York City or
+                    the surrounding area.
+                  </li>
+                  <li>
+                    Compensation varies by project (stipend, deferred, or
+                    volunteer). Details are provided with each specific call.
+                  </li>
+                </ul>
+
+                <a
+                  href="https://signnow.com/s/t7rt43y5"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex text-[11px] font-semibold text-cyan-300 underline underline-offset-4 hover:text-cyan-100 transition"
+                >
+                  Open General Talent Release in SignNow
+                </a>
+              </div>
+
+              <div className="bg-zinc-950/60 rounded-2xl border border-cyan-500/40 p-5 backdrop-blur shadow-[0_0_25px_rgba(34,211,238,0.45)]">
+                <h3 className="text-sm font-semibold mb-2">
+                  Contact <span className="text-cyan-300">/ /</span> Support
+                </h3>
+                <p className="text-xs text-emerald-100/80 mb-2">
+                  For casting, crew, or technical questions, reach out directly:
+                </p>
+                <p className="text-xs text-emerald-50">
+                  John Andy <br />
+                  Writer / Director / Lead Actor –{" "}
+                  <span className="font-semibold">Those Ryderz</span>
+                  <br />
+                  JAB Visions
+                  <br />
+                  <a
+                    href="mailto:JohnAndyBooks@gmail.com"
+                    className="underline underline-offset-4 text-cyan-300 hover:text-cyan-100"
+                  >
+                    JohnAndyBooks@gmail.com
+                  </a>
+                </p>
+              </div>
+            </aside>
+          </div>
+        </div>
       </main>
     </>
   );
-};
-
-export default JoinUsPage;
+}
