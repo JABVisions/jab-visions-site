@@ -16,10 +16,10 @@ function splitTitle(text: string) {
 
 const RYDERZ = [
 
-  { name: 'Rubi Wong',   title: 'The Red Ryder',    img: '/assets/simran-k-headshot3.jpg',      aura: 'red'    },
+  { name: 'Rubi Wong',   title: 'The Red Ryder',    img: '/assets/chaeyeon-kim-headshot.jpeg',      aura: 'red'    },
   { name: 'Leo Montana', title: 'The Yellow Ryder', img: '/assets/haylee-brown-headshot.jpeg',  aura: 'yellow' },
   { name: 'Aaron Addams',title: 'The Black Ryder',  img: '/assets/hadi-taloustan-headshot.jpg', aura: 'black'  },
-  { name: 'Zoe Folie',   title: 'The Blue Ryder',   img: '/assets/aria-patterson-headshot.jpg', aura: 'blue'   },
+  { name: 'Zoe Folie',   title: 'The Blue Ryder',   img: '/assets/nowcasting-blue.jpg', aura: 'blue'   },
     { name: 'Keven Hart',  title: 'The Pink Ryder',   img: '/assets/john_andy_headshot.jpg',      aura: 'pink'   },
 ] as const;
 
