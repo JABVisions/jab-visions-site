@@ -161,7 +161,7 @@ export default function JohnAndyPage() {
               <p className="text-xs md:text-sm text-emerald-100/85 mb-3">
                 I grew up on{" "}
                 <span className="font-semibold text-emerald-300">
-                  Power Rangers, Teen Titans, KingdoM Hearts, Star Wars,
+                  Power Rangers, Teen Titans, Kingdom Hearts, Star Wars,
                 </span>
                 , intense teen dramas, and big spiritual questions.{" "}
                 <span className="font-semibold text-cyan-300">
