@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 
 const SIGNNOW_URL = "https://signnow.com/s/M1MdKxRK";
+const STORE_URL = "https://store.jabvisions.com";
 
 const LINKS = [
   { href: "/", label: "Home" },
@@ -80,6 +81,20 @@ export default function Navbar() {
             </Link>
           ))}
 
+          {/* STORE LINK */}
+          <a
+            href={STORE_URL}
+            className="
+              uppercase text-[10px] lg:text-xs tracking-[0.2em]
+              transition
+              text-gray-300 hover:text-[#ff00c8]
+              hover:drop-shadow-[0_0_14px_rgba(255,0,200,0.9)]
+              whitespace-nowrap
+            "
+          >
+            Store
+          </a>
+
           {/* SIGN RELEASE BUTTON */}
           <a
             href={SIGNNOW_URL}
@@ -152,6 +167,19 @@ export default function Navbar() {
                 {link.label}
               </Link>
             ))}
+
+            {/* STORE LINK */}
+            <a
+              href={STORE_URL}
+              className="
+                py-2
+                uppercase text-[10px] tracking-[0.2em]
+                transition
+                text-gray-200 hover:text-[#ff00c8]
+              "
+            >
+              Store
+            </a>
 
             <a
               href={SIGNNOW_URL}

@@ -3,49 +3,12 @@
 import React from "react";
 import Link from "next/link";
 import Image from "next/image";
+import Navbar from "@/components/Navbar";
 
 export default function JabComicsPage() {
   return (
     <>
-      {/* NAVBAR */}
-      <header className="fixed top-0 left-0 right-0 z-40 border-b border-emerald-500/40 bg-black/80 backdrop-blur-xl">
-        <div className="max-w-6xl mx-auto px-4 h-14 flex items-center justify-between">
-          {/* Brand / Logo */}
-          <Link href="/" className="flex items-center gap-2">
-            <span className="text-xs tracking-[0.35em] uppercase text-emerald-400">
-              JAB<span className="text-emerald-300">_</span>VISIONS
-            </span>
-          </Link>
-
-          {/* Nav Links */}
-          <nav className="flex items-center gap-6 text-[11px] md:text-xs">
-            <Link
-              href="/"
-              className="text-emerald-100/70 hover:text-emerald-100 hover:underline underline-offset-4 transition"
-            >
-              Home
-            </Link>
-            <Link
-              href="/those-ryderz"
-              className="text-emerald-100/70 hover:text-emerald-100 hover:underline underline-offset-4 transition"
-            >
-              Those Ryderz
-            </Link>
-            <Link
-              href="/join-us"
-              className="text-emerald-100/70 hover:text-emerald-100 hover:underline underline-offset-4 transition"
-            >
-              Join Us
-            </Link>
-            <Link
-              href="/store"
-              className="text-emerald-100/70 hover:text-emerald-100 hover:underline underline-offset-4 transition"
-            >
-              Store
-            </Link>
-          </nav>
-        </div>
-      </header>
+      <Navbar />
 
       <main className="min-h-screen bg-black text-emerald-50 relative overflow-hidden">
         {/* URBAN / DRAWING-BOARD BACKGROUND */}
@@ -173,9 +136,7 @@ export default function JabComicsPage() {
                 <span className="text-lime-300">_</span>
               </h2>
               <p className="text-xs md:text-sm text-slate-100/85 mb-3">
-                <span className="font-semibold text-lime-300">
-                  JAB Comics
-                </span>{" "}
+                <span className="font-semibold text-lime-300">JAB Comics</span>{" "}
                 is the ink-and-paper cousin of{" "}
                 <span className="font-semibold text-emerald-300">
                   JAB Visions
@@ -273,15 +234,13 @@ export default function JabComicsPage() {
 
             <p className="text-xs md:text-sm text-slate-100/80 mb-4 max-w-xl">
               Selected pieces from the{" "}
-              <span className="font-semibold text-lime-300">
-                JAB Comics
-              </span>{" "}
+              <span className="font-semibold text-lime-300">JAB Comics</span>{" "}
               sketch archive — Procreate studies, cover explorations, and aura
               experiments that live between storyboards and finished frames.
             </p>
 
             <div className="grid gap-4 md:gap-6 md:grid-cols-3">
-              {/* Artwork 1 – beach / Mercy-Jonas piece */}
+              {/* Artwork 1 */}
               <div className="relative group">
                 <div className="absolute -inset-1 rounded-2xl bg-[conic-gradient(from_160deg,rgba(190,242,100,0.6),rgba(56,189,248,0.6),rgba(244,114,182,0.6),rgba(190,242,100,0.6))] blur-xl opacity-40 group-hover:opacity-80 transition" />
                 <div className="relative rounded-2xl overflow-hidden border border-slate-400/70 bg-slate-950 shadow-[4px_4px_0_rgba(15,23,42,0.9)]">
@@ -303,7 +262,7 @@ export default function JabComicsPage() {
                 </div>
               </div>
 
-              {/* Artwork 2 – Kid Paranormal hallway */}
+              {/* Artwork 2 */}
               <div className="relative group">
                 <div className="absolute -inset-1 rounded-2xl bg-[radial-gradient(circle_at_top,rgba(56,189,248,0.7),transparent_60%),radial-gradient(circle_at_bottom,rgba(244,114,182,0.7),transparent_60%)] blur-xl opacity-35 group-hover:opacity-80 transition" />
                 <div className="relative rounded-2xl overflow-hidden border border-slate-400/70 bg-slate-950 shadow-[4px_4px_0_rgba(15,23,42,0.9)]">
@@ -318,14 +277,15 @@ export default function JabComicsPage() {
                   </div>
                   <div className="border-t border-slate-700/70 bg-slate-950/90 px-3 py-2">
                     <p className="text-[11px] text-slate-100/90">
-                      Kid Paranormal — The Star of JAB Comic Visions, he holds the universe together
-                      like glue as his schizophrenia turns into tanglible illusions and fourth dimensional tools.
+                      Kid Paranormal — The Star of JAB Comic Visions, he holds
+                      the universe together like glue as his schizophrenia turns
+                      into tanglible illusions and fourth dimensional tools.
                     </p>
                   </div>
                 </div>
               </div>
 
-              {/* Artwork 3 – Marywantis & Mercy Jonas */}
+              {/* Artwork 3 */}
               <div className="relative group">
                 <div className="absolute -inset-1 rounded-2xl bg-[radial-gradient(circle_at_center,rgba(190,242,100,0.7),transparent_60%)] blur-xl opacity-35 group-hover:opacity-80 transition" />
                 <div className="relative rounded-2xl overflow-hidden border border-slate-400/70 bg-slate-950 shadow-[4px_4px_0_rgba(15,23,42,0.9)]">
@@ -340,8 +300,9 @@ export default function JabComicsPage() {
                   </div>
                   <div className="border-t border-slate-700/70 bg-slate-950/90 px-3 py-2">
                     <p className="text-[11px] text-slate-100/90">
-                      Mary Wantis &amp; Mercy Jonas — storm-dock sequence with water
-                      spirit design, glow nets, and JAB Studios iconography.
+                      Mary Wantis &amp; Mercy Jonas — storm-dock sequence with
+                      water spirit design, glow nets, and JAB Studios
+                      iconography.
                     </p>
                   </div>
                 </div>
@@ -391,9 +352,7 @@ export default function JabComicsPage() {
                 </h3>
                 <p className="text-[11px] md:text-xs text-slate-100/85 mb-2">
                   For questions specifically about{" "}
-                  <span className="font-semibold text-lime-300">
-                    JAB Comics
-                  </span>{" "}
+                  <span className="font-semibold text-lime-300">JAB Comics</span>{" "}
                   and graphic projects:
                 </p>
                 <p className="text-[11px] md:text-xs text-slate-100/85 mb-4">

@@ -2,6 +2,7 @@
 
 import React, { useState, FormEvent } from "react";
 import Link from "next/link";
+import Navbar from "@/components/Navbar";
 
 const SCRIPT_URL =
   "https://script.google.com/macros/s/AKfycby4wgM7brYEIxPVyvStr3nd9bZF4_0P_hna7Bv8WJqqDMAwfk8sbFspRDqnHwMayr-r0A/exec";
@@ -43,45 +44,7 @@ export default function JoinUs() {
 
   return (
     <>
-      {/* NAVBAR */}
-      <header className="fixed top-0 left-0 right-0 z-40 border-b border-emerald-500/40 bg-black/80 backdrop-blur-xl">
-        <div className="max-w-6xl mx-auto px-4 h-14 flex items-center justify-between">
-          {/* Brand / Logo */}
-          <Link href="/" className="flex items-center gap-2">
-            <span className="text-xs tracking-[0.35em] uppercase text-emerald-400">
-              JAB<span className="text-emerald-300">_</span>VISIONS
-            </span>
-          </Link>
-
-          {/* Nav Links */}
-          <nav className="flex items-center gap-6 text-[11px] md:text-xs">
-            <Link
-              href="/"
-              className="text-emerald-100/70 hover:text-emerald-100 hover:underline underline-offset-4 transition"
-            >
-              Home
-            </Link>
-            <Link
-              href="/those-ryderz"
-              className="text-emerald-100/70 hover:text-emerald-100 hover:underline underline-offset-4 transition"
-            >
-              Those Ryderz
-            </Link>
-            <Link
-              href="/join-us"
-              className="text-cyan-300 font-semibold hover:text-cyan-100 hover:underline underline-offset-4 transition"
-            >
-              Join Us
-            </Link>
-            <Link
-              href="/store"
-              className="text-emerald-100/70 hover:text-emerald-100 hover:underline underline-offset-4 transition"
-            >
-              Store
-            </Link>
-          </nav>
-        </div>
-      </header>
+      <Navbar />
 
       <main className="min-h-screen bg-black text-emerald-100 relative overflow-hidden">
         {/* MATRIX GRID BACKGROUND */}

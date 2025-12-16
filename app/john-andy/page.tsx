@@ -3,49 +3,14 @@
 import React from "react";
 import Link from "next/link";
 import Image from "next/image";
+import Navbar from "@/components/Navbar";
+
+const STORE_URL = "https://store.jabvisions.com";
 
 export default function JohnAndyPage() {
   return (
     <>
-      {/* NAVBAR */}
-      <header className="fixed top-0 left-0 right-0 z-40 border-b border-emerald-500/40 bg-black/80 backdrop-blur-xl">
-        <div className="max-w-6xl mx-auto px-4 h-14 flex items-center justify-between">
-          {/* Brand / Logo */}
-          <Link href="/" className="flex items-center gap-2">
-            <span className="text-xs tracking-[0.35em] uppercase text-emerald-400">
-              JAB<span className="text-emerald-300">_</span>VISIONS
-            </span>
-          </Link>
-
-          {/* Nav Links */}
-          <nav className="flex items-center gap-6 text-[11px] md:text-xs">
-            <Link
-              href="/"
-              className="text-emerald-100/70 hover:text-emerald-100 hover:underline underline-offset-4 transition"
-            >
-              Home
-            </Link>
-            <Link
-              href="/those-ryderz"
-              className="text-emerald-100/70 hover:text-emerald-100 hover:underline underline-offset-4 transition"
-            >
-              Those Ryderz
-            </Link>
-            <Link
-              href="/join-us"
-              className="text-emerald-100/70 hover:text-emerald-100 hover:underline underline-offset-4 transition"
-            >
-              Join Us
-            </Link>
-            <Link
-              href="/store"
-              className="text-emerald-100/70 hover:text-emerald-100 hover:underline underline-offset-4 transition"
-            >
-              Store
-            </Link>
-          </nav>
-        </div>
-      </header>
+      <Navbar />
 
       <main className="min-h-screen bg-black text-emerald-50 relative overflow-hidden">
         {/* MATRIX BACKGROUND */}
@@ -275,12 +240,14 @@ export default function JohnAndyPage() {
                   <span className="text-cyan-300">JAB Visions</span> visual
                   language—glitchy, neon, and cinematic.
                 </p>
-                <Link
-                  href="/store"
+                <a
+                  href={STORE_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
                   className="inline-flex text-[11px] md:text-xs font-semibold text-cyan-300 underline underline-offset-4 hover:text-cyan-100 transition"
                 >
                   // Visit store
-                </Link>
+                </a>
               </div>
             </div>
           </section>
