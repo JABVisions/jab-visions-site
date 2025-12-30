@@ -31,22 +31,22 @@ export default function Home() {
     const drops = Array(columns).fill(0);
     const chars = '0123456789ABCDEFλΔΨ';
 
-    function draw() {
-      ctx.fillStyle = 'rgba(0,0,0,0.08)';
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      ctx.fillStyle = '#00ff9c';
-      ctx.font = `${fontSize}px monospace`;
+    const draw = () => {
+      ctx!.fillStyle = 'rgba(0,0,0,0.08)';
+      ctx!.fillRect(0, 0, canvas!.width, canvas!.height);
+      ctx!.fillStyle = '#00ff9c';
+      ctx!.font = `${fontSize}px monospace`;
 
       for (let i = 0; i < drops.length; i++) {
         const text = chars[Math.floor(Math.random() * chars.length)];
-        ctx.fillText(text, i * fontSize, drops[i] * fontSize);
+        ctx!.fillText(text, i * fontSize, drops[i] * fontSize);
         drops[i]++;
-        if (drops[i] * fontSize > canvas.height && Math.random() > 0.98) {
+        if (drops[i] * fontSize > canvas!.height && Math.random() > 0.98) {
           drops[i] = 0;
         }
       }
       requestAnimationFrame(draw);
-    }
+    };
     draw();
   }, []);
 
