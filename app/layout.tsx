@@ -1,6 +1,7 @@
 // File: /app/layout.tsx
 import "./globals.css";
 import Navbar from "@/components/Navbar";
+import { Analytics } from "@vercel/analytics/next";
 
 export const metadata = {
   title: "Those Ryderz",
@@ -35,8 +36,8 @@ export default function RootLayout({
         <div className="pt-20">
           {children}
         </div>
+        <Analytics />
       </body>
     </html>
   );
 }
-import { Analytics } from "@vercel/analytics/next"
