@@ -19,7 +19,6 @@ export default function Navbar() {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
 
-  // Close menu with ESC
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") setOpen(false);
@@ -28,10 +27,13 @@ export default function Navbar() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  // Close menu on route change
   useEffect(() => {
     setOpen(false);
   }, [pathname]);
+
+  const isBoardActive =
+    pathname === "/board" || pathname?.startsWith("/board/");
+  const isLinkActive = (href: string) => pathname === href;
 
   return (
     <header
@@ -44,7 +46,7 @@ export default function Navbar() {
       "
     >
       <div className="mx-auto flex max-w-7xl items-center justify-between px-4 sm:px-6 py-3 sm:py-4">
-        {/* BRAND TITLE */}
+        {/* BRAND */}
         <Link
           href="/"
           className="
@@ -61,7 +63,47 @@ export default function Navbar() {
 
         {/* DESKTOP NAV */}
         <nav className="hidden md:flex items-center gap-8 lg:gap-10">
-          {LINKS.map((link) => (
+          {/* BOARD (now first) */}
+          <Link
+            href="/board"
+            className={`
+              rounded-full
+              px-4 py-2
+              text-[10px] lg:text-xs font-semibold uppercase tracking-[0.2em]
+              border border-[#ff00c8]/45
+              bg-[#ff00c8]/10
+              text-[#ff00c8]
+              transition
+              hover:bg-[#ff00c8]/18
+              hover:shadow-[0_0_25px_rgba(255,0,200,0.65)]
+              hover:drop-shadow-[0_0_14px_rgba(255,0,200,0.9)]
+              whitespace-nowrap
+              ${isBoardActive ? "shadow-[0_0_28px_rgba(255,0,200,0.85)]" : ""}
+            `}
+          >
+            Board
+          </Link>
+
+          {/* HOME (now second) */}
+          <Link
+            href="/"
+            className={`
+              uppercase text-[10px] lg:text-xs tracking-[0.2em]
+              transition
+              ${
+                isLinkActive("/")
+                  ? "text-[#d5ff00]"
+                  : "text-gray-300 hover:text-[#ff00c8]"
+              }
+              hover:drop-shadow-[0_0_14px_rgba(255,0,200,0.9)]
+              whitespace-nowrap
+            `}
+          >
+            Home
+          </Link>
+
+          {/* REST OF LINKS */}
+          {LINKS.filter((l) => l.href !== "/").map((link) => (
             <Link
               key={link.href}
               href={link.href}
@@ -69,7 +111,7 @@ export default function Navbar() {
                 uppercase text-[10px] lg:text-xs tracking-[0.2em]
                 transition
                 ${
-                  pathname === link.href
+                  isLinkActive(link.href)
                     ? "text-[#d5ff00]"
                     : "text-gray-300 hover:text-[#ff00c8]"
                 }
@@ -81,7 +123,7 @@ export default function Navbar() {
             </Link>
           ))}
 
-          {/* STORE LINK */}
+          {/* STORE */}
           <a
             href={STORE_URL}
             className="
@@ -95,7 +137,7 @@ export default function Navbar() {
             Store
           </a>
 
-          {/* SIGN RELEASE BUTTON */}
+          {/* SIGN RELEASE */}
           <a
             href={SIGNNOW_URL}
             target="_blank"
@@ -117,7 +159,7 @@ export default function Navbar() {
           </a>
         </nav>
 
-        {/* MOBILE MENU TOGGLE */}
+        {/* MOBILE TOGGLE */}
         <button
           type="button"
           onClick={() => setOpen((prev) => !prev)}
@@ -149,7 +191,46 @@ export default function Navbar() {
           "
         >
           <nav className="mx-auto flex max-w-7xl flex-col gap-1 px-4 py-3">
-            {LINKS.map((link) => (
+            {/* BOARD (mobile first) */}
+            <Link
+              href="/board"
+              className={`
+                mt-1
+                inline-flex items-center justify-center
+                rounded-full
+                bg-[#ff00c8]/10
+                border border-[#ff00c8]/45
+                px-4 py-2
+                text-[10px] font-semibold uppercase tracking-[0.2em]
+                text-[#ff00c8]
+                transition
+                hover:bg-[#ff00c8]/18
+                hover:shadow-[0_0_22px_rgba(255,0,200,0.6)]
+                ${isBoardActive ? "shadow-[0_0_26px_rgba(255,0,200,0.85)]" : ""}
+              `}
+            >
+              Board
+            </Link>
+
+            {/* HOME */}
+            <Link
+              href="/"
+              className={`
+                py-2
+                uppercase text-[10px] tracking-[0.2em]
+                transition
+                ${
+                  isLinkActive("/")
+                    ? "text-[#d5ff00]"
+                    : "text-gray-200 hover:text-[#ff00c8]"
+                }
+              `}
+            >
+              Home
+            </Link>
+
+            {/* REST */}
+            {LINKS.filter((l) => l.href !== "/").map((link) => (
               <Link
                 key={link.href}
                 href={link.href}
@@ -158,7 +239,7 @@ export default function Navbar() {
                   uppercase text-[10px] tracking-[0.2em]
                   transition
                   ${
-                    pathname === link.href
+                    isLinkActive(link.href)
                       ? "text-[#d5ff00]"
                       : "text-gray-200 hover:text-[#ff00c8]"
                   }
@@ -168,7 +249,7 @@ export default function Navbar() {
               </Link>
             ))}
 
-            {/* STORE LINK */}
+            {/* STORE */}
             <a
               href={STORE_URL}
               className="
@@ -181,6 +262,7 @@ export default function Navbar() {
               Store
             </a>
 
+            {/* SIGN RELEASE */}
             <a
               href={SIGNNOW_URL}
               target="_blank"

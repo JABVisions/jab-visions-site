@@ -58,3 +58,10 @@ body {
 .nav-glow:hover::after {
   width: 100%;
 }
+.board-bg {
+  background-color: #fff2a6;
+  background-image:
+    linear-gradient(#ffffff 1px, transparent 1px),
+    linear-gradient(90deg, #ffffff 1px, transparent 1px);
+  background-size: 80px 80px;
+}
