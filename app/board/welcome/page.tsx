@@ -11,12 +11,14 @@ export default function WelcomePage() {
         <h1 className="text-2xl font-semibold tracking-wide mb-3">
           Welcome to the JAB Visions™ Board
         </h1>
+
         <p className="text-white/75 mb-6">
           This is your welcome hub. (Placeholder page so Vercel can build.)
         </p>
 
         <div className="flex flex-wrap gap-3">
           <button
+            type="button"
             className="rounded-xl border border-emerald-400/70 px-4 py-3 font-mono text-emerald-200 hover:bg-emerald-400/10 transition"
             onClick={() => router.push('/board')}
           >
@@ -24,6 +26,7 @@ export default function WelcomePage() {
           </button>
 
           <button
+            type="button"
             className="rounded-xl border border-emerald-400/40 px-4 py-3 font-mono text-emerald-100/80 hover:bg-emerald-400/10 transition"
             onClick={() => router.push('/')}
           >
