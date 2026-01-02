@@ -1,4 +1,5 @@
 'use client';
+
 import Image from 'next/image';
 import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
@@ -54,7 +55,7 @@ export default function Home() {
     <main className="relative min-h-screen w-full bg-black flex flex-col items-center justify-center overflow-hidden">
       <canvas ref={canvasRef} className="fixed inset-0 z-0" />
 
-      {/* 🟡 ANNOUNCEMENTS – TOP LEFT */}
+      {/* 🟡 ANNOUNCEMENTS – BELOW NAVBAR (LEFT) */}
       <div className="announce-wrap">
         <button
           className="announce-tab"
@@ -72,13 +73,11 @@ export default function Home() {
         )}
       </div>
 
-      {/* 🟣 STORE BAG – TOP RIGHT */}
+      {/* 🟣 STORE BAG – BELOW NAVBAR (RIGHT) */}
       <div className="store-bag-wrap">
         <button onClick={handleStore} aria-label="JAB Visions Store">
           <div className="store-bag-handle" />
-          <div className="store-bag-body">
-            🛍️
-          </div>
+          <div className="store-bag-body">🛍️</div>
         </button>
         <span className="store-bag-label">JAB Visions™ Store</span>
       </div>
@@ -96,7 +95,7 @@ export default function Home() {
       {/* CTA BUTTONS */}
       <div className="z-40 flex flex-col items-center gap-4">
         <button className="enter-site-btn" onClick={handleJoin}>
-          [ Join JAB Visions ]
+          [ Join JAB Visions™ Board ]
         </button>
         <button className="enter-site-btn" onClick={handleEnterSite}>
           [ Enter Site ]
@@ -108,6 +107,11 @@ export default function Home() {
 
       {/* STYLES */}
       <style jsx global>{`
+        :root {
+          /* Navbar is roughly 80px (ptoughly pt-20). Adjust if your navbar changes. */
+          --nav-offset: 92px; /* 80px navbar + 12px breathing room */
+        }
+
         /* CTA */
         .enter-site-btn {
           padding: 1rem 2.5rem;
@@ -121,7 +125,7 @@ export default function Home() {
           transition: all 0.2s ease;
         }
         .enter-site-btn:hover {
-          background: rgba(0,255,160,0.15);
+          background: rgba(0, 255, 160, 0.15);
           box-shadow: 0 0 28px #66ffcc;
         }
         .enter-site-btn-secondary {
@@ -136,9 +140,9 @@ export default function Home() {
         /* ANNOUNCEMENTS */
         .announce-wrap {
           position: fixed;
-          top: 20px;
+          top: var(--nav-offset);
           left: 20px;
-          z-index: 9999;
+          z-index: 60; /* high, but not absurdly above everything */
         }
         .announce-tab {
           padding: 12px 16px;
@@ -156,7 +160,7 @@ export default function Home() {
           padding: 12px 14px;
           border-radius: 16px;
           border: 2px solid #ffd64a66;
-          background: rgba(0,0,0,0.7);
+          background: rgba(0, 0, 0, 0.7);
           color: #ffefb7;
           font-family: monospace;
           box-shadow: 0 0 26px #ffd64a55;
@@ -165,9 +169,9 @@ export default function Home() {
         /* STORE BAG */
         .store-bag-wrap {
           position: fixed;
-          top: 20px;
+          top: var(--nav-offset);
           right: 20px;
-          z-index: 9999;
+          z-index: 60; /* match announcements */
           display: flex;
           flex-direction: column;
           align-items: center;
