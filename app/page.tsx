@@ -21,34 +21,55 @@ export default function Home() {
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
 
-    canvas.width = window.innerWidth;
-    canvas.height = window.innerHeight;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return; // ✅ fixes Vercel TS error: ctx possibly null
 
     const fontSize = 14;
-    const columns = Math.floor(canvas.width / fontSize);
-    const drops = Array(columns).fill(0);
     const chars = '0123456789ABCDEFλΔΨ';
 
-    function draw() {
+    const resize = () => {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+    };
+
+    resize();
+
+    const columns = Math.floor(canvas.width / fontSize);
+    const drops = Array(columns).fill(0);
+
+    let rafId = 0;
+
+    const draw = () => {
+      // (ctx is guaranteed non-null because of the guard above)
       ctx.fillStyle = 'rgba(0,0,0,0.08)';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
+
       ctx.fillStyle = '#00ff9c';
       ctx.font = `${fontSize}px monospace`;
 
       for (let i = 0; i < drops.length; i++) {
         const text = chars[Math.floor(Math.random() * chars.length)];
         ctx.fillText(text, i * fontSize, drops[i] * fontSize);
+
         drops[i]++;
+
         if (drops[i] * fontSize > canvas.height && Math.random() > 0.98) {
           drops[i] = 0;
         }
       }
-      requestAnimationFrame(draw);
-    }
+
+      rafId = requestAnimationFrame(draw);
+    };
+
     draw();
+
+    window.addEventListener('resize', resize);
+
+    return () => {
+      window.removeEventListener('resize', resize);
+      if (rafId) cancelAnimationFrame(rafId);
+    };
   }, []);
 
   return (
@@ -108,7 +129,7 @@ export default function Home() {
       {/* STYLES */}
       <style jsx global>{`
         :root {
-          /* Navbar is roughly 80px (ptoughly pt-20). Adjust if your navbar changes. */
+          /* Navbar is roughly 80px (pt-20). Adjust if your navbar changes. */
           --nav-offset: 92px; /* 80px navbar + 12px breathing room */
         }
 
