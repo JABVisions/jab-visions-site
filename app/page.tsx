@@ -23,7 +23,7 @@ export default function Home() {
     if (!canvas) return;
 
     const ctx = canvas.getContext('2d');
-    if (!ctx) return; // ✅ fixes Vercel TS error: ctx possibly null
+    if (!ctx) return;
 
     const fontSize = 14;
     const chars = '0123456789ABCDEFλΔΨ';
@@ -41,7 +41,6 @@ export default function Home() {
     let rafId = 0;
 
     const draw = () => {
-      // (ctx is guaranteed non-null because of the guard above)
       ctx.fillStyle = 'rgba(0,0,0,0.08)';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
 
@@ -63,7 +62,6 @@ export default function Home() {
     };
 
     draw();
-
     window.addEventListener('resize', resize);
 
     return () => {
@@ -76,7 +74,7 @@ export default function Home() {
     <main className="relative min-h-screen w-full bg-black flex flex-col items-center justify-center overflow-hidden">
       <canvas ref={canvasRef} className="fixed inset-0 z-0" />
 
-      {/* 🟡 ANNOUNCEMENTS – BELOW NAVBAR (LEFT) */}
+      {/* ANNOUNCEMENTS */}
       <div className="announce-wrap">
         <button
           className="announce-tab"
@@ -94,7 +92,7 @@ export default function Home() {
         )}
       </div>
 
-      {/* 🟣 STORE BAG – BELOW NAVBAR (RIGHT) */}
+      {/* STORE */}
       <div className="store-bag-wrap">
         <button onClick={handleStore} aria-label="JAB Visions Store">
           <div className="store-bag-handle" />
@@ -129,8 +127,7 @@ export default function Home() {
       {/* STYLES */}
       <style jsx global>{`
         :root {
-          /* Navbar is roughly 80px (pt-20). Adjust if your navbar changes. */
-          --nav-offset: 92px; /* 80px navbar + 12px breathing room */
+          --nav-offset: 92px;
         }
 
         /* CTA */
@@ -143,12 +140,8 @@ export default function Home() {
           border-radius: 1.3rem;
           letter-spacing: 0.12em;
           box-shadow: 0 0 18px #22ff77;
-          transition: all 0.2s ease;
         }
-        .enter-site-btn:hover {
-          background: rgba(0, 255, 160, 0.15);
-          box-shadow: 0 0 28px #66ffcc;
-        }
+
         .enter-site-btn-secondary {
           padding: 0.7rem 2rem;
           border: 1.5px solid #22ff77aa;
@@ -163,8 +156,9 @@ export default function Home() {
           position: fixed;
           top: var(--nav-offset);
           left: 20px;
-          z-index: 60; /* high, but not absurdly above everything */
+          z-index: 60;
         }
+
         .announce-tab {
           padding: 12px 16px;
           border-radius: 16px;
@@ -174,8 +168,8 @@ export default function Home() {
           font-family: monospace;
           letter-spacing: 0.12em;
           box-shadow: 0 0 30px #ffd64a;
-          cursor: pointer;
         }
+
         .announce-panel {
           margin-top: 10px;
           padding: 12px 14px;
@@ -187,25 +181,26 @@ export default function Home() {
           box-shadow: 0 0 26px #ffd64a55;
         }
 
-        /* STORE BAG */
+        /* STORE */
         .store-bag-wrap {
           position: fixed;
           top: var(--nav-offset);
           right: 20px;
-          z-index: 60; /* match announcements */
+          z-index: 60;
           display: flex;
           flex-direction: column;
           align-items: center;
           gap: 10px;
         }
+
         .store-bag-wrap button {
-          position: relative;
           width: 150px;
           height: 180px;
           background: transparent;
           border: none;
-          cursor: pointer;
+          position: relative;
         }
+
         .store-bag-handle {
           position: absolute;
           top: 8px;
@@ -218,6 +213,7 @@ export default function Home() {
           border-radius: 20px 20px 0 0;
           box-shadow: 0 0 20px #ff4fd8;
         }
+
         .store-bag-body {
           position: absolute;
           bottom: 0;
@@ -232,6 +228,7 @@ export default function Home() {
           justify-content: center;
           font-size: 3.2rem;
         }
+
         .store-bag-label {
           font-family: monospace;
           font-size: 13px;
@@ -239,8 +236,43 @@ export default function Home() {
           color: #ff9de8;
           text-shadow: 0 0 14px #ff5fd9;
         }
+
+        /* MOBILE FIX */
+        @media (max-width: 640px) {
+          .announce-wrap {
+            left: 12px;
+            max-width: calc(100vw - 140px);
+          }
+
+          .store-bag-wrap {
+            right: 12px;
+          }
+
+          .store-bag-wrap button {
+            width: 96px;
+            height: 108px;
+          }
+
+          .store-bag-handle {
+            width: 44px;
+            height: 18px;
+            border-width: 3px;
+          }
+
+          .store-bag-body {
+            width: 96px;
+            height: 86px;
+            border-width: 3px;
+            font-size: 2.1rem;
+            box-shadow: 0 0 26px #ff4fd8;
+          }
+
+          .store-bag-label {
+            font-size: 10px;
+            letter-spacing: 0.1em;
+          }
+        }
       `}</style>
     </main>
   );
 }
-// touch
