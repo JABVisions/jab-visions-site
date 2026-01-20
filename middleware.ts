@@ -4,20 +4,42 @@ import { createServerClient } from "@supabase/ssr";
 
 /**
  * Public /board routes (always accessible without login)
- * Add to this list as needed.
+ * - Keep /board and /board/login reachable so you can enter while Board is locked.
+ * - We will conditionally block /board/signup when locked.
  */
 const PUBLIC_BOARD_ROUTES = new Set([
   "/board",
   "/board/login",
   "/board/signup",
-  "/board/auth/callback", // keep if you use OAuth / magic link callbacks
+  "/board/auth/callback",
 ]);
+
+function parseAllowedEmails(raw?: string | null) {
+  return new Set(
+    (raw || "")
+      .split(",")
+      .map((s) => s.trim().toLowerCase())
+      .filter(Boolean)
+  );
+}
 
 export async function middleware(req: NextRequest) {
   const { pathname, search } = req.nextUrl;
 
   // Only guard /board/*
   if (!pathname.startsWith("/board")) return NextResponse.next();
+
+  const locked =
+    (process.env.BOARD_LOCKED || "").toLowerCase() === "1" ||
+    (process.env.BOARD_LOCKED || "").toLowerCase() === "true";
+
+  // While locked: block signup so new users can’t create accounts.
+  if (locked && pathname === "/board/signup") {
+    const url = req.nextUrl.clone();
+    url.pathname = "/board";
+    url.searchParams.set("locked", "1");
+    return NextResponse.redirect(url);
+  }
 
   // Allow public pages
   if (PUBLIC_BOARD_ROUTES.has(pathname)) return NextResponse.next();
@@ -31,7 +53,6 @@ export async function middleware(req: NextRequest) {
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
       cookies: {
-        // @supabase/ssr expects getAll/setAll for best compatibility
         getAll() {
           return req.cookies.getAll();
         },
@@ -44,13 +65,10 @@ export async function middleware(req: NextRequest) {
     }
   );
 
-  // Prefer getUser() for auth checks in middleware
-  // (more direct than session and avoids some edge cases)
   const { data, error } = await supabase.auth.getUser();
   const user = data?.user;
 
   if (error) {
-    // If something goes wrong, treat as unauthenticated and redirect safely
     console.error("[middleware] supabase.auth.getUser error:", error);
   }
 
@@ -60,6 +78,19 @@ export async function middleware(req: NextRequest) {
     url.pathname = "/board/login";
     url.searchParams.set("next", `${pathname}${search}`);
     return NextResponse.redirect(url);
+  }
+
+  // ✅ Lock gate: only allow whitelisted emails when BOARD_LOCKED=1
+  if (locked) {
+    const allowed = parseAllowedEmails(process.env.BOARD_ALLOWED_EMAILS);
+    const email = (user.email || "").toLowerCase();
+
+    if (!email || !allowed.has(email)) {
+      const url = req.nextUrl.clone();
+      url.pathname = "/board";
+      url.searchParams.set("locked", "1");
+      return NextResponse.redirect(url);
+    }
   }
 
   return res;

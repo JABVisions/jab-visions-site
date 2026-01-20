@@ -317,7 +317,7 @@ export default function BoardDock() {
 
             {/* ✅ Keep your dock look; just correct routing + active check */}
             <DockPill
-              href="/board/profile/options"
+              href="/board/options"
               label="Options"
               active={isActive(pathname, "/board/profile/options")}
               Icon={Sparkles}
