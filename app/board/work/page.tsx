@@ -74,7 +74,11 @@ export default function WorkPage() {
     <main className="work-root">
       <section className="work-row">
         <div className="panel desk">
-          <WorkDesk />
+         <WorkDesk
+  onToggleDropPadPower={() => {}}
+  onManagePayDrops={() => {}}
+/>
+
         </div>
 
         <div className="panel notebook">

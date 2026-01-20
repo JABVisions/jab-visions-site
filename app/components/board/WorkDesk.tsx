@@ -1,3 +1,4 @@
+// app/components/board/WorkDesk.tsx
 "use client";
 
 import React, { useEffect, useState } from "react";
@@ -53,15 +54,17 @@ const JOBS = [
   "JAB Music Curator",
   "JAB Visions Intern",
   "Other",
-];
+] as const;
 
 export default function WorkDesk({
-  onToggleDropPadPower,
-  onManagePayDrops,
+  onToggleDropPadPower = () => {},
+  onManagePayDrops = () => {},
   compact,
 }: {
-  onToggleDropPadPower: () => void;
-  onManagePayDrops: () => void;
+  /** ✅ Optional so <WorkDesk /> won't break builds */
+  onToggleDropPadPower?: () => void;
+  /** ✅ Optional so <WorkDesk /> won't break builds */
+  onManagePayDrops?: () => void;
   compact?: boolean;
 }) {
   const [payDrops, setPayDrops] = useState<PayDropLite[]>([]);
@@ -82,7 +85,11 @@ export default function WorkDesk({
 
   function loadProfileAvatar() {
     if (typeof window === "undefined") return;
-    const payload = safeParse<ProfilePayload>(localStorage.getItem(BOARD_PROFILE_STORAGE_KEY), {});
+
+    const payload = safeParse<ProfilePayload>(
+      localStorage.getItem(BOARD_PROFILE_STORAGE_KEY),
+      {}
+    );
 
     const url =
       payload?.avatarDataUrl ??
@@ -99,6 +106,7 @@ export default function WorkDesk({
 
   function loadPayDrops() {
     if (typeof window === "undefined") return;
+
     const parsed = safeParse<PayDropLite[]>(localStorage.getItem(PAYDROPS_STORAGE_KEY), []);
     const list = Array.isArray(parsed) ? parsed : [];
     list.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
@@ -113,8 +121,10 @@ export default function WorkDesk({
       if (e.key === PAYDROPS_STORAGE_KEY) loadPayDrops();
       if (e.key === BOARD_PROFILE_STORAGE_KEY) loadProfileAvatar();
     }
+
     window.addEventListener("storage", onStorage);
 
+    // light polling for same-tab changes
     const t = window.setInterval(() => {
       loadPayDrops();
       loadProfileAvatar();
@@ -129,7 +139,6 @@ export default function WorkDesk({
   const canQuit = status !== "unemployed";
 
   const quitJob = () => {
-    // Quit always returns you to Unemployed
     setJob("");
     setStatus("unemployed");
   };
@@ -175,7 +184,7 @@ export default function WorkDesk({
         <div className="mt-2 text-white text-lg font-semibold">{statusLabel(status)}</div>
 
         <div className="mt-3 grid gap-2">
-          {/* QUIT button (replaces Off) */}
+          {/* QUIT button */}
           <button
             type="button"
             onClick={quitJob}
@@ -194,7 +203,6 @@ export default function WorkDesk({
           {/* Job dropdown */}
           <label className="text-xs text-white/60 -mt-0.5">Job</label>
 
-          {/* slight left nudge so it sits cleaner inside the tile */}
           <div className="-ml-1">
             <select
               value={job}
@@ -202,10 +210,7 @@ export default function WorkDesk({
                 const v = e.target.value;
                 setJob(v);
 
-                // Choose a job automatically sets Working
                 if (v) setStatus("working");
-
-                // Clearing job returns to Unemployed
                 if (!v) setStatus("unemployed");
               }}
               className="w-[calc(100%+4px)] rounded-xl border border-white/10 bg-black/40 px-3 py-2 text-sm text-white outline-none"
