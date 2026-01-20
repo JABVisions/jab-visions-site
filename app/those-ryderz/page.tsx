@@ -1,7 +1,7 @@
 'use client';
 
 import Image from 'next/image';
-import Navbar from '../../components/Navbar';
+import Navbar from '../components/Navbar';
 
 const heavenlyFont = "'Playfair Display', serif";
 const steelFont = "'Anton', Impact, Arial Black, sans-serif";

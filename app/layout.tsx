@@ -1,6 +1,6 @@
 // File: /app/layout.tsx
 import "./globals.css";
-import Navbar from "@/components/Navbar";
+import Navbar from "./components/Navbar";
 import Script from "next/script";
 import { Analytics } from "@vercel/analytics/next";
 

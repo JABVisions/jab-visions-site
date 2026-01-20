@@ -4,7 +4,7 @@
 
 /* === Global Typography / Fonts === */
 body {
-  font-family: 'Inter', sans-serif;
+  font-family: "Inter", sans-serif;
   background-color: #0e0e0e;
   color: #e0e0e0;
   overflow-x: hidden;
@@ -12,16 +12,34 @@ body {
 
 /* === Navbar Glowing Styles === */
 @keyframes flicker {
-  0% { opacity: 1; text-shadow: 0 0 6px #66fcf1, 0 0 12px #33faff; }
-  15% { opacity: 0.85; text-shadow: 0 0 4px #66fcf1; }
-  30% { opacity: 1; text-shadow: 0 0 8px #66fcf1; }
-  50% { opacity: 0.9; text-shadow: 0 0 10px #33faff; }
-  70% { opacity: 1; text-shadow: 0 0 12px #66fcf1, 0 0 20px #9efeff; }
-  100% { opacity: 1; }
+  0% {
+    opacity: 1;
+    text-shadow: 0 0 6px #66fcf1, 0 0 12px #33faff;
+  }
+  15% {
+    opacity: 0.85;
+    text-shadow: 0 0 4px #66fcf1;
+  }
+  30% {
+    opacity: 1;
+    text-shadow: 0 0 8px #66fcf1;
+  }
+  50% {
+    opacity: 0.9;
+    text-shadow: 0 0 10px #33faff;
+  }
+  70% {
+    opacity: 1;
+    text-shadow: 0 0 12px #66fcf1, 0 0 20px #9efeff;
+  }
+  100% {
+    opacity: 1;
+  }
 }
 
 @keyframes pulse-slow {
-  0%, 100% {
+  0%,
+  100% {
     text-shadow: 0 0 6px #00ff88, 0 0 10px #00ff88;
   }
   50% {
@@ -46,7 +64,7 @@ body {
 }
 
 .nav-glow::after {
-  content: '';
+  content: "";
   display: block;
   width: 0%;
   height: 2px;
@@ -58,10 +76,228 @@ body {
 .nav-glow:hover::after {
   width: 100%;
 }
+
+/* === Board grid background (older helper, safe to keep) === */
 .board-bg {
   background-color: #fff2a6;
-  background-image:
-    linear-gradient(#ffffff 1px, transparent 1px),
+  background-image: linear-gradient(#ffffff 1px, transparent 1px),
     linear-gradient(90deg, #ffffff 1px, transparent 1px);
   background-size: 80px 80px;
+}
+
+/* ============================================================
+   BOARD THEMES (Classic default + Nightlife override)
+   Use layout wrappers to apply .theme-board-classic OR .theme-board-nightlife
+   ============================================================ */
+
+@layer base {
+  :root {
+    /* Default tokens (used when no theme wrapper is applied) */
+    --board-bg: #0e0e0e;
+    --board-text: rgba(224, 224, 224, 0.95);
+
+    --tile-bg: rgba(255, 255, 255, 0.06);
+    --tile-border: rgba(255, 255, 255, 0.1);
+
+    --rim-grad: linear-gradient(
+      135deg,
+      rgba(255, 255, 255, 0.12),
+      rgba(255, 255, 255, 0.06)
+    );
+
+    --accent: rgba(0, 255, 136, 0.9);
+
+    --shadow-lg: 0 14px 40px rgba(0, 0, 0, 0.12);
+    --shadow-md: 0 10px 28px rgba(0, 0, 0, 0.08);
+  }
+
+  /* Classic Board theme: cozy, safe, soft, "coming home" */
+  .theme-board-classic {
+    --board-bg: radial-gradient(
+        900px 500px at 20% 10%,
+        rgba(255, 0, 180, 0.1),
+        transparent 55%
+      ),
+      radial-gradient(
+        800px 480px at 75% 20%,
+        rgba(0, 190, 120, 0.1),
+        transparent 55%
+      ),
+      radial-gradient(
+        900px 600px at 55% 85%,
+        rgba(0, 170, 255, 0.1),
+        transparent 60%
+      ),
+      linear-gradient(180deg, rgba(255, 246, 200, 0.95), rgba(255, 240, 190, 0.92));
+
+    --board-text: rgba(15, 15, 15, 0.82);
+
+    --tile-bg: rgba(255, 255, 255, 0.86);
+    --tile-border: rgba(0, 0, 0, 0.06);
+
+    --rim-grad: linear-gradient(
+      135deg,
+      rgba(255, 0, 180, 0.35),
+      rgba(0, 190, 120, 0.25),
+      rgba(0, 170, 255, 0.25),
+      rgba(255, 0, 180, 0.25)
+    );
+
+    /* Classic Board green */
+    --accent: rgba(0, 150, 90, 0.95);
+  }
+
+  /* Nightlife theme: cool, urban, darker glow for Work + Forums */
+  .theme-board-nightlife {
+    --board-bg: radial-gradient(
+        900px 500px at 20% 10%,
+        rgba(0, 255, 200, 0.08),
+        transparent 55%
+      ),
+      radial-gradient(
+        900px 600px at 70% 80%,
+        rgba(255, 0, 180, 0.08),
+        transparent 60%
+      ),
+      linear-gradient(180deg, rgba(8, 8, 12, 0.98), rgba(12, 12, 18, 0.98));
+
+    --board-text: rgba(235, 235, 245, 0.92);
+
+    --tile-bg: rgba(255, 255, 255, 0.06);
+    --tile-border: rgba(255, 255, 255, 0.1);
+
+    --rim-grad: linear-gradient(
+      135deg,
+      rgba(0, 255, 200, 0.22),
+      rgba(255, 0, 180, 0.18),
+      rgba(120, 120, 255, 0.14)
+    );
+
+    --accent: rgba(102, 252, 241, 0.95);
+  }
+}
+
+@layer components {
+  /* Apply to a full page wrapper */
+  .board-surface {
+    background: var(--board-bg);
+    color: var(--board-text);
+    min-height: 100vh;
+  }
+
+  /* Rim + tile system */
+  .board-rim {
+    border-radius: 28px;
+    padding: 2px;
+    background: var(--rim-grad);
+    box-shadow: var(--shadow-lg), 0 0 0 1px rgba(255, 255, 255, 0.45) inset;
+  }
+
+  .board-tile {
+    border-radius: 26px;
+    background: var(--tile-bg);
+    border: 1px solid var(--tile-border);
+    box-shadow: var(--shadow-md);
+    backdrop-filter: blur(10px);
+  }
+
+  /* Accent text (green in Classic, cyan in Nightlife) */
+  .board-accent {
+    color: var(--accent);
+    letter-spacing: -0.02em;
+  }
+
+  /* Small chip/pill */
+  .board-chip {
+    border-radius: 999px;
+    padding: 6px 10px;
+    font-size: 12px;
+    border: 1px solid var(--tile-border);
+    background: rgba(255, 255, 255, 0.55);
+    color: rgba(40, 40, 40, 0.75);
+  }
+
+  .theme-board-nightlife .board-chip {
+    background: rgba(0, 0, 0, 0.25);
+    color: rgba(235, 235, 245, 0.86);
+  }
+
+  /* Inputs */
+  .board-input {
+    border-radius: 18px;
+    border: 1px solid var(--tile-border);
+    background: rgba(255, 255, 255, 0.85);
+    padding: 12px 14px;
+    font-size: 14px;
+    outline: none;
+    color: rgba(10, 10, 10, 0.85);
+    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.9) inset;
+  }
+
+  .board-input::placeholder {
+    color: rgba(0, 0, 0, 0.35);
+  }
+
+  .board-input:focus {
+    border-color: rgba(255, 0, 180, 0.35);
+    box-shadow: 0 0 0 4px rgba(255, 0, 180, 0.1),
+      0 1px 0 rgba(255, 255, 255, 0.9) inset;
+  }
+
+  .theme-board-nightlife .board-input {
+    background: rgba(0, 0, 0, 0.35);
+    color: rgba(235, 235, 245, 0.92);
+  }
+
+  .theme-board-nightlife .board-input::placeholder {
+    color: rgba(235, 235, 245, 0.4);
+  }
+
+  /* Buttons */
+  .board-btn-primary {
+    border-radius: 18px;
+    padding: 12px 16px;
+    font-weight: 700;
+    font-size: 14px;
+    background: rgba(20, 20, 20, 0.92);
+    color: rgba(255, 255, 255, 0.92);
+    box-shadow: 0 10px 20px rgba(0, 0, 0, 0.14);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    transition: opacity 0.15s ease;
+  }
+
+  .board-btn-primary:hover {
+    opacity: 0.96;
+  }
+
+  .board-btn-ghost {
+    border-radius: 18px;
+    padding: 12px 16px;
+    font-weight: 700;
+    font-size: 14px;
+    background: rgba(255, 255, 255, 0.6);
+    border: 1px solid var(--tile-border);
+    color: rgba(20, 20, 20, 0.85);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    transition: background 0.15s ease;
+  }
+
+  .board-btn-ghost:hover {
+    background: rgba(255, 255, 255, 0.78);
+  }
+
+  .theme-board-nightlife .board-btn-ghost {
+    background: rgba(255, 255, 255, 0.08);
+    color: rgba(235, 235, 245, 0.9);
+  }
+
+  .theme-board-nightlife .board-btn-ghost:hover {
+    background: rgba(255, 255, 255, 0.14);
+  }
 }

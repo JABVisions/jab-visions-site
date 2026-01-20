@@ -3,7 +3,7 @@
 import React from "react";
 import Link from "next/link";
 import Image from "next/image";
-import Navbar from "@/components/Navbar";
+import Navbar from "@/app/components/Navbar";
 
 const STORE_URL = "https://store.jabvisions.com";
 
