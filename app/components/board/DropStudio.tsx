@@ -7,26 +7,13 @@ import {
   type DropCustomization,
 } from "@/lib/board/dropCustomizations";
 import DropStudioOverlay from "./DropStudioOverlay";
+import {
+  STICKER_PACKS,
+  stickerTypeForPack,
+  type StickerItem,
+  type StickerPack,
+} from "@/lib/board/stickerPacks";
 import styles from "./DropStudio.module.css";
-
-const EMOJI_GROUPS = [
-  {
-    name: "Creative",
-    items: ["🎬", "🎥", "📸", "🎤", "🎧", "🎵", "✍️", "📖", "🎨", "💻"],
-  },
-  {
-    name: "Mood",
-    items: ["✨", "💫", "🌊", "🔥", "💖", "💎", "🌙", "☁️", "🫧", "🪩"],
-  },
-  {
-    name: "Signal",
-    items: ["⚡️", "🔮", "👁️", "🌐", "🌀", "📡", "🚨", "💥", "⭐️"],
-  },
-  {
-    name: "Fun",
-    items: ["😂", "😍", "😭", "😎", "🤍", "💋", "🫶", "🧠", "🛸"],
-  },
-];
 
 const ACTIONS = [
   "Join",
@@ -112,16 +99,18 @@ export default function DropStudio({
     setText("");
   }
 
-  function addSticker(value: string) {
+  function addSticker(item: StickerItem, pack: StickerPack) {
     update({
       ...normalized,
       stickers: [
         ...(normalized.stickers ?? []),
         {
           id: makeId("sticker"),
-          type: "emoji",
-          value,
-          label: value,
+          type: stickerTypeForPack(pack.kind),
+          value: item.value,
+          label: item.label,
+          ...(item.src ? { src: item.src } : {}),
+          pack: pack.id,
           x: 50,
           y: 52,
         },
@@ -272,18 +261,22 @@ export default function DropStudio({
         {tool === "stickers" ? (
           <div className={styles.toolStack}>
             <div className={styles.emojiPicker}>
-              {EMOJI_GROUPS.map((group) => (
-                <div className={styles.emojiGroup} key={group.name}>
-                  <div className={styles.groupLabel}>{group.name}</div>
+              {STICKER_PACKS.map((pack) => (
+                <div className={styles.emojiGroup} key={pack.id}>
+                  <div className={styles.groupLabel}>{pack.name}</div>
                   <div className={styles.emojiGrid}>
-                    {group.items.map((emoji) => (
+                    {pack.items.map((item) => (
                       <button
                         type="button"
-                        key={`${group.name}-${emoji}`}
-                        onClick={() => addSticker(emoji)}
-                        aria-label={`Add ${emoji} sticker`}
+                        key={`${pack.id}-${item.value}`}
+                        onClick={() => addSticker(item, pack)}
+                        aria-label={`Add ${item.label} sticker`}
                       >
-                        {emoji}
+                        {item.src ? (
+                          <img src={item.src} alt={item.label} />
+                        ) : (
+                          item.value
+                        )}
                       </button>
                     ))}
                   </div>

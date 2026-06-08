@@ -71,7 +71,16 @@ export default function DropStudioOverlay({
               : sticker.value ?? sticker.label
           }
         >
-          {sticker.value ?? sticker.label}
+          {sticker.src ? (
+            <img
+              src={sticker.src}
+              alt={sticker.label ?? ""}
+              className={styles.stickerImage}
+              draggable={false}
+            />
+          ) : (
+            sticker.value ?? sticker.label
+          )}
         </button>
       ))}
 

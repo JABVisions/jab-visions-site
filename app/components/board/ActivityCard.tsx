@@ -475,6 +475,8 @@ export default function ActivityCard({
   const [payCheckoutBusy, setPayCheckoutBusy] = useState(false);
   const [isRemovingDrop, setIsRemovingDrop] = useState(false);
   const [selectedReaction, setSelectedReaction] = useState<"pass" | "pin" | "push" | null>(null);
+  // Transient sonar burst when a drop's signal is amplified (Push).
+  const [amplifyBurst, setAmplifyBurst] = useState(false);
   const [commentsOpen, setCommentsOpen] = useState(false);
   const [commentCount, setCommentCount] = useState(0);
   const [userAuraColor, setUserAuraColor] = useState(fallbackAuraColor);
@@ -869,6 +871,11 @@ export default function ActivityCard({
     setSelectedReaction(folder);
 
     if (folder === "push") {
+      // Amplify the signal: fire the sonar burst regardless of dedupe so the
+      // gesture always feels alive.
+      setAmplifyBurst(true);
+      window.setTimeout(() => setAmplifyBurst(false), 1100);
+
       const userId = currentUserKey(currentUser);
       const originalDropId = pushedRootId(item, meta);
       const localActivity = getLocalActivity();
@@ -886,7 +893,7 @@ export default function ActivityCard({
               type: "drop_push",
               dropId: originalDropId,
               userId,
-              text: `${pushedDrop.meta?.pushedByName || "Someone"} pushed a drop back into orbit.`,
+              text: `${pushedDrop.meta?.pushedByName || "Someone"} amplified a drop's signal back into orbit.`,
               createdAt: pushedDrop.meta?.pushedAt || new Date().toISOString(),
             },
           })
@@ -899,7 +906,7 @@ export default function ActivityCard({
     }
 
     const word = folder === "pass" ? "PASS" : folder === "pin" ? "PIN" : "PUSH";
-    setToast(folder === "push" ? `${word} carried forward` : `${word} saved to Bucket`);
+    setToast(folder === "push" ? "Signal amplified" : `${word} saved to Bucket`);
     window.setTimeout(() => setToast(null), 1200);
   }
 
@@ -1047,7 +1054,13 @@ export default function ActivityCard({
         } as React.CSSProperties
       }
     >
-      {isPushed ? <div className="pushedByLabel">Pushed by {pushedByName}</div> : null}
+      {amplifyBurst ? (
+        <div className="amplifyRings" aria-hidden>
+          <span />
+          <span />
+        </div>
+      ) : null}
+      {isPushed ? <div className="pushedByLabel">⚡ Amplified by {pushedByName}</div> : null}
       <div className="head">
         <div className="headCopy">
           <div className="metaRow">
@@ -1439,6 +1452,44 @@ export default function ActivityCard({
             0 0 18px rgba(255, 221, 87, 0.22),
             inset 0 0 18px rgba(255, 221, 87, 0.08),
             0 16px 40px rgba(0, 0, 0, 0.1);
+        }
+
+        /* Signal amplification: a brief sonar burst in the user's aura when a
+           drop is Pushed — amplifying the signal rather than reposting it. */
+        .amplifyRings {
+          position: absolute;
+          inset: 0;
+          z-index: 4;
+          display: grid;
+          place-items: center;
+          pointer-events: none;
+        }
+        .amplifyRings span {
+          position: absolute;
+          width: 46px;
+          height: 46px;
+          border-radius: 999px;
+          border: 2px solid var(--reaction-aura, ${fallbackAuraColor});
+          opacity: 0;
+          animation: amplifyRing 1000ms cubic-bezier(0.22, 0.61, 0.36, 1) forwards;
+        }
+        .amplifyRings span:nth-child(2) {
+          animation-delay: 150ms;
+        }
+        @keyframes amplifyRing {
+          0% {
+            transform: scale(0.55);
+            opacity: 0.5;
+          }
+          100% {
+            transform: scale(9);
+            opacity: 0;
+          }
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .amplifyRings span {
+            animation-duration: 1ms;
+          }
         }
 
         .pushedByLabel {

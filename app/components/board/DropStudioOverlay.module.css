@@ -166,6 +166,15 @@
   font-weight: 850;
 }
 
+.stickerImage {
+  display: block;
+  width: clamp(2.4rem, 9vw, 4.2rem);
+  height: auto;
+  object-fit: contain;
+  pointer-events: none;
+  filter: drop-shadow(0 0 10px rgba(119, 255, 230, 0.28));
+}
+
 .sticker {
   padding: 0.16rem 0.24rem;
   border: 0;

@@ -7,9 +7,14 @@ export type DropStudioTextLabel = {
 
 export type DropStudioSticker = {
   id: string;
+  // "emoji" today; "image" (or a pack-specific kind) for future BOARD packs.
   type: "emoji" | string;
   value: string;
   label: string;
+  // Optional asset source for non-emoji (image) stickers, and the pack it came
+  // from. Lets BOARD-specific sticker packs render later without a schema change.
+  src?: string;
+  pack?: string;
   x: number;
   y: number;
 };
@@ -80,7 +85,7 @@ export function normalizeDropCustomizations(
           const sticker = entry as Record<string, unknown>;
           const value =
             typeof sticker.value === "string" && sticker.value.trim()
-              ? sticker.value.trim().slice(0, 8)
+              ? sticker.value.trim().slice(0, 64)
               : typeof sticker.label === "string"
                 ? sticker.label.trim().slice(0, 24)
                 : "";
@@ -89,6 +94,14 @@ export function normalizeDropCustomizations(
             typeof sticker.label === "string" && sticker.label.trim()
               ? sticker.label.trim().slice(0, 24)
               : value;
+          const src =
+            typeof sticker.src === "string" && sticker.src.trim()
+              ? sticker.src.trim().slice(0, 512)
+              : undefined;
+          const pack =
+            typeof sticker.pack === "string" && sticker.pack.trim()
+              ? sticker.pack.trim().slice(0, 48)
+              : undefined;
           return {
             id: cleanId(sticker.id, "sticker", index),
             type:
@@ -97,6 +110,8 @@ export function normalizeDropCustomizations(
                 : "emoji",
             value,
             label,
+            ...(src ? { src } : {}),
+            ...(pack ? { pack } : {}),
             x: clampPosition(sticker.x, 50),
             y: clampPosition(sticker.y, 50),
           };
