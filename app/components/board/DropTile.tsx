@@ -21,6 +21,7 @@ import {
 import { DROP_FLAVOR_ORDER, type DropFlavorKey } from "@/lib/board/dropFlavors";
 import CameraDropPortal from "./CameraDropPortal";
 import RemovableDropBadge from "./RemovableDropBadge";
+import VoiceRecorder from "./VoiceRecorder";
 import DropCommentsDrawer from "./DropCommentsDrawer";
 import DropStudio from "./DropStudio";
 import DropStudioOverlay from "./DropStudioOverlay";
@@ -1850,19 +1851,28 @@ export default function DropTile() {
             />
 
             <div className="drop-file-control">
-              <label className="capture-action upload-action">
-                Upload
-                <input
-                  className="file-input"
-                  type="file"
-                  accept={fileAccept}
-                  onChange={(e) => {
-                    setFile(e.currentTarget.files?.[0] ?? null);
-                    setMediaSource(e.currentTarget.files?.[0] ? "upload" : null);
-                    e.currentTarget.value = "";
+              <div className="capture-actions">
+                <label className="capture-action upload-action">
+                  Upload
+                  <input
+                    className="file-input"
+                    type="file"
+                    accept={fileAccept}
+                    onChange={(e) => {
+                      setFile(e.currentTarget.files?.[0] ?? null);
+                      setMediaSource(e.currentTarget.files?.[0] ? "upload" : null);
+                      e.currentTarget.value = "";
+                    }}
+                  />
+                </label>
+                {/* Vocal Mode — record a voice memo straight into this Thought Drop. */}
+                <VoiceRecorder
+                  onRecorded={(recorded) => {
+                    setFile(recorded);
+                    setMediaSource("capture");
                   }}
                 />
-              </label>
+              </div>
               <div className="file-meta file-status">
                 {file ? (
                   <>
@@ -1870,7 +1880,7 @@ export default function DropTile() {
                     <span className="file-size">{Math.round(file.size / 1024)} KB</span>
                   </>
                 ) : (
-                  <span className="file-name dim">Optional voice memo or doodle/image.</span>
+                  <span className="file-name dim">Record a voice memo, or upload a doodle/image.</span>
                 )}
               </div>
             </div>
