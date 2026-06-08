@@ -288,6 +288,32 @@ function deriveActivityWhisper(
   return { id: `aw-${item.id}`, type: "whisper", tone: w.tone, text: w.text, eventType };
 }
 
+// Returns 1–2 whispers for a drop. A drop that carries an extra real signal
+// (pushed, pay/store, comments, energy) gets a second whisper, so the Activity
+// Channel sometimes shows two in a row. Every third quiet drop gets a soft
+// ambient line for rhythm.
+function deriveActivityWhispers(
+  item: { id: string; kind?: string | null; meta?: Record<string, any> | null },
+  index: number
+): ProfileWhisper[] {
+  const meta = (item.meta ?? {}) as Record<string, any>;
+  const flavor = String(meta.signalType ?? meta.dropType ?? item.kind ?? "");
+  const out: ProfileWhisper[] = [deriveActivityWhisper(item, String(index))];
+
+  let extra: BoardWhisperEventType | null = null;
+  if (meta.isPushed) extra = "drop_pin";
+  else if (flavor === "Pay" || /store/i.test(flavor)) extra = "drop_view";
+  else if (Number(meta.commentCount) > 0) extra = "drop_view";
+  else if (flavor === "energy_change") extra = "profile_view";
+  else if (index % 3 === 1) extra = "quiet_day";
+
+  if (extra) {
+    const w = getBoardWhisper(extra, `${item.id}:extra:${index}`);
+    out.push({ id: `aw-${item.id}-x`, type: "whisper", tone: w.tone, text: w.text, eventType: extra });
+  }
+  return out;
+}
+
 function BoardBookmark({
   href,
   title,
@@ -2150,19 +2176,21 @@ export default function BoardProfileHubPage() {
                   </div>
                 ) : recentDrops.length > 0 ? (
                   <div className="recent-drops-stack activity-feed-stack">
-                    {[...visitWhispers, PROFILE_ACTIVITY_WHISPERS[0]].map((whisper) => (
+                    {[...visitWhispers, ...PROFILE_ACTIVITY_WHISPERS.slice(0, 2)].map((whisper) => (
                       <BoardWhisper key={whisper.id} whisper={whisper} />
                     ))}
 
                     {recentDrops.map((item, index) => {
-                      // Whisper derived from this drop's real activity, not a canned list.
-                      const whisper =
-                        index % 2 === 0 ? deriveActivityWhisper(item, String(index)) : null;
+                      // 1–2 whispers per drop, derived from its real activity — so the
+                      // channel is denser and sometimes shows two in a row.
+                      const whispers = deriveActivityWhispers(item, index);
 
                       return (
                         <div key={item.id} className="activity-feed-entry">
                           <ActivityCard item={item} compact />
-                          {whisper ? <BoardWhisper whisper={whisper} /> : null}
+                          {whispers.map((whisper) => (
+                            <BoardWhisper key={whisper.id} whisper={whisper} />
+                          ))}
                         </div>
                       );
                     })}
