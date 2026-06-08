@@ -1773,57 +1773,34 @@ export default function DropTile() {
           </>
         ) : mode === "Media" ? (
           <div className="media-capture-field">
-            <div className="capture-actions" aria-label="Capture media with this device">
+            <button
+              type="button"
+              className="capture-action studio-open-cta"
+              onClick={() => setStudioOpen(true)}
+            >
+              {file ? "Edit in Drop Studio" : "Open Drop Studio"}
+            </button>
+
+            {selectedMediaPreview ? (
               <button
                 type="button"
-                className="capture-action"
-                onClick={() => setCameraMode("photo")}
+                className="studio-launch-preview drop-studio-media-frame"
+                onClick={() => setStudioOpen(true)}
+                aria-label="Edit this Vision in Drop Studio"
               >
-                Open camera
+                {file?.type.startsWith("video/") ? (
+                  <video src={selectedMediaPreview} muted playsInline />
+                ) : (
+                  <img src={selectedMediaPreview} alt="Vision drop preview" />
+                )}
+                <DropStudioOverlay customizations={dropCustomizations} />
               </button>
-              <label className="capture-action upload-action">
-                Upload
-                <input
-                  className="file-input"
-                  type="file"
-                  accept={fileAccept}
-                onChange={(e) => {
-                  setFile(e.currentTarget.files?.[0] ?? null);
-                  setMediaSource(e.currentTarget.files?.[0] ? "upload" : null);
-                  e.currentTarget.value = "";
-                }}
-                />
-              </label>
-            </div>
-            <div className="file-meta file-status">
-              {file ? (
-                <>
-                  <span className="file-name">{file.name}</span>
-                  <span className="file-size">{Math.round(file.size / 1024)} KB</span>
-                </>
-              ) : (
-                <span className="file-name dim">Upload a photo/video or capture one live.</span>
-              )}
-            </div>
-            {selectedMediaPreview ? (
-              <div className="studio-launch">
-                <div className="studio-launch-preview drop-studio-media-frame">
-                  {file?.type.startsWith("video/") ? (
-                    <video src={selectedMediaPreview} muted playsInline />
-                  ) : (
-                    <img src={selectedMediaPreview} alt="Vision drop preview" />
-                  )}
-                  <DropStudioOverlay customizations={dropCustomizations} />
-                </div>
-                <button
-                  type="button"
-                  className="drop-mini studio-launch-btn"
-                  onClick={() => setStudioOpen(true)}
-                >
-                  Open Drop Studio →
-                </button>
+            ) : (
+              <div className="capture-help">
+                Capture or upload a Vision inside Drop Studio — Board's creation sheet.
               </div>
-            ) : null}
+            )}
+
             <textarea
               className="drop-textarea"
               placeholder="Add context, credit, mood, or what this drop is about…"
@@ -1831,9 +1808,6 @@ export default function DropTile() {
               onChange={(e) => setDropDesc(e.target.value)}
               rows={3}
             />
-            <div className="capture-help">
-              Upload from your device or open the Board camera portal.
-            </div>
           </div>
         ) : mode === "Thought" ? (
           <div className="thought-field">
@@ -2346,11 +2320,14 @@ export default function DropTile() {
       />
 
       <DropStudioStage
-        open={studioOpen && mode === "Media" && !!selectedMediaPreview}
-        mediaUrl={selectedMediaPreview}
-        mediaKind={file?.type.startsWith("video/") ? "video" : "image"}
+        open={studioOpen && mode === "Media"}
+        initialFile={file}
         value={dropCustomizations}
         onChange={setDropCustomizations}
+        onComplete={(captured, src) => {
+          setFile(captured);
+          setMediaSource(src);
+        }}
         onClose={() => setStudioOpen(false)}
       />
 
@@ -2570,29 +2547,29 @@ export default function DropTile() {
           display: grid;
           gap: 9px;
         }
-        .studio-launch {
-          display: grid;
-          gap: 10px;
-          justify-items: center;
+        .studio-open-cta {
+          width: 100%;
+          font-weight: 950;
+          letter-spacing: 0.08em;
+          border-color: rgba(126, 226, 255, 0.5);
+          box-shadow: 0 0 16px rgba(126, 226, 255, 0.22);
         }
         .studio-launch-preview {
+          display: block;
           width: 100%;
           max-width: 360px;
+          margin: 0 auto;
+          padding: 0;
           border-radius: 16px;
           border: 1px solid rgba(0, 0, 0, 0.12);
           overflow: hidden;
           background: #000;
+          cursor: pointer;
         }
         .studio-launch-preview > img,
         .studio-launch-preview > video {
           display: block;
           width: 100%;
-        }
-        .studio-launch-btn {
-          font-weight: 950;
-          letter-spacing: 0.06em;
-          border-color: rgba(126, 226, 255, 0.5);
-          box-shadow: 0 0 16px rgba(126, 226, 255, 0.25);
         }
         .capture-actions {
           display: flex;
