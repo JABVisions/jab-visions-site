@@ -1,5 +1,7 @@
 "use client";
 
+import { supabaseBrowser } from "@/lib/supabase/browser";
+
 export type StoreDropStatus = "collected" | "bookmarked";
 
 export type BoardStoreDrop = {
@@ -104,13 +106,123 @@ export function bookmarkStoreDrop(drop: StoreDropInput) {
   ].slice(0, 80);
 
   writeList(STORE_DROP_BOOKMARKS_STORAGE_KEY, next);
+  // Persist to Supabase (optimistic; local write already happened).
+  void persistStoreDropRemote(savedDrop, "bookmarked");
   return next;
 }
 
 export function unbookmarkStoreDrop(id: string) {
   const next = readStoreDropBookmarks().filter((item) => item.id !== id);
   writeList(STORE_DROP_BOOKMARKS_STORAGE_KEY, next);
+  void removeStoreDropRemote(id);
   return next;
+}
+
+export function collectStoreDrop(drop: StoreDropInput) {
+  const collected = readCollectedStoreDrops();
+  if (collected.some((item) => item.id === drop.id)) return collected;
+  const savedDrop: BoardStoreDrop = {
+    ...drop,
+    status: "collected",
+    collectedAt: new Date().toISOString(),
+  };
+  const next = [savedDrop, ...collected].slice(0, 80);
+  writeList(STORE_DROP_COLLECTION_STORAGE_KEY, next);
+  void persistStoreDropRemote(savedDrop, "collected");
+  return next;
+}
+
+/* ----------------------------- Supabase layer -----------------------------
+   Table: public.store_drop_collection (see BOARD_SYSTEMS_PLAN.md for the SQL).
+   The local lists above stay the optimistic/offline cache; these functions
+   mirror them to Supabase so a user's collection persists per account and
+   across devices. All gracefully no-op when signed out or the table is absent. */
+
+function rowToStoreDrop(row: any): BoardStoreDrop | null {
+  const id = String(row?.drop_id ?? "").trim();
+  const title = String(row?.title ?? "").trim();
+  const imageUrl = String(row?.image_url ?? "").trim();
+  const productUrl = String(row?.product_url ?? "").trim();
+  if (!id || !title || !imageUrl || !productUrl) return null;
+  return {
+    id,
+    title,
+    imageUrl,
+    productUrl,
+    price: typeof row?.price === "string" ? row.price : undefined,
+    artifactNumber: typeof row?.artifact_no === "string" ? row.artifact_no : undefined,
+    status: row?.status === "collected" ? "collected" : "bookmarked",
+    collectedAt: typeof row?.created_at === "string" ? row.created_at : undefined,
+    bookmarkedAt: typeof row?.created_at === "string" ? row.created_at : undefined,
+  };
+}
+
+export async function persistStoreDropRemote(drop: BoardStoreDrop, status: StoreDropStatus) {
+  try {
+    const sb = supabaseBrowser();
+    const { data: auth } = await sb.auth.getUser();
+    if (!auth?.user) return;
+    await sb.from("store_drop_collection").upsert(
+      {
+        user_id: auth.user.id,
+        drop_id: drop.id,
+        title: drop.title,
+        image_url: drop.imageUrl,
+        product_url: drop.productUrl,
+        price: drop.price ?? null,
+        artifact_no: drop.artifactNumber ?? null,
+        status,
+      },
+      { onConflict: "user_id,drop_id" }
+    );
+  } catch {
+    // Offline / table missing — local cache still holds the change.
+  }
+}
+
+export async function removeStoreDropRemote(dropId: string) {
+  try {
+    const sb = supabaseBrowser();
+    const { data: auth } = await sb.auth.getUser();
+    if (!auth?.user) return;
+    await sb
+      .from("store_drop_collection")
+      .delete()
+      .eq("user_id", auth.user.id)
+      .eq("drop_id", dropId);
+  } catch {
+    // ignore
+  }
+}
+
+/** Pull the account's collection from Supabase into the local cache. Returns all rows. */
+export async function syncStoreDropCollection(): Promise<BoardStoreDrop[]> {
+  try {
+    const sb = supabaseBrowser();
+    const { data: auth } = await sb.auth.getUser();
+    if (!auth?.user) {
+      return [...readCollectedStoreDrops(), ...readStoreDropBookmarks()];
+    }
+    const { data } = await sb
+      .from("store_drop_collection")
+      .select("*")
+      .eq("user_id", auth.user.id);
+    const rows = (data ?? [])
+      .map(rowToStoreDrop)
+      .filter((x): x is BoardStoreDrop => Boolean(x));
+
+    writeList(
+      STORE_DROP_COLLECTION_STORAGE_KEY,
+      rows.filter((d) => d.status === "collected")
+    );
+    writeList(
+      STORE_DROP_BOOKMARKS_STORAGE_KEY,
+      rows.filter((d) => d.status === "bookmarked")
+    );
+    return rows;
+  } catch {
+    return [...readCollectedStoreDrops(), ...readStoreDropBookmarks()];
+  }
 }
 
 export function toggleStoreDropBookmark(drop: StoreDropInput) {

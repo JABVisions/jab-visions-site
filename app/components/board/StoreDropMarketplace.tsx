@@ -1,10 +1,11 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ExternalLink, Search, ShoppingBag, Star, X } from "lucide-react";
 import {
   isStoreDropBookmarked,
   toggleStoreDropBookmark,
+  syncStoreDropCollection,
 } from "@/lib/board/storeDrops";
 
 type Aura =
@@ -259,6 +260,22 @@ export default function StoreDropMarketplace() {
     if (typeof window === "undefined") return new Set();
     return new Set(STORE_DROPS.filter((drop) => isStoreDropBookmarked(drop.id)).map((drop) => drop.id));
   });
+
+  // Pull the account's collection from Supabase on mount, then reflect it.
+  useEffect(() => {
+    let cancelled = false;
+    void syncStoreDropCollection().then(() => {
+      if (cancelled) return;
+      setSavedIds(
+        new Set(
+          STORE_DROPS.filter((drop) => isStoreDropBookmarked(drop.id)).map((drop) => drop.id)
+        )
+      );
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const visibleDrops = useMemo(() => {
     return STORE_DROPS.filter((drop) => {

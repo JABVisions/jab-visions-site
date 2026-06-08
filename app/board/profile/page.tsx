@@ -27,13 +27,16 @@ import {
 import {
   PROFILE_ACTIVITY_WHISPERS,
   getBoardWhisper,
+  createBoardWhisper,
   type BoardWhisper as ProfileWhisper,
+  type BoardWhisperEventType,
 } from "@/lib/board/whispers";
 import {
   STORE_DROP_BOOKMARKS_STORAGE_KEY,
   STORE_DROP_COLLECTION_STORAGE_KEY,
   STORE_DROP_UPDATED_EVENT,
   readStoreDropCollectionSlots,
+  syncStoreDropCollection,
   type BoardStoreDrop,
 } from "@/lib/board/storeDrops";
 import {
@@ -123,6 +126,8 @@ type StaticProfile = {
   avatarPath?: string | null;
   coverPath?: string | null;
   visionSlotPaths?: (string | null)[];
+  /** Current Board energy level (0–100), persisted in board_style. */
+  energyLevel?: number;
 };
 
 type FriendZoneFallbackParams = {
@@ -148,6 +153,7 @@ type RemoteBoardStyle = {
   boardDrops?: unknown[];
   boardDropsDeleted?: unknown[];
   visibility?: "public" | "private";
+  energyLevel?: number;
 };
 
 type RemoteProfileRow = {
@@ -259,6 +265,27 @@ function BoardWhisper({ whisper }: { whisper: ProfileWhisper }) {
       {whisper.text}
     </p>
   );
+}
+
+// Bucket Brain: turn a real activity item into a short, ambient observation,
+// keyed off the action that actually happened (drop, push, pay/store, energy,
+// profile). No invented activity types — we read existing meta.
+function deriveActivityWhisper(
+  item: { id: string; kind?: string | null; meta?: Record<string, any> | null },
+  seed: string
+): ProfileWhisper {
+  const meta = (item.meta ?? {}) as Record<string, any>;
+  const flavor = String(meta.signalType ?? meta.dropType ?? item.kind ?? "");
+
+  let eventType: BoardWhisperEventType = "drop_view";
+  if (meta.isPushed) eventType = "drop_push";
+  else if (flavor === "energy_change") eventType = "drop_pin";
+  else if (flavor === "profile_update") eventType = "profile_view";
+  else if (/store/i.test(flavor)) eventType = "drop_view";
+  else if (flavor === "Pay") eventType = "drop_view";
+
+  const w = getBoardWhisper(eventType, `${item.id}:${seed}`);
+  return { id: `aw-${item.id}`, type: "whisper", tone: w.tone, text: w.text, eventType };
 }
 
 function BoardBookmark({
@@ -538,6 +565,7 @@ function buildGenericProfile(identifier: string): StaticProfile {
     avatarPath: null,
     coverPath: null,
     visionSlotPaths: EMPTY_VISION,
+    energyLevel: 60,
   };
 }
 
@@ -744,6 +772,9 @@ export default function BoardProfileHubPage() {
     }
 
     syncStoreDrops();
+    // Pull the account's persisted collection from Supabase; the local write it
+    // performs re-fires STORE_DROP_UPDATED_EVENT and refreshes the slots.
+    void syncStoreDropCollection();
     window.addEventListener(STORE_DROP_UPDATED_EVENT, syncStoreDrops as EventListener);
     window.addEventListener("storage", onStoreStorage);
 
@@ -960,6 +991,10 @@ export default function BoardProfileHubPage() {
             base.bio,
           glowColor: localGlowColor || resolveBoardGlow(boardStyle, base.glowColor),
           auraMood: boardStyle?.auraMood ?? base.auraMood,
+          energyLevel:
+            typeof boardStyle?.energyLevel === "number"
+              ? Math.max(0, Math.min(100, boardStyle.energyLevel))
+              : base.energyLevel,
           avatarDataUrl:
             (typeof boardStyle?.avatarDataUrl === "string" &&
               boardStyle.avatarDataUrl.trim()) ||
@@ -1691,6 +1726,20 @@ export default function BoardProfileHubPage() {
     }
   }
 
+  // Surface an energy change as an immediate pastel whisper in the Activity Channel.
+  function notifyEnergyChange(level: number) {
+    setVisitWhispers((prev) =>
+      [
+        createBoardWhisper({
+          id: `energy-${Date.now()}`,
+          tone: "signal",
+          text: `Energy set to ${level}. Your board hums at a new frequency.`,
+        }),
+        ...prev,
+      ].slice(0, 6)
+    );
+  }
+
   async function persistBoardStylePatch(patch: Partial<RemoteBoardStyle>) {
     try {
       const sb = supabaseBrowser();
@@ -1986,6 +2035,38 @@ export default function BoardProfileHubPage() {
                       <span>Glow: <b>{signalLabel}</b></span>
                       <span>Mode: <b>Public</b></span>
                     </div>
+
+                    <div
+                      className="energy-row"
+                      style={
+                        {
+                          "--board-glow": profile.glowColor,
+                          "--energy": `${profile.energyLevel ?? 60}%`,
+                        } as React.CSSProperties
+                      }
+                    >
+                      <div className="energy-head">
+                        <span className="energy-label">Energy</span>
+                        <span className="energy-value">{profile.energyLevel ?? 60}</span>
+                      </div>
+                      <input
+                        className="energy-slider"
+                        type="range"
+                        min={0}
+                        max={100}
+                        step={1}
+                        value={profile.energyLevel ?? 60}
+                        onChange={(e) =>
+                          setProfile((p) => ({ ...p, energyLevel: Number(e.target.value) }))
+                        }
+                        onPointerUp={() => {
+                          const level = profile.energyLevel ?? 60;
+                          void persistBoardStylePatch({ energyLevel: level });
+                          notifyEnergyChange(level);
+                        }}
+                        aria-label="Energy level"
+                      />
+                    </div>
                     <div className="micro-row">
                       <span>Pinned goals coming next</span>
                       <span>Saved threads coming next</span>
@@ -2074,7 +2155,9 @@ export default function BoardProfileHubPage() {
                     ))}
 
                     {recentDrops.map((item, index) => {
-                      const whisper = PROFILE_ACTIVITY_WHISPERS[index + 1];
+                      // Whisper derived from this drop's real activity, not a canned list.
+                      const whisper =
+                        index % 2 === 0 ? deriveActivityWhisper(item, String(index)) : null;
 
                       return (
                         <div key={item.id} className="activity-feed-entry">
@@ -2738,6 +2821,70 @@ export default function BoardProfileHubPage() {
 
         .profile-pills b {
           color: #35a24b;
+        }
+
+        /* Energy level — liquid-glass slider, aura-glowing, not a generic input. */
+        .energy-row {
+          margin-top: 14px;
+          display: grid;
+          gap: 7px;
+          max-width: 320px;
+        }
+        .energy-head {
+          display: flex;
+          align-items: baseline;
+          justify-content: space-between;
+        }
+        .energy-label {
+          font-size: 10px;
+          font-weight: 950;
+          letter-spacing: 0.2em;
+          text-transform: uppercase;
+          color: rgba(0, 0, 0, 0.5);
+        }
+        .energy-value {
+          font-size: 14px;
+          font-weight: 950;
+          color: var(--board-glow, #ff4fd8);
+          text-shadow: 0 0 12px
+            color-mix(in srgb, var(--board-glow, #ff4fd8) 50%, transparent);
+        }
+        .energy-slider {
+          -webkit-appearance: none;
+          appearance: none;
+          width: 100%;
+          height: 10px;
+          border-radius: 999px;
+          background: linear-gradient(
+            90deg,
+            var(--board-glow, #ff4fd8) var(--energy, 60%),
+            rgba(0, 0, 0, 0.08) var(--energy, 60%)
+          );
+          box-shadow:
+            inset 0 0 10px rgba(255, 255, 255, 0.45),
+            0 0 18px color-mix(in srgb, var(--board-glow, #ff4fd8) 28%, transparent);
+          outline: none;
+          cursor: pointer;
+        }
+        .energy-slider::-webkit-slider-thumb {
+          -webkit-appearance: none;
+          width: 20px;
+          height: 20px;
+          border-radius: 999px;
+          background: radial-gradient(circle at 35% 30%, #fff, var(--board-glow, #ff4fd8));
+          border: 1px solid rgba(255, 255, 255, 0.75);
+          box-shadow: 0 0 14px
+            color-mix(in srgb, var(--board-glow, #ff4fd8) 65%, transparent);
+          cursor: pointer;
+        }
+        .energy-slider::-moz-range-thumb {
+          width: 20px;
+          height: 20px;
+          border: none;
+          border-radius: 999px;
+          background: radial-gradient(circle at 35% 30%, #fff, var(--board-glow, #ff4fd8));
+          box-shadow: 0 0 14px var(--board-glow, #ff4fd8);
+          cursor: pointer;
         }
 
         .micro-row {
