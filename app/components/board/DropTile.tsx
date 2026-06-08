@@ -1630,6 +1630,10 @@ export default function DropTile() {
                 setPayProvider("stripe_connect");
               }
               if (m !== "Doc") setDocDesc("");
+
+              // Drop Studio: launching Vision drops you straight into the live
+              // camera/recording environment (Upload stays as a fallback).
+              if (m === "Media" && !file) setCameraMode("photo");
             }}
           >
             {displayDropType(m)}
@@ -1773,6 +1777,13 @@ export default function DropTile() {
         ) : mode === "Media" ? (
           <div className="media-capture-field">
             <div className="capture-actions" aria-label="Capture media with this device">
+              <button
+                type="button"
+                className="capture-action"
+                onClick={() => setCameraMode("photo")}
+              >
+                Open camera
+              </button>
               <label className="capture-action upload-action">
                 Upload
                 <input
@@ -1786,13 +1797,6 @@ export default function DropTile() {
                 }}
                 />
               </label>
-              <button
-                type="button"
-                className="capture-action"
-                onClick={() => setCameraMode("photo")}
-              >
-                Capture
-              </button>
             </div>
             <div className="file-meta file-status">
               {file ? (
