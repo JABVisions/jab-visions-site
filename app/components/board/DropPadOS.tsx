@@ -713,13 +713,15 @@ function BoardDropsScreen({
   onDestinationChange: (destination: DropDestination) => void;
   onBeginPlace: (kind: AssetKind) => void;
 }) {
+  // Creation-first order, mirroring lib/board/dropFlavors.ts: native-creation
+  // Drops lead (Media, Note≈Thought), then the link-ingest types.
   const DROP_TYPES: Array<{ kind: AssetKind; title: string; desc: string; hint: string }> = [
     { kind: "media", title: "Media", desc: "Image embed", hint: "Upload an image" },
-    { kind: "music", title: "Music", desc: "Spotify / SoundCloud", hint: "Paste a music link" },
-    { kind: "youtube", title: "YouTube", desc: "YouTube video embed", hint: "Paste a YouTube link" },
-    { kind: "doc", title: "Doc", desc: "Docs + PDFs + Notion links", hint: "Paste a doc link" },
-    { kind: "link", title: "Link", desc: "Any URL", hint: "Paste a link" },
     { kind: "note", title: "Note", desc: "Text drop", hint: "Write something short" },
+    { kind: "youtube", title: "YouTube", desc: "YouTube video embed", hint: "Paste a YouTube link" },
+    { kind: "music", title: "Music", desc: "Spotify / SoundCloud", hint: "Paste a music link" },
+    { kind: "link", title: "Link", desc: "Any URL", hint: "Paste a link" },
+    { kind: "doc", title: "Doc", desc: "Docs + PDFs + Notion links", hint: "Paste a doc link" },
   ];
 
   const [selected, setSelected] = useState<AssetKind>("media");

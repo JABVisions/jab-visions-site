@@ -18,7 +18,9 @@ import {
   normalizeDropCustomizations,
   type DropCustomization,
 } from "@/lib/board/dropCustomizations";
+import { DROP_FLAVOR_ORDER, type DropFlavorKey } from "@/lib/board/dropFlavors";
 import CameraDropPortal from "./CameraDropPortal";
+import RemovableDropBadge from "./RemovableDropBadge";
 import DropCommentsDrawer from "./DropCommentsDrawer";
 import DropStudio from "./DropStudio";
 import DropStudioOverlay from "./DropStudioOverlay";
@@ -34,6 +36,20 @@ type DropType =
   | "Thought";
 type MediaKind = "image" | "video" | "audio";
 type PayProviderMode = "payment_link" | "authorize_net_accept_hosted";
+
+// Map the canonical (creation-first) flavor order to this surface's DropType
+// labels, so the Drop tabs match the Drop Console and every other surface.
+const MODE_BY_FLAVOR: Record<DropFlavorKey, DropType> = {
+  media: "Media",
+  thought: "Thought",
+  pay: "Pay",
+  youtube: "YouTube",
+  music: "Music",
+  news: "News",
+  link: "Link",
+  doc: "Doc",
+};
+const MODE_ORDER: DropType[] = DROP_FLAVOR_ORDER.map((k) => MODE_BY_FLAVOR[k]);
 
 export type DropItem = {
   id: string;
@@ -533,7 +549,7 @@ export default function DropTile() {
   const [avatarSrc, setAvatarSrc] = useState("");
   const [avatarGlow, setAvatarGlow] = useState("#FF4FD8");
   const [avatarAuraIntensity, setAvatarAuraIntensity] = useState(72);
-  const [mode, setMode] = useState<DropType>("YouTube");
+  const [mode, setMode] = useState<DropType>("Media");
   const [title, setTitle] = useState("");
   const [dropDesc, setDropDesc] = useState("");
   const [msg, setMsg] = useState<string | null>(null);
@@ -1565,7 +1581,7 @@ export default function DropTile() {
       </div>
 
       <div className="mode-row" role="tablist" aria-label="Drop type">
-        {(["YouTube", "Music", "News", "Link", "Media", "Pay", "Doc", "Thought"] as DropType[]).map((m) => (
+        {MODE_ORDER.map((m) => (
           <button
             key={m}
             type="button"
@@ -1857,7 +1873,7 @@ export default function DropTile() {
             />
 
             <div className="capture-help">
-              Public thoughts can enter the feed. Private thoughts only stay in your Activity Channel.
+              Public thoughts can enter the Community Feed. Private thoughts stay in your Activity Channel.
             </div>
           </div>
         ) : mode === "Music" ? (
@@ -1971,7 +1987,11 @@ export default function DropTile() {
 
                 <div className="drop-metaRow">
                   <div className="drop-badges">
-                    <span className="badge">{d.type.toUpperCase()}</span>
+                    <RemovableDropBadge
+                      label={d.type.toUpperCase()}
+                      canRemove
+                      onRemove={() => removeDrop(d.id)}
+                    />
                     {d.hostLabel ? <span className="badge ghost">{d.hostLabel}</span> : null}
                     {isPay && d.priceCents ? (
                       <span className="badge ghost">{formatPriceFromCents(d.priceCents)}</span>
@@ -2025,10 +2045,6 @@ export default function DropTile() {
                         Open →
                       </a>
                     ) : null}
-
-                    <button className="drop-mini" onClick={() => void removeDrop(d.id)}>
-                      Remove
-                    </button>
                   </div>
                 </div>
 

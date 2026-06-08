@@ -1977,6 +1977,14 @@ export default function ActivityCard({
         .rbtn:hover {
           transform: translateY(-1px);
           filter: brightness(1.02);
+          border-color: color-mix(in srgb, var(--reaction-aura, ${fallbackAuraColor}) 50%, rgba(0, 0, 0, 0.1));
+          box-shadow: 0 0 0 6px color-mix(in srgb, var(--reaction-aura, ${fallbackAuraColor}) 12%, transparent);
+        }
+
+        /* Aura identity stays visible across every action, including Comment. */
+        .rbtn:hover .lbl,
+        .rbtn:hover .glyph {
+          color: var(--reaction-aura, ${fallbackAuraColor});
         }
 
         .glyph {
@@ -2006,19 +2014,8 @@ export default function ActivityCard({
           text-shadow: 0 0 12px var(--reaction-aura, ${fallbackAuraColor});
         }
 
-        .pass:hover {
-          box-shadow: 0 0 0 6px rgba(0, 140, 135, 0.08);
-        }
-        .pin:hover {
-          box-shadow: 0 0 0 6px rgba(255, 0, 190, 0.08);
-        }
-        .push:hover {
-          box-shadow: 0 0 0 6px rgba(120, 255, 240, 0.1);
-        }
-
-        .comments:hover {
-          box-shadow: 0 0 0 6px rgba(141, 255, 231, 0.1);
-        }
+        /* Per-action hovers now unified under .rbtn:hover so the active aura
+           tints Pass/Pin/Push/Comment identically. */
 
         .remove:hover {
           border-color: rgba(0, 0, 0, 0.18);

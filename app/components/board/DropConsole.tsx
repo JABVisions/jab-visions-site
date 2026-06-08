@@ -14,6 +14,12 @@ import {
   compactDropCustomizations,
   type DropCustomization,
 } from "@/lib/board/dropCustomizations";
+import {
+  DROP_FLAVOR_ORDER,
+  DROP_FLAVOR_LABEL,
+  DROP_FLAVOR_SUB,
+  type DropFlavorKey,
+} from "@/lib/board/dropFlavors";
 
 import {
   createThread,
@@ -47,38 +53,10 @@ const MODE_HINT: Record<DropMode, string> = {
   board_drop: "Extensions of your Board with staple attachments.",
 };
 
-type DropFlavor =
-  | "youtube"
-  | "music"
-  | "news"
-  | "link"
-  | "media"
-  | "pay"
-  | "doc"
-  | "thought";
+// Drop flavor type, order, and labels are centralized in lib/board/dropFlavors.ts
+// so the Drop hierarchy stays identical across every creation surface.
+type DropFlavor = DropFlavorKey;
 type PayProviderMode = "payment_link" | "authorize_net_accept_hosted";
-
-const DROP_FLAVOR_LABEL: Record<DropFlavor, string> = {
-  youtube: "YouTube",
-  music: "Music",
-  news: "News",
-  link: "Link",
-  media: "Media",
-  pay: "Pay",
-  doc: "Doc",
-  thought: "Thought",
-};
-
-const DROP_FLAVOR_SUB: Record<DropFlavor, string> = {
-  youtube: "video",
-  music: "track",
-  news: "article",
-  link: "card",
-  media: "upload",
-  pay: "monetize",
-  doc: "file",
-  thought: "idea",
-};
 
 type AnnouncementVibe =
   | "hype"
@@ -239,7 +217,7 @@ export default function DropConsole({
   const [sleeping, setSleeping] = useState(true);
 
   const [mode, setMode] = useState<DropMode>("board_drop");
-  const [dropFlavor, setDropFlavor] = useState<DropFlavor>("youtube");
+  const [dropFlavor, setDropFlavor] = useState<DropFlavor>("media");
 
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
@@ -851,7 +829,7 @@ export default function DropConsole({
             </div>
 
             <div className="dcDropTypeRow" role="tablist" aria-label="Drop type">
-              {(["youtube", "music", "news", "link", "media", "pay", "doc", "thought"] as DropFlavor[]).map((t) => (
+              {DROP_FLAVOR_ORDER.map((t) => (
                 <button
                   key={t}
                   type="button"
