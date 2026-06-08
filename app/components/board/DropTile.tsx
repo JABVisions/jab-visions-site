@@ -83,6 +83,7 @@ export type DropItem = {
   recipientUserId?: string;
   recipientUsername?: string;
   recipientDisplayName?: string;
+  recipientStripeAccountId?: string;
   customizations?: DropCustomization;
   visibility?: "public" | "private";
   thoughtFormat?: "text" | "voice" | "doodle";
@@ -471,6 +472,10 @@ function normalizeDropItems(input: unknown, userId: string | null): DropItem[] {
         typeof x.recipientDisplayName === "string" && x.recipientDisplayName.trim()
           ? x.recipientDisplayName.trim()
           : undefined,
+      recipientStripeAccountId:
+        typeof x.recipientStripeAccountId === "string" && x.recipientStripeAccountId.trim()
+          ? x.recipientStripeAccountId.trim()
+          : undefined,
       customizations: normalizeDropCustomizations(x.customizations),
       visibility:
         x.visibility === "private" || x.visibility === "public"
@@ -548,6 +553,7 @@ export default function DropTile() {
   const [userId, setUserId] = useState<string | null>(null);
   const [username, setUsername] = useState<string | null>(null);
   const [displayName, setDisplayName] = useState<string | null>(null);
+  const [stripeAccountId, setStripeAccountId] = useState<string | null>(null);
   const [avatarSrc, setAvatarSrc] = useState("");
   const [avatarGlow, setAvatarGlow] = useState("#FF4FD8");
   const [avatarAuraIntensity, setAvatarAuraIntensity] = useState(72);
@@ -642,6 +648,11 @@ export default function DropTile() {
           profile?.board_style && typeof profile.board_style === "object"
             ? (profile.board_style as Record<string, any>)
             : {};
+        setStripeAccountId(
+          typeof boardStyle.stripeAccountId === "string" && boardStyle.stripeAccountId.trim()
+            ? boardStyle.stripeAccountId.trim()
+            : null
+        );
         const avatarPath =
           typeof profile?.avatar_path === "string" && profile.avatar_path.trim()
             ? profile.avatar_path.trim()
@@ -903,6 +914,7 @@ export default function DropTile() {
           recipientUserId: item.recipientUserId ?? sess.userId,
           recipientUsername: item.recipientUsername ?? username ?? null,
           recipientDisplayName: item.recipientDisplayName ?? displayName ?? username ?? null,
+          recipientStripeAccountId: item.recipientStripeAccountId ?? stripeAccountId ?? null,
           mediaKind: item.mediaKind ?? null,
           mediaSource: item.mediaSource ?? null,
           badgeLabel: item.badgeLabel ?? null,
@@ -1288,6 +1300,7 @@ export default function DropTile() {
     const recipientUserId = userId ?? undefined;
     const recipientUsername = username ?? undefined;
     const recipientDisplayName = displayName ?? username ?? undefined;
+    const recipientStripeAccountId = stripeAccountId ?? undefined;
     const next: DropItem[] = [
       {
         id,
@@ -1311,6 +1324,7 @@ export default function DropTile() {
         recipientUserId,
         recipientUsername,
         recipientDisplayName,
+        recipientStripeAccountId,
       },
       ...drops,
     ];
@@ -1326,6 +1340,7 @@ export default function DropTile() {
         recipientUserId,
         recipientUsername,
         recipientDisplayName,
+        recipientStripeAccountId,
         createdAt: Date.now(),
         updatedAt: Date.now(),
         provider: payProvider,
@@ -1426,6 +1441,7 @@ export default function DropTile() {
         title: drop.title,
         description: drop.description,
         amountCents: drop.priceCents ?? 0,
+        destinationAccountId: drop.recipientStripeAccountId ?? stripeAccountId ?? undefined,
         recipientUserId: drop.recipientUserId ?? userId ?? undefined,
         recipientUsername: drop.recipientUsername ?? username ?? undefined,
         recipientDisplayName: drop.recipientDisplayName ?? displayName ?? username ?? undefined,

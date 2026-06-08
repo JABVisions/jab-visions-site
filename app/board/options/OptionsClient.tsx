@@ -961,10 +961,34 @@ function BankingPayDropsPanel({
         // STRIPE_SECRET_KEY + Connect enabled (otherwise the route returns a
         // helpful 503 surfaced below).
         try {
+            const supabase = supabaseBrowser();
+            const { data: auth } = await supabase.auth.getUser();
+            const uid = auth?.user?.id;
+
+            // Reuse an existing connected account if onboarding was started before.
+            let currentStyle: Record<string, any> = {};
+            let existingAccountId: string | undefined;
+            if (uid) {
+                const { data: prof } = await supabase
+                    .from("profiles")
+                    .select("board_style")
+                    .eq("id", uid)
+                    .maybeSingle();
+                currentStyle =
+                    prof?.board_style && typeof prof.board_style === "object"
+                        ? (prof.board_style as Record<string, any>)
+                        : {};
+                if (typeof currentStyle.stripeAccountId === "string" && currentStyle.stripeAccountId.trim()) {
+                    existingAccountId = currentStyle.stripeAccountId.trim();
+                }
+            }
+
             const res = await fetch("/api/paydrops/stripe/connect", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
+                    accountId: existingAccountId,
+                    email: auth?.user?.email,
                     returnPath: "/board/options",
                     refreshPath: "/board/options",
                 }),
@@ -973,6 +997,18 @@ function BankingPayDropsPanel({
             if (!res.ok || !data?.ok || !data.url) {
                 throw new Error(data?.error || "Could not start Stripe onboarding.");
             }
+
+            // Persist the connected account id so checkout can route funds and we
+            // can reuse onboarding next time.
+            if (uid && data.accountId) {
+                await supabase
+                    .from("profiles")
+                    .upsert(
+                        { id: uid, board_style: { ...currentStyle, stripeAccountId: data.accountId } },
+                        { onConflict: "id" }
+                    );
+            }
+
             window.location.href = data.url;
         } catch (error) {
             if (typeof window !== "undefined") {

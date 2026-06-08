@@ -925,12 +925,13 @@ export default function ActivityCard({
         title,
         description: body,
         amountCents: priceCents,
+        destinationAccountId: metaString(meta?.recipientStripeAccountId) || undefined,
       });
     } catch (error) {
       window.alert(
         error instanceof Error
           ? error.message
-          : "Could not open National Bankcard checkout."
+          : "Could not open Stripe checkout."
       );
     } finally {
       setPayCheckoutBusy(false);

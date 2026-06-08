@@ -28,6 +28,8 @@ export type PayDrop = {
   recipientUserId?: string;
   recipientUsername?: string;
   recipientDisplayName?: string;
+  /** Recipient's Stripe Connect account (acct_…) — routes funds at checkout. */
+  recipientStripeAccountId?: string;
   createdAt: number;
   updatedAt: number;
   imageUrl?: string;
@@ -108,6 +110,10 @@ function normalizeStoredPayDrop(value: any): PayDrop | null {
     recipientDisplayName:
       typeof value.recipientDisplayName === "string" && value.recipientDisplayName.trim()
         ? value.recipientDisplayName.trim()
+        : undefined,
+    recipientStripeAccountId:
+      typeof value.recipientStripeAccountId === "string" && value.recipientStripeAccountId.trim()
+        ? value.recipientStripeAccountId.trim()
         : undefined,
     createdAt: Number(value.createdAt ?? Date.now()),
     updatedAt: Number(value.updatedAt ?? value.createdAt ?? Date.now()),
