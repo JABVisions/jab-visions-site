@@ -85,8 +85,7 @@ export default function PrivacyPage() {
         <p>
           Board may support Pay Drops, checkout links, and embedded or hosted payment flows.
           Payment transactions may be handled by third-party payment providers or merchant
-          gateways, including providers connected through National Bankcard, Authorize.Net,
-          Payanywhere, or similar services.
+          gateways, including Stripe (and Stripe Connect for creator payouts) or similar services.
         </p>
         <p>
           We do not intend to store full payment card numbers directly in Board when checkout is

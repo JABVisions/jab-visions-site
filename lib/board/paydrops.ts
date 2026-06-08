@@ -10,6 +10,8 @@ function scopedStorageKey(base: string, userId?: string | null) {
 
 export type PayDropProvider =
   | "payment_link"
+  | "stripe_connect"
+  // Legacy — kept so previously-saved Pay Drops still parse. New Drops use stripe_connect.
   | "authorize_net_accept_hosted";
 
 export type PayDropStatus =
@@ -72,10 +74,12 @@ function normalizeStoredPayDrop(value: any): PayDrop | null {
     typeof value.checkoutUrl === "string" && value.checkoutUrl.trim()
       ? value.checkoutUrl
       : undefined;
+  // External payment links stay links; everything else routes through Stripe
+  // Connect now (legacy Authorize.Net drops migrate forward to stripe_connect).
   const provider: PayDropProvider =
-    value.provider === "authorize_net_accept_hosted" || !checkoutUrl
-      ? "authorize_net_accept_hosted"
-      : "payment_link";
+    value.provider === "payment_link" && checkoutUrl
+      ? "payment_link"
+      : "stripe_connect";
 
   const status: PayDropStatus =
     value.status === "draft" ||
@@ -83,7 +87,7 @@ function normalizeStoredPayDrop(value: any): PayDrop | null {
     value.status === "archived" ||
     value.status === "gateway_setup_required"
       ? value.status
-      : provider === "authorize_net_accept_hosted"
+      : provider === "stripe_connect"
         ? "gateway_setup_required"
         : "active";
 
@@ -118,7 +122,7 @@ function normalizeStoredPayDrop(value: any): PayDrop | null {
     provider,
     status,
     checkoutMode:
-      provider === "authorize_net_accept_hosted" || value.checkoutMode === "embedded_hosted"
+      provider === "stripe_connect" || value.checkoutMode === "embedded_hosted"
         ? "embedded_hosted"
         : "external_link",
     checkoutUrl,
@@ -131,10 +135,10 @@ function normalizeStoredPayDrop(value: any): PayDrop | null {
         ? value.paymentLink.trim()
         : checkoutUrl,
     gatewayLabel:
-      typeof value.gatewayLabel === "string"
+      typeof value.gatewayLabel === "string" && value.gatewayLabel.trim()
         ? value.gatewayLabel
-        : provider === "authorize_net_accept_hosted"
-          ? "National Bankcard / Authorize.Net"
+        : provider === "stripe_connect"
+          ? "Stripe"
           : undefined,
     merchantLabel:
       typeof value.merchantLabel === "string" ? value.merchantLabel : undefined,
@@ -171,7 +175,7 @@ function readLegacyPayDrops(userId?: string | null, includeGlobalLegacy = false)
           : undefined;
       const provider: PayDropProvider = checkoutUrl
         ? "payment_link"
-        : "authorize_net_accept_hosted";
+        : "stripe_connect";
 
       return {
         id,
@@ -199,7 +203,7 @@ function readLegacyPayDrops(userId?: string | null, includeGlobalLegacy = false)
         checkoutUrl,
         paymentRequestType: checkoutUrl ? "link" : "direct",
         paymentLink: checkoutUrl,
-        gatewayLabel: checkoutUrl ? "Legacy Pay Link" : "National Bankcard / Authorize.Net",
+        gatewayLabel: checkoutUrl ? "Legacy Pay Link" : "Stripe",
         bucket: typeof value.bucket === "string" ? value.bucket : undefined,
         storagePath: typeof value.storagePath === "string" ? value.storagePath : undefined,
         mediaKind: value.mediaKind === "video" ? "video" : value.mediaKind === "image" ? "image" : undefined,

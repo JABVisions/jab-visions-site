@@ -215,7 +215,7 @@ function resolveBoardGlow(
 
 type DropType = "YouTube" | "Music" | "News" | "Link" | "Media" | "Pay" | "Doc";
 type MediaKind = "image" | "video" | "audio";
-type PayProviderMode = "payment_link" | "authorize_net_accept_hosted";
+type PayProviderMode = "payment_link" | "stripe_connect" | "authorize_net_accept_hosted";
 
 type DropItem = {
   id: string;

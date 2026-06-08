@@ -56,7 +56,7 @@ const MODE_HINT: Record<DropMode, string> = {
 // Drop flavor type, order, and labels are centralized in lib/board/dropFlavors.ts
 // so the Drop hierarchy stays identical across every creation surface.
 type DropFlavor = DropFlavorKey;
-type PayProviderMode = "payment_link" | "authorize_net_accept_hosted";
+type PayProviderMode = "payment_link" | "stripe_connect";
 
 type AnnouncementVibe =
   | "hype"
@@ -232,7 +232,7 @@ export default function DropConsole({
 
   const [tagsInput, setTagsInput] = useState("");
   const [payProvider, setPayProvider] =
-    useState<PayProviderMode>("authorize_net_accept_hosted");
+    useState<PayProviderMode>("stripe_connect");
   const [payPrice, setPayPrice] = useState("");
   const [payDesc, setPayDesc] = useState("");
   const [payLink, setPayLink] = useState("");
@@ -846,7 +846,7 @@ export default function DropConsole({
                       setPayPrice("");
                       setPayDesc("");
                       setPayLink("");
-                      setPayProvider("authorize_net_accept_hosted");
+                      setPayProvider("stripe_connect");
                     }
                     if (t !== "doc") setDocDesc("");
                     if (t !== "thought") setThoughtVisibility("public");
@@ -1577,10 +1577,10 @@ function BoardDropConsoleFields({
         <div className="payProviderRow">
           <button
             type="button"
-            className={clsx("providerChip", payProvider === "authorize_net_accept_hosted" && "on")}
-            onClick={() => setPayProvider("authorize_net_accept_hosted")}
+            className={clsx("providerChip", payProvider === "stripe_connect" && "on")}
+            onClick={() => setPayProvider("stripe_connect")}
           >
-            Direct Request
+            Pay on Board
           </button>
           <button
             type="button"
@@ -1759,9 +1759,9 @@ function BoardDropConsoleFields({
               onChange={(e) => setPayLink(e.target.value)}
             />
           </div>
-          {payProvider === "authorize_net_accept_hosted" ? (
+          {payProvider === "stripe_connect" ? (
             <div className="payGatewayNote">
-              Saved as a Board-native Direct Request. Processor routing activates after BOARD is connected to your National Bank Card / Authorize.Net gateway credentials.
+              Supporters check out securely on Stripe and funds land in your connected Stripe payout account. Connect Stripe once in Options → Banking to start receiving Pay Drops.
             </div>
           ) : null}
         </>

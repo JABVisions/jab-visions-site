@@ -122,8 +122,7 @@ export default function TermsPage() {
         <p>
           Board may support Pay Drops, checkout links, or embedded/hosted payment experiences.
           Payment processing may be provided by third-party processors, gateways, or merchant
-          service providers, including providers connected through National Bankcard,
-          Authorize.Net, Payanywhere, or similar services.
+          service providers, including Stripe (and Stripe Connect for creator payouts) or similar services.
         </p>
         <p>
           We are not a bank, payment network, or money transmitter. We do not guarantee payment

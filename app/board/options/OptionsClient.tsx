@@ -163,7 +163,7 @@ const DEFAULT_SETTINGS: BoardSettings = {
 };
 
 const bankingProfile = {
-    processor: "National Bank Card",
+    processor: "Stripe Connect",
     status: "processor_setup_required" as BankingStatus,
     availableBalance: 0,
     pendingBalance: 0,
@@ -955,11 +955,32 @@ function BankingPayDropsPanel({
         profile.availableBalance <= 0 ||
         profile.status !== "cash_out_available";
 
-    function connectBanking() {
-        // TODO: Confirm National Bank Card supports marketplace payouts/user payouts.
-        // TODO: Create recipient payout profile.
-        // TODO: Connect recipient bank account through payment processor.
-        console.log("Connect Banking clicked", { processor: profile.processor });
+    async function connectBanking() {
+        // Kick off Stripe Connect (Express) onboarding. The route creates/links the
+        // connected account and returns a one-time onboarding URL. Requires
+        // STRIPE_SECRET_KEY + Connect enabled (otherwise the route returns a
+        // helpful 503 surfaced below).
+        try {
+            const res = await fetch("/api/paydrops/stripe/connect", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    returnPath: "/board/options",
+                    refreshPath: "/board/options",
+                }),
+            });
+            const data = await res.json().catch(() => null);
+            if (!res.ok || !data?.ok || !data.url) {
+                throw new Error(data?.error || "Could not start Stripe onboarding.");
+            }
+            window.location.href = data.url;
+        } catch (error) {
+            if (typeof window !== "undefined") {
+                window.alert(
+                    error instanceof Error ? error.message : "Could not start Stripe onboarding."
+                );
+            }
+        }
     }
 
     function cashOut() {

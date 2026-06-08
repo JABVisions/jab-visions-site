@@ -35,7 +35,7 @@ type DropType =
   | "Doc"
   | "Thought";
 type MediaKind = "image" | "video" | "audio";
-type PayProviderMode = "payment_link" | "authorize_net_accept_hosted";
+type PayProviderMode = "payment_link" | "stripe_connect";
 
 // Map the canonical (creation-first) flavor order to this surface's DropType
 // labels, so the Drop tabs match the Drop Console and every other surface.
@@ -443,10 +443,12 @@ function normalizeDropItems(input: unknown, userId: string | null): DropItem[] {
       description: typeof x.description === "string" ? x.description : undefined,
       linkUrl: typeof x.linkUrl === "string" ? x.linkUrl : undefined,
       payProvider:
-        x.payProvider === "authorize_net_accept_hosted" ||
         x.payProvider === "payment_link"
-          ? x.payProvider
-          : undefined,
+          ? "payment_link"
+          : x.payProvider === "stripe_connect" ||
+              x.payProvider === "authorize_net_accept_hosted"
+            ? "stripe_connect"
+            : undefined,
       paymentRequestType:
         x.paymentRequestType === "direct" || x.paymentRequestType === "link"
           ? x.paymentRequestType
@@ -558,7 +560,7 @@ export default function DropTile() {
   const [payPrice, setPayPrice] = useState("");
   const [payDesc, setPayDesc] = useState("");
   const [payLink, setPayLink] = useState("");
-  const [payProvider, setPayProvider] = useState<PayProviderMode>("authorize_net_accept_hosted");
+  const [payProvider, setPayProvider] = useState<PayProviderMode>("stripe_connect");
   const [docDesc, setDocDesc] = useState("");
   const [thoughtText, setThoughtText] = useState("");
   const [thoughtVisibility, setThoughtVisibility] = useState<"public" | "private">("public");
@@ -965,7 +967,7 @@ export default function DropTile() {
 
   const hint = useMemo(() => {
     if (mode === "Media") return "Upload a photo or video. It becomes a visible tile instantly.";
-    if (mode === "Pay") return "Upload a pay image, set a price, and choose either a direct checkout link or National Bankcard hosted checkout.";
+    if (mode === "Pay") return "Show what you're raising support for, set a price, and let supporters pay you on Board via Stripe (or add your own external payment link).";
     if (mode === "Thought") return "Catch a quick idea. Add text, a voice memo, or a doodle/image.";
     if (mode === "Doc") {
       return "Upload a script/resume/essay (PDF/DOC). Big files later via resumable upload.";
@@ -1328,17 +1330,17 @@ export default function DropTile() {
         updatedAt: Date.now(),
         provider: payProvider,
         status:
-          payProvider === "authorize_net_accept_hosted"
+          payProvider === "stripe_connect"
             ? "gateway_setup_required"
             : "active",
         checkoutMode:
-          payProvider === "authorize_net_accept_hosted"
+          payProvider === "stripe_connect"
             ? "embedded_hosted"
             : "external_link",
         checkoutUrl: normalizedLinkUrl ?? undefined,
         gatewayLabel:
-          payProvider === "authorize_net_accept_hosted"
-            ? "National Bankcard / Authorize.Net"
+          payProvider === "stripe_connect"
+            ? "Stripe"
             : "External Payment Link",
         bucket: up.bucket,
         storagePath: up.storagePath,
@@ -1353,7 +1355,7 @@ export default function DropTile() {
     setPayPrice("");
     setPayDesc("");
     setPayLink("");
-    setPayProvider("authorize_net_accept_hosted");
+    setPayProvider("stripe_connect");
     setMediaSource(null);
     flash(setMsg, "Pay drop added ✓", 1400);
   }
@@ -1409,7 +1411,7 @@ export default function DropTile() {
     }
 
     const shouldUseHostedCheckout =
-      drop.payProvider === "authorize_net_accept_hosted" ||
+      drop.payProvider === "stripe_connect" ||
       (drop.type === "Pay" && !drop.linkUrl && !!drop.priceCents);
 
     if (!shouldUseHostedCheckout) {
@@ -1432,7 +1434,7 @@ export default function DropTile() {
     } catch (error) {
       flash(
         setMsg,
-        error instanceof Error ? error.message : "Could not open National Bankcard checkout.",
+        error instanceof Error ? error.message : "Could not open Stripe checkout.",
         3600
       );
     } finally {
@@ -1604,7 +1606,7 @@ export default function DropTile() {
                 setPayPrice("");
                 setPayDesc("");
                 setPayLink("");
-                setPayProvider("authorize_net_accept_hosted");
+                setPayProvider("stripe_connect");
               }
               if (m !== "Doc") setDocDesc("");
             }}
@@ -1627,10 +1629,10 @@ export default function DropTile() {
             <div className="pay-provider-row">
               <button
                 type="button"
-                className={`provider-chip ${payProvider === "authorize_net_accept_hosted" ? "on" : ""}`}
-                onClick={() => setPayProvider("authorize_net_accept_hosted")}
+                className={`provider-chip ${payProvider === "stripe_connect" ? "on" : ""}`}
+                onClick={() => setPayProvider("stripe_connect")}
               >
-                Direct Request
+                Pay on Board
               </button>
               <button
                 type="button"
@@ -1709,9 +1711,9 @@ export default function DropTile() {
               onChange={(e) => setPayLink(e.target.value)}
             />
 
-            {payProvider === "authorize_net_accept_hosted" ? (
+            {payProvider === "stripe_connect" ? (
               <div className="pay-gateway-note">
-                Saved as a Board-native Direct Request. Processor routing activates after BOARD is connected to your National Bank Card / Authorize.Net gateway credentials.
+                Supporters check out securely on Stripe and funds land in your connected Stripe payout account. Connect Stripe once in Options → Banking to start receiving Pay Drops.
               </div>
             ) : null}
           </>
