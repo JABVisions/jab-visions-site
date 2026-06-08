@@ -15,6 +15,7 @@ export default function BoardLoginPage() {
   const [agree, setAgree] = useState(false);
 
   const [loading, setLoading] = useState(false);
+  const [resetting, setResetting] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [ok, setOk] = useState<string | null>(null);
 
@@ -44,13 +45,53 @@ export default function BoardLoginPage() {
         return;
       }
 
+      await fetch("/api/board/profile/ensure", { method: "POST" }).catch(() => undefined);
+
       setOk("Welcome back. Redirecting…");
-      router.push("/board/work"); // change this to your real post-login route
-      router.refresh();
+      const next =
+        typeof window !== "undefined"
+          ? new URLSearchParams(window.location.search).get("next")
+          : null;
+      const safeNext = next?.startsWith("/board") ? next : "/board/profile";
+      window.location.assign(safeNext);
+      return;
     } catch (e: any) {
       setErr(e?.message || "Login failed. Please try again.");
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function onForgotPassword() {
+    setErr(null);
+    setOk(null);
+
+    if (!email.trim()) {
+      setErr("Enter your email first, then use Forgot password.");
+      return;
+    }
+
+    setResetting(true);
+    try {
+      const redirectTo =
+        typeof window !== "undefined"
+          ? `${window.location.origin}/board/reset-password`
+          : undefined;
+
+      const { error } = await sb.auth.resetPasswordForEmail(email.trim(), {
+        redirectTo,
+      });
+
+      if (error) {
+        setErr(error.message);
+        return;
+      }
+
+      setOk("Password reset link sent. Check your email.");
+    } catch (e: any) {
+      setErr(e?.message || "Could not send reset email.");
+    } finally {
+      setResetting(false);
     }
   }
 
@@ -110,6 +151,16 @@ export default function BoardLoginPage() {
                 placeholder="••••••••"
                 autoComplete="current-password"
               />
+              <div className="flex justify-end">
+                <button
+                  type="button"
+                  onClick={onForgotPassword}
+                  disabled={resetting}
+                  className="text-xs underline opacity-80 hover:opacity-100 disabled:opacity-60"
+                >
+                  {resetting ? "Sending…" : "Forgot password?"}
+                </button>
+              </div>
             </div>
 
             <label className="mt-2 flex items-start gap-3 rounded-2xl border border-white/10 bg-white/5 p-4 text-xs leading-5">

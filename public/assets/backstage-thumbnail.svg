@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 760" role="img" aria-labelledby="title desc">
+  <title id="title">Backstage casting link thumbnail</title>
+  <desc id="desc">A Board thumbnail for Backstage casting links.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#10131d"/>
+      <stop offset="0.46" stop-color="#20283a"/>
+      <stop offset="1" stop-color="#07080d"/>
+    </linearGradient>
+    <linearGradient id="gold" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#fff1a8"/>
+      <stop offset="0.5" stop-color="#ffcc4d"/>
+      <stop offset="1" stop-color="#d58a1f"/>
+    </linearGradient>
+    <filter id="glow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="16" result="blur"/>
+      <feColorMatrix in="blur" type="matrix" values="1 0 0 0 1 0 1 0 0 .73 0 0 1 0 .22 0 0 0 .55 0"/>
+      <feMerge>
+        <feMergeNode/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+  <rect width="1200" height="760" rx="56" fill="url(#bg)"/>
+  <path d="M0 632 C210 540 334 714 546 612 C763 508 872 569 1200 474 L1200 760 L0 760 Z" fill="#111927" opacity=".82"/>
+  <g opacity=".16" stroke="#ffffff" stroke-width="2">
+    <path d="M120 0v760M240 0v760M360 0v760M480 0v760M600 0v760M720 0v760M840 0v760M960 0v760M1080 0v760"/>
+    <path d="M0 120h1200M0 240h1200M0 360h1200M0 480h1200M0 600h1200"/>
+  </g>
+  <g filter="url(#glow)">
+    <rect x="86" y="82" width="1028" height="596" rx="42" fill="#0b0d13" stroke="url(#gold)" stroke-width="5"/>
+    <rect x="122" y="122" width="956" height="516" rx="28" fill="#151b27" stroke="#ffffff" stroke-opacity=".12"/>
+    <circle cx="214" cy="218" r="36" fill="url(#gold)"/>
+    <circle cx="986" cy="218" r="36" fill="url(#gold)"/>
+    <circle cx="214" cy="542" r="36" fill="url(#gold)"/>
+    <circle cx="986" cy="542" r="36" fill="url(#gold)"/>
+  </g>
+  <text x="600" y="330" text-anchor="middle" font-family="Arial Black, Arial, sans-serif" font-size="118" font-weight="900" fill="#ffffff" letter-spacing="5">BACKSTAGE</text>
+  <text x="600" y="405" text-anchor="middle" font-family="Arial, sans-serif" font-size="34" font-weight="800" fill="#ffdc69" letter-spacing="12">CASTING LINK</text>
+  <g transform="translate(438 470)">
+    <rect width="324" height="76" rx="38" fill="#ffffff" opacity=".1" stroke="#ffdc69" stroke-opacity=".55"/>
+    <text x="162" y="50" text-anchor="middle" font-family="Arial, sans-serif" font-size="25" font-weight="900" fill="#ffffff" letter-spacing="3">OPEN AUDITION</text>
+  </g>
+</svg>

@@ -1,17 +1,28 @@
 export const DROP_PAD_APP_EVENT = "jab:drop_pad_app";
 const APP_KEY = "jab_drop_pad_app_v1";
 
-export type DropPadApp = "home" | "assets" | "projects" | "portfolio" | "work_calls";
+export type DropPadApp =
+  | "home"
+  | "board_drops"
+  | "assets"
+  | "projects"
+  | "portfolio"
+  | "work_calls"
+  | "profile_drops"
+  | "store_drops";
 
 export function readDropPadApp(): DropPadApp {
   try {
     const raw = localStorage.getItem(APP_KEY);
     if (
       raw === "home" ||
+      raw === "board_drops" ||
       raw === "assets" ||
       raw === "projects" ||
       raw === "portfolio" ||
-      raw === "work_calls"
+      raw === "work_calls" ||
+      raw === "profile_drops" ||
+      raw === "store_drops"
     ) {
       return raw;
     }

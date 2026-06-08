@@ -1,9 +1,11 @@
 // File: app/components/board/ReactionRail.tsx
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
+  EVT_UPDATED,
   type BucketFolder,
+  type BucketMemoryDrop,
   readBrain,
   writeBrain,
 } from "@/lib/board/bucketBrain";
@@ -12,9 +14,45 @@ function clsx(...parts: Array<string | false | null | undefined>) {
   return parts.filter(Boolean).join(" ");
 }
 
+const AURA_HEX: Record<string, string> = {
+  sloth_pink: "#FF4FD8",
+  lust_blue: "#2D7CFF",
+  greed_black: "#111111",
+  pride_yellow: "#FFD12D",
+  envy_red: "#FF2D2D",
+  gluttony_orange: "#FF7A1A",
+  wrath_purple: "#7A44FF",
+  lilly_yellowgreen: "#B7FF2D",
+};
+
+const fallbackAuraColor = "#8ee7ff";
+
+function readUserAuraColor() {
+  try {
+    if (typeof window === "undefined") return fallbackAuraColor;
+    const optionsRaw = window.localStorage.getItem("board.options.v1");
+    const profileRaw = window.localStorage.getItem("jab_board_profile_v2");
+    const options = optionsRaw ? JSON.parse(optionsRaw) : null;
+    const profile = profileRaw ? JSON.parse(profileRaw) : null;
+    const key =
+      typeof options?.auraColor === "string" && options.auraColor.trim()
+        ? options.auraColor.trim()
+        : "";
+    return (
+      AURA_HEX[key] ||
+      (typeof profile?.glowColor === "string" && profile.glowColor.trim()) ||
+      (typeof profile?.avatarGlow === "string" && profile.avatarGlow.trim()) ||
+      fallbackAuraColor
+    );
+  } catch {
+    return fallbackAuraColor;
+  }
+}
+
 type Props = {
   activityId: string;
   size?: "sm" | "md";
+  item?: BucketMemoryDrop | null;
   // optional: let parent know something happened (for toast)
   onSignal?: (folder: BucketFolder) => void;
 };
@@ -22,12 +60,38 @@ type Props = {
 export default function ReactionRail({
   activityId,
   size = "md",
+  item,
   onSignal,
 }: Props) {
   const id = String(activityId || "").trim();
   const disabled = !id;
 
   const [pulse, setPulse] = useState<BucketFolder | null>(null);
+  const [selected, setSelected] = useState<BucketFolder | null>(null);
+  const [userAuraColor, setUserAuraColor] = useState(fallbackAuraColor);
+
+  useEffect(() => {
+    const sync = () => {
+      setUserAuraColor(readUserAuraColor());
+      if (!id) {
+        setSelected(null);
+        return;
+      }
+      const brain = readBrain();
+      const match = (["pass", "pin", "push"] as BucketFolder[]).find((folder) =>
+        (brain[folder] ?? []).some((entry) => String(entry.activityId) === id)
+      );
+      setSelected(match ?? null);
+    };
+
+    sync();
+    window.addEventListener(EVT_UPDATED, sync as EventListener);
+    window.addEventListener("storage", sync as EventListener);
+    return () => {
+      window.removeEventListener(EVT_UPDATED, sync as EventListener);
+      window.removeEventListener("storage", sync as EventListener);
+    };
+  }, [id]);
 
   const deposit = (folder: BucketFolder) => {
     if (!id) return;
@@ -38,7 +102,14 @@ export default function ReactionRail({
     const exists = Array.isArray(list) && list.some((x) => String(x.activityId) === id);
     const nextList = exists
       ? list // idempotent: don’t duplicate
-      : [{ activityId: id, savedAt: Date.now() }, ...(Array.isArray(list) ? list : [])].slice(0, 200);
+      : [
+          {
+            activityId: id,
+            savedAt: Date.now(),
+            ...(item ? { item } : {}),
+          },
+          ...(Array.isArray(list) ? list : []),
+        ].slice(0, 200);
 
     const next = {
       ...brain,
@@ -47,6 +118,7 @@ export default function ReactionRail({
     };
 
     writeBrain(next);
+    setSelected(folder);
 
     // micro interaction
     setPulse(folder);
@@ -61,7 +133,8 @@ export default function ReactionRail({
     <div className={clsx("rail", size === "sm" && "railSm")}>
       <button
         type="button"
-        className={clsx(btnSize, pulse === "pass" && "pulse")}
+        className={clsx(btnSize, selected === "pass" && "selected", pulse === "pass" && "pulse")}
+        style={selected === "pass" ? ({ "--reaction-aura": userAuraColor } as React.CSSProperties) : undefined}
         onClick={() => deposit("pass")}
         disabled={disabled}
         title="PASS (acknowledge)"
@@ -74,7 +147,8 @@ export default function ReactionRail({
 
       <button
         type="button"
-        className={clsx(btnSize, pulse === "pin" && "pulse")}
+        className={clsx(btnSize, selected === "pin" && "selected", pulse === "pin" && "pulse")}
+        style={selected === "pin" ? ({ "--reaction-aura": userAuraColor } as React.CSSProperties) : undefined}
         onClick={() => deposit("pin")}
         disabled={disabled}
         title="PIN (save)"
@@ -87,7 +161,8 @@ export default function ReactionRail({
 
       <button
         type="button"
-        className={clsx(btnSize, pulse === "push" && "pulse")}
+        className={clsx(btnSize, selected === "push" && "selected", pulse === "push" && "pulse")}
+        style={selected === "push" ? ({ "--reaction-aura": userAuraColor } as React.CSSProperties) : undefined}
         onClick={() => deposit("push")}
         disabled={disabled}
         title="PUSH (boost)"
@@ -119,7 +194,8 @@ export default function ReactionRail({
           border: 1px solid rgba(0,0,0,0.10);
           background: rgba(255,255,255,0.78);
           cursor: pointer;
-          transition: transform 140ms ease, filter 140ms ease, background 140ms ease;
+          color: rgba(0,0,0,0.62);
+          transition: transform 140ms ease, filter 140ms ease, background 140ms ease, border-color 140ms ease, box-shadow 140ms ease;
           user-select: none;
         }
 
@@ -154,6 +230,18 @@ export default function ReactionRail({
           color: rgba(0,0,0,0.62);
         }
 
+        .selected {
+          color: var(--reaction-aura, ${fallbackAuraColor});
+          border-color: var(--reaction-aura, ${fallbackAuraColor});
+          box-shadow: 0 0 18px color-mix(in srgb, var(--reaction-aura, ${fallbackAuraColor}) 27%, transparent);
+          text-shadow: 0 0 12px var(--reaction-aura, ${fallbackAuraColor});
+        }
+
+        .selected .lbl {
+          color: var(--reaction-aura, ${fallbackAuraColor});
+          text-shadow: 0 0 12px var(--reaction-aura, ${fallbackAuraColor});
+        }
+
         .pulse {
           background: rgba(0, 0, 0, 0.84);
           border-color: rgba(0, 0, 0, 0.14);
@@ -172,10 +260,10 @@ export default function ReactionRail({
 function Hand() {
   return (
     <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">
-      <path d="M8.4 11.2V5.6c0-.9.7-1.6 1.6-1.6s1.6.7 1.6 1.6v4.4" fill="none" stroke="rgba(0,0,0,0.62)" strokeWidth="2.2" strokeLinecap="round" />
-      <path d="M11.6 10V4.8c0-.9.7-1.6 1.6-1.6s1.6.7 1.6 1.6V10" fill="none" stroke="rgba(0,0,0,0.62)" strokeWidth="2.2" strokeLinecap="round" />
-      <path d="M14.8 10.4V5.5c0-.85.7-1.55 1.55-1.55.86 0 1.55.7 1.55 1.55V13" fill="none" stroke="rgba(0,0,0,0.62)" strokeWidth="2.2" strokeLinecap="round" />
-      <path d="M7.1 12.2l-.2-2.2c-.08-.9-.83-1.55-1.7-1.45-.88.1-1.52.9-1.42 1.78l.38 3.4c.2 1.8 1.2 3.45 2.7 4.4l1.05.66c1.2.76 2.6 1.17 4.02 1.17h1.55c2.9 0 5.25-2.35 5.25-5.25V13" fill="none" stroke="rgba(0,0,0,0.62)" strokeWidth="2.2" strokeLinejoin="round" strokeLinecap="round" />
+      <path d="M8.4 11.2V5.6c0-.9.7-1.6 1.6-1.6s1.6.7 1.6 1.6v4.4" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" />
+      <path d="M11.6 10V4.8c0-.9.7-1.6 1.6-1.6s1.6.7 1.6 1.6V10" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" />
+      <path d="M14.8 10.4V5.5c0-.85.7-1.55 1.55-1.55.86 0 1.55.7 1.55 1.55V13" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" />
+      <path d="M7.1 12.2l-.2-2.2c-.08-.9-.83-1.55-1.7-1.45-.88.1-1.52.9-1.42 1.78l.38 3.4c.2 1.8 1.2 3.45 2.7 4.4l1.05.66c1.2.76 2.6 1.17 4.02 1.17h1.55c2.9 0 5.25-2.35 5.25-5.25V13" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinejoin="round" strokeLinecap="round" />
     </svg>
   );
 }
@@ -183,7 +271,7 @@ function Hand() {
 function Star() {
   return (
     <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">
-      <path d="M12 2.8l2.9 6.1 6.7.9-4.9 4.7 1.2 6.6L12 18l-5.9 3.1 1.2-6.6L2.4 9.8l6.7-.9L12 2.8z" fill="transparent" stroke="rgba(0,0,0,0.62)" strokeWidth="2.2" strokeLinejoin="round" />
+      <path d="M12 2.8l2.9 6.1 6.7.9-4.9 4.7 1.2 6.6L12 18l-5.9 3.1 1.2-6.6L2.4 9.8l6.7-.9L12 2.8z" fill="transparent" stroke="currentColor" strokeWidth="2.2" strokeLinejoin="round" />
     </svg>
   );
 }
@@ -191,7 +279,7 @@ function Star() {
 function ArrowUp() {
   return (
     <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">
-      <path d="M12 4l7 7-1.7 1.7L13.2 8.6V20h-2.4V8.6L6.7 12.7 5 11l7-7z" fill="transparent" stroke="rgba(0,0,0,0.62)" strokeWidth="2.2" strokeLinejoin="round" strokeLinecap="round" />
+      <path d="M12 4l7 7-1.7 1.7L13.2 8.6V20h-2.4V8.6L6.7 12.7 5 11l7-7z" fill="transparent" stroke="currentColor" strokeWidth="2.2" strokeLinejoin="round" strokeLinecap="round" />
     </svg>
   );
 }

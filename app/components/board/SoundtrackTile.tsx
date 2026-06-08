@@ -1,7 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import type { MusicLink } from "@/app/components/board/friend-zone/profile/page";
+
+type MusicLink = {
+  id: string;
+  title: string;
+  url: string;
+  embedUrl: string;
+  platform: string;
+};
 
 export default function SoundtrackTile(props: {
   musicTitle: string;
@@ -13,7 +20,16 @@ export default function SoundtrackTile(props: {
   musicLinks: MusicLink[];
   removeMusicLink: (id: string) => void;
 }) {
-  const { musicTitle, setMusicTitle, musicUrl, setMusicUrl, addMusicLink, musicMsg, musicLinks, removeMusicLink } = props;
+  const {
+    musicTitle,
+    setMusicTitle,
+    musicUrl,
+    setMusicUrl,
+    addMusicLink,
+    musicMsg,
+    musicLinks,
+    removeMusicLink,
+  } = props;
 
   return (
     <div className="inner-tile music">

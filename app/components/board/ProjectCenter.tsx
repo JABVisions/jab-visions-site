@@ -1,154 +1,67 @@
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
+import ProjectDropMenu, {
+  type ProjectDrop,
+} from "@/app/components/board/projects/ProjectDropMenu";
+import DropCommentsDrawer from "@/app/components/board/DropCommentsDrawer";
+import { supabaseBrowser } from "@/lib/supabase/browser";
+import {
+  appendLocalActivity,
+  createActivity,
+  removeLocalActivity,
+  type BoardActivity,
+} from "@/lib/board/activity";
+import { addDrop, EVENTS, removeDrops } from "@/lib/boardStore";
+import {
+  BOARD_PROJECTS_UPDATED_EVENT,
+  configureBoardProjectsStorage,
+  createBoardProject,
+  readBoardProjects,
+  resolveBoardProjects,
+  syncRemoteProjectActivitiesToStorage,
+  syncResolvedProjectsToStorage,
+  statusLabel,
+  type BoardProject,
+  type ProjectInvite,
+  type ProjectRoomPost,
+  writeBoardProjects,
+} from "@/lib/board/projects";
+import { pushDrop, readDrops, writeDrops } from "@/lib/board/drops/storage";
+import { readCurrentBoardIdentity } from "@/lib/board/currentProfile";
+import { emitBoardDropSignal } from "@/lib/board/dropSignals";
 
 function clsx(...parts: Array<string | false | null | undefined>) {
   return parts.filter(Boolean).join(" ");
 }
 
-const PROJECTS_STORAGE_KEY = "jab_projects_v1";
+const PROJECT_DROPS_STORAGE_KEY = "jab_drop_pad_project_drops_v1";
+const PROJECT_DROPS_STORAGE_KEYS = [
+  PROJECT_DROPS_STORAGE_KEY,
+  "jab_drop_pad_project_drops",
+  "jab_drop_pad_projects_v1",
+];
+const PROJECT_DROPS_UPDATED_EVENT = "board:project-drops:updated";
 
-type ProjectStatus = "casting" | "staffing" | "pre_production" | "production" | "post" | "released";
-
-type ProjectDropKind =
-  | "overview"
-  | "casting"
-  | "crew"
-  | "script"
-  | "schedule"
-  | "assets"
-  | "links"
-  | "notes";
-
-type ProjectDrop = {
+type DropPadProjectDrop = {
   id: string;
-  kind: ProjectDropKind;
+  kind: string;
   title: string;
-  summary?: string;
-};
-
-type Project = {
-  id: string;
+  description?: string;
   createdAt: number;
-  updatedAt: number;
-
-  title: string;
-  type: string; // Film, Series, Music Video, Short, Commercial, etc.
-  status: ProjectStatus;
-
-  logline: string;
-  location: string;
-
-  // Backstage-style quick facts
-  dates: string; // e.g. "Jan 20–Feb 3"
-  pay: string; // e.g. "Paid / Deferred / Profit-share"
-  union: string; // e.g. "Non-Union"
-  rolesNeeded: string; // short summary
-
-  // Deep inspection fields
-  description: string;
-  notes: string;
-
-  drops: ProjectDrop[];
+  payload?: {
+    mediaUrl?: string;
+    mediaType?: "image";
+    embedUrl?: string;
+    url?: string;
+    text?: string;
+  };
 };
 
-function uid() {
-  return `${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 9)}`;
-}
-
-function readProjects(): Project[] {
-  try {
-    const raw = localStorage.getItem(PROJECTS_STORAGE_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed
-      .map((p: any) => ({
-        id: String(p?.id ?? ""),
-        createdAt: Number(p?.createdAt ?? Date.now()),
-        updatedAt: Number(p?.updatedAt ?? Date.now()),
-        title: String(p?.title ?? ""),
-        type: String(p?.type ?? "Project"),
-        status: (p?.status as ProjectStatus) ?? "casting",
-        logline: String(p?.logline ?? ""),
-        location: String(p?.location ?? ""),
-        dates: String(p?.dates ?? ""),
-        pay: String(p?.pay ?? ""),
-        union: String(p?.union ?? ""),
-        rolesNeeded: String(p?.rolesNeeded ?? ""),
-        description: String(p?.description ?? ""),
-        notes: String(p?.notes ?? ""),
-        drops: Array.isArray(p?.drops) ? (p.drops as ProjectDrop[]) : [],
-      }))
-      .filter((p) => p.id && p.title);
-  } catch {
-    return [];
-  }
-}
-
-function writeProjects(items: Project[]) {
-  try {
-    localStorage.setItem(PROJECTS_STORAGE_KEY, JSON.stringify(items));
-  } catch {}
-}
-
-function statusLabel(s: ProjectStatus) {
-  switch (s) {
-    case "casting":
-      return "Casting";
-    case "staffing":
-      return "Staffing";
-    case "pre_production":
-      return "Pre-Production";
-    case "production":
-      return "Production";
-    case "post":
-      return "Post";
-    case "released":
-      return "Released";
-  }
-}
-
-function dropLabel(k: ProjectDropKind) {
-  switch (k) {
-    case "overview":
-      return "Overview";
-    case "casting":
-      return "Casting";
-    case "crew":
-      return "Crew";
-    case "script":
-      return "Script";
-    case "schedule":
-      return "Schedule";
-    case "assets":
-      return "Assets";
-    case "links":
-      return "Links";
-    case "notes":
-      return "Notes";
-  }
-}
-
-function dropEmoji(k: ProjectDropKind) {
-  switch (k) {
-    case "overview":
-      return "🧠";
-    case "casting":
-      return "🎭";
-    case "crew":
-      return "🎬";
-    case "script":
-      return "📄";
-    case "schedule":
-      return "🗓️";
-    case "assets":
-      return "🗂️";
-    case "links":
-      return "🔗";
-    case "notes":
-      return "📝";
-  }
+function uid(prefix: string) {
+  return `${prefix}_${Date.now().toString(36)}_${Math.random()
+    .toString(36)
+    .slice(2, 8)}`;
 }
 
 function formatDate(ts: number) {
@@ -159,7 +72,13 @@ function formatDate(ts: number) {
   }
 }
 
-function TileFrame({ children, className }: { children: React.ReactNode; className?: string }) {
+function TileFrame({
+  children,
+  className,
+}: {
+  children: React.ReactNode;
+  className?: string;
+}) {
   return (
     <div
       className={clsx(
@@ -173,677 +92,1381 @@ function TileFrame({ children, className }: { children: React.ReactNode; classNa
   );
 }
 
-function SectionHeader({ title, subtitle }: { title: string; subtitle?: string }) {
+function kindLabel(kind: string) {
+  switch (kind) {
+    case "media":
+      return "Media Drop";
+    case "music":
+      return "Music Drop";
+    case "youtube":
+      return "YouTube Drop";
+    case "doc":
+      return "Doc Drop";
+    case "link":
+      return "Link Drop";
+    case "note":
+      return "Note Drop";
+    default:
+      return "Project Drop";
+  }
+}
+
+function readDropPadProjectDrops(): DropPadProjectDrop[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const drops: DropPadProjectDrop[] = [];
+
+    for (const key of PROJECT_DROPS_STORAGE_KEYS) {
+      const raw = window.localStorage.getItem(key);
+      if (!raw) continue;
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) continue;
+
+      for (const item of parsed) {
+        const title = String(item?.title ?? item?.name ?? "").trim();
+        const id = String(item?.id ?? "").trim();
+        if (!title || !id) continue;
+
+        const payload =
+          item?.payload && typeof item.payload === "object"
+            ? item.payload
+            : {
+                mediaUrl: item?.mediaUrl,
+                mediaType: item?.mediaType,
+                embedUrl: item?.embedUrl,
+                url: item?.url,
+                text: item?.text,
+              };
+
+        drops.push({
+          id,
+          kind: String(item?.kind ?? item?.type ?? "project"),
+          title,
+          description:
+            typeof item?.description === "string"
+              ? item.description
+              : typeof item?.body === "string"
+                ? item.body
+                : undefined,
+          createdAt: Number(item?.createdAt ?? item?.updatedAt ?? Date.now()),
+          payload,
+        });
+      }
+    }
+
+    const seen = new Set<string>();
+    return drops
+      .filter((drop) => {
+        if (seen.has(drop.id)) return false;
+        seen.add(drop.id);
+        return true;
+      })
+      .sort((a, b) => b.createdAt - a.createdAt);
+  } catch {
+    return [];
+  }
+}
+
+function projectFromDropPadProjectDrop(drop: DropPadProjectDrop): BoardProject {
+  const mediaUrl =
+    drop.payload?.mediaType === "image" && drop.payload.mediaUrl
+      ? drop.payload.mediaUrl
+      : undefined;
+  const body = drop.payload?.text || drop.description || "";
+
+  return {
+    id: `droppad_${drop.id}`,
+    createdAt: drop.createdAt,
+    updatedAt: drop.createdAt,
+    title: drop.title,
+    logline: body,
+    projectType: kindLabel(drop.kind),
+    status: "casting",
+    location: "",
+    startDate: "",
+    unionStatus: "Negotiable",
+    compensationType: "Negotiable",
+    rolesNeeded: body,
+    contactName: "Project Host",
+    contactEmail: "",
+    notes: body || undefined,
+    media: mediaUrl ? { kind: "image", src: mediaUrl } : undefined,
+    invites: [],
+    roomPosts: [
+      {
+        id: `post_${drop.id}`,
+        authorName: "Project Host",
+        text: body || `${drop.title} was added from Drop Pad OS.`,
+        createdAt: drop.createdAt,
+      },
+    ],
+  };
+}
+
+function DropPadProjectDropCard({ drop }: { drop: DropPadProjectDrop }) {
+  const mediaUrl =
+    drop.payload?.mediaType === "image" ? drop.payload.mediaUrl : undefined;
+  const externalUrl = drop.payload?.url;
+  const body = drop.payload?.text || drop.description;
+
   return (
-    <div className="px-5 pt-5 pb-4 border-b border-white/10 bg-white/[0.02]">
-      <div className="text-[11px] tracking-[0.35em] text-white/55">PROJECTS</div>
-      <div className="mt-2 text-lg font-semibold text-white/90">{title}</div>
-      {subtitle ? <div className="mt-1 text-sm text-white/55">{subtitle}</div> : null}
+    <div className="overflow-hidden rounded-[28px] border border-white/10 bg-white/[0.04] shadow-[0_16px_44px_rgba(0,0,0,0.24)]">
+      {mediaUrl ? (
+        <div className="bg-black/30 p-3">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={mediaUrl}
+            alt={drop.title}
+            className="max-h-72 w-full rounded-2xl object-contain"
+            loading="lazy"
+          />
+        </div>
+      ) : null}
+
+      <div className="p-5">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="text-lg font-semibold text-white/90">{drop.title}</div>
+            <div className="mt-1 text-xs uppercase tracking-[0.22em] text-white/45">
+              {kindLabel(drop.kind)}
+            </div>
+          </div>
+          <div className="shrink-0 text-xs text-white/40">
+            {formatDate(drop.createdAt)}
+          </div>
+        </div>
+
+        {body ? (
+          <div className="mt-3 whitespace-pre-wrap text-sm leading-6 text-white/65">
+            {body}
+          </div>
+        ) : null}
+
+        {drop.payload?.embedUrl ? (
+          <iframe
+            src={drop.payload.embedUrl}
+            title={`${drop.title} embed`}
+            className="mt-4 h-40 w-full rounded-2xl border border-white/10 bg-black/30"
+            loading="lazy"
+            allow="autoplay; clipboard-write; encrypted-media; picture-in-picture"
+          />
+        ) : null}
+
+        {externalUrl ? (
+          <a
+            href={externalUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="mt-4 inline-flex rounded-2xl border border-white/10 bg-black/30 px-4 py-2 text-sm text-white/76 hover:bg-black/40"
+          >
+            Open Link
+          </a>
+        ) : null}
+      </div>
     </div>
   );
 }
 
-/** Rounded rectangle “drop buttons” (not vertical cards) */
-function DropGrid({
-  drops,
-  onPick,
+function SectionHeader({
+  eyebrow,
+  title,
+  subtitle,
+  action,
 }: {
-  drops: ProjectDrop[];
-  onPick: (drop: ProjectDrop) => void;
+  eyebrow: string;
+  title: string;
+  subtitle?: string;
+  action?: React.ReactNode;
 }) {
   return (
-    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-      {drops.map((d) => (
-        <button
-          key={d.id}
-          type="button"
-          onClick={() => onPick(d)}
-          className={clsx(
-            "rounded-2xl border border-white/10 bg-white/5",
-            "px-4 py-3 text-left hover:bg-white/10 transition",
-            "shadow-[0_10px_30px_rgba(0,0,0,0.25)]"
-          )}
-        >
-          <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0">
-              <div className="text-sm font-medium text-white/85 truncate">
-                {dropLabel(d.kind)}
-              </div>
-              <div className="mt-1 text-xs text-white/50 line-clamp-2">
-                {d.summary ?? "Open drop"}
-              </div>
-            </div>
-            <div className="text-lg shrink-0">{dropEmoji(d.kind)}</div>
-          </div>
-        </button>
-      ))}
+    <div className="px-5 pt-5 pb-4 border-b border-white/10 bg-white/[0.02]">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="text-[11px] tracking-[0.35em] text-white/55">{eyebrow}</div>
+          <div className="mt-2 text-xl font-semibold text-white/90">{title}</div>
+          {subtitle ? <div className="mt-1 text-sm text-white/55">{subtitle}</div> : null}
+        </div>
+        {action}
+      </div>
     </div>
   );
+}
+
+function projectFromDrop(drop: ProjectDrop): BoardProject {
+  return createBoardProject({
+    title: drop.title,
+    logline: drop.logline,
+    projectType: drop.projectType,
+    status: drop.status,
+    location: drop.location,
+    startDate: drop.startDate,
+    endDate: drop.endDate,
+    unionStatus: drop.unionStatus,
+    compensationType: drop.compensationType,
+    rate: drop.rate,
+    rolesNeeded: drop.rolesNeeded,
+    contactName: drop.contactName,
+    contactEmail: drop.contactEmail,
+    notes: drop.notes,
+    goal: drop.goal,
+    milestone: drop.milestone,
+    source: "work_board",
+    media: drop.media,
+  });
+}
+
+function projectCommentDropId(projectId: string) {
+  return `project_drop_${projectId}`;
 }
 
 export default function ProjectCenter() {
-  const [projects, setProjects] = useState<Project[]>([]);
+  const [storageReady, setStorageReady] = useState(false);
+  const [projects, setProjects] = useState<BoardProject[]>([]);
+  const [dropPadProjectDrops, setDropPadProjectDrops] = useState<
+    DropPadProjectDrop[]
+  >([]);
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
-  const [dropsOpen, setDropsOpen] = useState(false);
-  const [activeDrop, setActiveDrop] = useState<ProjectDrop | null>(null);
-
-  // create modal
   const [createOpen, setCreateOpen] = useState(false);
-  const [draft, setDraft] = useState<Partial<Project>>({
-    title: "",
-    type: "Film",
-    status: "casting",
-    logline: "",
-    location: "",
-    dates: "",
-    pay: "",
-    union: "Non-Union",
-    rolesNeeded: "",
-    description: "",
-    notes: "",
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [inviteDraft, setInviteDraft] = useState({
+    name: "",
+    handle: "",
+    email: "",
+    role: "",
   });
-  const [draftError, setDraftError] = useState<string | null>(null);
+  const [inviteError, setInviteError] = useState<string | null>(null);
+  const [roomDraft, setRoomDraft] = useState("");
+  const [commentsProject, setCommentsProject] = useState<BoardProject | null>(null);
+  const [thoughtTitle, setThoughtTitle] = useState("");
+  const [thoughtText, setThoughtText] = useState("");
+  const [thoughtVisibility, setThoughtVisibility] = useState<"public" | "private">("public");
+  const [thoughtMessage, setThoughtMessage] = useState<string | null>(null);
+
+  function loadProjects() {
+    if (typeof window === "undefined") return;
+    const localProjectDrops = readDropPadProjectDrops();
+    const resolved = syncResolvedProjectsToStorage();
+    const merged = new Map(resolved.map((project) => [project.id, project]));
+
+    for (const drop of localProjectDrops) {
+      const project = projectFromDropPadProjectDrop(drop);
+      const existing = merged.get(project.id);
+      merged.set(project.id, existing ? { ...project, ...existing } : project);
+    }
+
+    const next = Array.from(merged.values()).sort((a, b) => b.updatedAt - a.updatedAt);
+    if (localProjectDrops.length > 0) writeBoardProjects(next);
+    setProjects(next);
+    setDropPadProjectDrops(localProjectDrops);
+  }
+
+  function loadDropPadProjectDrops() {
+    if (typeof window === "undefined") return;
+    setDropPadProjectDrops(readDropPadProjectDrops());
+  }
+
+  async function loadRemoteProjects() {
+    try {
+      const sb = supabaseBrowser();
+      setProjects(await syncRemoteProjectActivitiesToStorage(sb));
+    } catch {
+      loadProjects();
+    }
+  }
 
   useEffect(() => {
-    setProjects(readProjects());
+    let cancelled = false;
+
+    async function configureStorage() {
+      try {
+        const sb = supabaseBrowser();
+        const { data: auth } = await sb.auth.getUser();
+        const userId = auth.user?.id ?? null;
+        setCurrentUserId(userId);
+        let username = "";
+        if (userId) {
+          const { data: profile } = await sb
+            .from("profiles")
+            .select("username")
+            .eq("id", userId)
+            .maybeSingle();
+          username = String(profile?.username || "").toLowerCase();
+        }
+        configureBoardProjectsStorage(userId, username === "johnandy");
+      } catch {
+        setCurrentUserId(null);
+        configureBoardProjectsStorage(null, true);
+      } finally {
+        if (!cancelled) setStorageReady(true);
+      }
+    }
+
+    loadDropPadProjectDrops();
+    void configureStorage();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
-    writeProjects(projects);
-  }, [projects]);
+    loadDropPadProjectDrops();
+
+    const onStorage = (event: StorageEvent) => {
+      if (!event.key || PROJECT_DROPS_STORAGE_KEYS.includes(event.key)) {
+        loadDropPadProjectDrops();
+      }
+    };
+    const onProjectDropsUpdated = () => {
+      loadDropPadProjectDrops();
+    };
+
+    window.addEventListener("storage", onStorage);
+    window.addEventListener(
+      PROJECT_DROPS_UPDATED_EVENT,
+      onProjectDropsUpdated as EventListener
+    );
+
+    const t = window.setInterval(loadDropPadProjectDrops, 1000);
+
+    return () => {
+      window.removeEventListener("storage", onStorage);
+      window.removeEventListener(
+        PROJECT_DROPS_UPDATED_EVENT,
+        onProjectDropsUpdated as EventListener
+      );
+      window.clearInterval(t);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!storageReady) return;
+    loadProjects();
+    void loadRemoteProjects();
+
+    const onStorage = (event: StorageEvent) => {
+      if (event.key) loadProjects();
+    };
+    const onProjectsUpdated = () => {
+      loadProjects();
+    };
+    const onFeedUpdated = () => {
+      loadProjects();
+    };
+    const onActivityNew = () => {
+      loadProjects();
+      void loadRemoteProjects();
+    };
+    window.addEventListener("storage", onStorage);
+    window.addEventListener(
+      BOARD_PROJECTS_UPDATED_EVENT,
+      onProjectsUpdated as EventListener
+    );
+    window.addEventListener(EVENTS.feedUpdated, onFeedUpdated as EventListener);
+    window.addEventListener("board:activity:new", onActivityNew as EventListener);
+    return () => {
+      window.removeEventListener("storage", onStorage);
+      window.removeEventListener(
+        BOARD_PROJECTS_UPDATED_EVENT,
+        onProjectsUpdated as EventListener
+      );
+      window.removeEventListener(EVENTS.feedUpdated, onFeedUpdated as EventListener);
+      window.removeEventListener("board:activity:new", onActivityNew as EventListener);
+    };
+  }, [storageReady]);
+
+  useEffect(() => {
+    const onCreate = () => {
+      setActiveProjectId(null);
+      setCreateOpen(true);
+    };
+
+    window.addEventListener("board:projects:create", onCreate as EventListener);
+    return () =>
+      {
+        window.removeEventListener("board:projects:create", onCreate as EventListener);
+      };
+  }, []);
 
   const activeProject = useMemo(() => {
     if (!activeProjectId) return null;
-    return projects.find((p) => p.id === activeProjectId) ?? null;
+    return projects.find((project) => project.id === activeProjectId) ?? null;
   }, [projects, activeProjectId]);
 
-  const defaultDrops: ProjectDrop[] = useMemo(
-    () => [
-      {
-        id: "pd_overview",
-        kind: "overview",
-        title: "Overview",
-        summary: "The quick view: status, logline, location, dates, pay.",
-      },
-      {
-        id: "pd_casting",
-        kind: "casting",
-        title: "Casting",
-        summary: "Roles needed, breakdown notes, audition pipeline.",
-      },
-      {
-        id: "pd_crew",
-        kind: "crew",
-        title: "Crew",
-        summary: "Crew needs, departments, rates, availability.",
-      },
-      {
-        id: "pd_script",
-        kind: "script",
-        title: "Script",
-        summary: "Script links, versions, locked pages, notes.",
-      },
-      {
-        id: "pd_schedule",
-        kind: "schedule",
-        title: "Schedule",
-        summary: "Shoot dates, call times, milestones.",
-      },
-      {
-        id: "pd_assets",
-        kind: "assets",
-        title: "Assets",
-        summary: "Lookbook, images, audio, key links.",
-      },
-      {
-        id: "pd_links",
-        kind: "links",
-        title: "Links",
-        summary: "External links: IMDb, Drive, Notion, decks.",
-      },
-      {
-        id: "pd_notes",
-        kind: "notes",
-        title: "Notes",
-        summary: "Internal notes, private reminders.",
-      },
-    ],
-    []
-  );
-
-  const openCreate = () => {
-    setDraftError(null);
-    setDraft({
-      title: "",
-      type: "Film",
-      status: "casting",
-      logline: "",
-      location: "",
-      dates: "",
-      pay: "",
-      union: "Non-Union",
-      rolesNeeded: "",
-      description: "",
-      notes: "",
+  const commitProjects = (
+    updater: (current: BoardProject[]) => BoardProject[]
+  ) => {
+    setProjects((current) => {
+      const next = updater(current);
+      writeBoardProjects(next);
+      return next;
     });
-    setCreateOpen(true);
   };
 
-  const createProject = () => {
-    const title = String(draft.title ?? "").trim();
-    if (!title) {
-      setDraftError("Project title is required.");
+  const createProjectFromDrop = (drop: ProjectDrop) => {
+    const next = projectFromDrop(drop);
+    const nowIso = new Date(next.createdAt).toISOString();
+    const identity = readCurrentBoardIdentity();
+    const authorName = identity.displayName || next.authorName || next.contactName || "Project Host";
+    const authorUsername = identity.username || next.authorUsername || "";
+    const authorAvatar = identity.avatar || next.authorAvatar || "";
+    const authorGlow = identity.glow || next.authorGlow || "#FF4FD8";
+    const authorAuraIntensity = identity.auraIntensity ?? next.authorAuraIntensity;
+    const activity: BoardActivity = {
+      id: `project_drop_${next.id}`,
+      created_at: nowIso,
+      user_id: currentUserId,
+      kind: "board_drop",
+      title: `Project Drop: ${next.title}`,
+      body:
+        next.logline ||
+        `${next.contactName || "Host"} is planning a ${next.projectType.toLowerCase()} project.`,
+      href: "/board/work",
+      image_url: next.media?.kind === "image" ? next.media.src : null,
+      meta: {
+        cardStyle: "project_drop",
+        projectId: next.id,
+        dropType: "project",
+        projectType: next.projectType,
+        location: next.location || null,
+        status: next.status,
+        rolesNeeded: next.rolesNeeded || null,
+        startDate: next.startDate || null,
+        endDate: next.endDate || null,
+        unionStatus: next.unionStatus || null,
+        contactName: next.contactName || null,
+        contactEmail: next.contactEmail || null,
+        description: next.logline || null,
+        notes: next.notes || null,
+        goal: next.goal || null,
+        milestone: next.milestone || null,
+        source: "work_board",
+        authorId: currentUserId || identity.id,
+        authorName,
+        authorUsername,
+        authorAvatar,
+        authorGlow,
+        authorAuraIntensity,
+        ownerUsername: authorUsername,
+        ownerLabel: authorName,
+        // Future backend fields for casting/gig database + Pay Drops routing.
+        productionTitle: next.productionTitle || next.title,
+        roleTitle: next.roleTitle || null,
+        department: next.department || null,
+        compensationType: next.compensationType || null,
+        payRange: next.payRange || next.rate || null,
+        remoteOrInPerson: next.remoteOrInPerson || null,
+        deadline: next.deadline || null,
+        auditionInstructions: next.auditionInstructions || null,
+        applicationLink: next.applicationLink || null,
+        attachedFiles: next.attachedFiles || null,
+        payDropEligible: next.payDropEligible ?? null,
+        signalSeed: {
+          type: "project_drop_created",
+          projectId: next.id,
+        },
+      },
+    };
+
+    addDrop({
+      type: "status",
+      title: `Project Drop: ${next.title}`,
+      text:
+        next.logline ||
+        `${next.contactName || "Host"} opened a new project room on BOARD.`,
+      authorId: currentUserId || identity.id,
+      authorName,
+      href: "/board/work",
+      meta: {
+        kind: "project_drop",
+        cardStyle: "project_drop",
+        dropType: "project",
+        projectId: next.id,
+        projectType: next.projectType,
+        status: next.status,
+        description: next.logline,
+        goal: next.goal || null,
+        milestone: next.milestone || null,
+        source: "work_board",
+        authorId: currentUserId || identity.id,
+        authorName,
+        authorUsername,
+        authorAvatar,
+        authorGlow,
+        authorAuraIntensity,
+        ownerUsername: authorUsername,
+        ownerLabel: authorName,
+      },
+    });
+    pushDrop({
+      id: projectCommentDropId(next.id),
+      type: "project",
+      title: `Project Drop: ${next.title}`,
+      createdAt: next.createdAt,
+      url: "/board/work",
+      description:
+        next.logline ||
+        `${next.contactName || "Host"} opened a new project room on BOARD.`,
+      tags: [
+        "project",
+        next.projectType,
+        statusLabel(next.status),
+        next.location,
+      ].filter(Boolean),
+      authorId: currentUserId || identity.id,
+      authorName,
+      authorUsername,
+      authorAvatar,
+      authorGlow,
+      authorAuraIntensity,
+      imageUrl: next.media?.kind === "image" ? next.media.src : undefined,
+      mediaUrl: next.media?.src,
+      mediaKind: next.media?.kind,
+      projectId: next.id,
+      projectType: next.projectType,
+      projectStatus: next.status,
+      goal: next.goal,
+      milestone: next.milestone,
+      source: "work_board",
+      origin: "project_notebook",
+      meta: {
+        kind: "project_drop",
+        cardStyle: "project_drop",
+        dropType: "project",
+        projectId: next.id,
+        projectType: next.projectType,
+        status: next.status,
+        location: next.location || null,
+        rolesNeeded: next.rolesNeeded || null,
+        startDate: next.startDate || null,
+        endDate: next.endDate || null,
+        unionStatus: next.unionStatus || null,
+        compensationType: next.compensationType || null,
+        rate: next.rate || null,
+        contactName: next.contactName || null,
+        contactEmail: next.contactEmail || null,
+        description: next.logline || null,
+        notes: next.notes || null,
+        goal: next.goal || null,
+        milestone: next.milestone || null,
+        source: "work_board",
+        authorId: currentUserId || identity.id,
+        authorName,
+        authorUsername,
+        authorAvatar,
+        authorGlow,
+        authorAuraIntensity,
+        signalSeed: {
+          type: "project_drop_created",
+          projectId: next.id,
+        },
+      },
+    });
+    appendLocalActivity(activity);
+    window.dispatchEvent(new CustomEvent("board:activity:new", { detail: activity }));
+    emitBoardDropSignal({
+      type: "project_drop_created",
+      dropId: projectCommentDropId(next.id),
+      projectId: next.id,
+      userId: currentUserId || identity.id,
+      title: next.title,
+      meta: {
+        projectType: next.projectType,
+        status: next.status,
+        source: "work_board",
+      },
+    });
+    void (async () => {
+      try {
+        const sb = supabaseBrowser();
+        const { data } = await sb.auth.getUser();
+        const userId = data.user?.id;
+        if (!userId) return;
+        await createActivity(sb, {
+          user_id: userId,
+          kind: activity.kind,
+          title: activity.title,
+          body: activity.body,
+          href: activity.href,
+          image_url: activity.image_url,
+          meta: activity.meta,
+        });
+      } catch {
+        // Keep the local project notebook even if remote activity sync fails.
+      }
+    })();
+
+    commitProjects((prev) => [next, ...prev]);
+    setActiveProjectId(next.id);
+    setCreateOpen(false);
+  };
+
+  const createWorkThoughtDrop = () => {
+    const cleanTitle = thoughtTitle.trim();
+    const cleanThought = thoughtText.trim();
+
+    if (!cleanTitle && !cleanThought) {
+      setThoughtMessage("Add a quick thought first.");
+      window.setTimeout(() => setThoughtMessage(null), 1800);
       return;
     }
 
-    const now = Date.now();
-    const p: Project = {
-      id: uid(),
-      createdAt: now,
-      updatedAt: now,
+    const identity = readCurrentBoardIdentity();
+    const dropId = uid("thought");
+    const createdAt = Date.now();
+    const title = cleanTitle || "Work Thought";
+    const body = cleanThought || "A work thought landed on Board.";
+    const activity: BoardActivity = {
+      id: `work_thought_${dropId}`,
+      created_at: new Date(createdAt).toISOString(),
+      user_id: currentUserId || identity.id,
+      kind: "board_drop",
       title,
-      type: String(draft.type ?? "Project"),
-      status: (draft.status as ProjectStatus) ?? "casting",
-      logline: String(draft.logline ?? ""),
-      location: String(draft.location ?? ""),
-      dates: String(draft.dates ?? ""),
-      pay: String(draft.pay ?? ""),
-      union: String(draft.union ?? ""),
-      rolesNeeded: String(draft.rolesNeeded ?? ""),
-      description: String(draft.description ?? ""),
-      notes: String(draft.notes ?? ""),
-      drops: defaultDrops.map((d) => ({ ...d, id: uid() })),
+      body,
+      href: "/board/work",
+      image_url: null,
+      meta: {
+        source: "work_board",
+        origin: "work_board",
+        dropId,
+        dropType: "thought",
+        drop_flavor: "thought",
+        visibility: thoughtVisibility,
+        thoughtFormat: "text",
+        thoughtText: cleanThought || null,
+        description: cleanThought || null,
+        authorId: currentUserId || identity.id,
+        authorName: identity.displayName,
+        authorUsername: identity.username || null,
+        authorAvatar: identity.avatar || null,
+        authorGlow: identity.glow,
+        authorAuraIntensity: identity.auraIntensity,
+        signalSeed: {
+          type: "thought_drop_created",
+          dropId,
+        },
+      },
     };
 
-    setProjects((prev) => [p, ...prev]);
-    setCreateOpen(false);
-    setActiveProjectId(p.id);
-    setDropsOpen(false);
-    setActiveDrop(null);
+    appendLocalActivity(activity);
+    if (thoughtVisibility === "public") {
+      pushDrop({
+        id: dropId,
+        type: "thought",
+        title,
+        createdAt,
+        url: "/board/work",
+        description: cleanThought || undefined,
+        visibility: "public",
+        thoughtFormat: "text",
+        thoughtText: cleanThought || body,
+        authorId: currentUserId || identity.id,
+        authorName: identity.displayName,
+        authorUsername: identity.username || undefined,
+        authorAvatar: identity.avatar || undefined,
+        authorGlow: identity.glow,
+        authorAuraIntensity: identity.auraIntensity,
+        source: "work_board",
+        origin: "work_board",
+        meta: {
+          activityId: activity.id,
+          signalSeed: {
+            type: "thought_drop_created",
+            dropId,
+          },
+        },
+      });
+      window.dispatchEvent(new CustomEvent("board:activity:new", { detail: activity }));
+    }
+
+    window.dispatchEvent(new StorageEvent("storage", { key: "jab_board_activity_v1" }));
+    emitBoardDropSignal({
+      type: "thought_drop_created",
+      dropId,
+      userId: currentUserId || identity.id,
+      title,
+      meta: {
+        visibility: thoughtVisibility,
+        source: "work_board",
+      },
+    });
+
+    setThoughtTitle("");
+    setThoughtText("");
+    setThoughtVisibility("public");
+    setThoughtMessage(thoughtVisibility === "private" ? "Private work thought saved." : "Work thought dropped.");
+    window.setTimeout(() => setThoughtMessage(null), 1800);
   };
 
-  const updateProject = (id: string, patch: Partial<Project>) => {
-    setProjects((prev) =>
-      prev.map((p) =>
-        p.id === id ? { ...p, ...patch, updatedAt: Date.now() } : p
+  const updateProject = (id: string, patch: Partial<BoardProject>) => {
+    commitProjects((prev) =>
+      prev.map((project) =>
+        project.id === id
+          ? { ...project, ...patch, updatedAt: Date.now() }
+          : project
       )
     );
   };
 
   const deleteProject = (id: string) => {
-    setProjects((prev) => prev.filter((p) => p.id !== id));
+    removeLocalActivity(
+      (item) =>
+        item.id === `project_drop_${id}` ||
+        item.meta?.projectId === id
+    );
+    removeDrops(
+      (drop) => drop.meta?.projectId === id
+    );
+    writeDrops(
+      readDrops().filter(
+        (drop) => drop.projectId !== id && drop.id !== projectCommentDropId(id)
+      )
+    );
+
+    commitProjects((prev) => prev.filter((project) => project.id !== id));
+    if (commentsProject?.id === id) setCommentsProject(null);
     if (activeProjectId === id) {
       setActiveProjectId(null);
-      setDropsOpen(false);
-      setActiveDrop(null);
+      setInviteError(null);
+      setInviteDraft({ name: "", handle: "", email: "", role: "" });
+      setRoomDraft("");
     }
   };
 
-  // --------------------- PROJECTS TABLE VIEW ---------------------
-  const ProjectsTable = () => (
-    <TileFrame>
-      <SectionHeader
-        title="Projects Table"
-        subtitle="A Backstage-inspired outlet where creators list, inspect, and book work."
-      />
+  const addInvite = () => {
+    if (!activeProject) return;
+    const name = inviteDraft.name.trim();
+    if (!name) {
+      setInviteError("Invite name is required.");
+      return;
+    }
 
-      <div className="p-5">
-        <div className="flex items-center justify-between gap-3">
-          <div className="text-sm text-white/70">
-            Total: <span className="text-white/90 font-medium">{projects.length}</span>
-          </div>
+    const invite: ProjectInvite = {
+      id: uid("invite"),
+      name,
+      handle: inviteDraft.handle.trim() || undefined,
+      email: inviteDraft.email.trim() || undefined,
+      role: inviteDraft.role.trim() || undefined,
+      status: "invited",
+      invitedAt: Date.now(),
+    };
 
-          <button
-            type="button"
-            onClick={openCreate}
-            className={clsx(
-              "rounded-2xl border border-white/10 bg-white/5 px-4 py-2",
-              "text-sm text-white/75 hover:bg-white/10 transition"
-            )}
-          >
-            + New Project
-          </button>
-        </div>
+    updateProject(activeProject.id, {
+      invites: [invite, ...(activeProject.invites ?? [])],
+      roomPosts: [
+        {
+          id: uid("post"),
+          authorName: activeProject.contactName || "Host",
+          text: `Invited ${invite.name}${invite.role ? ` for ${invite.role}` : ""} to the project room.`,
+          createdAt: Date.now(),
+        },
+        ...(activeProject.roomPosts ?? []),
+      ],
+    });
 
-        <div className="mt-4 overflow-x-auto">
-          <div className="min-w-[920px]">
-            <div className="grid grid-cols-[2.2fr_1fr_1fr_1fr_1fr] gap-3 px-2 pb-2 text-[11px] tracking-[0.30em] text-white/45">
-              <div>PROJECT</div>
-              <div>STATUS</div>
-              <div>LOCATION</div>
-              <div>DATES</div>
-              <div>PAY</div>
-            </div>
+    setInviteDraft({ name: "", handle: "", email: "", role: "" });
+    setInviteError(null);
+  };
 
-            <div className="grid gap-3">
-              {projects.length === 0 ? (
-                <div className="rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-white/70">
-                  No projects yet. Create one and it’ll live here.
-                </div>
-              ) : (
-                projects
-                  .slice()
-                  .sort((a, b) => b.updatedAt - a.updatedAt)
-                  .map((p) => (
-                    <button
-                      key={p.id}
-                      type="button"
-                      onClick={() => {
-                        setActiveProjectId(p.id);
-                        setDropsOpen(false);
-                        setActiveDrop(null);
-                      }}
-                      className={clsx(
-                        "w-full text-left rounded-3xl border border-white/10 bg-black/20",
-                        "hover:bg-white/[0.06] transition shadow-[0_10px_30px_rgba(0,0,0,0.25)]"
-                      )}
-                    >
-                      <div className="grid grid-cols-[2.2fr_1fr_1fr_1fr_1fr] gap-3 p-4">
-                        <div className="min-w-0">
-                          <div className="text-sm font-semibold text-white/90 truncate">
-                            {p.title}
-                          </div>
-                          <div className="mt-1 text-xs text-white/55 line-clamp-1">
-                            {p.type} • {p.logline || "Add a logline to sell the vision."}
-                          </div>
-                          <div className="mt-1 text-xs text-white/45">
-                            Updated: {formatDate(p.updatedAt)}
-                          </div>
-                        </div>
+  const toggleInviteStatus = (invite: ProjectInvite) => {
+    if (!activeProject) return;
+    updateProject(activeProject.id, {
+      invites: (activeProject.invites ?? []).map((item) =>
+        item.id === invite.id
+          ? {
+              ...item,
+              status: item.status === "joined" ? "invited" : "joined",
+            }
+          : item
+      ),
+    });
+  };
 
-                        <div className="text-sm text-white/70">{statusLabel(p.status)}</div>
-                        <div className="text-sm text-white/70">{p.location || "—"}</div>
-                        <div className="text-sm text-white/70">{p.dates || "—"}</div>
-                        <div className="text-sm text-white/70">{p.pay || "—"}</div>
-                      </div>
-                    </button>
-                  ))
-              )}
-            </div>
-          </div>
-        </div>
-      </div>
-    </TileFrame>
+  const postRoomMessage = () => {
+    if (!activeProject) return;
+    const text = roomDraft.trim();
+    if (!text) return;
+
+    const post: ProjectRoomPost = {
+      id: uid("post"),
+      authorName: activeProject.contactName || "Host",
+      text,
+      createdAt: Date.now(),
+    };
+
+    updateProject(activeProject.id, {
+      roomPosts: [post, ...(activeProject.roomPosts ?? [])],
+    });
+    setRoomDraft("");
+  };
+
+  const projectTiles = useMemo(
+    () =>
+      [...projects].sort((a, b) => b.updatedAt - a.updatedAt),
+    [projects]
   );
 
-  // --------------------- PROJECT PAGE VIEW ---------------------
-  const ProjectPage = ({ p }: { p: Project }) => (
-    <TileFrame>
-      <div className="px-5 pt-5 pb-4 border-b border-white/10 bg-white/[0.02]">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <div className="text-[11px] tracking-[0.35em] text-white/55">PROJECT PAGE</div>
-            <div className="mt-2 text-xl font-semibold text-white/90 truncate">{p.title}</div>
-            <div className="mt-1 text-sm text-white/55">
-              {p.type} • {statusLabel(p.status)}
+  const allProjectDropCount = projectTiles.length + dropPadProjectDrops.length;
+  const universalProjectDropCount = useMemo(() => {
+    if (typeof window === "undefined") return 0;
+    return readDrops().filter((drop) => drop.type === "project").length;
+  }, [projects, dropPadProjectDrops]);
+
+  if (!activeProject) {
+    return (
+      <div className="w-full">
+        <TileFrame className="mb-5">
+          <SectionHeader
+            eyebrow="THOUGHT DROP"
+            title="Quick Work Thought"
+            subtitle="Capture a loose idea, note, or production spark without opening a full project room."
+          />
+          <div className="grid gap-4 p-5">
+            <div className="grid gap-3 md:grid-cols-[0.8fr_1.2fr]">
+              <input
+                value={thoughtTitle}
+                onChange={(event) => setThoughtTitle(event.target.value)}
+                placeholder="Optional title"
+                className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white/85 placeholder:text-white/35 focus:outline-none focus:ring-2 focus:ring-lime-200/15"
+              />
+              <div className="flex flex-wrap gap-2">
+                {(["public", "private"] as const).map((visibility) => (
+                  <button
+                    key={visibility}
+                    type="button"
+                    onClick={() => setThoughtVisibility(visibility)}
+                    className={clsx(
+                      "rounded-full border px-4 py-2 text-xs font-semibold uppercase tracking-[0.18em] transition",
+                      thoughtVisibility === visibility
+                        ? "border-lime-200/30 bg-lime-300/18 text-lime-50"
+                        : "border-white/10 bg-black/25 text-white/55 hover:bg-white/10"
+                    )}
+                  >
+                    {visibility}
+                  </button>
+                ))}
+              </div>
             </div>
-          </div>
 
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => setActiveProjectId(null)}
-              className="rounded-2xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-white/70 hover:bg-black/40 transition"
-              title="Back to Projects"
-            >
-              ← Back
-            </button>
+            <textarea
+              value={thoughtText}
+              onChange={(event) => setThoughtText(event.target.value)}
+              rows={4}
+              placeholder="Catch the work thought before it leaves..."
+              className="min-h-[116px] w-full rounded-3xl border border-white/10 bg-black/30 px-4 py-4 text-sm leading-6 text-white/85 placeholder:text-white/35 focus:outline-none focus:ring-2 focus:ring-lime-200/15"
+            />
 
-            <button
-              type="button"
-              onClick={() => setDropsOpen((v) => !v)}
-              className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-white/75 hover:bg-white/10 transition"
-              title="Open Project Drops"
-            >
-              Project Drops
-            </button>
-
-            <button
-              type="button"
-              onClick={() => deleteProject(p.id)}
-              className="rounded-2xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-white/60 hover:bg-black/40 transition"
-              title="Delete Project"
-            >
-              Delete
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <div className="p-5 space-y-4">
-        {/* Project Drops panel */}
-        {dropsOpen ? (
-          <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-4">
-            <div className="flex items-center justify-between gap-3">
-              <div className="text-sm text-white/80 font-medium">Project Drops</div>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="text-xs text-white/45">
+                Public thoughts can enter the Feed. Private thoughts stay in your Activity Channel.
+              </div>
               <button
                 type="button"
-                onClick={() => {
-                  setDropsOpen(false);
-                  setActiveDrop(null);
-                }}
-                className="rounded-2xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-white/70 hover:bg-black/40 transition"
+                onClick={createWorkThoughtDrop}
+                className="rounded-2xl border border-cyan-200/20 bg-cyan-400/15 px-4 py-3 text-sm text-cyan-50/90 transition hover:bg-cyan-400/22"
               >
-                Close
+                Save Thought Drop
               </button>
             </div>
-
-            <div className="mt-3">
-              <DropGrid
-                drops={p.drops?.length ? p.drops : defaultDrops.map((d) => ({ ...d, id: uid() }))}
-                onPick={(d) => setActiveDrop(d)}
-              />
-            </div>
-
-            {activeDrop ? (
-              <div className="mt-4 rounded-3xl border border-white/10 bg-black/25 p-4">
-                <div className="text-sm font-semibold text-white/90">
-                  {dropEmoji(activeDrop.kind)} {dropLabel(activeDrop.kind)}
-                </div>
-                <div className="mt-1 text-sm text-white/55">
-                  {activeDrop.summary ?? "Drop opened."}
-                </div>
-
-                <div className="mt-3 text-xs text-white/45">
-                  V1 behavior: drops open this inspector. Next step: connect each drop to its own
-                  data + actions (casting posts, crew booking, asset pinning, etc.).
-                </div>
+            {thoughtMessage ? (
+              <div className="rounded-2xl border border-white/10 bg-white/[0.05] px-4 py-3 text-sm text-white/72">
+                {thoughtMessage}
               </div>
             ) : null}
           </div>
-        ) : null}
+        </TileFrame>
 
-        {/* Deep inspection: editable sections */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-4">
-            <div className="text-xs tracking-[0.30em] text-white/45">QUICK FACTS</div>
-
-            <div className="mt-3 grid grid-cols-1 gap-3">
-              <label className="block">
-                <div className="text-xs text-white/55 mb-2">Status</div>
-                <select
-                  value={p.status}
-                  onChange={(e) => updateProject(p.id, { status: e.target.value as ProjectStatus })}
-                  className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white/85 focus:outline-none focus:ring-2 focus:ring-white/10"
-                >
-                  <option value="casting">Casting</option>
-                  <option value="staffing">Staffing</option>
-                  <option value="pre_production">Pre-Production</option>
-                  <option value="production">Production</option>
-                  <option value="post">Post</option>
-                  <option value="released">Released</option>
-                </select>
-              </label>
-
-              <label className="block">
-                <div className="text-xs text-white/55 mb-2">Location</div>
-                <input
-                  value={p.location}
-                  onChange={(e) => updateProject(p.id, { location: e.target.value })}
-                  placeholder="City, State"
-                  className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white/85 placeholder:text-white/35 focus:outline-none focus:ring-2 focus:ring-white/10"
-                />
-              </label>
-
-              <label className="block">
-                <div className="text-xs text-white/55 mb-2">Dates</div>
-                <input
-                  value={p.dates}
-                  onChange={(e) => updateProject(p.id, { dates: e.target.value })}
-                  placeholder="Jan 20–Feb 3"
-                  className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white/85 placeholder:text-white/35 focus:outline-none focus:ring-2 focus:ring-white/10"
-                />
-              </label>
-
-              <label className="block">
-                <div className="text-xs text-white/55 mb-2">Pay</div>
-                <input
-                  value={p.pay}
-                  onChange={(e) => updateProject(p.id, { pay: e.target.value })}
-                  placeholder="Paid / Deferred / Profit-share"
-                  className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white/85 placeholder:text-white/35 focus:outline-none focus:ring-2 focus:ring-white/10"
-                />
-              </label>
-
-              <label className="block">
-                <div className="text-xs text-white/55 mb-2">Union</div>
-                <input
-                  value={p.union}
-                  onChange={(e) => updateProject(p.id, { union: e.target.value })}
-                  placeholder="Non-Union"
-                  className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white/85 placeholder:text-white/35 focus:outline-none focus:ring-2 focus:ring-white/10"
-                />
-              </label>
-
-              <label className="block">
-                <div className="text-xs text-white/55 mb-2">Roles Needed</div>
-                <input
-                  value={p.rolesNeeded}
-                  onChange={(e) => updateProject(p.id, { rolesNeeded: e.target.value })}
-                  placeholder="Lead actor, DP, HMU…"
-                  className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white/85 placeholder:text-white/35 focus:outline-none focus:ring-2 focus:ring-white/10"
-                />
-              </label>
-            </div>
-          </div>
-
-          <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-4">
-            <div className="text-xs tracking-[0.30em] text-white/45">PITCH + INSPECTION</div>
-
-            <label className="block mt-3">
-              <div className="text-xs text-white/55 mb-2">Logline</div>
-              <input
-                value={p.logline}
-                onChange={(e) => updateProject(p.id, { logline: e.target.value })}
-                placeholder="One sentence that sells the project."
-                className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white/85 placeholder:text-white/35 focus:outline-none focus:ring-2 focus:ring-white/10"
-              />
-            </label>
-
-            <label className="block mt-3">
-              <div className="text-xs text-white/55 mb-2">Description</div>
-              <textarea
-                value={p.description}
-                onChange={(e) => updateProject(p.id, { description: e.target.value })}
-                placeholder="Thorough overview: story, vibe, scope, what you’re hiring for."
-                rows={6}
-                className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white/85 placeholder:text-white/35 focus:outline-none focus:ring-2 focus:ring-white/10"
-              />
-            </label>
-
-            <label className="block mt-3">
-              <div className="text-xs text-white/55 mb-2">Internal Notes</div>
-              <textarea
-                value={p.notes}
-                onChange={(e) => updateProject(p.id, { notes: e.target.value })}
-                placeholder="Private notes for your planning."
-                rows={4}
-                className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white/85 placeholder:text-white/35 focus:outline-none focus:ring-2 focus:ring-white/10"
-              />
-            </label>
-
-            <div className="mt-3 text-xs text-white/45">
-              Updated: {formatDate(p.updatedAt)}
-            </div>
-          </div>
-        </div>
-      </div>
-    </TileFrame>
-  );
-
-  return (
-    <div className="w-full">
-      {activeProject ? <ProjectPage p={activeProject} /> : <ProjectsTable />}
-
-      {/* CREATE PROJECT MODAL */}
-      {createOpen ? (
-        <div className="fixed inset-0 z-[999]">
-          <button
-            type="button"
-            onClick={() => setCreateOpen(false)}
-            className="absolute inset-0 bg-black/55 backdrop-blur-[2px]"
-            aria-label="Close create project modal"
+        <TileFrame>
+          <SectionHeader
+            eyebrow="PROJECTS"
+            title="Project Notebook"
+            subtitle="Create host-ready project drops, then open each tile to manage collaborators and project room activity."
+            action={
+              <button
+                type="button"
+                onClick={() => setCreateOpen(true)}
+                className="rounded-2xl border border-lime-300/20 bg-lime-400/15 px-4 py-2 text-sm text-lime-100/90 hover:bg-lime-400/20 transition"
+              >
+                + New Project Drop
+              </button>
+            }
           />
-          <div className="absolute left-1/2 top-1/2 w-[min(760px,92%)] -translate-x-1/2 -translate-y-1/2">
-            <div className="rounded-3xl border border-white/10 bg-[#070913]/90 shadow-[0_20px_90px_rgba(0,0,0,0.65)] overflow-hidden">
-              <div className="flex items-start justify-between gap-3 p-5">
-                <div className="min-w-0">
-                  <div className="text-[11px] tracking-[0.35em] text-white/55">NEW PROJECT</div>
-                  <div className="mt-2 text-xl font-semibold text-white/90">Create Project</div>
-                  <div className="mt-1 text-sm text-white/55">
-                    Build a project listing that creators can inspect like a Backstage breakdown.
-                  </div>
-                </div>
 
-                <button
-                  type="button"
-                  onClick={() => setCreateOpen(false)}
-                  className="rounded-2xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-white/70 hover:bg-black/40 transition"
-                >
-                  ✕
-                </button>
+          <div className="p-5">
+            <div className="mb-4 rounded-2xl border border-white/10 bg-black/25 px-4 py-3 text-xs text-white/45">
+              Sources: {projectTiles.length} notebook projects · {dropPadProjectDrops.length} Drop Pad project drops · {universalProjectDropCount} legacy project drops
+            </div>
+
+            {allProjectDropCount === 0 ? (
+              <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-6 text-sm text-white/65">
+                No projects yet. Start with a Project Drop and it will become a live project tile here.
               </div>
-
-              <div className="px-5 pb-5">
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <label className="block">
-                    <div className="text-xs text-white/55 mb-2">Title (required)</div>
-                    <input
-                      value={String(draft.title ?? "")}
-                      onChange={(e) => {
-                        setDraftError(null);
-                        setDraft((p) => ({ ...p, title: e.target.value }));
-                      }}
-                      placeholder="Project name…"
-                      className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white/85 placeholder:text-white/35 focus:outline-none focus:ring-2 focus:ring-white/10"
-                    />
-                  </label>
-
-                  <label className="block">
-                    <div className="text-xs text-white/55 mb-2">Type</div>
-                    <input
-                      value={String(draft.type ?? "")}
-                      onChange={(e) => setDraft((p) => ({ ...p, type: e.target.value }))}
-                      placeholder="Film, Series, Music Video…"
-                      className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white/85 placeholder:text-white/35 focus:outline-none focus:ring-2 focus:ring-white/10"
-                    />
-                  </label>
-                </div>
-
-                <label className="block mt-3">
-                  <div className="text-xs text-white/55 mb-2">Logline</div>
-                  <input
-                    value={String(draft.logline ?? "")}
-                    onChange={(e) => setDraft((p) => ({ ...p, logline: e.target.value }))}
-                    placeholder="One sentence pitch…"
-                    className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white/85 placeholder:text-white/35 focus:outline-none focus:ring-2 focus:ring-white/10"
-                  />
-                </label>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
-                  <label className="block">
-                    <div className="text-xs text-white/55 mb-2">Location</div>
-                    <input
-                      value={String(draft.location ?? "")}
-                      onChange={(e) => setDraft((p) => ({ ...p, location: e.target.value }))}
-                      placeholder="City, State"
-                      className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white/85 placeholder:text-white/35 focus:outline-none focus:ring-2 focus:ring-white/10"
-                    />
-                  </label>
-
-                  <label className="block">
-                    <div className="text-xs text-white/55 mb-2">Status</div>
-                    <select
-                      value={(draft.status as ProjectStatus) ?? "casting"}
-                      onChange={(e) =>
-                        setDraft((p) => ({ ...p, status: e.target.value as ProjectStatus }))
-                      }
-                      className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white/85 focus:outline-none focus:ring-2 focus:ring-white/10"
-                    >
-                      <option value="casting">Casting</option>
-                      <option value="staffing">Staffing</option>
-                      <option value="pre_production">Pre-Production</option>
-                      <option value="production">Production</option>
-                      <option value="post">Post</option>
-                      <option value="released">Released</option>
-                    </select>
-                  </label>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
-                  <label className="block">
-                    <div className="text-xs text-white/55 mb-2">Dates</div>
-                    <input
-                      value={String(draft.dates ?? "")}
-                      onChange={(e) => setDraft((p) => ({ ...p, dates: e.target.value }))}
-                      placeholder="Jan 20–Feb 3"
-                      className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white/85 placeholder:text-white/35 focus:outline-none focus:ring-2 focus:ring-white/10"
-                    />
-                  </label>
-
-                  <label className="block">
-                    <div className="text-xs text-white/55 mb-2">Pay</div>
-                    <input
-                      value={String(draft.pay ?? "")}
-                      onChange={(e) => setDraft((p) => ({ ...p, pay: e.target.value }))}
-                      placeholder="Paid / Deferred / Profit-share"
-                      className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white/85 placeholder:text-white/35 focus:outline-none focus:ring-2 focus:ring-white/10"
-                    />
-                  </label>
-                </div>
-
-                <label className="block mt-3">
-                  <div className="text-xs text-white/55 mb-2">Roles Needed</div>
-                  <input
-                    value={String(draft.rolesNeeded ?? "")}
-                    onChange={(e) => setDraft((p) => ({ ...p, rolesNeeded: e.target.value }))}
-                    placeholder="Lead actor, DP, HMU…"
-                    className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white/85 placeholder:text-white/35 focus:outline-none focus:ring-2 focus:ring-white/10"
-                  />
-                </label>
-
-                <label className="block mt-3">
-                  <div className="text-xs text-white/55 mb-2">Description</div>
-                  <textarea
-                    value={String(draft.description ?? "")}
-                    onChange={(e) => setDraft((p) => ({ ...p, description: e.target.value }))}
-                    placeholder="Thorough overview for creators to inspect."
-                    rows={5}
-                    className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white/85 placeholder:text-white/35 focus:outline-none focus:ring-2 focus:ring-white/10"
-                  />
-                </label>
-
-                {draftError ? (
-                  <div className="mt-4 rounded-2xl border border-red-400/20 bg-red-500/10 p-3 text-sm text-red-200/90">
-                    {draftError}
+            ) : (
+              <div className="grid gap-5">
+                {dropPadProjectDrops.length > 0 ? (
+                  <div className="rounded-3xl border border-lime-300/15 bg-lime-400/[0.06] p-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <div className="text-sm font-semibold text-lime-100/90">
+                          Drop Pad Project Drops
+                        </div>
+                        <div className="mt-1 text-xs text-white/48">
+                          Drops placed into the Projects destination from Drop Pad OS.
+                        </div>
+                      </div>
+                      <div className="text-xs text-white/42">
+                        {dropPadProjectDrops.length} drops
+                      </div>
+                    </div>
+                    <div className="mt-4 grid gap-4">
+                      {dropPadProjectDrops.map((drop) => (
+                        <DropPadProjectDropCard key={drop.id} drop={drop} />
+                      ))}
+                    </div>
                   </div>
                 ) : null}
 
-                <div className="mt-5 flex items-center justify-end gap-3">
-                  <button
-                    type="button"
-                    onClick={() => setCreateOpen(false)}
-                    className="rounded-2xl border border-white/10 bg-black/30 px-4 py-2 text-sm text-white/70 hover:bg-black/40 transition"
+                {projectTiles.map((project) => (
+                  <div
+                    key={project.id}
+                    className="overflow-hidden rounded-[30px] border border-white/10 bg-white/[0.04] text-left shadow-[0_16px_44px_rgba(0,0,0,0.28)] transition hover:bg-white/[0.08]"
                   >
-                    Cancel
-                  </button>
-                  <button
-                    type="button"
-                    onClick={createProject}
-                    className="rounded-2xl border border-white/10 bg-white/10 px-4 py-2 text-sm text-white/85 hover:bg-white/15 transition"
-                  >
-                    Create Project
-                  </button>
+                    <div className="relative h-56 bg-black/30 md:h-64">
+                      <div className="absolute right-4 top-4 z-10 flex flex-wrap justify-end gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setCommentsProject(project)}
+                          className="rounded-full border border-cyan-200/25 bg-cyan-400/15 px-3 py-1 text-[11px] tracking-[0.16em] text-cyan-50/90 transition hover:bg-cyan-400/22"
+                        >
+                          Comment
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => deleteProject(project.id)}
+                          className="rounded-full border border-red-300/25 bg-red-500/20 px-3 py-1 text-[11px] tracking-[0.16em] text-red-50/90 hover:bg-red-500/28 transition"
+                        >
+                          Delete
+                        </button>
+                      </div>
+                      {project.media ? (
+                        project.media.kind === "image" ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={project.media.src}
+                            alt={project.title}
+                            className="h-full w-full object-cover"
+                          />
+                        ) : (
+                          <video
+                            src={project.media.src}
+                            className="h-full w-full object-cover"
+                            muted
+                            playsInline
+                          />
+                        )
+                      ) : (
+                        <div className="flex h-full items-center justify-center bg-[radial-gradient(circle_at_top_left,rgba(244,114,182,0.18),transparent_45%),radial-gradient(circle_at_bottom_right,rgba(96,165,250,0.16),transparent_48%),linear-gradient(180deg,rgba(12,12,20,0.92),rgba(4,4,8,0.98))]">
+                          <div className="rounded-full border border-white/10 bg-white/5 px-4 py-2 text-[11px] tracking-[0.28em] text-white/55">
+                            PROJECT TILE
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="absolute left-4 top-4 rounded-full border border-white/10 bg-black/45 px-3 py-1 text-[11px] tracking-[0.24em] text-white/80">
+                        {statusLabel(project.status)}
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => setActiveProjectId(project.id)}
+                      className="block w-full p-5 text-left"
+                    >
+                      <div className="text-lg font-semibold text-white/92">
+                        {project.title}
+                      </div>
+                      <div className="mt-1 text-xs uppercase tracking-[0.22em] text-white/45">
+                        {project.projectType}
+                      </div>
+                      <div className="mt-3 line-clamp-3 text-sm leading-6 text-white/65">
+                        {project.logline || "Add a logline to pitch the project."}
+                      </div>
+
+                      {project.goal || project.milestone ? (
+                        <div className="mt-4 grid gap-2 rounded-2xl border border-lime-200/10 bg-lime-300/[0.06] p-3 text-xs text-lime-50/72">
+                          {project.goal ? (
+                            <div>
+                              <span className="font-semibold uppercase tracking-[0.18em] text-lime-100/55">
+                                Goal
+                              </span>{" "}
+                              {project.goal}
+                            </div>
+                          ) : null}
+                          {project.milestone ? (
+                            <div>
+                              <span className="font-semibold uppercase tracking-[0.18em] text-lime-100/55">
+                                Milestone
+                              </span>{" "}
+                              {project.milestone}
+                            </div>
+                          ) : null}
+                        </div>
+                      ) : null}
+
+                      <div className="mt-5 grid grid-cols-2 gap-4 text-xs text-white/52 md:grid-cols-4">
+                        <div>
+                          <div className="tracking-[0.22em] text-white/35">Location</div>
+                          <div className="mt-1 text-white/75">{project.location || "TBD"}</div>
+                        </div>
+                        <div>
+                          <div className="tracking-[0.22em] text-white/35">Dates</div>
+                          <div className="mt-1 text-white/75">
+                            {project.startDate || "TBD"}
+                            {project.endDate ? ` - ${project.endDate}` : ""}
+                          </div>
+                        </div>
+                        <div>
+                          <div className="tracking-[0.22em] text-white/35">Invites</div>
+                          <div className="mt-1 text-white/75">{project.invites.length}</div>
+                        </div>
+                        <div>
+                          <div className="tracking-[0.22em] text-white/35">Room Posts</div>
+                          <div className="mt-1 text-white/75">{project.roomPosts.length}</div>
+                        </div>
+                      </div>
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </TileFrame>
+
+        <ProjectDropMenu
+          open={createOpen}
+          onClose={() => setCreateOpen(false)}
+          onCreate={createProjectFromDrop}
+        />
+        <DropCommentsDrawer
+          open={Boolean(commentsProject)}
+          onClose={() => setCommentsProject(null)}
+          dropId={commentsProject ? projectCommentDropId(commentsProject.id) : ""}
+          dropTitle={commentsProject?.title}
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div className="w-full">
+      <TileFrame>
+        <SectionHeader
+          eyebrow="PROJECT ROOM"
+          title={activeProject.title}
+          subtitle={`${activeProject.projectType} • ${statusLabel(
+            activeProject.status
+          )}`}
+          action={
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setCommentsProject(activeProject)}
+                className="rounded-2xl border border-cyan-200/15 bg-cyan-400/10 px-3 py-2 text-sm text-cyan-50/75 transition hover:bg-cyan-400/15"
+              >
+                Comment
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveProjectId(null)}
+                className="rounded-2xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-white/70 hover:bg-black/40 transition"
+              >
+                ← Back
+              </button>
+              <button
+                type="button"
+                onClick={() => deleteProject(activeProject.id)}
+                className="rounded-2xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-white/60 hover:bg-black/40 transition"
+              >
+                Delete
+              </button>
+            </div>
+          }
+        />
+
+        <div className="p-5 space-y-4">
+          <div className="grid gap-4 lg:grid-cols-[1.2fr_0.8fr]">
+            <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-4">
+              <div className="text-xs tracking-[0.30em] text-white/45">PROJECT DROP</div>
+              <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                <div>
+                  <div className="text-xs text-white/42">Location</div>
+                  <div className="mt-1 text-sm text-white/82">
+                    {activeProject.location || "TBD"}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-xs text-white/42">Dates</div>
+                  <div className="mt-1 text-sm text-white/82">
+                    {activeProject.startDate || "TBD"}
+                    {activeProject.endDate ? ` - ${activeProject.endDate}` : ""}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-xs text-white/42">Union</div>
+                  <div className="mt-1 text-sm text-white/82">
+                    {activeProject.unionStatus || "TBD"}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-xs text-white/42">Compensation</div>
+                  <div className="mt-1 text-sm text-white/82">
+                    {activeProject.compensationType}
+                    {activeProject.rate ? ` • ${activeProject.rate}` : ""}
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-4 text-sm text-white/72">{activeProject.logline}</div>
+
+              {activeProject.goal || activeProject.milestone ? (
+                <div className="mt-4 grid gap-3 rounded-2xl border border-lime-200/10 bg-lime-300/[0.06] p-4">
+                  {activeProject.goal ? (
+                    <div>
+                      <div className="text-xs tracking-[0.26em] text-lime-100/45">
+                        GOAL
+                      </div>
+                      <div className="mt-2 text-sm text-lime-50/78">
+                        {activeProject.goal}
+                      </div>
+                    </div>
+                  ) : null}
+                  {activeProject.milestone ? (
+                    <div>
+                      <div className="text-xs tracking-[0.26em] text-lime-100/45">
+                        NEXT MILESTONE
+                      </div>
+                      <div className="mt-2 whitespace-pre-wrap text-sm text-lime-50/72">
+                        {activeProject.milestone}
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+
+              <div className="mt-4 rounded-2xl border border-white/10 bg-black/25 p-4">
+                <div className="text-xs tracking-[0.26em] text-white/40">ROLES NEEDED</div>
+                <div className="mt-2 whitespace-pre-wrap text-sm text-white/76">
+                  {activeProject.rolesNeeded || "No roles added yet."}
+                </div>
+              </div>
+
+              {activeProject.notes ? (
+                <div className="mt-4 rounded-2xl border border-white/10 bg-black/25 p-4">
+                  <div className="text-xs tracking-[0.26em] text-white/40">HOST NOTES</div>
+                  <div className="mt-2 whitespace-pre-wrap text-sm text-white/70">
+                    {activeProject.notes}
+                  </div>
+                </div>
+              ) : null}
+            </div>
+
+            <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-4">
+              <div className="text-xs tracking-[0.30em] text-white/45">HOST PANEL</div>
+              <div className="mt-3 space-y-3 text-sm text-white/72">
+                <div>
+                  <div className="text-xs text-white/42">Host</div>
+                  <div className="mt-1 text-white/86">{activeProject.contactName}</div>
+                </div>
+                <div>
+                  <div className="text-xs text-white/42">Contact Email</div>
+                  <div className="mt-1 break-all text-white/86">
+                    {activeProject.contactEmail}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-xs text-white/42">Updated</div>
+                  <div className="mt-1 text-white/86">
+                    {formatDate(activeProject.updatedAt)}
+                  </div>
                 </div>
               </div>
             </div>
+          </div>
 
-            <div className="mt-3 text-center text-xs text-white/40">
-              Tip: Projects are accessed through the Projects tile under Work Desk (not the dock).
+          <div className="grid gap-4 xl:grid-cols-[0.9fr_1.1fr]">
+            <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-4">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="text-xs tracking-[0.30em] text-white/45">
+                    PROJECT INVITES
+                  </div>
+                  <div className="mt-1 text-sm text-white/62">
+                    Invite collaborators into this project room.
+                  </div>
+                </div>
+                <div className="rounded-full border border-white/10 bg-black/25 px-3 py-1 text-xs text-white/70">
+                  {activeProject.invites.length} invited
+                </div>
+              </div>
+
+              <div className="mt-4 grid gap-3">
+                <input
+                  value={inviteDraft.name}
+                  onChange={(event) =>
+                    setInviteDraft((prev) => ({ ...prev, name: event.target.value }))
+                  }
+                  placeholder="Invite name"
+                  className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white/85 placeholder:text-white/35 focus:outline-none focus:ring-2 focus:ring-white/10"
+                />
+                <input
+                  value={inviteDraft.handle}
+                  onChange={(event) =>
+                    setInviteDraft((prev) => ({ ...prev, handle: event.target.value }))
+                  }
+                  placeholder="@handle (optional)"
+                  className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white/85 placeholder:text-white/35 focus:outline-none focus:ring-2 focus:ring-white/10"
+                />
+                <input
+                  value={inviteDraft.email}
+                  onChange={(event) =>
+                    setInviteDraft((prev) => ({ ...prev, email: event.target.value }))
+                  }
+                  placeholder="Email (optional)"
+                  className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white/85 placeholder:text-white/35 focus:outline-none focus:ring-2 focus:ring-white/10"
+                />
+                <input
+                  value={inviteDraft.role}
+                  onChange={(event) =>
+                    setInviteDraft((prev) => ({ ...prev, role: event.target.value }))
+                  }
+                  placeholder="Invited for role / department"
+                  className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white/85 placeholder:text-white/35 focus:outline-none focus:ring-2 focus:ring-white/10"
+                />
+
+                {inviteError ? (
+                  <div className="rounded-2xl border border-red-400/20 bg-red-500/10 p-3 text-sm text-red-200/90">
+                    {inviteError}
+                  </div>
+                ) : null}
+
+                <button
+                  type="button"
+                  onClick={addInvite}
+                  className="rounded-2xl border border-lime-300/18 bg-lime-400/15 px-4 py-3 text-sm text-lime-100/90 hover:bg-lime-400/20 transition"
+                >
+                  Invite to Project Room
+                </button>
+              </div>
+
+              <div className="mt-4 grid gap-3">
+                {activeProject.invites.length === 0 ? (
+                  <div className="rounded-2xl border border-white/10 bg-black/25 p-4 text-sm text-white/55">
+                    No invites yet. Add names here and they’ll appear as project collaborators.
+                  </div>
+                ) : (
+                  activeProject.invites.map((invite) => (
+                    <div
+                      key={invite.id}
+                      className="rounded-2xl border border-white/10 bg-black/25 p-4"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="text-sm font-medium text-white/86">
+                            {invite.name}
+                          </div>
+                          <div className="mt-1 text-xs text-white/52">
+                            {[invite.handle, invite.role, invite.email]
+                              .filter(Boolean)
+                              .join(" • ") || "Project collaborator"}
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => toggleInviteStatus(invite)}
+                          className={clsx(
+                            "rounded-full border px-3 py-1 text-[11px] tracking-[0.18em] transition",
+                            invite.status === "joined"
+                              ? "border-cyan-300/25 bg-cyan-400/15 text-cyan-100/90"
+                              : "border-pink-300/20 bg-pink-400/15 text-pink-100/90"
+                          )}
+                        >
+                          {invite.status === "joined" ? "JOINED" : "INVITED"}
+                        </button>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+
+            <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-4">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="text-xs tracking-[0.30em] text-white/45">
+                    PROJECT ROOM
+                  </div>
+                  <div className="mt-1 text-sm text-white/62">
+                    A forum-style room for invites, updates, and project planning.
+                  </div>
+                </div>
+                <div className="rounded-full border border-white/10 bg-black/25 px-3 py-1 text-xs text-white/70">
+                  {activeProject.roomPosts.length} posts
+                </div>
+              </div>
+
+              <div className="mt-4 flex gap-3">
+                <textarea
+                  value={roomDraft}
+                  onChange={(event) => setRoomDraft(event.target.value)}
+                  rows={3}
+                  placeholder="Post an update to your project room..."
+                  className="min-h-[92px] flex-1 rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white/85 placeholder:text-white/35 focus:outline-none focus:ring-2 focus:ring-white/10"
+                />
+                <button
+                  type="button"
+                  onClick={postRoomMessage}
+                  className="self-end rounded-2xl border border-white/10 bg-white/10 px-4 py-3 text-sm text-white/85 hover:bg-white/15 transition"
+                >
+                  Post
+                </button>
+              </div>
+
+              <div className="mt-4 grid gap-3">
+                {activeProject.roomPosts.map((post) => (
+                  <div
+                    key={post.id}
+                    className="rounded-2xl border border-white/10 bg-black/25 p-4"
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="text-sm font-medium text-white/86">
+                        {post.authorName}
+                      </div>
+                      <div className="text-xs text-white/42">
+                        {formatDate(post.createdAt)}
+                      </div>
+                    </div>
+                    <div className="mt-2 whitespace-pre-wrap text-sm text-white/68">
+                      {post.text}
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
         </div>
-      ) : null}
+      </TileFrame>
+
+      <ProjectDropMenu
+        open={createOpen}
+        onClose={() => setCreateOpen(false)}
+        onCreate={createProjectFromDrop}
+      />
+      <DropCommentsDrawer
+        open={Boolean(commentsProject)}
+        onClose={() => setCommentsProject(null)}
+        dropId={commentsProject ? projectCommentDropId(commentsProject.id) : ""}
+        dropTitle={commentsProject?.title}
+      />
     </div>
   );
 }

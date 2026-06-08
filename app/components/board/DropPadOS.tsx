@@ -4,12 +4,29 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import { supabaseBrowser } from "@/lib/supabase/browser";
 import WorkCallsList, { type WorkCallItem } from "@/app/components/board/WorkCallsList";
+import ProjectCenter from "@/app/components/board/ProjectCenter";
+import StoreDropTile, { type StoreDrop } from "@/app/components/board/StoreDropTile";
 
-type DropRoute = "board" | "assets" | "projects" | "portfolio" | "workcalls";
+type DropRoute =
+  | "board"
+  | "assets"
+  | "projects"
+  | "portfolio"
+  | "workcalls"
+  | "profiledrops"
+  | "storedrops";
 type ScreenMode = "menu" | "screen";
 
 // This matches your Remote + WorkPage usage
-export type DropPadApp = "home" | "assets" | "projects" | "portfolio" | "work_calls";
+export type DropPadApp =
+  | "home"
+  | "board_drops"
+  | "assets"
+  | "projects"
+  | "portfolio"
+  | "work_calls"
+  | "profile_drops"
+  | "store_drops";
 
 export type DropBubble = {
   id: string;
@@ -19,6 +36,7 @@ export type DropBubble = {
 };
 
 type AssetKind = "media" | "music" | "youtube" | "link" | "doc" | "note";
+type DropDestination = "assets" | "portfolio" | "projects";
 
 type AssetItem = {
   id: string;
@@ -54,6 +72,9 @@ type WorkCallDraft = {
 };
 
 const ASSETS_STORAGE_KEY = "jab_drop_pad_assets_v4";
+const PORTFOLIO_DROPS_STORAGE_KEY = "jab_drop_pad_portfolio_drops_v1";
+const PROJECT_DROPS_STORAGE_KEY = "jab_drop_pad_project_drops_v1";
+const PROJECT_DROPS_UPDATED_EVENT = "board:project-drops:updated";
 const WORK_CALLS_STORAGE_KEY = "jab_work_calls_v1";
 
 // Crown center image (expects: public/assets/BoardLogo.png)
@@ -97,6 +118,10 @@ function RouteTitle(route: DropRoute) {
       return "Portfolio";
     case "workcalls":
       return "Work Calls";
+    case "profiledrops":
+      return "Profile Drops";
+    case "storedrops":
+      return "Store Drops";
     default:
       return "Drop Pad";
   }
@@ -146,8 +171,12 @@ function safeHostname(url?: string) {
 }
 
 function readAssetsFromStorage(): AssetItem[] {
+  return readDropItemsFromStorage(ASSETS_STORAGE_KEY);
+}
+
+function readDropItemsFromStorage(key: string): AssetItem[] {
   try {
-    const raw = localStorage.getItem(ASSETS_STORAGE_KEY);
+    const raw = localStorage.getItem(key);
     if (!raw) return [];
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
@@ -167,13 +196,41 @@ function readAssetsFromStorage(): AssetItem[] {
 }
 
 function writeAssetsToStorage(items: AssetItem[]) {
+  writeDropItemsToStorage(ASSETS_STORAGE_KEY, items);
+}
+
+function writeDropItemsToStorage(key: string, items: AssetItem[]) {
   try {
-    localStorage.setItem(ASSETS_STORAGE_KEY, JSON.stringify(items));
+    localStorage.setItem(key, JSON.stringify(items));
   } catch {}
 }
 
 function uid() {
   return `${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 9)}`;
+}
+
+function readFileAsDataUrl(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result ?? ""));
+    reader.onerror = () => reject(new Error("read_error"));
+    reader.readAsDataURL(file);
+  });
+}
+
+function withTimeout<T>(promise: Promise<T>, ms: number) {
+  return new Promise<T>((resolve, reject) => {
+    const timer = window.setTimeout(() => reject(new Error("timeout")), ms);
+    promise
+      .then((value) => {
+        window.clearTimeout(timer);
+        resolve(value);
+      })
+      .catch((error) => {
+        window.clearTimeout(timer);
+        reject(error);
+      });
+  });
 }
 
 function readWorkCallsFromStorage(): WorkCallItem[] {
@@ -275,6 +332,28 @@ function parseSoundCloud(url: string) {
   }
 }
 
+function parseAppleMusic(url: string) {
+  try {
+    const u = new URL(url);
+    const host = u.hostname.toLowerCase();
+    if (host === "embed.music.apple.com") return { embedUrl: url, label: "Apple Music" };
+    if (host !== "music.apple.com") return null;
+
+    const parts = u.pathname.split("/").filter(Boolean);
+    if (parts[0] === "embed") {
+      return {
+        embedUrl: `https://embed.music.apple.com/${parts.slice(1).join("/")}${u.search}`,
+        label: "Apple Music",
+      };
+    }
+    if (parts.length < 3) return null;
+
+    return { embedUrl: `https://embed.music.apple.com${u.pathname}${u.search}`, label: "Apple Music" };
+  } catch {
+    return null;
+  }
+}
+
 function buildMusicEmbed(rawUrl: string) {
   const url = normalizeUrl(rawUrl);
   if (!url) return { embedUrl: "", provider: "" };
@@ -284,6 +363,9 @@ function buildMusicEmbed(rawUrl: string) {
 
   const sc = parseSoundCloud(url);
   if (sc) return { embedUrl: sc.embedUrl, provider: sc.label };
+
+  const am = parseAppleMusic(url);
+  if (am) return { embedUrl: am.embedUrl, provider: am.label };
 
   return { embedUrl: "", provider: "" };
 }
@@ -352,11 +434,14 @@ async function uploadMediaToSupabaseStorage(
   const safeName = file.name.replace(/[^\w.\-]+/g, "_");
   const path = `${userId}/${Date.now()}_${safeName}`;
 
-  const { error: upErr } = await sb.storage.from("board-media").upload(path, file, {
-    cacheControl: "3600",
-    upsert: false,
-    contentType: file.type,
-  });
+  const { error: upErr } = await withTimeout(
+    sb.storage.from("board-media").upload(path, file, {
+      cacheControl: "3600",
+      upsert: false,
+      contentType: file.type,
+    }),
+    12000
+  ).catch(() => ({ error: new Error("upload_timeout") }));
 
   if (upErr) return { ok: false };
 
@@ -420,12 +505,12 @@ function MediaDropTile({ a }: { a: AssetItem }) {
     <TileFrame>
       <DropHeader emoji={kindEmoji("media")} title={a.title} meta="Image embed" description={a.description} />
       <div className="mt-3 px-4 pb-4">
-        <div className="rounded-2xl overflow-hidden border border-white/10 bg-white/5">
+        <div className="inline-block max-w-full overflow-hidden rounded-2xl border border-white/10 bg-white/5 align-top">
           {url ? (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={url} alt={a.title} className="w-full h-44 object-cover" loading="lazy" />
+            <img src={url} alt={a.title} className="block h-auto max-h-72 max-w-full object-contain" loading="lazy" />
           ) : (
-            <div className="h-44 grid place-items-center text-sm text-white/50">No image</div>
+            <div className="grid min-h-32 min-w-48 place-items-center text-sm text-white/50">No image</div>
           )}
         </div>
       </div>
@@ -579,6 +664,7 @@ type InputModalState =
       kind: AssetKind;
       title: string;
       description: string;
+      destination: DropDestination;
 
       url?: string;
       text?: string;
@@ -612,7 +698,21 @@ function ScreenShell({
 /* Screens                                                                    */
 /* -------------------------------------------------------------------------- */
 
-function BoardDropsScreen({ onBeginPlace }: { onBeginPlace: (kind: AssetKind) => void }) {
+function destinationLabel(destination: DropDestination) {
+  if (destination === "portfolio") return "Portfolio";
+  if (destination === "projects") return "Projects";
+  return "Assets";
+}
+
+function BoardDropsScreen({
+  destination,
+  onDestinationChange,
+  onBeginPlace,
+}: {
+  destination: DropDestination;
+  onDestinationChange: (destination: DropDestination) => void;
+  onBeginPlace: (kind: AssetKind) => void;
+}) {
   const DROP_TYPES: Array<{ kind: AssetKind; title: string; desc: string; hint: string }> = [
     { kind: "media", title: "Media", desc: "Image embed", hint: "Upload an image" },
     { kind: "music", title: "Music", desc: "Spotify / SoundCloud", hint: "Paste a music link" },
@@ -626,7 +726,7 @@ function BoardDropsScreen({ onBeginPlace }: { onBeginPlace: (kind: AssetKind) =>
   const active = DROP_TYPES.find((d) => d.kind === selected) ?? DROP_TYPES[0];
 
   return (
-    <ScreenShell title="Board Drops" description="Select a Drop type, then place it into Assets as an embedded tile.">
+    <ScreenShell title="Board Drops" description="Select a Drop type, then place it into Assets, Portfolio, or Projects.">
       <div className="rounded-3xl border border-white/10 bg-black/25 shadow-[0_18px_60px_rgba(0,0,0,0.45)] overflow-hidden">
         <div className="px-5 pt-5 pb-4 border-b border-white/10 bg-white/[0.02]">
           <div className="flex items-center justify-between gap-3">
@@ -637,7 +737,33 @@ function BoardDropsScreen({ onBeginPlace }: { onBeginPlace: (kind: AssetKind) =>
             </div>
 
             <div className="shrink-0 rounded-2xl border border-lime-300/20 bg-lime-400/10 px-3 py-2 text-xs text-lime-200/80">
-              Live Menu
+              To {destinationLabel(destination)}
+            </div>
+          </div>
+
+          <div className="mt-4 rounded-3xl border border-white/10 bg-black/25 p-2">
+            <div className="mb-2 px-2 text-[10px] font-semibold uppercase tracking-[0.24em] text-white/42">
+              Place Into
+            </div>
+            <div className="grid grid-cols-3 gap-2">
+              {(["assets", "portfolio", "projects"] as DropDestination[]).map((target) => {
+                const isActive = target === destination;
+                return (
+                  <button
+                    key={target}
+                    type="button"
+                    onClick={() => onDestinationChange(target)}
+                    className={clsx(
+                      "rounded-2xl border px-3 py-2 text-xs font-semibold transition",
+                      isActive
+                        ? "border-lime-300/35 bg-lime-400/15 text-lime-100"
+                        : "border-white/10 bg-white/5 text-white/62 hover:bg-white/10"
+                    )}
+                  >
+                    {destinationLabel(target)}
+                  </button>
+                );
+              })}
             </div>
           </div>
 
@@ -675,7 +801,7 @@ function BoardDropsScreen({ onBeginPlace }: { onBeginPlace: (kind: AssetKind) =>
                 </div>
                 <div className="mt-1 text-xs text-white/55">{active.desc}</div>
               </div>
-              <div className="shrink-0 text-xs text-white/45">Embeds into Assets</div>
+              <div className="shrink-0 text-xs text-white/45">Embeds into {destinationLabel(destination)}</div>
             </div>
 
             <div className="mt-3 rounded-2xl border border-white/10 bg-black/30 p-4">
@@ -696,7 +822,7 @@ function BoardDropsScreen({ onBeginPlace }: { onBeginPlace: (kind: AssetKind) =>
                 "shadow-[0_0_28px_rgba(163,230,53,0.18)]"
               )}
             >
-              Place {active.title} Drop →
+              Place {active.title} Drop in {destinationLabel(destination)} →
             </button>
           </div>
         </div>
@@ -748,23 +874,59 @@ function AssetsScreen({
   );
 }
 
-function ProjectsScreen() {
+function ProjectsScreen({ drops }: { drops: AssetItem[] }) {
   return (
     <ScreenShell title="Projects" description="Project tiles, WIP boards, collaborations, and builds.">
-      <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-        <div className="text-sm text-white/75">Placeholder. Next: project list with create button.</div>
-      </div>
+      <PlacedDropsSection
+        title="Board Drops In Projects"
+        empty="Place drops here when they are tied to a project, pitch, casting call, or active build."
+        drops={drops}
+      />
+      <ProjectCenter />
     </ScreenShell>
   );
 }
 
-function PortfolioScreen() {
+function PortfolioScreen({ drops }: { drops: AssetItem[] }) {
   return (
-    <ScreenShell title="Portfolio" description="Later you’ll pin Assets into Portfolio.">
-      <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-        <div className="text-sm text-white/75">Placeholder. Next: portfolio sections + pinned drops.</div>
-      </div>
+    <ScreenShell title="Portfolio" description="Showcase-ready Board Drops pinned into your portfolio.">
+      <PlacedDropsSection
+        title="Portfolio Drops"
+        empty="Place polished media, links, notes, and embeds here as portfolio pieces."
+        drops={drops}
+      />
     </ScreenShell>
+  );
+}
+
+function PlacedDropsSection({
+  title,
+  empty,
+  drops,
+}: {
+  title: string;
+  empty: string;
+  drops: AssetItem[];
+}) {
+  return (
+    <div className="mb-5 rounded-3xl border border-white/10 bg-black/25 p-4">
+      <div className="flex items-center justify-between gap-3">
+        <div className="text-sm font-semibold text-white/84">{title}</div>
+        <div className="text-xs text-white/42">{drops.length} drops</div>
+      </div>
+      <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+        {drops.length === 0 ? (
+          <div className="rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-white/58">
+            {empty}
+          </div>
+        ) : (
+          drops
+            .slice()
+            .sort((a, b) => b.createdAt - a.createdAt)
+            .map((a) => <EmbeddedAssetTile key={a.id} a={a} />)
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -773,15 +935,69 @@ function WorkCallsScreen({
   counts,
   onOpen,
   onCreate,
+  onMarkAllRead,
+  onClear,
 }: {
   workCalls: WorkCallItem[];
   counts: { casting: number; crew: number; gigs: number; collaborations: number };
   onOpen?: (id: string) => void;
   onCreate?: () => void;
+  onMarkAllRead?: () => void;
+  onClear?: () => void;
 }) {
   return (
-    <ScreenShell title="Work Calls" description="Work Call Drops show up like an inbox. Each message is tagged by type.">
-      <WorkCallsList items={workCalls} counts={counts} onOpen={onOpen} onCreate={onCreate} />
+    <ScreenShell title="Work Calls" description="A clean inbox for casting, crew, gigs, and collaboration asks.">
+      <WorkCallsList
+        items={workCalls}
+        counts={counts}
+        onOpen={onOpen}
+        onCreate={onCreate}
+        onMarkAllRead={onMarkAllRead}
+        onClear={onClear}
+      />
+    </ScreenShell>
+  );
+}
+
+function ProfileDropsScreen() {
+  return (
+    <ScreenShell
+      title="Profile Drops"
+      description="A folder for the drops and moments tied to creator profile boards. This is where profile-linked drops can live inside Drop Pad OS."
+    >
+      <div className="rounded-[26px] border border-white/10 bg-white/5 p-6">
+        <div className="text-white/88 text-lg font-semibold">Profile Drops</div>
+        <div className="mt-2 text-sm text-white/55 max-w-[56ch]">
+          Use this bubble for profile-specific drops, creator identity snapshots, and board moments
+          routed from Explore and Profile.
+        </div>
+      </div>
+    </ScreenShell>
+  );
+}
+
+function StoreDropsScreen({ items }: { items: StoreDrop[] }) {
+  return (
+    <ScreenShell
+      title="Store Drops"
+      description="A folder for commerce-linked drops, product highlights, and future store interactions across BOARD."
+    >
+      <div className="space-y-4">
+        <div className="rounded-[26px] border border-white/10 bg-white/5 p-5">
+          <div className="text-white/88 text-lg font-semibold">Store Drop Marketplace</div>
+          <div className="mt-2 max-w-[56ch] text-sm text-white/55">
+            Browse the full artifact wave from Explore inside Drop Pad OS.
+          </div>
+        </div>
+
+        <div className="max-h-[520px] overflow-y-auto pr-1">
+          <div className="grid grid-cols-2 gap-4">
+            {items.map((item) => (
+              <StoreDropTile key={item.id} drop={item} />
+            ))}
+          </div>
+        </div>
+      </div>
     </ScreenShell>
   );
 }
@@ -792,6 +1008,8 @@ function WorkCallsScreen({
 
 function appToRoute(app: DropPadApp): DropRoute {
   switch (app) {
+    case "board_drops":
+      return "board";
     case "assets":
       return "assets";
     case "projects":
@@ -800,6 +1018,10 @@ function appToRoute(app: DropPadApp): DropRoute {
       return "portfolio";
     case "work_calls":
       return "workcalls";
+    case "profile_drops":
+      return "profiledrops";
+    case "store_drops":
+      return "storedrops";
     case "home":
     default:
       return "board";
@@ -816,9 +1038,13 @@ function routeToApp(route: DropRoute): DropPadApp {
       return "portfolio";
     case "workcalls":
       return "work_calls";
+    case "profiledrops":
+      return "profile_drops";
+    case "storedrops":
+      return "store_drops";
     case "board":
     default:
-      return "home";
+      return "board_drops";
   }
 }
 
@@ -837,6 +1063,8 @@ export default function DropPadOS({
 
   title = "DROP PAD OS",
   subtitle = "Work Profile Console",
+  maxScreenPx,
+  storeDrops = [],
 }: {
   className?: string;
   drops?: DropBubble[];
@@ -852,6 +1080,8 @@ export default function DropPadOS({
 
   title?: string;
   subtitle?: string;
+  maxScreenPx?: number;
+  storeDrops?: StoreDrop[];
 }) {
   const sb = useMemo(() => supabaseBrowser(), []);
   const reducedMotion = useReducedMotion();
@@ -861,6 +1091,9 @@ export default function DropPadOS({
   const [bootPhase, setBootPhase] = useState<"off" | "booting" | "ready" | "sleep">("off");
 
   const [assets, setAssets] = useState<AssetItem[]>([]);
+  const [portfolioDrops, setPortfolioDrops] = useState<AssetItem[]>([]);
+  const [projectDrops, setProjectDrops] = useState<AssetItem[]>([]);
+  const [dropDestination, setDropDestination] = useState<DropDestination>("assets");
   const [syncing, setSyncing] = useState(false);
   const [userId, setUserId] = useState<string | null>(null);
 
@@ -943,7 +1176,8 @@ export default function DropPadOS({
   };
 
   // iPad-like extendable screen
-  const [screenPx, setScreenPx] = useState<number>(680);
+  const initialScreenPx = 470;
+  const [screenPx, setScreenPx] = useState<number>(initialScreenPx);
   const screenMinPx = 420;
   const screenMaxPxRef = useRef<number>(1100);
 
@@ -956,6 +1190,8 @@ export default function DropPadOS({
       { id: "d3", label: "Projects", route: "projects", emoji: "🧩" },
       { id: "d4", label: "Portfolio", route: "portfolio", emoji: "🎞️" },
       { id: "d5", label: "Work Calls", route: "workcalls", emoji: "📣" },
+      { id: "d6", label: "Profile Drops", route: "profiledrops", emoji: "🪞" },
+      { id: "d7", label: "Store Drops", route: "storedrops", emoji: "🛍️" },
     ],
     []
   );
@@ -988,6 +1224,8 @@ export default function DropPadOS({
   // local cache first
   useEffect(() => {
     setAssets(readAssetsFromStorage());
+    setPortfolioDrops(readDropItemsFromStorage(PORTFOLIO_DROPS_STORAGE_KEY));
+    setProjectDrops(readDropItemsFromStorage(PROJECT_DROPS_STORAGE_KEY));
     setWorkCalls(readWorkCallsFromStorage());
   }, []);
 
@@ -1047,14 +1285,15 @@ export default function DropPadOS({
   // compute max based on viewport
   useEffect(() => {
     const compute = () => {
-      const max = Math.max(640, window.innerHeight - 180);
+      const viewportMax = Math.max(640, window.innerHeight - 180);
+      const max = typeof maxScreenPx === "number" ? Math.min(viewportMax, maxScreenPx) : viewportMax;
       screenMaxPxRef.current = max;
       setScreenPx((prev) => clamp(prev, screenMinPx, max));
     };
     compute();
     window.addEventListener("resize", compute);
     return () => window.removeEventListener("resize", compute);
-  }, []);
+  }, [maxScreenPx]);
 
   // Esc closes modals
   useEffect(() => {
@@ -1073,9 +1312,20 @@ export default function DropPadOS({
     writeAssetsToStorage(next);
   };
 
+  const syncPortfolioDropsLocal = (next: AssetItem[]) => {
+    setPortfolioDrops(next);
+    writeDropItemsToStorage(PORTFOLIO_DROPS_STORAGE_KEY, next);
+  };
+
+  const syncProjectDropsLocal = (next: AssetItem[]) => {
+    setProjectDrops(next);
+    writeDropItemsToStorage(PROJECT_DROPS_STORAGE_KEY, next);
+  };
+
   // ✅ Controlled: whenever osOn changes, drive boot phases + cleanup
   useEffect(() => {
     if (osOn) {
+      setScreenPx(clamp(initialScreenPx, screenMinPx, screenMaxPxRef.current));
       setBootPhase("booting");
       setMode("menu");
       const t = window.setTimeout(() => setBootPhase("ready"), 550);
@@ -1095,6 +1345,8 @@ export default function DropPadOS({
 
   // ✅ Controlled: whenever osApp changes, open correct screen if powered
   const activeRoute = appToRoute(osApp);
+  const showProjectHologram =
+    osOn && bootPhase === "ready" && mode === "screen" && activeRoute === "projects";
 
   useEffect(() => {
     if (!osOn) return;
@@ -1139,6 +1391,7 @@ export default function DropPadOS({
     setModal({
       open: true,
       kind,
+      destination: dropDestination,
       title: "",
       description: "",
       url: "",
@@ -1161,26 +1414,40 @@ export default function DropPadOS({
     });
   };
 
-  const placeAsset = async (asset: AssetItem) => {
-    const next = [asset, ...assets];
-    syncAssetsLocal(next);
+  const jumpToDestination = (destination: DropDestination) => {
+    onSelect?.(destination);
+    onNavigate?.(destination);
+    setMode("screen");
+  };
 
-    if (userId) {
+  const placeAsset = async (asset: AssetItem, destination: DropDestination) => {
+    if (destination === "portfolio") {
+      syncPortfolioDropsLocal([asset, ...portfolioDrops]);
+    } else if (destination === "projects") {
+      syncProjectDropsLocal([asset, ...projectDrops]);
+      window.dispatchEvent(new CustomEvent(PROJECT_DROPS_UPDATED_EVENT));
+    } else {
+      const next = [asset, ...assets];
+      syncAssetsLocal(next);
+    }
+
+    if (userId && destination === "assets") {
       setSyncing(true);
-      await upsertAssetToSupabase(sb, userId, asset);
+      await withTimeout(upsertAssetToSupabase(sb, userId, asset), 8000).catch(() => ({ ok: false }));
       setSyncing(false);
     }
 
-    triggerDropPlacedIndicator(`SYSTEM: ${kindLabel(asset.kind)} placed`);
+    triggerDropPlacedIndicator(`SYSTEM: ${kindLabel(asset.kind)} placed in ${destinationLabel(destination)}`);
 
     setModal({ open: false });
-    jumpToAssets();
+    jumpToDestination(destination);
   };
 
   const submitModal = async () => {
     if (!modal.open) return;
 
     const kind = modal.kind;
+    const destination = modal.destination;
     const now = Date.now();
 
     const titleVal = (modal.title ?? "").trim();
@@ -1204,48 +1471,49 @@ export default function DropPadOS({
 
       setModal({ ...modal, busy: true, error: null });
 
+      const placeLocalMedia = async () => {
+        const dataUrl = await readFileAsDataUrl(f).catch(() => "");
+        if (!dataUrl) {
+          setModal({ ...modal, busy: false, error: "Couldn’t read that image." });
+          return false;
+        }
+
+        await placeAsset(
+          {
+            id: uid(),
+            kind,
+            title: titleVal,
+            description: descVal || undefined,
+            createdAt: now,
+            payload: { mediaType: "image", mediaUrl: dataUrl },
+          },
+          destination
+        );
+        return true;
+      };
+
       if (userId) {
         const uploaded = await uploadMediaToSupabaseStorage(sb, userId, f);
         if (!uploaded.ok) {
-          setModal({
-            ...modal,
-            busy: false,
-            error: "Upload failed. Check bucket + policies for board-media.",
-          });
+          await placeLocalMedia();
           return;
         }
 
-        await placeAsset({
-          id: uid(),
-          kind,
-          title: titleVal,
-          description: descVal || undefined,
-          createdAt: now,
-          payload: { mediaType: "image", mediaUrl: uploaded.publicUrl },
-        });
+        await placeAsset(
+          {
+            id: uid(),
+            kind,
+            title: titleVal,
+            description: descVal || undefined,
+            createdAt: now,
+            payload: { mediaType: "image", mediaUrl: uploaded.publicUrl },
+          },
+          destination
+        );
         return;
       }
 
-      const dataUrl = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(String(reader.result ?? ""));
-        reader.onerror = () => reject(new Error("read_error"));
-        reader.readAsDataURL(f);
-      }).catch(() => "");
-
-      if (!dataUrl) {
-        setModal({ ...modal, busy: false, error: "Couldn’t read that image." });
-        return;
-      }
-
-      await placeAsset({
-        id: uid(),
-        kind,
-        title: titleVal,
-        description: descVal || undefined,
-        createdAt: now,
-        payload: { mediaType: "image", mediaUrl: dataUrl },
-      });
+      await placeLocalMedia();
       return;
     }
 
@@ -1262,14 +1530,17 @@ export default function DropPadOS({
         return;
       }
 
-      await placeAsset({
-        id: uid(),
-        kind,
-        title: titleVal,
-        description: descVal || undefined,
-        createdAt: now,
-        payload: { embedUrl },
-      });
+      await placeAsset(
+        {
+          id: uid(),
+          kind,
+          title: titleVal,
+          description: descVal || undefined,
+          createdAt: now,
+          payload: { embedUrl },
+        },
+        destination
+      );
       return;
     }
 
@@ -1286,14 +1557,17 @@ export default function DropPadOS({
         return;
       }
 
-      await placeAsset({
-        id: uid(),
-        kind,
-        title: titleVal,
-        description: descVal || undefined,
-        createdAt: now,
-        payload: { embedUrl },
-      });
+      await placeAsset(
+        {
+          id: uid(),
+          kind,
+          title: titleVal,
+          description: descVal || undefined,
+          createdAt: now,
+          payload: { embedUrl },
+        },
+        destination
+      );
       return;
     }
 
@@ -1308,14 +1582,17 @@ export default function DropPadOS({
         return;
       }
 
-      await placeAsset({
-        id: uid(),
-        kind,
-        title: titleVal,
-        description: descVal || undefined,
-        createdAt: now,
-        payload: { url },
-      });
+      await placeAsset(
+        {
+          id: uid(),
+          kind,
+          title: titleVal,
+          description: descVal || undefined,
+          createdAt: now,
+          payload: { url },
+        },
+        destination
+      );
       return;
     }
 
@@ -1326,14 +1603,17 @@ export default function DropPadOS({
         return;
       }
 
-      await placeAsset({
-        id: uid(),
-        kind,
-        title: titleVal,
-        description: descVal || undefined,
-        createdAt: now,
-        payload: { text },
-      });
+      await placeAsset(
+        {
+          id: uid(),
+          kind,
+          title: titleVal,
+          description: descVal || undefined,
+          createdAt: now,
+          payload: { text },
+        },
+        destination
+      );
       return;
     }
   };
@@ -1341,26 +1621,50 @@ export default function DropPadOS({
   const renderScreen = () => {
     switch (activeRoute) {
       case "board":
-        return <BoardDropsScreen onBeginPlace={beginPlace} />;
+        return (
+          <BoardDropsScreen
+            destination={dropDestination}
+            onDestinationChange={setDropDestination}
+            onBeginPlace={beginPlace}
+          />
+        );
       case "assets":
         return <AssetsScreen assets={assets} onClear={clearAssets} syncing={syncing} />;
       case "projects":
-        return <ProjectsScreen />;
+        return <ProjectsScreen drops={projectDrops} />;
       case "portfolio":
-        return <PortfolioScreen />;
+        return <PortfolioScreen drops={portfolioDrops} />;
       case "workcalls":
         return (
           <WorkCallsScreen
             workCalls={workCalls}
             counts={workCallCounts}
             onCreate={openWorkCallComposer}
+            onMarkAllRead={() => {
+              setWorkCalls((prev) => prev.map((x) => ({ ...x, unread: false })));
+              triggerDropPlacedIndicator("SYSTEM: Work Calls marked read");
+            }}
+            onClear={() => {
+              setWorkCalls([]);
+              triggerDropPlacedIndicator("SYSTEM: Work Calls cleared");
+            }}
             onOpen={(id) => {
               setWorkCalls((prev) => prev.map((x) => (x.id === id ? { ...x, unread: false } : x)));
             }}
           />
         );
+      case "profiledrops":
+        return <ProfileDropsScreen />;
+      case "storedrops":
+        return <StoreDropsScreen items={storeDrops} />;
       default:
-        return <BoardDropsScreen onBeginPlace={beginPlace} />;
+        return (
+          <BoardDropsScreen
+            destination={dropDestination}
+            onDestinationChange={setDropDestination}
+            onBeginPlace={beginPlace}
+          />
+        );
     }
   };
 
@@ -1394,7 +1698,7 @@ export default function DropPadOS({
   return (
     <section
       className={clsx(
-        "relative w-full h-full rounded-3xl overflow-hidden",
+        "relative w-full h-full rounded-3xl overflow-visible",
         "border border-white/10 shadow-[0_0_0_1px_rgba(255,255,255,0.06)]",
         "bg-gradient-to-b from-[#070913] via-[#050612] to-[#03040b]",
         className
@@ -1660,7 +1964,7 @@ export default function DropPadOS({
                 </div>
               )}
 
-              {mode === "screen" && <div className="pt-2">{renderScreen()}</div>}
+              {mode === "screen" && !showProjectHologram && <div className="pt-2">{renderScreen()}</div>}
 
               <div className="sticky bottom-0 z-30 px-4 pb-3 pt-2 bg-gradient-to-t from-black/35 to-transparent">
                 <div className="flex items-center justify-center">
@@ -1737,6 +2041,27 @@ export default function DropPadOS({
                           </label>
                         </div>
 
+                        <div className="mt-4 rounded-2xl border border-white/10 bg-black/25 p-3">
+                          <div className="mb-2 text-xs text-white/55">Destination</div>
+                          <div className="grid grid-cols-3 gap-2">
+                            {(["assets", "portfolio", "projects"] as DropDestination[]).map((target) => (
+                              <button
+                                key={target}
+                                type="button"
+                                onClick={() => setModal({ ...modal, destination: target, error: null })}
+                                className={clsx(
+                                  "rounded-xl border px-3 py-2 text-xs font-semibold transition",
+                                  modal.destination === target
+                                    ? "border-lime-300/35 bg-lime-400/15 text-lime-100"
+                                    : "border-white/10 bg-white/5 text-white/62 hover:bg-white/10"
+                                )}
+                              >
+                                {destinationLabel(target)}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
                         {(modal.kind === "music" ||
                           modal.kind === "youtube" ||
                           modal.kind === "link" ||
@@ -1772,7 +2097,10 @@ export default function DropPadOS({
                         {modal.kind === "media" && (
                           <div className="mt-4 space-y-3">
                             <label className="block">
-                              <div className="text-xs text-white/55 mb-2">Choose image</div>
+                              <div className="text-xs text-white/55 mb-2">Upload image</div>
+                              <span className="inline-flex w-fit cursor-pointer items-center justify-center rounded-full border border-cyan-200/25 bg-cyan-100/10 px-4 py-2 text-[11px] font-black uppercase tracking-[0.16em] text-cyan-50 shadow-[0_0_18px_rgba(103,232,249,0.10)] transition hover:-translate-y-0.5 hover:bg-cyan-100/15">
+                                Upload
+                              </span>
                               <input
                                 type="file"
                                 accept="image/*"
@@ -1783,8 +2111,11 @@ export default function DropPadOS({
                                     error: null,
                                   })
                                 }
-                                className="block w-full text-sm text-white/75 file:mr-4 file:rounded-xl file:border-0 file:bg-white/10 file:px-4 file:py-2 file:text-sm file:text-white/80 hover:file:bg-white/15"
+                                className="sr-only"
                               />
+                              <div className="mt-2 min-h-5 max-w-full truncate text-xs font-semibold text-white/55">
+                                {modal.file?.name ?? "Select image from this device."}
+                              </div>
                             </label>
                             <div className="text-xs text-white/45">
                               {userId ? "Uploads to Supabase Storage bucket: board-media." : "Not logged in: image will save locally only."}
@@ -1816,7 +2147,7 @@ export default function DropPadOS({
                               modal.busy ? "opacity-60 cursor-not-allowed" : ""
                             )}
                           >
-                            {modal.busy ? "Saving…" : "Place in Assets"}
+                            {modal.busy ? "Saving…" : `Place in ${destinationLabel(modal.destination)}`}
                           </button>
                         </div>
                       </div>
@@ -1858,9 +2189,33 @@ export default function DropPadOS({
                       </div>
 
                       <div className="px-5 pb-5">
+                        <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+                          {(["casting", "crew", "gigs", "collaborations"] as WorkCallType[]).map((type) => (
+                            <button
+                              key={type}
+                              type="button"
+                              onClick={() => setWcDraft((p) => ({ ...p, type, error: null }))}
+                              className={clsx(
+                                "rounded-2xl border px-3 py-2 text-xs font-semibold transition",
+                                wcDraft.type === type
+                                  ? "border-lime-300/35 bg-lime-400/15 text-lime-100"
+                                  : "border-white/10 bg-white/5 text-white/62 hover:bg-white/10"
+                              )}
+                            >
+                              {type === "casting"
+                                ? "Casting"
+                                : type === "crew"
+                                  ? "Crew"
+                                  : type === "gigs"
+                                    ? "Gig"
+                                    : "Collab"}
+                            </button>
+                          ))}
+                        </div>
+
                         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                           <label className="block">
-                            <div className="text-xs text-white/55 mb-2">Type</div>
+                            <div className="text-xs text-white/55 mb-2">Call Type</div>
                             <select
                               value={wcDraft.type}
                               onChange={(e) =>
@@ -1891,11 +2246,11 @@ export default function DropPadOS({
                         </div>
 
                         <label className="block mt-4">
-                          <div className="text-xs text-white/55 mb-2">Message preview (optional)</div>
+                          <div className="text-xs text-white/55 mb-2">Details</div>
                           <textarea
                             value={wcDraft.preview}
                             onChange={(e) => setWcDraft((p) => ({ ...p, preview: e.target.value, error: null }))}
-                            placeholder="Short description… rates, location, dates, what you need…"
+                            placeholder="Rates, location, date, contact details, roles, or what kind of collaborator you need..."
                             rows={5}
                             className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white/85 placeholder:text-white/35 focus:outline-none focus:ring-2 focus:ring-lime-300/40"
                           />
@@ -1945,6 +2300,42 @@ export default function DropPadOS({
           )}
         </div>
       </div>
+
+      {showProjectHologram ? (
+        <div className="pointer-events-none fixed inset-0 z-[130]">
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(195,255,244,0.07),transparent_34%),radial-gradient(circle_at_top,rgba(255,255,255,0.08),transparent_30%),radial-gradient(circle_at_bottom,rgba(96,240,255,0.06),transparent_36%)]" />
+          <div className="pointer-events-auto absolute left-1/2 top-[84px] h-[min(80vh,860px)] w-[min(1120px,calc(100vw-28px))] -translate-x-1/2">
+            <div className="absolute inset-0 rounded-[34px] bg-[linear-gradient(135deg,rgba(255,255,255,0.22),rgba(150,255,234,0.1),rgba(255,255,255,0.06),rgba(255,184,245,0.12))] blur-2xl opacity-90" />
+            <div className="absolute -inset-[2px] rounded-[36px] border border-white/22 opacity-70" />
+            <div className="absolute inset-[1px] rounded-[34px] border border-white/28 bg-[linear-gradient(180deg,rgba(255,255,255,0.18),rgba(190,245,255,0.1)_18%,rgba(26,34,52,0.26)_46%,rgba(9,14,28,0.34)_100%)] shadow-[0_24px_120px_rgba(0,0,0,0.42),0_0_90px_rgba(160,255,238,0.12),inset_0_1px_0_rgba(255,255,255,0.4)] backdrop-blur-[30px] overflow-hidden">
+              <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_18%_14%,rgba(255,255,255,0.34),transparent_18%),radial-gradient(circle_at_78%_12%,rgba(255,255,255,0.2),transparent_16%),linear-gradient(120deg,rgba(255,255,255,0.12),transparent_22%,transparent_72%,rgba(255,255,255,0.08))]" />
+              <div className="pointer-events-none absolute inset-x-6 top-0 h-16 rounded-b-[28px] bg-[linear-gradient(180deg,rgba(255,255,255,0.28),transparent)] opacity-80 blur-md" />
+              <div className="flex items-center justify-between gap-3 border-b border-white/14 bg-[linear-gradient(180deg,rgba(255,255,255,0.12),rgba(255,255,255,0.04))] px-5 py-4">
+                <div className="min-w-0">
+                  <div className="text-[11px] tracking-[0.34em] text-cyan-50/72">LIQUID GLASS PROJECTION</div>
+                  <div className="mt-1 text-lg font-semibold text-white/90">Projects Panel</div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMode("menu");
+                    onHome?.();
+                    onNavigate?.("home");
+                  }}
+                  className="rounded-2xl border border-white/18 bg-white/10 px-4 py-2 text-sm text-white/84 shadow-[inset_0_1px_0_rgba(255,255,255,0.22)] hover:bg-white/14 transition"
+                >
+                  Close Projection
+                </button>
+              </div>
+
+              <div className="h-[calc(100%-74px)] overflow-y-auto overflow-x-visible bg-[linear-gradient(180deg,rgba(255,255,255,0.05),rgba(255,255,255,0.02))] px-4 py-4">
+                <ProjectCenter />
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       <style jsx>{`
         @keyframes floaty {

@@ -520,12 +520,12 @@ function MediaDropTile({ a }: { a: AssetItem }) {
         description={a.description}
       />
       <div className="mt-3 px-4 pb-4">
-        <div className="rounded-2xl overflow-hidden border border-white/10 bg-white/5">
+        <div className="inline-block max-w-full overflow-hidden rounded-2xl border border-white/10 bg-white/5 align-top">
           {url ? (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={url} alt={a.title} className="w-full h-44 object-cover" loading="lazy" />
+            <img src={url} alt={a.title} className="block h-auto max-h-72 max-w-full object-contain" loading="lazy" />
           ) : (
-            <div className="h-44 grid place-items-center text-sm text-white/50">No image</div>
+            <div className="grid min-h-32 min-w-48 place-items-center text-sm text-white/50">No image</div>
           )}
         </div>
       </div>
@@ -1883,7 +1883,10 @@ const DropPadOSV2 = forwardRef<DropPadOSHandle, DropPadOSProps>(function DropPad
                         {modal.kind === "media" && (
                           <div className="mt-4 space-y-3">
                             <label className="block">
-                              <div className="text-xs text-white/55 mb-2">Choose image</div>
+                              <div className="text-xs text-white/55 mb-2">Upload image</div>
+                              <span className="inline-flex w-fit cursor-pointer items-center justify-center rounded-full border border-cyan-200/25 bg-cyan-100/10 px-4 py-2 text-[11px] font-black uppercase tracking-[0.16em] text-cyan-50 shadow-[0_0_18px_rgba(103,232,249,0.10)] transition hover:-translate-y-0.5 hover:bg-cyan-100/15">
+                                Upload
+                              </span>
                               <input
                                 type="file"
                                 accept="image/*"
@@ -1894,8 +1897,11 @@ const DropPadOSV2 = forwardRef<DropPadOSHandle, DropPadOSProps>(function DropPad
                                     error: null,
                                   })
                                 }
-                                className="block w-full text-sm text-white/75 file:mr-4 file:rounded-xl file:border-0 file:bg-white/10 file:px-4 file:py-2 file:text-sm file:text-white/80 hover:file:bg-white/15"
+                                className="sr-only"
                               />
+                              <div className="mt-2 min-h-5 max-w-full truncate text-xs font-semibold text-white/55">
+                                {modal.file?.name ?? "Select image from this device."}
+                              </div>
                             </label>
                           </div>
                         )}

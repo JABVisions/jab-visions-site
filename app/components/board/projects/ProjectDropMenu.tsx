@@ -6,6 +6,39 @@ function clsx(...parts: Array<string | false | null | undefined>) {
   return parts.filter(Boolean).join(" ");
 }
 
+async function fileToDataUrl(
+  file: File,
+  opts: { maxWidth: number; maxHeight: number; quality?: number }
+) {
+  const source = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(typeof reader.result === "string" ? reader.result : "");
+    reader.onerror = () => reject(new Error("Could not read that file."));
+    reader.readAsDataURL(file);
+  });
+
+  const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error("That image could not be opened."));
+    img.src = source;
+  });
+
+  const scale = Math.min(1, opts.maxWidth / image.width, opts.maxHeight / image.height);
+  const width = Math.max(1, Math.round(image.width * scale));
+  const height = Math.max(1, Math.round(image.height * scale));
+
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("Image processing is not available.");
+
+  ctx.drawImage(image, 0, 0, width, height);
+  return canvas.toDataURL("image/jpeg", opts.quality ?? 0.84);
+}
+
 /** Media shown in the Project Drop thumbnail */
 export type ProjectMedia =
   | { kind: "image"; src: string }
@@ -18,6 +51,7 @@ export type ProjectDrop = {
   logline: string;
 
   projectType: string;
+  status: ProjectDropStatus;
   location: string;
 
   startDate: string;
@@ -33,10 +67,20 @@ export type ProjectDrop = {
   contactEmail: string;
 
   notes?: string;
+  goal?: string;
+  milestone?: string;
   media?: ProjectMedia;
 
   createdAt: number;
 };
+
+export type ProjectDropStatus =
+  | "casting"
+  | "staffing"
+  | "pre_production"
+  | "production"
+  | "post"
+  | "released";
 
 const PROJECT_TYPES = [
   "Feature Film",
@@ -48,6 +92,15 @@ const PROJECT_TYPES = [
   "Photo Shoot",
   "Other",
 ] as const;
+
+const PROJECT_STATUSES: Array<{ value: ProjectDropStatus; label: string }> = [
+  { value: "casting", label: "Casting" },
+  { value: "staffing", label: "Staffing" },
+  { value: "pre_production", label: "Pre-Production" },
+  { value: "production", label: "Production" },
+  { value: "post", label: "Post" },
+  { value: "released", label: "Released" },
+];
 
 const UNION = ["Non-Union", "SAG-AFTRA", "Equity", "Other"] as const;
 
@@ -70,6 +123,7 @@ export default function ProjectDropMenu({
 
   const [projectType, setProjectType] =
     useState<(typeof PROJECT_TYPES)[number]>("Feature Film");
+  const [status, setStatus] = useState<ProjectDropStatus>("casting");
   const [location, setLocation] = useState("");
 
   const [startDate, setStartDate] = useState("");
@@ -87,6 +141,8 @@ export default function ProjectDropMenu({
   const [contactEmail, setContactEmail] = useState("");
 
   const [notes, setNotes] = useState("");
+  const [goal, setGoal] = useState("");
+  const [milestone, setMilestone] = useState("");
 
   // Media: either a URL or uploaded file -> stored as dataURL for prototype reliability
   const [mediaKind, setMediaKind] = useState<ProjectMedia["kind"]>("image");
@@ -115,6 +171,7 @@ export default function ProjectDropMenu({
     setTitle("");
     setLogline("");
     setProjectType("Feature Film");
+    setStatus("casting");
     setLocation("");
     setStartDate("");
     setEndDate("");
@@ -125,6 +182,8 @@ export default function ProjectDropMenu({
     setContactName("");
     setContactEmail("");
     setNotes("");
+    setGoal("");
+    setMilestone("");
     setMediaKind("image");
     setMediaUrl("");
     setMediaDataUrl("");
@@ -138,23 +197,26 @@ export default function ProjectDropMenu({
     }
 
     // Light guardrails
-    const isVideo = file.type.startsWith("video/");
     const isImage = file.type.startsWith("image/");
+    const isVideo = file.type.startsWith("video/");
 
     if (!isVideo && !isImage) {
       setError("Please upload an image or video file.");
       return;
     }
 
+    if (isVideo) {
+      setError("Video uploads aren’t local-save safe yet. Use a hosted video URL for now.");
+      return;
+    }
+
     setMediaKind(isVideo ? "video" : "image");
     setMediaUrl(""); // prefer uploaded file if provided
 
-    // Read as dataURL so it survives refresh (prototype)
-    const dataUrl = await new Promise<string>((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(String(reader.result || ""));
-      reader.onerror = () => reject(new Error("File read failed"));
-      reader.readAsDataURL(file);
+    const dataUrl = await fileToDataUrl(file, {
+      maxWidth: 1600,
+      maxHeight: 1600,
+      quality: 0.84,
     }).catch(() => "");
 
     if (!dataUrl) {
@@ -202,6 +264,7 @@ export default function ProjectDropMenu({
       logline: logline.trim(),
 
       projectType,
+      status,
       location: location.trim(),
 
       startDate: startDate.trim(),
@@ -217,6 +280,8 @@ export default function ProjectDropMenu({
       contactEmail: contactEmail.trim(),
 
       notes: notes.trim() ? notes.trim() : undefined,
+      goal: goal.trim() ? goal.trim() : undefined,
+      milestone: milestone.trim() ? milestone.trim() : undefined,
       media: mediaPreview ?? undefined,
 
       createdAt: Date.now(),
@@ -234,7 +299,7 @@ export default function ProjectDropMenu({
 
   return (
     <div
-      className="fixed inset-0 z-[9999] flex items-center justify-center p-4"
+      className="fixed inset-0 z-[9999] flex items-start justify-center overflow-y-auto px-4 py-6 md:py-10"
       aria-modal="true"
       role="dialog"
     >
@@ -250,11 +315,16 @@ export default function ProjectDropMenu({
       />
 
       {/* modal */}
-      <div
+      <form
         className={clsx(
-          "relative w-full max-w-3xl rounded-3xl border border-white/10",
+          "relative my-auto w-full max-w-3xl rounded-3xl border border-white/10",
           "bg-black/70 backdrop-blur-xl shadow-2xl overflow-hidden"
         )}
+        onSubmit={(event) => {
+          event.preventDefault();
+          handleCreate();
+        }}
+        style={{ maxHeight: "min(900px, calc(100vh - 3rem))" }}
       >
         {/* header */}
         <div className="p-5 md:p-6 border-b border-white/10">
@@ -264,17 +334,25 @@ export default function ProjectDropMenu({
                 Drop Project
               </div>
               <div className="text-white/60 text-sm">
-                Backstage-style, simplified.
+                Build the project, then publish it into the community feed.
               </div>
             </div>
 
-            <button
-              type="button"
-              onClick={onClose}
-              className="rounded-2xl border border-white/15 bg-white/5 px-4 py-2 text-sm text-white/80 hover:bg-white/10 transition"
-            >
-              Close
-            </button>
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              <button
+                type="submit"
+                className="rounded-2xl border border-lime-300/30 bg-lime-400/20 px-4 py-2 text-sm font-semibold text-lime-50 hover:bg-lime-400/25 transition"
+              >
+                Publish to Community
+              </button>
+              <button
+                type="button"
+                onClick={onClose}
+                className="rounded-2xl border border-white/15 bg-white/5 px-4 py-2 text-sm text-white/80 hover:bg-white/10 transition"
+              >
+                Close
+              </button>
+            </div>
           </div>
 
           {error && (
@@ -285,7 +363,7 @@ export default function ProjectDropMenu({
         </div>
 
         {/* body */}
-        <div className="p-5 md:p-6 max-h-[75vh] overflow-auto">
+        <div className="p-5 md:p-6 overflow-y-auto" style={{ maxHeight: "calc(100vh - 18rem)" }}>
           {/* Title + Logline */}
           <div className="grid grid-cols-1 gap-3">
             <Field label="Project Title *">
@@ -330,6 +408,43 @@ export default function ProjectDropMenu({
                 onChange={(e) => setLocation(e.target.value)}
                 placeholder="NYC"
                 className={inputClass}
+              />
+            </Field>
+          </div>
+
+          <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3">
+            <Field label="Project Status">
+              <select
+                value={status}
+                onChange={(e) => setStatus(e.target.value as ProjectDropStatus)}
+                className={selectClass}
+              >
+                {PROJECT_STATUSES.map((item) => (
+                  <option key={item.value} value={item.value}>
+                    {item.label}
+                  </option>
+                ))}
+              </select>
+            </Field>
+
+            <Field label="Goal / Milestone (optional)">
+              <input
+                value={goal}
+                onChange={(e) => setGoal(e.target.value)}
+                placeholder="Build the pitch deck, cast leads, finish concept trailer..."
+                className={inputClass}
+              />
+            </Field>
+          </div>
+
+          <div className="mt-4 grid grid-cols-1 gap-3">
+            <Field label="Next Milestone (optional)">
+              <textarea
+                value={milestone}
+                onChange={(e) => setMilestone(e.target.value)}
+                rows={2}
+                placeholder="What should collaborators know is next?"
+                className={textareaClass}
               />
             </Field>
           </div>
@@ -432,7 +547,7 @@ export default function ProjectDropMenu({
           <div className="mt-6 rounded-3xl border border-white/10 bg-white/5 p-4">
             <div className="text-white/85 font-semibold">Media Thumbnail</div>
             <div className="mt-1 text-white/55 text-sm">
-              This shows on the drop tile. Upload a file or paste a URL.
+              This shows on the drop tile. Upload an image or paste a hosted image/video URL.
             </div>
 
             <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -462,15 +577,18 @@ export default function ProjectDropMenu({
 
             <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3 items-end">
               <Field label="Upload File (optional)">
-                <input
-                  type="file"
-                  accept="image/*,video/*"
-                  onChange={(e) => onPickFile(e.target.files?.[0] ?? null)}
-                  className="block w-full text-sm text-white/70
-                             file:mr-4 file:rounded-xl file:border file:border-white/15
-                             file:bg-white/10 file:px-4 file:py-2 file:text-sm file:text-white
-                             hover:file:bg-white/15"
-                />
+                <label className="inline-flex w-fit cursor-pointer items-center justify-center rounded-full border border-cyan-200/25 bg-cyan-100/10 px-4 py-2 text-[11px] font-black uppercase tracking-[0.16em] text-cyan-50 shadow-[0_0_18px_rgba(103,232,249,0.10)] transition hover:-translate-y-0.5 hover:bg-cyan-100/15">
+                  Upload
+                  <input
+                    type="file"
+                    accept="image/*,video/*"
+                    onChange={(e) => onPickFile(e.target.files?.[0] ?? null)}
+                    className="sr-only"
+                  />
+                </label>
+                <div className="mt-2 min-h-5 max-w-full truncate text-xs font-semibold text-white/55">
+                  {mediaDataUrl ? "Media attached from this device." : "Select image or video from this device."}
+                </div>
               </Field>
 
               <div className="rounded-2xl border border-white/10 bg-black/30 p-3">
@@ -527,8 +645,13 @@ export default function ProjectDropMenu({
         </div>
 
         {/* footer */}
-        <div className="p-5 md:p-6 border-t border-white/10 bg-black/40">
-          <div className="flex items-center justify-between gap-3">
+        <div className="sticky bottom-0 p-5 md:p-6 border-t border-white/10 bg-black/75 backdrop-blur-xl">
+          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <div className="text-xs uppercase tracking-[0.22em] text-white/45">
+              This will create the project tile and add the drop to Community Feed
+            </div>
+
+            <div className="flex items-center justify-end gap-3">
             <button
               type="button"
               onClick={onClose}
@@ -538,15 +661,15 @@ export default function ProjectDropMenu({
             </button>
 
             <button
-              type="button"
-              onClick={handleCreate}
-              className="rounded-2xl border border-white/20 bg-white/10 px-5 py-2.5 text-sm text-white hover:bg-white/15 transition"
+              type="submit"
+              className="rounded-2xl border border-lime-300/30 bg-lime-400/20 px-5 py-2.5 text-sm font-semibold text-lime-50 hover:bg-lime-400/25 transition"
             >
-              Create Project Drop
+              Submit Project Drop to Community
             </button>
+            </div>
           </div>
         </div>
-      </div>
+      </form>
     </div>
   );
 }

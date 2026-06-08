@@ -1,101 +1,79 @@
-// app/board/friends/page.tsx
 "use client";
 
+import { useEffect, useState } from "react";
 import Link from "next/link";
-import { useMemo, useState } from "react";
-import { Users, Search, ChevronRight } from "lucide-react";
+import FriendZoneOrb from "@/app/components/board/FriendZoneOrb";
+import type { FriendZoneOrbUser } from "@/lib/board/friendZoneSignals";
+import { loadBoardUserFriendZoneOrbs } from "@/lib/board/friendZoneUsers";
 
-type Friend = {
-  id: string;
-  name: string;
-  handle: string;
-  status?: "online" | "idle" | "offline";
-};
+export default function FriendZonePage() {
+  const [orbs, setOrbs] = useState<FriendZoneOrbUser[]>([]);
+  const [loading, setLoading] = useState(true);
 
-function safeId() {
-  return `${Date.now()}_${Math.random().toString(16).slice(2)}`;
-}
+  useEffect(() => {
+    let cancelled = false;
 
-export default function FriendsPage() {
-  const [q, setQ] = useState("");
+    async function loadOrbs() {
+      const boardUsers = await loadBoardUserFriendZoneOrbs(18);
+      if (!cancelled) {
+        setOrbs(boardUsers);
+        setLoading(false);
+      }
+    }
 
-  const friends = useMemo<Friend[]>(() => {
-    return [
-      { id: safeId(), name: "Amelia", handle: "@amelia", status: "online" },
-      { id: safeId(), name: "Marilyn", handle: "@marilyn", status: "idle" },
-      { id: safeId(), name: "Mark", handle: "@mark", status: "offline" },
-    ];
+    void loadOrbs();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
-  const filtered = useMemo(() => {
-    const s = q.trim().toLowerCase();
-    if (!s) return friends;
-    return friends.filter((f) =>
-      `${f.name} ${f.handle}`.toLowerCase().includes(s)
-    );
-  }, [q, friends]);
-
   return (
-    <div className="space-y-5">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-2">
-            <Users className="h-5 w-5" />
-            <h1 className="text-xl font-semibold tracking-tight">Friend Zone</h1>
+    <main className="min-h-screen px-5 py-10 text-[#241f12]">
+      <section className="mx-auto max-w-5xl">
+        <div className="mb-8 flex flex-wrap items-end justify-between gap-4">
+          <div>
+            <p className="text-xs font-black uppercase tracking-[0.28em] text-[rgba(0,160,80,0.72)]">
+              Friend Zone
+            </p>
+            <h1 className="mt-2 text-3xl font-black tracking-tight md:text-5xl">
+              Relationship Orbs
+            </h1>
           </div>
-          <p className="mt-1 text-sm text-neutral-400">
-            Route restored. Next we plug your real Friend Zone UI back in.
-          </p>
-        </div>
 
-        <Link
-          href="/board"
-          className="rounded-xl border border-neutral-800 bg-neutral-900/40 px-3 py-2 text-sm hover:bg-neutral-900"
-        >
-          Back to Feed
-        </Link>
-      </div>
-
-      <div className="rounded-2xl border border-neutral-800 bg-neutral-900/30 p-3">
-        <div className="flex items-center gap-2">
-          <Search className="h-4 w-4 text-neutral-400" />
-          <input
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            placeholder="Search friends..."
-            className="w-full bg-transparent text-sm outline-none placeholder:text-neutral-500"
-          />
-        </div>
-      </div>
-
-      <div className="space-y-3">
-        {filtered.map((f) => (
-          <div
-            key={f.id}
-            className="rounded-2xl border border-neutral-800 bg-neutral-900/30 p-4"
+          <Link
+            href="/board"
+            className="rounded-full border border-black/10 bg-white/70 px-4 py-2 text-xs font-black uppercase tracking-[0.16em] text-black/65"
           >
-            <div className="flex items-center justify-between gap-3">
-              <div className="min-w-0">
-                <div className="truncate text-base font-semibold">{f.name}</div>
-                <div className="text-sm text-neutral-400">{f.handle}</div>
-              </div>
+            Back to Board
+          </Link>
+        </div>
 
-              <div className="flex items-center gap-2">
-                <span className="rounded-full border border-neutral-800 bg-neutral-950/40 px-2 py-1 text-xs text-neutral-300">
-                  {f.status || "offline"}
-                </span>
-                <button
-                  type="button"
-                  className="inline-flex items-center gap-2 rounded-xl border border-neutral-800 bg-neutral-900/40 px-3 py-2 text-sm hover:bg-neutral-900"
-                  onClick={() => alert("Later: open DM / friend profile")}
-                >
-                  Open <ChevronRight className="h-4 w-4" />
-                </button>
-              </div>
+        <div className="rounded-[34px] border border-black/10 bg-[rgba(255,255,255,0.66)] p-6 shadow-2xl backdrop-blur-xl">
+          {loading ? (
+            <div className="rounded-[24px] border border-black/10 bg-white/55 px-5 py-10 text-center">
+              <p className="text-sm font-black uppercase tracking-[0.18em] text-black/55">
+                Syncing live Board users...
+              </p>
             </div>
-          </div>
-        ))}
-      </div>
-    </div>
+          ) : orbs.length ? (
+            <div className="flex flex-wrap justify-center gap-x-8 gap-y-9">
+              {orbs.map((user) => (
+                <FriendZoneOrb key={user.id || user.username} user={user} />
+              ))}
+            </div>
+          ) : (
+            <div className="rounded-[24px] border border-black/10 bg-white/55 px-5 py-10 text-center">
+              <p className="text-sm font-black uppercase tracking-[0.18em] text-black/60">
+                No current orbs found yet.
+              </p>
+              <p className="mx-auto mt-2 max-w-lg text-sm font-semibold text-black/45">
+                Friend Zone is ready for live Board users once public profiles are available.
+              </p>
+            </div>
+          )}
+        </div>
+      </section>
+    </main>
   );
 }

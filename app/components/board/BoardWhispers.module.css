@@ -1,0 +1,97 @@
+.whisperRow {
+  width: 100%;
+  display: flex;
+  margin: 2px 0 4px;
+  padding: 0 12px;
+  pointer-events: none;
+  animation: whisperFloatIn 520ms ease both;
+}
+
+.whisperText {
+  max-width: 94%;
+  margin: 0;
+  font-size: 0.76rem;
+  line-height: 1.5;
+  font-weight: 750;
+  font-style: italic;
+  letter-spacing: 0.02em;
+  opacity: 0.9;
+  text-wrap: balance;
+}
+
+.left {
+  justify-content: flex-start;
+  text-align: left;
+}
+
+.center {
+  justify-content: center;
+  text-align: center;
+}
+
+.right {
+  justify-content: flex-end;
+  text-align: right;
+}
+
+.memory .whisperText {
+  color: rgba(178, 132, 224, 0.88);
+  text-shadow:
+    0 0 10px rgba(190, 150, 255, 0.24),
+    0 0 26px rgba(220, 190, 255, 0.16);
+}
+
+.signal .whisperText {
+  color: rgba(116, 231, 199, 0.9);
+  text-shadow:
+    0 0 10px rgba(120, 255, 210, 0.22),
+    0 0 26px rgba(170, 255, 230, 0.14);
+}
+
+.friendZone .whisperText {
+  color: rgba(247, 197, 122, 0.9);
+  text-shadow:
+    0 0 10px rgba(255, 210, 130, 0.24),
+    0 0 26px rgba(255, 232, 190, 0.14);
+}
+
+.profile .whisperText {
+  color: rgba(142, 199, 255, 0.9);
+  text-shadow:
+    0 0 10px rgba(140, 190, 255, 0.24),
+    0 0 26px rgba(190, 220, 255, 0.14);
+}
+
+.system .whisperText {
+  color: rgba(180, 194, 222, 0.86);
+  text-shadow:
+    0 0 10px rgba(160, 190, 230, 0.18),
+    0 0 26px rgba(200, 220, 255, 0.12);
+}
+
+.quiet .whisperText {
+  color: rgba(202, 184, 218, 0.78);
+  text-shadow:
+    0 0 10px rgba(210, 190, 230, 0.14),
+    0 0 26px rgba(220, 210, 240, 0.1);
+}
+
+@keyframes whisperFloatIn {
+  from {
+    opacity: 0;
+    transform: translateY(5px) scale(0.992);
+    filter: blur(2px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    filter: blur(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .whisperRow {
+    animation: none;
+  }
+}

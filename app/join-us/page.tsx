@@ -4,10 +4,61 @@ import React, { useState, FormEvent } from "react";
 import Link from "next/link";
 import Navbar from "@/app/components/Navbar";
 
-const SCRIPT_URL =
-  "https://script.google.com/macros/s/AKfycby4wgM7brYEIxPVyvStr3nd9bZF4_0P_hna7Bv8WJqqDMAwfk8sbFspRDqnHwMayr-r0A/exec";
-
 type Status = "idle" | "submitting" | "success" | "error";
+
+function formValue(formData: FormData, key: string) {
+  const value = formData.get(key);
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function joinLines(...parts: string[]) {
+  return parts.filter(Boolean).join("\n");
+}
+
+function buildGoogleSheetsPayload(formData: FormData) {
+  const fullName = formValue(formData, "Full Name");
+  const email = formValue(formData, "Email");
+  const phone = formValue(formData, "Phone");
+  const dateOfBirth = formValue(formData, "Date of Birth");
+  const location = formValue(formData, "City / State");
+  const castOrCrew = formValue(formData, "Cast or Crew?");
+  const role = formValue(formData, "Desired Role / Position");
+  const emergencyName = formValue(formData, "Emergency Contact Name");
+  const emergencyPhone = formValue(formData, "Emergency Contact Phone");
+  const instagram = formValue(formData, "Instagram");
+  const website = formValue(formData, "Website / Reel");
+  const experience = formValue(formData, "Experience");
+  const notes = formValue(formData, "Additional Notes");
+  const emergencyRelationship = formValue(formData, "Emergency Contact Relationship");
+  const boardCompany = formValue(formData, "BoardCompany");
+
+  const availability = joinLines(
+    experience ? `Experience: ${experience}` : "",
+    notes ? `Notes / Availability: ${notes}` : "",
+    emergencyRelationship
+      ? `Emergency Relationship: ${emergencyRelationship}`
+      : ""
+  );
+  const links = joinLines(
+    instagram ? `Instagram: ${instagram}` : "",
+    website ? `Website / Reel: ${website}` : ""
+  );
+
+  return {
+    FullName: fullName,
+    Email: email,
+    Phone: phone,
+    DateOfBirth: dateOfBirth,
+    Location: location,
+    CastOrCrew: castOrCrew,
+    Role: role,
+    EmergencyContactName: emergencyName,
+    EmergencyContactPhone: emergencyPhone,
+    Availability: availability,
+    Links: links,
+    BoardCompany: boardCompany,
+  };
+}
 
 export default function JoinUs() {
   const [status, setStatus] = useState<Status>("idle");
@@ -20,23 +71,40 @@ export default function JoinUs() {
 
     const form = e.currentTarget;
     const formData = new FormData(form);
+    const payload = buildGoogleSheetsPayload(formData);
 
     try {
-      const res = await fetch(SCRIPT_URL, {
+      console.log("[JoinUs] POST /api/join-us payload", payload);
+
+      const res = await fetch("/api/join-us", {
         method: "POST",
-        body: formData,
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const result = await res.json().catch(() => null);
+
+      console.log("[JoinUs] /api/join-us response", {
+        ok: res.ok,
+        status: res.status,
+        result,
       });
 
       if (!res.ok) {
-        throw new Error("Network response was not ok");
+        throw new Error(
+          result?.message || "Submission failed. Please check the required fields and try again."
+        );
       }
 
       setStatus("success");
       form.reset();
     } catch (err) {
-      console.error(err);
+      console.error("[JoinUs] submission failed", err);
       setStatus("error");
-      setError("Something went wrong. Please try again or email JohnAndyBooks@gmail.com.");
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Something went wrong. Please try again or email JohnAndyBooks@gmail.com."
+      );
     }
   };
 
@@ -104,6 +172,18 @@ export default function JoinUs() {
             </div>
           </nav>
 
+          <div className="mb-8 rounded-2xl border border-yellow-300/70 bg-yellow-300/10 p-4 text-yellow-50 shadow-[0_0_24px_rgba(250,204,21,0.25)]">
+            <p className="text-[11px] uppercase tracking-[0.22em] text-yellow-200 mb-2">
+              Registration Notice · Updated May 23 at 5:23 PM
+            </p>
+            <p className="text-xs md:text-sm leading-relaxed text-yellow-50/90">
+              If you submitted a cast or crew registration any time since
+              September and have not received a response, please resubmit your
+              information. A technical issue may have prevented some form
+              details from saving correctly.
+            </p>
+          </div>
+
           <div className="grid gap-8 md:grid-cols-[2fr,1fr] items-start">
             {/* FORM CARD */}
             <section className="bg-zinc-950/80 rounded-2xl border border-emerald-500/40 p-6 md:p-8 shadow-[0_0_45px_rgba(16,185,129,0.35)] backdrop-blur">
@@ -116,7 +196,20 @@ export default function JoinUs() {
                 </span>
               </div>
 
-              <form onSubmit={handleSubmit} className="space-y-6">
+              <form action="/api/join-us" method="post" onSubmit={handleSubmit} className="space-y-6">
+                <div
+                  className="absolute left-[-10000px] top-auto h-px w-px overflow-hidden"
+                  aria-hidden="true"
+                >
+                  <label htmlFor="board-company">Company</label>
+                  <input
+                    id="board-company"
+                    name="BoardCompany"
+                    tabIndex={-1}
+                    autoComplete="off"
+                  />
+                </div>
+
                 {/* BASIC INFO */}
                 <div className="grid md:grid-cols-2 gap-4">
                   <div>

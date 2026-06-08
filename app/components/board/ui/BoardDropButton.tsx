@@ -227,14 +227,29 @@ export function BoardDropButton({
               />
             </label>
           ) : (
-            <label className="text-xs font-semibold text-emerald-800 block">
+            <label className="block text-xs font-semibold text-emerald-800">
               Upload ({kindIcon(kind)} {kind})
+              <span className="mt-2 inline-flex cursor-pointer items-center justify-center rounded-full bg-emerald-950 px-4 py-2 text-[11px] font-black uppercase tracking-[0.16em] text-emerald-100 shadow-[0_0_18px_rgba(16,185,129,0.14)] ring-1 ring-emerald-700/30 transition hover:-translate-y-0.5 hover:brightness-110">
+                Upload
+              </span>
               <input
                 type="file"
                 accept={acceptFor(kind)}
                 onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-                className="mt-1 w-full rounded-2xl bg-white px-4 py-3 text-sm text-emerald-900 ring-1 ring-emerald-200 outline-none"
+                className="sr-only"
               />
+              <div className="mt-2 flex min-h-5 flex-wrap items-center gap-2 text-[11px] font-bold text-emerald-700/70">
+                {file ? (
+                  <>
+                    <span className="max-w-full truncate">{file.name}</span>
+                    <span className="uppercase tracking-[0.12em]">
+                      {Math.round(file.size / 1024)} KB
+                    </span>
+                  </>
+                ) : (
+                  <span>Select a file from this device.</span>
+                )}
+              </div>
               <div className="mt-2 text-[11px] text-emerald-700/70">
                 v1 stores uploads locally. Next step: Supabase Storage for real uploads.
               </div>

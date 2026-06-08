@@ -1,99 +1,71 @@
-// middleware.ts
-import { NextResponse, type NextRequest } from "next/server";
 import { createServerClient } from "@supabase/ssr";
+import { NextRequest, NextResponse } from "next/server";
 
-/**
- * Public /board routes (always accessible without login)
- * - Keep /board and /board/login reachable so you can enter while Board is locked.
- * - We will conditionally block /board/signup when locked.
- */
-const PUBLIC_BOARD_ROUTES = new Set([
-  "/board",
-  "/board/login",
-  "/board/signup",
-  "/board/auth/callback",
-]);
-
-function parseAllowedEmails(raw?: string | null) {
-  return new Set(
-    (raw || "")
-      .split(",")
-      .map((s) => s.trim().toLowerCase())
-      .filter(Boolean)
-  );
-}
-
-export async function middleware(req: NextRequest) {
-  const { pathname, search } = req.nextUrl;
-
-  // Only guard /board/*
-  if (!pathname.startsWith("/board")) return NextResponse.next();
-
-  const locked =
-    (process.env.BOARD_LOCKED || "").toLowerCase() === "1" ||
-    (process.env.BOARD_LOCKED || "").toLowerCase() === "true";
-
-  // While locked: block signup so new users can’t create accounts.
-  if (locked && pathname === "/board/signup") {
-    const url = req.nextUrl.clone();
-    url.pathname = "/board";
-    url.searchParams.set("locked", "1");
-    return NextResponse.redirect(url);
+function isPublicBoardRoute(pathname: string) {
+  if (pathname === "/board") return true;
+  if (
+    pathname === "/board/login" ||
+    pathname === "/board/preview" ||
+    pathname === "/board/signup" ||
+    pathname === "/board/reset-password"
+  ) {
+    return true;
   }
 
-  // Allow public pages
-  if (PUBLIC_BOARD_ROUTES.has(pathname)) return NextResponse.next();
+  // Public, view-only profile boards stay shareable.
+  return /^\/board\/profile\/[^/]+$/.test(pathname);
+}
 
-  // Create the response we will return (and mutate cookies onto if needed)
-  const res = NextResponse.next();
+export async function middleware(request: NextRequest) {
+  const { pathname, search } = request.nextUrl;
 
-  // Supabase server client (cookie-based session)
+  if (isPublicBoardRoute(pathname)) {
+    return NextResponse.next();
+  }
+
+  let response = NextResponse.next({
+    request: {
+      headers: request.headers,
+    },
+  });
+
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
       cookies: {
         getAll() {
-          return req.cookies.getAll();
+          return request.cookies.getAll();
         },
-        setAll(cookies) {
-          cookies.forEach(({ name, value, options }) => {
-            res.cookies.set(name, value, options);
+        setAll(cookiesToSet) {
+          cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value));
+          response = NextResponse.next({
+            request: {
+              headers: request.headers,
+            },
+          });
+          cookiesToSet.forEach(({ name, value, options }) => {
+            response.cookies.set(name, value, options);
           });
         },
       },
     }
   );
 
-  const { data, error } = await supabase.auth.getUser();
-  const user = data?.user;
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
 
-  if (error) {
-    console.error("[middleware] supabase.auth.getUser error:", error);
+  if (user) {
+    return response;
   }
 
-  // If user is not authenticated, redirect to login
-  if (!user) {
-    const url = req.nextUrl.clone();
-    url.pathname = "/board/login";
-    url.searchParams.set("next", `${pathname}${search}`);
-    return NextResponse.redirect(url);
-  }
+  const loginUrl = request.nextUrl.clone();
+  loginUrl.pathname = "/board/login";
+  loginUrl.search = "";
+  loginUrl.searchParams.set("next", `${pathname}${search}`);
 
-  // ✅ Lock gate: only allow whitelisted emails when BOARD_LOCKED=1
-  if (locked) {
-    const allowed = parseAllowedEmails(process.env.BOARD_ALLOWED_EMAILS);
-    const email = (user.email || "").toLowerCase();
-
-    if (!email || !allowed.has(email)) {
-      const url = req.nextUrl.clone();
-      url.pathname = "/board";
-      url.searchParams.set("locked", "1");
-      return NextResponse.redirect(url);
-    }
-  }
-
-  return res;
+  return NextResponse.redirect(loginUrl);
 }
 
 export const config = {

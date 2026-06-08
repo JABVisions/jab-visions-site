@@ -4,9 +4,26 @@
 
 export type BucketFolder = "pass" | "pin" | "push";
 
+export type BucketMemoryDrop = {
+  id: string;
+  created_at?: string | null;
+  user_id?: string | null;
+  kind?: string | null;
+  title?: string | null;
+  body?: string | null;
+  href?: string | null;
+  image_url?: string | null;
+  meta?: Record<string, any> | null;
+};
+
 export type BucketEntry = {
   activityId: string;
   savedAt: number;
+  item?: BucketMemoryDrop | null;
+  waveCount?: number;
+  lastWavedAt?: string;
+  wavedBy?: string[];
+  resonanceScore?: number;
 };
 
 export type WaveEntry = {
@@ -47,6 +64,8 @@ export const EVT_BUCKET_UPDATED = EVT_UPDATED;
 export const EVT_BUCKET_OPEN = EVT_OPEN;
 export const EVT_BUCKET_DEPOSIT = EVT_DEPOSIT;
 
+export const WAVE_COOLDOWN_HOURS = 24;
+
 function now() {
   return Date.now();
 }
@@ -81,6 +100,45 @@ function uniqBucketByActivityId(arr: BucketEntry[]) {
     out.push(e);
   }
   return out;
+}
+
+function hoursSince(dateString?: string | null) {
+  if (!dateString) return Number.POSITIVE_INFINITY;
+  const time = new Date(dateString).getTime();
+  if (!Number.isFinite(time)) return Number.POSITIVE_INFINITY;
+  return (Date.now() - time) / 36e5;
+}
+
+export function getResonanceScore(
+  item: BucketEntry,
+  reactionType?: BucketFolder
+) {
+  const waveScore = (item.waveCount ?? 0) * 5;
+  const folder =
+    reactionType ||
+    (item.item?.meta?.reactionType as BucketFolder | undefined) ||
+    undefined;
+  const reactionScore =
+    folder === "push" ? 12 : folder === "pin" ? 8 : folder === "pass" ? 3 : 0;
+  const lastWavedScore = item.lastWavedAt
+    ? Math.max(0, 20 - hoursSince(item.lastWavedAt))
+    : 0;
+
+  return waveScore + reactionScore + lastWavedScore;
+}
+
+function sortBucketEntries(items: BucketEntry[], folder: BucketFolder) {
+  return [...items].sort((a, b) => {
+    const aScore = getResonanceScore(a, folder);
+    const bScore = getResonanceScore(b, folder);
+    if (bScore !== aScore) return bScore - aScore;
+
+    const aWave = a.lastWavedAt ? new Date(a.lastWavedAt).getTime() : 0;
+    const bWave = b.lastWavedAt ? new Date(b.lastWavedAt).getTime() : 0;
+    if (bWave !== aWave) return bWave - aWave;
+
+    return (b.savedAt ?? 0) - (a.savedAt ?? 0);
+  });
 }
 
 function pairKey(a: string, b: string) {
@@ -122,15 +180,26 @@ export function writeBrain(next: BucketBrainState) {
   window.dispatchEvent(new Event(EVT_UPDATED));
 }
 
-export function depositToBrain(folder: BucketFolder, activityId: string) {
+export function depositToBrain(
+  folder: BucketFolder,
+  activityId: string,
+  item?: BucketMemoryDrop | null
+) {
   const t = now();
   const prev = readBrain();
 
-  const entry: BucketEntry = { activityId: String(activityId), savedAt: t };
+  const entry: BucketEntry = {
+    activityId: String(activityId),
+    savedAt: t,
+    ...(item ? { item } : {}),
+  };
 
   const next: BucketBrainState = {
     ...prev,
-    [folder]: uniqBucketByActivityId([entry, ...(prev[folder] ?? [])]),
+    [folder]: sortBucketEntries(
+      uniqBucketByActivityId([entry, ...(prev[folder] ?? [])]),
+      folder
+    ),
     updatedAt: t,
   } as BucketBrainState;
 
@@ -139,6 +208,50 @@ export function depositToBrain(folder: BucketFolder, activityId: string) {
   if (typeof window !== "undefined") {
     window.dispatchEvent(new CustomEvent(EVT_OPEN, { detail: { folder } }));
   }
+}
+
+export function waveBucketDrop(
+  folder: BucketFolder,
+  activityId: string,
+  userId: string
+): { status: "waved" | "cooldown" | "missing"; entry?: BucketEntry } {
+  const id = String(activityId || "");
+  const user = normUser(userId || "me") || "me";
+  if (!id) return { status: "missing" };
+
+  const prev = readBrain();
+  const list = prev[folder] ?? [];
+  const index = list.findIndex((entry) => String(entry.activityId) === id);
+  if (index < 0) return { status: "missing" };
+
+  const current = list[index];
+  const alreadyWaved = (current.wavedBy ?? []).some((w) => normUser(w) === user);
+  const withinCooldown =
+    alreadyWaved &&
+    current.lastWavedAt &&
+    hoursSince(current.lastWavedAt) < WAVE_COOLDOWN_HOURS;
+
+  if (withinCooldown) return { status: "cooldown", entry: current };
+
+  const nowIso = new Date().toISOString();
+  const nextEntry: BucketEntry = {
+    ...current,
+    waveCount: (current.waveCount ?? 0) + 1,
+    lastWavedAt: nowIso,
+    wavedBy: Array.from(new Set([...(current.wavedBy ?? []), user])),
+  };
+  nextEntry.resonanceScore = getResonanceScore(nextEntry, folder);
+
+  const nextList = [...list];
+  nextList[index] = nextEntry;
+
+  writeBrain({
+    ...prev,
+    [folder]: sortBucketEntries(nextList, folder),
+    updatedAt: now(),
+  } as BucketBrainState);
+
+  return { status: "waved", entry: nextEntry };
 }
 
 export function openBucket(folder?: BucketFolder) {
@@ -171,11 +284,17 @@ export function sendWave(from: string, to: string) {
     const exists = mutuals.some(
       (m) => pairKey(m.a, m.b) === key && m.kind === "wave_wave"
     );
+
     if (!exists) {
-      mutuals = [
-        { id: makeId("mutual"), a: f, b: tUser, createdAt: ts, kind: "wave_wave" },
-        ...mutuals,
-      ].slice(0, 500);
+      const newMutual: MutualEntry = {
+        id: makeId("mutual"),
+        a: f,
+        b: tUser,
+        createdAt: ts,
+        kind: "wave_wave",
+      };
+
+      mutuals = [newMutual, ...mutuals].slice(0, 500);
     }
   }
 
@@ -187,7 +306,7 @@ export function simulateIncomingWave(me: string, someone: string) {
 }
 
 export function installBucketDepositBridge() {
-  if (typeof window === "undefined") return () => {};
+  if (typeof window === "undefined") return () => { };
 
   const handler = (e: Event) => {
     const ce = e as CustomEvent;
@@ -195,9 +314,13 @@ export function installBucketDepositBridge() {
 
     const folder = detail.folder as BucketFolder;
     const activityId = String(detail.activityId ?? "");
+    const item =
+      detail.item && typeof detail.item === "object"
+        ? (detail.item as BucketMemoryDrop)
+        : null;
     if (!folder || !activityId) return;
 
-    depositToBrain(folder, activityId);
+    depositToBrain(folder, activityId, item);
   };
 
   window.addEventListener(EVT_DEPOSIT, handler as EventListener);

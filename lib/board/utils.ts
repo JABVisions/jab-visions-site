@@ -46,16 +46,22 @@ export function kindEmoji(kind: AssetKind) {
 
 export function RouteTitle(route: DropRoute) {
   switch (route) {
-    case "board":
-      return "Board Drops";
-    case "assets":
-      return "Assets";
-    case "projects":
-      return "Projects";
-    case "portfolio":
-      return "Portfolio";
-    case "workcalls":
-      return "Work Calls";
+    case "home":
+      return "Home";
+    case "feed":
+      return "Feed";
+    case "forums":
+      return "Forums";
+    case "work":
+      return "Work";
+    case "profile":
+      return "Profile";
+    case "friend-zone":
+      return "Friend Zone";
+    case "options":
+      return "Options";
+    case "explore":
+      return "Explore";
     default:
       return "Drop Pad";
   }
@@ -138,6 +144,28 @@ export function parseSoundCloud(url: string) {
   }
 }
 
+export function parseAppleMusic(url: string) {
+  try {
+    const u = new URL(url);
+    const host = u.hostname.toLowerCase();
+    if (host === "embed.music.apple.com") return { embedUrl: url, label: "Apple Music" };
+    if (host !== "music.apple.com") return null;
+
+    const parts = u.pathname.split("/").filter(Boolean);
+    if (parts[0] === "embed") {
+      return {
+        embedUrl: `https://embed.music.apple.com/${parts.slice(1).join("/")}${u.search}`,
+        label: "Apple Music",
+      };
+    }
+    if (parts.length < 3) return null;
+
+    return { embedUrl: `https://embed.music.apple.com${u.pathname}${u.search}`, label: "Apple Music" };
+  } catch {
+    return null;
+  }
+}
+
 export function buildMusicEmbed(rawUrl: string) {
   const url = normalizeUrl(rawUrl);
   if (!url) return { embedUrl: "", provider: "" };
@@ -147,6 +175,9 @@ export function buildMusicEmbed(rawUrl: string) {
 
   const sc = parseSoundCloud(url);
   if (sc) return { embedUrl: sc.embedUrl, provider: sc.label };
+
+  const am = parseAppleMusic(url);
+  if (am) return { embedUrl: am.embedUrl, provider: am.label };
 
   return { embedUrl: "", provider: "" };
 }

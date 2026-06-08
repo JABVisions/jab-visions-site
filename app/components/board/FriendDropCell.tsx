@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import React from "react";
 
 export type FriendDropCellProps = {
@@ -9,6 +10,7 @@ export type FriendDropCellProps = {
   /** 0..3: higher = more “interactive glow” */
   tier?: 0 | 1 | 2 | 3;
   onClick?: () => void;
+  href?: string;
 };
 
 export default function FriendDropCell({
@@ -17,14 +19,12 @@ export default function FriendDropCell({
   selected = false,
   tier = 0,
   onClick,
+  href,
 }: FriendDropCellProps) {
-  return (
-    <button
-      type="button"
-      className={`fz_orbCell ${selected ? "on" : ""} glow${tier}`}
-      onClick={onClick}
-      title={`Message ${name}`}
-    >
+  const className = `fz_orbCell ${selected ? "on" : ""} glow${tier}`;
+  const title = href ? `Open ${name}'s Board` : `Message ${name}`;
+  const inner = (
+    <>
       <div className="fz_orb" aria-hidden>
         <div className="fz_orbInner" aria-hidden>
           <div className="fz_avatarTile" aria-hidden>
@@ -46,14 +46,16 @@ export default function FriendDropCell({
           background: transparent;
           padding: 0;
           cursor: pointer;
-          min-width: 92px;
+          min-width: 168px;
           text-align: center;
           user-select: none;
+          text-decoration: none;
+          display: block;
         }
 
         .fz_orb {
-          width: 66px;
-          height: 66px;
+          width: 132px;
+          height: 132px;
           margin: 0 auto;
           border-radius: 999px;
           display: grid;
@@ -75,8 +77,8 @@ export default function FriendDropCell({
         }
 
         .fz_orbInner {
-          width: 54px;
-          height: 54px;
+          width: 108px;
+          height: 108px;
           border-radius: 999px;
           display: grid;
           place-items: center;
@@ -86,9 +88,9 @@ export default function FriendDropCell({
         }
 
         .fz_avatarTile {
-          width: 44px;
-          height: 44px;
-          border-radius: 14px;
+          width: 88px;
+          height: 88px;
+          border-radius: 24px;
           border: 1px solid rgba(255,255,255,0.12);
           background: rgba(0,0,0,0.20);
           overflow: hidden;
@@ -105,17 +107,17 @@ export default function FriendDropCell({
         }
 
         .fz_orbEmoji {
-          font-size: 16px;
+          font-size: 32px;
           opacity: 0.9;
         }
 
         .fz_orbName {
-          margin-top: 8px;
-          font-size: 12px;
+          margin-top: 12px;
+          font-size: 14px;
           font-weight: 900;
           letter-spacing: 0.02em;
           color: rgba(255,255,255,0.82);
-          width: 92px;
+          width: 168px;
           overflow: hidden;
           text-overflow: ellipsis;
           white-space: nowrap;
@@ -182,6 +184,20 @@ export default function FriendDropCell({
           }
         }
       `}</style>
+    </>
+  );
+
+  if (href) {
+    return (
+      <Link href={href} className={className} title={title}>
+        {inner}
+      </Link>
+    );
+  }
+
+  return (
+    <button type="button" className={className} onClick={onClick} title={title}>
+      {inner}
     </button>
   );
 }

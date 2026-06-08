@@ -5,8 +5,16 @@ import DropPadOSBase, {
   type DropPadApp,
   type DropBubble,
 } from "@/app/components/board/DropPadOS";
+import type { StoreDrop } from "@/app/components/board/StoreDropTile";
 
-type DropRoute = "board" | "assets" | "projects" | "portfolio" | "workcalls";
+type DropRoute =
+  | "board"
+  | "assets"
+  | "projects"
+  | "portfolio"
+  | "workcalls"
+  | "profiledrops"
+  | "storedrops";
 
 function swapApp(app: DropPadApp): DropPadApp {
   // ✅ Swap meaning: assets <-> portfolio
@@ -36,6 +44,8 @@ export default function DropPadOSv3(props: {
 
   title?: string;
   subtitle?: string;
+  maxScreenPx?: number;
+  storeDrops?: StoreDrop[];
 }) {
   const drops = useMemo<DropBubble[]>(
     () =>
@@ -49,6 +59,8 @@ export default function DropPadOSv3(props: {
             { id: "d3", label: "Projects", route: "projects", emoji: "🧩" },
             { id: "d4", label: "Assets", route: "portfolio", emoji: "🗂️" }, // base portfolio placeholder = pinned assets later
             { id: "d5", label: "Work Calls", route: "workcalls", emoji: "📣" },
+            { id: "d6", label: "Profile Drops", route: "profiledrops", emoji: "🪞" },
+            { id: "d7", label: "Store Drops", route: "storedrops", emoji: "🛍️" },
           ] as any),
     [props.drops]
   );
@@ -66,6 +78,8 @@ export default function DropPadOSv3(props: {
       onNavigate={(app) => props.onNavigate?.(swapApp(app))} // ✅ base assets -> parent portfolio
       title={props.title}
       subtitle={props.subtitle}
+      maxScreenPx={props.maxScreenPx}
+      storeDrops={props.storeDrops}
     />
   );
 }

@@ -5,22 +5,104 @@ import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { supabaseBrowser } from "@/lib/supabase/browser";
 
+const MONTHS = [
+  { value: "1", label: "January" },
+  { value: "2", label: "February" },
+  { value: "3", label: "March" },
+  { value: "4", label: "April" },
+  { value: "5", label: "May" },
+  { value: "6", label: "June" },
+  { value: "7", label: "July" },
+  { value: "8", label: "August" },
+  { value: "9", label: "September" },
+  { value: "10", label: "October" },
+  { value: "11", label: "November" },
+  { value: "12", label: "December" },
+];
+
+const AURA_COLORS = [
+  { key: "sloth_pink", label: "Sleepy Pink", hex: "#FF4FD8", emblem: "■" },
+  { key: "lust_blue", label: "Dreamy Blue", hex: "#2D7CFF", emblem: "■" },
+  { key: "greed_black", label: "Selfish Black", hex: "#111111", emblem: "■" },
+  { key: "pride_yellow", label: "Pride Yellow", hex: "#FFD12D", emblem: "■" },
+  { key: "envy_red", label: "Really Red", hex: "#FF2D2D", emblem: "■" },
+  { key: "gluttony_orange", label: "Cautious Orange", hex: "#FF7A1A", emblem: "■" },
+  { key: "wrath_purple", label: "Royal Purple", hex: "#7A44FF", emblem: "■" },
+  { key: "lilly_yellowgreen", label: "Nature Green", hex: "#B7FF2D", emblem: "■" },
+];
+
+const PROFILE_VIBES = [
+  { key: "locked_in", emoji: "🎧", label: "Locked In" },
+  { key: "joyful", emoji: "✨", label: "Joyful" },
+  { key: "dreamy", emoji: "☁️", label: "Dreamy" },
+  { key: "romantic", emoji: "💞", label: "Romantic" },
+  { key: "mysterious", emoji: "🔮", label: "Mysterious" },
+  { key: "chaotic", emoji: "🌀", label: "Chaotic" },
+  { key: "sleepy", emoji: "🌙", label: "Sleepy" },
+  { key: "grateful", emoji: "🤍", label: "Grateful" },
+];
+
+function pad2(value: number) {
+  return String(value).padStart(2, "0");
+}
+
+function getAgeFromBirthDate(month: string, day: string, year: string) {
+  const m = Number(month);
+  const d = Number(day);
+  const y = Number(year);
+  if (!m || !d || !y) return null;
+
+  const birthDate = new Date(y, m - 1, d);
+  const isValidDate =
+    birthDate.getFullYear() === y &&
+    birthDate.getMonth() === m - 1 &&
+    birthDate.getDate() === d;
+
+  if (!isValidDate) return null;
+
+  const today = new Date();
+  let age = today.getFullYear() - y;
+  const birthdayPassed =
+    today.getMonth() > m - 1 || (today.getMonth() === m - 1 && today.getDate() >= d);
+  if (!birthdayPassed) age -= 1;
+
+  return age;
+}
+
 export default function BoardSignupPage() {
   const router = useRouter();
   const sb = useMemo(() => supabaseBrowser(), []);
 
+  const [fullName, setFullName] = useState("");
+  const [username, setUsername] = useState("");
+  const [birthMonth, setBirthMonth] = useState("");
+  const [birthDay, setBirthDay] = useState("");
+  const [birthYear, setBirthYear] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [accountType, setAccountType] = useState("Creator");
+  const [boardGoal, setBoardGoal] = useState("");
+  const [profileVibe, setProfileVibe] = useState("locked_in");
+  const [signalColor, setSignalColor] = useState("sloth_pink");
+  const [signalMenuOpen, setSignalMenuOpen] = useState(false);
 
   const [agree, setAgree] = useState(false);
 
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [ok, setOk] = useState<string | null>(null);
+  const currentYear = new Date().getFullYear();
+  const birthYears = Array.from({ length: 121 }, (_, index) => String(currentYear - index));
+  const selectedSignalColor =
+    AURA_COLORS.find((color) => color.key === signalColor) ?? AURA_COLORS[0];
 
   function validatePassword(pw: string) {
     if (pw.length < 8) return "Password must be at least 8 characters.";
     return null;
+  }
+
+  function cleanUsername(value: string) {
+    return value.trim().toLowerCase().replace(/^@+/, "").replace(/[^a-z0-9_]/g, "").slice(0, 24);
   }
 
   async function onSignup(e: React.FormEvent) {
@@ -28,6 +110,24 @@ export default function BoardSignupPage() {
     setErr(null);
     setOk(null);
 
+    const nextFullName = fullName.trim().replace(/\s+/g, " ");
+    const nextUsername = cleanUsername(username);
+    const nextAge = getAgeFromBirthDate(birthMonth, birthDay, birthYear);
+    const selectedSignal = AURA_COLORS.find((color) => color.key === signalColor) ?? AURA_COLORS[0];
+    const selectedVibe = PROFILE_VIBES.find((vibeOption) => vibeOption.key === profileVibe) ?? PROFILE_VIBES[0];
+
+    if (nextFullName.length < 2) {
+      setErr("Please enter your full name.");
+      return;
+    }
+    if (nextUsername.length < 3) {
+      setErr("Choose a username with at least 3 letters, numbers, or underscores.");
+      return;
+    }
+    if (nextAge === null || nextAge < 13 || nextAge > 120) {
+      setErr("Board is 13+. Please enter a valid birth date.");
+      return;
+    }
     if (!agree) {
       setErr("Please confirm you agree to the Terms, Privacy Policy, and Guidelines.");
       return;
@@ -44,13 +144,39 @@ export default function BoardSignupPage() {
 
     setLoading(true);
     try {
+      const { data: existingProfile } = await sb
+        .from("profiles")
+        .select("id")
+        .eq("username", nextUsername)
+        .maybeSingle();
+
+      if (existingProfile?.id) {
+        setErr("That username is already taken. Try another one.");
+        return;
+      }
+
       const { data, error } = await sb.auth.signUp({
         email: email.trim(),
         password,
         options: {
-          // You can store small metadata here if you want later (like plan="free")
           data: {
             onboarding: "v1",
+            full_name: nextFullName,
+            display_name: nextFullName,
+            name: nextFullName,
+            username: nextUsername,
+            age: nextAge,
+            birth_month: Number(birthMonth),
+            birth_day: Number(birthDay),
+            birth_year: Number(birthYear),
+            birth_date: `${birthYear}-${pad2(Number(birthMonth))}-${pad2(Number(birthDay))}`,
+            board_account_type: accountType,
+            board_goal: boardGoal.trim(),
+            board_vibe: selectedVibe.key,
+            board_vibe_label: selectedVibe.label,
+            board_signal_color: selectedSignal.key,
+            board_signal_label: selectedSignal.label,
+            board_signal_hex: selectedSignal.hex,
           },
         },
       });
@@ -70,6 +196,7 @@ export default function BoardSignupPage() {
 
       // If user exists immediately, redirect; otherwise take them to login.
       if (data.user) {
+        await fetch("/api/board/profile/ensure", { method: "POST" }).catch(() => undefined);
         router.push("/board/work"); // change to your real post-signup route
         router.refresh();
       } else {
@@ -87,7 +214,13 @@ export default function BoardSignupPage() {
       <header className="mx-auto max-w-6xl px-6 pt-10 pb-6">
         <div className="flex items-center justify-between gap-4">
           <Link href="/board" className="flex items-center gap-3">
-            <div className="h-10 w-10 rounded-2xl bg-black/40 ring-1 ring-white/10 shadow-[0_0_40px_rgba(255,0,180,0.25)]" />
+            <div className="h-10 w-10 overflow-hidden rounded-2xl border border-white/10 bg-black/40 ring-1 ring-white/10 shadow-[0_0_40px_rgba(210,255,60,0.25)]">
+              <img
+                src="/assets/board-logo-signup.jpg"
+                alt="Board logo"
+                className="h-full w-full object-cover object-center"
+              />
+            </div>
             <div>
               <div className="text-sm opacity-70">JAB Visions™</div>
               <div className="text-lg font-semibold tracking-tight">Board</div>
@@ -108,14 +241,107 @@ export default function BoardSignupPage() {
         </div>
       </header>
 
-      <section className="mx-auto max-w-xl px-6 pb-14 pt-4">
+      <section className="mx-auto max-w-3xl px-6 pb-14 pt-4">
         <div className="rounded-3xl border border-white/10 bg-black/30 p-8 shadow-[0_0_80px_rgba(0,200,255,0.08)]">
           <h1 className="text-3xl font-semibold tracking-tight">Create account</h1>
           <p className="mt-2 text-sm opacity-80">
-            Join Board. Drop, connect, build.
+            Set up your Board identity. Drop, connect, build.
           </p>
 
           <form className="mt-6 grid gap-4" onSubmit={onSignup}>
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="grid gap-2">
+                <label className="text-xs opacity-70">Full name</label>
+                <input
+                  className="w-full rounded-2xl border border-white/10 bg-black/40 px-4 py-3 text-sm outline-none focus:border-white/20"
+                  value={fullName}
+                  onChange={(e) => setFullName(e.target.value)}
+                  type="text"
+                  placeholder="First and last name"
+                  autoComplete="name"
+                />
+              </div>
+
+              <div className="grid gap-2">
+                <label className="text-xs opacity-70">Username</label>
+                <div className="flex items-center rounded-2xl border border-white/10 bg-black/40 px-4 py-3 focus-within:border-white/20">
+                  <span className="text-sm opacity-50">@</span>
+                  <input
+                    className="min-w-0 flex-1 bg-transparent pl-1 text-sm outline-none"
+                    value={username}
+                    onChange={(e) => setUsername(cleanUsername(e.target.value))}
+                    type="text"
+                    placeholder="yourname"
+                    autoComplete="username"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-[1.4fr_1fr]">
+              <div className="grid gap-2">
+                <label className="text-xs opacity-70">Birth date</label>
+                <div className="grid gap-2 sm:grid-cols-[1.2fr_0.8fr_0.9fr]">
+                  <select
+                    className="w-full rounded-2xl border border-white/10 bg-black/40 px-4 py-3 text-sm outline-none focus:border-white/20"
+                    value={birthMonth}
+                    onChange={(e) => setBirthMonth(e.target.value)}
+                    autoComplete="bday-month"
+                  >
+                    <option value="">Month</option>
+                    {MONTHS.map((month) => (
+                      <option key={month.value} value={month.value}>
+                        {month.label}
+                      </option>
+                    ))}
+                  </select>
+
+                  <select
+                    className="w-full rounded-2xl border border-white/10 bg-black/40 px-4 py-3 text-sm outline-none focus:border-white/20"
+                    value={birthDay}
+                    onChange={(e) => setBirthDay(e.target.value)}
+                    autoComplete="bday-day"
+                  >
+                    <option value="">Day</option>
+                    {Array.from({ length: 31 }, (_, index) => String(index + 1)).map((day) => (
+                      <option key={day} value={day}>
+                        {day}
+                      </option>
+                    ))}
+                  </select>
+
+                  <select
+                    className="w-full rounded-2xl border border-white/10 bg-black/40 px-4 py-3 text-sm outline-none focus:border-white/20"
+                    value={birthYear}
+                    onChange={(e) => setBirthYear(e.target.value)}
+                    autoComplete="bday-year"
+                  >
+                    <option value="">Year</option>
+                    {birthYears.map((year) => (
+                      <option key={year} value={year}>
+                        {year}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid gap-2">
+                <label className="text-xs opacity-70">Account lane</label>
+                <select
+                  className="w-full rounded-2xl border border-white/10 bg-black/40 px-4 py-3 text-sm outline-none focus:border-white/20"
+                  value={accountType}
+                  onChange={(e) => setAccountType(e.target.value)}
+                >
+                  <option>Creator</option>
+                  <option>Artist</option>
+                  <option>Business</option>
+                  <option>Collaborator</option>
+                  <option>Supporter</option>
+                </select>
+              </div>
+            </div>
+
             <div className="grid gap-2">
               <label className="text-xs opacity-70">Email</label>
               <input
@@ -140,6 +366,95 @@ export default function BoardSignupPage() {
               />
               <div className="text-[11px] opacity-60">
                 Tip: use 8+ characters. You can upgrade password rules later.
+              </div>
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="grid gap-2">
+                <label className="text-xs opacity-70">What are you building on Board?</label>
+                <textarea
+                  className="min-h-[108px] w-full resize-none rounded-2xl border border-white/10 bg-black/40 px-4 py-3 text-sm outline-none focus:border-white/20"
+                  value={boardGoal}
+                  onChange={(e) => setBoardGoal(e.target.value.slice(0, 180))}
+                  placeholder="This becomes your profile bio: music, films, projects, a portfolio, community..."
+                />
+              </div>
+
+              <div className="grid gap-2">
+                <label className="text-xs opacity-70">Board setup</label>
+                <div className="grid gap-3 rounded-2xl border border-white/10 bg-white/5 p-3">
+                  <select
+                    className="w-full rounded-2xl border border-white/10 bg-black/40 px-4 py-3 text-sm outline-none focus:border-white/20"
+                    value={profileVibe}
+                    onChange={(e) => setProfileVibe(e.target.value)}
+                    aria-label="Profile vibe"
+                  >
+                    {PROFILE_VIBES.map((vibeOption) => (
+                      <option key={vibeOption.key} value={vibeOption.key}>
+                        {vibeOption.emoji} Profile vibe: {vibeOption.label}
+                      </option>
+                    ))}
+                  </select>
+
+                  <div className="relative">
+                    <button
+                      type="button"
+                      className="flex w-full items-center justify-between gap-3 rounded-2xl border border-white/10 bg-black/40 px-4 py-3 text-left text-sm outline-none transition hover:border-white/20 focus:border-white/25"
+                      onClick={() => setSignalMenuOpen((open) => !open)}
+                      aria-haspopup="listbox"
+                      aria-expanded={signalMenuOpen}
+                    >
+                      <span className="flex min-w-0 items-center gap-3">
+                        <span
+                          className="h-6 w-6 shrink-0 rounded-[8px] border border-white/30"
+                          style={{
+                            background: selectedSignalColor.hex,
+                            boxShadow: `0 0 16px ${selectedSignalColor.hex}66`,
+                          }}
+                          aria-hidden
+                        />
+                        <span className="truncate">Signal color: {selectedSignalColor.label}</span>
+                      </span>
+                      <span className="text-xs opacity-55" aria-hidden>
+                        {signalMenuOpen ? "▲" : "▼"}
+                      </span>
+                    </button>
+
+                    {signalMenuOpen ? (
+                      <div
+                        className="absolute left-0 right-0 top-[calc(100%+8px)] z-30 grid max-h-72 gap-1 overflow-auto rounded-2xl border border-white/10 bg-[#080b08] p-2 shadow-[0_20px_60px_rgba(0,0,0,0.45)]"
+                        role="listbox"
+                        aria-label="Signal color"
+                      >
+                        {AURA_COLORS.map((color) => (
+                          <button
+                            key={color.key}
+                            type="button"
+                            className={`flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left text-sm transition hover:bg-white/10 ${
+                              signalColor === color.key ? "bg-white/10" : "bg-transparent"
+                            }`}
+                            onClick={() => {
+                              setSignalColor(color.key);
+                              setSignalMenuOpen(false);
+                            }}
+                            role="option"
+                            aria-selected={signalColor === color.key}
+                          >
+                            <span
+                              className="h-7 w-7 shrink-0 rounded-[9px] border border-white/30"
+                              style={{
+                                background: color.hex,
+                                boxShadow: `0 0 16px ${color.hex}66`,
+                              }}
+                              aria-hidden
+                            />
+                            <span className="font-semibold">{color.label}</span>
+                          </button>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
               </div>
             </div>
 

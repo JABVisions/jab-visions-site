@@ -3,27 +3,96 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import type { BoardActivity } from "@/lib/board/activity";
 import { getLocalActivity } from "@/lib/board/activity";
+import { mergeActivityWithFeed } from "@/lib/board/feedActivity";
+import { EVENTS, readFeed } from "@/lib/boardStore";
+import { supabaseBrowser } from "@/lib/supabase/browser";
 
 import {
   type BucketFolder,
   type BucketBrainState,
+  type BucketEntry,
+  type BucketMemoryDrop,
   readBrain,
   writeBrain,
   sendWave,
   simulateIncomingWave,
+  getResonanceScore,
+  waveBucketDrop,
   BUCKET_BRAIN_KEY,
   EVT_UPDATED,
+  EVT_OPEN,
 } from "@/lib/board/bucketBrain";
 
 function clsx(...parts: Array<string | false | null | undefined>) {
   return parts.filter(Boolean).join(" ");
 }
 
-type BucketEntry = { activityId: string; savedAt: number };
+type BucketStatsOverride = {
+  pass: number;
+  pin: number;
+  push: number;
+  waves: number;
+  mutuals: number;
+  updatedAt?: number;
+};
+
+const fallbackAuraColor = "#8ee7ff";
+const EMPTY_BRAIN: BucketBrainState = {
+  version: 3,
+  pass: [],
+  pin: [],
+  push: [],
+  waves: [],
+  mutuals: [],
+  updatedAt: 0,
+};
+
+function readUserAuraColor() {
+  try {
+    if (typeof window === "undefined") return fallbackAuraColor;
+    const optionsRaw = window.localStorage.getItem("board.options.v1");
+    const profileRaw = window.localStorage.getItem("jab_board_profile_v2");
+    const options = optionsRaw ? JSON.parse(optionsRaw) : null;
+    const profile = profileRaw ? JSON.parse(profileRaw) : null;
+    const auraColor =
+      typeof options?.auraColor === "string" && options.auraColor.trim()
+        ? options.auraColor.trim()
+        : "";
+    const auraHex: Record<string, string> = {
+      sloth_pink: "#FF4FD8",
+      lust_blue: "#2D7CFF",
+      greed_black: "#111111",
+      pride_yellow: "#FFD12D",
+      envy_red: "#FF2D2D",
+      gluttony_orange: "#FF7A1A",
+      wrath_purple: "#7A44FF",
+      lilly_yellowgreen: "#B7FF2D",
+    };
+    return (
+      auraHex[auraColor] ||
+      (typeof profile?.glowColor === "string" && profile.glowColor.trim()) ||
+      fallbackAuraColor
+    );
+  } catch {
+    return fallbackAuraColor;
+  }
+}
+
+const WAVE_AVATARS: Record<string, string> = {
+  johnandy: "/assets/john_andy_headshot.jpg",
+};
 
 /* --------------------------- embed helpers --------------------------- */
 
-type EmbedKind = "youtube" | "spotify" | "soundcloud" | "none";
+type EmbedKind =
+  | "youtube"
+  | "spotify"
+  | "apple_music"
+  | "soundcloud"
+  | "image"
+  | "video"
+  | "audio"
+  | "none";
 
 function safeStr(x: any): string {
   return typeof x === "string" ? x : "";
@@ -31,11 +100,22 @@ function safeStr(x: any): string {
 function isExternalHref(href: string) {
   return /^https?:\/\//i.test(href);
 }
+function getExt(url: string) {
+  const clean = url.split("?")[0].split("#")[0];
+  const dot = clean.lastIndexOf(".");
+  if (dot === -1) return "";
+  return clean.slice(dot + 1).toLowerCase();
+}
+function guessMediaKind(url: string): EmbedKind {
+  const ext = getExt(url);
+  if (["png", "jpg", "jpeg", "webp", "gif", "avif"].includes(ext)) return "image";
+  if (["mp4", "webm", "mov", "m4v"].includes(ext)) return "video";
+  if (["mp3", "wav", "m4a", "aac", "ogg", "flac"].includes(ext)) return "audio";
+  return "none";
+}
 function fmtShort(ts: number) {
   try {
-    return new Date(ts).toLocaleString(undefined, {
-      month: "short",
-      day: "2-digit",
+    return new Date(ts).toLocaleTimeString(undefined, {
       hour: "numeric",
       minute: "2-digit",
     });
@@ -56,6 +136,50 @@ function fmtWhen(iso: string) {
   } catch {
     return iso;
   }
+}
+function formatLastWaved(iso: string) {
+  const time = new Date(iso).getTime();
+  if (!Number.isFinite(time)) return "";
+  const diff = Math.max(0, Date.now() - time);
+  const hour = 60 * 60 * 1000;
+  if (diff < hour * 24) return "Last waved today";
+  const days = Math.max(1, Math.floor(diff / (hour * 24)));
+  return days === 1 ? "Last waved yesterday" : `Last waved ${days} days ago`;
+}
+
+function avatarForUser(user: string) {
+  const key = String(user || "")
+    .trim()
+    .toLowerCase()
+    .replace(/^@+/, "");
+  return WAVE_AVATARS[key] ?? null;
+}
+
+function memoryDropToActivity(entry: BucketEntry): BoardActivity | null {
+  const item = entry.item;
+  if (!item || typeof item !== "object") return null;
+
+  const body = typeof item.body === "string" ? item.body : "";
+  const title = typeof item.title === "string" ? item.title : null;
+  const createdAt =
+    typeof item.created_at === "string" && item.created_at
+      ? item.created_at
+      : new Date(entry.savedAt).toISOString();
+  const kind = String(item.kind || "board_drop") as BoardActivity["kind"];
+
+  if (!body && !title && !item.href && !item.image_url) return null;
+
+  return {
+    id: String(item.id || entry.activityId),
+    created_at: createdAt,
+    user_id: typeof item.user_id === "string" ? item.user_id : null,
+    kind,
+    title,
+    body,
+    href: typeof item.href === "string" ? item.href : null,
+    image_url: typeof item.image_url === "string" ? item.image_url : null,
+    meta: item.meta && typeof item.meta === "object" ? item.meta : null,
+  };
 }
 
 function ytId(url: string): string | null {
@@ -89,8 +213,39 @@ function toSpotifyEmbed(url: string): string | null {
   }
 }
 
+function toAppleMusicEmbed(url: string): string | null {
+  try {
+    const u = new URL(url);
+    const host = u.hostname.toLowerCase();
+    if (host === "embed.music.apple.com") return u.toString();
+    if (host !== "music.apple.com") return null;
+
+    const parts = u.pathname.split("/").filter(Boolean);
+    if (parts[0] === "embed") {
+      return `https://embed.music.apple.com/${parts.slice(1).join("/")}${u.search}`;
+    }
+    if (parts.length < 3) return null;
+
+    return `https://embed.music.apple.com${u.pathname}${u.search}`;
+  } catch {
+    return null;
+  }
+}
+
 function toSoundCloudEmbed(url: string): string | null {
   try {
+    const u = new URL(url);
+    const host = u.hostname.toLowerCase();
+    const isSC =
+      host === "soundcloud.com" ||
+      host.endsWith(".soundcloud.com") ||
+      host === "snd.sc" ||
+      host.endsWith(".snd.sc") ||
+      host === "on.soundcloud.com" ||
+      host.endsWith(".on.soundcloud.com");
+
+    if (!isSC) return null;
+
     return `https://w.soundcloud.com/player/?url=${encodeURIComponent(url)}&auto_play=false&visual=true`;
   } catch {
     return null;
@@ -107,8 +262,14 @@ function computeEmbed(href: string): { kind: EmbedKind; url: string } {
   const sp = toSpotifyEmbed(href);
   if (sp) return { kind: "spotify", url: sp };
 
+  const am = toAppleMusicEmbed(href);
+  if (am) return { kind: "apple_music", url: am };
+
   const sc = toSoundCloudEmbed(href);
   if (sc) return { kind: "soundcloud", url: sc };
+
+  const mk = guessMediaKind(href);
+  if (mk !== "none") return { kind: mk, url: href };
 
   return { kind: "none", url: "" };
 }
@@ -126,26 +287,64 @@ export default function DropsBucket({
   subtitle = "Your smart bucket. Manual only. Feed never auto-syncs.",
   // TEMP: for testability until auth/users are wired
   selfUser = "me",
+  statsOverride,
 }: {
   title?: string;
   subtitle?: string;
   selfUser?: string;
+  statsOverride?: BucketStatsOverride;
 }) {
-  const [brain, setBrain] = useState<BucketBrainState>(() => readBrain());
+  const [brain, setBrain] = useState<BucketBrainState>(EMPTY_BRAIN);
   const [active, setActive] = useState<BucketFolder>("pin");
   const [open, setOpen] = useState(false);
+  const [viewer, setViewer] = useState<{
+    folder: BucketFolder;
+    entry: BucketEntry;
+    item: BoardActivity | null;
+  } | null>(null);
 
   // Wave UI
   const [waveOpen, setWaveOpen] = useState(false);
   const [waveTo, setWaveTo] = useState("someone");
   const [toast, setToast] = useState<string | null>(null);
+  const [userAuraColor, setUserAuraColor] = useState(fallbackAuraColor);
 
   const closeBtnRef = useRef<HTMLButtonElement | null>(null);
 
   useEffect(() => {
-    const onUpdated = () => setBrain(readBrain());
+    const onUpdated = () => {
+      setUserAuraColor(readUserAuraColor());
+      setBrain(readBrain());
+    };
+    setUserAuraColor(readUserAuraColor());
+    setBrain(readBrain());
     window.addEventListener(EVT_UPDATED, onUpdated as EventListener);
-    return () => window.removeEventListener(EVT_UPDATED, onUpdated as EventListener);
+    window.addEventListener("storage", onUpdated as EventListener);
+    return () => {
+      window.removeEventListener(EVT_UPDATED, onUpdated as EventListener);
+      window.removeEventListener("storage", onUpdated as EventListener);
+    };
+  }, []);
+
+  useEffect(() => {
+    const onOpenBucket = (event: Event) => {
+      const detail = ((event as CustomEvent).detail ?? {}) as { folder?: BucketFolder };
+      if (detail.folder && FOLDERS.some((folder) => folder.key === detail.folder)) {
+        setActive(detail.folder);
+      }
+      setBrain(readBrain());
+      setOpen(true);
+    };
+
+    window.addEventListener(EVT_OPEN, onOpenBucket as EventListener);
+    return () => window.removeEventListener(EVT_OPEN, onOpenBucket as EventListener);
+  }, []);
+
+  useEffect(() => {
+    const onFeedUpdated = () => setBrain(readBrain());
+    window.addEventListener(EVENTS.feedUpdated, onFeedUpdated as EventListener);
+    return () =>
+      window.removeEventListener(EVENTS.feedUpdated, onFeedUpdated as EventListener);
   }, []);
 
   // Keep brain synced (local demo). We can remove once backend real-time exists.
@@ -175,21 +374,56 @@ export default function DropsBucket({
   }, [toast]);
 
   const activityIndex = useMemo(() => {
-    const items = getLocalActivity?.() ?? [];
+    const items = mergeActivityWithFeed(
+      getLocalActivity?.() ?? [],
+      readFeed()
+    );
     const map = new Map<string, BoardActivity>();
     for (const it of items) if (it?.id) map.set(String(it.id), it);
+    for (const folder of FOLDERS) {
+      const bucketItems = (brain as any)[folder.key] as BucketEntry[] | undefined;
+      if (!Array.isArray(bucketItems)) continue;
+      for (const entry of bucketItems) {
+        const memoryActivity = memoryDropToActivity(entry);
+        if (memoryActivity?.id && !map.has(String(entry.activityId))) {
+          map.set(String(entry.activityId), memoryActivity);
+        }
+      }
+    }
     return map;
   }, [brain.updatedAt, open]);
 
   const counts = useMemo(() => {
+    if (statsOverride) {
+      return {
+        pass: statsOverride.pass,
+        pin: statsOverride.pin,
+        push: statsOverride.push,
+      };
+    }
     return {
       pass: brain.pass.length,
       pin: brain.pin.length,
       push: brain.push.length,
     };
-  }, [brain]);
+  }, [brain, statsOverride]);
 
-  const list = (brain as any)[active] as BucketEntry[] | undefined;
+  const list = useMemo(() => {
+    const raw = ((brain as any)[active] as BucketEntry[] | undefined) ?? [];
+    return [...raw]
+      .map((entry) => ({
+        ...entry,
+        resonanceScore: getResonanceScore(entry, active),
+      }))
+      .sort((a, b) => {
+        const scoreDiff = (b.resonanceScore ?? 0) - (a.resonanceScore ?? 0);
+        if (scoreDiff) return scoreDiff;
+        const aWave = a.lastWavedAt ? new Date(a.lastWavedAt).getTime() : 0;
+        const bWave = b.lastWavedAt ? new Date(b.lastWavedAt).getTime() : 0;
+        if (bWave !== aWave) return bWave - aWave;
+        return (b.savedAt ?? 0) - (a.savedAt ?? 0);
+      });
+  }, [active, brain]);
 
   // Waves
   const my = String(selfUser || "me").trim().toLowerCase();
@@ -199,6 +433,119 @@ export default function DropsBucket({
   const mutualsForMe = useMemo(() => {
     return brain.mutuals.filter((m) => m.a === my || m.b === my);
   }, [brain.mutuals, my]);
+
+  const waveCount = statsOverride?.waves ?? inbound.length;
+  const mutualCount = statsOverride?.mutuals ?? mutualsForMe.length;
+
+  function handleBucketWave(entry: BucketEntry, item: BoardActivity | null) {
+    const result = waveBucketDrop(active, entry.activityId, my || "me");
+    if (result.status === "missing") {
+      setToast("Drop memory not found.");
+      return;
+    }
+    if (result.status === "cooldown") {
+      setToast("That drop is still glowing.");
+      return;
+    }
+
+    setBrain(readBrain());
+    setToast("Wave sent. This memory rose in the Bucket.");
+    window.dispatchEvent(
+      new CustomEvent("board:whisper:create", {
+        detail: {
+          type: "bucket_wave",
+          dropId: item?.id || entry.activityId,
+          userId: my || "me",
+          text: "A saved drop rippled back through your orbit.",
+          createdAt: new Date().toISOString(),
+        },
+      })
+    );
+  }
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (statsOverride) return;
+
+    let cancelled = false;
+
+    async function persistBucketStatsToSupabase() {
+      try {
+        const sb = supabaseBrowser();
+        const { data: auth, error: authError } = await sb.auth.getUser();
+        if (cancelled || authError || !auth?.user) return;
+
+        const { data: profile, error: profileError } = await sb
+          .from("profiles")
+          .select("username, board_style")
+          .eq("id", auth.user.id)
+          .single();
+
+        if (cancelled || profileError) return;
+
+        const normalizedSelf = String(selfUser || "")
+          .trim()
+          .toLowerCase()
+          .replace(/^@+/, "");
+        const profileUsername = String(profile?.username || "")
+          .trim()
+          .toLowerCase()
+          .replace(/^@+/, "");
+
+        if (
+          normalizedSelf &&
+          normalizedSelf !== "me" &&
+          normalizedSelf !== profileUsername &&
+          normalizedSelf !== String(auth.user.id).toLowerCase()
+        ) {
+          return;
+        }
+
+        const boardStyle =
+          profile?.board_style && typeof profile.board_style === "object"
+            ? profile.board_style
+            : {};
+
+        const nextBucketStats = {
+          pass: brain.pass.length,
+          pin: brain.pin.length,
+          push: brain.push.length,
+          waves: inbound.length,
+          mutuals: mutualsForMe.length,
+          updatedAt: brain.updatedAt,
+        };
+
+        const prevStats = (boardStyle as any).bucketStats;
+        const unchanged =
+          prevStats &&
+          prevStats.pass === nextBucketStats.pass &&
+          prevStats.pin === nextBucketStats.pin &&
+          prevStats.push === nextBucketStats.push &&
+          prevStats.waves === nextBucketStats.waves &&
+          prevStats.mutuals === nextBucketStats.mutuals;
+
+        if (unchanged) return;
+
+        await sb
+          .from("profiles")
+          .update({
+            board_style: {
+              ...boardStyle,
+              bucketStats: nextBucketStats,
+            },
+          })
+          .eq("id", auth.user.id);
+      } catch {
+        // local bucket remains usable if remote sync fails
+      }
+    }
+
+    void persistBucketStatsToSupabase();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [brain, inbound.length, mutualsForMe.length, selfUser, statsOverride]);
 
   return (
     <div className="bucket">
@@ -235,7 +582,7 @@ export default function DropsBucket({
             </span>
             <span className="waveText">
               <span className="waveLabel">WAVE</span>
-              <span className="waveCount">{inbound.length}</span>
+              <span className="waveCount">{waveCount}</span>
             </span>
           </button>
 
@@ -243,12 +590,37 @@ export default function DropsBucket({
             <span className="metaDot" />
             self: <b>{my}</b>
             <span className="metaSep">•</span>
-            mutuals: <b>{mutualsForMe.length}</b>
+            mutuals: <b>{mutualCount}</b>
           </div>
         </div>
 
         {waveOpen && (
           <div className="wavePanel">
+            {statsOverride ? (
+              <div className="waveSummaryOnly">
+                <div className="waveSummaryCard">
+                  <div className="waveColTitle">Waves</div>
+                  <div className="waveSummaryValue">{waveCount}</div>
+                </div>
+                <div className="waveSummaryCard">
+                  <div className="waveColTitle">Pass</div>
+                  <div className="waveSummaryValue">{counts.pass}</div>
+                </div>
+                <div className="waveSummaryCard">
+                  <div className="waveColTitle">Pin</div>
+                  <div className="waveSummaryValue">{counts.pin}</div>
+                </div>
+                <div className="waveSummaryCard">
+                  <div className="waveColTitle">Push</div>
+                  <div className="waveSummaryValue">{counts.push}</div>
+                </div>
+                <div className="waveSummaryCard">
+                  <div className="waveColTitle">Mutuals</div>
+                  <div className="waveSummaryValue">{mutualCount}</div>
+                </div>
+              </div>
+            ) : (
+              <>
             <div className="waveRow">
               <div className="waveInputWrap">
                 <div className="waveHint">Wave to (username)</div>
@@ -294,8 +666,18 @@ export default function DropsBucket({
                 ) : (
                   inbound.slice(0, 6).map((w) => (
                     <div key={w.id} className="waveItem">
-                      <div className="waveFrom">@{w.from}</div>
-                      <div className="waveTime">{fmtShort(w.createdAt)}</div>
+                      <div className="waveStampCol">
+                        <div className="waveBubble" aria-label={`Wave from @${w.from}`}>
+                          {avatarForUser(w.from) ? (
+                            <img className="waveAvatarImg" src={avatarForUser(w.from)!} alt="" />
+                          ) : (
+                            <span className="waveAvatarFallback">
+                              {String(w.from).slice(0, 1).toUpperCase()}
+                            </span>
+                          )}
+                        </div>
+                        <div className="waveTime">{fmtShort(w.createdAt)}</div>
+                      </div>
                     </div>
                   ))
                 )}
@@ -308,8 +690,18 @@ export default function DropsBucket({
                 ) : (
                   outbound.slice(0, 6).map((w) => (
                     <div key={w.id} className="waveItem">
-                      <div className="waveFrom">to @{w.to}</div>
-                      <div className="waveTime">{fmtShort(w.createdAt)}</div>
+                      <div className="waveStampCol">
+                        <div className="waveBubble" aria-label={`Wave sent to @${w.to}`}>
+                          {avatarForUser(w.to) ? (
+                            <img className="waveAvatarImg" src={avatarForUser(w.to)!} alt="" />
+                          ) : (
+                            <span className="waveAvatarFallback">
+                              {String(w.to).slice(0, 1).toUpperCase()}
+                            </span>
+                          )}
+                        </div>
+                        <div className="waveTime">{fmtShort(w.createdAt)}</div>
+                      </div>
                     </div>
                   ))
                 )}
@@ -324,14 +716,26 @@ export default function DropsBucket({
                     const other = m.a === my ? m.b : m.a;
                     return (
                       <div key={m.id} className="mutualItem">
-                        <div className="mutualText">“a connection is forming”</div>
-                        <div className="mutualWho">@{other}</div>
+                        <div className="waveStampCol">
+                          <div className="waveBubble mutual" aria-label={`Mutual with @${other}`}>
+                            {avatarForUser(other) ? (
+                              <img className="waveAvatarImg" src={avatarForUser(other)!} alt="" />
+                            ) : (
+                              <span className="waveAvatarFallback">
+                                {String(other).slice(0, 1).toUpperCase()}
+                              </span>
+                            )}
+                          </div>
+                          <div className="waveTime">{fmtShort(m.createdAt)}</div>
+                        </div>
                       </div>
                     );
                   })
                 )}
               </div>
             </div>
+              </>
+            )}
           </div>
         )}
 
@@ -372,7 +776,8 @@ export default function DropsBucket({
               <div className="empty">No saved drops yet.</div>
             ) : (
               list.slice(0, 4).map((e) => {
-                const it = activityIndex.get(String(e.activityId));
+                const it =
+                  activityIndex.get(String(e.activityId)) ?? memoryDropToActivity(e);
                 return (
                   <div key={e.activityId} className="miniItem">
                     <div className="miniTitle">{it?.title ? it.title : "Saved Drop"}</div>
@@ -480,18 +885,64 @@ export default function DropsBucket({
               ) : (
                 <div className="domeTiles">
                   {list.map((e) => {
-                    const it = activityIndex.get(String(e.activityId));
-                    return <BucketDropCard key={e.activityId} folder={active} entry={e} item={it ?? null} />;
+                    const it =
+                      activityIndex.get(String(e.activityId)) ?? memoryDropToActivity(e);
+                    return (
+                      <BucketDropCard
+                        key={e.activityId}
+                        folder={active}
+                        entry={e}
+                        item={it ?? null}
+                        userAuraColor={userAuraColor}
+                        onWave={() => handleBucketWave(e, it ?? null)}
+                        onOpenFull={() =>
+                          setViewer({ folder: active, entry: e, item: it ?? null })
+                        }
+                      />
+                    );
                   })}
                 </div>
               )}
             </div>
+
+            {viewer ? (
+              <div className="memoryViewer" role="dialog" aria-modal="true" aria-label="Full bucket memory drop">
+                <div className="memoryViewerBackdrop" onClick={() => setViewer(null)} />
+                <div className="memoryViewerPanel">
+                  <div className="memoryViewerTop">
+                    <div>
+                      <div className="memoryViewerKicker">
+                        Bucket Brain Memory · {viewer.folder.toUpperCase()}
+                      </div>
+                      <div className="memoryViewerTitle">
+                        {viewer.item?.title || "Saved Drop"}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      className="memoryViewerClose"
+                      onClick={() => setViewer(null)}
+                    >
+                      Close
+                    </button>
+                  </div>
+                  <BucketDropCard
+                    folder={viewer.folder}
+                    entry={viewer.entry}
+                    item={viewer.item}
+                    userAuraColor={userAuraColor}
+                    onWave={() => handleBucketWave(viewer.entry, viewer.item)}
+                    expanded
+                  />
+                </div>
+              </div>
+            ) : null}
           </div>
         </div>
       )}
 
       {/* styles */}
-      <style jsx>{`
+      <style>{`
         .bucket { width: 100%; }
 
         .shell {
@@ -689,8 +1140,31 @@ export default function DropsBucket({
           gap: 10px;
         }
 
+        .waveSummaryOnly {
+          margin-top: 12px;
+          display: grid;
+          grid-template-columns: repeat(5, minmax(0, 1fr));
+          gap: 10px;
+        }
+
+        .waveSummaryCard {
+          border-radius: 18px;
+          border: 1px solid rgba(0,0,0,0.10);
+          background: rgba(255,255,255,0.65);
+          padding: 12px;
+          text-align: center;
+        }
+
+        .waveSummaryValue {
+          margin-top: 8px;
+          font-size: 20px;
+          font-weight: 950;
+          color: rgba(0,0,0,0.78);
+        }
+
         @media (max-width: 900px) {
           .waveGrid { grid-template-columns: 1fr; }
+          .waveSummaryOnly { grid-template-columns: repeat(2, minmax(0, 1fr)); }
         }
 
         .waveCol {
@@ -717,41 +1191,84 @@ export default function DropsBucket({
 
         .waveItem {
           margin-top: 10px;
-          padding: 10px 12px;
+          padding: 12px;
           border-radius: 16px;
           border: 1px solid rgba(0,0,0,0.08);
           background: rgba(255,255,255,0.72);
           display: flex;
-          align-items: center;
-          justify-content: space-between;
+          align-items: flex-end;
+          justify-content: flex-end;
           gap: 10px;
+          min-height: 86px;
+          position: relative;
         }
 
-        .waveFrom { font-weight: 950; color: rgba(0,0,0,0.70); }
-        .waveTime { font-weight: 900; opacity: 0.55; font-size: 11px; }
+        .waveStampCol {
+          display: flex;
+          flex-direction: column;
+          align-items: flex-end;
+          gap: 6px;
+        }
+
+        .waveBubble {
+          width: 58px;
+          height: 58px;
+          border-radius: 999px;
+          display: grid;
+          place-items: center;
+          overflow: hidden;
+          border: 1px solid rgba(255,255,255,0.58);
+          background:
+            radial-gradient(circle at 30% 25%, rgba(255,255,255,0.9), rgba(255,255,255,0.12) 34%, rgba(255,255,255,0.03) 58%),
+            linear-gradient(145deg, rgba(255,255,255,0.45), rgba(170,245,255,0.18) 48%, rgba(255,186,245,0.14));
+          box-shadow:
+            inset 0 1px 0 rgba(255,255,255,0.78),
+            0 0 22px rgba(255,255,255,0.18),
+            0 0 34px rgba(165,240,255,0.14);
+          backdrop-filter: blur(10px);
+        }
+
+        .waveBubble.mutual {
+          box-shadow:
+            inset 0 1px 0 rgba(255,255,255,0.78),
+            0 0 22px rgba(0,140,135,0.16),
+            0 0 34px rgba(255,0,190,0.12);
+        }
+
+        .waveAvatarImg {
+          width: 44px;
+          height: 44px;
+          object-fit: cover;
+          border-radius: 999px;
+          border: 1px solid rgba(255,255,255,0.45);
+          display: block;
+        }
+
+        .waveAvatarFallback {
+          font-size: 18px;
+          font-weight: 950;
+          color: rgba(0,0,0,0.58);
+        }
+
+        .waveTime {
+          font-weight: 900;
+          opacity: 0.48;
+          font-size: 10px;
+          line-height: 1;
+          text-align: right;
+        }
 
         .mutualItem {
           margin-top: 10px;
-          padding: 10px 12px;
+          padding: 12px;
           border-radius: 16px;
           border: 1px solid rgba(0, 140, 135, 0.18);
           background: rgba(0, 140, 135, 0.08);
-        }
-
-        .mutualText {
-          font-size: 11px;
-          font-weight: 950;
-          letter-spacing: 0.04em;
-          color: rgba(0, 0, 0, 0.68);
-        }
-
-        .mutualWho {
-          margin-top: 6px;
-          font-size: 11px;
-          font-weight: 950;
-          letter-spacing: 0.14em;
-          text-transform: uppercase;
-          color: rgba(255, 0, 190, 0.85);
+          display: flex;
+          align-items: flex-end;
+          justify-content: flex-end;
+          gap: 10px;
+          min-height: 86px;
         }
 
         /* folders */
@@ -988,6 +1505,66 @@ export default function DropsBucket({
           font-weight: 900; letter-spacing: 0.10em;
         }
         .domeEmptyHint { margin-top: 10px; font-size: 12px; font-weight: 800; color: rgba(220, 255, 250, 0.72); letter-spacing: 0.04em; text-transform: none; opacity: 0.9; }
+        .memoryViewer {
+          position: absolute;
+          inset: 0;
+          z-index: 4;
+          display: grid;
+          place-items: center;
+          padding: 18px;
+        }
+        .memoryViewerBackdrop {
+          position: absolute;
+          inset: 0;
+          background: rgba(0, 0, 0, 0.58);
+          backdrop-filter: blur(8px);
+        }
+        .memoryViewerPanel {
+          position: relative;
+          z-index: 1;
+          width: min(760px, 100%);
+          max-height: min(78vh, 780px);
+          overflow: auto;
+          border-radius: 26px;
+          border: 1px solid rgba(120, 255, 240, 0.24);
+          background: rgba(0, 10, 14, 0.94);
+          box-shadow: 0 30px 90px rgba(0, 0, 0, 0.58);
+          padding: 14px;
+        }
+        .memoryViewerTop {
+          display: flex;
+          align-items: flex-start;
+          justify-content: space-between;
+          gap: 14px;
+          margin-bottom: 12px;
+          padding: 4px 2px 0;
+        }
+        .memoryViewerKicker {
+          color: rgba(120, 255, 240, 0.70);
+          font-size: 10px;
+          font-weight: 950;
+          letter-spacing: 0.18em;
+          text-transform: uppercase;
+        }
+        .memoryViewerTitle {
+          margin-top: 5px;
+          color: rgba(220, 255, 250, 0.94);
+          font-size: 16px;
+          font-weight: 950;
+          letter-spacing: 0.04em;
+        }
+        .memoryViewerClose {
+          border-radius: 999px;
+          border: 1px solid rgba(120, 255, 240, 0.24);
+          background: rgba(120, 255, 240, 0.10);
+          color: rgba(220, 255, 250, 0.94);
+          cursor: pointer;
+          padding: 9px 12px;
+          font-size: 10px;
+          font-weight: 950;
+          letter-spacing: 0.14em;
+          text-transform: uppercase;
+        }
         @media (max-width: 900px) { .domeTiles { grid-template-columns: 1fr; } }
       `}</style>
     </div>
@@ -1000,43 +1577,166 @@ function BucketDropCard({
   folder,
   entry,
   item,
+  userAuraColor = fallbackAuraColor,
+  expanded = false,
+  onWave,
+  onOpenFull,
 }: {
   folder: BucketFolder;
   entry: BucketEntry;
   item: BoardActivity | null;
+  userAuraColor?: string;
+  expanded?: boolean;
+  onWave?: () => void;
+  onOpenFull?: () => void;
 }) {
-  const href = safeStr(item?.href);
+  const rawMeta = item?.meta && typeof item.meta === "object" ? item.meta : null;
+  const preview = rawMeta?.preview && typeof rawMeta.preview === "object" ? rawMeta.preview : rawMeta;
+  const previewBucket =
+    typeof preview?.bucket === "string" && preview.bucket ? preview.bucket : "";
+  const previewStoragePath =
+    typeof preview?.storagePath === "string" && preview.storagePath ? preview.storagePath : "";
+  const previewHref =
+    safeStr(item?.href) ||
+    safeStr((preview as any)?.embedUrl) ||
+    safeStr((preview as any)?.linkUrl) ||
+    safeStr((preview as any)?.url) ||
+    safeStr((preview as any)?.href) ||
+    safeStr((preview as any)?.src);
+  const [signedPreviewUrl, setSignedPreviewUrl] = useState("");
+  const href = signedPreviewUrl || previewHref;
   const external = href ? isExternalHref(href) : false;
 
   const [embedFailed, setEmbedFailed] = useState(false);
   const embed = useMemo(() => computeEmbed(href), [href]);
-  const showEmbed = !!embed.url && !embedFailed;
+  const showEmbed = !!embed.url && !embedFailed && embed.kind !== "none";
+  const attachmentLabel =
+    embed.kind === "spotify"
+      ? "Play full track in Spotify"
+      : embed.kind === "apple_music"
+        ? "Open in Apple Music"
+        : "Open attachment";
+  const waveCount = entry.waveCount ?? 0;
+  const lastWavedLabel = entry.lastWavedAt ? formatLastWaved(entry.lastWavedAt) : "";
+
+  useEffect(() => {
+    let cancelled = false;
+    setSignedPreviewUrl("");
+
+    if (!previewBucket || !previewStoragePath) return;
+
+    async function signPreviewDrop() {
+      try {
+        const supabase = supabaseBrowser();
+        const { data, error } = await supabase.storage
+          .from(previewBucket)
+          .createSignedUrl(previewStoragePath, 60 * 45);
+
+        if (!cancelled && !error && data?.signedUrl) {
+          setSignedPreviewUrl(data.signedUrl);
+        }
+      } catch {
+        // Keep the saved href/preview fallback if signing fails.
+      }
+    }
+
+    void signPreviewDrop();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [previewBucket, previewStoragePath]);
 
   return (
-    <div className="card">
+    <div
+      className={clsx("card", expanded && "expanded")}
+      style={
+        {
+          "--bucket-aura": userAuraColor || fallbackAuraColor,
+        } as React.CSSProperties
+      }
+    >
       <div className="top">
         <div className="badge">{folder.toUpperCase()}</div>
         <div className="time">{item?.created_at ? fmtWhen(item.created_at) : fmtShort(entry.savedAt)}</div>
       </div>
 
-      <div className="title">{item?.title || "Saved Drop"}</div>
-      {item?.body && <div className="body">{item.body}</div>}
+      <div className="memoryDropTitle">{item?.title || "Saved Drop"}</div>
+      {item?.body && <div className="memoryDropCaption">{item.body}</div>}
+
+      <div className="waveActionRow">
+        <button type="button" className="memoryWaveButton" onClick={onWave}>
+          <span>〰 Wave</span>
+          {waveCount ? <b>{waveCount}</b> : null}
+        </button>
+        <span className="waveStatus">
+          {waveCount
+            ? lastWavedLabel || `${waveCount} waves`
+            : "Still waiting for its first ripple"}
+        </span>
+      </div>
+
+      {!item ? (
+        <div className="memoryMissing">
+          This older bucket memory only saved an id. New Pass, Pin, and Push signals now save the full drop into Bucket Brain memory.
+        </div>
+      ) : null}
 
       {showEmbed && (
         <div className={clsx("embed", embed.kind)}>
-          <iframe
-            title={`bucket-embed-${embed.kind}-${entry.activityId}`}
-            src={embed.url}
-            loading="lazy"
-            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-            allowFullScreen
-            referrerPolicy="strict-origin-when-cross-origin"
-            onError={() => setEmbedFailed(true)}
-          />
+          {embed.kind === "image" && (
+            <div className="mediaFrame">
+              <img
+                src={embed.url}
+                alt={item?.title || "Saved drop image"}
+                className="img"
+                loading="lazy"
+                onError={() => setEmbedFailed(true)}
+              />
+            </div>
+          )}
+
+          {embed.kind === "video" && (
+            <div className="mediaFrame">
+              <video
+                className="vid"
+                src={embed.url}
+                controls
+                playsInline
+                onError={() => setEmbedFailed(true)}
+              />
+            </div>
+          )}
+
+          {embed.kind === "audio" && (
+            <div className="mediaFrame">
+              <audio
+                className="aud"
+                src={embed.url}
+                controls
+                onError={() => setEmbedFailed(true)}
+              />
+            </div>
+          )}
+
+          {(embed.kind === "youtube" ||
+            embed.kind === "spotify" ||
+            embed.kind === "apple_music" ||
+            embed.kind === "soundcloud") && (
+            <iframe
+              title={`bucket-embed-${embed.kind}-${entry.activityId}`}
+              src={embed.url}
+              loading="lazy"
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+              allowFullScreen
+              referrerPolicy="strict-origin-when-cross-origin"
+              onError={() => setEmbedFailed(true)}
+            />
+          )}
           <div className="embedFoot">
             {href ? (
               <a className="embedLink" href={href} target={external ? "_blank" : undefined} rel={external ? "noreferrer" : undefined}>
-                Open attachment
+                {attachmentLabel}
               </a>
             ) : (
               <span className="embedLink dim">No attachment</span>
@@ -1048,6 +1748,12 @@ function BucketDropCard({
               </button>
             )}
           </div>
+
+          {embed.kind === "spotify" ? (
+            <div className="embedNote">
+              Spotify’s embed can fall back to a preview clip in some browser sessions. Use the link above for full playback in Spotify.
+            </div>
+          ) : null}
         </div>
       )}
 
@@ -1059,7 +1765,13 @@ function BucketDropCard({
         </a>
       )}
 
-      <style jsx>{`
+      {!expanded && item ? (
+        <button type="button" className="viewFullBtn" onClick={onOpenFull}>
+          View Full Drop
+        </button>
+      ) : null}
+
+      <style>{`
         .card {
           border-radius: 22px;
           border: 1px solid rgba(120, 255, 240, 0.18);
@@ -1077,16 +1789,94 @@ function BucketDropCard({
           color: rgba(220, 255, 250, 0.92);
         }
         .time { color: rgba(120, 255, 240, 0.72); font-weight: 900; font-size: 10px; letter-spacing: 0.10em; text-transform: uppercase; white-space: nowrap; opacity: 0.95; }
-        .title { margin-top: 10px; font-weight: 950; color: rgba(220, 255, 250, 0.92); letter-spacing: 0.04em; font-size: 13px; }
-        .body { margin-top: 8px; font-size: 12px; color: rgba(120, 255, 240, 0.72); white-space: pre-wrap; line-height: 1.45; }
+        .memoryDropTitle {
+          margin-top: 10px;
+          color: rgba(220, 255, 250, 0.92) !important;
+          font-size: 13px;
+          font-weight: 950;
+          letter-spacing: 0.04em;
+        }
+        .memoryDropTitle::selection {
+          color: rgba(220, 255, 250, 0.92);
+          background: rgba(120, 255, 240, 0.22);
+        }
+        .memoryDropCaption {
+          margin-top: 8px;
+          color: rgba(220, 255, 250, 0.92) !important;
+          font-size: 12px;
+          line-height: 1.45;
+          white-space: pre-wrap;
+        }
+        .memoryDropCaption::selection {
+          color: rgba(220, 255, 250, 0.92);
+          background: rgba(120, 255, 240, 0.22);
+        }
+        .waveActionRow {
+          margin-top: 10px;
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          flex-wrap: wrap;
+        }
+        .memoryWaveButton {
+          position: relative;
+          display: inline-flex;
+          align-items: center;
+          gap: 8px;
+          overflow: hidden;
+          border-radius: 999px;
+          padding: 0.45rem 0.75rem;
+          border: 1px solid var(--bucket-aura, ${fallbackAuraColor});
+          background: rgba(255, 255, 255, 0.055);
+          color: rgba(220, 255, 250, 0.90);
+          cursor: pointer;
+          font-size: 10px;
+          font-weight: 950;
+          letter-spacing: 0.14em;
+          text-transform: uppercase;
+          box-shadow: 0 0 18px color-mix(in srgb, var(--bucket-aura, ${fallbackAuraColor}) 20%, transparent);
+          transition: transform 180ms ease, border-color 180ms ease, box-shadow 180ms ease;
+        }
+        .memoryWaveButton:hover { transform: translateY(-1px); }
+        .memoryWaveButton::after {
+          content: "";
+          position: absolute;
+          inset: -40%;
+          opacity: 0;
+          background: radial-gradient(circle, rgba(255,255,255,0.28), transparent 55%);
+          transform: scale(0.2);
+          transition: opacity 220ms ease, transform 420ms ease;
+        }
+        .memoryWaveButton:active::after {
+          opacity: 1;
+          transform: scale(1);
+        }
+        .memoryWaveButton b {
+          color: var(--bucket-aura, ${fallbackAuraColor});
+          text-shadow: 0 0 10px var(--bucket-aura, ${fallbackAuraColor});
+        }
+        .waveStatus {
+          color: rgba(120, 255, 240, 0.68);
+          font-size: 10px;
+          font-weight: 900;
+          letter-spacing: 0.10em;
+          text-transform: uppercase;
+        }
+        .memoryMissing { margin-top: 10px; border-radius: 14px; border: 1px solid rgba(255, 0, 190, 0.18); background: rgba(255, 0, 190, 0.08); color: rgba(255, 210, 246, 0.86); padding: 10px; font-size: 11px; font-weight: 800; line-height: 1.45; }
 
         .embed { margin-top: 12px; border-radius: 18px; overflow: hidden; border: 1px solid rgba(120, 255, 240, 0.14); background: rgba(0, 0, 0, 0.22); }
         iframe { width: 100%; height: 240px; border: none; display: block; background: rgba(255, 255, 255, 0.05); }
         .embed.spotify iframe { height: 160px; }
+        .embed.apple_music iframe { height: 175px; }
+        .mediaFrame { background: rgba(255, 255, 255, 0.04); }
+        .img { width: 100%; height: auto; display: block; }
+        .vid { width: 100%; display: block; background: #000; max-height: 520px; }
+        .aud { width: 100%; display: block; padding: 10px; }
 
         .embedFoot { display: flex; gap: 10px; align-items: center; justify-content: space-between; padding: 10px 12px; background: rgba(0, 0, 0, 0.18); border-top: 1px solid rgba(120, 255, 240, 0.10); }
         .embedLink { font-size: 10px; font-weight: 950; letter-spacing: 0.14em; text-transform: uppercase; color: rgba(255, 0, 190, 0.85); text-decoration: underline; text-underline-offset: 4px; }
         .embedLink.dim { color: rgba(120, 255, 240, 0.55); text-decoration: none; }
+        .embedNote { padding: 10px 12px 12px; border-top: 1px solid rgba(120, 255, 240, 0.10); font-size: 11px; font-weight: 800; color: rgba(180, 245, 238, 0.76); background: rgba(255, 255, 255, 0.04); }
 
         .embedFallback {
           border-radius: 999px; padding: 8px 10px;
@@ -1101,6 +1891,17 @@ function BucketDropCard({
         .linkLabel { font-size: 10px; font-weight: 950; letter-spacing: 0.18em; text-transform: uppercase; color: rgba(120, 255, 240, 0.60); }
         .link { margin-top: 8px; font-size: 12px; font-weight: 900; color: rgba(220, 255, 250, 0.90); word-break: break-word; line-height: 1.35; }
         .linkNote { margin-top: 8px; font-size: 12px; font-weight: 800; color: rgba(120, 255, 240, 0.60); }
+        .viewFullBtn {
+          margin-top: 12px; width: 100%; border-radius: 999px; border: 1px solid rgba(120, 255, 240, 0.22);
+          background: rgba(120, 255, 240, 0.12); color: rgba(220, 255, 250, 0.94);
+          padding: 10px 12px; cursor: pointer; font-size: 10px; font-weight: 950;
+          letter-spacing: 0.16em; text-transform: uppercase;
+        }
+        .viewFullBtn:hover { background: rgba(120, 255, 240, 0.18); }
+        .expanded { background: rgba(0, 0, 0, 0.42); }
+        .expanded iframe { height: min(58vh, 520px); }
+        .expanded .embed.spotify iframe { height: 352px; }
+        .expanded .embed.apple_music iframe { height: 360px; }
       `}</style>
     </div>
   );
@@ -1200,4 +2001,3 @@ function ArrowEmblemBright() {
     </svg>
   );
 }
-

@@ -132,6 +132,16 @@ export function addDrop(drop: Omit<FeedDrop, "id" | "createdAt"> & { id?: string
   return next;
 }
 
+export function removeDrops(
+  matcher: (drop: FeedDrop) => boolean
+) {
+  const current = readFeed();
+  const next = current.filter((drop) => !matcher(drop));
+  writeJSON(FEED_KEY, next);
+  emit(EVENTS.feedUpdated);
+  return next;
+}
+
 export function clearFeed() {
   writeJSON(FEED_KEY, []);
   emit(EVENTS.feedUpdated);

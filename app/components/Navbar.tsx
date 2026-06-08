@@ -5,14 +5,15 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 
-const SIGNNOW_URL = "https://signnow.com/s/M1MdKxRK";
+const STORE_URL = "https://store.jabvisions.com";
 const BOARD_URL = "/board";
 
 const LINKS = [
   { href: "/", label: "Home" },
   { href: "/those-ryderz", label: "Those Ryderz" },
   { href: "/join-us", label: "Join Us" },
-  { href: "/john-andy", label: "John Andy" },
+  { href: "/john-andy", label: "JAB Founder" },
+  { href: "/jab-lit", label: "JAB Lit" },
   { href: "/jab-comics", label: "JAB Comics" },
   { href: "/jab-music", label: "JAB Music" },
 ];
@@ -111,7 +112,7 @@ export default function Navbar() {
           {/* RIGHT */}
           <div className="shrink-0">
             <a
-              href={SIGNNOW_URL}
+              href={STORE_URL}
               target="_blank"
               rel="noopener noreferrer"
               className="
@@ -127,7 +128,7 @@ export default function Navbar() {
                 whitespace-nowrap
               "
             >
-              Sign Release
+              JAB Visions™ Store
             </a>
           </div>
         </div>
@@ -207,7 +208,7 @@ export default function Navbar() {
             ))}
 
             <a
-              href={SIGNNOW_URL}
+              href={STORE_URL}
               target="_blank"
               rel="noopener noreferrer"
               className="
@@ -224,7 +225,7 @@ export default function Navbar() {
                 hover:shadow-[0_0_22px_rgba(0,255,123,0.6)]
               "
             >
-              Sign Release
+              JAB Visions™ Store
             </a>
           </nav>
         </div>

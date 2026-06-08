@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 
 type WorkStatus = "unemployed" | "working" | "vacation";
 
@@ -13,6 +13,7 @@ type Props = {
 
 /** Board Profile storage (you’ve used this pattern already) */
 const BOARD_PROFILE_KEY = "jab_board_profile_v2";
+const PROFILE_UPDATED_EVENT = "board:profile:updated";
 
 /** WorkStation storage */
 const WORKSTATION_KEY = "jab_workstation_v1";
@@ -66,13 +67,15 @@ function statusLabel(s: WorkStatus) {
 }
 
 export default function WorkStatusTile({ onChangeView }: Props) {
-  const boardProfile = useMemo(() => {
+  function readBoardProfile() {
     if (typeof window === "undefined") return { displayName: "You", avatarDataUrl: null };
     return safeParse<BoardProfilePayload>(localStorage.getItem(BOARD_PROFILE_KEY), {
       displayName: "You",
       avatarDataUrl: null,
     });
-  }, []);
+  }
+
+  const [boardProfile, setBoardProfile] = useState<BoardProfilePayload>(() => readBoardProfile());
 
   const [state, setState] = useState<WorkStationState>({
     profession: "",
@@ -85,6 +88,27 @@ export default function WorkStatusTile({ onChangeView }: Props) {
     if (typeof window === "undefined") return;
     const loaded = safeParse<WorkStationState | null>(localStorage.getItem(WORKSTATION_KEY), null);
     if (loaded) setState(loaded);
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    function refreshProfile() {
+      setBoardProfile(readBoardProfile());
+    }
+
+    function onStorage(event: StorageEvent) {
+      if (event.key === null || event.key === BOARD_PROFILE_KEY) refreshProfile();
+    }
+
+    refreshProfile();
+    window.addEventListener("storage", onStorage);
+    window.addEventListener(PROFILE_UPDATED_EVENT, refreshProfile as EventListener);
+
+    return () => {
+      window.removeEventListener("storage", onStorage);
+      window.removeEventListener(PROFILE_UPDATED_EVENT, refreshProfile as EventListener);
+    };
   }, []);
 
   // Persist workstation state

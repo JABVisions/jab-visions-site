@@ -3,6 +3,7 @@
 import React from "react";
 import { usePathname } from "next/navigation";
 import BoardDock from "@/app/components/board/BoardDock";
+import BoardUtilityHeader from "@/app/components/board/BoardUtilityHeader";
 
 export default function BoardLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -12,17 +13,28 @@ export default function BoardLayout({ children }: { children: React.ReactNode })
     pathname === "/board/work" ||
     pathname.startsWith("/board/work/") ||
     pathname === "/board/forums" ||
-    pathname.startsWith("/board/forums/");
+    pathname.startsWith("/board/forums/") ||
+    pathname === "/board/explore" ||
+    pathname.startsWith("/board/explore/");
+
+  const isAuthRoute =
+    pathname === "/board/login" ||
+    pathname === "/board/signup" ||
+    pathname === "/board/reset-password";
+
+  const isWelcomeRoute = pathname === "/board";
 
   return (
     <div className={isDark ? "board-root board-root--dark" : "board-root board-root--light"}>
+      {!isAuthRoute && !isWelcomeRoute ? <BoardUtilityHeader /> : null}
+
       {/* Page content */}
       <div className="board-slot">{children}</div>
 
-      {/* ✅ BoardDock belongs to the Board layout */}
-      <BoardDock />
+      {/* ✅ Keep the Board dock available on the Board gate/welcome page too. */}
+      {!isAuthRoute ? <BoardDock /> : null}
 
-      <style jsx global>{`
+      <style>{`
         .board-root {
           min-height: 100vh;
           width: 100%;

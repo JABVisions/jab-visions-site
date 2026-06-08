@@ -6,7 +6,15 @@ function clsx(...parts: Array<string | false | null | undefined>) {
   return parts.filter(Boolean).join(" ");
 }
 
-export type DropPadApp = "home" | "assets" | "projects" | "portfolio" | "work_calls";
+export type DropPadApp =
+  | "home"
+  | "board_drops"
+  | "assets"
+  | "projects"
+  | "portfolio"
+  | "work_calls"
+  | "profile_drops"
+  | "store_drops";
 
 export default function QuickActionsRemote({
   osOn,
@@ -77,9 +85,11 @@ export default function QuickActionsRemote({
         {/* Buttons stay disabled until power is on */}
         <div className="mt-4 grid grid-cols-2 gap-2">
           <RemoteButton label="Assets" active={activeApp === "assets"} disabled={!osOn} onClick={() => onNavigate("assets")} />
-          <RemoteButton label="Projects" active={activeApp === "projects"} disabled={!osOn} onClick={() => onNavigate("projects")} />
+          <RemoteButton label="Board Drops" hint="Open console" active={activeApp === "board_drops"} disabled={!osOn} onClick={() => onNavigate("board_drops")} />
           <RemoteButton label="Portfolio" active={activeApp === "portfolio"} disabled={!osOn} onClick={() => onNavigate("portfolio")} />
+          <RemoteButton label="Profile Drops" active={activeApp === "profile_drops"} disabled={!osOn} onClick={() => onNavigate("profile_drops")} />
           <RemoteButton label="Work Calls" active={activeApp === "work_calls"} disabled={!osOn} onClick={() => onNavigate("work_calls")} />
+          <RemoteButton label="Store Drops" active={activeApp === "store_drops"} disabled={!osOn} onClick={() => onNavigate("store_drops")} />
         </div>
 
         {!osOn && <div className="mt-3 text-xs text-white/40">Power on to control the OS.</div>}
@@ -90,11 +100,13 @@ export default function QuickActionsRemote({
 
 function RemoteButton({
   label,
+  hint = "Open window",
   active,
   disabled,
   onClick,
 }: {
   label: string;
+  hint?: string;
   active: boolean;
   disabled: boolean;
   onClick: () => void;
@@ -114,7 +126,7 @@ function RemoteButton({
       )}
     >
       {label}
-      <div className="mt-1 text-[11px] text-white/45">Open window</div>
+      <div className="mt-1 text-[11px] text-white/45">{hint}</div>
     </button>
   );
 }

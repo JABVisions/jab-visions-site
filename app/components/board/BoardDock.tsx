@@ -2,7 +2,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Newspaper,
@@ -16,12 +16,18 @@ import {
   ChevronUp,
   BriefcaseBusiness,
 } from "lucide-react";
+import FriendZoneOrb from "@/app/components/board/FriendZoneOrb";
+import type { FriendZoneState } from "@/lib/board/friendZoneSignals";
+import { loadBoardUserFriendZoneOrbs } from "@/lib/board/friendZoneUsers";
 
 type Friend = {
   id: string;
   name: string;
+  username?: string;
   avatar?: string | null;
   addedAt: number;
+  relationshipState?: FriendZoneState;
+  lastActiveLabel?: string;
 };
 
 type ChatMsg = {
@@ -30,11 +36,29 @@ type ChatMsg = {
   from: "me" | "them";
   text: string;
   at: number;
+  remoteId?: string;
+  senderId?: string;
+  recipientId?: string;
+  status?: "sent" | "local" | "failed";
 };
 
 const FRIENDS_KEY = "jab_board_friends_v1";
 const FRIENDS_EVENT = "jab:friends_updated";
 const CHAT_KEY = "jab_board_chat_v1";
+
+type FriendZoneOrbLike = Awaited<ReturnType<typeof loadBoardUserFriendZoneOrbs>>[number];
+
+function friendFromOrb(orb: FriendZoneOrbLike, index = 0): Friend {
+  return {
+    id: orb.id || `friend:${orb.username}`,
+    name: orb.name,
+    username: orb.username,
+    avatar: orb.avatarUrl,
+    addedAt: Date.now() - index,
+    relationshipState: orb.relationshipState || orb.state,
+    lastActiveLabel: orb.lastActiveLabel,
+  };
+}
 
 function safeId() {
   return `${Date.now()}_${Math.random().toString(16).slice(2)}`;
@@ -58,15 +82,27 @@ function readFriends(): Friend[] {
     if (!raw) return [];
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
-    return parsed
+    const saved = parsed
       .map((f: any) => ({
         id: String(f.id ?? ""),
         name: String(f.name ?? "Unknown"),
+        username: typeof f.username === "string" ? f.username : undefined,
         avatar: typeof f.avatar === "string" ? f.avatar : null,
         addedAt: Number(f.addedAt ?? Date.now()),
+        relationshipState:
+          f.relationshipState === "fresh" ||
+          f.relationshipState === "active" ||
+          f.relationshipState === "magnetic" ||
+          f.relationshipState === "echo" ||
+          f.relationshipState === "fractured" ||
+          f.relationshipState === "phantom"
+            ? f.relationshipState
+            : undefined,
+        lastActiveLabel: typeof f.lastActiveLabel === "string" ? f.lastActiveLabel : undefined,
       }))
       .filter((f) => f.id && f.name)
       .sort((a, b) => b.addedAt - a.addedAt);
+    return saved;
   } catch {
     return [];
   }
@@ -79,12 +115,19 @@ function readChat(): ChatMsg[] {
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
     return parsed
-      .map((m: any) => ({
+      .map((m: any): ChatMsg => ({
         id: String(m.id ?? ""),
         threadId: String(m.threadId ?? ""),
         from: m.from === "them" ? "them" : "me",
         text: String(m.text ?? ""),
         at: Number(m.at ?? Date.now()),
+        remoteId: typeof m.remoteId === "string" ? m.remoteId : undefined,
+        senderId: typeof m.senderId === "string" ? m.senderId : undefined,
+        recipientId: typeof m.recipientId === "string" ? m.recipientId : undefined,
+        status:
+          m.status === "sent" || m.status === "local" || m.status === "failed"
+            ? m.status
+            : undefined,
       }))
       .filter((m) => m.id && m.threadId && m.text)
       .sort((a, b) => a.at - b.at);
@@ -141,8 +184,10 @@ function ExploreIcon({
 
 export default function BoardDock() {
   const pathname = usePathname();
+  const router = useRouter();
 
   const [friends, setFriends] = useState<Friend[]>([]);
+  const [friendsLoading, setFriendsLoading] = useState(true);
   const [drawerOpen, setDrawerOpen] = useState(false);
 
   const [activeFriendId, setActiveFriendId] = useState<string | null>(null);
@@ -150,7 +195,10 @@ export default function BoardDock() {
 
   const [allMsgs, setAllMsgs] = useState<ChatMsg[]>([]);
   const [draft, setDraft] = useState("");
+  const [dmStatus, setDmStatus] = useState<string | null>(null);
+  const [sendingDm, setSendingDm] = useState(false);
 
+  const detailsRef = useRef<HTMLDetailsElement>(null);
   const drawerRef = useRef<HTMLDivElement>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
@@ -160,7 +208,33 @@ export default function BoardDock() {
   }, []);
 
   useEffect(() => {
-    const refresh = () => setFriends(readFriends());
+    let cancelled = false;
+
+    async function loadBoardUsers() {
+      setFriendsLoading(true);
+      const boardUsers = await loadBoardUserFriendZoneOrbs(18);
+      if (!cancelled) {
+        setFriends(boardUsers.length ? boardUsers.map(friendFromOrb) : readFriends());
+        setFriendsLoading(false);
+      }
+    }
+
+    void loadBoardUsers();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    closeFriendZone();
+  }, [pathname]);
+
+  useEffect(() => {
+    const refresh = () => {
+      const saved = readFriends();
+      if (saved.length) setFriends(saved);
+    };
 
     const onCustom = () => refresh();
     const onStorage = (e: StorageEvent) => {
@@ -182,7 +256,8 @@ export default function BoardDock() {
     function onDown(e: MouseEvent) {
       if (!drawerOpen) return;
       if (!drawerRef.current) return;
-      if (!drawerRef.current.contains(e.target as Node)) setDrawerOpen(false);
+      if ((e.target as Element | null)?.closest?.(".bd_zoneBtn")) return;
+      if (!drawerRef.current.contains(e.target as Node)) closeFriendZone();
     }
     window.addEventListener("mousedown", onDown);
     return () => window.removeEventListener("mousedown", onDown);
@@ -235,10 +310,74 @@ export default function BoardDock() {
     return allMsgs.filter((m) => m.threadId === activeThreadId);
   }, [allMsgs, activeThreadId]);
 
-  function sendMsg() {
-    if (!activeThreadId) return;
+  useEffect(() => {
+    if (!drawerOpen || !activeFriend || !activeThreadId) return;
+
+    let cancelled = false;
+    const friendForSync = activeFriend;
+    const threadIdForSync = activeThreadId;
+
+    async function loadRemoteMessages() {
+      setDmStatus("Syncing direct messages...");
+      try {
+        const params = new URLSearchParams({ friendId: friendForSync.id });
+        if (friendForSync.username) params.set("username", friendForSync.username);
+
+        const res = await fetch(`/api/board/dms?${params.toString()}`, {
+          method: "GET",
+          cache: "no-store",
+        });
+        const payload = await res.json().catch(() => null);
+
+        if (cancelled) return;
+
+        if (!res.ok || !payload?.ok) {
+          setDmStatus(payload?.message || "Direct messages are local until Supabase is ready.");
+          return;
+        }
+
+        const remoteMessages: ChatMsg[] = (Array.isArray(payload.messages) ? payload.messages : [])
+          .map((m: any): ChatMsg => ({
+            id: String(m.remoteId || m.id || safeId()),
+            remoteId: typeof m.remoteId === "string" ? m.remoteId : undefined,
+            threadId: threadIdForSync,
+            from: m.from === "them" ? "them" : "me",
+            text: String(m.text || ""),
+            at: Number.isFinite(Number(m.at)) ? Number(m.at) : Date.now(),
+            senderId: typeof m.senderId === "string" ? m.senderId : undefined,
+            recipientId: typeof m.recipientId === "string" ? m.recipientId : undefined,
+            status: "sent",
+          }))
+          .filter((m: ChatMsg) => m.text);
+
+        setAllMsgs((current) => {
+          const localOtherThreads = current.filter((m) => m.threadId !== threadIdForSync);
+          const localOnly = current.filter(
+            (m) => m.threadId === threadIdForSync && !m.remoteId && m.status !== "sent"
+          );
+          const next = [...localOtherThreads, ...remoteMessages, ...localOnly].sort((a, b) => a.at - b.at);
+          writeChat(next);
+          return next;
+        });
+        setDmStatus(remoteMessages.length ? "Synced with Supabase." : "No messages yet.");
+      } catch (err) {
+        if (!cancelled) {
+          setDmStatus(err instanceof Error ? err.message : "Could not sync direct messages.");
+        }
+      }
+    }
+
+    void loadRemoteMessages();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [drawerOpen, activeFriend, activeThreadId]);
+
+  async function sendMsg() {
+    if (!activeThreadId || !activeFriend) return;
     const text = draft.trim();
-    if (!text) return;
+    if (!text || sendingDm) return;
 
     const msg: ChatMsg = {
       id: safeId(),
@@ -246,25 +385,71 @@ export default function BoardDock() {
       from: "me",
       text,
       at: Date.now(),
+      recipientId: activeFriend.id,
+      status: "local",
     };
 
     const next = [...allMsgs, msg];
     setAllMsgs(next);
     writeChat(next);
     setDraft("");
+    setSendingDm(true);
+    setDmStatus("Sending through Supabase...");
 
-    window.setTimeout(() => {
-      const reply: ChatMsg = {
-        id: safeId(),
-        threadId: activeThreadId,
-        from: "them",
-        text: "👀 seen. keep cooking.",
-        at: Date.now(),
+    try {
+      const res = await fetch("/api/board/dms", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          recipientId: activeFriend.id,
+          recipientUsername: activeFriend.username || null,
+          text,
+        }),
+      });
+      const payload = await res.json().catch(() => null);
+
+      if (!res.ok || !payload?.ok || !payload.message) {
+        throw new Error(payload?.message || "Direct message could not be delivered.");
+      }
+
+      const remote = payload.message;
+      const sentMsg: ChatMsg = {
+        ...msg,
+        id: String(remote.remoteId || remote.id || msg.id),
+        remoteId: String(remote.remoteId || remote.id || ""),
+        senderId: typeof remote.senderId === "string" ? remote.senderId : undefined,
+        recipientId: typeof remote.recipientId === "string" ? remote.recipientId : activeFriend.id,
+        at: Number.isFinite(Number(remote.at)) ? Number(remote.at) : msg.at,
+        status: "sent",
       };
-      const after = [...next, reply];
-      setAllMsgs(after);
-      writeChat(after);
-    }, 650);
+
+      setAllMsgs((current) => {
+        const updated = current.map((item) => (item.id === msg.id ? sentMsg : item));
+        writeChat(updated);
+        return updated;
+      });
+      setDmStatus("Delivered through Supabase.");
+    } catch (err) {
+      const message =
+        err instanceof Error
+          ? err.message
+          : "Direct message saved locally, but was not delivered.";
+      setAllMsgs((current) => {
+        const updated = current.map((item) =>
+          item.id === msg.id ? { ...item, status: "failed" as const } : item
+        );
+        writeChat(updated);
+        return updated;
+      });
+      setDmStatus(`${message} Message kept local.`);
+    } finally {
+      setSendingDm(false);
+    }
+  }
+
+  function closeFriendZone() {
+    detailsRef.current?.removeAttribute("open");
+    setDrawerOpen(false);
   }
 
   return (
@@ -319,7 +504,7 @@ export default function BoardDock() {
             <DockPill
               href="/board/options"
               label="Options"
-              active={isActive(pathname, "/board/profile/options")}
+              active={isActive(pathname, "/board/options")}
               Icon={Sparkles}
               iconColor="rgba(37,246,255,0.95)"
             />
@@ -334,25 +519,27 @@ export default function BoardDock() {
             variant="explore"
           />
 
-          <button
-            type="button"
-            className={`bd_zoneBtn ${drawerOpen ? "open" : ""}`}
-            onClick={() => setDrawerOpen(true)}
-            aria-haspopup="dialog"
-            aria-expanded={drawerOpen}
+          <details
+            className="fz_details"
+            ref={detailsRef}
+            onToggle={(event) => {
+              setDrawerOpen((event.currentTarget as HTMLDetailsElement).open);
+            }}
           >
-            <Users size={18} strokeWidth={2.4} className="bd_zoneIcon" aria-hidden />
-            <span className="bd_zoneLabel">Friend Zone</span>
-            <span className="bd_zoneCount" aria-label={`${friendCount} friends`}>
-              {friendCount}
-            </span>
-            <ChevronUp size={16} strokeWidth={2.6} className="bd_zoneChev" aria-hidden />
-          </button>
+            <summary className="bd_zoneBtn" aria-haspopup="dialog">
+              <Users size={18} strokeWidth={2.4} className="bd_zoneIcon" aria-hidden />
+              <span className="bd_zoneLabel">Friend Zone</span>
+              <span className="bd_zoneCount" aria-label={`${friendCount} friends`}>
+                {friendCount}
+              </span>
+              <ChevronUp size={16} strokeWidth={2.6} className="bd_zoneChev" aria-hidden />
+            </summary>
+          </details>
         </div>
       </div>
 
       {/* ✅ Friend Zone overlay lives here (dock unchanged) */}
-      {drawerOpen && (
+      <div className="fz_nativeOverlay">
         <div className="fz_overlay">
           <div
             className="fz_sheet"
@@ -369,16 +556,16 @@ export default function BoardDock() {
 
               <div className="fz_actions">
                 <Link
-                  href="/board/friends"
+                  href="/board/friend-zone"
                   className="fz_link"
-                  onClick={() => setDrawerOpen(false)}
+                  onClick={closeFriendZone}
                 >
-                  Manage Friends →
+                  Open Friend Zone →
                 </Link>
                 <button
                   type="button"
                   className="fz_close"
-                  onClick={() => setDrawerOpen(false)}
+                  onClick={closeFriendZone}
                   aria-label="Close"
                 >
                   <X size={18} strokeWidth={2.6} />
@@ -396,21 +583,28 @@ export default function BoardDock() {
                   placeholder="Search friends…"
                 />
               </div>
-              <div className="fz_hintMini">Tap an orb to open a thread.</div>
+              <div className="fz_hintMini">Tap once to DM. Double tap to open profile board.</div>
             </div>
 
             {/* Orbs row */}
-            {friends.length === 0 ? (
+            {friendsLoading ? (
               <div className="fz_emptyRow">
                 <div className="fz_empty">
-                  <div className="fz_emptyTitle">No friends yet.</div>
-                  <div className="fz_emptySub">Add demo friends on the Friends page.</div>
+                  <div className="fz_emptyTitle">Finding current Board users...</div>
+                  <div className="fz_emptySub">Friend Zone is syncing the live orbit.</div>
+                </div>
+              </div>
+            ) : friends.length === 0 ? (
+              <div className="fz_emptyRow">
+                <div className="fz_empty">
+                  <div className="fz_emptyTitle">No current orbs yet.</div>
+                  <div className="fz_emptySub">Explore live Board users and open their profile boards.</div>
                   <Link
-                    href="/board/friends"
+                    href="/board/explore"
                     className="fz_cta"
-                    onClick={() => setDrawerOpen(false)}
+                    onClick={closeFriendZone}
                   >
-                    Go to Friends
+                    Open Explore
                   </Link>
                 </div>
               </div>
@@ -419,26 +613,38 @@ export default function BoardDock() {
                 {filteredFriends.map((f, index) => {
                   const selected = f.id === activeFriendId;
                   const delay = `${(index % 9) * 0.12}s`;
+                  const username =
+                    f.username ||
+                    f.name.toLowerCase().replace(/[^a-z0-9]+/g, "").slice(0, 24) ||
+                    f.id.replace(/[^a-z0-9]+/gi, "").toLowerCase();
                   return (
-                    <button
+                    <div
                       key={f.id}
-                      type="button"
-                      className={`fz_orbCell ${selected ? "on" : ""}`}
-                      onClick={() => setActiveFriendId(f.id)}
-                      title={`Message ${f.name}`}
+                      className={`fz_orbCell bubble ${selected ? "on" : ""}`}
+                      title={`Select ${f.name} for DMs. Double tap to open their Board.`}
+                      style={{ animationDelay: delay }}
+                      onClickCapture={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        setActiveFriendId(f.id);
+                        setDmStatus(null);
+                        if (event.detail >= 2) {
+                          closeFriendZone();
+                          router.push(`/board/profile/${encodeURIComponent(username)}`);
+                        }
+                      }}
                     >
-                      <div className="fz_orb" style={{ animationDelay: delay }} aria-hidden>
-                        <div className="fz_orbInner" aria-hidden>
-                          {f.avatar ? (
-                            // eslint-disable-next-line @next/next/no-img-element
-                            <img src={f.avatar} alt="" className="fz_orbImg" />
-                          ) : (
-                            <span className="fz_orbEmoji">🙂</span>
-                          )}
-                        </div>
-                      </div>
-                      <div className="fz_orbName">{f.name}</div>
-                    </button>
+                      <FriendZoneOrb
+                        user={{
+                          id: f.id,
+                          name: f.name,
+                          username,
+                          avatarUrl: f.avatar || "/assets/board-welcome-mark.jpg",
+                          lastActiveLabel: f.lastActiveLabel || "Board signal",
+                          relationshipState: f.relationshipState || "fresh",
+                        }}
+                      />
+                    </div>
                   );
                 })}
               </div>
@@ -462,9 +668,10 @@ export default function BoardDock() {
                       </div>
                       <div>
                         <div className="fz_chatName">{activeFriend.name}</div>
-                        <div className="fz_chatSub">Direct messages (demo)</div>
+                        <div className="fz_chatSub">Direct messages</div>
                       </div>
                     </div>
+                    {dmStatus ? <div className="fz_dmStatus">{dmStatus}</div> : null}
                   </div>
 
                   <div className="fz_chat">
@@ -480,6 +687,11 @@ export default function BoardDock() {
                         >
                           <div className={`fz_bubble ${m.from === "me" ? "me" : "them"}`}>
                             {m.text}
+                            {m.from === "me" && m.status && m.status !== "sent" ? (
+                              <span className="fz_msgStatus">
+                                {m.status === "failed" ? "Not delivered" : "Local"}
+                              </span>
+                            ) : null}
                           </div>
                         </div>
                       ))
@@ -501,6 +713,7 @@ export default function BoardDock() {
                       type="button"
                       className="fz_send"
                       onClick={sendMsg}
+                      disabled={sendingDm}
                       aria-label="Send"
                     >
                       <Send size={18} strokeWidth={2.6} />
@@ -511,9 +724,9 @@ export default function BoardDock() {
             </div>
           </div>
         </div>
-      )}
+      </div>
 
-      <style jsx global>{`
+      <style>{`
         /* ----------------------------- Dock styles (unchanged) ----------------------------- */
         .bd_wrap { position: fixed; left: 0; right: 0; bottom: 0; z-index: 40; pointer-events: none; }
         .bd_shell {
@@ -550,7 +763,7 @@ export default function BoardDock() {
           color: rgba(255,0,190,0.92);
           text-shadow: 0 0 12px rgba(255,0,190,0.14);
         }
-        .bd_nav { display: flex; align-items: center; gap: 8px; flex: 1; flex-wrap: wrap; }
+        .bd_nav { display: flex; align-items: center; gap: 8px; flex: 1; flex-wrap: nowrap; min-width: 0; }
 
         .bd_zoneBtn {
           border: 1px solid rgba(0,0,0,0.12);
@@ -563,8 +776,14 @@ export default function BoardDock() {
           cursor: pointer;
           transition: transform 160ms ease, filter 160ms ease, box-shadow 160ms ease;
           white-space: nowrap;
+          list-style: none;
         }
+        .fz_details { display: inline-flex; }
+        .fz_details summary::-webkit-details-marker { display: none; }
+        .fz_nativeOverlay { display: none; }
+        .bd_wrap:has(.fz_details[open]) + .fz_nativeOverlay { display: block; }
         .bd_zoneBtn:hover { transform: translateY(-1px); filter: brightness(1.02); }
+        .fz_details[open] .bd_zoneBtn,
         .bd_zoneBtn.open { box-shadow: 0 0 0 1px rgba(255,0,190,0.18), 0 0 24px rgba(255,0,190,0.10); }
         .bd_zoneIcon { color: rgba(255,214,74,1); filter: drop-shadow(0 0 10px rgba(255,214,74,0.18)); }
         .bd_zoneLabel { font-size: 12px; font-weight: 950; letter-spacing: 0.08em; text-transform: uppercase; color: rgba(0,0,0,0.68); }
@@ -582,10 +801,15 @@ export default function BoardDock() {
           .bd_shell {
             width: calc(100% - 16px);
             border-radius: 28px;
-            flex-wrap: wrap;
-            justify-content: center;
+            flex-wrap: nowrap;
+            justify-content: flex-start;
+            overflow-x: auto;
+            overflow-y: hidden;
+            -webkit-overflow-scrolling: touch;
+            scrollbar-width: none;
           }
-          .bd_nav { justify-content: center; flex: 0 0 auto; }
+          .bd_shell::-webkit-scrollbar { display: none; }
+          .bd_nav { justify-content: flex-start; flex: 0 0 auto; }
         }
 
         /* --------------------------- Friend Zone: bottom sheet --------------------------- */
@@ -744,9 +968,9 @@ export default function BoardDock() {
           margin-top: 12px;
           display:flex;
           align-items:flex-start;
-          gap: 12px;
+          gap: 20px;
           overflow-x: auto;
-          padding: 6px 2px 8px;
+          padding: 10px 2px 12px;
         }
 
         .fz_orbCell{
@@ -754,13 +978,13 @@ export default function BoardDock() {
           background: transparent;
           padding: 0;
           cursor: pointer;
-          min-width: 84px;
+          min-width: 168px;
           text-align: center;
         }
 
         .fz_orb{
-          width: 58px;
-          height: 58px;
+          width: 116px;
+          height: 116px;
           margin: 0 auto;
           border-radius: 999px;
           border: 1px solid rgba(255,255,255,0.18);
@@ -785,8 +1009,8 @@ export default function BoardDock() {
         }
 
         .fz_orbInner{
-          width: 46px;
-          height: 46px;
+          width: 92px;
+          height: 92px;
           border-radius: 999px;
           border: 1px solid rgba(255,255,255,0.14);
           background: rgba(0,0,0,0.25);
@@ -804,17 +1028,17 @@ export default function BoardDock() {
         }
 
         .fz_orbEmoji{
-          font-size: 16px;
+          font-size: 32px;
           opacity: 0.90;
         }
 
         .fz_orbName{
-          margin-top: 8px;
-          font-size: 12px;
+          margin-top: 12px;
+          font-size: 14px;
           font-weight: 900;
           letter-spacing: 0.02em;
           color: rgba(255,255,255,0.80);
-          width: 84px;
+          width: 168px;
           overflow:hidden;
           text-overflow: ellipsis;
           white-space: nowrap;
@@ -847,6 +1071,10 @@ export default function BoardDock() {
         .fz_chatHead{
           padding: 10px 12px;
           border-bottom: 1px solid rgba(255,255,255,0.10);
+          display:flex;
+          align-items:center;
+          justify-content: space-between;
+          gap: 12px;
         }
         .fz_chatPerson{
           display:flex;
@@ -872,6 +1100,13 @@ export default function BoardDock() {
         .fz_chatSub{
           font-size: 11px;
           color: rgba(255,255,255,0.55);
+        }
+        .fz_dmStatus{
+          max-width: 46%;
+          text-align:right;
+          font-size: 11px;
+          line-height: 1.25;
+          color: rgba(134,255,230,0.70);
         }
 
         .fz_chat{
@@ -905,6 +1140,15 @@ export default function BoardDock() {
         .fz_bubble.them{
           background: rgba(0,0,0,0.22);
           color: rgba(255,255,255,0.86);
+        }
+        .fz_msgStatus{
+          display:block;
+          margin-top: 6px;
+          font-size: 10px;
+          font-weight: 900;
+          letter-spacing: 0.08em;
+          text-transform: uppercase;
+          color: rgba(255,214,74,0.72);
         }
 
         .fz_inputRow{
@@ -940,6 +1184,11 @@ export default function BoardDock() {
           transition: transform 160ms ease, filter 160ms ease, background 160ms ease;
         }
         .fz_send:hover{ transform: translateY(-1px); filter: brightness(1.06); background: rgba(255,255,255,0.10); }
+        .fz_send:disabled{
+          opacity: 0.48;
+          cursor: not-allowed;
+          transform: none;
+        }
 
         /* empty row wrapper */
         .fz_emptyRow{ margin-top: 12px; }
@@ -996,7 +1245,7 @@ function DockPill({
       <Icon size={18} strokeWidth={2.4} className="bd_pillIcon" style={{ color: iconColor }} aria-hidden />
       <span className="bd_pillLabel">{label}</span>
 
-      <style jsx global>{`
+      <style>{`
         .bd_pill {
           text-decoration: none;
           border-radius: 999px;

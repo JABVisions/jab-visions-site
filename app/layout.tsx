@@ -5,8 +5,8 @@ import Script from "next/script";
 import { Analytics } from "@vercel/analytics/next";
 
 export const metadata = {
-  title: "Those Ryderz",
-  description: "The official website for Those Ryderz. A JAB Visions production.",
+  title: "JAB Visions™ Official Website",
+  description: "The official website for JAB Visions™.",
 };
 
 export default function RootLayout({
@@ -17,7 +17,6 @@ export default function RootLayout({
   return (
     <html lang="en">
       <head>
-        {/* Google Fonts */}
         <link
           href="https://fonts.googleapis.com/css2?family=Anton&display=swap"
           rel="stylesheet"
@@ -26,11 +25,8 @@ export default function RootLayout({
           href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700&display=swap"
           rel="stylesheet"
         />
-
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <meta charSet="UTF-8" />
-
-        {/* Google Analytics (GA4) */}
         <Script
           src="https://www.googletagmanager.com/gtag/js?id=G-E2204ZVTRQ"
           strategy="afterInteractive"
@@ -44,15 +40,9 @@ export default function RootLayout({
           `}
         </Script>
       </head>
-
       <body className="bg-neutral-900 text-white">
-        {/* Global Navbar */}
         <Navbar />
-
-        {/* Offset for fixed navbar */}
-        <div className="pt-20">{children}</div>
-
-        {/* Vercel Analytics */}
+        <div className="site-content">{children}</div>
         <Analytics />
       </body>
     </html>

@@ -10,6 +10,16 @@ body {
   overflow-x: hidden;
 }
 
+.site-content {
+  padding-top: 66px;
+}
+
+@media (max-width: 767px) {
+  .site-content {
+    padding-top: 54px;
+  }
+}
+
 /* === Navbar Glowing Styles === */
 @keyframes flicker {
   0% {

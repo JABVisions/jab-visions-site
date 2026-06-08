@@ -55,7 +55,7 @@ export async function POST(req: NextRequest) {
   // private bucket -> signed URL for display
   const { data: signed, error: signErr } = await supabase.storage
     .from("board-avatars")
-    .createSignedUrl(path, 60 * 60 * 24 * 7); // 7 days
+    .createSignedUrl(path, 60 * 60 * 24 * 365); // 1 year
 
   if (signErr || !signed?.signedUrl) {
     return Response.json({ ok: false, message: signErr?.message || "Could not sign URL" }, { status: 500 });

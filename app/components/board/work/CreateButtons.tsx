@@ -30,8 +30,8 @@ export function CreateButtons({
     tab === "assets"
       ? "+ Add Asset"
       : tab === "calls"
-      ? "+ Post Work Call"
-      : "+ Create Project";
+        ? "+ Post Work Call"
+        : "+ Create Project";
 
   const openKey =
     tab === "assets" ? "asset" : tab === "calls" ? "call" : "project";
@@ -40,7 +40,7 @@ export function CreateButtons({
     <div className="flex justify-end">
       <button
         onClick={() => setOpen(openKey)}
-        className="rounded-xl bg-white text-black px-4 py-2 text-xs font-semibold hover:opacity-90"
+        className="rounded-xl bg-white px-4 py-2 text-xs font-semibold text-black hover:opacity-90"
       >
         {buttonLabel}
       </button>
@@ -84,7 +84,7 @@ function CreateAssetModal({
   const [url, setUrl] = useState("");
   const [tags, setTags] = useState("");
 
-  const canSave = useMemo(() => title.trim() && url.trim(), [title, url]);
+  const canSave = useMemo(() => !!title.trim() && !!url.trim(), [title, url]);
 
   const save = () => {
     if (!canSave) return;
@@ -104,7 +104,7 @@ function CreateAssetModal({
             .filter(Boolean),
           createdAt: Date.now(),
         },
-        ...state.assets,
+        ...(state.assets ?? []),
       ],
     });
 
@@ -125,11 +125,14 @@ function CreateAssetModal({
               onChange={(e) => setType(e.target.value as AssetType)}
               className="mt-1 w-full rounded-xl bg-white/5 px-3 py-2 text-sm ring-1 ring-white/10 outline-none"
             >
-              <option>Artwork</option>
               <option>Headshot</option>
-              <option>Video Reel</option>
-              <option>Music Link</option>
+              <option>Resume</option>
+              <option>Demo Reel</option>
+              <option>Photo</option>
+              <option>Video</option>
+              <option>Music</option>
               <option>Link</option>
+              <option>Document</option>
             </select>
           </label>
 
@@ -147,7 +150,7 @@ function CreateAssetModal({
           </label>
         </div>
 
-        <label className="text-xs text-white/70 block">
+        <label className="block text-xs text-white/70">
           Title
           <input
             value={title}
@@ -157,7 +160,7 @@ function CreateAssetModal({
           />
         </label>
 
-        <label className="text-xs text-white/70 block">
+        <label className="block text-xs text-white/70">
           Link / URL
           <input
             value={url}
@@ -167,7 +170,7 @@ function CreateAssetModal({
           />
         </label>
 
-        <label className="text-xs text-white/70 block">
+        <label className="block text-xs text-white/70">
           Tags (comma-separated)
           <input
             value={tags}
@@ -218,7 +221,7 @@ function CreateCallModal({
   const [tags, setTags] = useState("");
 
   const canSave = useMemo(
-    () => title.trim() && description.trim(),
+    () => !!title.trim() && !!description.trim(),
     [title, description]
   );
 
@@ -243,7 +246,7 @@ function CreateCallModal({
             .filter(Boolean),
           createdAt: Date.now(),
         },
-        ...state.calls,
+        ...(state.calls ?? []),
       ],
     });
 
@@ -260,7 +263,7 @@ function CreateCallModal({
   return (
     <Modal open={open} title="Post Work Call" onClose={onClose}>
       <div className="space-y-3">
-        <label className="text-xs text-white/70 block">
+        <label className="block text-xs text-white/70">
           Type
           <select
             value={type}
@@ -268,12 +271,14 @@ function CreateCallModal({
             className="mt-1 w-full rounded-xl bg-white/5 px-3 py-2 text-sm ring-1 ring-white/10 outline-none"
           >
             <option>Audition</option>
-            <option>Collab</option>
-            <option>Request</option>
+            <option>Casting Call</option>
+            <option>Crew Call</option>
+            <option>Gig</option>
+            <option>Collaboration</option>
           </select>
         </label>
 
-        <label className="text-xs text-white/70 block">
+        <label className="block text-xs text-white/70">
           Title
           <input
             value={title}
@@ -283,12 +288,12 @@ function CreateCallModal({
           />
         </label>
 
-        <label className="text-xs text-white/70 block">
+        <label className="block text-xs text-white/70">
           Description
           <textarea
             value={description}
             onChange={(e) => setDescription(e.target.value)}
-            className="mt-1 w-full rounded-xl bg-white/5 px-3 py-2 text-sm ring-1 ring-white/10 outline-none min-h-[110px]"
+            className="mt-1 min-h-[110px] w-full rounded-xl bg-white/5 px-3 py-2 text-sm ring-1 ring-white/10 outline-none"
             placeholder="What are you looking for? What should people submit?"
           />
         </label>
@@ -334,7 +339,7 @@ function CreateCallModal({
           </label>
         </div>
 
-        <label className="text-xs text-white/70 block">
+        <label className="block text-xs text-white/70">
           Tags (comma-separated)
           <input
             value={tags}
@@ -375,12 +380,12 @@ function CreateProjectModal({
   state: WorkState;
   onChange: (next: WorkState) => void;
 }) {
-  const [name, setName] = useState("");
-  const [status, setStatus] = useState<ProjectStatus>("Active");
+  const [title, setTitle] = useState("");
+  const [status, setStatus] = useState<ProjectStatus>("Idea");
   const [description, setDescription] = useState("");
   const [tags, setTags] = useState("");
 
-  const canSave = useMemo(() => name.trim().length > 2, [name]);
+  const canSave = useMemo(() => title.trim().length > 2, [title]);
 
   const save = () => {
     if (!canSave) return;
@@ -390,7 +395,7 @@ function CreateProjectModal({
       projects: [
         {
           id: newId("proj"),
-          name: name.trim(),
+          title: title.trim(),
           status,
           description: description.trim() || undefined,
           tags: tags
@@ -399,12 +404,12 @@ function CreateProjectModal({
             .filter(Boolean),
           createdAt: Date.now(),
         },
-        ...state.projects,
+        ...(state.projects ?? []),
       ],
     });
 
-    setName("");
-    setStatus("Active");
+    setTitle("");
+    setStatus("Idea");
     setDescription("");
     setTags("");
     onClose();
@@ -413,41 +418,42 @@ function CreateProjectModal({
   return (
     <Modal open={open} title="Create Project" onClose={onClose}>
       <div className="space-y-3">
-        <label className="text-xs text-white/70 block">
+        <label className="block text-xs text-white/70">
           Project Name
           <input
-            value={name}
-            onChange={(e) => setName(e.target.value)}
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
             className="mt-1 w-full rounded-xl bg-white/5 px-3 py-2 text-sm ring-1 ring-white/10 outline-none"
             placeholder="e.g., Short Film Crew"
           />
         </label>
 
-        <label className="text-xs text-white/70 block">
+        <label className="block text-xs text-white/70">
           Status
           <select
             value={status}
             onChange={(e) => setStatus(e.target.value as ProjectStatus)}
             className="mt-1 w-full rounded-xl bg-white/5 px-3 py-2 text-sm ring-1 ring-white/10 outline-none"
           >
-            <option>Active</option>
-            <option>Casting</option>
-            <option>Building</option>
-            <option>Archived</option>
+            <option>Idea</option>
+            <option>Planning</option>
+            <option>In Progress</option>
+            <option>Paused</option>
+            <option>Complete</option>
           </select>
         </label>
 
-        <label className="text-xs text-white/70 block">
+        <label className="block text-xs text-white/70">
           Description (optional)
           <textarea
             value={description}
             onChange={(e) => setDescription(e.target.value)}
-            className="mt-1 w-full rounded-xl bg-white/5 px-3 py-2 text-sm ring-1 ring-white/10 outline-none min-h-[110px]"
+            className="mt-1 min-h-[110px] w-full rounded-xl bg-white/5 px-3 py-2 text-sm ring-1 ring-white/10 outline-none"
             placeholder="What is this project? Who should join?"
           />
         </label>
 
-        <label className="text-xs text-white/70 block">
+        <label className="block text-xs text-white/70">
           Tags (comma-separated)
           <input
             value={tags}

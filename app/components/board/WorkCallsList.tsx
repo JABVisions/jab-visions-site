@@ -39,19 +39,38 @@ export default function WorkCallsList({
   counts,
   onOpen,
   onCreate,
+  onMarkAllRead,
+  onClear,
 }: {
   items: WorkCallItem[];
   counts: Record<WorkCallType, number>;
   onOpen?: (id: string) => void;
   onCreate?: () => void;
+  onMarkAllRead?: () => void;
+  onClear?: () => void;
 }) {
   const [filter, setFilter] = useState<WorkCallType | "all">("all");
+  const [query, setQuery] = useState("");
+  const [unreadOnly, setUnreadOnly] = useState(false);
 
   const filtered = useMemo(() => {
-    const base = items.slice().sort((a, b) => b.createdAt - a.createdAt);
-    if (filter === "all") return base;
-    return base.filter((x) => x.type === filter);
-  }, [items, filter]);
+    const q = query.trim().toLowerCase();
+    return items
+      .slice()
+      .sort((a, b) => b.createdAt - a.createdAt)
+      .filter((x) => (filter === "all" ? true : x.type === filter))
+      .filter((x) => (unreadOnly ? !!x.unread : true))
+      .filter((x) => {
+        if (!q) return true;
+        return (
+          x.title.toLowerCase().includes(q) ||
+          (x.preview ?? "").toLowerCase().includes(q) ||
+          typeLabel(x.type).toLowerCase().includes(q)
+        );
+      });
+  }, [items, filter, query, unreadOnly]);
+
+  const unreadCount = items.filter((item) => item.unread).length;
 
   const tabs: Array<{ id: WorkCallType | "all"; label: string; count: number }> = [
     { id: "all", label: "All", count: items.length },
@@ -69,7 +88,7 @@ export default function WorkCallsList({
             <div className="text-xs tracking-[0.35em] text-white/55">WORK CALLS</div>
             <div className="mt-2 text-lg font-semibold text-white/90">Inbox</div>
             <div className="mt-1 text-sm text-white/55">
-              Message-list Work Calls with tags by index.
+              Track casting, crew, gigs, and collaboration asks in one place.
             </div>
           </div>
 
@@ -85,18 +104,64 @@ export default function WorkCallsList({
             >
               + Work Call
             </button>
-
-            <div className="hidden sm:block rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-xs text-white/60">
-              Index:
-              <span className="ml-2 text-white/80">Casting {counts.casting ?? 0}</span>
-              <span className="mx-2 text-white/20">•</span>
-              <span className="text-white/80">Crew {counts.crew ?? 0}</span>
-              <span className="mx-2 text-white/20">•</span>
-              <span className="text-white/80">Gigs {counts.gigs ?? 0}</span>
-              <span className="mx-2 text-white/20">•</span>
-              <span className="text-white/80">Collabs {counts.collaborations ?? 0}</span>
-            </div>
           </div>
+        </div>
+
+        <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-5">
+          {[
+            ["All", items.length],
+            ["Unread", unreadCount],
+            ["Casting", counts.casting ?? 0],
+            ["Crew", counts.crew ?? 0],
+            ["Gigs", counts.gigs ?? 0],
+          ].map(([label, count]) => (
+            <div
+              key={String(label)}
+              className="grid aspect-square min-h-[86px] place-items-center rounded-2xl border border-white/10 bg-white/5 px-2 py-3 text-center sm:aspect-auto"
+            >
+              <div>
+                <div className="text-[10px] uppercase tracking-[0.16em] text-white/36">{label}</div>
+                <div className="mt-2 text-lg font-semibold leading-none text-white/86">{count}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div className="mt-4 grid gap-2 md:grid-cols-[1fr_auto_auto_auto]">
+          <input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Search work calls..."
+            className="min-w-0 rounded-2xl border border-white/10 bg-black/30 px-4 py-2 text-sm text-white/82 outline-none placeholder:text-white/35 focus:ring-2 focus:ring-lime-300/30"
+          />
+          <button
+            type="button"
+            onClick={() => setUnreadOnly((value) => !value)}
+            className={clsx(
+              "rounded-2xl border px-4 py-2 text-sm transition",
+              unreadOnly
+                ? "border-lime-300/30 bg-lime-400/15 text-lime-100"
+                : "border-white/10 bg-white/5 text-white/70 hover:bg-white/10"
+            )}
+          >
+            Unread
+          </button>
+          <button
+            type="button"
+            onClick={onMarkAllRead}
+            disabled={!items.some((item) => item.unread)}
+            className="rounded-2xl border border-white/10 bg-white/5 px-4 py-2 text-sm text-white/68 transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-45"
+          >
+            Mark read
+          </button>
+          <button
+            type="button"
+            onClick={onClear}
+            disabled={items.length === 0}
+            className="rounded-2xl border border-red-300/15 bg-red-500/10 px-4 py-2 text-sm text-red-100/80 transition hover:bg-red-500/15 disabled:cursor-not-allowed disabled:opacity-45"
+          >
+            Clear
+          </button>
         </div>
 
         {/* Tabs */}
@@ -126,24 +191,27 @@ export default function WorkCallsList({
       </div>
 
       {/* List */}
-      <div className="p-3">
+      <div className="p-4">
         {filtered.length === 0 ? (
           <div className="rounded-2xl border border-white/10 bg-white/5 p-5">
-            <div className="text-sm text-white/80">No Work Calls yet.</div>
+            <div className="text-sm text-white/80">No Work Calls match this view.</div>
             <div className="mt-1 text-xs text-white/45">
-              Hit <span className="text-white/70 font-medium">+ Work Call</span> to post the first one.
+              Post a new call or adjust the filter/search.
             </div>
           </div>
         ) : (
-          <div className="divide-y divide-white/10">
+          <div className="grid gap-3">
             {filtered.map((w) => (
               <button
                 key={w.id}
                 type="button"
                 onClick={() => onOpen?.(w.id)}
                 className={clsx(
-                  "w-full text-left rounded-2xl p-4 transition",
-                  "hover:bg-white/[0.04] focus:outline-none focus:ring-2 focus:ring-lime-300/30"
+                  "w-full text-left rounded-3xl border p-4 transition",
+                  w.unread
+                    ? "border-lime-300/20 bg-lime-400/[0.08]"
+                    : "border-white/10 bg-white/[0.04]",
+                  "hover:bg-white/[0.07] focus:outline-none focus:ring-2 focus:ring-lime-300/30"
                 )}
               >
                 <div className="flex items-start justify-between gap-3">
@@ -155,8 +223,6 @@ export default function WorkCallsList({
                         <span className="mt-[2px] inline-block h-2 w-2 rounded-full bg-white/10" />
                       )}
 
-                      <div className="text-sm font-medium text-white/85 truncate">{w.title}</div>
-
                       <span
                         className={clsx(
                           "shrink-0 rounded-full border px-2 py-1 text-[11px]",
@@ -166,14 +232,18 @@ export default function WorkCallsList({
                         {typeLabel(w.type)}
                       </span>
                     </div>
+                    <div className="mt-2 text-base font-semibold text-white/88">{w.title}</div>
 
                     {w.preview ? (
-                      <div className="mt-2 text-xs text-white/55 line-clamp-2">{w.preview}</div>
+                      <div className="mt-2 text-sm leading-6 text-white/58 line-clamp-3">{w.preview}</div>
                     ) : null}
                   </div>
 
-                  <div className="shrink-0 text-xs text-white/40">
-                    {new Date(w.createdAt).toLocaleDateString()}
+                  <div className="shrink-0 text-right text-xs text-white/40">
+                    <div>{new Date(w.createdAt).toLocaleDateString()}</div>
+                    <div className="mt-2 rounded-full border border-white/10 bg-black/20 px-2 py-1 text-[10px] uppercase tracking-[0.16em] text-white/42">
+                      Open
+                    </div>
                   </div>
                 </div>
               </button>

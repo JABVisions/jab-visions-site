@@ -8,7 +8,8 @@ export type UniversalDropType =
   // removed: "audio"
   | "link"
   | "doc"
-  | "project";
+  | "project"
+  | "thought";
 // intentionally NOT including "pay"
 
 export type UniversalDrop = {
@@ -21,6 +22,29 @@ export type UniversalDrop = {
   embedUrl?: string;
   description?: string;
   tags?: string[];
+
+  authorId?: string;
+  authorName?: string;
+  authorUsername?: string;
+  authorAvatar?: string;
+  authorGlow?: string;
+  authorAuraIntensity?: number;
+
+  imageUrl?: string;
+  mediaUrl?: string;
+  mediaKind?: "image" | "video" | "audio";
+  visibility?: "public" | "private";
+  thoughtFormat?: "text" | "voice" | "doodle";
+  thoughtText?: string;
+
+  projectId?: string;
+  projectType?: string;
+  projectStatus?: string;
+  goal?: string;
+  milestone?: string;
+  source?: string;
+  origin?: string;
+  meta?: Record<string, any>;
 };
 
 export const DROPS_KEY = "jab_board_drops_v2";
@@ -49,6 +73,43 @@ export function readDrops(): UniversalDrop[] {
         embedUrl: typeof x.embedUrl === "string" ? x.embedUrl : undefined,
         description: typeof x.description === "string" ? x.description : undefined,
         tags: Array.isArray(x.tags) ? x.tags.map(String) : undefined,
+        authorId: typeof x.authorId === "string" ? x.authorId : undefined,
+        authorName: typeof x.authorName === "string" ? x.authorName : undefined,
+        authorUsername:
+          typeof x.authorUsername === "string" ? x.authorUsername : undefined,
+        authorAvatar: typeof x.authorAvatar === "string" ? x.authorAvatar : undefined,
+        authorGlow: typeof x.authorGlow === "string" ? x.authorGlow : undefined,
+        authorAuraIntensity:
+          typeof x.authorAuraIntensity === "number" ? x.authorAuraIntensity : undefined,
+        imageUrl: typeof x.imageUrl === "string" ? x.imageUrl : undefined,
+        mediaUrl: typeof x.mediaUrl === "string" ? x.mediaUrl : undefined,
+        mediaKind:
+          x.mediaKind === "image" || x.mediaKind === "video" || x.mediaKind === "audio"
+            ? x.mediaKind
+            : undefined,
+        visibility:
+          x.visibility === "private" || x.visibility === "public"
+            ? x.visibility
+            : undefined,
+        thoughtFormat:
+          x.thoughtFormat === "text" ||
+          x.thoughtFormat === "voice" ||
+          x.thoughtFormat === "doodle"
+            ? x.thoughtFormat
+            : undefined,
+        thoughtText: typeof x.thoughtText === "string" ? x.thoughtText : undefined,
+        projectId: typeof x.projectId === "string" ? x.projectId : undefined,
+        projectType: typeof x.projectType === "string" ? x.projectType : undefined,
+        projectStatus:
+          typeof x.projectStatus === "string" ? x.projectStatus : undefined,
+        goal: typeof x.goal === "string" ? x.goal : undefined,
+        milestone: typeof x.milestone === "string" ? x.milestone : undefined,
+        source: typeof x.source === "string" ? x.source : undefined,
+        origin: typeof x.origin === "string" ? x.origin : undefined,
+        meta:
+          x.meta && typeof x.meta === "object" && !Array.isArray(x.meta)
+            ? x.meta
+            : undefined,
       }))
       .filter((d) => d.id && d.type && d.type !== "pay") as UniversalDrop[];
   } catch {
@@ -75,6 +136,16 @@ export function pushDrop(drop: UniversalDrop) {
   const current = readDrops();
   const next = [drop, ...current].slice(0, 250);
   writeDrops(next);
+}
+
+export function removeDrops(matcher: (drop: UniversalDrop) => boolean) {
+  const current = readDrops();
+  const next = current.filter((drop) => !matcher(drop));
+  writeDrops(next);
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent("board:drops:updated"));
+  }
+  return next;
 }
 
 export function newId(prefix: string) {

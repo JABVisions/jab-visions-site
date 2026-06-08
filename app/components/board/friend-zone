@@ -8,6 +8,7 @@ import FriendDropCell from "./FriendDropCell";
 type Friend = {
   id: string;
   name: string;
+  username?: string;
   avatar?: string | null;
   addedAt: number;
 };
@@ -24,6 +25,45 @@ const FRIENDS_KEY = "jab_board_friends_v1";
 const FRIENDS_EVENT = "jab:friends_updated";
 const CHAT_KEY = "jab_board_chat_v1";
 
+const DEMO_FRIENDS: Friend[] = [
+  {
+    id: "demo:chaeyeon",
+    name: "Chaeyeon",
+    avatar: "/assets/chaeyeon-kim-headshot.jpeg",
+    addedAt: 6,
+  },
+  {
+    id: "demo:simran",
+    name: "Simran",
+    avatar: "/assets/simran-k-headshot3.jpg",
+    addedAt: 5,
+  },
+  {
+    id: "demo:hadi",
+    name: "Hadi",
+    avatar: "/assets/hadi-taloustan-headshot.jpg",
+    addedAt: 4,
+  },
+  {
+    id: "demo:aria",
+    name: "Aria",
+    avatar: "/assets/aria-patterson-headshot.jpg",
+    addedAt: 3,
+  },
+  {
+    id: "demo:haylee",
+    name: "Haylee",
+    avatar: "/assets/haylee-brown-headshot.jpeg",
+    addedAt: 2,
+  },
+  {
+    id: "demo:mercy",
+    name: "Mercy",
+    avatar: "/assets/mercy_jonas.jpg",
+    addedAt: 1,
+  },
+];
+
 function safeId() {
   return `${Date.now()}_${Math.random().toString(16).slice(2)}`;
 }
@@ -31,20 +71,25 @@ function safeId() {
 function readFriends(): Friend[] {
   try {
     const raw = localStorage.getItem(FRIENDS_KEY);
-    if (!raw) return [];
+    if (!raw) return DEMO_FRIENDS;
     const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed
+    if (!Array.isArray(parsed)) return DEMO_FRIENDS;
+    const saved = parsed
       .map((f: any) => ({
         id: String(f.id ?? ""),
         name: String(f.name ?? "Unknown"),
+        username:
+          typeof f.username === "string" && f.username.trim()
+            ? f.username.trim().replace(/^@+/, "").toLowerCase()
+            : undefined,
         avatar: typeof f.avatar === "string" ? f.avatar : null,
         addedAt: Number(f.addedAt ?? Date.now()),
       }))
       .filter((f) => f.id && f.name)
       .sort((a, b) => b.addedAt - a.addedAt);
+    return saved.length ? saved : DEMO_FRIENDS;
   } catch {
-    return [];
+    return DEMO_FRIENDS;
   }
 }
 
@@ -199,7 +244,7 @@ export default function FriendZone({
         id: safeId(),
         threadId: activeThreadId,
         from: "them",
-        text: "👀 seen. keep cooking.",
+        text: "Bucket Brain noticed your signal got picked up. Keep the room warm.",
         at: Date.now(),
       };
       const after = [...next, reply];
@@ -268,7 +313,7 @@ export default function FriendZone({
                       </div>
                       <div>
                         <div className="fz_chatName">{activeFriend.name}</div>
-                        <div className="fz_chatSub">Direct messages (demo)</div>
+                        <div className="fz_chatSub">Direct messages</div>
                       </div>
                     </div>
                   </div>
@@ -313,6 +358,10 @@ export default function FriendZone({
                 const score = allMsgs.filter((m) => m.threadId === tid).length;
                 const tier: 0 | 1 | 2 | 3 =
                   score >= 12 ? 3 : score >= 6 ? 2 : score >= 1 ? 1 : 0;
+                const username =
+                  f.username ||
+                  f.name.toLowerCase().replace(/[^a-z0-9]+/g, "").slice(0, 24) ||
+                  f.id.replace(/[^a-z0-9]+/gi, "").toLowerCase();
 
                 return (
                   <FriendDropCell
@@ -321,7 +370,7 @@ export default function FriendZone({
                     avatar={f.avatar}
                     selected={f.id === activeFriendId}
                     tier={tier}
-                    onClick={() => setActiveFriendId(f.id)}
+                    href={`/board/profile/${encodeURIComponent(username)}`}
                   />
                 );
               })}

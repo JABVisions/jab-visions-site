@@ -2,54 +2,18 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-
-type DropType = "YouTube" | "Music" | "News" | "Link" | "Media" | "Pay" | "Doc";
-
-type DropItem = {
-  id: string;
-  title: string;
-  type: DropType;
-  createdAt: number;
-
-  // Pay metadata
-  priceCents?: number;
-  description?: string;
-  linkUrl?: string;
-
-  // optional
-  fileName?: string;
-};
-
-const DROPS_KEY = "jab_board_drops_v2";
+import {
+  PAY_DROPS_UPDATED_EVENT,
+  readPayDrops,
+  type PayDrop,
+} from "@/lib/board/paydrops";
+import { openHostedPayDropCheckout } from "@/lib/board/payCheckout";
+import { supabaseBrowser } from "@/lib/supabase/browser";
 const PREF_MODE_KEY = "jab_board_dropconsole_mode"; // used only to preselect Pay on Feed
 
 function fmtMoney(cents?: number) {
   if (!cents || cents <= 0) return "";
   return `$${(cents / 100).toFixed(2)}`;
-}
-
-function safeParseDrops(): DropItem[] {
-  try {
-    const raw = localStorage.getItem(DROPS_KEY);
-    if (!raw) return [];
-    const arr = JSON.parse(raw);
-    if (!Array.isArray(arr)) return [];
-    return arr
-      .filter((x) => x && typeof x === "object")
-      .map((x: any) => ({
-        id: String(x.id ?? ""),
-        title: String(x.title ?? "Untitled"),
-        type: (x.type as DropType) ?? "Link",
-        createdAt: Number(x.createdAt ?? Date.now()),
-        priceCents: typeof x.priceCents === "number" ? x.priceCents : undefined,
-        description: typeof x.description === "string" ? x.description : undefined,
-        linkUrl: typeof x.linkUrl === "string" ? x.linkUrl : undefined,
-        fileName: typeof x.fileName === "string" ? x.fileName : undefined,
-      }))
-      .filter((d) => d.id);
-  } catch {
-    return [];
-  }
 }
 
 export default function PayDropsMiniPanel({
@@ -61,31 +25,71 @@ export default function PayDropsMiniPanel({
 }) {
   const router = useRouter();
 
-  const [drops, setDrops] = useState<DropItem[]>([]);
+  const [drops, setDrops] = useState<PayDrop[]>([]);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [userId, setUserId] = useState<string | null>(null);
+  const [username, setUsername] = useState<string | null>(null);
+
+  useEffect(() => {
+    const sb = supabaseBrowser();
+    let cancelled = false;
+
+    async function loadUser() {
+      const { data } = await sb.auth.getUser();
+      const nextUserId = data.user?.id ?? null;
+      if (!cancelled) setUserId(nextUserId);
+      if (!nextUserId) {
+        if (!cancelled) setUsername(null);
+        return;
+      }
+      const { data: profile } = await sb
+        .from("profiles")
+        .select("username")
+        .eq("id", nextUserId)
+        .maybeSingle();
+      if (!cancelled) setUsername(String(profile?.username || "").toLowerCase() || null);
+    }
+
+    void loadUser();
+
+    const {
+      data: { subscription },
+    } = sb.auth.onAuthStateChange((_event, session) => {
+      setUserId(session?.user?.id ?? null);
+      setUsername(null);
+    });
+
+    return () => {
+      cancelled = true;
+      subscription.unsubscribe();
+    };
+  }, []);
 
   // Load + keep reasonably in sync in same tab
   useEffect(() => {
-    const read = () => setDrops(safeParseDrops());
+    const read = () => setDrops(readPayDrops(userId, username === "johnandy"));
 
     read();
     const onStorage = (e: StorageEvent) => {
-      if (e.key === DROPS_KEY) read();
+      if (e.key) read();
     };
+    const onUpdated = () => read();
     window.addEventListener("storage", onStorage);
+    window.addEventListener(PAY_DROPS_UPDATED_EVENT, onUpdated as EventListener);
 
     // Same-tab updates don’t fire "storage", so we poll lightly
     const t = window.setInterval(read, 1200);
 
     return () => {
       window.removeEventListener("storage", onStorage);
+      window.removeEventListener(PAY_DROPS_UPDATED_EVENT, onUpdated as EventListener);
       window.clearInterval(t);
     };
-  }, []);
+  }, [userId, username]);
 
   const payDrops = useMemo(() => {
     return drops
-      .filter((d) => String(d.type).toLowerCase() === "pay")
-      .filter((d) => (d.priceCents ?? 0) > 0) // ✅ amount required
+      .filter((d) => (d.amountCents ?? 0) > 0)
       .sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0))
       .slice(0, max);
   }, [drops, max]);
@@ -96,6 +100,31 @@ export default function PayDropsMiniPanel({
     } catch {}
     router.push("/board/feed");
   };
+
+  async function openCheckout(drop: PayDrop) {
+    if (drop.checkoutUrl) {
+      window.open(drop.checkoutUrl, "_blank", "noopener,noreferrer");
+      return;
+    }
+
+    if (drop.provider !== "authorize_net_accept_hosted" && drop.checkoutUrl) return;
+
+    try {
+      setBusyId(drop.id);
+      await openHostedPayDropCheckout({
+        payDropId: drop.id,
+        title: drop.title,
+        description: drop.description,
+        amountCents: drop.amountCents,
+      });
+    } catch (error) {
+      window.alert(
+        error instanceof Error ? error.message : "Could not open National Bankcard checkout."
+      );
+    } finally {
+      setBusyId(null);
+    }
+  }
 
   return (
     <section
@@ -152,19 +181,30 @@ export default function PayDropsMiniPanel({
                 </div>
 
                 <div className="shrink-0 rounded-full px-3 py-1 text-[11px] font-extrabold tracking-[0.14em] uppercase bg-[#FFE36A]/70 border border-black/10 text-black/70">
-                  {fmtMoney(d.priceCents)}
+                  {fmtMoney(d.amountCents)}
                 </div>
               </div>
 
-              {d.linkUrl ? (
-                <a
-                  href={d.linkUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="mt-3 inline-flex rounded-full px-3 py-2 text-xss text-xs font-extrabold tracking-[0.12em] uppercase bg-white/70 border border-black/10 text-[rgba(255,0,190,0.9)]"
+              <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px] font-extrabold tracking-[0.12em] uppercase">
+                <span className="rounded-full border border-black/10 bg-white/70 px-3 py-2 text-black/55">
+                  {d.provider === "authorize_net_accept_hosted"
+                    ? "Authorize.Net Hosted"
+                    : "Payment Link"}
+                </span>
+                <span className="rounded-full border border-black/10 bg-white/70 px-3 py-2 text-black/45">
+                  {d.status.replaceAll("_", " ")}
+                </span>
+              </div>
+
+              {d.checkoutUrl || d.provider === "authorize_net_accept_hosted" ? (
+                <button
+                  type="button"
+                  onClick={() => void openCheckout(d)}
+                  disabled={busyId === d.id}
+                  className="mt-3 inline-flex rounded-full px-3 py-2 text-xs font-extrabold tracking-[0.12em] uppercase bg-white/70 border border-black/10 text-[rgba(255,0,190,0.9)] disabled:opacity-60 disabled:cursor-wait"
                 >
-                  Link →
-                </a>
+                  {busyId === d.id ? "Opening..." : "Checkout →"}
+                </button>
               ) : null}
             </div>
           ))}

@@ -111,6 +111,14 @@ export function appendLocalActivity(item: BoardActivity) {
   setLocalActivity(next);
 }
 
+export function removeLocalActivity(
+  matcher: (item: BoardActivity) => boolean
+) {
+  const prev = getLocalActivity();
+  const next = prev.filter((item) => !matcher(item));
+  setLocalActivity(next);
+}
+
 /* -------------------------------------------------------------------------- */
 /* remote helpers */
 /* -------------------------------------------------------------------------- */

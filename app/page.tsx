@@ -1,23 +1,65 @@
 'use client';
 
 import Image from 'next/image';
-import { useState, useEffect, useRef } from 'react';
+import { useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
+
+const ecosystemCards = [
+  {
+    label: 'IP Engine',
+    title: 'THOSE RYDERZ',
+    description:
+      'Flagship cinematic IP. A supernatural superhero story-world about power, faith, identity, and the final resistance.',
+    cta: 'Enter the Universe',
+    href: '/those-ryderz',
+    image: '/assets/those-ryderz-logo.jpg',
+    tone: 'ryderz',
+  },
+  {
+    label: 'Commerce Engine',
+    title: 'JAB Visions Store',
+    description:
+      'Creator commerce for the JAB Visions brand, supporting original productions, audience growth, and future artifacts.',
+    cta: 'Visit the Store',
+    href: 'https://store.jabvisions.com',
+    image: '/store-drops/artifact-015-signal-crown-headphones.png',
+    tone: 'store',
+  },
+  {
+    label: 'Infrastructure Engine',
+    title: 'Board',
+    description:
+      'A creator-production network for auditions, cast, crew, project drops, work pages, and community infrastructure.',
+    cta: 'Preview Board',
+    href: '/board-preview',
+    image: '/assets/board-welcome-mark.jpg',
+    tone: 'board',
+  },
+];
+
+const focusItems = [
+  ['THOSE RYDERZ', 'Active development / production'],
+  ['Board', 'Web beta now live'],
+  ['JAB Visions Store', 'Open and evolving'],
+];
+
+const boardFeatures = [
+  'Drops',
+  'Work Page',
+  'Project Notebook',
+  'Pass / Pin / Push',
+  'Board Glow',
+  'Future Pay Drops',
+];
 
 export default function Home() {
   const router = useRouter();
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
-  const [announcementsOpen, setAnnouncementsOpen] = useState(true);
-
-  const handleEnterSite = () => router.push('/those-ryderz');
-  const handleJoin = () => router.push('/board/signup');
-  const handleLogin = () => router.push('/board/login');
-  const handleStore = () => {
+  const openStore = () => {
     window.location.href = 'https://store.jabvisions.com';
   };
 
-  /* MATRIX BACKGROUND */
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -26,34 +68,29 @@ export default function Home() {
     if (!ctx) return;
 
     const fontSize = 14;
-    const chars = '0123456789ABCDEFλΔΨ';
+    const chars = '0123456789ABCDEFJABλΔΨRYDRZ';
+    let drops: number[] = [];
+    let rafId = 0;
 
     const resize = () => {
       canvas.width = window.innerWidth;
       canvas.height = window.innerHeight;
+      drops = Array(Math.floor(canvas.width / fontSize)).fill(0);
     };
-
-    resize();
-
-    const columns = Math.floor(canvas.width / fontSize);
-    const drops = Array(columns).fill(0);
-
-    let rafId = 0;
 
     const draw = () => {
       ctx.fillStyle = 'rgba(0,0,0,0.08)';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-      ctx.fillStyle = '#00ff9c';
+      ctx.fillStyle = '#31ff96';
       ctx.font = `${fontSize}px monospace`;
 
-      for (let i = 0; i < drops.length; i++) {
+      for (let i = 0; i < drops.length; i += 1) {
         const text = chars[Math.floor(Math.random() * chars.length)];
         ctx.fillText(text, i * fontSize, drops[i] * fontSize);
+        drops[i] += 1;
 
-        drops[i]++;
-
-        if (drops[i] * fontSize > canvas.height && Math.random() > 0.98) {
+        if (drops[i] * fontSize > canvas.height && Math.random() > 0.982) {
           drops[i] = 0;
         }
       }
@@ -61,215 +98,687 @@ export default function Home() {
       rafId = requestAnimationFrame(draw);
     };
 
+    resize();
     draw();
     window.addEventListener('resize', resize);
 
     return () => {
       window.removeEventListener('resize', resize);
-      if (rafId) cancelAnimationFrame(rafId);
+      cancelAnimationFrame(rafId);
     };
   }, []);
 
   return (
-    <main className="relative min-h-screen w-full bg-black flex flex-col items-center justify-center overflow-hidden">
-      <canvas ref={canvasRef} className="fixed inset-0 z-0" />
+    <main className="home-root">
+      <canvas ref={canvasRef} className="matrix-canvas" />
+      <div className="scanlines" />
+      <div className="aurora" />
 
-      {/* ANNOUNCEMENTS */}
-      <div className="announce-wrap">
-        <button
-          className="announce-tab"
-          onClick={() => setAnnouncementsOpen(v => !v)}
-        >
-          📣 ANNOUNCEMENTS {announcementsOpen ? '▾' : '▸'}
-        </button>
-
-        {announcementsOpen && (
-          <div className="announce-panel">
-            <div>• JAB Visions™ Board is coming: A social media community</div>
-            <div>• Those Ryderz in production</div>
-            <div>• Now casting: Zoe Folie (The Blue Ryder)</div>
+      <section className="hero-shell">
+        <div className="hero-terminal">
+          <div className="terminal-topline">
+            <span>JAB VISIONS ECOSYSTEM TERMINAL</span>
+            <span>THOSE RYDERZ ERA</span>
           </div>
-        )}
-      </div>
 
-      {/* STORE */}
-      <div className="store-bag-wrap">
-        <button onClick={handleStore} aria-label="JAB Visions Store">
-          <div className="store-bag-handle" />
-          <div className="store-bag-body">🛍️</div>
-        </button>
-        <span className="store-bag-label">JAB Visions™ Store</span>
-      </div>
+          <div className="hero-grid">
+            <div className="hero-copy">
+              <Image
+                src="/assets/jab-logo@2x.png"
+                alt="JAB Visions"
+                width={460}
+                height={105}
+                priority
+                className="hero-logo"
+              />
 
-      {/* LOGO */}
-      <Image
-        src="/assets/jab-logo@2x.png"
-        alt="JAB Logo"
-        width={440}
-        height={100}
-        priority
-        className="z-30 mb-6 drop-shadow-2xl"
-      />
+              <p className="eyebrow">Entertainment-tech / cinematic IP / creator infrastructure</p>
+              <h1>Original stories. Living worlds. Creator-built infrastructure.</h1>
+              <p className="subhead">
+                JAB Visions is an entertainment-tech company developing cinematic IP,
+                creator commerce, and production/community tools through one connected
+                ecosystem.
+              </p>
 
-      {/* CTA BUTTONS */}
-      <div className="z-40 flex flex-col items-center gap-4">
-        <button className="enter-site-btn" onClick={handleJoin}>
-          [ Join JAB Visions™ Board ]
-        </button>
-        <button className="enter-site-btn" onClick={handleEnterSite}>
-          [ Enter Site ]
-        </button>
-        <button className="enter-site-btn-secondary" onClick={handleLogin}>
-          [ Log In ]
-        </button>
-      </div>
+              <div className="hero-actions">
+                <button className="primary-action" onClick={() => router.push('/those-ryderz')}>
+                  Enter THOSE RYDERZ
+                </button>
+                <button className="secondary-action" onClick={() => router.push('/board-preview')}>
+                  Explore Board
+                </button>
+                <button className="ghost-action" onClick={openStore}>
+                  Visit Store
+                </button>
+              </div>
+            </div>
 
-      {/* STYLES */}
+            <div className="signal-panel" aria-label="JAB Visions current signal">
+              <div className="signal-card">
+                <div className="signal-label">Now transmitting</div>
+                <div className="signal-title">Stories become worlds.</div>
+                <div className="signal-line">Worlds become communities.</div>
+                <div className="signal-line">Communities become companies.</div>
+              </div>
+              <div className="mini-status-grid">
+                {focusItems.map(([title, status]) => (
+                  <div className="mini-status" key={title}>
+                    <span>{title}</span>
+                    <strong>{status}</strong>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section className="section-block ecosystem-block">
+        <div className="section-heading">
+          <p>The JAB Visions Ecosystem</p>
+          <h2>Three engines. One creative universe.</h2>
+        </div>
+
+        <div className="ecosystem-grid">
+          {ecosystemCards.map((card) => (
+            <article className={`ecosystem-card ${card.tone}`} key={card.title}>
+              <div className={`card-image card-image-${card.tone}`}>
+                <Image src={card.image} alt="" width={540} height={360} />
+              </div>
+              <div className="card-copy">
+                <span>{card.label}</span>
+                <h3>{card.title}</h3>
+                <p>{card.description}</p>
+                <button
+                  onClick={() =>
+                    card.href.startsWith('http')
+                      ? (window.location.href = card.href)
+                      : router.push(card.href)
+                  }
+                >
+                  {card.cta}
+                </button>
+              </div>
+            </article>
+          ))}
+        </div>
+      </section>
+
+      <section className="spine-section">
+        <p>IP creates culture. Commerce sustains it. Infrastructure connects it.</p>
+      </section>
+
+      <section className="section-block board-preview-block">
+        <div className="board-preview-copy">
+          <p className="eyebrow">Board beta preview</p>
+          <h2>The production network behind the glow.</h2>
+          <p>
+            Board began as a private production tool for JAB Visions cast and crew.
+            It is now evolving into a creator-production network where users can post
+            drops, organize work, join projects, audition, and build inside the JAB
+            Visions ecosystem.
+          </p>
+          <div className="feature-pills">
+            {boardFeatures.map((feature) => (
+              <span key={feature}>{feature}</span>
+            ))}
+          </div>
+          <div className="board-actions">
+            <button className="secondary-action" onClick={() => router.push('/board-preview')}>
+              Preview Board
+            </button>
+            <button className="ghost-action" onClick={() => router.push('/board/signup')}>
+              Enter Board Beta
+            </button>
+          </div>
+        </div>
+
+        <div className="board-terminal-card">
+          <div className="board-terminal-header">
+            <span>BOARD OS</span>
+            <strong>Creator-production infrastructure</strong>
+          </div>
+          <div className="board-terminal-list">
+            <div><b>Drop Console</b><span>Post signals, media, project notes, and announcements.</span></div>
+            <div><b>Work Page</b><span>Organize auditions, casting calls, crew needs, and files.</span></div>
+            <div><b>Project Notebook</b><span>Track productions as living work rooms.</span></div>
+          </div>
+        </div>
+      </section>
+
+      <section className="focus-strip" aria-label="Current JAB Visions focus">
+        <span>Now Building</span>
+        {focusItems.map(([title, status]) => (
+          <div key={title}>
+            <strong>{title}</strong>
+            <p>{status}</p>
+          </div>
+        ))}
+      </section>
+
       <style jsx global>{`
-        :root {
-          --nav-offset: 92px;
+        .home-root {
+          position: relative;
+          min-height: 100vh;
+          overflow-x: hidden;
+          background: #020403;
+          color: #f4fff3;
+          padding: 56px 18px 64px;
         }
 
-        /* CTA */
-        .enter-site-btn {
-          padding: 1rem 2.5rem;
-          font-family: monospace;
-          border: 2px solid #22ff77;
-          background: transparent;
-          color: #22ff77;
-          border-radius: 1.3rem;
-          letter-spacing: 0.12em;
-          box-shadow: 0 0 18px #22ff77;
-        }
-
-        .enter-site-btn-secondary {
-          padding: 0.7rem 2rem;
-          border: 1.5px solid #22ff77aa;
-          background: transparent;
-          color: #22ff77aa;
-          border-radius: 1rem;
-          font-family: monospace;
-        }
-
-        /* ANNOUNCEMENTS */
-        .announce-wrap {
+        .matrix-canvas {
           position: fixed;
-          top: var(--nav-offset);
-          left: 20px;
-          z-index: 60;
+          inset: 0;
+          z-index: 0;
+          opacity: 0.52;
         }
 
-        .announce-tab {
-          padding: 12px 16px;
-          border-radius: 16px;
-          border: 2.5px solid #ffd64a;
-          background: linear-gradient(145deg, #2a2308, #000);
-          color: #ffefb7;
-          font-family: monospace;
-          letter-spacing: 0.12em;
-          box-shadow: 0 0 30px #ffd64a;
-        }
-
-        .announce-panel {
-          margin-top: 10px;
-          padding: 12px 14px;
-          border-radius: 16px;
-          border: 2px solid #ffd64a66;
-          background: rgba(0, 0, 0, 0.7);
-          color: #ffefb7;
-          font-family: monospace;
-          box-shadow: 0 0 26px #ffd64a55;
-        }
-
-        /* STORE */
-        .store-bag-wrap {
+        .scanlines,
+        .aurora {
           position: fixed;
-          top: var(--nav-offset);
-          right: 20px;
-          z-index: 60;
+          inset: 0;
+          pointer-events: none;
+          z-index: 1;
+        }
+
+        .scanlines {
+          background:
+            linear-gradient(rgba(255, 255, 255, 0.035) 1px, transparent 1px),
+            radial-gradient(circle at 30% 5%, rgba(255, 47, 205, 0.25), transparent 32%),
+            radial-gradient(circle at 78% 20%, rgba(255, 220, 70, 0.2), transparent 34%);
+          background-size: 100% 4px, 100% 100%, 100% 100%;
+          mix-blend-mode: screen;
+          opacity: 0.65;
+        }
+
+        .aurora {
+          background:
+            radial-gradient(circle at 50% 25%, rgba(32, 255, 134, 0.18), transparent 36%),
+            linear-gradient(180deg, rgba(0,0,0,0.1), rgba(0,0,0,0.86));
+        }
+
+        .hero-shell,
+        .section-block,
+        .spine-section,
+        .focus-strip {
+          position: relative;
+          z-index: 2;
+          max-width: 1180px;
+          margin: 0 auto;
+        }
+
+        .hero-shell {
+          min-height: calc(100vh - 80px);
+          display: flex;
+          align-items: center;
+          padding: 28px 0;
+        }
+
+        .hero-terminal,
+        .section-block,
+        .focus-strip {
+          width: 100%;
+          border: 1px solid rgba(74, 255, 164, 0.38);
+          background:
+            linear-gradient(135deg, rgba(2, 12, 8, 0.9), rgba(7, 6, 14, 0.88)),
+            rgba(0, 0, 0, 0.7);
+          box-shadow:
+            0 0 42px rgba(27, 255, 139, 0.18),
+            inset 0 0 34px rgba(255, 255, 255, 0.035);
+          backdrop-filter: blur(14px);
+        }
+
+        .hero-terminal {
+          border-radius: 28px;
+          overflow: hidden;
+        }
+
+        .terminal-topline {
+          display: flex;
+          justify-content: space-between;
+          gap: 16px;
+          padding: 14px 18px;
+          border-bottom: 1px solid rgba(74, 255, 164, 0.26);
+          color: rgba(176, 255, 211, 0.86);
+          font-family: monospace;
+          font-size: 11px;
+          letter-spacing: 0.18em;
+          text-transform: uppercase;
+        }
+
+        .hero-grid {
+          display: grid;
+          grid-template-columns: minmax(0, 1.14fr) minmax(320px, 0.86fr);
+          gap: 32px;
+          padding: clamp(28px, 5vw, 58px);
+          align-items: center;
+        }
+
+        .hero-logo {
+          width: min(440px, 100%);
+          height: auto;
+          filter: drop-shadow(0 0 22px rgba(195, 255, 0, 0.72));
+          margin-bottom: 22px;
+        }
+
+        .eyebrow,
+        .section-heading p {
+          margin: 0 0 12px;
+          color: #baff6d;
+          font-family: monospace;
+          font-size: 12px;
+          letter-spacing: 0.22em;
+          text-transform: uppercase;
+        }
+
+        h1,
+        h2,
+        h3,
+        p {
+          letter-spacing: 0;
+        }
+
+        h1 {
+          max-width: 820px;
+          margin: 0;
+          font-size: clamp(42px, 7.2vw, 86px);
+          line-height: 0.92;
+          font-weight: 950;
+          color: #ffffff;
+          text-shadow:
+            0 0 24px rgba(255, 255, 255, 0.18),
+            0 0 38px rgba(255, 58, 205, 0.26);
+        }
+
+        .subhead {
+          max-width: 700px;
+          margin: 22px 0 0;
+          color: rgba(232, 255, 239, 0.82);
+          font-size: clamp(16px, 2vw, 20px);
+          line-height: 1.6;
+        }
+
+        .hero-actions,
+        .board-actions {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 12px;
+          margin-top: 28px;
+        }
+
+        .primary-action,
+        .secondary-action,
+        .ghost-action,
+        .ecosystem-card button {
+          border-radius: 999px;
+          padding: 13px 18px;
+          border: 1px solid rgba(255, 255, 255, 0.25);
+          font-family: monospace;
+          font-size: 12px;
+          font-weight: 900;
+          letter-spacing: 0.1em;
+          text-transform: uppercase;
+          cursor: pointer;
+          transition:
+            transform 170ms ease,
+            box-shadow 170ms ease,
+            border-color 170ms ease;
+        }
+
+        .primary-action {
+          background: linear-gradient(135deg, #d7ff00, #35ff8c);
+          color: #071007;
+          box-shadow: 0 0 26px rgba(190, 255, 0, 0.54);
+        }
+
+        .secondary-action {
+          background: rgba(255, 47, 205, 0.12);
+          color: #ff9cec;
+          border-color: rgba(255, 47, 205, 0.62);
+          box-shadow: 0 0 22px rgba(255, 47, 205, 0.22);
+        }
+
+        .ghost-action {
+          background: rgba(255, 255, 255, 0.055);
+          color: rgba(245, 255, 239, 0.88);
+          border-color: rgba(255, 255, 255, 0.22);
+        }
+
+        .primary-action:hover,
+        .secondary-action:hover,
+        .ghost-action:hover,
+        .ecosystem-card button:hover {
+          transform: translateY(-2px);
+        }
+
+        .signal-panel {
+          display: grid;
+          gap: 14px;
+        }
+
+        .signal-card,
+        .mini-status,
+        .board-terminal-card {
+          border-radius: 22px;
+          border: 1px solid rgba(255, 255, 255, 0.18);
+          background: rgba(255, 255, 255, 0.07);
+          box-shadow: inset 0 0 24px rgba(255, 255, 255, 0.04);
+        }
+
+        .signal-card {
+          padding: 28px;
+          min-height: 260px;
           display: flex;
           flex-direction: column;
-          align-items: center;
+          justify-content: flex-end;
+          background:
+            linear-gradient(150deg, rgba(255, 47, 205, 0.16), transparent 45%),
+            radial-gradient(circle at 50% 18%, rgba(190, 255, 0, 0.22), transparent 34%),
+            rgba(255, 255, 255, 0.06);
+        }
+
+        .signal-label,
+        .mini-status span,
+        .board-terminal-header span {
+          color: #6ffff0;
+          font-family: monospace;
+          font-size: 11px;
+          font-weight: 900;
+          letter-spacing: 0.22em;
+          text-transform: uppercase;
+        }
+
+        .signal-title {
+          margin-top: 18px;
+          font-size: clamp(28px, 4vw, 46px);
+          line-height: 1;
+          font-weight: 950;
+        }
+
+        .signal-line {
+          margin-top: 10px;
+          color: rgba(244, 255, 241, 0.76);
+          font-size: 15px;
+        }
+
+        .mini-status-grid {
+          display: grid;
           gap: 10px;
         }
 
-        .store-bag-wrap button {
-          width: 150px;
-          height: 180px;
-          background: transparent;
-          border: none;
-          position: relative;
+        .mini-status {
+          padding: 14px 16px;
         }
 
-        .store-bag-handle {
-          position: absolute;
-          top: 8px;
-          left: 50%;
-          transform: translateX(-50%);
-          width: 70px;
-          height: 28px;
-          border: 4px solid #ff4fd8;
-          border-bottom: none;
-          border-radius: 20px 20px 0 0;
-          box-shadow: 0 0 20px #ff4fd8;
+        .mini-status strong {
+          display: block;
+          margin-top: 6px;
+          color: #fffbd6;
+          font-size: 14px;
         }
 
-        .store-bag-body {
-          position: absolute;
-          bottom: 0;
-          width: 150px;
-          height: 140px;
-          border-radius: 22px;
-          border: 4px solid #ff4fd8;
-          background: linear-gradient(145deg, #2a0f23, #000);
-          box-shadow: 0 0 50px #ff4fd8;
+        .section-block {
+          margin-top: 28px;
+          border-radius: 28px;
+          padding: clamp(24px, 4vw, 42px);
+        }
+
+        .section-heading {
           display: flex;
-          align-items: center;
-          justify-content: center;
-          font-size: 3.2rem;
+          justify-content: space-between;
+          gap: 20px;
+          align-items: end;
+          margin-bottom: 22px;
         }
 
-        .store-bag-label {
+        .section-heading h2,
+        .board-preview-copy h2 {
+          margin: 0;
+          color: #ffffff;
+          font-size: clamp(30px, 4.4vw, 54px);
+          line-height: 1;
+        }
+
+        .ecosystem-grid {
+          display: grid;
+          grid-template-columns: repeat(3, minmax(0, 1fr));
+          gap: 16px;
+        }
+
+        .ecosystem-card {
+          overflow: hidden;
+          border-radius: 22px;
+          border: 1px solid rgba(255, 255, 255, 0.16);
+          background: rgba(255, 255, 255, 0.075);
+        }
+
+        .ecosystem-card.ryderz {
+          box-shadow: 0 0 24px rgba(255, 55, 68, 0.22);
+        }
+
+        .ecosystem-card.store {
+          box-shadow: 0 0 24px rgba(255, 220, 72, 0.2);
+        }
+
+        .ecosystem-card.board {
+          box-shadow: 0 0 24px rgba(72, 255, 184, 0.22);
+        }
+
+        .card-image {
+          height: 210px;
+          background: rgba(0, 0, 0, 0.42);
+          overflow: hidden;
+        }
+
+        .card-image img {
+          width: 100%;
+          height: 100%;
+          object-fit: cover;
+          opacity: 0.88;
+        }
+
+        .card-image-board img {
+          object-position: 50% 18%;
+          transform: scale(1.08);
+        }
+
+        .card-copy {
+          padding: 20px;
+        }
+
+        .card-copy span {
+          color: #baff6d;
           font-family: monospace;
-          font-size: 13px;
-          letter-spacing: 0.14em;
-          color: #ff9de8;
-          text-shadow: 0 0 14px #ff5fd9;
+          font-size: 11px;
+          letter-spacing: 0.18em;
+          text-transform: uppercase;
         }
 
-        /* MOBILE FIX */
+        .card-copy h3 {
+          margin: 10px 0 8px;
+          color: #ffffff;
+          font-size: 24px;
+        }
+
+        .card-copy p,
+        .board-preview-copy p {
+          color: rgba(238, 255, 238, 0.76);
+          line-height: 1.6;
+        }
+
+        .ecosystem-card button {
+          margin-top: 14px;
+          background: rgba(0, 0, 0, 0.5);
+          color: #dfffe8;
+        }
+
+        .spine-section {
+          margin-top: 28px;
+          padding: clamp(34px, 6vw, 70px) 20px;
+          text-align: center;
+          border-top: 1px solid rgba(186, 255, 109, 0.34);
+          border-bottom: 1px solid rgba(255, 47, 205, 0.3);
+        }
+
+        .spine-section p {
+          max-width: 980px;
+          margin: 0 auto;
+          color: #fff;
+          font-size: clamp(28px, 5vw, 58px);
+          line-height: 1.05;
+          font-weight: 950;
+          text-shadow:
+            0 0 22px rgba(186, 255, 109, 0.24),
+            0 0 28px rgba(255, 47, 205, 0.18);
+        }
+
+        .board-preview-block {
+          display: grid;
+          grid-template-columns: minmax(0, 1fr) minmax(320px, 0.78fr);
+          gap: 24px;
+          align-items: stretch;
+        }
+
+        .feature-pills {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 10px;
+          margin-top: 20px;
+        }
+
+        .feature-pills span {
+          border-radius: 999px;
+          padding: 9px 12px;
+          border: 1px solid rgba(111, 255, 240, 0.38);
+          color: #cffffb;
+          background: rgba(111, 255, 240, 0.08);
+          font-family: monospace;
+          font-size: 11px;
+          font-weight: 900;
+          letter-spacing: 0.08em;
+          text-transform: uppercase;
+        }
+
+        .board-terminal-card {
+          padding: 22px;
+          background:
+            radial-gradient(circle at 80% 0%, rgba(255, 47, 205, 0.2), transparent 38%),
+            rgba(255, 255, 255, 0.075);
+        }
+
+        .board-terminal-header strong {
+          display: block;
+          margin-top: 10px;
+          color: #ffffff;
+          font-size: 24px;
+        }
+
+        .board-terminal-list {
+          display: grid;
+          gap: 12px;
+          margin-top: 22px;
+        }
+
+        .board-terminal-list div {
+          border-radius: 16px;
+          padding: 14px;
+          background: rgba(0, 0, 0, 0.35);
+          border: 1px solid rgba(255, 255, 255, 0.12);
+        }
+
+        .board-terminal-list b,
+        .board-terminal-list span {
+          display: block;
+        }
+
+        .board-terminal-list b {
+          color: #baff6d;
+        }
+
+        .board-terminal-list span {
+          margin-top: 5px;
+          color: rgba(238, 255, 238, 0.7);
+          font-size: 13px;
+          line-height: 1.45;
+        }
+
+        .focus-strip {
+          display: grid;
+          grid-template-columns: 0.8fr repeat(3, 1fr);
+          gap: 12px;
+          align-items: center;
+          margin-top: 28px;
+          padding: 16px;
+          border-radius: 22px;
+        }
+
+        .focus-strip > span {
+          color: #ff9cec;
+          font-family: monospace;
+          font-size: 12px;
+          font-weight: 900;
+          letter-spacing: 0.2em;
+          text-transform: uppercase;
+        }
+
+        .focus-strip div {
+          border-left: 1px solid rgba(255, 255, 255, 0.14);
+          padding-left: 14px;
+        }
+
+        .focus-strip strong {
+          display: block;
+          color: #ffffff;
+        }
+
+        .focus-strip p {
+          margin: 5px 0 0;
+          color: rgba(238, 255, 238, 0.68);
+          font-size: 13px;
+        }
+
+        @media (max-width: 920px) {
+          .hero-grid,
+          .ecosystem-grid,
+          .board-preview-block,
+          .focus-strip {
+            grid-template-columns: 1fr;
+          }
+
+          .hero-shell {
+            align-items: flex-start;
+          }
+
+          .terminal-topline,
+          .section-heading {
+            flex-direction: column;
+            align-items: flex-start;
+          }
+        }
+
         @media (max-width: 640px) {
-          .announce-wrap {
-            left: 12px;
-            max-width: calc(100vw - 140px);
+          .home-root {
+            padding: 18px 12px 44px;
           }
 
-          .store-bag-wrap {
-            right: 12px;
+          .hero-grid,
+          .section-block {
+            padding: 22px;
           }
 
-          .store-bag-wrap button {
-            width: 96px;
-            height: 108px;
+          .terminal-topline {
+            font-size: 9px;
           }
 
-          .store-bag-handle {
-            width: 44px;
-            height: 18px;
-            border-width: 3px;
+          .hero-actions,
+          .board-actions {
+            flex-direction: column;
           }
 
-          .store-bag-body {
-            width: 96px;
-            height: 86px;
-            border-width: 3px;
-            font-size: 2.1rem;
-            box-shadow: 0 0 26px #ff4fd8;
-          }
-
-          .store-bag-label {
-            font-size: 10px;
-            letter-spacing: 0.1em;
+          .primary-action,
+          .secondary-action,
+          .ghost-action {
+            width: 100%;
           }
         }
       `}</style>

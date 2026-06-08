@@ -3,17 +3,21 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { supabaseBrowser } from "@/lib/supabase/browser";
 
-import HomeBoardHeader from "@/app/components/board/HomeBoardHeader";
 import DropConsole from "@/app/components/board/DropConsole";
 import DropsBucket from "@/app/components/board/DropsBucket";
 import ActivityCard from "@/app/components/board/ActivityCard";
 
 import {
-  fetchActivity,
   getLocalActivity,
   type BoardActivity,
   type BoardActivityKind,
 } from "@/lib/board/activity";
+import { mergeActivityWithFeed } from "@/lib/board/feedActivity";
+import {
+  BOARD_PROJECTS_UPDATED_EVENT,
+  syncResolvedProjectsToStorage,
+} from "@/lib/board/projects";
+import { EVENTS, readFeed, seedForumsIfEmpty } from "@/lib/boardStore";
 
 import { installBucketBrainBridge } from "@/lib/board/bucketBrain";
 
@@ -21,7 +25,96 @@ function clsx(...parts: Array<string | false | null | undefined>) {
   return parts.filter(Boolean).join(" ");
 }
 
-const PAGE_SIZE = 12;
+const PAGE_SIZE = 80;
+const FEED_TIMEOUT_MS = 8000;
+const PROJECT_DROPS_UPDATED_EVENT = "board:project-drops:updated";
+
+function demoFeedItems(): BoardActivity[] {
+  const now = Date.now();
+  return [
+    {
+      id: "demo_feed_announcement",
+      created_at: new Date(now - 1000 * 60 * 6).toISOString(),
+      user_id: null,
+      kind: "announcement",
+      title: "Board is waking back up",
+      body:
+        "Community Feed is live again. Board Drops, Pay Drops, Project Drops, and announcements all land here as the shared activity stream.",
+      href: "/board/feed",
+      image_url: "/assets/board-logo-signup.jpg",
+      meta: {
+        dropType: "announcement",
+        preview: {
+          image: "/assets/board-logo-signup.jpg",
+          title: "Board Feed Restored",
+          description: "The shared activity stream is ready for new drops.",
+        },
+      },
+    },
+    {
+      id: "demo_feed_pay_drop",
+      created_at: new Date(now - 1000 * 60 * 18).toISOString(),
+      user_id: null,
+      kind: "board_drop",
+      title: "Welcome Present",
+      body: "A Pay Drop preview should show its image, price, checkout button, and reactions in the same universal card style.",
+      href: null,
+      image_url: "/assets/BoardLogo.png",
+      meta: {
+        dropType: "pay",
+        payProvider: "authorize_net_accept_hosted",
+        priceCents: 500,
+        preview: {
+          image: "/assets/BoardLogo.png",
+          title: "Welcome Present",
+          description: "Demo Pay Drop card with embedded thumbnail.",
+        },
+      },
+    },
+    {
+      id: "demo_feed_project_drop",
+      created_at: new Date(now - 1000 * 60 * 32).toISOString(),
+      user_id: null,
+      kind: "board_drop",
+      title: "Project Drop: Those Ryderz Casting Call",
+      body:
+        "A host-ready project drop for casting, crew, BTS media, and collaborator updates.",
+      href: "/board/work",
+      image_url: "/assets/those-ryderz-logo.jpg",
+      meta: {
+        dropType: "project",
+        cardStyle: "project_drop",
+        projectType: "Short Film",
+        status: "casting",
+        location: "New York City",
+        rolesNeeded: "Lead actor, featured extras, stylist, BTS photographer",
+        preview: {
+          image: "/assets/those-ryderz-logo.jpg",
+          title: "Those Ryderz Casting Call",
+          description: "Project Notebook activity preview.",
+        },
+      },
+    },
+    {
+      id: "demo_feed_media_drop",
+      created_at: new Date(now - 1000 * 60 * 48).toISOString(),
+      user_id: null,
+      kind: "board_drop",
+      title: "Vision Wall Signal",
+      body:
+        "Media Drops should show the full image without trapping it inside a tiny fixed crop.",
+      href: "/assets/john_andy_headshot.jpg",
+      image_url: "/assets/john_andy_headshot.jpg",
+      meta: {
+        dropType: "media",
+        preview: {
+          image: "/assets/john_andy_headshot.jpg",
+          title: "Vision Wall Signal",
+        },
+      },
+    },
+  ];
+}
 
 function normalizeIncoming(x: any): BoardActivity | null {
   if (!x || typeof x !== "object") return null;
@@ -51,13 +144,43 @@ function normalizeIncoming(x: any): BoardActivity | null {
   };
 }
 
+function isPrivateDropActivity(item: BoardActivity) {
+  return item.meta?.visibility === "private";
+}
+
+async function fetchSupabaseActivity(opts: {
+  limit: number;
+  offset: number;
+  kinds?: BoardActivityKind[];
+}) {
+  const params = new URLSearchParams({
+    limit: String(opts.limit),
+    offset: String(opts.offset),
+  });
+
+  for (const kind of opts.kinds ?? []) {
+    params.append("kind", kind);
+  }
+
+  const res = await fetch(`/api/board/activity?${params.toString()}`, {
+    cache: "no-store",
+  });
+
+  if (!res.ok) throw new Error("Could not load Board activity.");
+  const data = await res.json();
+  const list = Array.isArray(data?.items) ? data.items : [];
+  return list.map(normalizeIncoming).filter(Boolean) as BoardActivity[];
+}
+
 export default function HomeBoardFeedPage() {
   const sb = useMemo(() => supabaseBrowser(), []);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
 
   const [tab, setTab] = useState<"all" | "announcements">("all");
-  const [items, setItems] = useState<BoardActivity[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [items, setItems] = useState<BoardActivity[]>(() =>
+    demoFeedItems().slice(0, PAGE_SIZE)
+  );
+  const [loading, setLoading] = useState(false);
 
   const [offset, setOffset] = useState(0);
   const [hasMore, setHasMore] = useState(true);
@@ -66,62 +189,116 @@ export default function HomeBoardFeedPage() {
     return tab === "announcements" ? ["announcement"] : undefined;
   }, [tab]);
 
+  const visibleFallbackItems = useMemo(() => {
+    const demos = demoFeedItems();
+    return kinds?.length
+      ? demos.filter((item) => kinds.includes(item.kind))
+      : demos;
+  }, [kinds]);
+
   const safeItems = useMemo(
     () => (Array.isArray(items) ? items : []).filter(Boolean),
     [items]
   );
 
+  function removeItemFromFeed(removedId: string) {
+    setItems((current) =>
+      current.filter((item) => {
+        const meta = item.meta && typeof item.meta === "object" ? item.meta : null;
+        return (
+          item.id !== removedId &&
+          String(meta?.dropId || "") !== removedId &&
+          String(meta?.originalDropId || "") !== removedId
+        );
+      })
+    );
+  }
+
   useEffect(() => {
     installBucketBrainBridge();
+    seedForumsIfEmpty();
+    syncResolvedProjectsToStorage();
   }, []);
 
   useEffect(() => {
     let alive = true;
 
+    function syncFromLocal() {
+      try {
+        const localActivity = getLocalActivity();
+        const sharedFeed = readFeed();
+        if (!alive) return;
+        const merged = mergeActivityWithFeed(localActivity, sharedFeed);
+        const scoped = (kinds?.length
+          ? merged.filter((item) => kinds.includes(item.kind))
+          : merged
+        ).filter((item) => !isPrivateDropActivity(item));
+        setItems(
+          (scoped.length ? scoped : visibleFallbackItems).slice(0, PAGE_SIZE)
+        );
+        setHasMore(false);
+        setOffset(PAGE_SIZE);
+      } catch {
+        if (alive) {
+          setItems(visibleFallbackItems.slice(0, PAGE_SIZE));
+          setHasMore(false);
+          setOffset(PAGE_SIZE);
+        }
+      } finally {
+        if (alive) setLoading(false);
+      }
+    }
+
     async function run() {
-      setLoading(true);
+      setLoading(false);
       setOffset(0);
       setHasMore(true);
+      syncFromLocal();
 
       try {
-        const data = await fetchActivity(sb as any, {
-          limit: PAGE_SIZE,
-          offset: 0,
-          kinds,
-        });
+        const data = await Promise.race([
+          fetchSupabaseActivity({ limit: PAGE_SIZE, offset: 0, kinds }),
+          new Promise<BoardActivity[]>((_, reject) =>
+            window.setTimeout(() => reject(new Error("Feed request timed out")), FEED_TIMEOUT_MS)
+          ),
+        ]);
 
         if (!alive) return;
 
-        const list = Array.isArray(data)
-          ? data
-          : Array.isArray((data as any)?.items)
-          ? (data as any).items
-          : [];
+        const cleaned = Array.isArray(data) ? data : [];
+        const localActivity = getLocalActivity();
+        const sharedFeed = readFeed();
+        const merged = mergeActivityWithFeed([...cleaned, ...localActivity], sharedFeed);
+        const nextItems = (merged.length ? merged : visibleFallbackItems).filter(
+          (item) => !isPrivateDropActivity(item)
+        );
 
-        const cleaned = (list as any[])
-          .map(normalizeIncoming)
-          .filter(Boolean) as BoardActivity[];
-
-        setItems(cleaned);
+        setItems(nextItems);
         setHasMore(cleaned.length === PAGE_SIZE);
         setOffset(cleaned.length);
       } catch {
-        const local = getLocalActivity().slice(0, PAGE_SIZE);
-        const cleaned = (local as any[])
-          .map(normalizeIncoming)
-          .filter(Boolean) as BoardActivity[];
-
-        setItems(cleaned);
-        setHasMore(cleaned.length === PAGE_SIZE);
-        setOffset(cleaned.length);
+        syncFromLocal();
       } finally {
         if (alive) setLoading(false);
       }
     }
 
     run();
+    const onFeedUpdated = () => syncFromLocal();
+    window.addEventListener(EVENTS.feedUpdated, onFeedUpdated as EventListener);
+    window.addEventListener(BOARD_PROJECTS_UPDATED_EVENT, onFeedUpdated as EventListener);
+    window.addEventListener(PROJECT_DROPS_UPDATED_EVENT, onFeedUpdated as EventListener);
     return () => {
       alive = false;
+      window.removeEventListener(EVENTS.feedUpdated, onFeedUpdated as EventListener);
+      window.removeEventListener(
+        BOARD_PROJECTS_UPDATED_EVENT,
+        onFeedUpdated as EventListener
+      );
+      window.removeEventListener(
+        PROJECT_DROPS_UPDATED_EVENT,
+        onFeedUpdated as EventListener
+      );
     };
   }, [sb, tab, kinds]);
 
@@ -129,6 +306,7 @@ export default function HomeBoardFeedPage() {
     const onNew = (e: any) => {
       const a = normalizeIncoming(e?.detail);
       if (!a) return;
+      if (isPrivateDropActivity(a)) return;
       if (tab === "announcements" && a.kind !== "announcement") return;
 
       setItems((prev) => {
@@ -153,21 +331,13 @@ export default function HomeBoardFeedPage() {
 
         setLoading(true);
         try {
-          const next = await fetchActivity(sb as any, {
+          const next = await fetchSupabaseActivity({
             limit: PAGE_SIZE,
             offset,
             kinds,
           });
 
-          const list = Array.isArray(next)
-            ? next
-            : Array.isArray((next as any)?.items)
-            ? (next as any).items
-            : [];
-
-          const cleaned = (list as any[])
-            .map(normalizeIncoming)
-            .filter(Boolean) as BoardActivity[];
+          const cleaned = Array.isArray(next) ? next : [];
 
           setItems((prev) => [...prev, ...cleaned]);
           setHasMore(cleaned.length === PAGE_SIZE);
@@ -188,8 +358,6 @@ export default function HomeBoardFeedPage() {
       <div className="bg" />
 
       <div className="shell">
-        <HomeBoardHeader />
-
         <div className="controls">
           <div className="leftControls">
             <div className="sectionTitle">Community Feed</div>
@@ -219,7 +387,7 @@ export default function HomeBoardFeedPage() {
           <section className="feed">
             <div className="cards">
               {safeItems.map((a) => (
-                <ActivityCard key={a.id} item={a} />
+                <ActivityCard key={a.id} item={a} onRemove={removeItemFromFeed} />
               ))}
             </div>
 
@@ -229,8 +397,12 @@ export default function HomeBoardFeedPage() {
           </section>
 
           <aside className="rightRail">
-            <DropConsole />
-            <DropsBucket />
+            <div className="dropConsoleSlot">
+              <DropConsole />
+            </div>
+            <div className="bucketSlot">
+              <DropsBucket />
+            </div>
           </aside>
         </div>
       </div>
@@ -278,11 +450,18 @@ export default function HomeBoardFeedPage() {
         }
 
         .sectionTitle {
-          font-size: 13px;
+          font-family: Georgia, "Times New Roman", serif;
+          font-size: 18px;
           font-weight: 900;
-          letter-spacing: 0.18em;
+          letter-spacing: 0.12em;
           text-transform: uppercase;
-          opacity: 0.6;
+          color: rgba(255, 255, 255, 0.92);
+          -webkit-text-stroke: 1.1px rgba(0, 0, 0, 0.95);
+          text-shadow:
+            1px 1px 0 rgba(0, 0, 0, 0.95),
+            -1px 1px 0 rgba(0, 0, 0, 0.95),
+            1px -1px 0 rgba(0, 0, 0, 0.95),
+            -1px -1px 0 rgba(0, 0, 0, 0.95);
         }
 
         .tabs {
@@ -295,6 +474,7 @@ export default function HomeBoardFeedPage() {
           border-radius: 999px;
           background: rgba(255, 255, 255, 0.9);
           border: 1px solid rgba(0, 0, 0, 0.1);
+          color: rgba(35, 30, 18, 0.88);
           font-weight: 900;
           text-transform: uppercase;
           font-size: 12px;
@@ -349,10 +529,21 @@ export default function HomeBoardFeedPage() {
 
         @media (max-width: 980px) {
           .layout {
-            grid-template-columns: 1fr;
+            display: flex;
+            flex-direction: column;
+          }
+          .dropConsoleSlot {
+            order: 1;
+          }
+          .feed {
+            order: 2;
           }
           .rightRail {
+            display: contents;
             position: static;
+          }
+          .bucketSlot {
+            order: 3;
           }
         }
       `}</style>

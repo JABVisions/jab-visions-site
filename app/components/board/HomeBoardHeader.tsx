@@ -1,8 +1,15 @@
 // File: app/components/board/HomeBoardHeader.tsx
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import type { CSSProperties } from "react";
 import Link from "next/link";
+import {
+  AURA_HEX,
+  DEFAULT_BOARD_OPTIONS_SETTINGS,
+  loadBoardOptionsSettings,
+  type BoardOptionsSettings,
+} from "@/lib/board/optionsSettings";
 
 function clsx(...parts: Array<string | false | null | undefined>) {
   return parts.filter(Boolean).join(" ");
@@ -13,6 +20,7 @@ const PROFILE_STORAGE_KEY = "jab_board_profile_v2";
 type ProfilePayload = {
   displayName?: string;
   avatarDataUrl?: string | null;
+  glowColor?: string | null;
 };
 
 function safeParse<T>(raw: string | null, fallback: T): T {
@@ -24,11 +32,21 @@ function safeParse<T>(raw: string | null, fallback: T): T {
   }
 }
 
+function rgbaFromHex(hex: string, alpha: number) {
+  const value = hex.replace("#", "");
+  const full = value.length === 3 ? value.split("").map((char) => char + char).join("") : value;
+  const r = parseInt(full.slice(0, 2), 16);
+  const g = parseInt(full.slice(2, 4), 16);
+  const b = parseInt(full.slice(4, 6), 16);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
 export default function HomeBoardHeader() {
   const [profile, setProfile] = useState<ProfilePayload>({
     displayName: "Board User",
     avatarDataUrl: null,
   });
+  const [options, setOptions] = useState<BoardOptionsSettings>(DEFAULT_BOARD_OPTIONS_SETTINGS);
 
   useEffect(() => {
     const read = () => {
@@ -37,10 +55,13 @@ export default function HomeBoardHeader() {
           ? localStorage.getItem(PROFILE_STORAGE_KEY)
           : null;
       const parsed = safeParse<ProfilePayload>(raw, {});
+      const parsedOptions = loadBoardOptionsSettings();
       setProfile({
         displayName: parsed.displayName ?? "Board User",
         avatarDataUrl: parsed.avatarDataUrl ?? null,
+        glowColor: parsed.glowColor ?? null,
       });
+      setOptions(parsedOptions);
     };
 
     read();
@@ -60,8 +81,26 @@ export default function HomeBoardHeader() {
     } catch {}
   }
 
+  const auraHex = useMemo(() => {
+    return AURA_HEX[options.auraColor] || profile.glowColor || AURA_HEX.sloth_pink;
+  }, [options.auraColor, profile.glowColor]);
+  const auraStrength = Math.max(0, Math.min(100, options.auraIntensity ?? 70));
+  const auraMain = rgbaFromHex(auraHex, 0.22 + auraStrength / 240);
+  const auraSoft = rgbaFromHex(auraHex, 0.12 + auraStrength / 360);
+  const auraBorder = rgbaFromHex(auraHex, 0.34 + auraStrength / 360);
+
   return (
-    <div className="hbHeader">
+    <div
+      className="hbHeader"
+      style={
+        {
+          "--hb-aura": auraHex,
+          "--hb-aura-main": auraMain,
+          "--hb-aura-soft": auraSoft,
+          "--hb-aura-border": auraBorder,
+        } as CSSProperties
+      }
+    >
       <div className="hbGlow" aria-hidden />
       <div className="hbInner">
         {/* Left */}
@@ -132,6 +171,7 @@ export default function HomeBoardHeader() {
           pointer-events: none;
           position: absolute;
           inset: -30px;
+          z-index: 0;
           background: radial-gradient(
               circle at 18% 35%,
               rgba(210, 255, 0, 0.46),
@@ -148,6 +188,7 @@ export default function HomeBoardHeader() {
 
         .hbInner {
           position: relative;
+          z-index: 1;
           display: grid;
           /* HARD FIX: lock center column width so avatar can’t “grow” */
           grid-template-columns: 1fr 96px 1fr;
@@ -203,8 +244,11 @@ export default function HomeBoardHeader() {
           place-items: center;
           text-decoration: none;
 
-          background: radial-gradient(circle, rgba(210, 255, 0, 0.42), rgba(255, 255, 255, 0));
-          box-shadow: 0 0 0 2px rgba(180, 255, 0, 0.35), 0 0 30px rgba(180, 255, 0, 0.18);
+          background: radial-gradient(circle, var(--hb-aura-main), rgba(255, 255, 255, 0));
+          box-shadow:
+            0 0 0 2px var(--hb-aura-border),
+            0 0 30px var(--hb-aura-soft),
+            0 0 58px var(--hb-aura-soft);
         }
 
         .avatar {
@@ -273,14 +317,14 @@ export default function HomeBoardHeader() {
 
         .pill.strong {
           background: rgba(0, 0, 0, 0.86);
-          border-color: rgba(180, 255, 0, 0.25);
+          border-color: var(--hb-aura-border);
           color: rgba(255, 255, 255, 0.92);
-          box-shadow: 0 0 18px rgba(180, 255, 0, 0.14);
+          box-shadow: 0 0 18px var(--hb-aura-soft);
         }
 
         .pill.workcalls {
           background: rgba(0, 0, 0, 0.86);
-          border-color: rgba(180, 255, 0, 0.22);
+          border-color: var(--hb-aura-border);
           color: rgba(255, 255, 255, 0.92);
           padding: 9px 14px;
         }

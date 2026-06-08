@@ -1,29 +1,30 @@
-// lib/board/types.ts
+export type AssetKind =
+  | "youtube"
+  | "music"
+  | "link"
+  | "media"
+  | "doc"
+  | "pay"
+  | "note";
 
-export type MusicPlatform = "Spotify" | "SoundCloud" | "YouTube" | "Other";
+export type DropRoute =
+  | "home"
+  | "feed"
+  | "forums"
+  | "work"
+  | "profile"
+  | "friend-zone"
+  | "options"
+  | "explore";
 
-export type MusicLink = {
+export type Visibility = "Private" | "Friends" | "Public";
+
+export type AssetItem = {
   id: string;
+  kind: AssetKind;
   title: string;
-  platform: MusicPlatform;
-  url: string;
-  embedUrl: string;
   createdAt: number;
-};
-
-export type FeedDrop = {
-  id: string;
-  type: "status" | "forum" | "board" | "photo" | "link" | "system";
-  title?: string;
-  text: string;
-  author?: string;
-  createdAt: number;
-  href?: string;
+  url?: string;
+  visibility?: Visibility;
   tags?: string[];
-
-  linkUrl?: string | null;
-  provider?: string | null;
-  linkType?: "video" | "music" | "link" | "photo" | "other";
-  image?: string | null;
-  embedUrl?: string | null;
 };

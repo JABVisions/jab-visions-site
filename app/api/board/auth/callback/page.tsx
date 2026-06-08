@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { Suspense, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@supabase/supabase-js";
 
@@ -11,7 +11,7 @@ function getSupabaseClient() {
   return createClient(url, key);
 }
 
-export default function BoardAuthCallbackPage() {
+function BoardAuthCallbackContent() {
   const router = useRouter();
   const params = useSearchParams();
 
@@ -71,5 +71,13 @@ export default function BoardAuthCallbackPage() {
         </div>
       </div>
     </main>
+  );
+}
+
+export default function BoardAuthCallbackPage() {
+  return (
+    <Suspense fallback={null}>
+      <BoardAuthCallbackContent />
+    </Suspense>
   );
 }

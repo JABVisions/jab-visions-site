@@ -1,4 +1,5 @@
-import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { createBrowserClient } from "@supabase/ssr";
+import type { SupabaseClient } from "@supabase/supabase-js";
 
 /**
  * IMPORTANT:
@@ -7,6 +8,38 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
  */
 
 let browserClient: SupabaseClient | null = null;
+const authLocks = new Map<string, Promise<unknown>>();
+
+async function runWithBrowserAuthLock<T>(
+  name: string,
+  _acquireTimeout: number,
+  fn: () => Promise<T>
+): Promise<T> {
+  const previous = authLocks.get(name) ?? Promise.resolve();
+
+  let release!: () => void;
+  const current = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+
+  authLocks.set(
+    name,
+    previous
+      .catch(() => undefined)
+      .then(() => current)
+  );
+
+  await previous.catch(() => undefined);
+
+  try {
+    return await fn();
+  } finally {
+    release();
+    if (authLocks.get(name) === current) {
+      authLocks.delete(name);
+    }
+  }
+}
 
 export function supabaseBrowser(): SupabaseClient {
   if (browserClient) return browserClient;
@@ -20,11 +53,12 @@ export function supabaseBrowser(): SupabaseClient {
     );
   }
 
-  browserClient = createClient(supabaseUrl, supabaseAnonKey, {
+  browserClient = createBrowserClient(supabaseUrl, supabaseAnonKey, {
     auth: {
       persistSession: true,
       autoRefreshToken: true,
       detectSessionInUrl: true,
+      lock: runWithBrowserAuthLock,
     },
     global: {
       headers: {

@@ -15,7 +15,7 @@ export type BucketEntry = {
 export type WaveEntry = {
   id: string;
   from: string; // normalized username
-  to: string;   // normalized username
+  to: string; // normalized username
   createdAt: number;
 };
 
@@ -185,16 +185,15 @@ export function sendWave(from: string, to: string) {
     const key = pairKey(f, tUser);
     const exists = mutuals.some((m) => pairKey(m.a, m.b) === key && m.kind === "wave_wave");
     if (!exists) {
-      mutuals = [
-        {
-          id: makeId("mutual"),
-          a: f,
-          b: tUser,
-          createdAt: ts,
-          kind: "wave_wave",
-        },
-        ...mutuals,
-      ].slice(0, 500);
+      const newMutual: MutualEntry = {
+        id: makeId("mutual"),
+        a: f,
+        b: tUser,
+        createdAt: ts,
+        kind: "wave_wave" as const,
+      };
+
+      mutuals = [newMutual, ...mutuals].slice(0, 500);
     }
   }
 

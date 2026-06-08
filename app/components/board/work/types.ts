@@ -1,43 +1,64 @@
-// app/components/board/work/storage.ts
-export type PlacedDropKind = "youtube" | "music" | "link" | "media";
+export type AssetType =
+  | "Headshot"
+  | "Resume"
+  | "Demo Reel"
+  | "Photo"
+  | "Video"
+  | "Music"
+  | "Link"
+  | "Document";
 
-export type PlacedDropAsset = {
+export type Visibility = "Private" | "Friends" | "Public";
+
+export type WorkCallType =
+  | "Audition"
+  | "Casting Call"
+  | "Crew Call"
+  | "Gig"
+  | "Collaboration";
+
+export type ProjectStatus =
+  | "Idea"
+  | "Planning"
+  | "In Progress"
+  | "Paused"
+  | "Complete";
+
+export type WorkAsset = {
   id: string;
-  kind: PlacedDropKind;
+  type: AssetType;
   title: string;
   createdAt: number;
-  // optional payload fields you can expand later
   url?: string;
+  visibility?: Visibility;
+  tags?: string[];
 };
 
-const KEY = "jab_work_placed_assets_v1";
+export type WorkCall = {
+  id: string;
+  type: WorkCallType;
+  title: string;
+  description?: string;
+  createdAt: number;
+  visibility?: Visibility;
+  deadline?: string;
+  paid?: boolean;
+  remote?: boolean;
+  link?: string;
+  tags?: string[];
+};
 
-function safeParse<T>(raw: string | null, fallback: T): T {
-  if (!raw) return fallback;
-  try {
-    return JSON.parse(raw) as T;
-  } catch {
-    return fallback;
-  }
-}
+export type ProjectItem = {
+  id: string;
+  title: string;
+  status: ProjectStatus;
+  createdAt: number;
+  description?: string;
+  tags?: string[];
+};
 
-export function getPlacedDropAssets(): PlacedDropAsset[] {
-  if (typeof window === "undefined") return [];
-  return safeParse<PlacedDropAsset[]>(localStorage.getItem(KEY), []);
-}
-
-export function setPlacedDropAssets(items: PlacedDropAsset[]) {
-  if (typeof window === "undefined") return;
-  localStorage.setItem(KEY, JSON.stringify(items));
-}
-
-export function placeDropAsset(asset: Omit<PlacedDropAsset, "id" | "createdAt">) {
-  const items = getPlacedDropAssets();
-  const next: PlacedDropAsset = {
-    id: crypto?.randomUUID?.() ?? String(Date.now()),
-    createdAt: Date.now(),
-    ...asset,
-  };
-  setPlacedDropAssets([next, ...items]);
-  return next;
-}
+export type WorkState = {
+  assets: WorkAsset[];
+  calls: WorkCall[];
+  projects: ProjectItem[];
+};

@@ -1,0 +1,245 @@
+.overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  pointer-events: none;
+  overflow: hidden;
+  border-radius: inherit;
+}
+
+.overlay::before,
+.effectLayer {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+}
+
+.overlay::before {
+  content: "";
+  z-index: 0;
+}
+
+.effectLayer {
+  z-index: 1;
+}
+
+.filter_soft-glow::before {
+  backdrop-filter: saturate(1.12) contrast(1.02) brightness(1.08);
+  box-shadow: inset 0 0 42px rgba(128, 255, 233, 0.16);
+}
+
+.filter_cool-tone::before {
+  backdrop-filter: saturate(1.08) hue-rotate(10deg) contrast(1.04);
+  background: rgba(66, 196, 255, 0.08);
+  mix-blend-mode: screen;
+}
+
+.filter_warm-fade::before {
+  backdrop-filter: sepia(0.18) saturate(1.08) brightness(1.04);
+  background: rgba(255, 173, 88, 0.08);
+  mix-blend-mode: soft-light;
+}
+
+.filter_dream-blur::before {
+  backdrop-filter: blur(0.45px) saturate(1.18) brightness(1.07);
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.filter_night-glass::before {
+  backdrop-filter: contrast(1.08) brightness(0.82) saturate(1.28);
+  background: rgba(0, 18, 38, 0.14);
+  mix-blend-mode: multiply;
+}
+
+.filter_vintage-light::before {
+  backdrop-filter: sepia(0.28) contrast(0.96) brightness(1.08) saturate(0.92);
+  background: rgba(255, 225, 154, 0.1);
+  mix-blend-mode: soft-light;
+}
+
+.filter_high-contrast::before {
+  backdrop-filter: contrast(1.28) saturate(1.08);
+}
+
+.filter_monochrome::before {
+  backdrop-filter: grayscale(1) contrast(1.14) brightness(1.02);
+}
+
+.filter_neon-lift::before {
+  backdrop-filter: saturate(1.38) contrast(1.1) brightness(1.1);
+  background: linear-gradient(135deg, rgba(87, 255, 229, 0.1), rgba(255, 85, 218, 0.09));
+  mix-blend-mode: screen;
+}
+
+.overlay_sparkle .effectLayer {
+  background-image:
+    radial-gradient(circle at 14% 18%, rgba(255, 255, 255, 0.92) 0 1px, transparent 2px),
+    radial-gradient(circle at 68% 28%, rgba(160, 255, 239, 0.88) 0 1px, transparent 2px),
+    radial-gradient(circle at 82% 72%, rgba(255, 211, 252, 0.85) 0 1px, transparent 2px),
+    radial-gradient(circle at 32% 84%, rgba(255, 255, 255, 0.76) 0 1px, transparent 2px);
+  animation: sparkleFloat 4s ease-in-out infinite;
+}
+
+.overlay_glow-frame .effectLayer {
+  inset: 8px;
+  border: 1px solid rgba(133, 255, 231, 0.58);
+  border-radius: 18px;
+  box-shadow:
+    0 0 22px rgba(119, 255, 230, 0.22),
+    inset 0 0 28px rgba(119, 255, 230, 0.1);
+}
+
+.overlay_film-grain .effectLayer {
+  opacity: 0.16;
+  background-image:
+    radial-gradient(circle, rgba(255, 255, 255, 0.5) 0 1px, transparent 1px),
+    radial-gradient(circle, rgba(0, 0, 0, 0.65) 0 1px, transparent 1px);
+  background-position: 0 0, 9px 7px;
+  background-size: 18px 18px, 21px 21px;
+  mix-blend-mode: overlay;
+}
+
+.overlay_soft-vignette .effectLayer {
+  background: radial-gradient(circle at center, transparent 46%, rgba(0, 0, 0, 0.48) 100%);
+}
+
+.overlay_scanlines .effectLayer {
+  background: repeating-linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.08) 0 1px,
+    transparent 1px 5px
+  );
+  opacity: 0.34;
+}
+
+.overlay_blur-edge .effectLayer {
+  box-shadow: inset 0 0 42px 18px rgba(2, 7, 10, 0.72);
+  backdrop-filter: blur(0.6px);
+}
+
+.overlay_light-leak .effectLayer {
+  background:
+    radial-gradient(circle at 0% 20%, rgba(255, 142, 92, 0.28), transparent 35%),
+    radial-gradient(circle at 100% 85%, rgba(255, 82, 207, 0.22), transparent 38%);
+  mix-blend-mode: screen;
+}
+
+.overlay_aura-ring .effectLayer {
+  inset: 10%;
+  border: 1px solid rgba(137, 255, 236, 0.34);
+  border-radius: 50%;
+  box-shadow:
+    0 0 44px rgba(122, 255, 231, 0.2),
+    inset 0 0 34px rgba(255, 255, 255, 0.06);
+  transform: rotate(-8deg);
+}
+
+.overlay_shimmer .effectLayer {
+  background: linear-gradient(110deg, transparent 0%, rgba(255, 255, 255, 0.18) 45%, transparent 60%);
+  transform: translateX(-100%);
+  animation: shimmerSweep 3.6s ease-in-out infinite;
+}
+
+.item {
+  position: absolute;
+  z-index: 2;
+  transform: translate(-50%, -50%);
+  max-width: min(80%, 260px);
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  color: white;
+  text-align: center;
+  text-shadow: 0 1px 10px rgba(0, 0, 0, 0.85);
+  box-shadow:
+    0 0 18px rgba(129, 236, 255, 0.22),
+    inset 0 0 12px rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(9px);
+  pointer-events: none;
+  letter-spacing: 0.04em;
+}
+
+.textLabel {
+  padding: 0.42rem 0.7rem;
+  border-radius: 999px;
+  background: rgba(8, 25, 32, 0.58);
+  font-size: clamp(0.66rem, 1.8vw, 0.82rem);
+  font-weight: 850;
+}
+
+.sticker {
+  padding: 0.16rem 0.24rem;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(5, 15, 25, 0.08);
+  box-shadow:
+    0 0 18px rgba(255, 255, 255, 0.22),
+    0 0 28px rgba(119, 255, 230, 0.14);
+  color: white;
+  font-size: clamp(1.6rem, 5vw, 2.45rem);
+  line-height: 1;
+  text-transform: none;
+}
+
+.editable {
+  cursor: grab;
+  pointer-events: auto;
+  touch-action: none;
+}
+
+.editable:active {
+  cursor: grabbing;
+}
+
+.actionButton {
+  position: absolute;
+  z-index: 2;
+  left: 50%;
+  bottom: 7%;
+  transform: translateX(-50%);
+  max-width: 84%;
+  padding: 0.52rem 0.9rem;
+  border: 1px solid rgba(193, 255, 225, 0.68);
+  border-radius: 999px;
+  background: rgba(3, 19, 22, 0.74);
+  color: #d8fff0;
+  box-shadow:
+    0 0 22px rgba(105, 244, 218, 0.28),
+    inset 0 0 14px rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(12px);
+  font-size: 0.7rem;
+  font-weight: 950;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+@keyframes sparkleFloat {
+  0%,
+  100% {
+    opacity: 0.68;
+    transform: translateY(0);
+  }
+
+  50% {
+    opacity: 1;
+    transform: translateY(-4px);
+  }
+}
+
+@keyframes shimmerSweep {
+  0%,
+  55% {
+    transform: translateX(-100%);
+  }
+
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .overlay_sparkle .effectLayer,
+  .overlay_shimmer .effectLayer {
+    animation: none;
+  }
+}
