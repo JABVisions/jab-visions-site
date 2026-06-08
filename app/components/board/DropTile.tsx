@@ -2809,9 +2809,17 @@ export default function DropTile() {
           display: flex;
           gap: 8px;
           flex-wrap: wrap;
+          align-items: center;
           min-width: 0;
           max-width: 100%;
-          overflow: hidden;
+          /* Was overflow:hidden, which clipped the removable label's slide/glow.
+             Keep the row contained via wrapping + per-badge ellipsis instead. */
+          overflow: visible;
+        }
+        /* The removable drop-type label keeps its own clip; never let it shrink
+           or distort beside the ghost pills. */
+        .drop-badges > :global(.kindRemovable) {
+          flex: 0 0 auto;
         }
 
         .badge {

@@ -544,12 +544,15 @@ export default function ActivityCard({
     authorProfile.username
   ).replace(/^@+/, "");
   const authorHandle = formatHandle(authorUsername || authorName);
+  // Prefer the freshly-loaded Supabase profile avatar so it always reflects the
+  // user's CURRENT picture; the meta.* snapshot (baked at drop-creation) is only
+  // a fallback for before the profile lookup resolves.
   const authorAvatarSrc = storedUrl(
+    authorProfile.avatarSrc,
     meta?.authorAvatar,
     meta?.avatarUrl,
     meta?.avatarDataUrl,
-    meta?.recipientAvatar,
-    authorProfile.avatarSrc
+    meta?.recipientAvatar
   );
   const isCurrentUserDrop =
     item?.kind === "board_drop" &&
