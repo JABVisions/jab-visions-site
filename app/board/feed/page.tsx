@@ -9,16 +9,33 @@ import ActivityCard from "@/app/components/board/ActivityCard";
 import BoardWhispers from "@/app/components/board/BoardWhispers";
 import { createBoardWhisper, type BoardWhisperEventType } from "@/lib/board/whispers";
 
-// Ambient whispers woven into the Activity Channel cadence — surfaced quietly
-// between drops, never as alerts.
-const FEED_WHISPER_CADENCE: BoardWhisperEventType[] = [
-  "drop_view",
-  "profile_view",
-  "drop_pin",
-  "quiet_day",
-  "work_update",
-];
-const FEED_WHISPER_EVERY = 5;
+// Whispers are Bucket Brain noticing real activity — ambient and relational, not
+// notifications. Woven through the feed so Board feels alive and attentive.
+const FEED_WHISPER_EVERY = 3;
+
+// 1–2 whisper events for a drop, derived from what actually happened on it, so a
+// richer drop (pushed, pay/store) sometimes earns two whispers in a row.
+function feedWhisperEvents(
+  item: { kind?: string | null; meta?: Record<string, any> | null },
+  i: number
+): BoardWhisperEventType[] {
+  const meta = item?.meta && typeof item.meta === "object" ? item.meta : {};
+  const flavor = String(meta.signalType ?? meta.dropType ?? item?.kind ?? "");
+
+  const events: BoardWhisperEventType[] = [];
+  if (meta.isPushed) events.push("drop_push");
+  else if (flavor === "energy_change") events.push("drop_pin");
+  else if (flavor === "profile_update") events.push("profile_view");
+  else events.push("drop_view");
+
+  // A second, softer line when the drop carries an extra real signal — or now
+  // and then for rhythm — so whispers occasionally cluster.
+  if (meta.isPushed || flavor === "Pay" || /store/i.test(flavor)) events.push("drop_pin");
+  else if (Number(meta.commentCount) > 0) events.push("drop_view");
+  else if (i % 2 === 0) events.push("quiet_day");
+
+  return events;
+}
 
 import {
   getLocalActivity,
@@ -404,16 +421,17 @@ export default function HomeBoardFeedPage() {
                   <ActivityCard key={a.id} item={a} onRemove={removeItemFromFeed} />,
                 ];
                 if ((i + 1) % FEED_WHISPER_EVERY === 0) {
-                  const eventType =
-                    FEED_WHISPER_CADENCE[
-                      Math.floor(i / FEED_WHISPER_EVERY) % FEED_WHISPER_CADENCE.length
-                    ];
-                  nodes.push(
-                    <BoardWhispers
-                      key={`feed-whisper-${i}`}
-                      whisper={createBoardWhisper({ id: `feed-whisper-${a.id}`, eventType })}
-                    />
-                  );
+                  feedWhisperEvents(a, i).forEach((eventType, n) => {
+                    nodes.push(
+                      <BoardWhispers
+                        key={`feed-whisper-${a.id}-${n}`}
+                        whisper={createBoardWhisper({
+                          id: `feed-whisper-${a.id}-${n}`,
+                          eventType,
+                        })}
+                      />
+                    );
+                  });
                 }
                 return nodes;
               })}

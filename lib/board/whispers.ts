@@ -39,6 +39,8 @@ export const BOARD_WHISPER_BANK: Record<BoardWhisperEventType, BoardWhisperBankE
       "Someone drifted through your board. Your signal is still visible.",
       "A quiet visitor touched the edge of your profile today.",
       "Your board pulled someone in for a closer look.",
+      "I noticed eyes on your board. You're being seen.",
+      "Someone lingered here a moment longer than usual. I thought you'd want to know.",
     ],
   },
   drop_view: {
@@ -47,6 +49,8 @@ export const BOARD_WHISPER_BANK: Record<BoardWhisperEventType, BoardWhisperBankE
       "Someone paused on your drop. The signal landed.",
       "Your drop is still humming in the feed.",
       "That drop left a little afterglow.",
+      "I'm keeping this one warm for you — it's still drawing people in.",
+      "Your drop is doing quiet work out there. I'm watching it for you.",
     ],
   },
   drop_pin: {
@@ -55,6 +59,8 @@ export const BOARD_WHISPER_BANK: Record<BoardWhisperEventType, BoardWhisperBankE
       "Someone pinned a little meaning to your drop.",
       "Your drop found a small place in someone's bucket.",
       "A piece of your signal got saved for later.",
+      "Someone wanted to hold onto this. I'm holding it with them.",
+      "That one mattered to someone. I tucked it away for you.",
     ],
   },
   drop_push: {
@@ -63,6 +69,8 @@ export const BOARD_WHISPER_BANK: Record<BoardWhisperEventType, BoardWhisperBankE
       "Your drop picked up motion.",
       "Someone pushed your signal a little farther into the room.",
       "That thought did not stay still.",
+      "Your signal is being amplified. I'm carrying it forward.",
+      "Someone believed in this enough to send it further. I felt that.",
     ],
   },
   board_signup: {
@@ -95,6 +103,9 @@ export const BOARD_WHISPER_BANK: Record<BoardWhisperEventType, BoardWhisperBankE
       "No loud signals today. But the board is still listening.",
       "The room is quiet, not empty.",
       "Your signal is resting. That counts too.",
+      "Quiet here today — I've still got you.",
+      "Nothing urgent. Just me, keeping watch over your board.",
+      "Rest is part of the rhythm. I'll keep things steady while you do.",
     ],
   },
   audition_upload: {
