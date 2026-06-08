@@ -22,8 +22,8 @@ import { DROP_FLAVOR_ORDER, type DropFlavorKey } from "@/lib/board/dropFlavors";
 import CameraDropPortal from "./CameraDropPortal";
 import RemovableDropBadge from "./RemovableDropBadge";
 import VoiceRecorder from "./VoiceRecorder";
+import DropStudioStage from "./DropStudioStage";
 import DropCommentsDrawer from "./DropCommentsDrawer";
-import DropStudio from "./DropStudio";
 import DropStudioOverlay from "./DropStudioOverlay";
 
 type DropType =
@@ -585,6 +585,7 @@ export default function DropTile() {
   const [mediaSource, setMediaSource] = useState<"upload" | "capture" | null>(null);
   const [selectedMediaPreview, setSelectedMediaPreview] = useState("");
   const [dropCustomizations, setDropCustomizations] = useState<DropCustomization>({});
+  const [studioOpen, setStudioOpen] = useState(false);
 
   const signedUrlRef = useRef<Record<string, string>>({});
   const [signedUrlByKey, setSignedUrlByKey] = useState<Record<string, string>>({});
@@ -1630,10 +1631,6 @@ export default function DropTile() {
                 setPayProvider("stripe_connect");
               }
               if (m !== "Doc") setDocDesc("");
-
-              // Drop Studio: launching Vision drops you straight into the live
-              // camera/recording environment (Upload stays as a fallback).
-              if (m === "Media" && !file) setCameraMode("photo");
             }}
           >
             {displayDropType(m)}
@@ -1809,12 +1806,23 @@ export default function DropTile() {
               )}
             </div>
             {selectedMediaPreview ? (
-              <DropStudio
-                mediaUrl={selectedMediaPreview}
-                mediaKind={file?.type.startsWith("video/") ? "video" : "image"}
-                value={dropCustomizations}
-                onChange={setDropCustomizations}
-              />
+              <div className="studio-launch">
+                <div className="studio-launch-preview drop-studio-media-frame">
+                  {file?.type.startsWith("video/") ? (
+                    <video src={selectedMediaPreview} muted playsInline />
+                  ) : (
+                    <img src={selectedMediaPreview} alt="Vision drop preview" />
+                  )}
+                  <DropStudioOverlay customizations={dropCustomizations} />
+                </div>
+                <button
+                  type="button"
+                  className="drop-mini studio-launch-btn"
+                  onClick={() => setStudioOpen(true)}
+                >
+                  Open Drop Studio →
+                </button>
+              </div>
             ) : null}
             <textarea
               className="drop-textarea"
@@ -2337,6 +2345,15 @@ export default function DropTile() {
         }}
       />
 
+      <DropStudioStage
+        open={studioOpen && mode === "Media" && !!selectedMediaPreview}
+        mediaUrl={selectedMediaPreview}
+        mediaKind={file?.type.startsWith("video/") ? "video" : "image"}
+        value={dropCustomizations}
+        onChange={setDropCustomizations}
+        onClose={() => setStudioOpen(false)}
+      />
+
       <DropCommentsDrawer
         open={Boolean(commentsDropId)}
         onClose={() => setCommentsDropId(null)}
@@ -2552,6 +2569,30 @@ export default function DropTile() {
         .media-capture-field {
           display: grid;
           gap: 9px;
+        }
+        .studio-launch {
+          display: grid;
+          gap: 10px;
+          justify-items: center;
+        }
+        .studio-launch-preview {
+          width: 100%;
+          max-width: 360px;
+          border-radius: 16px;
+          border: 1px solid rgba(0, 0, 0, 0.12);
+          overflow: hidden;
+          background: #000;
+        }
+        .studio-launch-preview > img,
+        .studio-launch-preview > video {
+          display: block;
+          width: 100%;
+        }
+        .studio-launch-btn {
+          font-weight: 950;
+          letter-spacing: 0.06em;
+          border-color: rgba(126, 226, 255, 0.5);
+          box-shadow: 0 0 16px rgba(126, 226, 255, 0.25);
         }
         .capture-actions {
           display: flex;
