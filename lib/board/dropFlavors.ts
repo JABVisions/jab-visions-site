@@ -2,10 +2,9 @@
 // Single source of truth for Drop type ordering + labels across every creation
 // and selection surface (Drop Console, Profile Drop Tile, DropPad, etc.).
 //
-// Ordering philosophy: CREATION-FIRST. The Drops a user makes natively on BOARD
-// lead (Vision/Media, Thought), then the human-centered Pay Drop, then the
-// link-ingest types. Keep this list as the canonical order — surfaces should
-// import it rather than hand-rolling their own arrays.
+// Ordering philosophy: user-facing BOARD language. Keep the saved "media"
+// flavor intact for compatibility, but present it as "Vision" across the UI.
+// Surfaces should import this list rather than hand-rolling their own arrays.
 
 export type DropFlavorKey =
   | "media"
@@ -18,25 +17,25 @@ export type DropFlavorKey =
   | "doc";
 
 export const DROP_FLAVOR_ORDER: DropFlavorKey[] = [
-  "media",
   "thought",
-  "pay",
-  "youtube",
+  "media",
   "music",
-  "news",
+  "youtube",
   "link",
+  "news",
   "doc",
+  "pay",
 ];
 
 export const DROP_FLAVOR_LABEL: Record<DropFlavorKey, string> = {
-  media: "Media",
   thought: "Thought",
-  pay: "Pay",
-  youtube: "YouTube",
+  media: "Vision",
   music: "Music",
-  news: "News",
+  youtube: "YouTube",
   link: "Link",
+  news: "News",
   doc: "Doc",
+  pay: "Pay",
 };
 
 export const DROP_FLAVOR_SUB: Record<DropFlavorKey, string> = {

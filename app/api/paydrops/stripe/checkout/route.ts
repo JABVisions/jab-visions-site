@@ -50,16 +50,6 @@ export async function POST(req: NextRequest) {
       { status: 400 }
     );
   }
-  if (!destination) {
-    return NextResponse.json(
-      {
-        ok: false,
-        error:
-          "This Pay Drop's recipient hasn't connected their Stripe payout account yet.",
-      },
-      { status: 409 }
-    );
-  }
 
   const appUrl = process.env.NEXT_PUBLIC_APP_URL?.trim() || req.nextUrl.origin;
   const successUrl = new URL(
@@ -90,9 +80,16 @@ export async function POST(req: NextRequest) {
         },
       ],
       payment_intent_data: {
-        transfer_data: { destination },
-        ...(applicationFeeCents(amountCents) > 0
-          ? { application_fee_amount: applicationFeeCents(amountCents) }
+        // If the recipient has a connected Stripe account, route the funds there
+        // (destination charge + optional platform fee). Otherwise the charge
+        // settles on the platform Stripe account — checkout still works either way.
+        ...(destination
+          ? {
+              transfer_data: { destination },
+              ...(applicationFeeCents(amountCents) > 0
+                ? { application_fee_amount: applicationFeeCents(amountCents) }
+                : {}),
+            }
           : {}),
         metadata: {
           payDropId: String(body.payDropId ?? ""),

@@ -13,7 +13,7 @@ export function clamp(n: number, min: number, max: number) {
 export function kindLabel(kind: AssetKind) {
   switch (kind) {
     case "media":
-      return "Media Drop";
+      return "Vision Drop";
     case "music":
       return "Music Drop";
     case "youtube":

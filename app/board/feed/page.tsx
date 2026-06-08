@@ -115,7 +115,7 @@ function demoFeedItems(): BoardActivity[] {
       kind: "board_drop",
       title: "Vision Wall Signal",
       body:
-        "Media Drops should show the full image without trapping it inside a tiny fixed crop.",
+        "Vision Drops should show the full image without trapping it inside a tiny fixed crop.",
       href: "/assets/john_andy_headshot.jpg",
       image_url: "/assets/john_andy_headshot.jpg",
       meta: {

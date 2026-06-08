@@ -159,6 +159,10 @@ type DropType = "YouTube" | "Music" | "News" | "Link" | "Media" | "Pay" | "Doc";
 type MediaKind = "image" | "video" | "audio";
 type PayProviderMode = "payment_link" | "stripe_connect" | "authorize_net_accept_hosted";
 
+function displayDropType(type: DropType) {
+  return type === "Media" ? "Vision" : type;
+}
+
 type DropItem = {
   id: string;
   title: string;
@@ -1447,7 +1451,7 @@ export default function ProfileBoardViewPage({
                           <div className="board-drop-top">
                             <div className="board-drop-title">{drop.title}</div>
                             <div className="board-drop-badges">
-                              <span className="board-drop-badge">{drop.type}</span>
+                              <span className="board-drop-badge">{displayDropType(drop.type)}</span>
                               {drop.hostLabel ? (
                                 <span className="board-drop-badge ghost">{drop.hostLabel}</span>
                               ) : null}

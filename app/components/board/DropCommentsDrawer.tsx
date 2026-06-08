@@ -3,11 +3,18 @@
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import {
-  addDropComment,
+  addDropCommentRemote,
   DROP_COMMENTS_UPDATED_EVENT,
   readDropComments,
+  syncDropComments,
   type DropComment,
 } from "@/lib/board/dropComments";
+import {
+  readBrain,
+  writeBrain,
+  type BucketEntry,
+  type BucketMemoryDrop,
+} from "@/lib/board/bucketBrain";
 import styles from "./DropCommentsDrawer.module.css";
 
 type Props = {
@@ -52,21 +59,78 @@ function formatTime(value: string) {
   }).format(time);
 }
 
+function saveCommentToBucketBrain(comment: DropComment, dropTitle?: string) {
+  if (typeof window === "undefined") return;
+
+  const activityId = `comment:${comment.dropId}:${comment.remoteId || comment.id}`;
+  const item: BucketMemoryDrop = {
+    id: activityId,
+    created_at: comment.createdAt,
+    user_id: comment.userId ?? null,
+    kind: "drop_comment",
+    title: dropTitle ? `Comment on ${dropTitle}` : "Drop comment",
+    body: comment.body,
+    href: null,
+    image_url: comment.avatarUrl ?? null,
+    meta: {
+      dropId: comment.dropId,
+      commentId: comment.remoteId || comment.id,
+      reactionType: "comment",
+      source: "drop_comments",
+      username: comment.username,
+      displayName: comment.displayName,
+    },
+  };
+
+  const prev = readBrain();
+  const entry: BucketEntry = {
+    activityId,
+    savedAt: Date.now(),
+    item,
+  };
+  const nextPin = [
+    entry,
+    ...(prev.pin ?? []).filter((existing) => existing.activityId !== activityId),
+  ].slice(0, 240);
+
+  writeBrain({
+    ...prev,
+    pin: nextPin,
+    updatedAt: Date.now(),
+  });
+}
+
 export default function DropCommentsDrawer({ open, onClose, dropId, dropTitle }: Props) {
   const [mounted, setMounted] = useState(false);
   const [comments, setComments] = useState<DropComment[]>([]);
   const [draft, setDraft] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [syncNote, setSyncNote] = useState<string | null>(null);
   const viewer = useMemo(readViewerIdentity, [open]);
 
   useEffect(() => setMounted(true), []);
 
   useEffect(() => {
     if (!open || !dropId) return;
+    let cancelled = false;
     const sync = () => setComments(readDropComments(dropId));
     sync();
+
+    setSyncNote("Syncing comments with Board...");
+    syncDropComments(dropId)
+      .then((next) => {
+        if (cancelled) return;
+        setComments(next);
+        setSyncNote("Synced with Supabase.");
+      })
+      .catch(() => {
+        if (!cancelled) setSyncNote("Comments are local until Supabase is ready.");
+      });
+
     window.addEventListener(DROP_COMMENTS_UPDATED_EVENT, sync as EventListener);
     window.addEventListener("storage", sync as EventListener);
     return () => {
+      cancelled = true;
       window.removeEventListener(DROP_COMMENTS_UPDATED_EVENT, sync as EventListener);
       window.removeEventListener("storage", sync as EventListener);
     };
@@ -83,10 +147,13 @@ export default function DropCommentsDrawer({ open, onClose, dropId, dropTitle }:
 
   if (!mounted || !open || !dropId) return null;
 
-  const submit = () => {
+  const submit = async () => {
     const body = draft.trim();
-    if (!body) return;
-    const comment = addDropComment({
+    if (!body || saving) return;
+
+    setSaving(true);
+    setSyncNote("Sending comment...");
+    const comment = await addDropCommentRemote({
       dropId,
       userId: viewer.userId,
       username: viewer.username,
@@ -94,9 +161,11 @@ export default function DropCommentsDrawer({ open, onClose, dropId, dropTitle }:
       avatarUrl: viewer.avatarUrl,
       body,
     });
-    setComments((current) => [...current, comment]);
+    saveCommentToBucketBrain(comment, dropTitle);
+    setComments(readDropComments(dropId));
     setDraft("");
-    // TODO: replace local storage write with Supabase comment persistence when Board comments table is ready.
+    setSyncNote(comment.remoteId ? "Comment synced to Supabase." : "Comment saved locally until Supabase is ready.");
+    setSaving(false);
   };
 
   return createPortal(
@@ -106,13 +175,14 @@ export default function DropCommentsDrawer({ open, onClose, dropId, dropTitle }:
           <div className={styles.headerTop}>
             <div>
               <p className={styles.eyebrow}>Drop Side Channel</p>
-              <h2 className={styles.title}>Comments</h2>
+              <h2 className={styles.title}>Comment</h2>
             </div>
             <button className={styles.close} type="button" onClick={onClose} aria-label="Close comments">
               ✕
             </button>
           </div>
           {dropTitle ? <p className={styles.dropTitle}>{dropTitle}</p> : null}
+          {syncNote ? <p className={styles.syncNote}>{syncNote}</p> : null}
         </header>
 
         <div className={styles.list}>
@@ -144,8 +214,8 @@ export default function DropCommentsDrawer({ open, onClose, dropId, dropTitle }:
             placeholder="Drop a comment into this signal..."
             rows={2}
           />
-          <button className={styles.send} type="button" onClick={submit} disabled={!draft.trim()}>
-            Send
+          <button className={styles.send} type="button" onClick={submit} disabled={!draft.trim() || saving}>
+            {saving ? "Sending" : "Send"}
           </button>
         </div>
       </aside>

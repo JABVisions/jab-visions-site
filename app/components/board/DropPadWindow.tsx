@@ -30,7 +30,7 @@ const DROP_CATEGORIES = [
   { key: "link", label: "Link Drop" },
   { key: "youtube", label: "YouTube Drop" },
   { key: "music", label: "Music Drop" },
-  { key: "media", label: "Media Drop" }, // photo/video lives here
+  { key: "media", label: "Vision Drop" }, // photo/video lives here
   { key: "status", label: "Status Drop" },
 ];
 

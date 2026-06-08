@@ -51,6 +51,10 @@ const MODE_BY_FLAVOR: Record<DropFlavorKey, DropType> = {
 };
 const MODE_ORDER: DropType[] = DROP_FLAVOR_ORDER.map((k) => MODE_BY_FLAVOR[k]);
 
+function displayDropType(type: DropType) {
+  return type === "Media" ? "Vision" : type;
+}
+
 export type DropItem = {
   id: string;
   title: string;
@@ -978,7 +982,7 @@ export default function DropTile() {
   }
 
   const hint = useMemo(() => {
-    if (mode === "Media") return "Upload a photo or video. It becomes a visible tile instantly.";
+    if (mode === "Media") return "Upload a photo or video. It becomes a Vision Drop instantly.";
     if (mode === "Pay") return "Show what you're raising support for, set a price, and let supporters pay you on Board via Stripe (or add your own external payment link).";
     if (mode === "Thought") return "Catch a quick idea. Add text, a voice memo, or a doodle/image.";
     if (mode === "Doc") {
@@ -1137,7 +1141,7 @@ export default function DropTile() {
     setFile(null);
     setMediaSource(null);
     setDropCustomizations({});
-    flash(setMsg, "Media added ✓", 1400);
+    flash(setMsg, "Vision Drop added ✓", 1400);
   }
 
   async function addMusicFileDrop() {
@@ -1627,7 +1631,7 @@ export default function DropTile() {
               if (m !== "Doc") setDocDesc("");
             }}
           >
-            {m}
+            {displayDropType(m)}
           </button>
         ))}
       </div>
@@ -2006,7 +2010,7 @@ export default function DropTile() {
                 <div className="drop-metaRow">
                   <div className="drop-badges">
                     <RemovableDropBadge
-                      label={d.type.toUpperCase()}
+                      label={displayDropType(d.type).toUpperCase()}
                       canRemove
                       onRemove={() => removeDrop(d.id)}
                     />
@@ -2100,7 +2104,7 @@ export default function DropTile() {
                 ) : isMedia || isPay ? (
                   <div
                     className={`media-thumb ${isMedia ? "natural-media" : ""} ${isPay ? "pay-thumb" : ""}`}
-                    aria-label={isPay ? "Pay drop image" : "Media drop preview"}
+                    aria-label={isPay ? "Pay drop image" : "Vision drop preview"}
                   >
                     {signedUrl ? (
                       <div className="drop-studio-media-frame">
@@ -2115,7 +2119,7 @@ export default function DropTile() {
                       </div>
                     ) : (
                       <div className="media-missing">
-                        <div className="media-missing-title">Media not available</div>
+                        <div className="media-missing-title">Vision media not available</div>
                         <div className="media-missing-sub">
                           If this just uploaded, refresh once. If it persists, check Storage policies.
                         </div>
@@ -2234,7 +2238,7 @@ export default function DropTile() {
         <div
           className="viewerOverlay"
           role="dialog"
-          aria-label="Media viewer"
+          aria-label="Vision media viewer"
           onMouseDown={(e) => {
             if (e.target === e.currentTarget) closeViewer();
           }}
@@ -2285,7 +2289,7 @@ export default function DropTile() {
                 )
               ) : (
                 <div className="media-missing big">
-                  <div className="media-missing-title">Media not available</div>
+                  <div className="media-missing-title">Vision media not available</div>
                   <div className="media-missing-sub">Missing storage reference.</div>
                 </div>
               )}

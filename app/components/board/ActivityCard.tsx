@@ -444,7 +444,7 @@ function computeEmbed(href: string): { kind: EmbedKind; url: string } {
   const sc = toSoundCloudEmbed(href);
   if (sc) return { kind: "soundcloud", url: sc };
 
-  // 5) Media files (image/video/audio)
+  // 5) Vision/media files (image/video/audio)
   const mk = guessMediaKind(href);
   if (mk !== "none") return { kind: mk, url: href };
 
@@ -916,8 +916,14 @@ export default function ActivityCard({
   async function openPayCheckout() {
     if (!isPayDrop) return;
 
-    if (href) {
-      window.open(href, "_blank", "noopener,noreferrer");
+    // Only treat the href as a checkout destination when this Pay Drop is an
+    // explicit external payment link. Otherwise (Stripe "Pay on Board" drops) we
+    // must go through Stripe Checkout — never open the drop's image/link.
+    const explicitPaymentLink =
+      metaString(meta?.payProvider) === "payment_link" &&
+      metaString(meta?.paymentLink, meta?.checkoutUrl);
+    if (explicitPaymentLink) {
+      window.open(explicitPaymentLink, "_blank", "noopener,noreferrer");
       return;
     }
 
@@ -1127,7 +1133,7 @@ export default function ActivityCard({
             <div className="mediaFrame">
               <img
                 src={embed.url}
-                alt={title || "Media drop"}
+                alt={title || "Vision drop"}
                 className="img"
                 loading="lazy"
                 onError={() => setEmbedFailed(true)}

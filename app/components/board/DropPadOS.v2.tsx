@@ -198,9 +198,9 @@ function RouteTitle(route: DropRoute) {
 }
 
 function kindLabel(kind: AssetKind) {
-  switch (kind) {
-    case "media":
-      return "Media Drop";
+    switch (kind) {
+      case "media":
+        return "Vision Drop";
     case "music":
       return "Music Drop";
     case "youtube":
@@ -743,7 +743,7 @@ function ScreenShell({
 
 function BoardDropsScreen({ onBeginPlace }: { onBeginPlace: (kind: AssetKind) => void }) {
   const DROP_TYPES: Array<{ kind: AssetKind; title: string; desc: string; hint: string }> = [
-    { kind: "media", title: "Media", desc: "Image embed", hint: "Upload an image" },
+    { kind: "media", title: "Vision", desc: "Image embed", hint: "Upload an image" },
     { kind: "music", title: "Music", desc: "Spotify / SoundCloud", hint: "Paste a music link" },
     { kind: "youtube", title: "YouTube", desc: "YouTube video embed", hint: "Paste a YouTube link" },
     { kind: "doc", title: "Doc", desc: "Docs + PDFs + Notion links", hint: "Paste a doc link" },
@@ -1315,7 +1315,7 @@ const DropPadOSV2 = forwardRef<DropPadOSHandle, DropPadOSProps>(function DropPad
         return;
       }
       if (!f.type.startsWith("image/")) {
-        setModal({ ...modal, error: "Media Drop currently supports images only." });
+        setModal({ ...modal, error: "Vision Drop currently supports images only." });
         return;
       }
 

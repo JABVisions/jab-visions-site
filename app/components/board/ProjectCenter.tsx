@@ -95,7 +95,7 @@ function TileFrame({
 function kindLabel(kind: string) {
   switch (kind) {
     case "media":
-      return "Media Drop";
+      return "Vision Drop";
     case "music":
       return "Music Drop";
     case "youtube":

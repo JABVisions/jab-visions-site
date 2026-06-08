@@ -220,7 +220,7 @@ export default function CameraDropPortal({
         <header className={styles.topbar}>
           <div>
             <div className={styles.eyebrow}>Board Camera Signal</div>
-            <h2 className={styles.title}>Create a Media Drop</h2>
+            <h2 className={styles.title}>Create a Vision Drop</h2>
             <p className={styles.subtitle}>Frame the signal, capture it, then send it into Board.</p>
           </div>
           <button type="button" className={styles.close} onClick={onClose} aria-label="Close camera portal">×</button>
@@ -245,7 +245,7 @@ export default function CameraDropPortal({
 
         <article className={styles.dropTile}>
           <div className={styles.dropMeta}>
-            <span className={styles.dropBadge}>Media Drop Demo</span>
+            <span className={styles.dropBadge}>Vision Drop Demo</span>
             <span className={styles.cameraBadge}>{facingMode === "environment" ? "Back Camera" : "Front Camera"}</span>
           </div>
           <div className={styles.viewport}>
