@@ -45,6 +45,28 @@ export default function StoreDropTile({ drop }: { drop: StoreDrop }) {
           className="h-full w-full object-cover transition duration-500 group-hover:scale-105"
         />
 
+        {/* Collectible holographic sheen — sweeps across the artifact on hover. */}
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-0 opacity-0 transition-opacity duration-500 group-hover:opacity-100"
+          style={{
+            background:
+              "linear-gradient(115deg, transparent 30%, rgba(255,255,255,0.22) 46%, rgba(126,226,255,0.18) 52%, rgba(255,158,236,0.18) 58%, transparent 74%)",
+            backgroundSize: "220% 220%",
+            animation: "storeHolo 2.6s ease-in-out infinite",
+            mixBlendMode: "screen",
+          }}
+        />
+        <style>{`
+          @keyframes storeHolo {
+            0% { background-position: 130% 0%; }
+            100% { background-position: -30% 100%; }
+          }
+          @media (prefers-reduced-motion: reduce) {
+            [data-store-holo] { animation: none !important; }
+          }
+        `}</style>
+
         <div className="absolute left-3 top-3 rounded-full border border-white/20 bg-black/60 px-3 py-1 text-[10px] uppercase tracking-[0.2em] text-white/75 backdrop-blur-md">
           Store Drop
         </div>

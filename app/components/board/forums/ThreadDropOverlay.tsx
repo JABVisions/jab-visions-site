@@ -47,25 +47,46 @@ export default function ThreadDropOverlay({
 
   return (
     <div className="fixed inset-0 z-[100]">
+      <style>{`
+        @keyframes threadSpaceFade { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes threadSpaceEnter {
+          from { opacity: 0; transform: translateY(14px) scale(0.97); }
+          to { opacity: 1; transform: translateY(0) scale(1); }
+        }
+        @keyframes threadPresence {
+          0%, 100% { opacity: 0.5; transform: scale(0.85); }
+          50% { opacity: 1; transform: scale(1.1); }
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .thread-space-backdrop, .thread-space-panel { animation: none !important; }
+        }
+      `}</style>
       <button
         type="button"
         aria-label="Close"
         onClick={onClose}
-        className="absolute inset-0 bg-black/70"
+        className="thread-space-backdrop absolute inset-0 bg-black/70"
+        style={{ animation: "threadSpaceFade 260ms ease-out" }}
       />
 
       <div className="absolute inset-0 p-4 sm:p-6 md:p-8">
         <div
           className={clsx(
-            "relative h-full w-full rounded-3xl border border-white/10",
+            "thread-space-panel relative h-full w-full rounded-3xl border border-white/10",
             "bg-gradient-to-b from-white/10 to-black/30 backdrop-blur-xl",
             "shadow-2xl overflow-hidden"
           )}
+          style={{ animation: "threadSpaceEnter 320ms cubic-bezier(0.22, 0.85, 0.32, 1)" }}
         >
           <div className="flex items-center justify-between gap-4 border-b border-white/10 px-5 py-4">
             <div className="min-w-0">
-              <div className="text-xs uppercase tracking-wide text-pink-400/80">
-                {thread.channel ?? "Forum"}
+              <div className="flex items-center gap-2 text-xs uppercase tracking-wide text-pink-400/80">
+                <span
+                  aria-hidden
+                  className="inline-block h-1.5 w-1.5 rounded-full bg-pink-400"
+                  style={{ animation: "threadPresence 2.4s ease-in-out infinite" }}
+                />
+                Inside · {thread.channel ?? "Forum"}
               </div>
               <h2 className="mt-1 truncate text-lg font-semibold text-white">
                 {thread.title}

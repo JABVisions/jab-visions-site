@@ -6,6 +6,19 @@ import { supabaseBrowser } from "@/lib/supabase/browser";
 import DropConsole from "@/app/components/board/DropConsole";
 import DropsBucket from "@/app/components/board/DropsBucket";
 import ActivityCard from "@/app/components/board/ActivityCard";
+import BoardWhispers from "@/app/components/board/BoardWhispers";
+import { createBoardWhisper, type BoardWhisperEventType } from "@/lib/board/whispers";
+
+// Ambient whispers woven into the Activity Channel cadence — surfaced quietly
+// between drops, never as alerts.
+const FEED_WHISPER_CADENCE: BoardWhisperEventType[] = [
+  "drop_view",
+  "profile_view",
+  "drop_pin",
+  "quiet_day",
+  "work_update",
+];
+const FEED_WHISPER_EVERY = 5;
 
 import {
   getLocalActivity,
@@ -386,9 +399,24 @@ export default function HomeBoardFeedPage() {
         <div className="layout">
           <section className="feed">
             <div className="cards">
-              {safeItems.map((a) => (
-                <ActivityCard key={a.id} item={a} onRemove={removeItemFromFeed} />
-              ))}
+              {safeItems.flatMap((a, i) => {
+                const nodes = [
+                  <ActivityCard key={a.id} item={a} onRemove={removeItemFromFeed} />,
+                ];
+                if ((i + 1) % FEED_WHISPER_EVERY === 0) {
+                  const eventType =
+                    FEED_WHISPER_CADENCE[
+                      Math.floor(i / FEED_WHISPER_EVERY) % FEED_WHISPER_CADENCE.length
+                    ];
+                  nodes.push(
+                    <BoardWhispers
+                      key={`feed-whisper-${i}`}
+                      whisper={createBoardWhisper({ id: `feed-whisper-${a.id}`, eventType })}
+                    />
+                  );
+                }
+                return nodes;
+              })}
             </div>
 
             <div ref={sentinelRef} className="sentinel">

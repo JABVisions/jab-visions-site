@@ -117,7 +117,21 @@
     radial-gradient(circle, rgba(255, 255, 255, 0.16), transparent 66%);
   opacity: 0.42;
   z-index: 0;
-  animation: softPulse 4s ease-in-out infinite;
+  animation:
+    softPulse 4s ease-in-out infinite,
+    iridescentDrift 12s ease-in-out infinite;
+}
+
+/* Gentle iridescent shimmer — a soft hue sway, kept narrow so it never reads
+   as harsh saturation. */
+@keyframes iridescentDrift {
+  0%,
+  100% {
+    filter: hue-rotate(-10deg);
+  }
+  50% {
+    filter: hue-rotate(14deg);
+  }
 }
 
 .avatar {
