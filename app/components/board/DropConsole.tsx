@@ -57,7 +57,7 @@ const MODE_HINT: Record<DropMode, string> = {
 // so the Drop hierarchy stays identical across every creation surface.
 type DropFlavor = DropFlavorKey;
 type PayProviderMode = "payment_link" | "stripe_connect";
-type StudioCaptureMode = "photo" | "video" | "audio";
+type StudioCaptureMode = "photo" | "video" | "audio" | "art";
 
 type AnnouncementVibe =
   | "hype"
@@ -717,9 +717,10 @@ export default function DropConsole({
 
   const studioAllowedModes = useMemo<StudioCaptureMode[]>(
     () =>
+      // Thought = voice + art (no camera); Vision = camera modes + art.
       mode === "board_drop" && dropFlavor === "thought"
-        ? ["audio", "photo"]
-        : ["photo", "video"],
+        ? ["audio", "art"]
+        : ["photo", "video", "art"],
     [dropFlavor, mode]
   );
 

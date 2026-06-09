@@ -1,36 +1,51 @@
 // File: app/components/board/BoardArtCanvas.tsx
-// Drop Studio — Art Mode. A clean, Board-native drawing canvas (think tidy
-// Microsoft Paint with early-Procreate controls). Mouse + touch drawing, brush
-// size, color, clear, undo, and Save → PNG File that flows into the drop media
-// flow. Intentionally simple for v2: no layers / blending / pressure / brushes.
+// Drop Studio — Art Mode. A clean, Board-native drawing surface (tidy Microsoft
+// Paint with early-Procreate controls). Strokes live on a TRANSPARENT canvas
+// over a switchable background: dark or white paper, OR a captured photo (so the
+// same tools let you draw directly on a Vision). Save composites bg + strokes
+// into a PNG File that flows into the drop media flow.
+// v2 scope only: no layers / blending / pressure / custom brushes.
 
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { BOARD_DROP_ASPECT_RATIO } from "@/lib/board/mediaFormat";
 
-const CANVAS_BG = "#0b0f16";
+const DARK_BG = "#0b0f16";
+const PAPER_BG = "#fdfaf2";
 const BOARD_COLORS = [
-  "#FFFFFF",
   "#FF4FD8",
   "#7EE2FF",
   "#B7FF2D",
   "#FFD12D",
   "#FF2D6D",
   "#7A44FF",
+  "#FFFFFF",
   "#111111",
 ];
 
-export default function BoardArtCanvas({ onSave }: { onSave: (file: File) => void }) {
+export default function BoardArtCanvas({
+  onSave,
+  backgroundImageUrl,
+  saveLabel = "Use art →",
+}: {
+  onSave: (file: File) => void;
+  /** When set, strokes draw on top of this image (draw-on-photo for Vision). */
+  backgroundImageUrl?: string;
+  saveLabel?: string;
+}) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const ctxRef = useRef<CanvasRenderingContext2D | null>(null);
+  const bgImgRef = useRef<HTMLImageElement>(null);
   const drawingRef = useRef(false);
   const undoRef = useRef<ImageData[]>([]);
-  const dirtyRef = useRef(false);
 
   const [color, setColor] = useState("#FF4FD8");
   const [size, setSize] = useState(8);
+  const [paper, setPaper] = useState(false); // dark by default
+  const onPhoto = !!backgroundImageUrl;
 
-  // Size the backing store to the element (DPR-aware) and paint the board bg.
+  // Size the transparent drawing canvas to its element (DPR-aware).
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -43,14 +58,11 @@ export default function BoardArtCanvas({ onSave }: { onSave: (file: File) => voi
     ctx.scale(dpr, dpr);
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
-    ctx.fillStyle = CANVAS_BG;
-    ctx.fillRect(0, 0, rect.width, rect.height);
     ctxRef.current = ctx;
   }, []);
 
   function pointFromEvent(e: React.PointerEvent<HTMLCanvasElement>) {
-    const canvas = canvasRef.current!;
-    const r = canvas.getBoundingClientRect();
+    const r = canvasRef.current!.getBoundingClientRect();
     return { x: e.clientX - r.left, y: e.clientY - r.top };
   }
 
@@ -69,14 +81,11 @@ export default function BoardArtCanvas({ onSave }: { onSave: (file: File) => voi
     e.currentTarget.setPointerCapture(e.pointerId);
     pushUndo();
     drawingRef.current = true;
-    dirtyRef.current = true;
     const { x, y } = pointFromEvent(e);
     ctx.strokeStyle = color;
     ctx.fillStyle = color;
     ctx.lineWidth = size;
     ctx.beginPath();
-    ctx.moveTo(x, y);
-    // Dot for a tap with no movement.
     ctx.arc(x, y, size / 2, 0, Math.PI * 2);
     ctx.fill();
     ctx.beginPath();
@@ -102,9 +111,7 @@ export default function BoardArtCanvas({ onSave }: { onSave: (file: File) => voi
     const ctx = ctxRef.current;
     if (!canvas || !ctx) return;
     pushUndo();
-    const r = canvas.getBoundingClientRect();
-    ctx.fillStyle = CANVAS_BG;
-    ctx.fillRect(0, 0, r.width, r.height);
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
   }
 
   function undo() {
@@ -117,38 +124,79 @@ export default function BoardArtCanvas({ onSave }: { onSave: (file: File) => voi
   function save() {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    canvas.toBlob((blob) => {
+    const out = document.createElement("canvas");
+    out.width = canvas.width;
+    out.height = canvas.height;
+    const ctx = out.getContext("2d");
+    if (!ctx) return;
+
+    // Paint the background first…
+    if (onPhoto && bgImgRef.current && bgImgRef.current.naturalWidth) {
+      // cover-fit the photo into the output frame
+      const img = bgImgRef.current;
+      const iw = img.naturalWidth;
+      const ih = img.naturalHeight;
+      const scale = Math.max(out.width / iw, out.height / ih);
+      const dw = iw * scale;
+      const dh = ih * scale;
+      ctx.drawImage(img, (out.width - dw) / 2, (out.height - dh) / 2, dw, dh);
+    } else {
+      ctx.fillStyle = paper ? PAPER_BG : DARK_BG;
+      ctx.fillRect(0, 0, out.width, out.height);
+    }
+    // …then the strokes on top.
+    ctx.drawImage(canvas, 0, 0);
+
+    out.toBlob((blob) => {
       if (blob) onSave(new File([blob], `board-art-${Date.now()}.png`, { type: "image/png" }));
     }, "image/png");
   }
 
   return (
     <div className="artMode">
-      <canvas
-        ref={canvasRef}
-        className="artCanvas"
-        onPointerDown={onPointerDown}
-        onPointerMove={onPointerMove}
-        onPointerUp={onPointerUp}
-        onPointerCancel={onPointerUp}
-        onPointerLeave={onPointerUp}
-      />
+      <div className={`artStage ${paper && !onPhoto ? "paper" : ""}`}>
+        {onPhoto ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img ref={bgImgRef} src={backgroundImageUrl} alt="" className="artBg" crossOrigin="anonymous" />
+        ) : null}
+        <canvas
+          ref={canvasRef}
+          className="artCanvas"
+          onPointerDown={onPointerDown}
+          onPointerMove={onPointerMove}
+          onPointerUp={onPointerUp}
+          onPointerCancel={onPointerUp}
+          onPointerLeave={onPointerUp}
+        />
+      </div>
 
       <div className="artTools">
-        <div className="artColors">
-          {BOARD_COLORS.map((c) => (
+        <div className="artRow">
+          <div className="artColors">
+            {BOARD_COLORS.map((c) => (
+              <button
+                key={c}
+                type="button"
+                className={`artSwatch ${color.toLowerCase() === c.toLowerCase() ? "on" : ""}`}
+                style={{ background: c }}
+                onClick={() => setColor(c)}
+                aria-label={`Color ${c}`}
+              />
+            ))}
+            <label className="artPicker" aria-label="Custom color">
+              <input type="color" value={color} onChange={(e) => setColor(e.target.value)} />
+            </label>
+          </div>
+          {onPhoto ? null : (
             <button
-              key={c}
               type="button"
-              className={`artSwatch ${color.toLowerCase() === c.toLowerCase() ? "on" : ""}`}
-              style={{ background: c }}
-              onClick={() => setColor(c)}
-              aria-label={`Color ${c}`}
-            />
-          ))}
-          <label className="artPicker" aria-label="Custom color">
-            <input type="color" value={color} onChange={(e) => setColor(e.target.value)} />
-          </label>
+              className="artBgToggle"
+              onClick={() => setPaper((p) => !p)}
+              aria-pressed={paper}
+            >
+              {paper ? "Paper" : "Dark"}
+            </button>
+          )}
         </div>
 
         <div className="artBrush">
@@ -171,7 +219,7 @@ export default function BoardArtCanvas({ onSave }: { onSave: (file: File) => voi
             Clear
           </button>
           <button type="button" className="artSave" onClick={save}>
-            Use art →
+            {saveLabel}
           </button>
         </div>
       </div>
@@ -185,23 +233,47 @@ export default function BoardArtCanvas({ onSave }: { onSave: (file: File) => voi
           gap: 10px;
           padding: 12px;
         }
-        .artCanvas {
-          /* Standard Board Drop frame so art matches Vision/Video in the feed. */
+        .artStage {
+          position: relative;
           aspect-ratio: 4 / 5;
-          width: min(100%, calc(58vh * 4 / 5));
+          width: min(100%, calc(54vh * 4 / 5));
           height: auto;
           margin: 0 auto;
-          min-height: 0;
           border-radius: 16px;
+          overflow: hidden;
           border: 1px solid rgba(255, 255, 255, 0.16);
-          background: ${CANVAS_BG};
+          background: ${DARK_BG};
+          box-shadow: inset 0 0 30px rgba(0, 0, 0, 0.5);
+        }
+        .artStage.paper {
+          background: ${PAPER_BG};
+        }
+        .artBg {
+          position: absolute;
+          inset: 0;
+          width: 100%;
+          height: 100%;
+          object-fit: cover;
+          pointer-events: none;
+        }
+        .artCanvas {
+          position: absolute;
+          inset: 0;
+          width: 100%;
+          height: 100%;
           touch-action: none;
           cursor: crosshair;
-          box-shadow: inset 0 0 30px rgba(0, 0, 0, 0.5);
         }
         .artTools {
           display: grid;
           gap: 10px;
+        }
+        .artRow {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 12px;
+          flex-wrap: wrap;
         }
         .artColors {
           display: flex;
@@ -238,6 +310,18 @@ export default function BoardArtCanvas({ onSave }: { onSave: (file: File) => voi
           height: 40px;
           border: 0;
           background: none;
+          cursor: pointer;
+        }
+        .artBgToggle {
+          border-radius: 999px;
+          padding: 7px 14px;
+          font-size: 11px;
+          font-weight: 950;
+          letter-spacing: 0.1em;
+          text-transform: uppercase;
+          color: rgba(255, 255, 255, 0.86);
+          background: rgba(255, 255, 255, 0.1);
+          border: 1px solid rgba(255, 255, 255, 0.22);
           cursor: pointer;
         }
         .artBrush {

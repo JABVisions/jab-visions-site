@@ -105,6 +105,8 @@ export default function DropStudioStage({
   const [mediaUrl, setMediaUrl] = useState("");
   const [mediaKind, setMediaKind] = useState<"image" | "video" | "audio">("image");
   const [source, setSource] = useState<"capture" | "upload">("capture");
+  // Draw-on-photo: reuse the Art canvas seeded with the current image.
+  const [drawOpen, setDrawOpen] = useState(false);
 
   const setMedia = useCallback((url: string, kind: "image" | "video" | "audio") => {
     if (urlRef.current) URL.revokeObjectURL(urlRef.current);
@@ -155,6 +157,7 @@ export default function DropStudioStage({
       return;
     }
     document.body.style.overflow = "hidden";
+    setDrawOpen(false);
     const safeMode = allowedModes.includes(initialMode) ? initialMode : allowedModes[0] ?? "photo";
     setMode(safeMode);
     if (initialFile) {
@@ -305,6 +308,7 @@ export default function DropStudioStage({
       urlRef.current = "";
     }
     setMediaUrl("");
+    setDrawOpen(false);
     setPhase("capture");
   }
 
@@ -466,20 +470,44 @@ export default function DropStudioStage({
               ) : (
                 <div className="capEdit">
                   {mediaKind === "audio" ? (
-                    <div className="vocalReview">
-                      <div className="studioBrand">
-                        <span className="studioDot" aria-hidden />
-                        VOCAL THOUGHT READY
+                    <>
+                      <div className="vocalReview">
+                        <div className="studioBrand">
+                          <span className="studioDot" aria-hidden />
+                          VOCAL THOUGHT READY
+                        </div>
+                        <audio src={mediaUrl} controls preload="metadata" />
+                        <p>Use this voice memo as the audio layer for your Thought Drop.</p>
                       </div>
-                      <audio src={mediaUrl} controls preload="metadata" />
-                      <p>Use this voice memo as the audio layer for your Thought Drop.</p>
-                    </div>
+                      <button type="button" className="studioDone" onClick={done}>
+                        Use this Vocal →
+                      </button>
+                    </>
+                  ) : drawOpen ? (
+                    // Draw on the photo with the exact Art Mode tools, then bake it in.
+                    <BoardArtCanvas
+                      backgroundImageUrl={mediaUrl}
+                      saveLabel="Apply drawing →"
+                      onSave={(f) => {
+                        commitBlob(f, "image", source);
+                        setDrawOpen(false);
+                      }}
+                    />
                   ) : (
-                    <DropStudio mediaUrl={mediaUrl} mediaKind={mediaKind} value={value} onChange={onChange} hideHeader />
+                    <>
+                      <DropStudio mediaUrl={mediaUrl} mediaKind={mediaKind} value={value} onChange={onChange} hideHeader />
+                      <div className="editActions">
+                        {mediaKind === "image" ? (
+                          <button type="button" className="studioGhost" onClick={() => setDrawOpen(true)}>
+                            🎨 Draw on photo
+                          </button>
+                        ) : null}
+                        <button type="button" className="studioDone" onClick={done}>
+                          Use this {mediaKind === "video" ? "Video" : "Vision"} →
+                        </button>
+                      </div>
+                    </>
                   )}
-                  <button type="button" className="studioDone" onClick={done}>
-                    Use this {mediaKind === "audio" ? "Vocal" : mediaKind === "video" ? "Video" : "Vision"} →
-                  </button>
                 </div>
               )}
             </div>
@@ -863,6 +891,13 @@ export default function DropStudioStage({
           color: rgba(236, 255, 251, 0.68);
           font-size: 0.86rem;
           line-height: 1.5;
+        }
+        .editActions {
+          display: flex;
+          gap: 10px;
+          flex-wrap: wrap;
+          align-items: center;
+          justify-content: center;
         }
         .studioDone {
           justify-self: center;
