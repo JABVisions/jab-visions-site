@@ -17,6 +17,8 @@ type FacingMode = "user" | "environment";
 type Phase = "capture" | "edit";
 
 const DEFAULT_CAPTURE_MODES: CaptureMode[] = ["photo", "video"];
+// Every media mode shows in the rail; ones not allowed for this drop are locked.
+const ALL_STUDIO_MODES: CaptureMode[] = ["photo", "video", "audio", "art"];
 
 function preferredVideoMime() {
   if (typeof MediaRecorder === "undefined") return "";
@@ -340,30 +342,41 @@ export default function DropStudioStage({
               live capture and editing, so editing feels continuous with shooting. */}
           <div className="capStage">
             <nav className="modeRail" aria-label="Drop Studio modes">
-              {allowedModes.map((allowedMode) => (
-                <button
-                  key={allowedMode}
-                  type="button"
-                  className={`modeRailBtn ${mode === allowedMode ? "on" : ""}`}
-                  onClick={() => {
-                    // Switching mode mid-edit returns to live capture in that mode.
-                    if (phase === "edit") retake();
-                    setMode(allowedMode);
-                  }}
-                  disabled={recording}
-                >
-                  <span className="modeGlyph" aria-hidden>
-                    {modeGlyph(allowedMode)}
-                  </span>
-                  <span className="modeName">{modeLabel(allowedMode)}</span>
-                </button>
-              ))}
+              {ALL_STUDIO_MODES.map((m) => {
+                const enabled = allowedModes.includes(m);
+                return (
+                  <button
+                    key={m}
+                    type="button"
+                    className={`modeRailBtn ${mode === m ? "on" : ""} ${enabled ? "" : "locked"}`}
+                    onClick={() => {
+                      if (!enabled) return;
+                      // Switching mode mid-edit returns to live capture in that mode.
+                      if (phase === "edit") retake();
+                      setMode(m);
+                    }}
+                    disabled={recording || !enabled}
+                    title={
+                      enabled
+                        ? modeLabel(m)
+                        : m === "audio"
+                          ? "Voice is available on Thought Drops"
+                          : `${modeLabel(m)} isn't available for this drop`
+                    }
+                  >
+                    <span className="modeGlyph" aria-hidden>
+                      {modeGlyph(m)}
+                    </span>
+                    <span className="modeName">{modeLabel(m)}</span>
+                  </button>
+                );
+              })}
             </nav>
 
             <div className="capMain">
               {phase === "capture" ? (
                 <>
-                  <div className="capViewport">
+                  <div className={`capViewport ${mode === "photo" || mode === "video" ? "framed" : ""}`}>
                     {mode === "art" ? (
                       <BoardArtCanvas onSave={(f) => commitBlob(f, "image", "capture")} />
                     ) : mode === "audio" ? (
@@ -481,7 +494,8 @@ export default function DropStudioStage({
         }
         .studioSheet {
           width: min(560px, calc(100vw - 20px));
-          height: min(900px, calc(100vh - 20px));
+          height: min(900px, calc(100dvh - 20px));
+          max-height: calc(100dvh - 20px);
           display: grid;
           grid-template-rows: auto 1fr;
           border-radius: 28px;
@@ -619,20 +633,23 @@ export default function DropStudioStage({
         }
         .capViewport {
           position: relative;
-          /* Locked to the standard Board Drop frame so the live camera, the
-             captured shot, and the editor all share one shape on every device. */
-          aspect-ratio: ${BOARD_DROP_ASPECT_CSS};
-          width: 100%;
-          max-width: 100%;
-          max-height: 100%;
-          margin: 0 auto;
-          align-self: center;
           min-height: 0;
+          width: 100%;
+          height: 100%;
           background: #000;
           display: grid;
           place-items: center;
           overflow: hidden;
           border-radius: 14px;
+        }
+        /* Camera modes lock to the standard Board Drop frame. Height-driven so
+           the frame always fits and the controls below stay reachable. */
+        .capViewport.framed {
+          aspect-ratio: ${BOARD_DROP_ASPECT_CSS};
+          height: 100%;
+          width: auto;
+          max-width: 100%;
+          margin: 0 auto;
         }
         .capVideo {
           width: 100%;
