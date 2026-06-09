@@ -991,6 +991,12 @@ export default function DropConsole({
               uploading={uploading}
               uploadErr={uploadErr}
               uploadToBoardMedia={uploadToBoardMedia}
+              onClearMedia={() => {
+                setAttachUrl("");
+                setUploadedFileName("");
+                setMediaSource(null);
+                setDropCustomizations({});
+              }}
               onOpenCamera={setStudioMode}
               dropDesc={dropDesc}
               setDropDesc={setDropDesc}
@@ -1403,6 +1409,33 @@ export default function DropConsole({
           text-transform: uppercase;
         }
 
+        .consoleStudioWrap {
+          position: relative;
+        }
+        .dcMediaRemove {
+          position: absolute;
+          top: 9px;
+          right: 9px;
+          z-index: 4;
+          border: 1px solid rgba(255, 120, 160, 0.55);
+          border-radius: 999px;
+          padding: 6px 11px;
+          background: rgba(28, 6, 14, 0.82);
+          color: #ffd7e3;
+          font-size: 10px;
+          font-weight: 900;
+          letter-spacing: 0.08em;
+          text-transform: uppercase;
+          cursor: pointer;
+          backdrop-filter: blur(4px);
+          box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3);
+          transition: transform 140ms ease, filter 140ms ease;
+        }
+        .dcMediaRemove:hover {
+          transform: translateY(-1px);
+          filter: brightness(1.08);
+        }
+
         .thoughtAttachmentPreview {
           position: relative;
           overflow: hidden;
@@ -1515,6 +1548,7 @@ function BoardDropConsoleFields({
   uploading,
   uploadErr,
   uploadToBoardMedia,
+  onClearMedia,
   onOpenCamera,
   dropDesc,
   setDropDesc,
@@ -1543,6 +1577,7 @@ function BoardDropConsoleFields({
   uploading: boolean;
   uploadErr: string | null;
   uploadToBoardMedia: (file: File, source?: "upload" | "capture") => void;
+  onClearMedia: () => void;
   onOpenCamera: (mode: StudioCaptureMode) => void;
   dropDesc: string;
   setDropDesc: (value: string) => void;
@@ -1666,8 +1701,19 @@ function BoardDropConsoleFields({
 
       {dropFlavor === "pay" && attachUrl ? (
         <div className="consoleMediaPreview">
+          <button
+            type="button"
+            className="dcMediaRemove"
+            onClick={onClearMedia}
+            aria-label="Remove selected media"
+          >
+            ✕ Remove
+          </button>
           {inferMediaType(attachUrl) === "video" || /\.(mp4|webm|mov|m4v)$/i.test(uploadedFileName) ? (
             <video src={attachUrl} controls playsInline />
+          ) : inferMediaType(attachUrl) === "audio" ||
+            /\.(mp3|m4a|wav|aac|ogg|flac|weba)$/i.test(uploadedFileName) ? (
+            <audio src={attachUrl} controls preload="metadata" />
           ) : (
             <img src={attachUrl} alt="Pay Drop request context" />
           )}
@@ -1676,18 +1722,28 @@ function BoardDropConsoleFields({
       ) : null}
 
       {dropFlavor === "media" && attachUrl ? (
-        <DropStudio
-          mediaUrl={attachUrl}
-          mediaKind={
-            inferMediaType(attachUrl) === "video" ||
-            /\.(mp4|webm|mov|m4v)$/i.test(uploadedFileName)
-              ? "video"
-              : "image"
-          }
-          value={customizations}
-          onChange={setCustomizations}
-          compact
-        />
+        <div className="consoleStudioWrap">
+          <button
+            type="button"
+            className="dcMediaRemove"
+            onClick={onClearMedia}
+            aria-label="Remove selected media"
+          >
+            ✕ Remove
+          </button>
+          <DropStudio
+            mediaUrl={attachUrl}
+            mediaKind={
+              inferMediaType(attachUrl) === "video" ||
+              /\.(mp4|webm|mov|m4v)$/i.test(uploadedFileName)
+                ? "video"
+                : "image"
+            }
+            value={customizations}
+            onChange={setCustomizations}
+            compact
+          />
+        </div>
       ) : null}
 
       {dropFlavor === "thought" ? (
@@ -1707,6 +1763,14 @@ function BoardDropConsoleFields({
 
           {attachUrl ? (
             <div className="thoughtAttachmentPreview">
+              <button
+                type="button"
+                className="dcMediaRemove"
+                onClick={onClearMedia}
+                aria-label="Remove thought attachment"
+              >
+                ✕ Remove
+              </button>
               {inferMediaType(attachUrl) === "audio" ||
               /\.(mp3|wav|m4a|aac|ogg|flac)$/i.test(uploadedFileName) ? (
                 <audio src={attachUrl} controls preload="metadata" />

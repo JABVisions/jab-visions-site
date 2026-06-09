@@ -22,6 +22,7 @@ import { DROP_FLAVOR_ORDER, type DropFlavorKey } from "@/lib/board/dropFlavors";
 import RemovableDropBadge from "./RemovableDropBadge";
 import DropStudioStage from "./DropStudioStage";
 import DropCommentsDrawer from "./DropCommentsDrawer";
+import AudioDropPlayer from "./AudioDropPlayer";
 import DropStudioOverlay from "./DropStudioOverlay";
 
 type DropType =
@@ -615,6 +616,17 @@ export default function DropTile() {
     setStudioInitialFile(null);
   }
 
+  // Clear any media a user attached (upload or capture) before posting, so they
+  // can swap it out or start over. Resets the file, its source, the Studio
+  // initial file, and any Drop Studio customizations tied to that media.
+  function clearSelectedMedia() {
+    setFile(null);
+    setMediaSource(null);
+    setStudioInitialFile(null);
+    setSelectedMediaPreview("");
+    setDropCustomizations({});
+  }
+
   useEffect(() => {
     if (!file || (mode !== "Media" && mode !== "Pay" && mode !== "Thought")) {
       setSelectedMediaPreview("");
@@ -867,6 +879,9 @@ export default function DropTile() {
         };
         appendLocalActivity(localActivity);
         window.dispatchEvent(new StorageEvent("storage", { key: "jab_board_activity_v1" }));
+        // Surface the private thought to the profile Activity Channel live, the
+        // same way public drops broadcast, so it appears without a reload.
+        emitNewActivity(localActivity);
         emitBoardDropSignal({
           type: "thought_drop_created",
           dropId: item.id,
@@ -1726,6 +1741,14 @@ export default function DropTile() {
               </div>
               {selectedMediaPreview ? (
                 <div className="selected-media-preview">
+                  <button
+                    type="button"
+                    className="media-remove-btn"
+                    onClick={clearSelectedMedia}
+                    aria-label="Remove selected media"
+                  >
+                    ✕ Remove
+                  </button>
                   {file?.type.startsWith("video/") ? (
                     <video src={selectedMediaPreview} controls playsInline />
                   ) : file && isAudioFile(file) ? (
@@ -1789,6 +1812,14 @@ export default function DropTile() {
                   <>
                     <span className="file-name">{file.name}</span>
                     <span className="file-size">{Math.round(file.size / 1024)} KB</span>
+                    <button
+                      type="button"
+                      className="media-remove-btn inline"
+                      onClick={clearSelectedMedia}
+                      aria-label="Remove document"
+                    >
+                      ✕ Remove
+                    </button>
                   </>
                 ) : (
                   <span className="file-name dim">Upload doc (PDF/DOC/TXT/MD)</span>
@@ -1815,19 +1846,29 @@ export default function DropTile() {
             </button>
 
             {selectedMediaPreview ? (
-              <button
-                type="button"
-                className="studio-launch-preview drop-studio-media-frame"
-                onClick={() => openStudio(file?.type.startsWith("video/") ? "video" : "photo", file)}
-                aria-label="Edit this Vision in Drop Studio"
-              >
-                {file?.type.startsWith("video/") ? (
-                  <video src={selectedMediaPreview} muted playsInline />
-                ) : (
-                  <img src={selectedMediaPreview} alt="Vision drop preview" />
-                )}
-                <DropStudioOverlay customizations={dropCustomizations} />
-              </button>
+              <div className="studio-preview-wrap">
+                <button
+                  type="button"
+                  className="studio-launch-preview drop-studio-media-frame"
+                  onClick={() => openStudio(file?.type.startsWith("video/") ? "video" : "photo", file)}
+                  aria-label="Edit this Vision in Drop Studio"
+                >
+                  {file?.type.startsWith("video/") ? (
+                    <video src={selectedMediaPreview} muted playsInline />
+                  ) : (
+                    <img src={selectedMediaPreview} alt="Vision drop preview" />
+                  )}
+                  <DropStudioOverlay customizations={dropCustomizations} />
+                </button>
+                <button
+                  type="button"
+                  className="media-remove-btn"
+                  onClick={clearSelectedMedia}
+                  aria-label="Remove this Vision"
+                >
+                  ✕ Remove
+                </button>
+              </div>
             ) : (
               <div className="capture-help">
                 Capture or upload a Vision inside Drop Studio — Board's creation sheet.
@@ -1902,6 +1943,14 @@ export default function DropTile() {
 
             {selectedMediaPreview ? (
               <div className="thought-selected-preview">
+                <button
+                  type="button"
+                  className="media-remove-btn"
+                  onClick={clearSelectedMedia}
+                  aria-label="Remove thought attachment"
+                >
+                  ✕ Remove
+                </button>
                 {file && isAudioFile(file) ? (
                   <audio src={selectedMediaPreview} controls preload="metadata" />
                 ) : (
@@ -2107,7 +2156,7 @@ export default function DropTile() {
                   <div className={`audio-drop-card ${isThought ? "thought-audio-card" : ""}`}>
                     <div className="audio-drop-label">{isThought ? "VOICE MEMO" : isPay ? "AUDIO" : "FULL SONG"}</div>
                     {signedUrl ? (
-                      <audio src={signedUrl} controls preload="metadata" />
+                      <AudioDropPlayer src={signedUrl} />
                     ) : (
                       <div className="media-missing">
                         <div className="media-missing-title">Audio preparing…</div>
@@ -2287,7 +2336,7 @@ export default function DropTile() {
                   viewerDrop.mediaKind === "audio" ? (
                     <div className="viewerAudio">
                       <div className="viewerAudioTitle">{viewerDrop.fileName || viewerDrop.title}</div>
-                      <audio src={(viewerSignedUrl || signedUrlByKey[viewerSignedKey])!} controls autoPlay />
+                      <AudioDropPlayer src={(viewerSignedUrl || signedUrlByKey[viewerSignedKey])!} autoPlay />
                     </div>
                   ) : viewerDrop.mediaKind === "video" ? (
                     <div className="viewer-studio-frame">
@@ -2679,6 +2728,43 @@ export default function DropTile() {
           font-weight: 900;
           letter-spacing: 0.1em;
           text-transform: uppercase;
+        }
+        .studio-preview-wrap {
+          position: relative;
+          display: grid;
+          gap: 8px;
+        }
+        .media-remove-btn {
+          position: absolute;
+          top: 9px;
+          right: 9px;
+          z-index: 3;
+          border: 1px solid rgba(255, 120, 160, 0.55);
+          border-radius: 999px;
+          padding: 6px 11px;
+          background: rgba(28, 6, 14, 0.82);
+          color: #ffd7e3;
+          font-size: 10px;
+          font-weight: 900;
+          letter-spacing: 0.08em;
+          text-transform: uppercase;
+          cursor: pointer;
+          backdrop-filter: blur(4px);
+          box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3);
+          transition: transform 140ms ease, filter 140ms ease;
+        }
+        .media-remove-btn:hover {
+          transform: translateY(-1px);
+          filter: brightness(1.08);
+        }
+        .media-remove-btn.inline {
+          position: static;
+          padding: 4px 9px;
+          background: rgba(120, 20, 40, 0.12);
+          color: rgba(150, 20, 50, 0.95);
+          border-color: rgba(150, 20, 50, 0.35);
+          box-shadow: none;
+          backdrop-filter: none;
         }
         .thought-field {
           display: grid;

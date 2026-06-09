@@ -12,6 +12,10 @@ import DropStudio from "./DropStudio";
 import BoardArtCanvas from "./BoardArtCanvas";
 import { BOARD_DROP_ASPECT_CSS, BOARD_DROP_ASPECT_RATIO } from "@/lib/board/mediaFormat";
 import type { DropCustomization } from "@/lib/board/dropCustomizations";
+import { saveDropDraft, draftToFile, type DropDraft } from "@/lib/board/dropDrafts";
+import DropDraftsDrawer from "./DropDraftsDrawer";
+import VocalVisualizer from "./VocalVisualizer";
+import VoicePresets from "./VoicePresets";
 
 type CaptureMode = "photo" | "video" | "audio" | "art";
 type FacingMode = "user" | "environment";
@@ -107,6 +111,49 @@ export default function DropStudioStage({
   const [source, setSource] = useState<"capture" | "upload">("capture");
   // Draw-on-photo: reuse the Art canvas seeded with the current image.
   const [drawOpen, setDrawOpen] = useState(false);
+  // Save feature: device download, Drafts, and auto-save on capture.
+  const draftIdRef = useRef<string>("");
+  const [saveNote, setSaveNote] = useState("");
+  const saveNoteTimerRef = useRef<number | null>(null);
+  const [draftsOpen, setDraftsOpen] = useState(false);
+  const [audioPlaying, setAudioPlaying] = useState(false);
+
+  const flashSaveNote = useCallback((message: string) => {
+    setSaveNote(message);
+    if (saveNoteTimerRef.current) window.clearTimeout(saveNoteTimerRef.current);
+    saveNoteTimerRef.current = window.setTimeout(() => setSaveNote(""), 2600);
+  }, []);
+
+  const saveToDevice = useCallback(() => {
+    const file = fileRef.current;
+    if (!file) return;
+    const url = URL.createObjectURL(file);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = file.name || "drop-studio-media";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 4000);
+    flashSaveNote("Saved to your device ⬇");
+  }, [flashSaveNote]);
+
+  const saveToDrafts = useCallback(
+    async (auto = false) => {
+      const file = fileRef.current;
+      if (!file) return;
+      if (!draftIdRef.current) {
+        draftIdRef.current = `draft_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
+      }
+      const saved = await saveDropDraft(file, draftIdRef.current);
+      if (auto) {
+        if (saved) flashSaveNote("Auto-saved to Drafts");
+        return;
+      }
+      flashSaveNote(saved ? "Saved to Drafts 🗂" : "Too large to save to Drafts");
+    },
+    [flashSaveNote]
+  );
 
   const setMedia = useCallback((url: string, kind: "image" | "video" | "audio") => {
     if (urlRef.current) URL.revokeObjectURL(urlRef.current);
@@ -123,6 +170,26 @@ export default function DropStudioStage({
     if (videoRef.current) videoRef.current.srcObject = null;
     setRecording(false);
   }, []);
+
+  // Reopen a saved draft straight into the editor.
+  const openDraft = useCallback(
+    (draft: DropDraft) => {
+      const file = draftToFile(draft);
+      if (!file) return;
+      fileRef.current = file;
+      if (urlRef.current) URL.revokeObjectURL(urlRef.current);
+      const url = URL.createObjectURL(file);
+      urlRef.current = url;
+      setMediaUrl(url);
+      setMediaKind(draft.kind);
+      setSource("upload");
+      draftIdRef.current = draft.id; // re-saving updates this same draft
+      stopCamera();
+      setPhase("edit");
+      setDraftsOpen(false);
+    },
+    [stopCamera]
+  );
 
   const startCamera = useCallback(
     async (nextFacing: FacingMode) => {
@@ -149,6 +216,11 @@ export default function DropStudioStage({
     },
     [mode, stopCamera]
   );
+
+  // Stable primitive key so the lifecycle effect below doesn't re-run (and reset
+  // the phase back to Capture) every time the parent re-renders with a fresh
+  // `allowedModes` array literal — e.g. while editing stickers/text.
+  const allowedModesKey = allowedModes.join("|");
 
   // Open/close lifecycle: lock scroll, choose starting phase.
   useEffect(() => {
@@ -179,7 +251,9 @@ export default function DropStudioStage({
     return () => {
       document.body.style.overflow = "";
     };
-  }, [open, initialFile, setMedia, stopCamera, allowedModes, initialMode]);
+    // allowedModes is intentionally tracked via the stable allowedModesKey.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, initialFile, setMedia, stopCamera, allowedModesKey, initialMode]);
 
   // Run the live camera only while in capture phase for camera modes.
   useEffect(() => {
@@ -217,6 +291,8 @@ export default function DropStudioStage({
     setSource(src);
     stopCamera();
     setPhase("edit");
+    draftIdRef.current = "";
+    void saveToDrafts(true);
   }
 
   function takePhoto() {
@@ -240,6 +316,13 @@ export default function DropStudioStage({
     c.height = Math.round(sh);
     const ctx = c.getContext("2d");
     if (!ctx) return;
+    // The front ("user") camera is previewed mirrored (see .capVideo.mirror), so
+    // mirror the saved frame too — the photo then matches exactly what was framed
+    // on screen instead of flipping after capture.
+    if (facing === "user") {
+      ctx.translate(c.width, 0);
+      ctx.scale(-1, 1);
+    }
     ctx.drawImage(v, sx, sy, sw, sh, 0, 0, c.width, c.height);
     c.toBlob((b) => b && commitBlob(b, "image", "capture"), "image/jpeg", 0.94);
   }
@@ -299,6 +382,8 @@ export default function DropStudioStage({
     setSource("upload");
     stopCamera();
     setPhase("edit");
+    draftIdRef.current = "";
+    void saveToDrafts(true);
   }
 
   function retake() {
@@ -309,6 +394,7 @@ export default function DropStudioStage({
     }
     setMediaUrl("");
     setDrawOpen(false);
+    setAudioPlaying(false);
     setPhase("capture");
   }
 
@@ -339,6 +425,14 @@ export default function DropStudioStage({
             <span className="studioPill">{phase === "edit" ? `${modeLabel(mode)} Tools` : "Capture Mode"}</span>
           </div>
           <div className="studioBarRight">
+            <button
+              type="button"
+              className="studioGhost"
+              onClick={() => setDraftsOpen(true)}
+              aria-label="Open drafts"
+            >
+              🗂 Drafts
+            </button>
             {phase === "edit" ? (
               <button type="button" className="studioGhost" onClick={retake}>
                 Retake
@@ -394,10 +488,13 @@ export default function DropStudioStage({
                       <BoardArtCanvas onSave={(f) => commitBlob(f, "image", "capture")} />
                     ) : mode === "audio" ? (
                       <div className="vocalStage">
-                        <div className={`vocalOrb ${recording ? "recording" : ""}`} aria-hidden>
-                          <span />
+                        <div className="vocalViz">
+                          <VocalVisualizer
+                            state={recording ? "recording" : "idle"}
+                            stream={recording ? streamRef.current : null}
+                          />
                         </div>
-                        <div>
+                        <div className="vocalCopyBlock">
                           <div className="vocalTitle">Voice Mode</div>
                           <p className="vocalCopy">
                             Record a voice memo thought. Board attaches it as audio when you use this drop.
@@ -471,37 +568,62 @@ export default function DropStudioStage({
                 <div className="capEdit">
                   {mediaKind === "audio" ? (
                     <>
-                      <div className="vocalReview">
-                        <div className="studioBrand">
-                          <span className="studioDot" aria-hidden />
-                          VOCAL THOUGHT READY
+                      <div className="capEditScroll">
+                        <div className="vocalReview">
+                          <div className="studioBrand">
+                            <span className="studioDot" aria-hidden />
+                            VOCAL THOUGHT READY
+                          </div>
+                          <div className="reviewViz">
+                            <VocalVisualizer state={audioPlaying ? "playback" : "saved"} />
+                          </div>
+                          <VoicePresets src={mediaUrl} onPlayingChange={setAudioPlaying} />
+                          <p>Use this voice memo as the audio layer for your Thought Drop.</p>
                         </div>
-                        <audio src={mediaUrl} controls preload="metadata" />
-                        <p>Use this voice memo as the audio layer for your Thought Drop.</p>
                       </div>
-                      <button type="button" className="studioDone" onClick={done}>
-                        Use this Vocal →
-                      </button>
+                      <div className="editActions">
+                        {saveNote ? <span className="saveNote">{saveNote}</span> : null}
+                        <button type="button" className="studioGhost" onClick={saveToDevice}>
+                          ⬇ Save
+                        </button>
+                        <button type="button" className="studioGhost" onClick={() => void saveToDrafts(false)}>
+                          🗂 Drafts
+                        </button>
+                        <button type="button" className="studioDone" onClick={done}>
+                          Use this Vocal →
+                        </button>
+                      </div>
                     </>
                   ) : drawOpen ? (
                     // Draw on the photo with the exact Art Mode tools, then bake it in.
-                    <BoardArtCanvas
-                      backgroundImageUrl={mediaUrl}
-                      saveLabel="Apply drawing →"
-                      onSave={(f) => {
-                        commitBlob(f, "image", source);
-                        setDrawOpen(false);
-                      }}
-                    />
+                    <div className="capEditCanvas">
+                      <BoardArtCanvas
+                        backgroundImageUrl={mediaUrl}
+                        saveLabel="Apply drawing →"
+                        onSave={(f) => {
+                          commitBlob(f, "image", source);
+                          setDrawOpen(false);
+                        }}
+                      />
+                    </div>
                   ) : (
                     <>
-                      <DropStudio mediaUrl={mediaUrl} mediaKind={mediaKind} value={value} onChange={onChange} hideHeader />
+                      <div className="capStudioHost">
+                        <DropStudio mediaUrl={mediaUrl} mediaKind={mediaKind} value={value} onChange={onChange} hideHeader sheet />
+                      </div>
                       <div className="editActions">
+                        {saveNote ? <span className="saveNote">{saveNote}</span> : null}
                         {mediaKind === "image" ? (
                           <button type="button" className="studioGhost" onClick={() => setDrawOpen(true)}>
                             🎨 Draw on photo
                           </button>
                         ) : null}
+                        <button type="button" className="studioGhost" onClick={saveToDevice}>
+                          ⬇ Save
+                        </button>
+                        <button type="button" className="studioGhost" onClick={() => void saveToDrafts(false)}>
+                          🗂 Drafts
+                        </button>
                         <button type="button" className="studioDone" onClick={done}>
                           Use this {mediaKind === "video" ? "Video" : "Vision"} →
                         </button>
@@ -515,14 +637,25 @@ export default function DropStudioStage({
         </div>
       </div>
 
+      <DropDraftsDrawer
+        open={draftsOpen}
+        onClose={() => setDraftsOpen(false)}
+        onOpenDraft={openDraft}
+      />
+
       <style jsx>{`
         .studioStage {
           position: fixed;
           inset: 0;
-          z-index: 99998;
+          /* Above the board navbar/dock and other floating board UI so the
+             studio is never clipped by them, especially on mobile. */
+          z-index: 100050;
           display: grid;
           place-items: center;
-          padding: 14px;
+          /* Respect notches and the home-indicator / browser chrome so the sheet
+             (and its top bar + bottom "Use" button) stay fully on-screen. */
+          padding: max(10px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right))
+            max(10px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
           background:
             radial-gradient(circle at 22% 14%, rgba(126, 226, 255, 0.16), transparent 34%),
             radial-gradient(circle at 80% 16%, rgba(255, 0, 190, 0.14), transparent 32%),
@@ -530,9 +663,16 @@ export default function DropStudioStage({
           backdrop-filter: blur(12px);
         }
         .studioSheet {
-          width: min(440px, calc(100vw - 28px));
-          height: min(720px, calc(100dvh - 40px));
-          max-height: calc(100dvh - 40px);
+          width: min(560px, calc(100vw - 20px));
+          /* Size against the dynamic viewport minus the safe-area padding the
+             stage already applies, so the sheet never extends under the dock,
+             navbar, notch, or home indicator on mobile. Taller cap + slimmer
+             margins give the monitor and the attachment drawer more room. */
+          height: min(
+            880px,
+            calc(100dvh - 20px - env(safe-area-inset-top) - env(safe-area-inset-bottom))
+          );
+          max-height: calc(100dvh - 20px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
           display: grid;
           grid-template-rows: auto 1fr;
           border-radius: 28px;
@@ -716,12 +856,28 @@ export default function DropStudioStage({
           transform: scaleX(-1);
         }
         .vocalStage {
-          width: min(82%, 360px);
-          display: grid;
-          gap: 20px;
-          place-items: center;
+          width: 100%;
+          height: 100%;
+          display: flex;
+          flex-direction: column;
+          gap: 12px;
+          padding: 10px 12px 16px;
+          align-items: center;
+          justify-content: center;
           text-align: center;
           color: rgba(236, 255, 251, 0.94);
+        }
+        .vocalViz {
+          flex: 1 1 auto;
+          min-height: 120px;
+          width: 100%;
+        }
+        .vocalCopyBlock {
+          flex: 0 0 auto;
+        }
+        .reviewViz {
+          width: 100%;
+          height: clamp(150px, 30vh, 260px);
         }
         .vocalOrb {
           width: 146px;
@@ -864,11 +1020,42 @@ export default function DropStudioStage({
         .editStage,
         .capEdit {
           min-height: 0;
-          overflow: auto;
+          overflow: hidden;
           padding: 16px;
+          display: flex;
+          flex-direction: column;
+          gap: 12px;
+        }
+        /* The monitor + tools + attachment panel scroll together as one surface,
+           so the whole panel (stickers, effects, etc.) is always reachable. */
+        .capEditScroll {
+          flex: 1 1 auto;
+          min-height: 0;
+          overflow-y: auto;
+          overscroll-behavior: contain;
+          -webkit-overflow-scrolling: touch;
           display: grid;
           gap: 14px;
           align-content: start;
+          padding-right: 2px;
+          /* Clearance so the last items in the attachment panel (layer list,
+             enhance copy, etc.) fully scroll into view above the pinned actions. */
+          padding-bottom: 14px;
+        }
+        /* The action buttons stay pinned below the scroll area so "Use this …"
+           is always visible no matter how far you scroll the panel. */
+        .capEditCanvas {
+          flex: 1 1 auto;
+          min-height: 0;
+          display: flex;
+        }
+        /* Full-height host for the editor when it runs the draggable attachment
+           bottom-sheet — the sheet anchors to the bottom of this area. */
+        .capStudioHost {
+          flex: 1 1 auto;
+          min-height: 0;
+          display: flex;
+          flex-direction: column;
         }
         .vocalReview {
           display: grid;
@@ -893,11 +1080,21 @@ export default function DropStudioStage({
           line-height: 1.5;
         }
         .editActions {
+          flex: 0 0 auto;
           display: flex;
           gap: 10px;
           flex-wrap: wrap;
           align-items: center;
           justify-content: center;
+        }
+        .saveNote {
+          width: 100%;
+          text-align: center;
+          font-size: 11px;
+          font-weight: 800;
+          letter-spacing: 0.08em;
+          color: rgba(150, 255, 240, 0.92);
+          text-shadow: 0 0 12px rgba(120, 255, 234, 0.4);
         }
         .studioDone {
           justify-self: center;

@@ -21,6 +21,7 @@ import {
 } from "@/lib/board/dropComments";
 import { supabaseBrowser } from "@/lib/supabase/browser";
 import DropCommentsDrawer from "./DropCommentsDrawer";
+import AudioDropPlayer from "./AudioDropPlayer";
 import DropStudioOverlay from "./DropStudioOverlay";
 import RemovableDropBadge from "./RemovableDropBadge";
 
@@ -1287,13 +1288,7 @@ export default function ActivityCard({
       {!showEmbed && isStoredAudioDrop ? (
         <div className="mediaFrame storedAudioFrame">
           <div className="audioLabel">{isPayDrop ? "Audio" : "Full song"}</div>
-          <audio
-            className="aud"
-            src={signedPreviewImage}
-            controls
-            preload="metadata"
-            onError={() => setEmbedFailed(true)}
-          />
+          <AudioDropPlayer src={signedPreviewImage} onError={() => setEmbedFailed(true)} />
         </div>
       ) : null}
 

@@ -426,6 +426,17 @@ function isDropTileActivity(item: BoardActivity) {
   );
 }
 
+function isPrivateThoughtActivity(item: BoardActivity) {
+  const meta = item.meta && typeof item.meta === "object" ? (item.meta as any) : null;
+  const isThought =
+    String(meta?.dropType ?? "").toLowerCase() === "thought" ||
+    String(meta?.drop_flavor ?? "").toLowerCase() === "thought";
+  return (
+    String(meta?.visibility ?? "").toLowerCase() === "private" &&
+    (isThought || String(item.id || "").startsWith("private_thought_"))
+  );
+}
+
 function isProjectDropActivity(item: BoardActivity) {
   const meta = item.meta && typeof item.meta === "object" ? (item.meta as any) : null;
   return (
@@ -473,6 +484,10 @@ function filterCurrentDropTileActivity(items: BoardActivity[], extraDropIds: str
   const hasKnownDropIds = currentDropIds.size > 0;
 
   return items.filter((item) => {
+    // Private thoughts are owner-only and live solely in local storage — they're
+    // never synced to the server boardDrops set, so they'd otherwise be filtered
+    // out by the known-drop-id check below. Always keep them on the owner's feed.
+    if (isPrivateThoughtActivity(item)) return true;
     if (item.kind === "board_drop" && !String(item.title || "").startsWith("Project Drop:")) {
       if (!isDropTileActivity(item)) return false;
     }
@@ -1201,6 +1216,44 @@ export default function BoardProfileHubPage() {
     };
   }, [remoteUserId, routeKey]);
 
+  // Private thoughts are owner-local and never come back from the server, so the
+  // remote load path above can't surface a freshly-saved one. Listen for them
+  // directly (event + local storage) and merge into the Activity Channel live.
+  useEffect(() => {
+    function mergePrivateThought(detail: BoardActivity | null) {
+      if (!detail || !isPrivateThoughtActivity(detail)) return;
+      if (!activityBelongsToProfile(detail, remoteUserId, routeKey)) return;
+      const dropId = activityDropId(detail);
+      if (dropId && readLocalDeletedDropIds().includes(dropId)) return;
+      setRecentDrops((prev) => dedupeActivity([detail, ...prev]).slice(0, ACTIVITY_CHANNEL_LIMIT));
+      setRecentDropsLoading(false);
+    }
+
+    function onActivityNew(event: Event) {
+      mergePrivateThought((event as CustomEvent<BoardActivity>).detail ?? null);
+    }
+
+    function onActivityStorage(event: StorageEvent) {
+      if (event.key !== null && event.key !== "jab_board_activity_v1") return;
+      const deleted = readLocalDeletedDropIds();
+      const privates = getLocalActivity().filter(
+        (item) =>
+          isPrivateThoughtActivity(item) &&
+          activityBelongsToProfile(item, remoteUserId, routeKey) &&
+          !(activityDropId(item) && deleted.includes(activityDropId(item)!))
+      );
+      if (!privates.length) return;
+      setRecentDrops((prev) => dedupeActivity([...privates, ...prev]).slice(0, ACTIVITY_CHANNEL_LIMIT));
+    }
+
+    window.addEventListener("board:activity:new", onActivityNew as EventListener);
+    window.addEventListener("storage", onActivityStorage as EventListener);
+    return () => {
+      window.removeEventListener("board:activity:new", onActivityNew as EventListener);
+      window.removeEventListener("storage", onActivityStorage as EventListener);
+    };
+  }, [remoteUserId, routeKey]);
+
   useEffect(() => {
     if (remoteUserId) {
       return;
@@ -1243,7 +1296,12 @@ export default function BoardProfileHubPage() {
       if (!detail) return;
       const dropId = activityDropId(detail);
       if (dropId && readLocalDeletedDropIds().includes(dropId)) return;
-      if (isDropTileActivity(detail) && (!dropId || !readLocalDropIds().includes(dropId))) return;
+      if (
+        !isPrivateThoughtActivity(detail) &&
+        isDropTileActivity(detail) &&
+        (!dropId || !readLocalDropIds().includes(dropId))
+      )
+        return;
       setRecentDrops((prev) => dedupeActivity([detail, ...prev]).slice(0, ACTIVITY_CHANNEL_LIMIT));
       setRecentDropsLoading(false);
     }

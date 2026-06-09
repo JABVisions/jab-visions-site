@@ -216,20 +216,15 @@ function kindLooksProject(value: unknown) {
 
 function metaLooksProject(meta: Record<string, any> | null | undefined) {
   if (!meta) return false;
-  const tags = Array.isArray(meta.tags) ? meta.tags.join(" ") : "";
+  // Only treat a drop as a project when it carries an EXPLICIT project marker.
+  // Matching loose body/title text (e.g. the word "work") wrongly swept ordinary
+  // drops — work thoughts especially — into the Project Notebook by the hundreds.
   return (
     kindLooksProject(meta.kind) ||
     kindLooksProject(meta.cardStyle) ||
     kindLooksProject(meta.dropType) ||
     kindLooksProject(meta.drop_type) ||
-    kindLooksProject(meta.type) ||
-    textLooksProject(meta.projectType) ||
-    textLooksProject(meta.productionTitle) ||
-    textLooksProject(meta.roleTitle) ||
-    textLooksProject(meta.description) ||
-    textLooksProject(meta.notes) ||
-    textLooksProject(tags) ||
-    typeof meta.projectId === "string"
+    (typeof meta.projectId === "string" && meta.projectId.trim() !== "")
   );
 }
 
@@ -359,11 +354,7 @@ function projectFromActivity(item: BoardActivity): BoardProject | null {
   if (isSeededOrDemoProjectValue(item)) return null;
 
   const isProjectDrop =
-    metaLooksProject(meta) ||
-    kindLooksProject(item.kind) ||
-    /^Project Drop:\s*/i.test(item.title ?? "") ||
-    textLooksProject(item.title) ||
-    textLooksProject(item.body);
+    metaLooksProject(meta) || /^Project Drop:\s*/i.test(item.title ?? "");
 
   if (!isProjectDrop) return null;
 
@@ -452,12 +443,7 @@ function projectFromFeed(drop: FeedDrop): BoardProject | null {
   const meta = drop.meta ?? {};
   if (isSeededOrDemoProjectValue(drop)) return null;
 
-  if (
-    !metaLooksProject(meta) &&
-    !/^Project Drop:\s*/i.test(drop.title ?? "") &&
-    !textLooksProject(drop.title) &&
-    !textLooksProject(drop.text)
-  ) {
+  if (!metaLooksProject(meta) && !/^Project Drop:\s*/i.test(drop.title ?? "")) {
     return null;
   }
 
@@ -653,14 +639,16 @@ function projectFromLooseStoredDrop(value: any, storageKey: string): BoardProjec
     kindLooksProject(value.kind) ||
     kindLooksProject(value.cardStyle) ||
     kindLooksProject(value.dropType) ||
-    /^Project Drop:\s*/i.test(title) ||
-    textLooksProject(title) ||
-    textLooksProject(description);
+    /^Project Drop:\s*/i.test(title);
 
   if (!title || !looksProject) return null;
 
   const createdAt = safeTime(value.createdAt ?? value.created_at ?? value.updatedAt);
-  const id = String(value.id ?? value.projectId ?? `${storageKey}_${title}_${createdAt}`);
+  // Prefer the underlying projectId so a loose copy of a project drop shares the
+  // SAME id as the dedicated activity/feed/universal readers and dedupes to one,
+  // instead of becoming a distinct "loose_" duplicate of an existing project.
+  const projectId = String(value.projectId ?? meta?.projectId ?? "").trim();
+  const id = String(value.id ?? `${storageKey}_${title}_${createdAt}`);
   const image =
     (typeof value.previewImage === "string" && value.previewImage) ||
     (typeof value.image_url === "string" && value.image_url) ||
@@ -671,7 +659,7 @@ function projectFromLooseStoredDrop(value: any, storageKey: string): BoardProjec
     "";
 
   return {
-    id: `loose_${id}`,
+    id: projectId || `loose_${id}`,
     createdAt,
     updatedAt: safeTime(value.updatedAt, createdAt),
     title: stripProjectPrefix(title) || title,
@@ -713,9 +701,15 @@ function readLooseProjectDropsFromStorage(): BoardProject[] {
 
   const projects: BoardProject[] = [];
   try {
+    // Never re-ingest the project notebook's OWN storage. Doing so wraps already
+    // resolved projects as brand-new "loose_" drops, which then get persisted and
+    // re-ingested again (loose_loose_…) every cycle — multiplying one project into
+    // hundreds of repetitive tiles. The notebook keys are read by readBoardProjects.
+    const excludedKeys = new Set(allKnownProjectStorageKeys());
     for (let index = 0; index < localStorage.length; index += 1) {
       const key = localStorage.key(index);
       if (!key || !/drop|project|activity|feed|board/i.test(key)) continue;
+      if (excludedKeys.has(key) || key.startsWith(`${BOARD_PROJECTS_STORAGE_KEY}:`)) continue;
       const raw = localStorage.getItem(key);
       if (!raw) continue;
       const parsed = JSON.parse(raw);
@@ -758,6 +752,54 @@ function readDropPadProjectProjects(): BoardProject[] {
   }
 
   return projects;
+}
+
+// A genuine notebook project was either created through the New Project Drop
+// form (id `project_…`), placed from Drop Pad (`droppad_…`), or has real user
+// engagement (an invite). Everything else persisted in the projects store is
+// junk auto-ingested by the old over-eager resolver and is dropped on read.
+function isGenuineNotebookProject(project: BoardProject): boolean {
+  const id = String(project.id || "");
+  if (id.startsWith("project_") || id.startsWith("droppad_")) return true;
+  if (Array.isArray(project.invites) && project.invites.length > 0) return true;
+  return false;
+}
+
+// One-time cleanup: physically remove the corrupt auto-ingested entries from
+// localStorage so the bloated store (hundreds of bogus tiles) is reset, not just
+// hidden on read. Safe to call repeatedly — it only rewrites keys that change.
+export function pruneCorruptProjects(): boolean {
+  if (typeof window === "undefined") return false;
+  let changed = false;
+  try {
+    for (const key of allKnownProjectStorageKeys()) {
+      const raw = localStorage.getItem(key);
+      if (!raw) continue;
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(raw);
+      } catch {
+        continue;
+      }
+      if (!Array.isArray(parsed)) continue;
+      const cleaned = parsed.filter((value: any) => {
+        if (isSeededOrDemoProjectValue(value)) return false;
+        const id = String(value?.id ?? "");
+        const hasInvites = Array.isArray(value?.invites) && value.invites.length > 0;
+        return id.startsWith("project_") || id.startsWith("droppad_") || hasInvites;
+      });
+      if (cleaned.length !== parsed.length) {
+        localStorage.setItem(key, JSON.stringify(cleaned));
+        changed = true;
+      }
+    }
+    if (changed) {
+      window.dispatchEvent(new CustomEvent(BOARD_PROJECTS_UPDATED_EVENT));
+    }
+  } catch {
+    return changed;
+  }
+  return changed;
 }
 
 export function readBoardProjects(): BoardProject[] {
@@ -848,8 +890,7 @@ export function readBoardProjects(): BoardProject[] {
 
     const merged = new Map<string, BoardProject>();
     for (const project of normalized) {
-      const existing = merged.get(project.id);
-      merged.set(project.id, existing ? mergeProjectRecord(existing, project) : project);
+      mergeIntoCanonical(merged, project);
     }
 
     return Array.from(merged.values()).sort((a, b) => b.updatedAt - a.updatedAt);
@@ -858,43 +899,63 @@ export function readBoardProjects(): BoardProject[] {
   }
 }
 
+// Collapse accidental wrapper-prefixed ids (loose_, feed_, universal_, and any
+// nested repeats like loose_loose_) down to the underlying project id so the
+// same project from different storage sources dedupes to ONE tile. droppad_ is
+// preserved on purpose — Drop Pad drops are keyed that way in both merge sites.
+function canonicalProjectKey(id: string): string {
+  let key = String(id || "").trim();
+  if (!key) return key;
+  let prev = "";
+  let guard = 0;
+  while (key !== prev && guard < 16) {
+    prev = key;
+    key = key.replace(/^(loose_|feed_|universal_)/i, "");
+    guard += 1;
+  }
+  return key || String(id);
+}
+
+function mergeIntoCanonical(merged: Map<string, BoardProject>, project: BoardProject) {
+  const key = canonicalProjectKey(project.id);
+  const existing = merged.get(key);
+  const record = existing ? mergeProjectRecord(existing, project) : { ...project };
+  record.id = key;
+  merged.set(key, record);
+}
+
 export function resolveBoardProjects(): BoardProject[] {
   const stored = readBoardProjects();
   const merged = new Map<string, BoardProject>();
 
   for (const project of stored) {
-    merged.set(project.id, project);
+    mergeIntoCanonical(merged, project);
   }
 
   for (const project of readDropPadProjectProjects()) {
-    const existing = merged.get(project.id);
-    merged.set(project.id, existing ? mergeProjectRecord(existing, project) : project);
+    mergeIntoCanonical(merged, project);
   }
 
   for (const project of readLooseProjectDropsFromStorage()) {
-    const existing = merged.get(project.id);
-    merged.set(project.id, existing ? mergeProjectRecord(existing, project) : project);
+    mergeIntoCanonical(merged, project);
   }
 
   for (const item of getLocalActivity()) {
     const project = projectFromActivity(item);
     if (!project) continue;
-    const existing = merged.get(project.id);
-    merged.set(project.id, existing ? mergeProjectRecord(existing, project) : project);
+    mergeIntoCanonical(merged, project);
   }
 
   for (const drop of readFeed()) {
     const project = projectFromFeed(drop);
     if (!project) continue;
-    const existing = merged.get(project.id);
-    merged.set(project.id, existing ? mergeProjectRecord(existing, project) : project);
+    mergeIntoCanonical(merged, project);
   }
 
   for (const drop of readDrops()) {
     const project = projectFromUniversalDrop(drop);
     if (!project) continue;
-    const existing = merged.get(project.id);
-    merged.set(project.id, existing ? mergeProjectRecord(existing, project) : project);
+    mergeIntoCanonical(merged, project);
   }
 
   return Array.from(merged.values())
@@ -925,7 +986,7 @@ export async function syncRemoteProjectActivitiesToStorage(sb: any) {
       .from("board_activity")
       .select("*")
       .order("created_at", { ascending: false })
-      .limit(200);
+      .limit(1000);
 
     if (error || !Array.isArray(data)) return syncResolvedProjectsToStorage();
 

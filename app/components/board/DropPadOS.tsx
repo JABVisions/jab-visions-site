@@ -6,6 +6,14 @@ import { supabaseBrowser } from "@/lib/supabase/browser";
 import WorkCallsList, { type WorkCallItem } from "@/app/components/board/WorkCallsList";
 import ProjectCenter from "@/app/components/board/ProjectCenter";
 import StoreDropTile, { type StoreDrop } from "@/app/components/board/StoreDropTile";
+import DropStudioStage from "@/app/components/board/DropStudioStage";
+import type { DropCustomization } from "@/lib/board/dropCustomizations";
+import { DROP_PAD_ASSETS_UPDATED_EVENT } from "@/lib/board/dropPadAssets";
+import { readPayDrops } from "@/lib/board/paydrops";
+import { readBoardProjects } from "@/lib/board/projects";
+import { getLocalActivity, type BoardActivity } from "@/lib/board/activity";
+import { BOARD_DROP_SIGNAL_EVENT, type BoardDropSignal } from "@/lib/board/dropSignals";
+import BoardWhispers, { sampleBoardWhispers } from "@/app/components/board/BoardWhispers";
 
 type DropRoute =
   | "board"
@@ -37,6 +45,39 @@ export type DropBubble = {
 
 type AssetKind = "media" | "music" | "youtube" | "link" | "doc" | "note";
 type DropDestination = "assets" | "portfolio" | "projects";
+
+function activitySignalLabel(s: BoardDropSignal) {
+  switch (s.type) {
+    case "thought_drop_created":
+      return `New thought · ${s.title ?? "Drop"}`;
+    case "project_drop_created":
+      return `Project drop · ${s.title ?? "opened"}`;
+    case "drop_commented":
+      return `New comment on ${s.title ?? "a drop"}`;
+    case "drop_pushed":
+      return `Drop pushed · ${s.title ?? ""}`;
+    case "drop_funded":
+      return `Pay Drop funded`;
+    default:
+      return `New drop · ${s.title ?? ""}`;
+  }
+}
+
+function activityRelTime(iso: string) {
+  const diff = Date.now() - new Date(iso).getTime();
+  const m = Math.floor(diff / 60000);
+  if (!Number.isFinite(m) || m < 1) return "just now";
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  return `${Math.floor(h / 24)}d ago`;
+}
+
+function activityChip(item: BoardActivity) {
+  const meta = item.meta ?? {};
+  const t = String(meta.dropType ?? meta.drop_flavor ?? item.kind ?? "drop");
+  return t.replace(/_/g, " ");
+}
 
 type AssetItem = {
   id: string;
@@ -1101,6 +1142,22 @@ export default function DropPadOS({
 
   const [modal, setModal] = useState<InputModalState>({ open: false });
 
+  // ✅ Drop Pad OS 4 — Drop Studio launches straight from the lock screen.
+  const [studioOpen, setStudioOpen] = useState(false);
+  const [studioValue, setStudioValue] = useState<DropCustomization>({});
+
+  // ✅ Profile Work Board (the spatial page to the right of the orb home).
+  const [profileStats, setProfileStats] = useState<{
+    status: "unemployed" | "working" | "on_vacation";
+    job: string;
+    payDrops: number;
+    projects: number;
+  }>({ status: "unemployed", job: "", payDrops: 0, projects: 0 });
+
+  // ✅ Activity Channel (the spatial page reached by swiping UP from the orb home).
+  const [activityDrops, setActivityDrops] = useState<BoardActivity[]>([]);
+  const [activitySignals, setActivitySignals] = useState<BoardDropSignal[]>([]);
+
   // ✅ Work Calls
   const [workCalls, setWorkCalls] = useState<WorkCallItem[]>([]);
   const workCallCounts = useMemo(() => {
@@ -1229,6 +1286,64 @@ export default function DropPadOS({
     setPortfolioDrops(readDropItemsFromStorage(PORTFOLIO_DROPS_STORAGE_KEY));
     setProjectDrops(readDropItemsFromStorage(PROJECT_DROPS_STORAGE_KEY));
     setWorkCalls(readWorkCallsFromStorage());
+  }, []);
+
+  // Load the Profile Work Board stats (work status/job, pay drop + project counts).
+  useEffect(() => {
+    if (!osOn) return;
+    const load = () => {
+      let status: "unemployed" | "working" | "on_vacation" = "unemployed";
+      let job = "";
+      try {
+        const raw = localStorage.getItem("jab_board_work_desk_v1");
+        if (raw) {
+          const p = JSON.parse(raw);
+          if (p?.status === "working" || p?.status === "on_vacation" || p?.status === "unemployed") {
+            status = p.status;
+          }
+          if (typeof p?.job === "string") job = p.job;
+        }
+      } catch {
+        /* noop */
+      }
+      let payDrops = 0;
+      let projects = 0;
+      try {
+        payDrops = readPayDrops(userId).length;
+      } catch {
+        /* noop */
+      }
+      try {
+        projects = readBoardProjects().length;
+      } catch {
+        /* noop */
+      }
+      setProfileStats({ status, job, payDrops, projects });
+    };
+    load();
+    window.addEventListener("storage", load);
+    window.addEventListener("focus", load);
+    window.addEventListener("board:projects:updated", load as EventListener);
+    return () => {
+      window.removeEventListener("storage", load);
+      window.removeEventListener("focus", load);
+      window.removeEventListener("board:projects:updated", load as EventListener);
+    };
+  }, [osOn, userId]);
+
+  // Refresh the Assets bin whenever a Work Drop is added from another surface
+  // (e.g. the Work Drop Station) so it shows up without a reload.
+  useEffect(() => {
+    const reload = () => setAssets(readAssetsFromStorage());
+    const onStorage = (event: StorageEvent) => {
+      if (!event.key || event.key === ASSETS_STORAGE_KEY) reload();
+    };
+    window.addEventListener(DROP_PAD_ASSETS_UPDATED_EVENT, reload as EventListener);
+    window.addEventListener("storage", onStorage);
+    return () => {
+      window.removeEventListener(DROP_PAD_ASSETS_UPDATED_EVENT, reload as EventListener);
+      window.removeEventListener("storage", onStorage);
+    };
   }, []);
 
   // persist work calls locally (for now)
@@ -1420,6 +1535,44 @@ export default function DropPadOS({
     onSelect?.(destination);
     onNavigate?.(destination);
     setMode("screen");
+  };
+
+  // Drop Pad OS 4 — a drop captured in Drop Studio is a "Work Drop" and lands
+  // straight in the Assets bin (no manual destination picker).
+  const addWorkDropToAssets = async (file: File) => {
+    setStudioOpen(false);
+    setStudioValue({});
+    const now = Date.now();
+    const isImage = file.type.startsWith("image/");
+
+    let mediaUrl = "";
+    if (userId) {
+      const uploaded = await uploadMediaToSupabaseStorage(sb, userId, file);
+      if (uploaded.ok) mediaUrl = uploaded.publicUrl;
+    }
+    if (!mediaUrl) {
+      mediaUrl = await readFileAsDataUrl(file).catch(() => "");
+    }
+    if (!mediaUrl) {
+      triggerDropPlacedIndicator("SYSTEM: Work Drop couldn’t be saved");
+      return;
+    }
+
+    const asset: AssetItem = {
+      id: uid(),
+      kind: "media",
+      title: `Work Drop · ${new Date(now).toLocaleDateString()}`,
+      createdAt: now,
+      payload: isImage ? { mediaType: "image", mediaUrl } : { mediaUrl },
+    };
+
+    syncAssetsLocal([asset, ...assets]);
+    if (userId) {
+      setSyncing(true);
+      await withTimeout(upsertAssetToSupabase(sb, userId, asset), 8000).catch(() => ({ ok: false }));
+      setSyncing(false);
+    }
+    triggerDropPlacedIndicator("SYSTEM: Work Drop placed in Assets");
   };
 
   const placeAsset = async (asset: AssetItem, destination: DropDestination) => {
@@ -1836,6 +1989,16 @@ export default function DropPadOS({
                   <div className="mt-2 text-sm text-white/50 max-w-[46ch] mx-auto">
                     Power on to open the holographic Drops menu.
                   </div>
+
+                  <button
+                    type="button"
+                    onClick={() => setStudioOpen(true)}
+                    className="group relative z-10 mt-6 inline-flex items-center gap-2 rounded-full border border-cyan-200/30 bg-gradient-to-b from-cyan-300/15 to-fuchsia-400/10 px-6 py-3 text-sm font-extrabold uppercase tracking-[0.18em] text-cyan-50/90 shadow-[0_0_24px_rgba(126,226,255,0.28)] backdrop-blur-sm transition hover:from-cyan-300/25 hover:to-fuchsia-400/18 hover:shadow-[0_0_32px_rgba(126,226,255,0.42)]"
+                    aria-label="Open Drop Studio"
+                  >
+                    <span aria-hidden className="text-base leading-none">🎬</span>
+                    Drop Studio
+                  </button>
                 </div>
               </div>
             </div>
@@ -1892,9 +2055,14 @@ export default function DropPadOS({
                 </div>
               </div>
 
-              {/* MENU (crown center + orbit bubbles) */}
+              {/* MENU — spatial pager: orb home (page 1) ↔ Profile Work Board (page 2) */}
               {mode === "menu" && (
-                <div className="relative h-[560px] sm:h-[620px]">
+                <div
+                  className="osPager"
+                  aria-label="Spatial home — swipe between Drops and your Profile Work Board"
+                >
+                  <section className="osPage">
+                    <div className="relative h-[560px] sm:h-[620px]">
                   {/* Crown center */}
                   <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none">
                     <div className="relative grid place-items-center">
@@ -1961,8 +2129,56 @@ export default function DropPadOS({
                   })}
 
                   <div className="absolute bottom-5 left-6 right-6 text-center text-xs text-white/40">
-                    Tap a bubble to open a screen inside Drop Pad.
+                    Tap a bubble to open a screen · swipe&nbsp;→&nbsp;for your Profile Work Board
                   </div>
+                    </div>
+                  </section>
+
+                  <section className="osPage osProfilePage">
+                    <div className="pwb">
+                      <div className="pwbHead">
+                        <div className="pwbEyebrow">Profile</div>
+                        <div className="pwbTitle">Work Board</div>
+                      </div>
+
+                      <div className="pwbDesk">
+                        <div className="pwbStatusRow">
+                          <span className={clsx("pwbDot", profileStats.status)} />
+                          <div className="min-w-0">
+                            <div className="pwbStatusLabel">
+                              {profileStats.status === "working"
+                                ? "Working"
+                                : profileStats.status === "on_vacation"
+                                  ? "On Vacation"
+                                  : "Open to Work"}
+                            </div>
+                            <div className="pwbJob">{profileStats.job || "No job set yet"}</div>
+                          </div>
+                        </div>
+
+                        <div className="pwbStats">
+                          <button
+                            type="button"
+                            className="pwbStat"
+                            onClick={() => openRoute("storedrops")}
+                          >
+                            <div className="pwbStatNum">{profileStats.payDrops}</div>
+                            <div className="pwbStatLabel">Pay Drops</div>
+                          </button>
+                          <button
+                            type="button"
+                            className="pwbStat"
+                            onClick={() => openRoute("projects")}
+                          >
+                            <div className="pwbStatNum">{profileStats.projects}</div>
+                            <div className="pwbStatLabel">Projects</div>
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="pwbHint">← swipe back to your Drops</div>
+                    </div>
+                  </section>
                 </div>
               )}
 
@@ -2339,7 +2555,144 @@ export default function DropPadOS({
         </div>
       ) : null}
 
+      <DropStudioStage
+        open={studioOpen}
+        initialFile={null}
+        initialMode="photo"
+        allowedModes={["photo", "video", "audio", "art"]}
+        value={studioValue}
+        onChange={setStudioValue}
+        onClose={() => setStudioOpen(false)}
+        onComplete={(file) => void addWorkDropToAssets(file)}
+      />
+
       <style jsx>{`
+        /* Spatial home pager — swipe/scroll horizontally between the orb home and
+           the Profile Work Board for an AR-like depth feel in the web prototype. */
+        .osPager {
+          display: flex;
+          height: 560px;
+          overflow-x: auto;
+          overflow-y: hidden;
+          scroll-snap-type: x mandatory;
+          -webkit-overflow-scrolling: touch;
+          scrollbar-width: none;
+        }
+        .osPager::-webkit-scrollbar {
+          display: none;
+        }
+        @media (min-width: 640px) {
+          .osPager {
+            height: 620px;
+          }
+        }
+        .osPage {
+          position: relative;
+          flex: 0 0 100%;
+          width: 100%;
+          height: 100%;
+          scroll-snap-align: start;
+        }
+        .osProfilePage {
+          overflow-y: auto;
+        }
+        .pwb {
+          display: grid;
+          align-content: start;
+          gap: 16px;
+          padding: 22px 20px 28px;
+          height: 100%;
+        }
+        .pwbEyebrow {
+          font-size: 11px;
+          letter-spacing: 0.34em;
+          text-transform: uppercase;
+          color: rgba(255, 255, 255, 0.5);
+        }
+        .pwbTitle {
+          margin-top: 4px;
+          font-size: 1.5rem;
+          font-weight: 850;
+          color: #fff;
+        }
+        .pwbDesk {
+          display: grid;
+          gap: 16px;
+          border-radius: 26px;
+          padding: 18px;
+          border: 1px solid rgba(255, 255, 255, 0.12);
+          background:
+            radial-gradient(circle at 16% 0%, rgba(163, 230, 53, 0.12), transparent 44%),
+            radial-gradient(circle at 92% 6%, rgba(34, 211, 238, 0.12), transparent 42%),
+            linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.02));
+          box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16);
+        }
+        .pwbStatusRow {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+        }
+        .pwbDot {
+          flex: 0 0 auto;
+          width: 13px;
+          height: 13px;
+          border-radius: 999px;
+          background: rgba(255, 255, 255, 0.4);
+        }
+        .pwbDot.working {
+          background: #a3ff12;
+          box-shadow: 0 0 12px rgba(163, 255, 18, 0.6);
+        }
+        .pwbDot.on_vacation {
+          background: #ffcf4d;
+          box-shadow: 0 0 12px rgba(255, 207, 77, 0.5);
+        }
+        .pwbStatusLabel {
+          font-size: 1rem;
+          font-weight: 850;
+          color: #fff;
+        }
+        .pwbJob {
+          font-size: 12px;
+          color: rgba(255, 255, 255, 0.6);
+        }
+        .pwbStats {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 10px;
+        }
+        .pwbStat {
+          text-align: left;
+          border-radius: 18px;
+          padding: 14px;
+          border: 1px solid rgba(255, 255, 255, 0.1);
+          background: rgba(255, 255, 255, 0.04);
+          cursor: pointer;
+          transition: background 140ms ease, transform 140ms ease;
+        }
+        .pwbStat:hover {
+          background: rgba(255, 255, 255, 0.08);
+          transform: translateY(-1px);
+        }
+        .pwbStatNum {
+          font-size: 1.9rem;
+          font-weight: 950;
+          line-height: 1;
+          color: #fff;
+        }
+        .pwbStatLabel {
+          margin-top: 6px;
+          font-size: 10px;
+          letter-spacing: 0.16em;
+          text-transform: uppercase;
+          color: rgba(255, 255, 255, 0.5);
+        }
+        .pwbHint {
+          text-align: center;
+          font-size: 11px;
+          color: rgba(255, 255, 255, 0.4);
+        }
+
         @keyframes floaty {
           0% {
             transform: translate(-50%, -50%) translateY(0px);

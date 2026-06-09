@@ -79,11 +79,19 @@
 .preview {
   position: relative;
   /* Standard Board Drop frame — matches the Drop Studio camera viewport so the
-     shot doesn't resize between capture and edit. Width is capped so the 4:5
-     box never exceeds the available height. */
+     shot doesn't resize between capture and edit. Height-driven and capped so
+     the monitor stays a comfortable, stable size and the attachment tools below
+     (Text / Stickers / etc.) never overshadow it. */
   aspect-ratio: 4 / 5;
-  width: min(100%, calc(64vh * 4 / 5));
+  /* Fill the available frame width (the binding constraint inside the Studio
+     sheet), capped by height so it can't run off-screen. Matches the camera
+     viewport's 4:5 frame so capture → edit is the same size and shape, and the
+     panel below stays reachable via the Studio's single scroll surface. */
+  width: min(100%, calc(58vh * 4 / 5));
+  height: auto;
+  max-width: 100%;
   margin: 0 auto;
+  flex: 0 0 auto;
   overflow: hidden;
   border: 1px solid rgba(255, 255, 255, 0.18);
   border-radius: 22px;
@@ -279,12 +287,15 @@
 }
 
 .tools {
+  /* The Studio lives in a narrow (~440px) sheet, so 6 pills in one row overlap
+     and clip their labels. Lay them out 3-across (two tidy rows) so every tool
+     name stays readable regardless of viewport width. */
   display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 7px;
-  padding: 5px;
+  padding: 6px;
   border: 1px solid rgba(167, 244, 232, 0.14);
-  border-radius: 999px;
+  border-radius: 22px;
   background: rgba(255, 255, 255, 0.045);
   box-shadow: inset 0 0 18px rgba(255, 255, 255, 0.035);
 }
@@ -344,7 +355,10 @@
 }
 
 .drawer {
-  min-height: 52px;
+  /* The attachment panel shows its full content. The Drop Studio body scrolls
+     as one surface (see .capEditScroll in DropStudioStage), so everything in the
+     panel is always reachable by scrolling instead of being clipped to a sliver. */
+  min-height: 120px;
 }
 
 .toolStack,
@@ -356,9 +370,16 @@
 }
 
 .textTool {
+  /* Single column so the input spans the full panel width — the Drop Studio
+     lives inside a narrow (~440px) sheet, so a side-by-side input + button was
+     squeezing the field and clipping its prompt text. Button sits below. */
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: 1fr;
   gap: 7px;
+}
+
+.textTool input {
+  text-overflow: ellipsis;
 }
 
 .drawer input {
@@ -491,6 +512,99 @@
 .removeButton {
   border-color: rgba(255, 146, 190, 0.42) !important;
   color: #ffc4dc !important;
+}
+
+/* ---- Attachment panel as a draggable bottom-sheet ("holo drawer") ---- */
+.sheetStudio {
+  position: relative;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 14px;
+}
+
+.monitorArea {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: center;
+  justify-content: flex-start;
+  /* Reserve room so the collapsed sheet's grabber + tools never hide the
+     bottom of the monitor. */
+  padding-bottom: 96px;
+}
+
+.attachmentSheet {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 2;
+  height: min(62%, 480px);
+  display: flex;
+  flex-direction: column;
+  border-top-left-radius: 24px;
+  border-top-right-radius: 24px;
+  border: 1px solid rgba(132, 244, 231, 0.34);
+  border-bottom: 0;
+  /* Holographic glass: translucent so the bottom of the creation (the monitor)
+     stays visible behind the panel — frosted by the backdrop blur below. */
+  background:
+    radial-gradient(circle at 18% 0%, rgba(82, 240, 213, 0.16), transparent 46%),
+    radial-gradient(circle at 92% 4%, rgba(255, 117, 219, 0.12), transparent 40%),
+    linear-gradient(180deg, rgba(8, 26, 33, 0.26), rgba(6, 10, 22, 0.42));
+  box-shadow:
+    0 -16px 46px rgba(0, 0, 0, 0.3),
+    0 0 30px rgba(53, 230, 211, 0.16),
+    inset 0 1px 0 rgba(255, 255, 255, 0.2);
+  backdrop-filter: blur(16px) saturate(1.15);
+  -webkit-backdrop-filter: blur(16px) saturate(1.15);
+  transform: translateY(0);
+  transition: transform 300ms cubic-bezier(0.22, 0.61, 0.36, 1);
+  touch-action: none;
+}
+.attachmentSheetDragging {
+  transition: none;
+}
+
+.sheetPeek {
+  flex: 0 0 auto;
+  display: grid;
+  gap: 8px;
+  padding: 4px 12px 10px;
+}
+
+.sheetHandle {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  padding: 8px 0 4px;
+  background: transparent;
+  border: 0;
+  cursor: grab;
+  touch-action: none;
+}
+.sheetHandle:active {
+  cursor: grabbing;
+}
+.sheetGrip {
+  width: 48px;
+  height: 5px;
+  border-radius: 999px;
+  background: rgba(150, 255, 240, 0.6);
+  box-shadow: 0 0 12px rgba(120, 255, 234, 0.55);
+}
+
+.sheetScroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  padding: 0 12px 16px;
 }
 
 .compact {

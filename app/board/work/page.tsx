@@ -234,7 +234,7 @@ export default function WorkPage() {
 
         @media (max-width: 1360px) {
           .work-row {
-            grid-template-columns: 360px minmax(420px, 1fr) 190px;
+            grid-template-columns: 360px minmax(420px, 1fr);
           }
           .droppad {
             order: 2;
@@ -242,8 +242,9 @@ export default function WorkPage() {
           .notebook {
             order: 3;
           }
+          /* Quick Actions Remote is a desktop-only panel for now. */
           .qar {
-            order: 4;
+            display: none;
           }
           .droppad {
             grid-column: 1 / -1;

@@ -1,7 +1,7 @@
 "use client";
 
 import type React from "react";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   compactDropCustomizations,
   type DropCustomization,
@@ -34,6 +34,7 @@ const FILTERS = [
   { label: "Bucket Vision", value: "bucket-vision" },
   { label: "Pulse", value: "pulse" },
   { label: "Neon Signal", value: "neon-signal" },
+  { label: "Night Glass", value: "night-glass" },
   { label: "Artifact", value: "artifact" },
   { label: "Clean Enhance", value: "clean-enhance" },
 ];
@@ -63,6 +64,7 @@ export default function DropStudio({
   onChange,
   compact = false,
   hideHeader = false,
+  sheet = false,
 }: {
   mediaUrl: string;
   mediaKind: "image" | "video";
@@ -70,6 +72,8 @@ export default function DropStudio({
   onChange: (next: DropCustomization) => void;
   compact?: boolean;
   hideHeader?: boolean;
+  /** Render the attachment tools as a draggable bottom-sheet ("holo drawer"). */
+  sheet?: boolean;
 }) {
   const previewRef = useRef<HTMLDivElement | null>(null);
   const [tool, setTool] = useState<Tool>("text");
@@ -78,6 +82,89 @@ export default function DropStudio({
     kind: "text" | "sticker";
     id: string;
   } | null>(null);
+
+  // ---- Attachment panel as a draggable bottom-sheet (sheet mode only) ----
+  // Resting positions are CSS-driven (collapsed = only the grabber + tools peek,
+  // open = full panel), so the sheet starts collapsed with no measurement flash.
+  // Drag uses live pixel translate; on release it snaps back to a resting state.
+  const sheetRef = useRef<HTMLDivElement | null>(null);
+  const sheetPeekRef = useRef<HTMLDivElement | null>(null);
+  const sheetDragRef = useRef<{ startY: number; startTranslate: number; moved: boolean } | null>(
+    null
+  );
+  const [sheetState, setSheetState] = useState<"collapsed" | "open">("collapsed");
+  const [dragTranslate, setDragTranslate] = useState<number | null>(null); // null = not dragging
+  const [peekH, setPeekH] = useState(120);
+
+  useEffect(() => {
+    if (!sheet) return;
+    const measure = () => {
+      const h = sheetPeekRef.current?.offsetHeight;
+      if (h && h > 0) setPeekH(h);
+    };
+    measure();
+    if (typeof ResizeObserver === "undefined" || !sheetPeekRef.current) return;
+    const ro = new ResizeObserver(measure);
+    ro.observe(sheetPeekRef.current);
+    return () => ro.disconnect();
+  }, [sheet]);
+
+  function sheetMaxTranslate() {
+    const sheetHeight = sheetRef.current?.offsetHeight ?? 0;
+    const peek = sheetPeekRef.current?.offsetHeight ?? peekH;
+    return Math.max(0, sheetHeight - peek);
+  }
+
+  function restingTranslate() {
+    return sheetState === "open" ? 0 : sheetMaxTranslate();
+  }
+
+  function openSheet() {
+    setDragTranslate(null);
+    setSheetState("open");
+  }
+
+  function onSheetHandleDown(e: React.PointerEvent<HTMLButtonElement>) {
+    e.currentTarget.setPointerCapture(e.pointerId);
+    const start = restingTranslate();
+    sheetDragRef.current = { startY: e.clientY, startTranslate: start, moved: false };
+    setDragTranslate(start);
+  }
+
+  function onSheetHandleMove(e: React.PointerEvent<HTMLButtonElement>) {
+    const st = sheetDragRef.current;
+    if (!st) return;
+    const dy = e.clientY - st.startY;
+    if (Math.abs(dy) > 4) st.moved = true;
+    const next = Math.min(Math.max(st.startTranslate + dy, 0), sheetMaxTranslate());
+    setDragTranslate(next);
+  }
+
+  function onSheetHandleUp() {
+    const st = sheetDragRef.current;
+    if (!st) {
+      setDragTranslate(null);
+      return;
+    }
+    const max = sheetMaxTranslate();
+    const current = dragTranslate ?? st.startTranslate;
+    if (!st.moved) {
+      // Tap on the grabber toggles open/closed.
+      setSheetState((prev) => (prev === "open" ? "collapsed" : "open"));
+    } else {
+      // Released after a drag — snap to the nearer end.
+      setSheetState(current > max / 2 ? "collapsed" : "open");
+    }
+    setDragTranslate(null);
+    sheetDragRef.current = null;
+  }
+
+  const sheetTransform =
+    dragTranslate != null
+      ? `translateY(${dragTranslate}px)`
+      : sheetState === "open"
+        ? "translateY(0px)"
+        : `translateY(calc(100% - ${peekH}px))`;
 
   const normalized = compactDropCustomizations(value) ?? {};
 
@@ -161,74 +248,82 @@ export default function DropStudio({
     });
   }
 
-  return (
-    <section className={`${styles.studio} ${compact ? styles.compact : ""}`}>
-      {hideHeader ? null : (
-        <div className={styles.header}>
-          <div>
-            <div className={styles.eyebrow}>Drop Studio</div>
-            <div className={styles.title}>Customize this media drop.</div>
-          </div>
-          <span className={styles.version}>Vision Tools</span>
-        </div>
+  const headerEl = hideHeader ? null : (
+    <div className={styles.header}>
+      <div>
+        <div className={styles.eyebrow}>Drop Studio</div>
+        <div className={styles.title}>Customize this media drop.</div>
+      </div>
+      <span className={styles.version}>Vision Tools</span>
+    </div>
+  );
+
+  const previewEl = (
+    <div
+      ref={previewRef}
+      className={`${styles.preview} ${
+        normalized.effects?.filter ? styles[`filter_${normalized.effects.filter}`] ?? "" : ""
+      } ${
+        normalized.effects?.overlay ? styles[`overlay_${normalized.effects.overlay}`] ?? "" : ""
+      }`}
+      onPointerMove={moveItem}
+      onPointerUp={() => setDragging(null)}
+      onPointerCancel={() => setDragging(null)}
+      onPointerLeave={() => setDragging(null)}
+    >
+      {mediaKind === "video" ? (
+        <video src={mediaUrl} controls playsInline preload="metadata" />
+      ) : (
+        <img src={mediaUrl} alt="Drop Studio media preview" />
       )}
+      <DropStudioOverlay
+        customizations={normalized}
+        editable
+        onMove={(kind, id, event) => {
+          event.currentTarget.setPointerCapture(event.pointerId);
+          setDragging({ kind, id });
+        }}
+        onRemove={removeItem}
+      />
+    </div>
+  );
 
-      <div
-        ref={previewRef}
-        className={`${styles.preview} ${
-          normalized.effects?.filter ? styles[`filter_${normalized.effects.filter}`] ?? "" : ""
-        } ${
-          normalized.effects?.overlay ? styles[`overlay_${normalized.effects.overlay}`] ?? "" : ""
-        }`}
-        onPointerMove={moveItem}
-        onPointerUp={() => setDragging(null)}
-        onPointerCancel={() => setDragging(null)}
-        onPointerLeave={() => setDragging(null)}
-      >
-        {mediaKind === "video" ? (
-          <video src={mediaUrl} controls playsInline preload="metadata" />
-        ) : (
-          <img src={mediaUrl} alt="Drop Studio media preview" />
-        )}
-        <DropStudioOverlay
-          customizations={normalized}
-          editable
-          onMove={(kind, id, event) => {
-            event.currentTarget.setPointerCapture(event.pointerId);
-            setDragging({ kind, id });
+  const hintEl = (
+    <div className={styles.hint}>
+      Drag labels and emojis. Use the layer list to remove anything on mobile.
+    </div>
+  );
+
+  const toolbarEl = (
+    <div className={styles.tools} aria-label="Drop Studio tools">
+      {(["text", "stickers", "button", "effects", "filters", "enhance"] as Tool[]).map((item) => (
+        <button
+          key={item}
+          type="button"
+          className={tool === item ? styles.activeTool : ""}
+          onClick={() => {
+            setTool(item);
+            if (sheet) openSheet();
           }}
-          onRemove={removeItem}
-        />
-      </div>
+        >
+          {item === "text"
+            ? "Text"
+            : item === "stickers"
+              ? "Stickers"
+              : item === "button"
+                ? "Button"
+                : item === "effects"
+                  ? "Effects"
+                  : item === "filters"
+                    ? "Filters"
+                    : "Enhance"}
+        </button>
+      ))}
+    </div>
+  );
 
-      <div className={styles.hint}>
-        Drag labels and emojis. Use the layer list to remove anything on mobile.
-      </div>
-
-      <div className={styles.tools} aria-label="Drop Studio tools">
-        {(["text", "stickers", "button", "effects", "filters", "enhance"] as Tool[]).map((item) => (
-          <button
-            key={item}
-            type="button"
-            className={tool === item ? styles.activeTool : ""}
-            onClick={() => setTool(item)}
-          >
-            {item === "text"
-              ? "Text"
-              : item === "stickers"
-                ? "Stickers"
-                : item === "button"
-                  ? "Button"
-                  : item === "effects"
-                    ? "Effects"
-                    : item === "filters"
-                      ? "Filters"
-                      : "Enhance"}
-          </button>
-        ))}
-      </div>
-
-      <div className={styles.drawer}>
+  const drawerEl = (
+    <div className={`${styles.drawer} ${sheet ? styles.sheetScroll : ""}`}>
         {tool === "text" ? (
           <div className={styles.toolStack}>
             <div className={styles.textTool}>
@@ -242,7 +337,7 @@ export default function DropStudio({
                     addText();
                   }
                 }}
-                placeholder="Add a short floating label"
+                placeholder="Type a word or phrase to float on your drop"
               />
               <button type="button" onClick={addText} disabled={!text.trim()}>
                 Add Text
@@ -405,6 +500,53 @@ export default function DropStudio({
           </div>
         ) : null}
       </div>
+  );
+
+  return (
+    <section
+      className={`${styles.studio} ${compact ? styles.compact : ""} ${
+        sheet ? styles.sheetStudio : ""
+      }`}
+    >
+      {headerEl}
+      {sheet ? (
+        <>
+          <div className={styles.monitorArea}>
+            {previewEl}
+            {hintEl}
+          </div>
+          <div
+            ref={sheetRef}
+            className={`${styles.attachmentSheet} ${
+              dragTranslate != null ? styles.attachmentSheetDragging : ""
+            }`}
+            style={{ transform: sheetTransform }}
+          >
+            <div className={styles.sheetPeek} ref={sheetPeekRef}>
+              <button
+                type="button"
+                className={styles.sheetHandle}
+                onPointerDown={onSheetHandleDown}
+                onPointerMove={onSheetHandleMove}
+                onPointerUp={onSheetHandleUp}
+                onPointerCancel={onSheetHandleUp}
+                aria-label="Drag to pull the attachment panel up or down"
+              >
+                <span className={styles.sheetGrip} aria-hidden />
+              </button>
+              {toolbarEl}
+            </div>
+            {drawerEl}
+          </div>
+        </>
+      ) : (
+        <>
+          {previewEl}
+          {hintEl}
+          {toolbarEl}
+          {drawerEl}
+        </>
+      )}
 
       {/* Future Drop Studio layers: deeper Aura Effects and animated Board sticker assets. */}
     </section>
