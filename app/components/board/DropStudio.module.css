@@ -78,9 +78,12 @@
 
 .preview {
   position: relative;
-  width: 100%;
-  min-height: 240px;
-  max-height: 540px;
+  /* Standard Board Drop frame — matches the Drop Studio camera viewport so the
+     shot doesn't resize between capture and edit. Width is capped so the 4:5
+     box never exceeds the available height. */
+  aspect-ratio: 4 / 5;
+  width: min(100%, calc(64vh * 4 / 5));
+  margin: 0 auto;
   overflow: hidden;
   border: 1px solid rgba(255, 255, 255, 0.18);
   border-radius: 22px;
@@ -115,9 +118,7 @@
   display: block;
   width: 100%;
   height: 100%;
-  min-height: 240px;
-  max-height: 540px;
-  object-fit: contain;
+  object-fit: cover;
   background: #02070a;
   transition: filter 220ms ease, transform 220ms ease;
 }

@@ -186,8 +186,11 @@ export default function BoardArtCanvas({ onSave }: { onSave: (file: File) => voi
           padding: 12px;
         }
         .artCanvas {
-          width: 100%;
-          height: 100%;
+          /* Standard Board Drop frame so art matches Vision/Video in the feed. */
+          aspect-ratio: 4 / 5;
+          width: min(100%, calc(58vh * 4 / 5));
+          height: auto;
+          margin: 0 auto;
           min-height: 0;
           border-radius: 16px;
           border: 1px solid rgba(255, 255, 255, 0.16);

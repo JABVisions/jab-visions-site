@@ -1869,6 +1869,20 @@ export default function ActivityCard({
           object-fit: contain;
         }
 
+        /* Standard Board Drop frame (Drop Studio Vision/Art) so the feed reads
+           as a clean, consistent column — announcements keep their banner. */
+        .activityImagePreview:not(.announcementMedia) {
+          aspect-ratio: 4 / 5;
+          width: min(100%, calc(72vh * 4 / 5));
+          margin: 12px auto 0;
+        }
+        .activityImagePreview:not(.announcementMedia) .activityImage {
+          width: 100%;
+          height: 100%;
+          max-height: none;
+          object-fit: cover;
+        }
+
         .announcementMedia {
           display: block;
           width: calc(100% + 24px);
@@ -1913,6 +1927,13 @@ export default function ActivityCard({
 
         .storedVideoFrame {
           margin-top: 12px;
+          /* Match the standard Board Drop frame so video drops sit uniform. */
+          aspect-ratio: 4 / 5;
+          width: min(100%, calc(72vh * 4 / 5));
+          margin-left: auto;
+          margin-right: auto;
+          overflow: hidden;
+          border-radius: 16px;
         }
 
         .storedAudioFrame {
@@ -1944,11 +1965,11 @@ export default function ActivityCard({
         }
 
         .vid {
-          width: auto;
-          max-width: 100%;
+          width: 100%;
+          height: 100%;
           display: block;
           background: #000;
-          max-height: 520px;
+          object-fit: cover;
         }
 
         .aud {

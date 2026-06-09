@@ -9,6 +9,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import DropStudio from "./DropStudio";
 import BoardArtCanvas from "./BoardArtCanvas";
+import { BOARD_DROP_ASPECT_CSS, BOARD_DROP_ASPECT_RATIO } from "@/lib/board/mediaFormat";
 import type { DropCustomization } from "@/lib/board/dropCustomizations";
 
 type CaptureMode = "photo" | "video" | "audio" | "art";
@@ -210,12 +211,25 @@ export default function DropStudioStage({
   function takePhoto() {
     const v = videoRef.current;
     if (!v || !v.videoWidth || !v.videoHeight) return;
+    // Cover-crop the live frame to the standard Board Drop ratio so the saved
+    // photo matches exactly what's framed in the viewport (WYSIWYG).
+    const ratio = BOARD_DROP_ASPECT_RATIO; // width / height
+    const vw = v.videoWidth;
+    const vh = v.videoHeight;
+    let sw = vw;
+    let sh = vw / ratio;
+    if (sh > vh) {
+      sh = vh;
+      sw = vh * ratio;
+    }
+    const sx = (vw - sw) / 2;
+    const sy = (vh - sh) / 2;
     const c = document.createElement("canvas");
-    c.width = v.videoWidth;
-    c.height = v.videoHeight;
+    c.width = Math.round(sw);
+    c.height = Math.round(sh);
     const ctx = c.getContext("2d");
     if (!ctx) return;
-    ctx.drawImage(v, 0, 0, c.width, c.height);
+    ctx.drawImage(v, sx, sy, sw, sh, 0, 0, c.width, c.height);
     c.toBlob((b) => b && commitBlob(b, "image", "capture"), "image/jpeg", 0.94);
   }
 
@@ -605,11 +619,20 @@ export default function DropStudioStage({
         }
         .capViewport {
           position: relative;
+          /* Locked to the standard Board Drop frame so the live camera, the
+             captured shot, and the editor all share one shape on every device. */
+          aspect-ratio: ${BOARD_DROP_ASPECT_CSS};
+          width: 100%;
+          max-width: 100%;
+          max-height: 100%;
+          margin: 0 auto;
+          align-self: center;
           min-height: 0;
           background: #000;
           display: grid;
           place-items: center;
           overflow: hidden;
+          border-radius: 14px;
         }
         .capVideo {
           width: 100%;

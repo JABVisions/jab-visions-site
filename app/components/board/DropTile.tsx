@@ -2370,8 +2370,20 @@ export default function DropTile() {
           border-radius: inherit;
         }
 
+        /* Profile grid: standard Board Drop frame so Vision tiles stay uniform.
+           (The expand viewer keeps the full media, so it's excluded.) */
+        .drop-studio-media-frame {
+          aspect-ratio: 4 / 5;
+          margin: 0 auto;
+        }
         .drop-studio-media-frame > img,
-        .drop-studio-media-frame > video,
+        .drop-studio-media-frame > video {
+          display: block;
+          width: 100%;
+          height: 100%;
+          object-fit: cover;
+        }
+
         .viewer-studio-frame > img,
         .viewer-studio-frame > video {
           display: block;
