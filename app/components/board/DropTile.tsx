@@ -593,9 +593,15 @@ export default function DropTile() {
   const previewHydrationRef = useRef<Set<string>>(new Set());
 
   const studioAllowedModes = useMemo<StudioCaptureMode[]>(
-    // Thought Drops are voice + art thoughts (no camera). Vision Drops own the
-    // camera features (Vision/Video) plus Art.
-    () => (mode === "Thought" ? ["audio", "art"] : ["photo", "video", "art"]),
+    // Thought Drops are voice + art thoughts (no camera). Pay Drops can capture
+    // any media type (photo / video / voice / art) so supporters see the full
+    // request context. Vision Drops own the camera features (Vision/Video) + Art.
+    () =>
+      mode === "Thought"
+        ? ["audio", "art"]
+        : mode === "Pay"
+          ? ["photo", "video", "audio", "art"]
+          : ["photo", "video", "art"],
     [mode]
   );
 
@@ -1299,7 +1305,10 @@ export default function DropTile() {
     if (!file) return flash(setMsg, "Upload or capture proof/context first.", 1600);
     const isImage = file.type.startsWith("image/");
     const isVideo = file.type.startsWith("video/");
-    if (!isImage && !isVideo) return flash(setMsg, "Pay Drop media must be an image or video.", 2000);
+    const isAudio = isAudioFile(file);
+    if (!isImage && !isVideo && !isAudio)
+      return flash(setMsg, "Pay Drop media must be an image, video, or audio file.", 2200);
+    const payMediaKind: MediaKind = isVideo ? "video" : isAudio ? "audio" : "image";
 
     const cents = parsePriceToCents(payPrice);
     if (cents === null) return flash(setMsg, "Enter a valid price (ex: 19.99).", 2000);
@@ -1335,7 +1344,7 @@ export default function DropTile() {
         fileName: file.name,
         fileSize: file.size,
         mime: file.type,
-        mediaKind: isVideo ? "video" : "image",
+        mediaKind: payMediaKind,
         priceCents: cents,
         description: payDesc.trim() || undefined,
         linkUrl: normalizedLinkUrl ?? undefined,
@@ -1383,7 +1392,7 @@ export default function DropTile() {
             : "External Payment Link",
         bucket: up.bucket,
         storagePath: up.storagePath,
-        mediaKind: isVideo ? "video" : "image",
+        mediaKind: payMediaKind,
         mediaSource: mediaSource ?? "upload",
       },
       userId
@@ -1584,7 +1593,7 @@ export default function DropTile() {
       : mode === "Music"
         ? "audio/*,.mp3,.m4a,.wav,.aac,.ogg,.flac"
       : mode === "Pay"
-        ? "image/*,video/*"
+        ? "image/*,video/*,audio/*,.mp3,.m4a,.wav,.aac,.ogg,.flac"
       : mode === "Thought"
         ? "image/*,audio/*,.mp3,.m4a,.wav,.aac,.ogg,.flac"
         : ".pdf,.doc,.docx,.txt,.rtf,.md,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain,text/markdown";
@@ -1719,6 +1728,8 @@ export default function DropTile() {
                 <div className="selected-media-preview">
                   {file?.type.startsWith("video/") ? (
                     <video src={selectedMediaPreview} controls playsInline />
+                  ) : file && isAudioFile(file) ? (
+                    <audio src={selectedMediaPreview} controls preload="metadata" />
                   ) : (
                     <img src={selectedMediaPreview} alt="Pay Drop context preview" />
                   )}
@@ -2092,9 +2103,9 @@ export default function DropTile() {
                   <div className="thought-body">{d.thoughtText}</div>
                 ) : null}
 
-                {isAudioMusic || (isThought && d.mediaKind === "audio") ? (
+                {isAudioMusic || ((isThought || isPay) && d.mediaKind === "audio") ? (
                   <div className={`audio-drop-card ${isThought ? "thought-audio-card" : ""}`}>
-                    <div className="audio-drop-label">{isThought ? "VOICE MEMO" : "FULL SONG"}</div>
+                    <div className="audio-drop-label">{isThought ? "VOICE MEMO" : isPay ? "AUDIO" : "FULL SONG"}</div>
                     {signedUrl ? (
                       <audio src={signedUrl} controls preload="metadata" />
                     ) : (

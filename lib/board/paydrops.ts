@@ -43,7 +43,7 @@ export type PayDrop = {
   merchantLabel?: string;
   bucket?: string;
   storagePath?: string;
-  mediaKind?: "image" | "video";
+  mediaKind?: "image" | "video" | "audio";
   mediaSource?: "upload" | "capture";
   legacySource?: boolean;
 };
@@ -120,7 +120,14 @@ function normalizeStoredPayDrop(value: any): PayDrop | null {
     imageUrl: typeof value.imageUrl === "string" ? value.imageUrl : undefined,
     bucket: typeof value.bucket === "string" ? value.bucket : undefined,
     storagePath: typeof value.storagePath === "string" ? value.storagePath : undefined,
-    mediaKind: value.mediaKind === "video" ? "video" : value.mediaKind === "image" ? "image" : undefined,
+    mediaKind:
+      value.mediaKind === "video"
+        ? "video"
+        : value.mediaKind === "audio"
+          ? "audio"
+          : value.mediaKind === "image"
+            ? "image"
+            : undefined,
     mediaSource:
       value.mediaSource === "capture" || value.mediaSource === "upload"
         ? value.mediaSource
@@ -212,7 +219,14 @@ function readLegacyPayDrops(userId?: string | null, includeGlobalLegacy = false)
         gatewayLabel: checkoutUrl ? "Legacy Pay Link" : "Stripe",
         bucket: typeof value.bucket === "string" ? value.bucket : undefined,
         storagePath: typeof value.storagePath === "string" ? value.storagePath : undefined,
-        mediaKind: value.mediaKind === "video" ? "video" : value.mediaKind === "image" ? "image" : undefined,
+        mediaKind:
+      value.mediaKind === "video"
+        ? "video"
+        : value.mediaKind === "audio"
+          ? "audio"
+          : value.mediaKind === "image"
+            ? "image"
+            : undefined,
         mediaSource:
           value.mediaSource === "capture" || value.mediaSource === "upload"
             ? value.mediaSource

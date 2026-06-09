@@ -158,7 +158,7 @@ function parsePriceToCents(raw: string): number | null {
 function fileAcceptForFlavor(flavor: DropFlavor) {
   if (flavor === "media") return "image/*,video/*";
   if (flavor === "music") return "audio/*,.mp3,.m4a,.wav,.aac,.ogg,.flac";
-  if (flavor === "pay") return "image/*,video/*";
+  if (flavor === "pay") return "image/*,video/*,audio/*,.mp3,.m4a,.wav,.aac,.ogg,.flac";
   if (flavor === "thought") return "image/*,audio/*,.mp3,.m4a,.wav,.aac,.ogg,.flac";
   if (flavor === "doc") {
     return ".pdf,.doc,.docx,.txt,.rtf,.md,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain,text/markdown";
@@ -508,7 +508,10 @@ export default function DropConsole({
                     ? inferMediaType(cleanAttach || "") === "video" ||
                       /\.(mp4|webm|mov|m4v)$/i.test(uploadedFileName)
                       ? "video"
-                      : "image"
+                      : inferMediaType(cleanAttach || "") === "audio" ||
+                        /\.(mp3|m4a|wav|aac|ogg|flac|weba)$/i.test(uploadedFileName)
+                        ? "audio"
+                        : "image"
                     : dropFlavor === "doc"
                     ? "doc"
                     : null,
@@ -600,7 +603,10 @@ export default function DropConsole({
                     ? inferMediaType(cleanAttach || "") === "video" ||
                       /\.(mp4|webm|mov|m4v)$/i.test(uploadedFileName)
                       ? "video"
-                      : "image"
+                      : inferMediaType(cleanAttach || "") === "audio" ||
+                        /\.(mp3|m4a|wav|aac|ogg|flac|weba)$/i.test(uploadedFileName)
+                        ? "audio"
+                        : "image"
                     : dropFlavor === "doc"
                     ? "doc"
                     : null,
@@ -717,10 +723,13 @@ export default function DropConsole({
 
   const studioAllowedModes = useMemo<StudioCaptureMode[]>(
     () =>
-      // Thought = voice + art (no camera); Vision = camera modes + art.
+      // Thought = voice + art (no camera); Pay = every media type (photo /
+      // video / voice / art); Vision = camera modes + art.
       mode === "board_drop" && dropFlavor === "thought"
         ? ["audio", "art"]
-        : ["photo", "video", "art"],
+        : mode === "board_drop" && dropFlavor === "pay"
+          ? ["photo", "video", "audio", "art"]
+          : ["photo", "video", "art"],
     [dropFlavor, mode]
   );
 

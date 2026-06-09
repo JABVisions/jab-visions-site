@@ -1286,7 +1286,7 @@ export default function ActivityCard({
 
       {!showEmbed && isStoredAudioDrop ? (
         <div className="mediaFrame storedAudioFrame">
-          <div className="audioLabel">Full song</div>
+          <div className="audioLabel">{isPayDrop ? "Audio" : "Full song"}</div>
           <audio
             className="aud"
             src={signedPreviewImage}

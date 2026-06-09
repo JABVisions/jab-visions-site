@@ -153,19 +153,41 @@ export default function DropCommentsDrawer({ open, onClose, dropId, dropTitle }:
 
     setSaving(true);
     setSyncNote("Sending comment...");
-    const comment = await addDropCommentRemote({
-      dropId,
-      userId: viewer.userId,
-      username: viewer.username,
-      displayName: viewer.displayName,
-      avatarUrl: viewer.avatarUrl,
-      body,
-    });
-    saveCommentToBucketBrain(comment, dropTitle);
-    setComments(readDropComments(dropId));
-    setDraft("");
-    setSyncNote(comment.remoteId ? "Comment synced to Supabase." : "Comment saved locally until Supabase is ready.");
-    setSaving(false);
+    try {
+      const comment = await addDropCommentRemote({
+        dropId,
+        userId: viewer.userId,
+        username: viewer.username,
+        displayName: viewer.displayName,
+        avatarUrl: viewer.avatarUrl,
+        body,
+      });
+      // Saving into the bucket brain is a best-effort side effect; never let it
+      // block the comment from showing or strand the composer in "Sending".
+      try {
+        saveCommentToBucketBrain(comment, dropTitle);
+      } catch {
+        /* ignore brain write failures */
+      }
+      setComments(readDropComments(dropId));
+      setDraft("");
+      setSyncNote(
+        comment.remoteId
+          ? "Comment synced to Supabase."
+          : "Comment saved locally until Supabase is ready."
+      );
+    } catch (error) {
+      // The comment may still have been written locally; reflect whatever is
+      // stored and surface the issue instead of silently hanging.
+      setComments(readDropComments(dropId));
+      setSyncNote(
+        error instanceof Error
+          ? `Comment couldn't sync: ${error.message}`
+          : "Comment couldn't sync. Please try again."
+      );
+    } finally {
+      setSaving(false);
+    }
   };
 
   return createPortal(
