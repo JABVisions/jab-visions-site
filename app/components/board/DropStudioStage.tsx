@@ -322,124 +322,132 @@ export default function DropStudioStage({
         </div>
 
         <div className="studioBody">
-          {phase === "capture" ? (
-            <div className="capStage">
-              <nav className="modeRail" aria-label="Drop Studio modes">
-                {allowedModes.map((allowedMode) => (
-                  <button
-                    key={allowedMode}
-                    type="button"
-                    className={`modeRailBtn ${mode === allowedMode ? "on" : ""}`}
-                    onClick={() => setMode(allowedMode)}
-                    disabled={recording}
-                  >
-                    <span className="modeGlyph" aria-hidden>
-                      {modeGlyph(allowedMode)}
-                    </span>
-                    <span className="modeName">{modeLabel(allowedMode)}</span>
-                  </button>
-                ))}
-              </nav>
+          {/* One surface: the mode rail stays put while the center moves between
+              live capture and editing, so editing feels continuous with shooting. */}
+          <div className="capStage">
+            <nav className="modeRail" aria-label="Drop Studio modes">
+              {allowedModes.map((allowedMode) => (
+                <button
+                  key={allowedMode}
+                  type="button"
+                  className={`modeRailBtn ${mode === allowedMode ? "on" : ""}`}
+                  onClick={() => {
+                    // Switching mode mid-edit returns to live capture in that mode.
+                    if (phase === "edit") retake();
+                    setMode(allowedMode);
+                  }}
+                  disabled={recording}
+                >
+                  <span className="modeGlyph" aria-hidden>
+                    {modeGlyph(allowedMode)}
+                  </span>
+                  <span className="modeName">{modeLabel(allowedMode)}</span>
+                </button>
+              ))}
+            </nav>
 
-              <div className="capMain">
-                <div className="capViewport">
-                  {mode === "art" ? (
-                    <BoardArtCanvas onSave={(f) => commitBlob(f, "image", "capture")} />
-                  ) : mode === "audio" ? (
-                    <div className="vocalStage">
-                      <div className={`vocalOrb ${recording ? "recording" : ""}`} aria-hidden>
-                        <span />
+            <div className="capMain">
+              {phase === "capture" ? (
+                <>
+                  <div className="capViewport">
+                    {mode === "art" ? (
+                      <BoardArtCanvas onSave={(f) => commitBlob(f, "image", "capture")} />
+                    ) : mode === "audio" ? (
+                      <div className="vocalStage">
+                        <div className={`vocalOrb ${recording ? "recording" : ""}`} aria-hidden>
+                          <span />
+                        </div>
+                        <div>
+                          <div className="vocalTitle">Voice Mode</div>
+                          <p className="vocalCopy">
+                            Record a voice memo thought. Board attaches it as audio when you use this drop.
+                          </p>
+                        </div>
                       </div>
-                      <div>
-                        <div className="vocalTitle">Voice Mode</div>
-                        <p className="vocalCopy">
-                          Record a voice memo thought. Board attaches it as audio when you use this drop.
-                        </p>
+                    ) : (
+                      <video
+                        ref={videoRef}
+                        className={`capVideo ${facing === "user" ? "mirror" : ""}`}
+                        autoPlay
+                        muted
+                        playsInline
+                      />
+                    )}
+                    {error ? <div className="capError">{error}</div> : null}
+                  </div>
+
+                  {mode === "art" ? null : (
+                    <div className="capControls">
+                      <div className="capActionRow">
+                        <label className="capUpload">
+                          Upload
+                          <input
+                            type="file"
+                            accept={
+                              allowedModes.includes("audio") && allowedModes.includes("photo") && !allowedModes.includes("video")
+                                ? "image/*,audio/*,.mp3,.m4a,.wav,.aac,.ogg,.flac"
+                                : allowedModes.includes("audio")
+                                  ? "image/*,video/*,audio/*,.mp3,.m4a,.wav,.aac,.ogg,.flac"
+                                  : "image/*,video/*"
+                            }
+                            onChange={(e) => {
+                              onUpload(e.currentTarget.files?.[0]);
+                              e.currentTarget.value = "";
+                            }}
+                          />
+                        </label>
+
+                        {mode === "audio" ? (
+                          recording ? (
+                            <button type="button" className="capShutter recording" onClick={stopRecording} aria-label="Stop vocal recording" />
+                          ) : (
+                            <button type="button" className="capShutter vocal" onClick={startVocalRecording} aria-label="Start vocal recording" />
+                          )
+                        ) : mode === "photo" ? (
+                          <button type="button" className="capShutter" onClick={takePhoto} aria-label="Capture photo" />
+                        ) : recording ? (
+                          <button type="button" className="capShutter recording" onClick={stopRecording} aria-label="Stop recording" />
+                        ) : (
+                          <button type="button" className="capShutter video" onClick={startRecording} aria-label="Start recording" />
+                        )}
+
+                        {mode === "audio" ? (
+                          <span className="capSpacer" />
+                        ) : (
+                          <button
+                            type="button"
+                            className="capFlip"
+                            onClick={() => setFacing((f) => (f === "environment" ? "user" : "environment"))}
+                            disabled={recording}
+                          >
+                            Flip
+                          </button>
+                        )}
                       </div>
+                    </div>
+                  )}
+                </>
+              ) : (
+                <div className="capEdit">
+                  {mediaKind === "audio" ? (
+                    <div className="vocalReview">
+                      <div className="studioBrand">
+                        <span className="studioDot" aria-hidden />
+                        VOCAL THOUGHT READY
+                      </div>
+                      <audio src={mediaUrl} controls preload="metadata" />
+                      <p>Use this voice memo as the audio layer for your Thought Drop.</p>
                     </div>
                   ) : (
-                    <video
-                      ref={videoRef}
-                      className={`capVideo ${facing === "user" ? "mirror" : ""}`}
-                      autoPlay
-                      muted
-                      playsInline
-                    />
+                    <DropStudio mediaUrl={mediaUrl} mediaKind={mediaKind} value={value} onChange={onChange} />
                   )}
-                  {error ? <div className="capError">{error}</div> : null}
+                  <button type="button" className="studioDone" onClick={done}>
+                    Use this {mediaKind === "audio" ? "Vocal" : mediaKind === "video" ? "Video" : "Vision"} →
+                  </button>
                 </div>
-
-                {mode === "art" ? null : (
-                  <div className="capControls">
-                    <div className="capActionRow">
-                      <label className="capUpload">
-                        Upload
-                        <input
-                          type="file"
-                          accept={
-                            allowedModes.includes("audio") && allowedModes.includes("photo") && !allowedModes.includes("video")
-                              ? "image/*,audio/*,.mp3,.m4a,.wav,.aac,.ogg,.flac"
-                              : allowedModes.includes("audio")
-                                ? "image/*,video/*,audio/*,.mp3,.m4a,.wav,.aac,.ogg,.flac"
-                                : "image/*,video/*"
-                          }
-                          onChange={(e) => {
-                            onUpload(e.currentTarget.files?.[0]);
-                            e.currentTarget.value = "";
-                          }}
-                        />
-                      </label>
-
-                      {mode === "audio" ? (
-                        recording ? (
-                          <button type="button" className="capShutter recording" onClick={stopRecording} aria-label="Stop vocal recording" />
-                        ) : (
-                          <button type="button" className="capShutter vocal" onClick={startVocalRecording} aria-label="Start vocal recording" />
-                        )
-                      ) : mode === "photo" ? (
-                        <button type="button" className="capShutter" onClick={takePhoto} aria-label="Capture photo" />
-                      ) : recording ? (
-                        <button type="button" className="capShutter recording" onClick={stopRecording} aria-label="Stop recording" />
-                      ) : (
-                        <button type="button" className="capShutter video" onClick={startRecording} aria-label="Start recording" />
-                      )}
-
-                      {mode === "audio" ? (
-                        <span className="capSpacer" />
-                      ) : (
-                        <button
-                          type="button"
-                          className="capFlip"
-                          onClick={() => setFacing((f) => (f === "environment" ? "user" : "environment"))}
-                          disabled={recording}
-                        >
-                          Flip
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-          ) : (
-            <div className="editStage">
-              {mediaKind === "audio" ? (
-                <div className="vocalReview">
-                  <div className="studioBrand">
-                    <span className="studioDot" aria-hidden />
-                    VOCAL THOUGHT READY
-                  </div>
-                  <audio src={mediaUrl} controls preload="metadata" />
-                  <p>Use this voice memo as the audio layer for your Thought Drop.</p>
-                </div>
-              ) : (
-                <DropStudio mediaUrl={mediaUrl} mediaKind={mediaKind} value={value} onChange={onChange} />
               )}
-              <button type="button" className="studioDone" onClick={done}>
-                Use this {mediaKind === "audio" ? "Vocal" : "Vision"} →
-              </button>
             </div>
-          )}
+          </div>
         </div>
       </div>
 
@@ -757,7 +765,8 @@ export default function DropStudioStage({
         }
 
         /* ---- edit phase ---- */
-        .editStage {
+        .editStage,
+        .capEdit {
           min-height: 0;
           overflow: auto;
           padding: 16px;
