@@ -593,8 +593,9 @@ export default function DropTile() {
   const previewHydrationRef = useRef<Set<string>>(new Set());
 
   const studioAllowedModes = useMemo<StudioCaptureMode[]>(
-    // Vision: capture/record/draw. Thought: Voice + Art doodle (+ photo).
-    () => (mode === "Thought" ? ["audio", "art", "photo"] : ["photo", "video", "art"]),
+    // Thought Drops are voice + art thoughts (no camera). Vision Drops own the
+    // camera features (Vision/Video) plus Art.
+    () => (mode === "Thought" ? ["audio", "art"] : ["photo", "video", "art"]),
     [mode]
   );
 
