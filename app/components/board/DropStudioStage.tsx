@@ -7,6 +7,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import DropStudio from "./DropStudio";
 import BoardArtCanvas from "./BoardArtCanvas";
 import { BOARD_DROP_ASPECT_CSS, BOARD_DROP_ASPECT_RATIO } from "@/lib/board/mediaFormat";
@@ -95,6 +96,7 @@ export default function DropStudioStage({
   const fileRef = useRef<File | null>(null);
   const urlRef = useRef<string>("");
 
+  const [mounted, setMounted] = useState(false);
   const [phase, setPhase] = useState<Phase>("capture");
   const [mode, setMode] = useState<CaptureMode>(initialMode);
   const [facing, setFacing] = useState<FacingMode>("environment");
@@ -196,6 +198,10 @@ export default function DropStudioStage({
   useEffect(() => () => {
     if (urlRef.current) URL.revokeObjectURL(urlRef.current);
   }, []);
+
+  // Portal to <body> so the studio escapes the profile board's transformed
+  // stacking context and floats above the navbar/dock (was being clipped).
+  useEffect(() => setMounted(true), []);
 
   function commitBlob(blob: Blob, kind: "image" | "video" | "audio", src: "capture" | "upload") {
     const type =
@@ -307,9 +313,9 @@ export default function DropStudioStage({
     onClose();
   }
 
-  if (!open) return null;
+  if (!open || !mounted) return null;
 
-  return (
+  return createPortal(
     <div
       className="studioStage"
       role="dialog"
@@ -321,9 +327,12 @@ export default function DropStudioStage({
     >
       <div className="studioSheet">
         <div className="studioBar">
-          <div className="studioBrand">
-            <span className="studioDot" aria-hidden />
-            DROP STUDIO
+          <div className="studioBarLeft">
+            <div className="studioBrand">
+              <span className="studioDot" aria-hidden />
+              DROP STUDIO
+            </div>
+            <span className="studioPill">{phase === "edit" ? `${modeLabel(mode)} Tools` : "Capture Mode"}</span>
           </div>
           <div className="studioBarRight">
             {phase === "edit" ? (
@@ -466,7 +475,7 @@ export default function DropStudioStage({
                       <p>Use this voice memo as the audio layer for your Thought Drop.</p>
                     </div>
                   ) : (
-                    <DropStudio mediaUrl={mediaUrl} mediaKind={mediaKind} value={value} onChange={onChange} />
+                    <DropStudio mediaUrl={mediaUrl} mediaKind={mediaKind} value={value} onChange={onChange} hideHeader />
                   )}
                   <button type="button" className="studioDone" onClick={done}>
                     Use this {mediaKind === "audio" ? "Vocal" : mediaKind === "video" ? "Video" : "Vision"} →
@@ -493,9 +502,9 @@ export default function DropStudioStage({
           backdrop-filter: blur(12px);
         }
         .studioSheet {
-          width: min(560px, calc(100vw - 20px));
-          height: min(900px, calc(100dvh - 20px));
-          max-height: calc(100dvh - 20px);
+          width: min(440px, calc(100vw - 28px));
+          height: min(720px, calc(100dvh - 40px));
+          max-height: calc(100dvh - 40px);
           display: grid;
           grid-template-rows: auto 1fr;
           border-radius: 28px;
@@ -517,6 +526,12 @@ export default function DropStudioStage({
           border-bottom: 1px solid rgba(255, 255, 255, 0.12);
           background: rgba(255, 255, 255, 0.05);
         }
+        .studioBarLeft {
+          display: inline-flex;
+          align-items: center;
+          gap: 10px;
+          min-width: 0;
+        }
         .studioBrand {
           display: inline-flex;
           align-items: center;
@@ -525,6 +540,19 @@ export default function DropStudioStage({
           font-weight: 950;
           letter-spacing: 0.22em;
           color: rgba(255, 255, 255, 0.92);
+        }
+        .studioPill {
+          font-size: 9px;
+          font-weight: 950;
+          letter-spacing: 0.14em;
+          text-transform: uppercase;
+          padding: 5px 9px;
+          border-radius: 999px;
+          color: #06121a;
+          background: radial-gradient(circle at 30% 20%, #fff, #7ee2ff);
+          border: 1px solid rgba(255, 255, 255, 0.5);
+          box-shadow: 0 0 12px rgba(126, 226, 255, 0.4);
+          white-space: nowrap;
         }
         .studioDot {
           width: 9px;
@@ -856,6 +884,7 @@ export default function DropStudioStage({
           }
         }
       `}</style>
-    </div>
+    </div>,
+    document.body
   );
 }

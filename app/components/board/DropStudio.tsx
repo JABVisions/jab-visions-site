@@ -62,12 +62,14 @@ export default function DropStudio({
   value,
   onChange,
   compact = false,
+  hideHeader = false,
 }: {
   mediaUrl: string;
   mediaKind: "image" | "video";
   value: DropCustomization;
   onChange: (next: DropCustomization) => void;
   compact?: boolean;
+  hideHeader?: boolean;
 }) {
   const previewRef = useRef<HTMLDivElement | null>(null);
   const [tool, setTool] = useState<Tool>("text");
@@ -161,13 +163,15 @@ export default function DropStudio({
 
   return (
     <section className={`${styles.studio} ${compact ? styles.compact : ""}`}>
-      <div className={styles.header}>
-        <div>
-          <div className={styles.eyebrow}>Drop Studio</div>
-          <div className={styles.title}>Customize this media drop.</div>
+      {hideHeader ? null : (
+        <div className={styles.header}>
+          <div>
+            <div className={styles.eyebrow}>Drop Studio</div>
+            <div className={styles.title}>Customize this media drop.</div>
+          </div>
+          <span className={styles.version}>Vision Tools</span>
         </div>
-        <span className={styles.version}>Vision Tools</span>
-      </div>
+      )}
 
       <div
         ref={previewRef}
