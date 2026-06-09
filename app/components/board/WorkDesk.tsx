@@ -565,7 +565,7 @@ function PayDropStand({
   }, [filled, sb]);
 
   async function openCheckout(drop: PayDrop) {
-    if (drop.checkoutUrl) {
+    if (drop.provider === "payment_link" && drop.checkoutUrl) {
       window.open(drop.checkoutUrl, "_blank", "noopener,noreferrer");
       return;
     }

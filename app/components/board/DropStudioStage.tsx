@@ -8,11 +8,14 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import DropStudio from "./DropStudio";
+import BoardArtCanvas from "./BoardArtCanvas";
 import type { DropCustomization } from "@/lib/board/dropCustomizations";
 
-type CaptureMode = "photo" | "video";
+type CaptureMode = "photo" | "video" | "audio" | "art";
 type FacingMode = "user" | "environment";
 type Phase = "capture" | "edit";
+
+const DEFAULT_CAPTURE_MODES: CaptureMode[] = ["photo", "video"];
 
 function preferredVideoMime() {
   if (typeof MediaRecorder === "undefined") return "";
@@ -31,6 +34,38 @@ function extForMime(type: string) {
   return "mov";
 }
 
+function preferredAudioMime() {
+  if (typeof MediaRecorder === "undefined") return "";
+  return (
+    [
+      "audio/webm;codecs=opus",
+      "audio/webm",
+      "audio/mp4",
+      "audio/ogg",
+    ].find((t) => MediaRecorder.isTypeSupported(t)) ?? ""
+  );
+}
+
+function audioExtForMime(type: string) {
+  if (type.includes("mp4")) return "m4a";
+  if (type.includes("ogg")) return "ogg";
+  return "webm";
+}
+
+function modeLabel(mode: CaptureMode) {
+  if (mode === "audio") return "Voice";
+  if (mode === "video") return "Video";
+  if (mode === "art") return "Art";
+  return "Vision";
+}
+
+function modeGlyph(mode: CaptureMode) {
+  if (mode === "audio") return "🎙️";
+  if (mode === "video") return "🎬";
+  if (mode === "art") return "🎨";
+  return "👁️";
+}
+
 export default function DropStudioStage({
   open,
   initialFile,
@@ -38,6 +73,8 @@ export default function DropStudioStage({
   onChange,
   onComplete,
   onClose,
+  allowedModes = DEFAULT_CAPTURE_MODES,
+  initialMode = "photo",
 }: {
   open: boolean;
   initialFile: File | null;
@@ -45,6 +82,8 @@ export default function DropStudioStage({
   onChange: (next: DropCustomization) => void;
   onComplete: (file: File, source: "capture" | "upload") => void;
   onClose: () => void;
+  allowedModes?: CaptureMode[];
+  initialMode?: CaptureMode;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -54,15 +93,15 @@ export default function DropStudioStage({
   const urlRef = useRef<string>("");
 
   const [phase, setPhase] = useState<Phase>("capture");
-  const [mode, setMode] = useState<CaptureMode>("photo");
+  const [mode, setMode] = useState<CaptureMode>(initialMode);
   const [facing, setFacing] = useState<FacingMode>("environment");
   const [error, setError] = useState("");
   const [recording, setRecording] = useState(false);
   const [mediaUrl, setMediaUrl] = useState("");
-  const [mediaKind, setMediaKind] = useState<"image" | "video">("image");
+  const [mediaKind, setMediaKind] = useState<"image" | "video" | "audio">("image");
   const [source, setSource] = useState<"capture" | "upload">("capture");
 
-  const setMedia = useCallback((url: string, kind: "image" | "video") => {
+  const setMedia = useCallback((url: string, kind: "image" | "video" | "audio") => {
     if (urlRef.current) URL.revokeObjectURL(urlRef.current);
     urlRef.current = url;
     setMediaUrl(url);
@@ -82,6 +121,7 @@ export default function DropStudioStage({
     async (nextFacing: FacingMode) => {
       stopCamera();
       setError("");
+      if (mode === "audio" || mode === "art") return;
       if (!navigator.mediaDevices?.getUserMedia) {
         setError("Camera unavailable here — upload a Vision instead.");
         return;
@@ -110,9 +150,18 @@ export default function DropStudioStage({
       return;
     }
     document.body.style.overflow = "hidden";
+    const safeMode = allowedModes.includes(initialMode) ? initialMode : allowedModes[0] ?? "photo";
+    setMode(safeMode);
     if (initialFile) {
       fileRef.current = initialFile;
-      setMedia(URL.createObjectURL(initialFile), initialFile.type.startsWith("video/") ? "video" : "image");
+      setMedia(
+        URL.createObjectURL(initialFile),
+        initialFile.type.startsWith("audio/")
+          ? "audio"
+          : initialFile.type.startsWith("video/")
+            ? "video"
+            : "image"
+      );
       setSource("upload");
       setPhase("edit");
     } else {
@@ -122,11 +171,11 @@ export default function DropStudioStage({
     return () => {
       document.body.style.overflow = "";
     };
-  }, [open, initialFile, setMedia, stopCamera]);
+  }, [open, initialFile, setMedia, stopCamera, allowedModes, initialMode]);
 
-  // Run the live camera only while in capture phase.
+  // Run the live camera only while in capture phase for camera modes.
   useEffect(() => {
-    if (!open || phase !== "capture") return;
+    if (!open || phase !== "capture" || mode === "audio" || mode === "art") return;
     void startCamera(facing);
     return stopCamera;
   }, [open, phase, facing, mode, startCamera, stopCamera]);
@@ -145,10 +194,13 @@ export default function DropStudioStage({
     if (urlRef.current) URL.revokeObjectURL(urlRef.current);
   }, []);
 
-  function commitBlob(blob: Blob, kind: "image" | "video", src: "capture" | "upload") {
-    const type = blob.type || (kind === "image" ? "image/jpeg" : "video/webm");
-    const ext = kind === "image" ? "jpg" : extForMime(type);
-    fileRef.current = new File([blob], `board-vision-${Date.now()}.${ext}`, { type });
+  function commitBlob(blob: Blob, kind: "image" | "video" | "audio", src: "capture" | "upload") {
+    const type =
+      blob.type ||
+      (kind === "image" ? "image/jpeg" : kind === "audio" ? "audio/webm" : "video/webm");
+    const ext = kind === "image" ? "jpg" : kind === "audio" ? audioExtForMime(type) : extForMime(type);
+    const base = kind === "audio" ? "board-vocal" : "board-vision";
+    fileRef.current = new File([blob], `${base}-${Date.now()}.${ext}`, { type });
     setMedia(URL.createObjectURL(blob), kind);
     setSource(src);
     stopCamera();
@@ -181,6 +233,29 @@ export default function DropStudioStage({
     rec.start();
     setRecording(true);
   }
+
+  async function startVocalRecording() {
+    if (typeof MediaRecorder === "undefined" || !navigator.mediaDevices?.getUserMedia) {
+      setError("Microphone recording is not supported in this browser.");
+      return;
+    }
+    stopCamera();
+    setError("");
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamRef.current = stream;
+      chunksRef.current = [];
+      const mt = preferredAudioMime();
+      const rec = mt ? new MediaRecorder(stream, { mimeType: mt }) : new MediaRecorder(stream);
+      recorderRef.current = rec;
+      rec.ondataavailable = (e) => e.data.size > 0 && chunksRef.current.push(e.data);
+      rec.onstop = () => commitBlob(new Blob(chunksRef.current, { type: rec.mimeType || mt || "audio/webm" }), "audio", "capture");
+      rec.start();
+      setRecording(true);
+    } catch {
+      setError("Microphone blocked. Allow access, or upload an audio thought instead.");
+    }
+  }
   function stopRecording() {
     if (recorderRef.current?.state === "recording") recorderRef.current.stop();
   }
@@ -188,7 +263,14 @@ export default function DropStudioStage({
   function onUpload(f: File | undefined) {
     if (!f) return;
     fileRef.current = f;
-    setMedia(URL.createObjectURL(f), f.type.startsWith("video/") ? "video" : "image");
+    setMedia(
+      URL.createObjectURL(f),
+      f.type.startsWith("audio/")
+        ? "audio"
+        : f.type.startsWith("video/")
+          ? "video"
+          : "image"
+    );
     setSource("upload");
     stopCamera();
     setPhase("edit");
@@ -242,75 +324,119 @@ export default function DropStudioStage({
         <div className="studioBody">
           {phase === "capture" ? (
             <div className="capStage">
-              <div className="capViewport">
-                <video
-                  ref={videoRef}
-                  className={`capVideo ${facing === "user" ? "mirror" : ""}`}
-                  autoPlay
-                  muted
-                  playsInline
-                />
-                {error ? <div className="capError">{error}</div> : null}
-              </div>
-
-              <div className="capControls">
-                <div className="capModes">
+              <nav className="modeRail" aria-label="Drop Studio modes">
+                {allowedModes.map((allowedMode) => (
                   <button
+                    key={allowedMode}
                     type="button"
-                    className={`capChip ${mode === "photo" ? "on" : ""}`}
-                    onClick={() => setMode("photo")}
+                    className={`modeRailBtn ${mode === allowedMode ? "on" : ""}`}
+                    onClick={() => setMode(allowedMode)}
                     disabled={recording}
                   >
-                    Photo
+                    <span className="modeGlyph" aria-hidden>
+                      {modeGlyph(allowedMode)}
+                    </span>
+                    <span className="modeName">{modeLabel(allowedMode)}</span>
                   </button>
-                  <button
-                    type="button"
-                    className={`capChip ${mode === "video" ? "on" : ""}`}
-                    onClick={() => setMode("video")}
-                    disabled={recording}
-                  >
-                    Video
-                  </button>
-                  <button
-                    type="button"
-                    className="capChip"
-                    onClick={() => setFacing((f) => (f === "environment" ? "user" : "environment"))}
-                    disabled={recording}
-                  >
-                    Flip
-                  </button>
-                </div>
+                ))}
+              </nav>
 
-                <div className="capActionRow">
-                  <label className="capUpload">
-                    Upload
-                    <input
-                      type="file"
-                      accept="image/*,video/*"
-                      onChange={(e) => {
-                        onUpload(e.currentTarget.files?.[0]);
-                        e.currentTarget.value = "";
-                      }}
-                    />
-                  </label>
-
-                  {mode === "photo" ? (
-                    <button type="button" className="capShutter" onClick={takePhoto} aria-label="Capture photo" />
-                  ) : recording ? (
-                    <button type="button" className="capShutter recording" onClick={stopRecording} aria-label="Stop recording" />
+              <div className="capMain">
+                <div className="capViewport">
+                  {mode === "art" ? (
+                    <BoardArtCanvas onSave={(f) => commitBlob(f, "image", "capture")} />
+                  ) : mode === "audio" ? (
+                    <div className="vocalStage">
+                      <div className={`vocalOrb ${recording ? "recording" : ""}`} aria-hidden>
+                        <span />
+                      </div>
+                      <div>
+                        <div className="vocalTitle">Voice Mode</div>
+                        <p className="vocalCopy">
+                          Record a voice memo thought. Board attaches it as audio when you use this drop.
+                        </p>
+                      </div>
+                    </div>
                   ) : (
-                    <button type="button" className="capShutter video" onClick={startRecording} aria-label="Start recording" />
+                    <video
+                      ref={videoRef}
+                      className={`capVideo ${facing === "user" ? "mirror" : ""}`}
+                      autoPlay
+                      muted
+                      playsInline
+                    />
                   )}
-
-                  <span className="capSpacer" />
+                  {error ? <div className="capError">{error}</div> : null}
                 </div>
+
+                {mode === "art" ? null : (
+                  <div className="capControls">
+                    <div className="capActionRow">
+                      <label className="capUpload">
+                        Upload
+                        <input
+                          type="file"
+                          accept={
+                            allowedModes.includes("audio") && allowedModes.includes("photo") && !allowedModes.includes("video")
+                              ? "image/*,audio/*,.mp3,.m4a,.wav,.aac,.ogg,.flac"
+                              : allowedModes.includes("audio")
+                                ? "image/*,video/*,audio/*,.mp3,.m4a,.wav,.aac,.ogg,.flac"
+                                : "image/*,video/*"
+                          }
+                          onChange={(e) => {
+                            onUpload(e.currentTarget.files?.[0]);
+                            e.currentTarget.value = "";
+                          }}
+                        />
+                      </label>
+
+                      {mode === "audio" ? (
+                        recording ? (
+                          <button type="button" className="capShutter recording" onClick={stopRecording} aria-label="Stop vocal recording" />
+                        ) : (
+                          <button type="button" className="capShutter vocal" onClick={startVocalRecording} aria-label="Start vocal recording" />
+                        )
+                      ) : mode === "photo" ? (
+                        <button type="button" className="capShutter" onClick={takePhoto} aria-label="Capture photo" />
+                      ) : recording ? (
+                        <button type="button" className="capShutter recording" onClick={stopRecording} aria-label="Stop recording" />
+                      ) : (
+                        <button type="button" className="capShutter video" onClick={startRecording} aria-label="Start recording" />
+                      )}
+
+                      {mode === "audio" ? (
+                        <span className="capSpacer" />
+                      ) : (
+                        <button
+                          type="button"
+                          className="capFlip"
+                          onClick={() => setFacing((f) => (f === "environment" ? "user" : "environment"))}
+                          disabled={recording}
+                        >
+                          Flip
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           ) : (
             <div className="editStage">
-              <DropStudio mediaUrl={mediaUrl} mediaKind={mediaKind} value={value} onChange={onChange} />
+              {mediaKind === "audio" ? (
+                <div className="vocalReview">
+                  <div className="studioBrand">
+                    <span className="studioDot" aria-hidden />
+                    VOCAL THOUGHT READY
+                  </div>
+                  <audio src={mediaUrl} controls preload="metadata" />
+                  <p>Use this voice memo as the audio layer for your Thought Drop.</p>
+                </div>
+              ) : (
+                <DropStudio mediaUrl={mediaUrl} mediaKind={mediaKind} value={value} onChange={onChange} />
+              )}
               <button type="button" className="studioDone" onClick={done}>
-                Use this Vision →
+                Use this {mediaKind === "audio" ? "Vocal" : "Vision"} →
               </button>
             </div>
           )}
@@ -321,7 +447,7 @@ export default function DropStudioStage({
         .studioStage {
           position: fixed;
           inset: 0;
-          z-index: 95;
+          z-index: 99998;
           display: grid;
           place-items: center;
           padding: 14px;
@@ -393,8 +519,81 @@ export default function DropStudioStage({
         /* ---- capture phase ---- */
         .capStage {
           display: grid;
+          grid-template-columns: 92px 1fr;
+          min-height: 0;
+        }
+        .modeRail {
+          display: flex;
+          flex-direction: column;
+          gap: 8px;
+          padding: 12px 8px;
+          background: rgba(255, 255, 255, 0.04);
+          border-right: 1px solid rgba(255, 255, 255, 0.1);
+          overflow: auto;
+        }
+        .modeRailBtn {
+          display: grid;
+          justify-items: center;
+          gap: 4px;
+          padding: 10px 4px;
+          border-radius: 16px;
+          border: 1px solid transparent;
+          background: rgba(255, 255, 255, 0.05);
+          color: rgba(255, 255, 255, 0.7);
+          cursor: pointer;
+        }
+        .modeRailBtn.on {
+          color: #06121a;
+          background: radial-gradient(circle at 30% 20%, #fff, #7ee2ff);
+          border-color: rgba(255, 255, 255, 0.5);
+          box-shadow: 0 0 16px rgba(126, 226, 255, 0.4);
+        }
+        .modeRailBtn:disabled {
+          opacity: 0.5;
+          cursor: not-allowed;
+        }
+        .modeGlyph {
+          font-size: 18px;
+          line-height: 1;
+        }
+        .modeName {
+          font-size: 9px;
+          font-weight: 950;
+          letter-spacing: 0.12em;
+          text-transform: uppercase;
+        }
+        .capMain {
+          display: grid;
           grid-template-rows: 1fr auto;
           min-height: 0;
+        }
+        .capFlip {
+          justify-self: end;
+          border-radius: 999px;
+          padding: 9px 14px;
+          font-size: 11px;
+          font-weight: 950;
+          letter-spacing: 0.1em;
+          text-transform: uppercase;
+          color: rgba(255, 255, 255, 0.82);
+          background: rgba(255, 255, 255, 0.1);
+          border: 1px solid rgba(255, 255, 255, 0.2);
+          cursor: pointer;
+        }
+        @media (max-width: 560px) {
+          .capStage {
+            grid-template-columns: 1fr;
+            grid-template-rows: auto 1fr;
+          }
+          .modeRail {
+            flex-direction: row;
+            border-right: 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            overflow-x: auto;
+          }
+          .modeRailBtn {
+            flex: 1 0 auto;
+          }
         }
         .capViewport {
           position: relative;
@@ -411,6 +610,54 @@ export default function DropStudioStage({
         }
         .capVideo.mirror {
           transform: scaleX(-1);
+        }
+        .vocalStage {
+          width: min(82%, 360px);
+          display: grid;
+          gap: 20px;
+          place-items: center;
+          text-align: center;
+          color: rgba(236, 255, 251, 0.94);
+        }
+        .vocalOrb {
+          width: 146px;
+          height: 146px;
+          display: grid;
+          place-items: center;
+          border-radius: 999px;
+          border: 1px solid rgba(126, 226, 255, 0.38);
+          background:
+            radial-gradient(circle at 34% 26%, rgba(255, 255, 255, 0.38), transparent 16%),
+            radial-gradient(circle, rgba(126, 226, 255, 0.26), rgba(255, 0, 190, 0.08) 54%, rgba(0, 0, 0, 0.32));
+          box-shadow:
+            0 0 44px rgba(126, 226, 255, 0.22),
+            inset 0 0 32px rgba(255, 255, 255, 0.08);
+        }
+        .vocalOrb span {
+          width: 54px;
+          height: 54px;
+          border-radius: 999px;
+          background: radial-gradient(circle at 35% 30%, #fff, #7ee2ff);
+          box-shadow: 0 0 26px rgba(126, 226, 255, 0.65);
+        }
+        .vocalOrb.recording {
+          border-color: rgba(255, 45, 109, 0.64);
+          box-shadow:
+            0 0 0 14px rgba(255, 45, 109, 0.07),
+            0 0 44px rgba(255, 45, 109, 0.24),
+            inset 0 0 32px rgba(255, 255, 255, 0.08);
+          animation: shutterPulse 1.1s ease-in-out infinite;
+        }
+        .vocalTitle {
+          font-size: 1.45rem;
+          font-weight: 950;
+          letter-spacing: 0;
+        }
+        .vocalCopy {
+          margin: 8px 0 0;
+          color: rgba(236, 255, 251, 0.66);
+          font-size: 0.9rem;
+          line-height: 1.55;
         }
         .capError {
           position: absolute;
@@ -488,6 +735,12 @@ export default function DropStudioStage({
           background: radial-gradient(circle at 35% 30%, #fff, #ff9ad1);
           box-shadow: 0 0 24px rgba(255, 45, 109, 0.45);
         }
+        .capShutter.vocal {
+          background: radial-gradient(circle at 35% 30%, #fff, #7ee2ff 54%, #ff9ad1);
+          box-shadow:
+            0 0 24px rgba(126, 226, 255, 0.46),
+            0 0 34px rgba(255, 45, 190, 0.18);
+        }
         .capShutter.recording {
           background: #ff2d6d;
           border-color: #ff2d6d;
@@ -511,6 +764,28 @@ export default function DropStudioStage({
           display: grid;
           gap: 14px;
           align-content: start;
+        }
+        .vocalReview {
+          display: grid;
+          gap: 16px;
+          border-radius: 24px;
+          border: 1px solid rgba(126, 226, 255, 0.28);
+          padding: 20px;
+          background:
+            radial-gradient(circle at 20% 0%, rgba(126, 226, 255, 0.16), transparent 34%),
+            rgba(255, 255, 255, 0.07);
+          box-shadow:
+            0 0 30px rgba(126, 226, 255, 0.16),
+            inset 0 0 24px rgba(255, 255, 255, 0.04);
+        }
+        .vocalReview audio {
+          width: 100%;
+        }
+        .vocalReview p {
+          margin: 0;
+          color: rgba(236, 255, 251, 0.68);
+          font-size: 0.86rem;
+          line-height: 1.5;
         }
         .studioDone {
           justify-self: center;

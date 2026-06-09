@@ -72,6 +72,47 @@
   mix-blend-mode: screen;
 }
 
+.filter_signal-glow::before {
+  backdrop-filter: saturate(1.18) contrast(1.06) brightness(1.08);
+  background: linear-gradient(135deg, rgba(87, 255, 229, 0.11), rgba(255, 255, 255, 0.03));
+  box-shadow: inset 0 0 44px rgba(128, 255, 233, 0.18);
+  mix-blend-mode: screen;
+}
+
+.filter_dream-fog::before {
+  backdrop-filter: blur(0.35px) saturate(1.1) contrast(0.94) brightness(1.1);
+  background:
+    radial-gradient(circle at 20% 10%, rgba(255, 255, 255, 0.08), transparent 34%),
+    rgba(186, 226, 255, 0.035);
+}
+
+.filter_bucket-vision::before {
+  backdrop-filter: saturate(1.22) hue-rotate(18deg) contrast(1.08) brightness(0.96);
+  background: linear-gradient(135deg, rgba(39, 145, 255, 0.1), rgba(80, 255, 216, 0.08));
+  mix-blend-mode: screen;
+}
+
+.filter_pulse::before {
+  backdrop-filter: saturate(1.32) contrast(1.12) brightness(1.04);
+  box-shadow: inset 0 0 36px rgba(255, 255, 255, 0.08);
+}
+
+.filter_neon-signal::before {
+  backdrop-filter: saturate(1.48) contrast(1.12) brightness(1.1);
+  background: linear-gradient(135deg, rgba(87, 255, 229, 0.1), rgba(255, 85, 218, 0.12));
+  mix-blend-mode: screen;
+}
+
+.filter_artifact::before {
+  backdrop-filter: sepia(0.16) saturate(1.16) contrast(1.04) brightness(1.02) hue-rotate(-8deg);
+  background: rgba(255, 218, 146, 0.06);
+  mix-blend-mode: soft-light;
+}
+
+.filter_clean-enhance::before {
+  backdrop-filter: saturate(1.12) contrast(1.1) brightness(1.06);
+}
+
 .overlay_sparkle .effectLayer {
   background-image:
     radial-gradient(circle at 14% 18%, rgba(255, 255, 255, 0.92) 0 1px, transparent 2px),

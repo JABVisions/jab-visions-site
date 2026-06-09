@@ -29,15 +29,13 @@ const ACTIONS = [
 
 const FILTERS = [
   { label: "None", value: null },
-  { label: "Soft Glow", value: "soft-glow" },
-  { label: "Cool Tone", value: "cool-tone" },
-  { label: "Warm Fade", value: "warm-fade" },
-  { label: "Dream Blur", value: "dream-blur" },
-  { label: "Night Glass", value: "night-glass" },
-  { label: "Vintage Light", value: "vintage-light" },
-  { label: "High Contrast", value: "high-contrast" },
-  { label: "Monochrome", value: "monochrome" },
-  { label: "Neon Lift", value: "neon-lift" },
+  { label: "Signal Glow", value: "signal-glow" },
+  { label: "Dream Fog", value: "dream-fog" },
+  { label: "Bucket Vision", value: "bucket-vision" },
+  { label: "Pulse", value: "pulse" },
+  { label: "Neon Signal", value: "neon-signal" },
+  { label: "Artifact", value: "artifact" },
+  { label: "Clean Enhance", value: "clean-enhance" },
 ];
 
 const OVERLAYS = [
@@ -47,13 +45,12 @@ const OVERLAYS = [
   { label: "Film Grain", value: "film-grain" },
   { label: "Soft Vignette", value: "soft-vignette" },
   { label: "Scanlines", value: "scanlines" },
-  { label: "Blur Edge", value: "blur-edge" },
   { label: "Light Leak", value: "light-leak" },
   { label: "Aura Ring", value: "aura-ring" },
   { label: "Shimmer", value: "shimmer" },
 ];
 
-type Tool = "text" | "stickers" | "button" | "effects";
+type Tool = "text" | "stickers" | "button" | "effects" | "filters" | "enhance";
 
 function makeId(prefix: string) {
   return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -205,7 +202,7 @@ export default function DropStudio({
       </div>
 
       <div className={styles.tools} aria-label="Drop Studio tools">
-        {(["text", "stickers", "button", "effects"] as Tool[]).map((item) => (
+        {(["text", "stickers", "button", "effects", "filters", "enhance"] as Tool[]).map((item) => (
           <button
             key={item}
             type="button"
@@ -218,7 +215,11 @@ export default function DropStudio({
                 ? "Stickers"
                 : item === "button"
                   ? "Button"
-                  : "Effects"}
+                  : item === "effects"
+                    ? "Effects"
+                    : item === "filters"
+                      ? "Filters"
+                      : "Enhance"}
           </button>
         ))}
       </div>
@@ -330,12 +331,12 @@ export default function DropStudio({
           </div>
         ) : null}
 
-        {tool === "effects" ? (
+        {tool === "filters" ? (
           <div className={styles.effectsTool}>
             <div className={styles.effectSection}>
               <div>
                 <div className={styles.groupLabel}>Filters</div>
-                <p>Soft color treatments for the media signal.</p>
+                <p>Board-native color treatments for the media signal.</p>
               </div>
               <div className={styles.effectGrid}>
                 {FILTERS.map((filter) => (
@@ -354,7 +355,11 @@ export default function DropStudio({
                 ))}
               </div>
             </div>
+          </div>
+        ) : null}
 
+        {tool === "effects" ? (
+          <div className={styles.effectsTool}>
             <div className={styles.effectSection}>
               <div>
                 <div className={styles.groupLabel}>Visual Effects</div>
@@ -377,6 +382,22 @@ export default function DropStudio({
                 ))}
               </div>
             </div>
+          </div>
+        ) : null}
+
+        {tool === "enhance" ? (
+          <div className={styles.enhanceTool}>
+            <div>
+              <div className={styles.groupLabel}>Quality Enhancement</div>
+              <p>Apply a clean visual lift now. Future versions can route this to AI/media processing.</p>
+            </div>
+            <button
+              type="button"
+              className={styles.selectedAction}
+              onClick={() => setEffect("filter", "clean-enhance")}
+            >
+              Apply Clean Enhance
+            </button>
           </div>
         ) : null}
       </div>

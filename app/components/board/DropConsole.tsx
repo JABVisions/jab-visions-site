@@ -28,8 +28,8 @@ import {
   seedForumsIfEmpty,
   type BoardUser,
 } from "@/lib/boardStore";
-import CameraDropPortal from "./CameraDropPortal";
 import DropStudio from "./DropStudio";
+import DropStudioStage from "./DropStudioStage";
 
 /* -------------------------------------------------------------------------- */
 /* utils */
@@ -57,6 +57,7 @@ const MODE_HINT: Record<DropMode, string> = {
 // so the Drop hierarchy stays identical across every creation surface.
 type DropFlavor = DropFlavorKey;
 type PayProviderMode = "payment_link" | "stripe_connect";
+type StudioCaptureMode = "photo" | "video" | "audio";
 
 type AnnouncementVibe =
   | "hype"
@@ -223,7 +224,7 @@ export default function DropConsole({
   const [body, setBody] = useState("");
   const [attachUrl, setAttachUrl] = useState("");
   const [uploadedFileName, setUploadedFileName] = useState("");
-  const [cameraMode, setCameraMode] = useState<"photo" | "video" | null>(null);
+  const [studioMode, setStudioMode] = useState<StudioCaptureMode | null>(null);
   const [dropCustomizations, setDropCustomizations] = useState<DropCustomization>({});
   const [dropDesc, setDropDesc] = useState("");
   const [mediaSource, setMediaSource] = useState<"upload" | "capture" | null>(null);
@@ -341,7 +342,7 @@ export default function DropConsole({
         setAttachUrl(url);
         setUploadedFileName(file.name);
         setMediaSource(source);
-        if (dropFlavor === "media") setDropCustomizations({});
+        if (dropFlavor === "media" && source === "upload") setDropCustomizations({});
       }
 
       setPostMsg("Media attached ✓");
@@ -379,7 +380,7 @@ export default function DropConsole({
           ? docDesc.trim()
           : dropDesc.trim();
       const mediaCustomizations =
-        mode === "board_drop" && dropFlavor === "media"
+        mode === "board_drop" && (dropFlavor === "media" || dropFlavor === "pay")
           ? compactDropCustomizations(dropCustomizations)
           : undefined;
       const attachMediaType = cleanAttach ? inferMediaType(cleanAttach) : null;
@@ -714,6 +715,14 @@ export default function DropConsole({
   const showMediaUploadForBoardDrop =
     mode === "board_drop" && dropFlavor === "media";
 
+  const studioAllowedModes = useMemo<StudioCaptureMode[]>(
+    () =>
+      mode === "board_drop" && dropFlavor === "thought"
+        ? ["audio", "photo"]
+        : ["photo", "video"],
+    [dropFlavor, mode]
+  );
+
   // -------------------------
   // SLEEP DOCK (does NOT overlay your buckets)
   // -------------------------
@@ -780,11 +789,15 @@ export default function DropConsole({
 
   const content = (
     <div className="dc">
-      <CameraDropPortal
-        open={cameraMode !== null}
-        initialMode={cameraMode ?? "photo"}
-        onClose={() => setCameraMode(null)}
-        onCapture={(file) => uploadToBoardMedia(file, "capture")}
+      <DropStudioStage
+        open={studioMode !== null}
+        initialFile={null}
+        initialMode={studioMode ?? "photo"}
+        allowedModes={studioAllowedModes}
+        value={dropCustomizations}
+        onChange={setDropCustomizations}
+        onClose={() => setStudioMode(null)}
+        onComplete={(file) => uploadToBoardMedia(file, "capture")}
       />
       <div className="dcInner">
         <div className="dcTop">
@@ -933,7 +946,7 @@ export default function DropConsole({
                 <button
                   type="button"
                   className={clsx("mediaAction", "captureAction", uploading && "busy")}
-                  onClick={() => setCameraMode("photo")}
+                  onClick={() => setStudioMode("photo")}
                   disabled={uploading}
                 >
                   Capture
@@ -968,7 +981,7 @@ export default function DropConsole({
               uploading={uploading}
               uploadErr={uploadErr}
               uploadToBoardMedia={uploadToBoardMedia}
-              onOpenCamera={setCameraMode}
+              onOpenCamera={setStudioMode}
               dropDesc={dropDesc}
               setDropDesc={setDropDesc}
               mediaSource={mediaSource}
@@ -1520,7 +1533,7 @@ function BoardDropConsoleFields({
   uploading: boolean;
   uploadErr: string | null;
   uploadToBoardMedia: (file: File, source?: "upload" | "capture") => void;
-  onOpenCamera: (mode: "photo" | "video") => void;
+  onOpenCamera: (mode: StudioCaptureMode) => void;
   dropDesc: string;
   setDropDesc: (value: string) => void;
   mediaSource: "upload" | "capture" | null;
@@ -1609,11 +1622,11 @@ function BoardDropConsoleFields({
                 }}
               />
             </label>
-            {dropFlavor === "media" || dropFlavor === "pay" ? (
+            {dropFlavor === "media" || dropFlavor === "pay" || dropFlavor === "thought" ? (
               <button
                 type="button"
                 className={clsx("mediaAction", "captureAction", uploading && "busy")}
-                onClick={() => onOpenCamera("photo")}
+                onClick={() => onOpenCamera(dropFlavor === "thought" ? "audio" : "photo")}
                 disabled={uploading}
               >
                 Capture
@@ -1628,11 +1641,13 @@ function BoardDropConsoleFields({
             )}
             {uploading ? <span className="fileSize">Uploading...</span> : null}
           </div>
-          {dropFlavor === "media" || dropFlavor === "pay" ? (
+          {dropFlavor === "media" || dropFlavor === "pay" || dropFlavor === "thought" ? (
             <div className="captureHelp">
               {dropFlavor === "pay"
                 ? "Show what this request is for in real time."
-                : "Upload from your device or open the Board camera portal."}
+                : dropFlavor === "thought"
+                ? "Record a vocal thought or capture a quick visual note in Drop Studio."
+                : "Upload from your device or open Drop Studio capture."}
             </div>
           ) : null}
           {uploadErr ? <div className="dcErr">{uploadErr}</div> : null}

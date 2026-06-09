@@ -1677,14 +1677,17 @@ export default function BoardProfileHubPage() {
   );
 
   async function openPayCheckout(drop: DropItem) {
-    if (drop.linkUrl) {
-      window.open(drop.linkUrl, "_blank", "noopener,noreferrer");
+    const explicitPaymentLink = drop.payProvider === "payment_link" && drop.linkUrl;
+
+    if (explicitPaymentLink) {
+      window.open(explicitPaymentLink, "_blank", "noopener,noreferrer");
       return;
     }
 
     const shouldUseHostedCheckout =
+      drop.payProvider === "stripe_connect" ||
       drop.payProvider === "authorize_net_accept_hosted" ||
-      (drop.type === "Pay" && !drop.linkUrl && !!drop.priceCents);
+      (drop.type === "Pay" && !!drop.priceCents);
 
     if (!shouldUseHostedCheckout) {
       return;

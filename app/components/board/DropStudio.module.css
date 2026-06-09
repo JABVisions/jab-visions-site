@@ -167,6 +167,41 @@
   filter: saturate(1.38) contrast(1.1) brightness(1.1) drop-shadow(0 0 16px rgba(255, 94, 220, 0.24));
 }
 
+.filter_signal-glow > img,
+.filter_signal-glow > video {
+  filter: saturate(1.18) contrast(1.06) brightness(1.08) drop-shadow(0 0 22px rgba(122, 255, 231, 0.3));
+}
+
+.filter_dream-fog > img,
+.filter_dream-fog > video {
+  filter: saturate(1.1) contrast(0.94) brightness(1.1) blur(0.35px);
+}
+
+.filter_bucket-vision > img,
+.filter_bucket-vision > video {
+  filter: saturate(1.22) hue-rotate(18deg) contrast(1.08) brightness(0.96) drop-shadow(0 0 16px rgba(95, 214, 255, 0.22));
+}
+
+.filter_pulse > img,
+.filter_pulse > video {
+  filter: saturate(1.32) contrast(1.12) brightness(1.04);
+}
+
+.filter_neon-signal > img,
+.filter_neon-signal > video {
+  filter: saturate(1.48) contrast(1.12) brightness(1.1) drop-shadow(0 0 18px rgba(255, 94, 220, 0.28));
+}
+
+.filter_artifact > img,
+.filter_artifact > video {
+  filter: sepia(0.16) saturate(1.16) contrast(1.04) brightness(1.02) hue-rotate(-8deg);
+}
+
+.filter_clean-enhance > img,
+.filter_clean-enhance > video {
+  filter: saturate(1.12) contrast(1.1) brightness(1.06);
+}
+
 .overlay_sparkle::after {
   background-image:
     radial-gradient(circle at 14% 18%, rgba(255, 255, 255, 0.92) 0 1px, transparent 2px),
@@ -244,7 +279,7 @@
 
 .tools {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: 7px;
   padding: 5px;
   border: 1px solid rgba(167, 244, 232, 0.14);
@@ -313,6 +348,7 @@
 
 .toolStack,
 .effectsTool,
+.enhanceTool,
 .effectSection {
   display: grid;
   gap: 9px;
@@ -398,6 +434,25 @@
   color: rgba(220, 255, 248, 0.58);
   font-size: 0.62rem;
   line-height: 1.4;
+}
+
+.enhanceTool {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  padding: 0.72rem;
+  border: 1px solid rgba(167, 244, 232, 0.14);
+  border-radius: 20px;
+  background:
+    radial-gradient(circle at top left, rgba(107, 255, 231, 0.1), transparent 42%),
+    radial-gradient(circle at right, rgba(255, 107, 222, 0.08), transparent 42%),
+    rgba(255, 255, 255, 0.04);
+}
+
+.enhanceTool p {
+  margin: 0.2rem 0 0;
+  color: rgba(220, 255, 248, 0.62);
+  font-size: 0.64rem;
+  line-height: 1.45;
 }
 
 .layerList {
@@ -498,7 +553,7 @@
 
   .tools {
     border-radius: 18px;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
   .textTool {
@@ -507,5 +562,9 @@
 
   .emojiGrid {
     grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
+
+  .enhanceTool {
+    grid-template-columns: 1fr;
   }
 }

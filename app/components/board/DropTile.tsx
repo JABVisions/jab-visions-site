@@ -19,9 +19,7 @@ import {
   type DropCustomization,
 } from "@/lib/board/dropCustomizations";
 import { DROP_FLAVOR_ORDER, type DropFlavorKey } from "@/lib/board/dropFlavors";
-import CameraDropPortal from "./CameraDropPortal";
 import RemovableDropBadge from "./RemovableDropBadge";
-import VoiceRecorder from "./VoiceRecorder";
 import DropStudioStage from "./DropStudioStage";
 import DropCommentsDrawer from "./DropCommentsDrawer";
 import DropStudioOverlay from "./DropStudioOverlay";
@@ -37,6 +35,7 @@ type DropType =
   | "Thought";
 type MediaKind = "image" | "video" | "audio";
 type PayProviderMode = "payment_link" | "stripe_connect";
+type StudioCaptureMode = "photo" | "video" | "audio" | "art";
 
 // Map the canonical (creation-first) flavor order to this surface's DropType
 // labels, so the Drop tabs match the Drop Console and every other surface.
@@ -581,17 +580,33 @@ export default function DropTile() {
   const [commentsDropId, setCommentsDropId] = useState<string | null>(null);
   const [commentCountByDrop, setCommentCountByDrop] = useState<Record<string, number>>({});
   const [payCheckoutBusyId, setPayCheckoutBusyId] = useState<string | null>(null);
-  const [cameraMode, setCameraMode] = useState<"photo" | "video" | null>(null);
   const [mediaSource, setMediaSource] = useState<"upload" | "capture" | null>(null);
   const [selectedMediaPreview, setSelectedMediaPreview] = useState("");
   const [dropCustomizations, setDropCustomizations] = useState<DropCustomization>({});
-  const [studioOpen, setStudioOpen] = useState(false);
+  const [studioMode, setStudioMode] = useState<StudioCaptureMode | null>(null);
+  const [studioInitialFile, setStudioInitialFile] = useState<File | null>(null);
 
   const signedUrlRef = useRef<Record<string, string>>({});
   const [signedUrlByKey, setSignedUrlByKey] = useState<Record<string, string>>({});
   // Tracks link/news drops we've already tried to back-fill a thumbnail for,
   // so the hydration effect never re-fetches the same drop in a loop.
   const previewHydrationRef = useRef<Set<string>>(new Set());
+
+  const studioAllowedModes = useMemo<StudioCaptureMode[]>(
+    // Vision: capture/record/draw. Thought: Voice + Art doodle (+ photo).
+    () => (mode === "Thought" ? ["audio", "art", "photo"] : ["photo", "video", "art"]),
+    [mode]
+  );
+
+  function openStudio(nextMode: StudioCaptureMode, initial: File | null = null) {
+    setStudioInitialFile(initial);
+    setStudioMode(nextMode);
+  }
+
+  function closeStudio() {
+    setStudioMode(null);
+    setStudioInitialFile(null);
+  }
 
   useEffect(() => {
     if (!file || (mode !== "Media" && mode !== "Pay" && mode !== "Thought")) {
@@ -1307,6 +1322,7 @@ export default function DropTile() {
     const recipientUsername = username ?? undefined;
     const recipientDisplayName = displayName ?? username ?? undefined;
     const recipientStripeAccountId = stripeAccountId ?? undefined;
+    const customizations = compactDropCustomizations(dropCustomizations);
     const next: DropItem[] = [
       {
         id,
@@ -1327,6 +1343,7 @@ export default function DropTile() {
         paymentLink: normalizedLinkUrl ?? undefined,
         mediaSource: mediaSource ?? "upload",
         badgeLabel: mediaSource === "capture" ? "Captured on Board" : undefined,
+        customizations,
         recipientUserId,
         recipientUsername,
         recipientDisplayName,
@@ -1378,6 +1395,7 @@ export default function DropTile() {
     setPayLink("");
     setPayProvider("stripe_connect");
     setMediaSource(null);
+    setDropCustomizations({});
     flash(setMsg, "Pay drop added ✓", 1400);
   }
 
@@ -1426,14 +1444,17 @@ export default function DropTile() {
   }
 
   async function openPayCheckout(drop: DropItem) {
-    if (drop.linkUrl) {
-      window.open(drop.linkUrl, "_blank", "noopener,noreferrer");
+    const explicitPaymentLink =
+      drop.payProvider === "payment_link" && (drop.paymentLink || drop.linkUrl);
+
+    if (explicitPaymentLink) {
+      window.open(explicitPaymentLink, "_blank", "noopener,noreferrer");
       return;
     }
 
     const shouldUseHostedCheckout =
       drop.payProvider === "stripe_connect" ||
-      (drop.type === "Pay" && !drop.linkUrl && !!drop.priceCents);
+      (drop.type === "Pay" && !!drop.priceCents);
 
     if (!shouldUseHostedCheckout) {
       flash(setMsg, "This Pay Drop needs a checkout link.", 2200);
@@ -1679,7 +1700,7 @@ export default function DropTile() {
                     }}
                   />
                 </label>
-                <button type="button" className="capture-action" onClick={() => setCameraMode("photo")}>
+                <button type="button" className="capture-action" onClick={() => openStudio("photo")}>
                   Capture
                 </button>
               </div>
@@ -1776,7 +1797,7 @@ export default function DropTile() {
             <button
               type="button"
               className="capture-action studio-open-cta"
-              onClick={() => setStudioOpen(true)}
+              onClick={() => openStudio(file?.type.startsWith("video/") ? "video" : "photo", file)}
             >
               {file ? "Edit in Drop Studio" : "Open Drop Studio"}
             </button>
@@ -1785,7 +1806,7 @@ export default function DropTile() {
               <button
                 type="button"
                 className="studio-launch-preview drop-studio-media-frame"
-                onClick={() => setStudioOpen(true)}
+                onClick={() => openStudio(file?.type.startsWith("video/") ? "video" : "photo", file)}
                 aria-label="Edit this Vision in Drop Studio"
               >
                 {file?.type.startsWith("video/") ? (
@@ -1851,13 +1872,9 @@ export default function DropTile() {
                     }}
                   />
                 </label>
-                {/* Vocal Mode — record a voice memo straight into this Thought Drop. */}
-                <VoiceRecorder
-                  onRecorded={(recorded) => {
-                    setFile(recorded);
-                    setMediaSource("capture");
-                  }}
-                />
+                <button type="button" className="capture-action" onClick={() => openStudio("audio")}>
+                  Capture
+                </button>
               </div>
               <div className="file-meta file-status">
                 {file ? (
@@ -2309,26 +2326,18 @@ export default function DropTile() {
         </div>
       ) : null}
 
-      <CameraDropPortal
-        open={cameraMode !== null}
-        initialMode={cameraMode ?? "photo"}
-        onClose={() => setCameraMode(null)}
-        onCapture={(capturedFile) => {
-          setFile(capturedFile);
-          setMediaSource("capture");
-        }}
-      />
-
       <DropStudioStage
-        open={studioOpen && mode === "Media"}
-        initialFile={file}
+        open={studioMode !== null}
+        initialFile={studioInitialFile}
+        initialMode={studioMode ?? (mode === "Thought" ? "audio" : "photo")}
+        allowedModes={studioAllowedModes}
         value={dropCustomizations}
         onChange={setDropCustomizations}
         onComplete={(captured, src) => {
           setFile(captured);
           setMediaSource(src);
         }}
-        onClose={() => setStudioOpen(false)}
+        onClose={closeStudio}
       />
 
       <DropCommentsDrawer

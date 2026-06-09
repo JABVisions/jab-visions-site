@@ -102,12 +102,10 @@ export default function PayDropsMiniPanel({
   };
 
   async function openCheckout(drop: PayDrop) {
-    if (drop.checkoutUrl) {
+    if (drop.provider === "payment_link" && drop.checkoutUrl) {
       window.open(drop.checkoutUrl, "_blank", "noopener,noreferrer");
       return;
     }
-
-    if (drop.provider !== "authorize_net_accept_hosted" && drop.checkoutUrl) return;
 
     try {
       setBusyId(drop.id);
