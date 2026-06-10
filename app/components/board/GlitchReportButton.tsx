@@ -76,7 +76,7 @@ function defaultPageFromPath(pathname: string): GlitchPage {
   if (pathname.startsWith("/board/feed")) return "Feed";
   if (pathname.startsWith("/board/forums")) return "Forums";
   if (pathname.startsWith("/board/work")) return "Work";
-  if (pathname.startsWith("/board/friend-zone") || pathname.startsWith("/board/friendzone")) {
+  if (pathname.startsWith("/board/friend-zone")) {
     return "Friend Zone";
   }
   if (pathname.startsWith("/board/options")) return "Options";

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { createClient } from "@/lib/supabase/client";
+import { supabaseBrowser } from "@/lib/supabase/browser";
 
 type MusicLink = {
   id: string;
@@ -41,7 +41,7 @@ function platformLabel(p?: string | null) {
 }
 
 export default function MyMusicModule() {
-  const supabase = useMemo(() => createClient(), []);
+  const supabase = useMemo(() => supabaseBrowser(), []);
 
   const [links, setLinks] = useState<MusicLink[]>([]);
   const [loading, setLoading] = useState(true);
