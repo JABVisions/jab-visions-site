@@ -33,6 +33,9 @@ export type UniversalDrop = {
   imageUrl?: string;
   mediaUrl?: string;
   mediaKind?: "image" | "video" | "audio";
+  bucket?: string;
+  storagePath?: string;
+  fileName?: string;
   visibility?: "public" | "private";
   thoughtFormat?: "text" | "voice" | "doodle";
   thoughtText?: string;

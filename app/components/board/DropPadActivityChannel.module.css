@@ -1,0 +1,220 @@
+.channel {
+  position: relative;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  color: #eef7ff;
+}
+
+/* The signal waterfall — newest sits near the gateway, scroll up for deeper. */
+.stream {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 64px, #000 100%);
+  mask-image: linear-gradient(to bottom, transparent 0, #000 64px, #000 100%);
+}
+.stream::-webkit-scrollbar {
+  display: none;
+}
+.streamInner {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  /* Big top space so the top fades into an open, "end of the world" feel. */
+  padding: 120px 16px 14px;
+}
+
+/* ---- Signal (primary, conversational) ---- */
+.signal {
+  position: relative;
+  display: flex;
+  gap: 11px;
+  align-items: flex-start;
+  padding: 13px 15px 13px 16px;
+  border-radius: 20px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.045));
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow: 0 8px 26px rgba(0, 0, 0, 0.18);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  animation: rise 520ms cubic-bezier(0.22, 0.61, 0.36, 1) both;
+}
+.signal::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 14px;
+  bottom: 14px;
+  width: 3px;
+  border-radius: 999px;
+  background: var(--accent, #7ee2ff);
+  box-shadow: 0 0 14px var(--accent, #7ee2ff);
+}
+.avatar {
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  font-size: 13px;
+  font-weight: 900;
+  color: #06121a;
+  object-fit: cover;
+  background: radial-gradient(circle at 30% 20%, #fff, #cfeeff);
+}
+.body {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.message {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.5;
+  font-weight: 600;
+  color: rgba(245, 252, 255, 0.96);
+}
+.meta {
+  margin-top: 6px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 10px;
+  color: rgba(230, 244, 255, 0.5);
+}
+.typeChip {
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  font-weight: 900;
+  color: var(--accent, #7ee2ff);
+}
+
+/* ---- Compact drop preview attached to a signal ---- */
+.dropPreview {
+  margin-top: 10px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+.dropThumb {
+  flex: 0 0 auto;
+  width: 44px;
+  height: 44px;
+  border-radius: 11px;
+  object-fit: cover;
+  display: grid;
+  place-items: center;
+  font-size: 20px;
+  background: rgba(0, 0, 0, 0.3);
+}
+.dropInfo {
+  min-width: 0;
+}
+.dropType {
+  font-size: 9px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: rgba(126, 246, 230, 0.8);
+}
+.dropTitle {
+  font-size: 13px;
+  font-weight: 800;
+  color: #fff;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dropDesc {
+  margin-top: 1px;
+  font-size: 11px;
+  color: rgba(230, 244, 255, 0.55);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---- Whisper (secondary, soft pastel) ---- */
+.whisper {
+  margin: 0;
+  padding: 2px 18px;
+  text-align: center;
+  font-size: 12.5px;
+  font-style: italic;
+  line-height: 1.5;
+  color: rgba(214, 230, 255, 0.62);
+  text-shadow: 0 0 16px rgba(160, 200, 255, 0.25);
+  animation: rise 520ms cubic-bezier(0.22, 0.61, 0.36, 1) both;
+}
+.whisperMedium {
+  color: rgba(226, 214, 255, 0.74);
+  text-shadow: 0 0 18px rgba(196, 160, 255, 0.3);
+}
+
+/* ---- Bottom gateway (anchored title) ---- */
+.gateway {
+  flex: 0 0 auto;
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+  padding: 12px 16px 18px;
+  background: linear-gradient(180deg, transparent, rgba(4, 8, 16, 0.5));
+}
+.gatewayReturn {
+  width: 44px;
+  height: 20px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(236, 246, 255, 0.85);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+}
+.gatewayEyebrow {
+  margin-top: 4px;
+  font-size: 9px;
+  letter-spacing: 0.34em;
+  text-transform: uppercase;
+  color: rgba(126, 226, 255, 0.7);
+}
+.gatewayTitle {
+  margin: 0;
+  font-size: 1.35rem;
+  font-weight: 900;
+  color: #fff;
+  text-shadow:
+    0 0 18px rgba(126, 226, 255, 0.5),
+    0 0 44px rgba(217, 70, 239, 0.22);
+}
+.gatewayHint {
+  font-size: 10px;
+  color: rgba(230, 244, 255, 0.4);
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .signal,
+  .whisper {
+    animation: none;
+  }
+}

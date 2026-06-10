@@ -7,6 +7,7 @@ import { supabaseBrowser } from "@/lib/supabase/browser";
 
 import { createActivity, type BoardActivityKind } from "@/lib/board/activity";
 import { readCurrentBoardIdentity } from "@/lib/board/currentProfile";
+import { isAudioFileUrl } from "@/lib/board/musicPlayback";
 import { newId, pushDrop } from "@/lib/board/drops/storage";
 import { emitBoardDropSignal } from "@/lib/board/dropSignals";
 import { fetchLinkPreview } from "@/lib/board/linkPreview";
@@ -29,7 +30,14 @@ import {
   type BoardUser,
 } from "@/lib/boardStore";
 import DropStudio from "./DropStudio";
+import DropStudioOverlay from "./DropStudioOverlay";
 import DropStudioStage from "./DropStudioStage";
+import { RichTextField } from "./RichTextField";
+import {
+  normalizeRichText,
+  richToPlain,
+  type RichTextValue,
+} from "@/lib/board/richText";
 
 /* -------------------------------------------------------------------------- */
 /* utils */
@@ -189,9 +197,21 @@ function inferMediaType(url: string) {
   const u = url.toLowerCase();
   if (/\.(png|jpg|jpeg|gif|webp|avif|svg|bmp|tif|tiff|heic|heif)(\?|$)/i.test(u)) return "image";
   if (/\.(mp4|webm|mov|m4v)(\?|$)/i.test(u)) return "video";
-  if (/\.(mp3|wav|m4a|aac|ogg|flac)(\?|$)/i.test(u)) return "audio";
-  if (/\/storage\/v1\/object\/public\/board-media\//i.test(u)) return "image";
+  if (/\.(mp3|wav|m4a|aac|ogg|flac|weba)(\?|$)/i.test(u)) return "audio";
+  if (isAudioFileUrl(url)) return "audio";
+  if (/\/storage\/v1\/object\/public\/board-media\//i.test(u)) return "link";
   return "link";
+}
+
+function musicMediaKind(
+  attachUrl: string | null,
+  fileName: string,
+  attachMediaType: string | null
+) {
+  if (attachMediaType === "audio") return "audio";
+  if (isAudioFileUrl(attachUrl || "")) return "audio";
+  if (/\.(mp3|m4a|wav|aac|ogg|flac|weba)$/i.test(fileName)) return "audio";
+  return null;
 }
 
 function thoughtFormatFromMedia(mediaType: string | null) {
@@ -221,12 +241,16 @@ export default function DropConsole({
   const [dropFlavor, setDropFlavor] = useState<DropFlavor>("media");
 
   const [title, setTitle] = useState("");
+  const [titleRich, setTitleRich] = useState<RichTextValue>({ html: "" });
   const [body, setBody] = useState("");
   const [attachUrl, setAttachUrl] = useState("");
   const [uploadedFileName, setUploadedFileName] = useState("");
+  const [uploadedBucket, setUploadedBucket] = useState<string | null>(null);
+  const [uploadedStoragePath, setUploadedStoragePath] = useState<string | null>(null);
   const [studioMode, setStudioMode] = useState<StudioCaptureMode | null>(null);
   const [dropCustomizations, setDropCustomizations] = useState<DropCustomization>({});
   const [dropDesc, setDropDesc] = useState("");
+  const [dropDescRich, setDropDescRich] = useState<RichTextValue>({ html: "" });
   const [mediaSource, setMediaSource] = useState<"upload" | "capture" | null>(null);
   const [thoughtText, setThoughtText] = useState("");
   const [thoughtVisibility, setThoughtVisibility] = useState<"public" | "private">("public");
@@ -341,6 +365,8 @@ export default function DropConsole({
       if (mode === "board_drop") {
         setAttachUrl(url);
         setUploadedFileName(file.name);
+        setUploadedBucket(bucket);
+        setUploadedStoragePath(path);
         setMediaSource(source);
         if (dropFlavor === "media" && source === "upload") setDropCustomizations({});
       }
@@ -379,11 +405,24 @@ export default function DropConsole({
           : dropFlavor === "doc"
           ? docDesc.trim()
           : dropDesc.trim();
+      // Inline-formatted title/description for the feed + tile to render.
+      const titleRichMeta = normalizeRichText(titleRich) ?? null;
+      const descriptionRichMeta =
+        dropFlavor === "pay" || dropFlavor === "doc"
+          ? null
+          : normalizeRichText(dropDescRich) ?? null;
+      const annMediaDraft = mode === "announcement" ? announceMediaUrl.trim() : "";
       const mediaCustomizations =
         mode === "board_drop" && (dropFlavor === "media" || dropFlavor === "pay")
           ? compactDropCustomizations(dropCustomizations)
-          : undefined;
+          : mode === "announcement" && annMediaDraft
+            ? compactDropCustomizations(dropCustomizations)
+            : undefined;
       const attachMediaType = cleanAttach ? inferMediaType(cleanAttach) : null;
+      const resolvedMusicKind =
+        dropFlavor === "music"
+          ? musicMediaKind(cleanAttach, uploadedFileName, attachMediaType)
+          : null;
       const thoughtFormat =
         dropFlavor === "thought" ? thoughtFormatFromMedia(attachMediaType) : null;
       const identity = readCurrentBoardIdentity();
@@ -490,9 +529,12 @@ export default function DropConsole({
                 dropType: dropFlavor,
                 dropId: boardDropId,
                 fileName: uploadedFileName || null,
+                bucket: uploadedBucket,
+                storagePath: uploadedStoragePath,
+                mediaUrl: resolvedMusicKind === "audio" ? cleanAttach : null,
                 mediaKind:
                   dropFlavor === "music"
-                    ? "audio"
+                    ? resolvedMusicKind
                     : dropFlavor === "thought"
                     ? attachMediaType === "audio"
                       ? "audio"
@@ -517,6 +559,8 @@ export default function DropConsole({
                     : null,
                 customizations: mediaCustomizations ?? null,
                 description: boardDropDescription || null,
+                titleRich: titleRichMeta,
+                descriptionRich: descriptionRichMeta,
                 visibility: dropFlavor === "thought" ? thoughtVisibility : "public",
                 thoughtText: dropFlavor === "thought" ? thoughtText.trim() || cleanBody : null,
                 thoughtFormat,
@@ -557,6 +601,15 @@ export default function DropConsole({
                 announcement_vibe: vibe,
                 announcement_media_url: cleanAnnMedia,
                 announcement_media_type: annMediaType,
+                customizations: mediaCustomizations ?? null,
+                mediaKind:
+                  annMediaType === "video"
+                    ? "video"
+                    : annMediaType === "image"
+                      ? "image"
+                      : null,
+                titleRich: titleRichMeta,
+                descriptionRich: descriptionRichMeta,
               }
             : {}),
         },
@@ -585,9 +638,12 @@ export default function DropConsole({
                 dropType: dropFlavor,
                 dropId: boardDropId,
                 fileName: uploadedFileName || null,
+                bucket: uploadedBucket,
+                storagePath: uploadedStoragePath,
+                mediaUrl: resolvedMusicKind === "audio" ? cleanAttach : null,
                 mediaKind:
                   dropFlavor === "music"
-                    ? "audio"
+                    ? resolvedMusicKind
                     : dropFlavor === "thought"
                     ? attachMediaType === "audio"
                       ? "audio"
@@ -612,6 +668,8 @@ export default function DropConsole({
                     : null,
                 customizations: mediaCustomizations ?? null,
                 description: boardDropDescription || null,
+                titleRich: titleRichMeta,
+                descriptionRich: descriptionRichMeta,
                 visibility: dropFlavor === "thought" ? thoughtVisibility : "public",
                 thoughtText: dropFlavor === "thought" ? thoughtText.trim() || cleanBody : null,
                 thoughtFormat,
@@ -641,10 +699,48 @@ export default function DropConsole({
                 announcement_vibe: vibe,
                 announcement_media_url: cleanAnnMedia,
                 announcement_media_type: annMediaType,
+                customizations: mediaCustomizations ?? null,
+                mediaKind:
+                  annMediaType === "video"
+                    ? "video"
+                    : annMediaType === "image"
+                      ? "image"
+                      : null,
+                titleRich: titleRichMeta,
+                descriptionRich: descriptionRichMeta,
               }
             : {}),
         },
       });
+
+      if (mode === "board_drop" && dropFlavor === "music" && resolvedMusicKind === "audio") {
+        const dropId = boardDropId ?? newId("music");
+        pushDrop({
+          id: dropId,
+          type: "music",
+          title: cleanTitle || "Music Drop",
+          createdAt: Date.now(),
+          url: cleanAttach || undefined,
+          mediaUrl: cleanAttach || undefined,
+          mediaKind: "audio",
+          bucket: uploadedBucket || undefined,
+          storagePath: uploadedStoragePath || undefined,
+          fileName: uploadedFileName || undefined,
+          description: boardDropDescription || undefined,
+          authorId: identity.id,
+          authorName: identity.displayName,
+          authorUsername: identity.username || undefined,
+          authorAvatar: identity.avatar || undefined,
+          authorGlow: identity.glow,
+          authorAuraIntensity: identity.auraIntensity,
+          source: "drop_console",
+          origin: "board_drop_console",
+          meta: {
+            activityId: res.activity.id,
+            tags,
+          },
+        });
+      }
 
       if (mode === "board_drop" && dropFlavor === "thought") {
         const dropId = boardDropId ?? newId("thought");
@@ -694,11 +790,15 @@ export default function DropConsole({
       }
 
       setTitle("");
+      setTitleRich({ html: "" });
       setBody("");
       setAttachUrl("");
       setUploadedFileName("");
+      setUploadedBucket(null);
+      setUploadedStoragePath(null);
       setDropCustomizations({});
       setDropDesc("");
+      setDropDescRich({ html: "" });
       setThoughtText("");
       setThoughtVisibility("public");
       setMediaSource(null);
@@ -938,30 +1038,23 @@ export default function DropConsole({
               </div>
 
               <div className="mediaActionRow" aria-label="Announcement media actions">
-                <label className={clsx("mediaAction", "uploadAction", uploading && "busy")}>
-                  <span>{uploading ? "Uploading..." : "Upload"}</span>
-                  <input
-                    className="fileInput"
-                    type="file"
-                    accept="image/*,video/*"
-                    disabled={uploading}
-                    onChange={(e) => {
-                      const f = e.currentTarget.files?.[0];
-                      if (f) uploadToBoardMedia(f);
-                      e.currentTarget.value = "";
-                    }}
-                  />
-                </label>
-
                 <button
                   type="button"
-                  className={clsx("mediaAction", "captureAction", uploading && "busy")}
+                  className={clsx("mediaAction", "studioAction", uploading && "busy")}
                   onClick={() => setStudioMode("photo")}
                   disabled={uploading}
                 >
-                  Capture
+                  🎬 Open Drop Studio
                 </button>
               </div>
+
+              {announceMediaUrl && inferMediaType(announceMediaUrl) === "image" ? (
+                <div className="annStudioPreview">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={announceMediaUrl} alt="Announcement preview" className="annStudioImg" />
+                  <DropStudioOverlay customizations={dropCustomizations} />
+                </div>
+              ) : null}
 
               {uploadErr && <div className="dcErr">{uploadErr}</div>}
               <div className="dcFieldHelp">
@@ -974,11 +1067,16 @@ export default function DropConsole({
           {/* Title */}
           <div className="dcField">
             <div className="dcFieldLabel">Title</div>
-            <input
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
+            <RichTextField
+              value={titleRich}
+              onChange={(v) => {
+                setTitleRich(v);
+                setTitle(richToPlain(v.html));
+              }}
+              singleLine
+              ariaLabel="Title"
               placeholder={mode === "forum_post" ? "Thread title (optional)" : "Title"}
-              className="dcInput"
+              minHeight={38}
             />
           </div>
 
@@ -1000,6 +1098,8 @@ export default function DropConsole({
               onOpenCamera={setStudioMode}
               dropDesc={dropDesc}
               setDropDesc={setDropDesc}
+              dropDescRich={dropDescRich}
+              setDropDescRich={setDropDescRich}
               mediaSource={mediaSource}
               payProvider={payProvider}
               setPayProvider={setPayProvider}
@@ -1372,6 +1472,41 @@ export default function DropConsole({
           opacity: 0.62;
           pointer-events: none;
         }
+        .studioAction {
+          flex: 1 1 100%;
+          border: 1px solid rgba(126, 226, 255, 0.45);
+          background:
+            radial-gradient(circle at 30% 18%, rgba(255, 255, 255, 0.18), transparent 55%),
+            linear-gradient(180deg, rgba(126, 226, 255, 0.22), rgba(255, 79, 216, 0.14));
+          color: rgba(0, 60, 70, 0.9);
+          box-shadow: 0 0 18px rgba(126, 226, 255, 0.22);
+          gap: 8px;
+        }
+        .studioAction:hover {
+          transform: translateY(-1px);
+          filter: brightness(1.03);
+          box-shadow: 0 0 26px rgba(126, 226, 255, 0.34);
+        }
+        .studioAction.busy {
+          opacity: 0.62;
+          pointer-events: none;
+        }
+        .annStudioPreview {
+          position: relative;
+          margin-top: 10px;
+          overflow: hidden;
+          border-radius: 16px;
+          border: 1px solid rgba(0, 120, 105, 0.2);
+          background: rgba(3, 24, 24, 0.92);
+          aspect-ratio: 4 / 5;
+          max-height: 220px;
+        }
+        .annStudioImg {
+          width: 100%;
+          height: 100%;
+          object-fit: cover;
+          display: block;
+        }
         .captureHelp {
           margin-top: 7px;
           font-size: 11px;
@@ -1552,6 +1687,8 @@ function BoardDropConsoleFields({
   onOpenCamera,
   dropDesc,
   setDropDesc,
+  dropDescRich,
+  setDropDescRich,
   mediaSource,
   payProvider,
   setPayProvider,
@@ -1581,6 +1718,8 @@ function BoardDropConsoleFields({
   onOpenCamera: (mode: StudioCaptureMode) => void;
   dropDesc: string;
   setDropDesc: (value: string) => void;
+  dropDescRich: RichTextValue;
+  setDropDescRich: (value: RichTextValue) => void;
   mediaSource: "upload" | "capture" | null;
   payProvider: PayProviderMode;
   setPayProvider: (value: PayProviderMode) => void;
@@ -1653,30 +1792,31 @@ function BoardDropConsoleFields({
       {showFileLine ? (
         <div className="dcField">
           <div className="mediaActionRow" aria-label="Drop media actions">
-            <label className={clsx("mediaAction", "uploadAction", uploading && "busy")}>
-              <span>{uploading ? "Uploading..." : "Upload"}</span>
-              <input
-                className="fileInput"
-                type="file"
-                accept={fileAcceptForFlavor(dropFlavor)}
-                disabled={uploading}
-                onChange={(e) => {
-                  const file = e.currentTarget.files?.[0];
-                  if (file) uploadToBoardMedia(file, "upload");
-                  e.currentTarget.value = "";
-                }}
-              />
-            </label>
             {dropFlavor === "media" || dropFlavor === "pay" || dropFlavor === "thought" ? (
               <button
                 type="button"
-                className={clsx("mediaAction", "captureAction", uploading && "busy")}
+                className={clsx("mediaAction", "studioAction", uploading && "busy")}
                 onClick={() => onOpenCamera(dropFlavor === "thought" ? "audio" : "photo")}
                 disabled={uploading}
               >
-                Capture
+                🎬 Open Drop Studio
               </button>
-            ) : null}
+            ) : (
+              <label className={clsx("mediaAction", "uploadAction", uploading && "busy")}>
+                <span>{uploading ? "Uploading..." : "Upload"}</span>
+                <input
+                  className="fileInput"
+                  type="file"
+                  accept={fileAcceptForFlavor(dropFlavor)}
+                  disabled={uploading}
+                  onChange={(e) => {
+                    const file = e.currentTarget.files?.[0];
+                    if (file) uploadToBoardMedia(file, "upload");
+                    e.currentTarget.value = "";
+                  }}
+                />
+              </label>
+            )}
           </div>
           <div className="fileMeta fileStatus">
             {uploadedFileName ? (
@@ -1802,16 +1942,19 @@ function BoardDropConsoleFields({
 
       {dropFlavor !== "pay" && dropFlavor !== "doc" && dropFlavor !== "thought" ? (
         <div className="dcField">
-          <textarea
-            className="dcTextarea"
+          <RichTextField
+            value={dropDescRich}
+            onChange={(v) => {
+              setDropDescRich(v);
+              setDropDesc(richToPlain(v.html));
+            }}
+            ariaLabel="Description"
             placeholder={
               dropFlavor === "media"
                 ? "Add context, credit, mood, or what this drop is about..."
                 : "Add a description..."
             }
-            value={dropDesc}
-            onChange={(e) => setDropDesc(e.target.value)}
-            rows={3}
+            minHeight={66}
           />
         </div>
       ) : null}

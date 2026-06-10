@@ -4,7 +4,7 @@
 // over a switchable background: dark or white paper, OR a captured photo (so the
 // same tools let you draw directly on a Vision). Save composites bg + strokes
 // into a PNG File that flows into the drop media flow.
-// v2 scope only: no layers / blending / pressure / custom brushes.
+// Brush modes: paint (opaque), blend (soft-light mix), erase.
 
 "use client";
 
@@ -58,10 +58,12 @@ export default function BoardArtCanvas({
   const wheelRef = useRef<HTMLDivElement | null>(null);
   const wheelDraggingRef = useRef(false);
 
+  type BrushMode = "paint" | "blend" | "erase";
+
   const [color, setColor] = useState("#FF4FD8");
   const [size, setSize] = useState(8);
   const [paper, setPaper] = useState(false); // dark by default
-  const [erasing, setErasing] = useState(false);
+  const [brushMode, setBrushMode] = useState<BrushMode>("paint");
   const [light, setLight] = useState(65);
   const [wheelHue, setWheelHue] = useState(318);
   const [wheelSat, setWheelSat] = useState(100);
@@ -79,7 +81,7 @@ export default function BoardArtCanvas({
     const sat = radius > 0 ? Math.round((dist / radius) * 100) : 100;
     setWheelHue(hue);
     setWheelSat(sat);
-    setErasing(false);
+    setBrushMode("paint");
     setColor(hslToHex(hue, sat, nextLight));
   }
 
@@ -164,8 +166,16 @@ export default function BoardArtCanvas({
     drawingRef.current = true;
     const { x, y } = pointFromXY(e.clientX, e.clientY);
     lastPtRef.current = { x, y };
-    // Eraser cuts through strokes on the transparent canvas; brush paints color.
-    ctx.globalCompositeOperation = erasing ? "destination-out" : "source-over";
+    if (brushMode === "erase") {
+      ctx.globalCompositeOperation = "destination-out";
+      ctx.globalAlpha = 1;
+    } else if (brushMode === "blend") {
+      ctx.globalCompositeOperation = "soft-light";
+      ctx.globalAlpha = 0.52;
+    } else {
+      ctx.globalCompositeOperation = "source-over";
+      ctx.globalAlpha = 1;
+    }
     ctx.strokeStyle = color;
     ctx.fillStyle = color;
     ctx.lineWidth = size;
@@ -217,7 +227,10 @@ export default function BoardArtCanvas({
     }
     drawingRef.current = false;
     lastPtRef.current = null;
-    if (ctx) ctx.globalCompositeOperation = "source-over";
+    if (ctx) {
+      ctx.globalCompositeOperation = "source-over";
+      ctx.globalAlpha = 1;
+    }
   }
 
   function clearCanvas() {
@@ -306,11 +319,11 @@ export default function BoardArtCanvas({
                 key={c}
                 type="button"
                 className={`artSwatch ${
-                  !erasing && color.toLowerCase() === c.toLowerCase() ? "on" : ""
+                  brushMode !== "erase" && color.toLowerCase() === c.toLowerCase() ? "on" : ""
                 }`}
                 style={{ background: c }}
                 onClick={() => {
-                  setErasing(false);
+                  setBrushMode("paint");
                   setColor(c);
                 }}
                 aria-label={`Color ${c}`}
@@ -373,7 +386,7 @@ export default function BoardArtCanvas({
                 onChange={(e) => {
                   const l = Number(e.target.value);
                   setLight(l);
-                  setErasing(false);
+                  setBrushMode("paint");
                   setColor(hslToHex(wheelHue, wheelSat, l));
                 }}
                 aria-label="Lightness"
@@ -386,8 +399,12 @@ export default function BoardArtCanvas({
                 style={{
                   width: Math.max(6, size),
                   height: Math.max(6, size),
-                  background: erasing ? "transparent" : color,
-                  border: erasing ? "2px dashed rgba(255,255,255,0.7)" : undefined,
+                  background: brushMode === "erase" ? "transparent" : color,
+                  border: brushMode === "erase" ? "2px dashed rgba(255,255,255,0.7)" : undefined,
+                  boxShadow:
+                    brushMode === "blend"
+                      ? `0 0 14px ${color}, 0 0 6px rgba(255,255,255,0.45)`
+                      : undefined,
                 }}
                 aria-hidden
               />
@@ -406,11 +423,27 @@ export default function BoardArtCanvas({
         <div className="artActions">
           <button
             type="button"
-            className={`artGhost ${erasing ? "on" : ""}`}
-            onClick={() => setErasing((e) => !e)}
-            aria-pressed={erasing}
+            className={`artGhost ${brushMode === "paint" ? "on" : ""}`}
+            onClick={() => setBrushMode("paint")}
+            aria-pressed={brushMode === "paint"}
           >
-            {erasing ? "Erasing" : "Eraser"}
+            Paint
+          </button>
+          <button
+            type="button"
+            className={`artGhost ${brushMode === "blend" ? "on" : ""}`}
+            onClick={() => setBrushMode("blend")}
+            aria-pressed={brushMode === "blend"}
+          >
+            Blend
+          </button>
+          <button
+            type="button"
+            className={`artGhost ${brushMode === "erase" ? "on" : ""}`}
+            onClick={() => setBrushMode("erase")}
+            aria-pressed={brushMode === "erase"}
+          >
+            Eraser
           </button>
           <button type="button" className="artGhost" onClick={undo}>
             Undo

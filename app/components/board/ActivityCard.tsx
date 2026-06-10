@@ -15,10 +15,15 @@ import { fetchLinkPreview } from "@/lib/board/linkPreview";
 import { openHostedPayDropCheckout } from "@/lib/board/payCheckout";
 import { EVENTS as BOARD_STORE_EVENTS, removeDrops as removeFeedDrops } from "@/lib/boardStore";
 import { normalizeDropCustomizations } from "@/lib/board/dropCustomizations";
+import { findLocalDropById, getDropSignedUrl } from "@/lib/board/boardDropEditStore";
+import { normalizeRichText, type RichTextValue } from "@/lib/board/richText";
+import { RichText } from "./RichTextField";
 import {
   DROP_COMMENTS_UPDATED_EVENT,
   getDropCommentCount,
+  syncDropCommentCounts,
 } from "@/lib/board/dropComments";
+import { isAudioFileUrl, resolveStoredAudioSrc } from "@/lib/board/musicPlayback";
 import { supabaseBrowser } from "@/lib/supabase/browser";
 import DropCommentsDrawer from "./DropCommentsDrawer";
 import AudioDropPlayer from "./AudioDropPlayer";
@@ -510,8 +515,24 @@ export default function ActivityCard({
   // id-based ownership check (drops store the author's user_id as a uuid).
   const [currentAuthUserId, setCurrentAuthUserId] = useState("");
 
-  const title = item?.title || "Drop";
-  const body = (item as any)?.body || (item as any)?.text || "";
+  // Live overrides so an in-place edit (via the board-wide editor) shows here
+  // immediately without a reload.
+  const [titleOverride, setTitleOverride] = useState<string | null>(null);
+  const [bodyOverride, setBodyOverride] = useState<string | null>(null);
+  // Media overrides: an edit can replace the image/video/audio (new storage path)
+  // and change the overlay. The feed item itself only carries a baked image URL,
+  // so without these the card would keep showing the pre-edit media.
+  const [mediaImageOverride, setMediaImageOverride] = useState<string | null>(null);
+  const [mediaKindOverride, setMediaKindOverride] = useState<string | null>(null);
+  const [customizationsOverride, setCustomizationsOverride] =
+    useState<ReturnType<typeof normalizeDropCustomizations> | null>(null);
+  const [titleRichOverride, setTitleRichOverride] = useState<RichTextValue | null>(null);
+  const [descRichOverride, setDescRichOverride] = useState<RichTextValue | null>(null);
+  // Bumped whenever this drop is edited, to re-resolve its canonical media.
+  const [mediaRefreshTick, setMediaRefreshTick] = useState(0);
+
+  const title = titleOverride ?? (item?.title || "Drop");
+  const body = bodyOverride ?? ((item as any)?.body || (item as any)?.text || "");
   const id = String((item as any)?.id || "");
   const timeLabel = formatDropTime((item as any)?.created_at);
 
@@ -524,9 +545,18 @@ export default function ActivityCard({
   const rawMeta = (item as any)?.meta;
   const meta = rawMeta && typeof rawMeta === "object" ? rawMeta : null;
   const preview = meta?.preview ?? meta ?? null;
-  const dropCustomizations = normalizeDropCustomizations(
-    meta?.customizations ?? preview?.customizations
-  );
+  const dropCustomizations =
+    customizationsOverride ??
+    normalizeDropCustomizations(meta?.customizations ?? preview?.customizations);
+  // Comments are keyed to the canonical drop id (not the feed activity row id),
+  // so they save and load consistently across the feed, grid, and profile.
+  const commentDropId = metaString(meta?.dropId, meta?.originalDropId, (item as any)?.id);
+
+  // Inline-formatted title/description (edit override → feed meta → none).
+  const titleRich =
+    titleRichOverride ?? normalizeRichText(meta?.titleRich ?? preview?.titleRich);
+  const descRich =
+    descRichOverride ?? normalizeRichText(meta?.descriptionRich ?? preview?.descriptionRich);
   const authorUserId = String((item as any)?.user_id || "");
   const authorName = metaString(
     meta?.authorName,
@@ -555,13 +585,203 @@ export default function ActivityCard({
     meta?.avatarDataUrl,
     meta?.recipientAvatar
   );
-  const isCurrentUserDrop =
-    item?.kind === "board_drop" &&
-    (Boolean(authorUserId) &&
+  const ownsActivity =
+    Boolean(authorUserId) &&
     Boolean(currentAuthUserId) &&
     authorUserId === currentAuthUserId
       ? true
-      : activityOwnedByCurrentUser(item, meta, viewerIdentity));
+      : activityOwnedByCurrentUser(item, meta, viewerIdentity);
+  const isCurrentUserDrop = item?.kind === "board_drop" && ownsActivity;
+  // Drops AND announcements the viewer owns can be managed (edit + remove).
+  const canManageDrop =
+    ownsActivity && (item?.kind === "board_drop" || item?.kind === "announcement");
+
+  // Stored-media coordinates can live on the feed item's `meta.preview` (the
+  // shape the card signs its image from) OR directly on `meta`. Resolve from
+  // both so detection matches what actually renders.
+  const mediaBucket = metaString(meta?.preview?.bucket, meta?.bucket);
+  const mediaStoragePath = metaString(meta?.preview?.storagePath, meta?.storagePath);
+
+  // Feed `board_drop` items don't carry bucket/storagePath — only a rendered
+  // media URL (meta.mediaUrl / meta.preview.image / image_url). Treat that URL
+  // as the media source, but ONLY for genuinely media-bearing drops so a link
+  // or news thumbnail never counts. Drop Studio loads from this URL when no
+  // storage path exists, then re-uploads on save.
+  const feedMediaKind = metaString(meta?.mediaKind, meta?.preview?.mediaKind);
+  const feedDropType = String(meta?.dropType ?? item?.kind ?? "").toLowerCase();
+  const isMediaBearingDrop =
+    feedDropType.includes("media") ||
+    feedDropType.includes("pay") ||
+    feedDropType.includes("music") ||
+    feedDropType.includes("audio") ||
+    Boolean(feedMediaKind);
+  const mediaUrl = isMediaBearingDrop
+    ? metaString(
+        meta?.mediaUrl,
+        feedMediaKind === "audio" ? "" : meta?.preview?.image,
+        feedMediaKind === "audio" ? "" : (item as any)?.image_url
+      )
+    : "";
+
+  // Reconstruct a drop record from the feed item so it stays editable even when
+  // it isn't in the local cache or server list yet. Shared by the Edit and Drop
+  // Studio buttons; the editor prefers the authoritative record and only uses
+  // this as a fallback.
+  function buildEditableDrop() {
+    if (item?.kind === "announcement") {
+      const activityId = id;
+      const annMedia =
+        announcementMediaUrl ||
+        resolvedPreviewImage ||
+        (typeof (item as any)?.image_url === "string" ? (item as any).image_url : "") ||
+        "";
+      const annKind =
+        announcementMediaType === "video"
+          ? "video"
+          : announcementMediaType === "image" || isLikelyImageUrl(annMedia)
+            ? "image"
+            : undefined;
+      const fallbackDrop = {
+        id: activityId,
+        title,
+        type: "Media" as const,
+        createdAt: Date.parse((item as any)?.created_at) || Date.now(),
+        description: body || undefined,
+        mediaUrl: annMedia || undefined,
+        mediaKind: annKind,
+        customizations: dropCustomizations,
+        editSource: "announcement" as const,
+        sourceActivityId: activityId,
+      };
+      return { dropId: activityId, fallbackDrop };
+    }
+
+    const dropId = metaString(meta?.dropId, meta?.originalDropId, id);
+    const dt = String(meta?.dropType ?? item?.kind ?? "").toLowerCase();
+    const mappedType =
+      dt.includes("thought") ? "Thought"
+      : dt.includes("pay") ? "Pay"
+      : dt.includes("music") || dt.includes("audio") ? "Music"
+      : dt.includes("youtube") ? "YouTube"
+      : dt.includes("news") ? "News"
+      : dt.includes("doc") ? "Doc"
+      : dt === "link" ? "Link"
+      : "Media";
+    const fallbackDrop = {
+      id: dropId,
+      title,
+      type: mappedType,
+      createdAt: Date.parse((item as any)?.created_at) || Date.now(),
+      description: metaString(meta?.description) || body || undefined,
+      thoughtText: metaString(meta?.thoughtText) || undefined,
+      url: metaString(meta?.url) || href || undefined,
+      linkUrl: metaString(meta?.linkUrl) || undefined,
+      bucket: mediaBucket || undefined,
+      storagePath: mediaStoragePath || undefined,
+      mediaUrl: mediaUrl || undefined,
+      mediaKind: (meta?.mediaKind ?? meta?.preview?.mediaKind) || undefined,
+      mime: metaString(meta?.mime, meta?.preview?.mime) || undefined,
+      fileName: metaString(meta?.fileName, meta?.preview?.fileName) || undefined,
+      priceCents: typeof meta?.priceCents === "number" ? meta.priceCents : undefined,
+      paymentLink: metaString(meta?.paymentLink) || undefined,
+      visibility: (meta?.visibility as any) || undefined,
+      customizations: dropCustomizations,
+      editSource: "board_drop" as const,
+    };
+    return { dropId, fallbackDrop };
+  }
+
+  function openDropStudioEditor() {
+    try {
+      const { dropId, fallbackDrop } = buildEditableDrop();
+      const dropMedia = fallbackDrop as {
+        mediaUrl?: string;
+        bucket?: string;
+        storagePath?: string;
+      };
+      const hasStudioMedia = !!(
+        dropMedia.mediaUrl || (dropMedia.bucket && dropMedia.storagePath)
+      );
+      const eventName = hasStudioMedia ? "board:drop:studio" : "board:drop:edit";
+      window.dispatchEvent(
+        new CustomEvent(eventName, {
+          detail: { dropId, drop: fallbackDrop },
+        })
+      );
+    } catch {
+      // ignore
+    }
+  }
+
+  // Reflect an in-place edit on this card without waiting for a feed reload.
+  useEffect(() => {
+    const myId = metaString(meta?.dropId, meta?.originalDropId, id);
+    function onUpdated(e: Event) {
+      const detail = (e as CustomEvent).detail || {};
+      if (!detail.dropId || detail.dropId !== myId) return;
+      const d = detail.drop || {};
+      if (typeof d.title === "string") setTitleOverride(d.title);
+      const nextBody =
+        d.type === "Thought" ? d.thoughtText ?? d.description : d.description;
+      if (typeof nextBody === "string") setBodyOverride(nextBody);
+
+      // An edit re-uploads to a NEW storage path and may change the overlay.
+      // Re-run the canonical-media effect (which reads the freshly-persisted
+      // local drop) so the feed reflects drawings / replaced media / overlay.
+      setMediaRefreshTick((t) => t + 1);
+    }
+    window.addEventListener("board:drop:updated", onUpdated as EventListener);
+    return () => window.removeEventListener("board:drop:updated", onUpdated as EventListener);
+  }, [meta, id]);
+
+  // Feed activity items bake the media URL at creation time, so an edit (new
+  // storage path / new overlay) never shows through the stale feed payload.
+  // Resolve the drop's CURRENT media from the canonical local boardDrops by id
+  // and sign a fresh URL — on mount and whenever this drop is edited. This makes
+  // the feed match the editor (and survives reloads).
+  useEffect(() => {
+    const canonicalDropId = metaString(meta?.dropId, meta?.originalDropId);
+    if (!canonicalDropId) return;
+    let cancelled = false;
+
+    const canonical = findLocalDropById(canonicalDropId);
+    if (!canonical) return;
+
+    if (canonical.mediaKind) setMediaKindOverride(canonical.mediaKind);
+    if ("customizations" in canonical) {
+      setCustomizationsOverride(normalizeDropCustomizations(canonical.customizations) ?? null);
+    }
+    if ("titleRich" in canonical) {
+      setTitleRichOverride(normalizeRichText(canonical.titleRich) ?? null);
+    }
+    if ("descriptionRich" in canonical) {
+      setDescRichOverride(normalizeRichText(canonical.descriptionRich) ?? null);
+    }
+
+    (async () => {
+      try {
+        if (canonical.bucket && canonical.storagePath) {
+          const url = await getDropSignedUrl(canonical.bucket, canonical.storagePath, 60 * 45);
+          if (!cancelled && url) {
+            setMediaImageOverride(url);
+            setSignedPreviewImage(url);
+          }
+        } else if (canonical.mediaUrl) {
+          if (!cancelled) {
+            setMediaImageOverride(canonical.mediaUrl);
+            setSignedPreviewImage(canonical.mediaUrl);
+          }
+        }
+      } catch {
+        // keep the existing feed image if we can't resolve the canonical media
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [meta, mediaRefreshTick]);
+
   const authorGlow =
     colorFromAura(meta?.authorAuraColor) ||
     colorFromAura(meta?.auraColor) ||
@@ -573,6 +793,9 @@ export default function ActivityCard({
       : Math.max(0.22, Math.min(1, authorProfile.auraIntensity / 100));
   const isPushed = Boolean(meta?.isPushed);
   const pushedByName = metaString(meta?.pushedByName, meta?.pushedByUsername, "Someone");
+  const displayAuraPower = isPushed
+    ? Math.min(1, authorAuraPower + 0.18)
+    : authorAuraPower;
   const announcementVibeLabel =
     item?.kind === "announcement" ? formatAnnouncementVibe(meta?.announcement_vibe) : "";
   const previewImage =
@@ -592,7 +815,7 @@ export default function ActivityCard({
     typeof preview?.bucket === "string" && preview.bucket ? preview.bucket : "";
   const previewStoragePath =
     typeof preview?.storagePath === "string" && preview.storagePath ? preview.storagePath : "";
-  const mediaKind = metaString(meta?.mediaKind, preview?.mediaKind);
+  const mediaKind = mediaKindOverride || metaString(meta?.mediaKind, preview?.mediaKind);
   const announcementMediaUrl = metaString(meta?.announcement_media_url);
   const announcementMediaType = metaString(meta?.announcement_media_type);
   const announcementImageUrl =
@@ -600,12 +823,21 @@ export default function ActivityCard({
       ? announcementMediaUrl
       : "";
   const resolvedPreviewImage =
+    mediaImageOverride ||
     signedPreviewImage ||
     resolveLinkPreviewImage(href, previewImage || announcementImageUrl) ||
     hydratedImage ||
     "";
   const isStoredVideoDrop = mediaKind === "video" && !!signedPreviewImage;
-  const isStoredAudioDrop = mediaKind === "audio" && !!signedPreviewImage;
+  const storedAudioSrc = resolveStoredAudioSrc({
+    mediaKind,
+    dropType: feedDropType || metaString(meta?.dropType, meta?.drop_flavor),
+    signedUrl: signedPreviewImage,
+    mediaUrl: metaString(meta?.mediaUrl),
+    href: href && isAudioFileUrl(href) ? href : "",
+    hasStoragePath: !!(previewBucket && previewStoragePath),
+  });
+  const isStoredAudioDrop = !!storedAudioSrc;
   const showAnnouncementImage =
     item?.kind === "announcement" &&
     !!resolvedPreviewImage &&
@@ -666,21 +898,27 @@ export default function ActivityCard({
   }, [id]);
 
   useEffect(() => {
-    const syncCommentCount = () => setCommentCount(getDropCommentCount(id));
+    const syncCommentCount = () => setCommentCount(getDropCommentCount(commentDropId));
     syncCommentCount();
+    // Pull the authoritative count from Supabase so the feed shows it without
+    // opening the drawer.
+    void syncDropCommentCounts([commentDropId]).then(syncCommentCount).catch(() => {});
     window.addEventListener(DROP_COMMENTS_UPDATED_EVENT, syncCommentCount as EventListener);
     window.addEventListener("storage", syncCommentCount as EventListener);
     return () => {
       window.removeEventListener(DROP_COMMENTS_UPDATED_EVENT, syncCommentCount as EventListener);
       window.removeEventListener("storage", syncCommentCount as EventListener);
     };
-  }, [id]);
+  }, [commentDropId]);
 
   useEffect(() => {
     let cancelled = false;
-    setSignedPreviewImage("");
 
+    // Only clear/sign when there's a storage path to sign. Otherwise leave
+    // signedPreviewImage alone so the canonical-media effect below (which owns
+    // the image for feed drops) isn't clobbered.
     if (!previewBucket || !previewStoragePath) return;
+    setSignedPreviewImage("");
 
     async function signPreviewImage() {
       try {
@@ -797,7 +1035,27 @@ export default function ActivityCard({
     priceCents > 0;
   const priceLabel = formatPriceFromCents(priceCents);
 
-  const embed = useMemo(() => computeEmbed(href), [href]);
+  // The feed item's `href` (and thus the embedded media URL) is baked when the
+  // drop is created, so an edit never reaches it. When we've resolved the drop's
+  // CURRENT media from the canonical store (mediaImageOverride), use that as the
+  // embedded media so edits — drawings, replaced photo/video — show in the feed.
+  const embed = useMemo(() => {
+    if (
+      mediaImageOverride &&
+      (mediaKindOverride === "image" ||
+        mediaKindOverride === "video" ||
+        mediaKindOverride === "audio")
+    ) {
+      const kind: EmbedKind =
+        mediaKindOverride === "video"
+          ? "video"
+          : mediaKindOverride === "audio"
+            ? "audio"
+            : "image";
+      return { kind, url: mediaImageOverride };
+    }
+    return computeEmbed(href);
+  }, [href, mediaImageOverride, mediaKindOverride]);
   const external = href ? isExternalHref(href) : false;
 
   // Host + favicon for the universal link-drop cover (shown when a link has no
@@ -859,8 +1117,22 @@ export default function ActivityCard({
         : "Open attachment";
   const compactSpotify = !!compact && embed.kind === "spotify";
 
-  // Show embed unless user forces fallback or embed fails
-  const showEmbed = !!embed.url && !embedFailed && embed.kind !== "none";
+  // Board vision/media drops carry a direct file URL in `href` — render those
+  // full-width (like the profile drop grid), not as a compact side embed.
+  const showBoardDirectMedia =
+    !!embed.url &&
+    !embedFailed &&
+    (embed.kind === "image" || embed.kind === "video") &&
+    !(item?.kind === "announcement" && showAnnouncementImage) &&
+    (item?.kind === "board_drop" || item?.kind === "announcement" || isPayDrop);
+
+  // Show rich embed (YouTube, Spotify, etc.) unless user forces fallback or embed fails
+  const showRichEmbed =
+    !!embed.url &&
+    !embedFailed &&
+    embed.kind !== "none" &&
+    !showBoardDirectMedia &&
+    !isStoredAudioDrop;
 
   function signal(folder: "pass" | "pin" | "push") {
     if (!id) return;
@@ -949,7 +1221,7 @@ export default function ActivityCard({
   }
 
   async function removeDropFromBoard() {
-    if (!id || !isCurrentUserDrop) return;
+    if (!id || !canManageDrop) return;
     if (isRemovingDrop) return;
     if (!window.confirm("Remove this drop from your Board?")) return;
 
@@ -1060,7 +1332,7 @@ export default function ActivityCard({
       style={
         {
           "--author-glow": authorGlow,
-          "--author-aura-power": String(authorAuraPower),
+          "--author-aura-power": String(displayAuraPower),
           "--reaction-aura": userAuraColor || fallbackAuraColor,
         } as React.CSSProperties
       }
@@ -1077,7 +1349,7 @@ export default function ActivityCard({
           <div className="metaRow">
             <RemovableDropBadge
               label={kindLabel}
-              canRemove={isCurrentUserDrop}
+              canRemove={canManageDrop}
               onRemove={removeDropFromBoard}
               isRemoving={isRemovingDrop}
             />
@@ -1088,7 +1360,9 @@ export default function ActivityCard({
             {isPayDrop && priceLabel ? <span className="metaBadge">{priceLabel}</span> : null}
             {timeLabel ? <span className="metaBadge timeBadge">{timeLabel}</span> : null}
           </div>
-          <div className="title">{title}</div>
+          <div className="title">
+            <RichText as="span" value={titleRich} plain={title} />
+          </div>
         </div>
 
         <div className="authorMark" aria-label={`Drop by ${authorHandle || authorName}`}>
@@ -1112,7 +1386,11 @@ export default function ActivityCard({
         </div>
       </div>
 
-      {body ? <div className="body">{body}</div> : null}
+      {body ? (
+        <div className="body">
+          <RichText as="span" value={descRich} plain={body} />
+        </div>
+      ) : null}
 
       {isPayDrop ? (
         <div className="dropActions" aria-label="Pay Drop actions">
@@ -1128,7 +1406,7 @@ export default function ActivityCard({
       ) : null}
 
       {/* ✅ EMBED (now media-aware) */}
-      {showEmbed ? (
+      {showRichEmbed ? (
         <div className={clsx("embed", embed.kind)}>
           {embed.kind === "image" && (
             <div className="mediaFrame">
@@ -1210,13 +1488,40 @@ export default function ActivityCard({
 
           {embed.kind === "spotify" ? (
             <div className="embedNote">
-              Spotify’s web embed may play a preview clip in some browser sessions. Use the link above for full playback in Spotify.
+              Streaming embeds may play a preview clip. Upload the audio file as a Music Drop for full in-Board playback, or open the link above in Spotify.
             </div>
           ) : null}
         </div>
       ) : null}
 
-      {!showEmbed && showAnnouncementImage ? (
+      {showBoardDirectMedia && embed.kind === "video" ? (
+        <div className="mediaFrame storedVideoFrame">
+          <video
+            className="vid"
+            src={embed.url}
+            controls
+            playsInline
+            preload="metadata"
+            onError={() => setEmbedFailed(true)}
+          />
+          <DropStudioOverlay customizations={dropCustomizations} />
+        </div>
+      ) : null}
+
+      {showBoardDirectMedia && embed.kind === "image" ? (
+        <div className="activityImagePreview">
+          <img
+            className="activityImage"
+            src={embed.url}
+            alt={title || "Board drop image"}
+            loading="lazy"
+            onError={() => setEmbedFailed(true)}
+          />
+          <DropStudioOverlay customizations={dropCustomizations} />
+        </div>
+      ) : null}
+
+      {!showRichEmbed && !showBoardDirectMedia && showAnnouncementImage ? (
         <div
           className={clsx("activityImagePreview announcementMedia", announcementDrag && "dragging")}
           style={
@@ -1244,7 +1549,8 @@ export default function ActivityCard({
         </div>
       ) : null}
 
-      {!showEmbed &&
+      {!showRichEmbed &&
+      !showBoardDirectMedia &&
       !showAnnouncementImage &&
       href &&
       resolvedPreviewImage &&
@@ -1271,7 +1577,7 @@ export default function ActivityCard({
         </a>
       ) : null}
 
-      {!showEmbed && isStoredVideoDrop ? (
+      {!showRichEmbed && !showBoardDirectMedia && isStoredVideoDrop ? (
         <div className="mediaFrame storedVideoFrame">
           <video
             className="vid"
@@ -1285,14 +1591,15 @@ export default function ActivityCard({
         </div>
       ) : null}
 
-      {!showEmbed && isStoredAudioDrop ? (
+      {!showRichEmbed && !showBoardDirectMedia && isStoredAudioDrop ? (
         <div className="mediaFrame storedAudioFrame">
           <div className="audioLabel">{isPayDrop ? "Audio" : "Full song"}</div>
-          <AudioDropPlayer src={signedPreviewImage} onError={() => setEmbedFailed(true)} />
+          <AudioDropPlayer src={storedAudioSrc} onError={() => setEmbedFailed(true)} />
         </div>
       ) : null}
 
-      {!showEmbed &&
+      {!showRichEmbed &&
+      !showBoardDirectMedia &&
       resolvedPreviewImage &&
       !showAnnouncementImage &&
       (!href || isPayDrop) &&
@@ -1311,7 +1618,8 @@ export default function ActivityCard({
 
       {/* Universal cover fallback: any external link with no real image still
           gets a branded thumbnail card instead of a bare URL. */}
-      {!showEmbed &&
+      {!showRichEmbed &&
+      !showBoardDirectMedia &&
       href &&
       external &&
       !resolvedPreviewImage &&
@@ -1360,7 +1668,7 @@ export default function ActivityCard({
             </div>
           </div>
         </a>
-      ) : !showEmbed && href && !resolvedPreviewImage ? (
+      ) : !showRichEmbed && !showBoardDirectMedia && href && !resolvedPreviewImage ? (
         <a
           className="href"
           href={href}
@@ -1421,12 +1729,26 @@ export default function ActivityCard({
           <span className="lbl">Comment{commentCount ? ` ${commentCount}` : ""}</span>
         </button>
 
+        {canManageDrop ? (
+          <button
+            type="button"
+            className="rbtn studiodrop"
+            onClick={openDropStudioEditor}
+            title="Edit this drop in Drop Studio Editor"
+          >
+            <span className="glyph" aria-hidden>
+              🎬
+            </span>
+            <span className="lbl">Drop Studio Editor</span>
+          </button>
+        ) : null}
+
       </div>
 
       <DropCommentsDrawer
         open={commentsOpen}
         onClose={() => setCommentsOpen(false)}
-        dropId={id}
+        dropId={commentDropId}
         dropTitle={title}
       />
 
@@ -1457,6 +1779,27 @@ export default function ActivityCard({
             0 0 18px rgba(255, 221, 87, 0.22),
             inset 0 0 18px rgba(255, 221, 87, 0.08),
             0 16px 40px rgba(0, 0, 0, 0.1);
+          animation: pushedAuraPulse 2.8s ease-in-out infinite;
+        }
+        @keyframes pushedAuraPulse {
+          0%,
+          100% {
+            box-shadow:
+              0 0 18px rgba(255, 221, 87, 0.22),
+              inset 0 0 18px rgba(255, 221, 87, 0.08),
+              0 16px 40px rgba(0, 0, 0, 0.1);
+          }
+          50% {
+            box-shadow:
+              0 0 28px rgba(255, 221, 87, 0.38),
+              inset 0 0 24px rgba(255, 221, 87, 0.14),
+              0 20px 48px rgba(255, 180, 40, 0.12);
+          }
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .pushedDrop {
+            animation: none;
+          }
         }
 
         /* Signal amplification: a brief sonar burst in the user's aura when a
@@ -1864,18 +2207,21 @@ export default function ActivityCard({
           object-fit: contain;
         }
 
-        /* Standard Board Drop frame (Drop Studio Vision/Art) so the feed reads
-           as a clean, consistent column — announcements keep their banner. */
+        /* Vision/media drops: full-width frame, natural aspect ratio — tile fits
+           the media instead of cropping it. Image stays centered in the card. */
         .activityImagePreview:not(.announcementMedia) {
-          aspect-ratio: 4 / 5;
-          width: min(100%, calc(72vh * 4 / 5));
+          width: 100%;
           margin: 12px auto 0;
+          display: flex;
+          justify-content: center;
+          align-items: center;
         }
         .activityImagePreview:not(.announcementMedia) .activityImage {
           width: 100%;
-          height: 100%;
+          height: auto;
           max-height: none;
-          object-fit: cover;
+          margin: 0 auto;
+          object-fit: contain;
         }
 
         .announcementMedia {
@@ -1922,13 +2268,15 @@ export default function ActivityCard({
 
         .storedVideoFrame {
           margin-top: 12px;
-          /* Match the standard Board Drop frame so video drops sit uniform. */
-          aspect-ratio: 4 / 5;
-          width: min(100%, calc(72vh * 4 / 5));
+          width: 100%;
+          max-width: 100%;
           margin-left: auto;
           margin-right: auto;
           overflow: hidden;
           border-radius: 16px;
+        }
+        .mediaFrame.storedVideoFrame {
+          width: 100%;
         }
 
         .storedAudioFrame {
@@ -1961,10 +2309,10 @@ export default function ActivityCard({
 
         .vid {
           width: 100%;
-          height: 100%;
+          height: auto;
           display: block;
           background: #000;
-          object-fit: cover;
+          object-fit: contain;
         }
 
         .aud {
@@ -2093,6 +2441,33 @@ export default function ActivityCard({
 
         /* Per-action hovers now unified under .rbtn:hover so the active aura
            tints Pass/Pin/Push/Comment identically. */
+
+        .rbtn.editdrop {
+          color: #b07bff;
+          border-color: rgba(160, 110, 255, 0.4);
+        }
+        .rbtn.editdrop .glyph {
+          font-size: 16px;
+          line-height: 1;
+        }
+        .rbtn.editdrop:hover {
+          color: #c79bff;
+          border-color: rgba(160, 110, 255, 0.7);
+          box-shadow: 0 0 16px rgba(160, 110, 255, 0.25);
+        }
+        .rbtn.studiodrop {
+          color: #ff6bbf;
+          border-color: rgba(255, 90, 170, 0.42);
+        }
+        .rbtn.studiodrop .glyph {
+          font-size: 15px;
+          line-height: 1;
+        }
+        .rbtn.studiodrop:hover {
+          color: #ff8fd0;
+          border-color: rgba(255, 90, 170, 0.72);
+          box-shadow: 0 0 16px rgba(255, 90, 170, 0.28);
+        }
 
         .remove:hover {
           border-color: rgba(0, 0, 0, 0.18);

@@ -11,9 +11,15 @@ import type { DropCustomization } from "@/lib/board/dropCustomizations";
 import { DROP_PAD_ASSETS_UPDATED_EVENT } from "@/lib/board/dropPadAssets";
 import { readPayDrops } from "@/lib/board/paydrops";
 import { readBoardProjects } from "@/lib/board/projects";
-import { getLocalActivity, type BoardActivity } from "@/lib/board/activity";
-import { BOARD_DROP_SIGNAL_EVENT, type BoardDropSignal } from "@/lib/board/dropSignals";
-import BoardWhispers, { sampleBoardWhispers } from "@/app/components/board/BoardWhispers";
+import { BOARD_DROP_SIGNAL_EVENT } from "@/lib/board/dropSignals";
+import { deriveBoardSignals, type BoardSignal } from "@/lib/board/boardSignals";
+import {
+  buildActivityChannelItems,
+  fetchActivityChannelItems,
+  type ActivityChannelItem,
+} from "@/lib/board/activityChannel";
+import DropPadActivityChannel from "@/app/components/board/DropPadActivityChannel";
+import DropPadBucketBrain from "@/app/components/board/DropPadBucketBrain";
 
 type DropRoute =
   | "board"
@@ -45,39 +51,6 @@ export type DropBubble = {
 
 type AssetKind = "media" | "music" | "youtube" | "link" | "doc" | "note";
 type DropDestination = "assets" | "portfolio" | "projects";
-
-function activitySignalLabel(s: BoardDropSignal) {
-  switch (s.type) {
-    case "thought_drop_created":
-      return `New thought · ${s.title ?? "Drop"}`;
-    case "project_drop_created":
-      return `Project drop · ${s.title ?? "opened"}`;
-    case "drop_commented":
-      return `New comment on ${s.title ?? "a drop"}`;
-    case "drop_pushed":
-      return `Drop pushed · ${s.title ?? ""}`;
-    case "drop_funded":
-      return `Pay Drop funded`;
-    default:
-      return `New drop · ${s.title ?? ""}`;
-  }
-}
-
-function activityRelTime(iso: string) {
-  const diff = Date.now() - new Date(iso).getTime();
-  const m = Math.floor(diff / 60000);
-  if (!Number.isFinite(m) || m < 1) return "just now";
-  if (m < 60) return `${m}m ago`;
-  const h = Math.floor(m / 60);
-  if (h < 24) return `${h}h ago`;
-  return `${Math.floor(h / 24)}d ago`;
-}
-
-function activityChip(item: BoardActivity) {
-  const meta = item.meta ?? {};
-  const t = String(meta.dropType ?? meta.drop_flavor ?? item.kind ?? "drop");
-  return t.replace(/_/g, " ");
-}
 
 type AssetItem = {
   id: string;
@@ -1154,9 +1127,70 @@ export default function DropPadOS({
     projects: number;
   }>({ status: "unemployed", job: "", payDrops: 0, projects: 0 });
 
-  // ✅ Activity Channel (the spatial page reached by swiping UP from the orb home).
-  const [activityDrops, setActivityDrops] = useState<BoardActivity[]>([]);
-  const [activitySignals, setActivitySignals] = useState<BoardDropSignal[]>([]);
+  // ✅ Activity Channel (signal waterfall) + Bucket Brain signals.
+  const [activityItems, setActivityItems] = useState<ActivityChannelItem[]>([]);
+  const [signals, setSignals] = useState<BoardSignal[]>([]);
+
+  // Vertical spatial navigation: orb "home" ↔ "activity" (up) ↔ "bucketBrain" (down).
+  const [verticalSpace, setVerticalSpace] = useState<"home" | "activity" | "bucketBrain">("home");
+  const spaceCooldownRef = useRef(0);
+  const menuTouchRef = useRef<{ x: number; y: number } | null>(null);
+  const activityScrollRef = useRef<HTMLDivElement | null>(null);
+
+  function navVertical(space: "home" | "activity" | "bucketBrain") {
+    const now = Date.now();
+    if (now - spaceCooldownRef.current < 480) return;
+    spaceCooldownRef.current = now;
+    setVerticalSpace(space);
+  }
+
+  function activityAtBottom() {
+    const el = activityScrollRef.current;
+    if (!el) return true;
+    return el.scrollTop + el.clientHeight >= el.scrollHeight - 4;
+  }
+  function activityScrollable() {
+    const el = activityScrollRef.current;
+    return el ? el.scrollHeight - el.clientHeight > 4 : false;
+  }
+
+  function onMenuWheel(e: React.WheelEvent) {
+    if (Math.abs(e.deltaY) < 22) return;
+    const up = e.deltaY < 0;
+    if (verticalSpace === "home") {
+      navVertical(up ? "activity" : "bucketBrain"); // up → Activity, down → Bucket Brain
+    } else if (verticalSpace === "activity") {
+      // The "Activity Channel" gateway sits at the bottom — scroll down there to
+      // drop back to Orb Home (or any down when there's nothing to scroll).
+      if ((!up && activityAtBottom()) || !activityScrollable()) navVertical("home");
+    } else if (verticalSpace === "bucketBrain") {
+      if (up) navVertical("home"); // leave the lower layer by scrolling up
+    }
+  }
+
+  function onMenuTouchStart(e: React.TouchEvent) {
+    const t = e.touches[0];
+    menuTouchRef.current = { x: t.clientX, y: t.clientY };
+  }
+
+  function onMenuTouchEnd(e: React.TouchEvent) {
+    const s = menuTouchRef.current;
+    menuTouchRef.current = null;
+    if (!s) return;
+    const t = e.changedTouches[0];
+    const dx = t.clientX - s.x;
+    const dy = t.clientY - s.y;
+    if (Math.abs(dy) < 50 || Math.abs(dy) <= Math.abs(dx)) return; // need a vertical swipe
+    const swipeUp = dy < 0;
+    const swipeDown = dy > 0;
+    if (verticalSpace === "home") {
+      navVertical(swipeUp ? "activity" : "bucketBrain");
+    } else if (verticalSpace === "activity") {
+      if ((swipeDown && activityAtBottom()) || !activityScrollable()) navVertical("home");
+    } else if (verticalSpace === "bucketBrain") {
+      if (swipeUp) navVertical("home");
+    }
+  }
 
   // ✅ Work Calls
   const [workCalls, setWorkCalls] = useState<WorkCallItem[]>([]);
@@ -1328,6 +1362,33 @@ export default function DropPadOS({
       window.removeEventListener("storage", load);
       window.removeEventListener("focus", load);
       window.removeEventListener("board:projects:updated", load as EventListener);
+    };
+  }, [osOn, userId]);
+
+  // Load the Activity Channel waterfall + Bucket Brain signals.
+  useEffect(() => {
+    if (!osOn) return;
+    let cancelled = false;
+    const refresh = () => {
+      // Fast local fallback, then replace with real Supabase-backed signals.
+      setActivityItems(buildActivityChannelItems(userId));
+      setSignals(deriveBoardSignals(userId));
+      void fetchActivityChannelItems(userId).then((items) => {
+        if (!cancelled && items.length) setActivityItems(items);
+      });
+    };
+    refresh();
+    const onEvt = () => refresh();
+    window.addEventListener("board:activity:new", onEvt as EventListener);
+    window.addEventListener("storage", onEvt);
+    window.addEventListener(BOARD_DROP_SIGNAL_EVENT, onEvt as EventListener);
+    window.addEventListener("board:drop-comments:updated", onEvt as EventListener);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("board:activity:new", onEvt as EventListener);
+      window.removeEventListener("storage", onEvt);
+      window.removeEventListener(BOARD_DROP_SIGNAL_EVENT, onEvt as EventListener);
+      window.removeEventListener("board:drop-comments:updated", onEvt as EventListener);
     };
   }, [osOn, userId]);
 
@@ -2055,8 +2116,14 @@ export default function DropPadOS({
                 </div>
               </div>
 
-              {/* MENU — spatial pager: orb home (page 1) ↔ Profile Work Board (page 2) */}
+              {/* MENU — spatial nav: orb home ↔ Work Board (→) and Activity Channel (↑) */}
               {mode === "menu" && (
+                <div
+                  className="osMenuRoot"
+                  onWheel={onMenuWheel}
+                  onTouchStart={onMenuTouchStart}
+                  onTouchEnd={onMenuTouchEnd}
+                >
                 <div
                   className="osPager"
                   aria-label="Spatial home — swipe between Drops and your Profile Work Board"
@@ -2129,7 +2196,7 @@ export default function DropPadOS({
                   })}
 
                   <div className="absolute bottom-5 left-6 right-6 text-center text-xs text-white/40">
-                    Tap a bubble to open a screen · swipe&nbsp;→&nbsp;for your Profile Work Board
+                    Tap a bubble · swipe&nbsp;↑&nbsp;Activity · swipe&nbsp;→&nbsp;Work Board · swipe&nbsp;↓&nbsp;Bucket Brain
                   </div>
                     </div>
                   </section>
@@ -2179,6 +2246,28 @@ export default function DropPadOS({
                       <div className="pwbHint">← swipe back to your Drops</div>
                     </div>
                   </section>
+                  </div>
+
+                  {/* ACTIVITY CHANNEL — floating upper layer (swipe / scroll up) */}
+                  <div
+                    className={clsx("osActivityLayer", verticalSpace === "activity" && "open")}
+                    aria-hidden={verticalSpace !== "activity"}
+                  >
+                    <DropPadActivityChannel
+                      active={verticalSpace === "activity"}
+                      items={activityItems}
+                      onReturn={() => navVertical("home")}
+                      scrollRef={activityScrollRef}
+                    />
+                  </div>
+
+                  {/* BUCKET BRAIN — lower layer (swipe / scroll down) */}
+                  <div
+                    className={clsx("osBucketLayer", verticalSpace === "bucketBrain" && "open")}
+                    aria-hidden={verticalSpace !== "bucketBrain"}
+                  >
+                    <DropPadBucketBrain onReturn={() => navVertical("home")} signals={signals} />
+                  </div>
                 </div>
               )}
 
@@ -2567,6 +2656,229 @@ export default function DropPadOS({
       />
 
       <style jsx>{`
+        .osMenuRoot {
+          position: relative;
+          overflow: hidden;
+        }
+
+        /* Activity Channel — a glowing floating upper layer that slides down over
+           the orb home when you swipe/scroll up, and back up to return. */
+        .osActivityLayer {
+          position: absolute;
+          inset: 0;
+          z-index: 26;
+          transform: translateY(-100%);
+          transition: transform 460ms cubic-bezier(0.22, 0.61, 0.36, 1);
+          pointer-events: none;
+          display: flex;
+          flex-direction: column;
+          background:
+            radial-gradient(circle at 20% 0%, rgba(126, 226, 255, 0.18), transparent 42%),
+            radial-gradient(circle at 86% 8%, rgba(217, 70, 239, 0.14), transparent 40%),
+            linear-gradient(180deg, rgba(6, 12, 22, 0.92), rgba(4, 8, 16, 0.97));
+          backdrop-filter: blur(16px) saturate(1.1);
+          -webkit-backdrop-filter: blur(16px) saturate(1.1);
+          box-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.06);
+        }
+        .osActivityLayer.open {
+          transform: translateY(0);
+          pointer-events: auto;
+        }
+
+        /* Bucket Brain — lower layer that rises from below on swipe/scroll down. */
+        .osBucketLayer {
+          position: absolute;
+          inset: 0;
+          z-index: 26;
+          transform: translateY(100%);
+          transition: transform 460ms cubic-bezier(0.22, 0.61, 0.36, 1);
+          pointer-events: none;
+          overflow: hidden;
+          background:
+            radial-gradient(circle at 20% 100%, rgba(163, 230, 53, 0.16), transparent 44%),
+            linear-gradient(180deg, rgba(4, 8, 16, 0.97), rgba(6, 12, 22, 0.94));
+          backdrop-filter: blur(16px) saturate(1.1);
+          -webkit-backdrop-filter: blur(16px) saturate(1.1);
+        }
+        .osBucketLayer.open {
+          transform: translateY(0);
+          pointer-events: auto;
+        }
+        .osActivityScroll {
+          flex: 1 1 auto;
+          min-height: 0;
+          overflow-y: auto;
+          padding: 20px 16px 30px;
+          scrollbar-width: none;
+        }
+        .osActivityScroll::-webkit-scrollbar {
+          display: none;
+        }
+        .actTitleWrap {
+          text-align: center;
+          display: grid;
+          gap: 4px;
+          padding: 6px 0 14px;
+        }
+        .actEyebrow {
+          font-size: 10px;
+          letter-spacing: 0.34em;
+          text-transform: uppercase;
+          color: rgba(126, 226, 255, 0.7);
+        }
+        .actTitle {
+          margin: 2px 0 0;
+          font-size: 1.7rem;
+          font-weight: 900;
+          color: #fff;
+          text-shadow:
+            0 0 18px rgba(126, 226, 255, 0.5),
+            0 0 40px rgba(217, 70, 239, 0.25);
+        }
+        .actSub {
+          margin: 0;
+          font-size: 12px;
+          color: rgba(236, 255, 251, 0.55);
+        }
+        .actReturn {
+          justify-self: center;
+          margin-top: 8px;
+          border-radius: 999px;
+          padding: 6px 14px;
+          font-size: 11px;
+          font-weight: 900;
+          letter-spacing: 0.1em;
+          text-transform: uppercase;
+          color: rgba(232, 255, 248, 0.82);
+          background: rgba(255, 255, 255, 0.07);
+          border: 1px solid rgba(167, 244, 232, 0.22);
+          cursor: pointer;
+        }
+        .actSignals {
+          display: grid;
+          gap: 7px;
+          margin-bottom: 16px;
+        }
+        .actSectionLabel {
+          font-size: 10px;
+          font-weight: 900;
+          letter-spacing: 0.24em;
+          text-transform: uppercase;
+          color: rgba(126, 226, 255, 0.72);
+          padding: 0 2px 2px;
+        }
+        .actSignal {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          border-radius: 16px;
+          padding: 9px 12px;
+          font-size: 12px;
+          color: rgba(236, 255, 251, 0.86);
+          background: rgba(126, 226, 255, 0.08);
+          border: 1px solid rgba(126, 226, 255, 0.18);
+        }
+        .actSignal.interaction {
+          background: rgba(217, 70, 239, 0.1);
+          border-color: rgba(217, 70, 239, 0.24);
+          color: rgba(255, 234, 252, 0.9);
+        }
+        .actSigIcon {
+          flex: 0 0 auto;
+          font-size: 14px;
+          line-height: 1;
+        }
+        .actSigText {
+          flex: 1 1 auto;
+          min-width: 0;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+        .actSigTime {
+          flex: 0 0 auto;
+          font-size: 10px;
+          color: rgba(255, 255, 255, 0.42);
+        }
+        .actStream {
+          display: grid;
+          gap: 12px;
+        }
+        .actCard {
+          border-radius: 20px;
+          padding: 14px;
+          border: 1px solid rgba(255, 255, 255, 0.12);
+          background:
+            radial-gradient(circle at 14% 0%, rgba(126, 226, 255, 0.08), transparent 50%),
+            linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.02));
+          box-shadow:
+            0 10px 30px rgba(0, 0, 0, 0.3),
+            inset 0 1px 0 rgba(255, 255, 255, 0.14);
+        }
+        .actCardTop {
+          display: flex;
+          align-items: center;
+          gap: 11px;
+        }
+        .actAvatar {
+          flex: 0 0 auto;
+          width: 36px;
+          height: 36px;
+          border-radius: 999px;
+          object-fit: cover;
+          display: grid;
+          place-items: center;
+          font-weight: 900;
+          color: #06121a;
+          background: radial-gradient(circle at 30% 20%, #fff, #7ee2ff);
+        }
+        .actAvatar.fallback {
+          font-size: 14px;
+        }
+        .actCardHead {
+          flex: 1 1 auto;
+          min-width: 0;
+        }
+        .actCardKind {
+          font-size: 9px;
+          letter-spacing: 0.18em;
+          text-transform: uppercase;
+          color: rgba(126, 246, 230, 0.78);
+        }
+        .actCardTitle {
+          margin-top: 1px;
+          font-size: 14px;
+          font-weight: 800;
+          color: #fff;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+        .actCardTime {
+          flex: 0 0 auto;
+          font-size: 10px;
+          color: rgba(255, 255, 255, 0.4);
+        }
+        .actCardBody {
+          margin-top: 9px;
+          font-size: 13px;
+          line-height: 1.45;
+          color: rgba(236, 255, 251, 0.72);
+          display: -webkit-box;
+          -webkit-line-clamp: 3;
+          -webkit-box-orient: vertical;
+          overflow: hidden;
+        }
+        .actEmpty {
+          border-radius: 18px;
+          padding: 18px;
+          text-align: center;
+          font-size: 13px;
+          color: rgba(236, 255, 251, 0.55);
+          border: 1px dashed rgba(255, 255, 255, 0.14);
+          background: rgba(255, 255, 255, 0.03);
+        }
+
         /* Spatial home pager — swipe/scroll horizontally between the orb home and
            the Profile Work Board for an AR-like depth feel in the web prototype. */
         .osPager {

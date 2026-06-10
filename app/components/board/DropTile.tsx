@@ -19,6 +19,8 @@ import {
   type DropCustomization,
 } from "@/lib/board/dropCustomizations";
 import { DROP_FLAVOR_ORDER, type DropFlavorKey } from "@/lib/board/dropFlavors";
+import { normalizeRichText, type RichTextValue } from "@/lib/board/richText";
+import { RichText } from "./RichTextField";
 import RemovableDropBadge from "./RemovableDropBadge";
 import DropStudioStage from "./DropStudioStage";
 import DropCommentsDrawer from "./DropCommentsDrawer";
@@ -76,6 +78,10 @@ export type DropItem = {
   fileSize?: number;
   mime?: string;
   mediaKind?: MediaKind;
+  /** Direct media URL fallback (e.g. from a feed item) when no Supabase
+   *  bucket/storagePath is available. Lets Drop Studio load existing media
+   *  to re-edit even from surfaces that only carry a rendered URL. */
+  mediaUrl?: string;
 
   priceCents?: number;
   description?: string;
@@ -93,6 +99,13 @@ export type DropItem = {
   visibility?: "public" | "private";
   thoughtFormat?: "text" | "voice" | "doodle";
   thoughtText?: string;
+  /** Inline-formatted title/description (bold/italic/underline + field-level
+   *  size & spacing). Plain `title`/`description` remain the fallback. */
+  titleRich?: RichTextValue;
+  descriptionRich?: RichTextValue;
+  /** When editing from the feed Activity Channel (announcements, etc.). */
+  editSource?: "board_drop" | "announcement";
+  sourceActivityId?: string;
 };
 
 const STORAGE_KEY = "jab_board_drops_v2";
@@ -445,6 +458,7 @@ function normalizeDropItems(input: unknown, userId: string | null): DropItem[] {
       fileSize: typeof x.fileSize === "number" ? x.fileSize : undefined,
       mime: typeof x.mime === "string" ? x.mime : undefined,
       mediaKind: toMediaKind(x.mediaKind),
+      mediaUrl: typeof x.mediaUrl === "string" ? x.mediaUrl : undefined,
       priceCents: typeof x.priceCents === "number" ? x.priceCents : undefined,
       description: typeof x.description === "string" ? x.description : undefined,
       linkUrl: typeof x.linkUrl === "string" ? x.linkUrl : undefined,
@@ -482,6 +496,8 @@ function normalizeDropItems(input: unknown, userId: string | null): DropItem[] {
           ? x.recipientStripeAccountId.trim()
           : undefined,
       customizations: normalizeDropCustomizations(x.customizations),
+      titleRich: normalizeRichText(x.titleRich),
+      descriptionRich: normalizeRichText(x.descriptionRich),
       visibility:
         x.visibility === "private" || x.visibility === "public"
           ? x.visibility
@@ -586,6 +602,168 @@ export default function DropTile() {
   const [dropCustomizations, setDropCustomizations] = useState<DropCustomization>({});
   const [studioMode, setStudioMode] = useState<StudioCaptureMode | null>(null);
   const [studioInitialFile, setStudioInitialFile] = useState<File | null>(null);
+
+  // ---- Edit an existing drop (owner only) ----
+  const [editDrop, setEditDrop] = useState<DropItem | null>(null);
+  const [editTitle, setEditTitle] = useState("");
+  const [editDesc, setEditDesc] = useState("");
+  const [editUrl, setEditUrl] = useState("");
+  const [editPayPrice, setEditPayPrice] = useState("");
+  const [editPayLink, setEditPayLink] = useState("");
+  const [editVisibility, setEditVisibility] = useState<"public" | "private">("public");
+  const [editFile, setEditFile] = useState<File | null>(null);
+  const [editCustomizations, setEditCustomizations] = useState<DropCustomization>({});
+  const [editStudioMode, setEditStudioMode] = useState<StudioCaptureMode | null>(null);
+  const [editStudioInitialFile, setEditStudioInitialFile] = useState<File | null>(null);
+  const [editSaving, setEditSaving] = useState(false);
+
+  function openEdit(d: DropItem) {
+    setEditDrop(d);
+    setEditTitle(d.title || "");
+    setEditDesc(
+      (d.type === "Thought" ? d.thoughtText : d.type === "Pay" ? d.description : d.description) || ""
+    );
+    setEditUrl(d.url || d.linkUrl || "");
+    setEditPayPrice(d.priceCents ? (d.priceCents / 100).toFixed(2) : "");
+    setEditPayLink(d.paymentLink || d.linkUrl || "");
+    setEditVisibility(d.visibility ?? "public");
+    setEditFile(null);
+    setEditCustomizations(d.customizations || {});
+  }
+
+  function closeEdit() {
+    setEditDrop(null);
+    setEditFile(null);
+    setEditStudioMode(null);
+    setEditStudioInitialFile(null);
+    setEditSaving(false);
+  }
+
+  // The board-wide editor (BoardDropEditModal) persists edits to localStorage +
+  // Supabase and fires `board:drop:updated`. Re-read local drops so this grid
+  // reflects the change immediately without a reload.
+  useEffect(() => {
+    function onUpdated() {
+      setDrops(readBestLocalDropItems());
+    }
+    window.addEventListener("board:drop:updated", onUpdated);
+    return () => window.removeEventListener("board:drop:updated", onUpdated);
+  }, []);
+
+  async function openEditStudio() {
+    const d = editDrop;
+    if (!d) return;
+    let initial: File | null = null;
+    if (d.bucket && d.storagePath) {
+      try {
+        const url = await getSignedUrl(d.bucket, d.storagePath);
+        if (url) {
+          const res = await fetch(url);
+          const blob = await res.blob();
+          initial = new File([blob], d.fileName || "drop-media", {
+            type: blob.type || d.mime || "application/octet-stream",
+          });
+        }
+      } catch {
+        initial = null;
+      }
+    }
+    setEditStudioInitialFile(initial);
+    setEditStudioMode(d.mediaKind === "audio" ? "audio" : d.mediaKind === "video" ? "video" : "photo");
+  }
+
+  async function saveEdit() {
+    const d = editDrop;
+    if (!d) return;
+    setEditSaving(true);
+    try {
+      let media: Partial<DropItem> = {
+        bucket: d.bucket,
+        storagePath: d.storagePath,
+        mediaKind: d.mediaKind,
+        fileName: d.fileName,
+        mime: d.mime,
+        fileSize: d.fileSize,
+      };
+      if (editFile) {
+        const up = await uploadFileToStorage({ bucket: BUCKET_MEDIA, file: editFile, dropId: d.id });
+        if (up) {
+          const isAudio = isAudioFile(editFile);
+          media = {
+            bucket: up.bucket,
+            storagePath: up.storagePath,
+            mediaKind: isAudio ? "audio" : editFile.type.startsWith("video/") ? "video" : "image",
+            fileName: editFile.name,
+            mime: editFile.type,
+            fileSize: editFile.size,
+          };
+        }
+      }
+
+      const cents = d.type === "Pay" ? parsePriceToCents(editPayPrice) : d.priceCents;
+      const cleanLink = editPayLink.trim() ? normalizeUrl(editPayLink) : null;
+      const updated: DropItem = {
+        ...d,
+        title: editTitle.trim() || d.title,
+        description:
+          d.type === "Thought" ? d.description : editDesc.trim() || undefined,
+        thoughtText: d.type === "Thought" ? editDesc.trim() || undefined : d.thoughtText,
+        visibility: d.type === "Thought" ? editVisibility : d.visibility,
+        url:
+          d.type === "Link" || d.type === "News" || d.type === "YouTube" || d.type === "Music"
+            ? (editUrl.trim() ? normalizeUrl(editUrl) ?? d.url : d.url)
+            : d.url,
+        priceCents: d.type === "Pay" ? cents ?? d.priceCents : d.priceCents,
+        paymentLink: d.type === "Pay" ? cleanLink ?? undefined : d.paymentLink,
+        linkUrl: d.type === "Pay" ? cleanLink ?? d.linkUrl : d.linkUrl,
+        customizations: compactDropCustomizations(editCustomizations) ?? d.customizations,
+        ...media,
+      };
+
+      const next = drops.map((x) => (x.id === d.id ? updated : x));
+      persist(next);
+
+      if (updated.type === "Pay") {
+        upsertPayDrop(
+          {
+            id: updated.id,
+            title: updated.title,
+            description: updated.description || undefined,
+            amountCents: updated.priceCents ?? 0,
+            recipientUserId: updated.recipientUserId,
+            recipientUsername: updated.recipientUsername,
+            recipientDisplayName: updated.recipientDisplayName,
+            recipientStripeAccountId: updated.recipientStripeAccountId,
+            createdAt: updated.createdAt,
+            updatedAt: Date.now(),
+            provider: updated.payProvider ?? "stripe_connect",
+            status: updated.payProvider === "stripe_connect" ? "gateway_setup_required" : "active",
+            checkoutMode:
+              updated.payProvider === "stripe_connect" ? "embedded_hosted" : "external_link",
+            checkoutUrl: updated.paymentLink ?? undefined,
+            gatewayLabel:
+              updated.payProvider === "stripe_connect" ? "Stripe" : "External Payment Link",
+            bucket: updated.bucket,
+            storagePath: updated.storagePath,
+            mediaKind:
+              updated.mediaKind === "video"
+                ? "video"
+                : updated.mediaKind === "audio"
+                  ? "audio"
+                  : "image",
+            mediaSource: updated.mediaSource ?? "upload",
+          },
+          userId
+        );
+      }
+
+      flash(setMsg, "Drop updated ✓", 1500);
+      closeEdit();
+    } catch (err) {
+      flash(setMsg, err instanceof Error ? err.message : "Couldn't update drop.", 2400);
+      setEditSaving(false);
+    }
+  }
 
   const signedUrlRef = useRef<Record<string, string>>({});
   const [signedUrlByKey, setSignedUrlByKey] = useState<Record<string, string>>({});
@@ -895,13 +1073,16 @@ export default function DropTile() {
       const sess = await requireSession();
       if (!sess) return;
 
+      const signedMediaUrl =
+        item.bucket && item.storagePath ? await getSignedUrl(item.bucket, item.storagePath) : null;
+
       const imageUrl =
-        item.type === "Media" && item.mediaKind === "image" && item.bucket && item.storagePath
-          ? await getSignedUrl(item.bucket, item.storagePath)
-        : item.type === "Thought" && item.mediaKind === "image" && item.bucket && item.storagePath
-          ? await getSignedUrl(item.bucket, item.storagePath)
-        : item.type === "Pay" && item.bucket && item.storagePath
-          ? await getSignedUrl(item.bucket, item.storagePath)
+        item.type === "Media" && item.mediaKind === "image" && signedMediaUrl
+          ? signedMediaUrl
+        : item.type === "Thought" && item.mediaKind === "image" && signedMediaUrl
+          ? signedMediaUrl
+        : item.type === "Pay" && signedMediaUrl
+          ? signedMediaUrl
           : item.type === "Link" || item.type === "News"
             ? item.previewImage ?? null
           : null;
@@ -959,6 +1140,10 @@ export default function DropTile() {
           recipientDisplayName: item.recipientDisplayName ?? displayName ?? username ?? null,
           recipientStripeAccountId: item.recipientStripeAccountId ?? stripeAccountId ?? null,
           mediaKind: item.mediaKind ?? null,
+          mediaUrl:
+            item.type === "Music" && item.mediaKind === "audio"
+              ? signedMediaUrl
+              : null,
           mediaSource: item.mediaSource ?? null,
           badgeLabel: item.badgeLabel ?? null,
           storagePath: item.storagePath ?? null,
@@ -2079,12 +2264,14 @@ export default function DropTile() {
 
             return (
               <div key={d.id} className="drop-item">
-                <div className="drop-titleTop">{d.title}</div>
+                <div className="drop-titleTop">
+                  <RichText as="span" value={d.titleRich} plain={d.title} />
+                </div>
 
-                <div className="drop-metaRow">
+                <div className="drop-labelRow">
                   <div className="drop-badges">
                     <RemovableDropBadge
-                      label={displayDropType(d.type).toUpperCase()}
+                      label={`${displayDropType(d.type)} Drop`}
                       canRemove
                       onRemove={() => removeDrop(d.id)}
                     />
@@ -2101,7 +2288,9 @@ export default function DropTile() {
                     ) : null}
                     {!isPay && d.fileName ? <span className="badge ghost">{d.fileName}</span> : null}
                   </div>
+                </div>
 
+                <div className="drop-metaRow">
                   <div className="drop-actions">
                     {d.url ? (
                       <a className="drop-open" href={d.url} target="_blank" rel="noreferrer">
@@ -2136,6 +2325,25 @@ export default function DropTile() {
                       Comment{commentCountByDrop[d.id] ? ` ${commentCountByDrop[d.id]}` : ""}
                     </button>
 
+                    {/* Single creator control: opens the Edit Drop modal first
+                        (title/description/etc.), where media drops also get the
+                        in-modal Drop Studio launch. This board only shows the
+                        owner's own drops, so it's always a creator control. */}
+                    <button
+                      className="drop-mini studio-mini"
+                      type="button"
+                      onClick={() =>
+                        window.dispatchEvent(
+                          new CustomEvent("board:drop:edit", {
+                            detail: { dropId: d.id, drop: d },
+                          })
+                        )
+                      }
+                      title="Edit this drop in Drop Studio Editor"
+                    >
+                      🎬 Drop Studio Editor
+                    </button>
+
                     {!isMedia && !canEmbed && isLinky && d.url ? (
                       <a className="drop-mini" href={d.url} target="_blank" rel="noreferrer">
                         Open →
@@ -2145,7 +2353,9 @@ export default function DropTile() {
                 </div>
 
                 {d.description && !isPay && !isDoc ? (
-                  <div className="drop-description">{d.description}</div>
+                  <div className="drop-description">
+                    <RichText as="span" value={d.descriptionRich} plain={d.description} />
+                  </div>
                 ) : null}
 
                 {isThought && d.thoughtText ? (
@@ -2177,7 +2387,7 @@ export default function DropTile() {
                   </div>
                 ) : isMedia || isPay ? (
                   <div
-                    className={`media-thumb ${isMedia ? "natural-media" : ""} ${isPay ? "pay-thumb" : ""}`}
+                    className={`media-thumb ${isMedia ? "natural-media vision-media-thumb" : ""} ${isPay ? "pay-thumb" : ""}`}
                     aria-label={isPay ? "Pay drop image" : "Vision drop preview"}
                   >
                     {signedUrl ? (
@@ -2408,6 +2618,154 @@ export default function DropTile() {
         dropTitle={drops.find((drop) => drop.id === commentsDropId)?.title}
       />
 
+      {editDrop ? (
+        <div
+          className="edit-overlay"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Edit drop"
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget && !editSaving) closeEdit();
+          }}
+        >
+          <div className="edit-sheet">
+            <div className="edit-head">
+              <div>
+                <div className="edit-eyebrow">{editDrop.type} Drop</div>
+                <h3 className="edit-title-h">Edit Drop</h3>
+              </div>
+              <button
+                type="button"
+                className="edit-close"
+                onClick={() => !editSaving && closeEdit()}
+                aria-label="Close editor"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="edit-body">
+              <label className="edit-label">Title</label>
+              <input
+                className="edit-input"
+                value={editTitle}
+                onChange={(e) => setEditTitle(e.target.value)}
+                placeholder="Title"
+              />
+
+              {editDrop.type === "Link" ||
+              editDrop.type === "News" ||
+              editDrop.type === "YouTube" ||
+              editDrop.type === "Music" ? (
+                <>
+                  <label className="edit-label">Link</label>
+                  <input
+                    className="edit-input"
+                    value={editUrl}
+                    onChange={(e) => setEditUrl(e.target.value)}
+                    placeholder="https://…"
+                  />
+                </>
+              ) : null}
+
+              <label className="edit-label">
+                {editDrop.type === "Thought" ? "Thought" : "Description"}
+              </label>
+              <textarea
+                className="edit-textarea"
+                value={editDesc}
+                onChange={(e) => setEditDesc(e.target.value)}
+                rows={3}
+                placeholder="Add context…"
+              />
+
+              {editDrop.type === "Pay" ? (
+                <>
+                  <label className="edit-label">Price (ex: 19.99)</label>
+                  <input
+                    className="edit-input"
+                    value={editPayPrice}
+                    onChange={(e) => setEditPayPrice(e.target.value)}
+                    inputMode="decimal"
+                    placeholder="19.99"
+                  />
+                  <label className="edit-label">Checkout / payment link</label>
+                  <input
+                    className="edit-input"
+                    value={editPayLink}
+                    onChange={(e) => setEditPayLink(e.target.value)}
+                    placeholder="Optional payment link"
+                  />
+                </>
+              ) : null}
+
+              {editDrop.type === "Thought" ? (
+                <div className="edit-visibility">
+                  {(["public", "private"] as const).map((v) => (
+                    <button
+                      key={v}
+                      type="button"
+                      className={`edit-vis ${editVisibility === v ? "on" : ""}`}
+                      onClick={() => setEditVisibility(v)}
+                    >
+                      {v}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+
+              {editDrop.bucket && editDrop.storagePath ? (
+                <div className="edit-media-row">
+                  <button
+                    type="button"
+                    className="edit-studio-btn"
+                    onClick={() => void openEditStudio()}
+                  >
+                    🎬 {editFile ? "Re-edit media in Drop Studio" : "Edit media in Drop Studio"}
+                  </button>
+                  {editFile ? (
+                    <span className="edit-media-note">New media staged ✓</span>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+
+            <div className="edit-actions">
+              <button
+                type="button"
+                className="edit-cancel"
+                onClick={() => !editSaving && closeEdit()}
+                disabled={editSaving}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="edit-save"
+                onClick={() => void saveEdit()}
+                disabled={editSaving}
+              >
+                {editSaving ? "Saving…" : "Save changes"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      <DropStudioStage
+        open={editStudioMode !== null}
+        initialFile={editStudioInitialFile}
+        initialMode={editStudioMode ?? "photo"}
+        allowedModes={["photo", "video", "audio", "art"]}
+        value={editCustomizations}
+        onChange={setEditCustomizations}
+        onComplete={(captured) => {
+          setEditFile(captured);
+          setEditStudioMode(null);
+        }}
+        onClose={() => setEditStudioMode(null)}
+      />
+
       <style>{`
         .drop-tile {
           width: 100%;
@@ -2431,18 +2789,14 @@ export default function DropTile() {
           border-radius: inherit;
         }
 
-        /* Profile grid: standard Board Drop frame so Vision tiles stay uniform.
-           (The expand viewer keeps the full media, so it's excluded.) */
-        .drop-studio-media-frame {
-          aspect-ratio: 4 / 5;
-          margin: 0 auto;
-        }
+        /* Profile grid: frame follows the media — full width, no crop. */
         .drop-studio-media-frame > img,
         .drop-studio-media-frame > video {
           display: block;
           width: 100%;
-          height: 100%;
-          object-fit: cover;
+          height: auto;
+          margin: 0 auto;
+          object-fit: contain;
         }
 
         .viewer-studio-frame > img,
@@ -2915,16 +3269,25 @@ export default function DropTile() {
           min-width: 0;
           max-width: 100%;
           overflow-wrap: anywhere;
+          text-align: center;
+        }
+
+        .drop-labelRow {
+          display: flex;
+          justify-content: center;
+          width: 100%;
+          min-width: 0;
         }
 
         .drop-metaRow {
           display: flex;
           align-items: center;
-          justify-content: flex-start;
+          justify-content: center;
           gap: 10px;
           flex-wrap: wrap;
           min-width: 0;
           max-width: 100%;
+          width: 100%;
         }
 
         .drop-actions {
@@ -2932,7 +3295,7 @@ export default function DropTile() {
           gap: 10px;
           align-items: center;
           flex-wrap: wrap;
-          justify-content: flex-start;
+          justify-content: center;
           width: 100%;
           min-width: 0;
           max-width: 100%;
@@ -2959,12 +3322,205 @@ export default function DropTile() {
           cursor: pointer;
           text-decoration: none;
         }
+        /* Creator-only control — subtle, not a public reaction. */
+        .edit-mini {
+          border-color: rgba(126, 64, 255, 0.28);
+          background: rgba(126, 64, 255, 0.08);
+          color: rgba(90, 40, 200, 0.92);
+        }
+        .edit-mini:hover {
+          background: rgba(126, 64, 255, 0.16);
+          box-shadow: 0 0 14px rgba(126, 64, 255, 0.18);
+        }
+        /* Drop Studio Editor — creator control, only on media drops. */
+        .studio-mini {
+          border-color: rgba(255, 64, 160, 0.32);
+          background: rgba(255, 64, 160, 0.08);
+          color: rgba(190, 30, 120, 0.95);
+        }
+        .studio-mini:hover {
+          background: rgba(255, 64, 160, 0.16);
+          box-shadow: 0 0 14px rgba(255, 64, 160, 0.2);
+        }
+
+        /* ---- Edit drop modal ---- */
+        .edit-overlay {
+          position: fixed;
+          inset: 0;
+          z-index: 100040;
+          display: grid;
+          place-items: center;
+          padding: 16px;
+          background: rgba(6, 10, 16, 0.6);
+          backdrop-filter: blur(8px);
+        }
+        .edit-sheet {
+          width: min(440px, 100%);
+          max-height: min(86vh, 760px);
+          display: flex;
+          flex-direction: column;
+          border-radius: 26px;
+          overflow: hidden;
+          border: 1px solid rgba(132, 244, 231, 0.3);
+          background:
+            radial-gradient(circle at 16% 0%, rgba(126, 64, 255, 0.16), transparent 42%),
+            linear-gradient(180deg, rgba(10, 14, 22, 0.96), rgba(8, 10, 18, 0.98));
+          color: #eef7ff;
+          box-shadow: 0 30px 90px rgba(0, 0, 0, 0.5);
+        }
+        .edit-head {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 12px;
+          padding: 16px 18px;
+          border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        .edit-eyebrow {
+          font-size: 10px;
+          letter-spacing: 0.3em;
+          text-transform: uppercase;
+          color: rgba(170, 140, 255, 0.85);
+        }
+        .edit-title-h {
+          margin: 3px 0 0;
+          font-size: 1.4rem;
+          font-weight: 900;
+        }
+        .edit-close {
+          width: 34px;
+          height: 34px;
+          border-radius: 999px;
+          border: 1px solid rgba(255, 255, 255, 0.18);
+          background: rgba(255, 255, 255, 0.08);
+          color: #eef7ff;
+          cursor: pointer;
+        }
+        .edit-body {
+          flex: 1 1 auto;
+          min-height: 0;
+          overflow-y: auto;
+          padding: 16px 18px;
+          display: grid;
+          gap: 8px;
+        }
+        .edit-label {
+          font-size: 10px;
+          font-weight: 900;
+          letter-spacing: 0.16em;
+          text-transform: uppercase;
+          color: rgba(180, 210, 230, 0.62);
+          margin-top: 6px;
+        }
+        .edit-input,
+        .edit-textarea {
+          width: 100%;
+          border-radius: 14px;
+          border: 1px solid rgba(255, 255, 255, 0.14);
+          background: rgba(255, 255, 255, 0.06);
+          color: #eef7ff;
+          padding: 11px 13px;
+          font: inherit;
+          font-size: 14px;
+          outline: none;
+        }
+        .edit-textarea {
+          resize: vertical;
+          min-height: 72px;
+        }
+        .edit-input::placeholder,
+        .edit-textarea::placeholder {
+          color: rgba(220, 235, 245, 0.4);
+        }
+        .edit-visibility {
+          display: flex;
+          gap: 8px;
+          margin-top: 6px;
+        }
+        .edit-vis {
+          border-radius: 999px;
+          padding: 8px 14px;
+          font-size: 11px;
+          font-weight: 900;
+          letter-spacing: 0.08em;
+          text-transform: uppercase;
+          color: rgba(232, 255, 248, 0.7);
+          background: rgba(255, 255, 255, 0.06);
+          border: 1px solid rgba(167, 244, 232, 0.2);
+          cursor: pointer;
+        }
+        .edit-vis.on {
+          color: #06121a;
+          background: radial-gradient(circle at 30% 20%, #fff, #7ee2ff);
+          border-color: rgba(255, 255, 255, 0.5);
+        }
+        .edit-media-row {
+          margin-top: 12px;
+          display: flex;
+          flex-wrap: wrap;
+          align-items: center;
+          gap: 10px;
+        }
+        .edit-studio-btn {
+          border-radius: 14px;
+          padding: 11px 14px;
+          font-size: 12px;
+          font-weight: 900;
+          letter-spacing: 0.04em;
+          color: rgba(245, 252, 255, 0.94);
+          background:
+            radial-gradient(circle at 30% 18%, rgba(255, 255, 255, 0.14), transparent 55%),
+            rgba(126, 226, 255, 0.14);
+          border: 1px solid rgba(126, 226, 255, 0.4);
+          cursor: pointer;
+        }
+        .edit-media-note {
+          font-size: 11px;
+          font-weight: 800;
+          color: rgba(150, 255, 220, 0.9);
+        }
+        .edit-actions {
+          flex: 0 0 auto;
+          display: flex;
+          gap: 10px;
+          justify-content: flex-end;
+          padding: 14px 18px 18px;
+          border-top: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        .edit-cancel {
+          border-radius: 999px;
+          padding: 11px 18px;
+          font-size: 12px;
+          font-weight: 900;
+          color: rgba(232, 246, 255, 0.82);
+          background: rgba(255, 255, 255, 0.08);
+          border: 1px solid rgba(255, 255, 255, 0.18);
+          cursor: pointer;
+        }
+        .edit-save {
+          border-radius: 999px;
+          padding: 11px 22px;
+          font-size: 12px;
+          font-weight: 950;
+          letter-spacing: 0.06em;
+          text-transform: uppercase;
+          color: #06121a;
+          background: radial-gradient(circle at 30% 20%, #fff, #7ee2ff);
+          border: 1px solid rgba(255, 255, 255, 0.5);
+          cursor: pointer;
+        }
+        .edit-save:disabled,
+        .edit-cancel:disabled {
+          opacity: 0.55;
+          cursor: not-allowed;
+        }
 
         .drop-badges {
           display: flex;
           gap: 8px;
           flex-wrap: wrap;
           align-items: center;
+          justify-content: center;
           min-width: 0;
           max-width: 100%;
           /* Was overflow:hidden, which clipped the removable label's slide/glow.
@@ -3225,11 +3781,30 @@ export default function DropTile() {
         .media-thumb.natural-media {
           width: 100%;
           max-width: 100%;
-          justify-self: start;
           border: 0;
           border-radius: 0;
           overflow: visible;
           background: transparent;
+        }
+        /* Vision drops: picture centered, full width, natural aspect ratio. */
+        .media-thumb.vision-media-thumb {
+          justify-self: stretch;
+          width: 100%;
+          max-width: 100%;
+          display: block;
+          overflow: visible;
+          border: 0;
+          background: transparent;
+        }
+        .media-thumb.vision-media-thumb .drop-studio-media-frame {
+          width: 100%;
+          max-width: 100%;
+          height: auto;
+          margin: 0 auto;
+          overflow: visible;
+          border-radius: 14px;
+          border: 1px solid rgba(0, 0, 0, 0.1);
+          background: rgba(0, 0, 0, 0.055);
         }
         .media-thumb img,
         .media-thumb video {
@@ -3242,8 +3817,20 @@ export default function DropTile() {
           object-fit: contain;
           max-height: min(520px, 72vh);
         }
-        .media-thumb.natural-media img,
-        .media-thumb.natural-media video {
+        .media-thumb.vision-media-thumb .drop-studio-media-frame > img,
+        .media-thumb.vision-media-thumb .drop-studio-media-frame > video {
+          width: 100%;
+          height: auto;
+          max-width: 100%;
+          max-height: none;
+          margin: 0 auto;
+          object-fit: contain;
+          border-radius: 14px;
+          border: none;
+          background: rgba(0, 0, 0, 0.055);
+        }
+        .media-thumb.natural-media:not(.vision-media-thumb) img,
+        .media-thumb.natural-media:not(.vision-media-thumb) video {
           max-width: 100%;
           border-radius: 14px;
           border: 1px solid rgba(0, 0, 0, 0.1);
@@ -3254,7 +3841,7 @@ export default function DropTile() {
           min-height: 180px;
           background: #000;
         }
-        .media-thumb.natural-media video {
+        .media-thumb.natural-media:not(.vision-media-thumb) video {
           width: auto;
           height: auto;
           max-width: 100%;

@@ -144,6 +144,39 @@ function threadIdForFriend(friendId: string) {
   return `friend:${friendId}`;
 }
 
+function formatDmTime(at: number) {
+  const time = new Date(at);
+  if (!Number.isFinite(time.getTime())) return "";
+
+  const now = new Date();
+  const isToday =
+    time.getDate() === now.getDate() &&
+    time.getMonth() === now.getMonth() &&
+    time.getFullYear() === now.getFullYear();
+
+  const yesterday = new Date(now);
+  yesterday.setDate(yesterday.getDate() - 1);
+  const isYesterday =
+    time.getDate() === yesterday.getDate() &&
+    time.getMonth() === yesterday.getMonth() &&
+    time.getFullYear() === yesterday.getFullYear();
+
+  const clock = new Intl.DateTimeFormat(undefined, {
+    hour: "numeric",
+    minute: "2-digit",
+  });
+
+  if (isToday) return clock.format(time);
+  if (isYesterday) return `Yesterday ${clock.format(time)}`;
+
+  return new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(time);
+}
+
 /** ✅ White magnifying glass icon (SVG) */
 function ExploreIcon({
   size = 18,
@@ -685,13 +718,21 @@ export default function BoardDock() {
                           key={m.id}
                           className={`fz_bubbleRow ${m.from === "me" ? "me" : "them"}`}
                         >
-                          <div className={`fz_bubble ${m.from === "me" ? "me" : "them"}`}>
-                            {m.text}
-                            {m.from === "me" && m.status && m.status !== "sent" ? (
-                              <span className="fz_msgStatus">
-                                {m.status === "failed" ? "Not delivered" : "Local"}
-                              </span>
-                            ) : null}
+                          <div className={`fz_bubbleWrap ${m.from === "me" ? "me" : "them"}`}>
+                            <div className={`fz_bubble ${m.from === "me" ? "me" : "them"}`}>
+                              {m.text}
+                              {m.from === "me" && m.status && m.status !== "sent" ? (
+                                <span className="fz_msgStatus">
+                                  {m.status === "failed" ? "Not delivered" : "Local"}
+                                </span>
+                              ) : null}
+                            </div>
+                            <time
+                              className="fz_msgTime"
+                              dateTime={new Date(m.at).toISOString()}
+                            >
+                              {formatDmTime(m.at)}
+                            </time>
                           </div>
                         </div>
                       ))
@@ -1125,13 +1166,29 @@ export default function BoardDock() {
         .fz_bubbleRow.me{ justify-content:flex-end; }
         .fz_bubbleRow.them{ justify-content:flex-start; }
 
+        .fz_bubbleWrap{
+          display:flex;
+          flex-direction:column;
+          gap:4px;
+          max-width:min(520px, 78%);
+        }
+        .fz_bubbleWrap.me{ align-items:flex-end; }
+        .fz_bubbleWrap.them{ align-items:flex-start; }
+
         .fz_bubble{
-          max-width: min(520px, 78%);
+          max-width:100%;
           padding: 10px 12px;
           border-radius: 16px;
           border: 1px solid rgba(255,255,255,0.10);
           font-size: 13px;
           line-height: 1.3;
+        }
+        .fz_msgTime{
+          font-size:10px;
+          font-weight:700;
+          letter-spacing:0.04em;
+          color:rgba(255,255,255,0.42);
+          white-space:nowrap;
         }
         .fz_bubble.me{
           background: rgba(255,255,255,0.10);

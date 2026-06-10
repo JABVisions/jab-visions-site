@@ -39,7 +39,7 @@ export const DROP_FLAVOR_LABEL: Record<DropFlavorKey, string> = {
 };
 
 export const DROP_FLAVOR_SUB: Record<DropFlavorKey, string> = {
-  media: "upload",
+  media: "media",
   thought: "idea",
   pay: "monetize",
   youtube: "video",

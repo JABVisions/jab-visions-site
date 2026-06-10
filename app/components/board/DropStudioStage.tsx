@@ -19,7 +19,7 @@ import VoicePresets from "./VoicePresets";
 
 type CaptureMode = "photo" | "video" | "audio" | "art";
 type FacingMode = "user" | "environment";
-type Phase = "capture" | "edit";
+type Phase = "choose" | "capture" | "edit";
 
 const DEFAULT_CAPTURE_MODES: CaptureMode[] = ["photo", "video"];
 // Every media mode shows in the rail; ones not allowed for this drop are locked.
@@ -101,7 +101,7 @@ export default function DropStudioStage({
   const urlRef = useRef<string>("");
 
   const [mounted, setMounted] = useState(false);
-  const [phase, setPhase] = useState<Phase>("capture");
+  const [phase, setPhase] = useState<Phase>("choose");
   const [mode, setMode] = useState<CaptureMode>(initialMode);
   const [facing, setFacing] = useState<FacingMode>("environment");
   const [error, setError] = useState("");
@@ -246,7 +246,7 @@ export default function DropStudioStage({
       setPhase("edit");
     } else {
       fileRef.current = null;
-      setPhase("capture");
+      setPhase("choose");
     }
     return () => {
       document.body.style.overflow = "";
@@ -422,7 +422,13 @@ export default function DropStudioStage({
               <span className="studioDot" aria-hidden />
               DROP STUDIO
             </div>
-            <span className="studioPill">{phase === "edit" ? `${modeLabel(mode)} Tools` : "Capture Mode"}</span>
+            <span className="studioPill">
+              {phase === "edit"
+                ? `${modeLabel(mode)} Tools`
+                : phase === "capture"
+                  ? "Capture Mode"
+                  : "New Drop"}
+            </span>
           </div>
           <div className="studioBarRight">
             <button
@@ -481,7 +487,54 @@ export default function DropStudioStage({
             </nav>
 
             <div className="capMain">
-              {phase === "capture" ? (
+              {phase === "choose" ? (
+                <div className="capChoose">
+                  <div className="capChooseInner">
+                    <div className="capChooseGlyphBig" aria-hidden>
+                      {modeGlyph(mode)}
+                    </div>
+                    <div className="capChooseTitle">{modeLabel(mode)} Drop</div>
+                    <p className="capChooseSub">
+                      Capture something live, or upload from your device — then make it yours in
+                      Drop Studio.
+                    </p>
+                    <div className="capChooseBtns">
+                      <label className="capChooseBtn upload">
+                        <span className="capChooseGlyph" aria-hidden>
+                          📤
+                        </span>
+                        <span>Upload</span>
+                        <input
+                          type="file"
+                          accept={
+                            allowedModes.includes("audio") &&
+                            allowedModes.includes("photo") &&
+                            !allowedModes.includes("video")
+                              ? "image/*,audio/*,.mp3,.m4a,.wav,.aac,.ogg,.flac"
+                              : allowedModes.includes("audio")
+                                ? "image/*,video/*,audio/*,.mp3,.m4a,.wav,.aac,.ogg,.flac"
+                                : "image/*,video/*"
+                          }
+                          onChange={(e) => {
+                            onUpload(e.currentTarget.files?.[0]);
+                            e.currentTarget.value = "";
+                          }}
+                        />
+                      </label>
+                      <button
+                        type="button"
+                        className="capChooseBtn capture"
+                        onClick={() => setPhase("capture")}
+                      >
+                        <span className="capChooseGlyph" aria-hidden>
+                          {mode === "audio" ? "🎙️" : mode === "art" ? "🎨" : "📸"}
+                        </span>
+                        <span>{mode === "audio" ? "Record" : mode === "art" ? "Draw" : "Capture"}</span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ) : phase === "capture" ? (
                 <>
                   <div className={`capViewport ${mode === "photo" || mode === "video" ? "framed" : ""}`}>
                     {mode === "art" ? (
@@ -931,6 +984,80 @@ export default function DropStudioStage({
           font-weight: 800;
           text-align: center;
         }
+        /* ---- choose phase (Upload / Capture before capture mode) ---- */
+        .capChoose {
+          display: grid;
+          place-items: center;
+          height: 100%;
+          padding: 22px;
+        }
+        .capChooseInner {
+          display: grid;
+          justify-items: center;
+          gap: 10px;
+          text-align: center;
+          max-width: 360px;
+        }
+        .capChooseGlyphBig {
+          font-size: 46px;
+          line-height: 1;
+          filter: drop-shadow(0 0 22px rgba(126, 226, 255, 0.4));
+        }
+        .capChooseTitle {
+          font-size: 1.3rem;
+          font-weight: 950;
+          color: rgba(255, 255, 255, 0.95);
+        }
+        .capChooseSub {
+          margin: 0;
+          font-size: 13px;
+          line-height: 1.5;
+          color: rgba(236, 255, 251, 0.6);
+        }
+        .capChooseBtns {
+          margin-top: 10px;
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 12px;
+          width: 100%;
+        }
+        .capChooseBtn {
+          display: grid;
+          justify-items: center;
+          gap: 8px;
+          padding: 20px 12px;
+          border-radius: 22px;
+          border: 1px solid rgba(255, 255, 255, 0.2);
+          background:
+            radial-gradient(circle at 30% 18%, rgba(255, 255, 255, 0.12), transparent 55%),
+            rgba(255, 255, 255, 0.06);
+          color: rgba(245, 252, 255, 0.94);
+          font-size: 13px;
+          font-weight: 950;
+          letter-spacing: 0.06em;
+          text-transform: uppercase;
+          cursor: pointer;
+          transition: transform 150ms ease, box-shadow 150ms ease, background 150ms ease;
+        }
+        .capChooseBtn:hover {
+          transform: translateY(-2px);
+          box-shadow: 0 12px 30px rgba(0, 0, 0, 0.35);
+          background:
+            radial-gradient(circle at 30% 18%, rgba(255, 255, 255, 0.18), transparent 55%),
+            rgba(89, 240, 216, 0.14);
+        }
+        .capChooseBtn.capture {
+          border-color: rgba(126, 226, 255, 0.5);
+          box-shadow: 0 0 22px rgba(126, 226, 255, 0.2);
+        }
+        .capChooseBtn input {
+          display: none;
+        }
+        .capChooseGlyph {
+          font-size: 28px;
+          line-height: 1;
+        }
+
         .capControls {
           display: grid;
           gap: 12px;

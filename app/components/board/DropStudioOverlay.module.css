@@ -5,6 +5,11 @@
   pointer-events: none;
   overflow: hidden;
   border-radius: inherit;
+  /* Establish a size container so attachment sizing can be expressed in `cqw`
+     (1% of the media frame width). This makes every label, sticker, and button
+     a CONSTANT fraction of the media — identical in the Drop Studio editor and
+     on every card (feed, profile, grid), regardless of how wide each frame is. */
+  container-type: inline-size;
 }
 
 .overlay::before,
@@ -186,7 +191,9 @@
   position: absolute;
   z-index: 2;
   transform: translate(-50%, -50%);
-  max-width: min(80%, 260px);
+  /* Width as a fraction of the media, not a fixed px cap, so wrapping is
+     identical across frame sizes. */
+  max-width: 80%;
   border: 1px solid rgba(255, 255, 255, 0.5);
   color: white;
   text-align: center;
@@ -200,16 +207,20 @@
 }
 
 .textLabel {
-  padding: 0.42rem 0.7rem;
+  /* Container-relative so the label is the same fraction of the media width
+     everywhere. Padding in cqw keeps the pill shape proportional too. */
+  padding: 1.55cqw 2.6cqw;
   border-radius: 999px;
   background: rgba(8, 25, 32, 0.58);
-  font-size: clamp(0.66rem, 1.8vw, 0.82rem);
+  font-size: clamp(0.5rem, 3.1cqw, 1.4rem);
   font-weight: 850;
 }
 
 .stickerImage {
   display: block;
-  width: clamp(2.4rem, 9vw, 4.2rem);
+  /* Container-relative width so image stickers hold their size relative to the
+     media across the editor and every card. */
+  width: clamp(1.7rem, 15.6cqw, 7rem);
   height: auto;
   object-fit: contain;
   pointer-events: none;
@@ -217,7 +228,7 @@
 }
 
 .sticker {
-  padding: 0.16rem 0.24rem;
+  padding: 0.55cqw 0.85cqw;
   border: 0;
   border-radius: 999px;
   background: rgba(5, 15, 25, 0.08);
@@ -225,7 +236,8 @@
     0 0 18px rgba(255, 255, 255, 0.22),
     0 0 28px rgba(119, 255, 230, 0.14);
   color: white;
-  font-size: clamp(1.6rem, 5vw, 2.45rem);
+  /* Emoji stickers sized in cqw so they match the media proportion everywhere. */
+  font-size: clamp(0.95rem, 9.1cqw, 4rem);
   line-height: 1;
   text-transform: none;
 }
@@ -247,7 +259,9 @@
   bottom: 7%;
   transform: translateX(-50%);
   max-width: 84%;
-  padding: 0.52rem 0.9rem;
+  /* Container-relative so the action pill scales with the media like the other
+     attachments. */
+  padding: 1.9cqw 3.3cqw;
   border: 1px solid rgba(193, 255, 225, 0.68);
   border-radius: 999px;
   background: rgba(3, 19, 22, 0.74);
@@ -256,7 +270,7 @@
     0 0 22px rgba(105, 244, 218, 0.28),
     inset 0 0 14px rgba(255, 255, 255, 0.08);
   backdrop-filter: blur(12px);
-  font-size: 0.7rem;
+  font-size: clamp(0.5rem, 2.6cqw, 1.1rem);
   font-weight: 950;
   letter-spacing: 0.08em;
   text-transform: uppercase;

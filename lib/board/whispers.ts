@@ -168,6 +168,60 @@ export function createBoardWhisper(params: {
   };
 }
 
+/** Turn a real activity item into an ambient whisper keyed off existing meta. */
+export function deriveActivityWhisper(
+  item: { id: string; kind?: string | null; meta?: Record<string, any> | null },
+  seed: string
+): BoardWhisper {
+  const meta = (item.meta ?? {}) as Record<string, any>;
+  const flavor = String(meta.signalType ?? meta.dropType ?? item.kind ?? "");
+
+  let eventType: BoardWhisperEventType = "drop_view";
+  if (meta.isPushed) eventType = "drop_push";
+  else if (flavor === "energy_change") eventType = "drop_pin";
+  else if (flavor === "profile_update") eventType = "profile_view";
+  else if (/store/i.test(flavor)) eventType = "drop_view";
+  else if (flavor === "Pay") eventType = "drop_view";
+
+  const w = getBoardWhisper(eventType, `${item.id}:${seed}`);
+  return {
+    id: `aw-${item.id}`,
+    type: "whisper",
+    tone: w.tone,
+    text: w.text,
+    eventType,
+  };
+}
+
+/** 1–2 whispers per drop for the Activity Channel cadence. */
+export function deriveActivityWhispers(
+  item: { id: string; kind?: string | null; meta?: Record<string, any> | null },
+  index: number
+): BoardWhisper[] {
+  const meta = (item.meta ?? {}) as Record<string, any>;
+  const flavor = String(meta.signalType ?? meta.dropType ?? item.kind ?? "");
+  const out: BoardWhisper[] = [deriveActivityWhisper(item, String(index))];
+
+  let extra: BoardWhisperEventType | null = null;
+  if (meta.isPushed) extra = "drop_pin";
+  else if (flavor === "Pay" || /store/i.test(flavor)) extra = "drop_view";
+  else if (Number(meta.commentCount) > 0) extra = "drop_view";
+  else if (flavor === "energy_change") extra = "profile_view";
+  else if (index % 3 === 1) extra = "quiet_day";
+
+  if (extra) {
+    const w = getBoardWhisper(extra, `${item.id}:extra:${index}`);
+    out.push({
+      id: `aw-${item.id}-x`,
+      type: "whisper",
+      tone: w.tone,
+      text: w.text,
+      eventType: extra,
+    });
+  }
+  return out;
+}
+
 export const PROFILE_ACTIVITY_WHISPERS: BoardWhisper[] = [
   createBoardWhisper({
     id: "profile-whisper-2026-05-23-project-progress",

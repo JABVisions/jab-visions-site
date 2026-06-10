@@ -22,7 +22,7 @@ import {
 } from "@/lib/board/dropCustomizations";
 import { recordBoardVisitWhisper } from "@/lib/board/visitWhispers";
 import {
-  PROFILE_ACTIVITY_WHISPERS,
+  deriveActivityWhispers,
   type BoardWhisper as ProfileWhisper,
 } from "@/lib/board/whispers";
 import { supabaseBrowser } from "@/lib/supabase/browser";
@@ -181,6 +181,7 @@ type DropItem = {
   fileSize?: number;
   mime?: string;
   mediaKind?: MediaKind;
+  mediaUrl?: string;
   priceCents?: number;
   description?: string;
   linkUrl?: string;
@@ -1055,6 +1056,7 @@ export default function ProfileBoardViewPage({
           meta?.mediaKind === "image" || meta?.mediaKind === "video" || meta?.mediaKind === "audio"
             ? meta.mediaKind
             : undefined,
+        mediaUrl: typeof meta?.mediaUrl === "string" ? meta.mediaUrl : undefined,
         priceCents: typeof meta?.priceCents === "number" ? meta.priceCents : undefined,
         description: typeof item.body === "string" ? item.body : undefined,
         linkUrl: safeType === "Pay" && href ? href : undefined,
@@ -1663,14 +1665,15 @@ export default function ProfileBoardViewPage({
                   </div>
                 ) : recentDrops.length > 0 ? (
                   <div className="recent-drops-stack activity-feed-stack">
-                    <BoardWhisper whisper={PROFILE_ACTIVITY_WHISPERS[0]} />
                     {recentDrops.map((item, index) => {
-                      const whisper = PROFILE_ACTIVITY_WHISPERS[index + 1];
+                      const whispers = deriveActivityWhispers(item, index);
 
                       return (
                         <div key={item.id} className="activity-feed-entry">
                           <ActivityCard item={item} compact />
-                          {whisper ? <BoardWhisper whisper={whisper} /> : null}
+                          {whispers.map((whisper) => (
+                            <BoardWhisper key={whisper.id} whisper={whisper} />
+                          ))}
                         </div>
                       );
                     })}

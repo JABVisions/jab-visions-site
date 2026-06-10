@@ -15,6 +15,7 @@ import { EVENTS, readFeed } from "@/lib/boardStore";
 import { openHostedPayDropCheckout } from "@/lib/board/payCheckout";
 import { readPayDrops, type PayDrop } from "@/lib/board/paydrops";
 import { EVT_UPDATED, readBrain, sendWave } from "@/lib/board/bucketBrain";
+import { STICKER_PACKS } from "@/lib/board/stickerPacks";
 import { resolveLinkPreviewImage } from "@/lib/board/linkPreviewImages";
 import {
   normalizeDropCustomizations,
@@ -25,11 +26,10 @@ import {
   readBoardVisitWhispers,
 } from "@/lib/board/visitWhispers";
 import {
-  PROFILE_ACTIVITY_WHISPERS,
-  getBoardWhisper,
+  deriveActivityWhispers,
   createBoardWhisper,
+  getBoardWhisper,
   type BoardWhisper as ProfileWhisper,
-  type BoardWhisperEventType,
 } from "@/lib/board/whispers";
 import {
   STORE_DROP_BOOKMARKS_STORAGE_KEY,
@@ -241,6 +241,7 @@ type DropItem = {
   fileSize?: number;
   mime?: string;
   mediaKind?: MediaKind;
+  mediaUrl?: string;
   priceCents?: number;
   description?: string;
   linkUrl?: string;
@@ -265,53 +266,6 @@ function BoardWhisper({ whisper }: { whisper: ProfileWhisper }) {
       {whisper.text}
     </p>
   );
-}
-
-// Bucket Brain: turn a real activity item into a short, ambient observation,
-// keyed off the action that actually happened (drop, push, pay/store, energy,
-// profile). No invented activity types — we read existing meta.
-function deriveActivityWhisper(
-  item: { id: string; kind?: string | null; meta?: Record<string, any> | null },
-  seed: string
-): ProfileWhisper {
-  const meta = (item.meta ?? {}) as Record<string, any>;
-  const flavor = String(meta.signalType ?? meta.dropType ?? item.kind ?? "");
-
-  let eventType: BoardWhisperEventType = "drop_view";
-  if (meta.isPushed) eventType = "drop_push";
-  else if (flavor === "energy_change") eventType = "drop_pin";
-  else if (flavor === "profile_update") eventType = "profile_view";
-  else if (/store/i.test(flavor)) eventType = "drop_view";
-  else if (flavor === "Pay") eventType = "drop_view";
-
-  const w = getBoardWhisper(eventType, `${item.id}:${seed}`);
-  return { id: `aw-${item.id}`, type: "whisper", tone: w.tone, text: w.text, eventType };
-}
-
-// Returns 1–2 whispers for a drop. A drop that carries an extra real signal
-// (pushed, pay/store, comments, energy) gets a second whisper, so the Activity
-// Channel sometimes shows two in a row. Every third quiet drop gets a soft
-// ambient line for rhythm.
-function deriveActivityWhispers(
-  item: { id: string; kind?: string | null; meta?: Record<string, any> | null },
-  index: number
-): ProfileWhisper[] {
-  const meta = (item.meta ?? {}) as Record<string, any>;
-  const flavor = String(meta.signalType ?? meta.dropType ?? item.kind ?? "");
-  const out: ProfileWhisper[] = [deriveActivityWhisper(item, String(index))];
-
-  let extra: BoardWhisperEventType | null = null;
-  if (meta.isPushed) extra = "drop_pin";
-  else if (flavor === "Pay" || /store/i.test(flavor)) extra = "drop_view";
-  else if (Number(meta.commentCount) > 0) extra = "drop_view";
-  else if (flavor === "energy_change") extra = "profile_view";
-  else if (index % 3 === 1) extra = "quiet_day";
-
-  if (extra) {
-    const w = getBoardWhisper(extra, `${item.id}:extra:${index}`);
-    out.push({ id: `aw-${item.id}-x`, type: "whisper", tone: w.tone, text: w.text, eventType: extra });
-  }
-  return out;
 }
 
 function BoardBookmark({
@@ -693,6 +647,13 @@ export default function BoardProfileHubPage() {
   const [payCheckoutBusyId, setPayCheckoutBusyId] = useState<string | null>(null);
   const [orbitState, setOrbitState] = useState<"idle" | "requested" | "connected">("idle");
   const [bucketStats, setBucketStats] = useState<BucketStats | null>(null);
+  const [stickerBinOpen, setStickerBinOpen] = useState(false);
+  const passCount = useMemo(
+    () =>
+      bucketStats?.pass ??
+      (typeof window !== "undefined" ? readBrain().pass.length : 0),
+    [bucketStats]
+  );
   const [remoteUserId, setRemoteUserId] = useState<string | null>(null);
   const [selfUser, setSelfUser] = useState("");
   const [visitWhispers, setVisitWhispers] = useState<ProfileWhisper[]>([]);
@@ -1477,6 +1438,7 @@ export default function BoardProfileHubPage() {
           meta?.mediaKind === "image" || meta?.mediaKind === "video" || meta?.mediaKind === "audio"
             ? meta.mediaKind
             : undefined,
+        mediaUrl: typeof meta?.mediaUrl === "string" ? meta.mediaUrl : undefined,
         priceCents: typeof meta?.priceCents === "number" ? meta.priceCents : undefined,
         description: typeof item.body === "string" ? item.body : undefined,
         linkUrl: safeType === "Pay" && href ? href : undefined,
@@ -2118,7 +2080,7 @@ export default function BoardProfileHubPage() {
                     <div className="status-pill aura-active">Aura active</div>
                     <p className="bio">{profile.bio}</p>
                     <div className="profile-pills">
-                      <span>Posts: <b>{boardDropsLoading ? "..." : boardDrops.length}</b></span>
+                      <span>Drops: <b>{boardDropsLoading ? "..." : boardDrops.length}</b></span>
                       <span>Glow: <b>{signalLabel}</b></span>
                       <span>Mode: <b>Public</b></span>
                     </div>
@@ -2155,9 +2117,22 @@ export default function BoardProfileHubPage() {
                       />
                     </div>
                     <div className="micro-row">
-                      <span>Pinned goals coming next</span>
-                      <span>Saved threads coming next</span>
-                      <span>Collabs &amp; calls coming next</span>
+                      <div className="micro-tile">
+                        <span className="micro-num">{passCount}</span>
+                        <span className="micro-cap">Passes</span>
+                      </div>
+                      <Link href="/board/work" className="micro-tile micro-link">
+                        <span className="micro-ico" aria-hidden>🗂️</span>
+                        <span className="micro-cap">Work Board</span>
+                      </Link>
+                      <button
+                        type="button"
+                        className="micro-tile micro-link"
+                        onClick={() => setStickerBinOpen(true)}
+                      >
+                        <span className="micro-ico" aria-hidden>🩷</span>
+                        <span className="micro-cap">Sticker Bin</span>
+                      </button>
                     </div>
                     <div className="avatar-actions">
                       <button
@@ -2237,7 +2212,7 @@ export default function BoardProfileHubPage() {
                   </div>
                 ) : recentDrops.length > 0 ? (
                   <div className="recent-drops-stack activity-feed-stack">
-                    {[...visitWhispers, ...PROFILE_ACTIVITY_WHISPERS.slice(0, 2)].map((whisper) => (
+                    {visitWhispers.map((whisper) => (
                       <BoardWhisper key={whisper.id} whisper={whisper} />
                     ))}
 
@@ -2983,15 +2958,45 @@ export default function BoardProfileHubPage() {
           gap: 8px;
         }
 
-        .micro-row span {
+        .micro-tile {
           min-height: 96px;
           border-radius: 18px;
           border: 1px solid rgba(255, 0, 190, 0.13);
           background: rgba(255, 255, 255, 0.58);
           padding: 12px;
-          color: rgba(0, 0, 0, 0.58);
-          font-size: 13px;
-          line-height: 1.35;
+          color: rgba(0, 0, 0, 0.62);
+          display: grid;
+          place-items: center;
+          align-content: center;
+          gap: 6px;
+          text-align: center;
+          text-decoration: none;
+        }
+        .micro-link {
+          cursor: pointer;
+          transition: transform 150ms ease, box-shadow 150ms ease, background 150ms ease;
+        }
+        .micro-link:hover {
+          transform: translateY(-2px);
+          background: rgba(255, 255, 255, 0.72);
+          box-shadow: 0 10px 26px rgba(255, 0, 190, 0.16);
+        }
+        .micro-num {
+          font-size: 1.9rem;
+          font-weight: 950;
+          line-height: 1;
+          color: rgba(0, 0, 0, 0.82);
+        }
+        .micro-ico {
+          font-size: 1.5rem;
+          line-height: 1;
+        }
+        .micro-cap {
+          font-size: 11px;
+          font-weight: 800;
+          letter-spacing: 0.08em;
+          text-transform: uppercase;
+          color: rgba(0, 0, 0, 0.52);
         }
 
         .avatar-actions {
@@ -3778,6 +3783,149 @@ export default function BoardProfileHubPage() {
           }
         }
       `}</style>
+
+      {stickerBinOpen ? (
+        <div
+          className="sticker-bin-overlay"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Sticker collection bin"
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget) setStickerBinOpen(false);
+          }}
+        >
+          <div className="sticker-bin">
+            <div className="sticker-bin-head">
+              <div>
+                <div className="sticker-bin-eyebrow">Collection</div>
+                <h3 className="sticker-bin-title">Sticker Bin</h3>
+              </div>
+              <button
+                type="button"
+                className="sticker-bin-close"
+                onClick={() => setStickerBinOpen(false)}
+                aria-label="Close sticker bin"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="sticker-bin-body">
+              {STICKER_PACKS.map((pack) => (
+                <div className="sticker-pack" key={pack.id}>
+                  <div className="sticker-pack-name">{pack.name}</div>
+                  <div className="sticker-bin-grid">
+                    {pack.items.map((item) => (
+                      <div
+                        className="sticker-cell"
+                        key={`${pack.id}-${item.value}`}
+                        title={item.label}
+                      >
+                        {item.src ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img src={item.src} alt={item.label} />
+                        ) : (
+                          <span>{item.value}</span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <style>{`
+            .sticker-bin-overlay {
+              position: fixed;
+              inset: 0;
+              z-index: 400;
+              display: grid;
+              place-items: center;
+              padding: 16px;
+              background: rgba(6, 10, 16, 0.6);
+              backdrop-filter: blur(10px);
+            }
+            .sticker-bin {
+              width: min(560px, 100%);
+              max-height: min(80vh, 720px);
+              display: flex;
+              flex-direction: column;
+              border-radius: 26px;
+              overflow: hidden;
+              border: 1px solid rgba(255, 255, 255, 0.16);
+              background:
+                radial-gradient(circle at 16% 0%, rgba(255, 79, 216, 0.16), transparent 42%),
+                radial-gradient(circle at 90% 8%, rgba(126, 226, 255, 0.14), transparent 40%),
+                linear-gradient(180deg, rgba(12, 14, 22, 0.96), rgba(8, 10, 18, 0.98));
+              color: #eef7ff;
+              box-shadow: 0 30px 90px rgba(0, 0, 0, 0.5);
+            }
+            .sticker-bin-head {
+              display: flex;
+              align-items: center;
+              justify-content: space-between;
+              gap: 12px;
+              padding: 16px 18px;
+              border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            }
+            .sticker-bin-eyebrow {
+              font-size: 10px;
+              letter-spacing: 0.3em;
+              text-transform: uppercase;
+              color: rgba(255, 150, 220, 0.8);
+            }
+            .sticker-bin-title {
+              margin: 3px 0 0;
+              font-size: 1.4rem;
+              font-weight: 900;
+            }
+            .sticker-bin-close {
+              width: 34px;
+              height: 34px;
+              border-radius: 999px;
+              border: 1px solid rgba(255, 255, 255, 0.18);
+              background: rgba(255, 255, 255, 0.08);
+              color: #eef7ff;
+              cursor: pointer;
+            }
+            .sticker-bin-body {
+              flex: 1 1 auto;
+              min-height: 0;
+              overflow-y: auto;
+              padding: 16px 18px 22px;
+              display: grid;
+              gap: 18px;
+            }
+            .sticker-pack-name {
+              font-size: 11px;
+              font-weight: 900;
+              letter-spacing: 0.16em;
+              text-transform: uppercase;
+              color: rgba(126, 246, 230, 0.85);
+              margin-bottom: 8px;
+            }
+            .sticker-bin-grid {
+              display: grid;
+              grid-template-columns: repeat(auto-fill, minmax(46px, 1fr));
+              gap: 8px;
+            }
+            .sticker-cell {
+              display: grid;
+              place-items: center;
+              aspect-ratio: 1;
+              border-radius: 14px;
+              font-size: 22px;
+              background: rgba(255, 255, 255, 0.05);
+              border: 1px solid rgba(255, 255, 255, 0.1);
+            }
+            .sticker-cell img {
+              width: 80%;
+              height: 80%;
+              object-fit: contain;
+            }
+          `}</style>
+        </div>
+      ) : null}
     </main>
   );
 }

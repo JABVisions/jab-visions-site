@@ -6,36 +6,6 @@ import { supabaseBrowser } from "@/lib/supabase/browser";
 import DropConsole from "@/app/components/board/DropConsole";
 import DropsBucket from "@/app/components/board/DropsBucket";
 import ActivityCard from "@/app/components/board/ActivityCard";
-import BoardWhispers from "@/app/components/board/BoardWhispers";
-import { createBoardWhisper, type BoardWhisperEventType } from "@/lib/board/whispers";
-
-// Whispers are Bucket Brain noticing real activity — ambient and relational, not
-// notifications. Woven through the feed so Board feels alive and attentive.
-const FEED_WHISPER_EVERY = 3;
-
-// 1–2 whisper events for a drop, derived from what actually happened on it, so a
-// richer drop (pushed, pay/store) sometimes earns two whispers in a row.
-function feedWhisperEvents(
-  item: { kind?: string | null; meta?: Record<string, any> | null },
-  i: number
-): BoardWhisperEventType[] {
-  const meta = item?.meta && typeof item.meta === "object" ? item.meta : {};
-  const flavor = String(meta.signalType ?? meta.dropType ?? item?.kind ?? "");
-
-  const events: BoardWhisperEventType[] = [];
-  if (meta.isPushed) events.push("drop_push");
-  else if (flavor === "energy_change") events.push("drop_pin");
-  else if (flavor === "profile_update") events.push("profile_view");
-  else events.push("drop_view");
-
-  // A second, softer line when the drop carries an extra real signal — or now
-  // and then for rhythm — so whispers occasionally cluster.
-  if (meta.isPushed || flavor === "Pay" || /store/i.test(flavor)) events.push("drop_pin");
-  else if (Number(meta.commentCount) > 0) events.push("drop_view");
-  else if (i % 2 === 0) events.push("quiet_day");
-
-  return events;
-}
 
 import {
   getLocalActivity,
@@ -207,9 +177,11 @@ export default function HomeBoardFeedPage() {
   const sentinelRef = useRef<HTMLDivElement | null>(null);
 
   const [tab, setTab] = useState<"all" | "announcements">("all");
-  const [items, setItems] = useState<BoardActivity[]>(() =>
-    demoFeedItems().slice(0, PAGE_SIZE)
-  );
+  // Start empty so the server-rendered HTML and the first client render match.
+  // demoFeedItems() derives timestamps/ids from Date.now(), so seeding it in the
+  // useState initializer made SSR and hydration disagree (React hydration error).
+  // The mount effects below (syncFromLocal / Supabase fetch) fill this in.
+  const [items, setItems] = useState<BoardActivity[]>([]);
   const [loading, setLoading] = useState(false);
 
   const [offset, setOffset] = useState(0);
@@ -416,25 +388,9 @@ export default function HomeBoardFeedPage() {
         <div className="layout">
           <section className="feed">
             <div className="cards">
-              {safeItems.flatMap((a, i) => {
-                const nodes = [
-                  <ActivityCard key={a.id} item={a} onRemove={removeItemFromFeed} />,
-                ];
-                if ((i + 1) % FEED_WHISPER_EVERY === 0) {
-                  feedWhisperEvents(a, i).forEach((eventType, n) => {
-                    nodes.push(
-                      <BoardWhispers
-                        key={`feed-whisper-${a.id}-${n}`}
-                        whisper={createBoardWhisper({
-                          id: `feed-whisper-${a.id}-${n}`,
-                          eventType,
-                        })}
-                      />
-                    );
-                  });
-                }
-                return nodes;
-              })}
+              {safeItems.map((a) => (
+                <ActivityCard key={a.id} item={a} onRemove={removeItemFromFeed} />
+              ))}
             </div>
 
             <div ref={sentinelRef} className="sentinel">

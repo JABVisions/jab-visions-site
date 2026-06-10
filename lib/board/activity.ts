@@ -111,6 +111,76 @@ export function appendLocalActivity(item: BoardActivity) {
   setLocalActivity(next);
 }
 
+export function updateLocalActivity(
+  id: string,
+  updater: (item: BoardActivity) => BoardActivity
+): BoardActivity | null {
+  const prev = getLocalActivity();
+  let updated: BoardActivity | null = null;
+  const next = prev.map((item) => {
+    if (item.id !== id) return item;
+    updated = updater(item);
+    return updated;
+  });
+  if (!updated) return null;
+  setLocalActivity(next);
+  return updated;
+}
+
+export type ActivityEditPatch = {
+  title?: string | null;
+  body?: string;
+  href?: string | null;
+  image_url?: string | null;
+  meta?: Record<string, any> | null;
+};
+
+/** Update a feed activity row (announcements, etc.) in local cache + Supabase. */
+export async function persistActivityEdit(
+  activityId: string,
+  patch: ActivityEditPatch
+): Promise<BoardActivity | null> {
+  const updated = updateLocalActivity(activityId, (item) => ({
+    ...item,
+    title: patch.title !== undefined ? patch.title : item.title,
+    body: patch.body ?? item.body,
+    href: patch.href !== undefined ? patch.href : item.href,
+    image_url: patch.image_url !== undefined ? patch.image_url : item.image_url,
+    meta: patch.meta ? { ...(item.meta ?? {}), ...patch.meta } : item.meta,
+  }));
+  if (!updated) return null;
+
+  try {
+    const { supabaseBrowser } = await import("@/lib/supabase/browser");
+    const sb = supabaseBrowser();
+    const { data: auth } = await sb.auth.getUser();
+    if (auth?.user) {
+      await sb
+        .from("board_activity")
+        .update({
+          title: updated.title,
+          body: updated.body,
+          href: updated.href,
+          image_url: updated.image_url,
+          meta: updated.meta,
+        })
+        .eq("id", activityId)
+        .eq("user_id", auth.user.id);
+    }
+  } catch {
+    // Local edit still stands.
+  }
+
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent("board:activity:updated", { detail: updated }));
+    window.dispatchEvent(
+      new StorageEvent("storage", { key: STORAGE_KEY })
+    );
+  }
+
+  return updated;
+}
+
 export function removeLocalActivity(
   matcher: (item: BoardActivity) => boolean
 ) {

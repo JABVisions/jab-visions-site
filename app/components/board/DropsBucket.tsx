@@ -5,7 +5,9 @@ import type { BoardActivity } from "@/lib/board/activity";
 import { getLocalActivity } from "@/lib/board/activity";
 import { mergeActivityWithFeed } from "@/lib/board/feedActivity";
 import { EVENTS, readFeed } from "@/lib/boardStore";
+import { resolveStoredAudioSrc } from "@/lib/board/musicPlayback";
 import { supabaseBrowser } from "@/lib/supabase/browser";
+import AudioDropPlayer from "./AudioDropPlayer";
 
 import {
   type BucketFolder,
@@ -1609,7 +1611,25 @@ function BucketDropCard({
 
   const [embedFailed, setEmbedFailed] = useState(false);
   const embed = useMemo(() => computeEmbed(href), [href]);
-  const showEmbed = !!embed.url && !embedFailed && embed.kind !== "none";
+  const mediaKind =
+    typeof rawMeta?.mediaKind === "string"
+      ? rawMeta.mediaKind
+      : typeof preview?.mediaKind === "string"
+        ? preview.mediaKind
+        : "";
+  const storedAudioSrc = resolveStoredAudioSrc({
+    mediaKind,
+    dropType: String(rawMeta?.dropType ?? rawMeta?.drop_flavor ?? preview?.dropType ?? ""),
+    signedUrl: signedPreviewUrl,
+    mediaUrl: typeof rawMeta?.mediaUrl === "string" ? rawMeta.mediaUrl : null,
+    href: previewHref && /\.(mp3|wav|m4a|aac|ogg|flac|weba)(\?|#|$)/i.test(previewHref)
+      ? previewHref
+      : "",
+    hasStoragePath: !!(previewBucket && previewStoragePath),
+  });
+  const showFullSongPlayer = !!storedAudioSrc;
+  const showEmbed =
+    !!embed.url && !embedFailed && embed.kind !== "none" && !showFullSongPlayer;
   const attachmentLabel =
     embed.kind === "spotify"
       ? "Play full track in Spotify"
@@ -1679,6 +1699,13 @@ function BucketDropCard({
       {!item ? (
         <div className="memoryMissing">
           This older bucket memory only saved an id. New Pass, Pin, and Push signals now save the full drop into Bucket Brain memory.
+        </div>
+      ) : null}
+
+      {showFullSongPlayer ? (
+        <div className="storedAudioFrame">
+          <div className="audioLabel">Full song</div>
+          <AudioDropPlayer src={storedAudioSrc} onError={() => setEmbedFailed(true)} />
         </div>
       ) : null}
 
@@ -1877,6 +1904,21 @@ function BucketDropCard({
         .embedLink { font-size: 10px; font-weight: 950; letter-spacing: 0.14em; text-transform: uppercase; color: rgba(255, 0, 190, 0.85); text-decoration: underline; text-underline-offset: 4px; }
         .embedLink.dim { color: rgba(120, 255, 240, 0.55); text-decoration: none; }
         .embedNote { padding: 10px 12px 12px; border-top: 1px solid rgba(120, 255, 240, 0.10); font-size: 11px; font-weight: 800; color: rgba(180, 245, 238, 0.76); background: rgba(255, 255, 255, 0.04); }
+        .storedAudioFrame {
+          margin-top: 12px;
+          padding: 12px;
+          border-radius: 18px;
+          border: 1px solid rgba(120, 255, 240, 0.14);
+          background: rgba(255, 255, 255, 0.05);
+        }
+        .audioLabel {
+          margin: 0 0 8px;
+          font-size: 10px;
+          font-weight: 950;
+          letter-spacing: 0.16em;
+          text-transform: uppercase;
+          color: rgba(180, 245, 238, 0.82);
+        }
 
         .embedFallback {
           border-radius: 999px; padding: 8px 10px;

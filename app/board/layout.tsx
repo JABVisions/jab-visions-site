@@ -4,6 +4,8 @@ import React from "react";
 import { usePathname } from "next/navigation";
 import BoardDock from "@/app/components/board/BoardDock";
 import BoardUtilityHeader from "@/app/components/board/BoardUtilityHeader";
+import BoardDropEditModal from "@/app/components/board/BoardDropEditModal";
+import MusicDropMigration from "@/app/components/board/MusicDropMigration";
 
 export default function BoardLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -33,6 +35,10 @@ export default function BoardLayout({ children }: { children: React.ReactNode })
 
       {/* ✅ Keep the Board dock available on the Board gate/welcome page too. */}
       {!isAuthRoute ? <BoardDock /> : null}
+
+      {/* Board-wide drop editor — any Edit button opens this in place. */}
+      {!isAuthRoute ? <BoardDropEditModal /> : null}
+      {!isAuthRoute ? <MusicDropMigration /> : null}
 
       <style>{`
         .board-root {
