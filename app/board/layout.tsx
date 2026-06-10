@@ -6,6 +6,7 @@ import BoardDock from "@/app/components/board/BoardDock";
 import BoardUtilityHeader from "@/app/components/board/BoardUtilityHeader";
 import BoardDropEditModal from "@/app/components/board/BoardDropEditModal";
 import MusicDropMigration from "@/app/components/board/MusicDropMigration";
+import CloudSyncBridge from "@/app/components/board/CloudSyncBridge";
 
 export default function BoardLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -39,6 +40,7 @@ export default function BoardLayout({ children }: { children: React.ReactNode })
       {/* Board-wide drop editor — any Edit button opens this in place. */}
       {!isAuthRoute ? <BoardDropEditModal /> : null}
       {!isAuthRoute ? <MusicDropMigration /> : null}
+      {!isAuthRoute ? <CloudSyncBridge /> : null}
 
       <style>{`
         .board-root {

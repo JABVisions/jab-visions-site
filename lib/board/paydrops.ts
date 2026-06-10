@@ -287,6 +287,13 @@ export function writePayDrops(items: PayDrop[], userId?: string | null) {
   try {
     window.localStorage.setItem(key, JSON.stringify(items));
     emitUpdated(userId);
+
+    // Mirror to Supabase in the background so Pay Drops follow the user
+    // across devices (dynamic import avoids a circular dependency).
+    void import("@/lib/board/cloudSync")
+      .then((sync) => sync.schedulePayDropsSync(userId))
+      .catch(() => {});
+
     return true;
   } catch {
     return false;

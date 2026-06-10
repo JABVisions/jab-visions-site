@@ -133,6 +133,12 @@ export function writeDrops(drops: UniversalDrop[]) {
       // swallow
     }
   }
+
+  // Mirror to Supabase in the background so drops follow the user across
+  // devices (dynamic import avoids a circular dependency at module load).
+  void import("@/lib/board/cloudSync")
+    .then((sync) => sync.scheduleUniversalDropsSync())
+    .catch(() => {});
 }
 
 export function pushDrop(drop: UniversalDrop) {
