@@ -952,9 +952,9 @@ export default function DropsBucket({
           border: 1px solid rgba(0, 0, 0, 0.08);
           overflow: hidden;
           background:
-            radial-gradient(circle at 18% 20%, rgba(120, 255, 240, 0.38), rgba(255, 255, 255, 0) 55%),
-            radial-gradient(circle at 85% 70%, rgba(160, 220, 255, 0.34), rgba(255, 255, 255, 0) 60%),
-            linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(246, 248, 255, 0.92));
+            radial-gradient(circle at 18% 20%, rgba(120, 255, 240, 0.22), rgba(255, 255, 255, 0) 55%),
+            radial-gradient(circle at 85% 70%, rgba(160, 220, 255, 0.18), rgba(255, 255, 255, 0) 60%),
+            linear-gradient(180deg, #ffffff, #f6f8ff);
           box-shadow: 0 18px 44px rgba(0, 0, 0, 0.14);
           padding: 14px;
           position: relative;

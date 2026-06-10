@@ -32,14 +32,92 @@ function clampNumber(value: unknown, min: number, max: number): number | undefin
 // Allowed inline tags. Everything else (including all attributes) is dropped.
 const ALLOWED_TAGS = new Set(["B", "STRONG", "I", "EM", "U", "BR"]);
 
+function isBoldWeight(weight: string): boolean {
+  const w = weight.trim().toLowerCase();
+  if (!w || w === "normal" || w === "400") return false;
+  if (w === "bold" || w === "bolder") return true;
+  const n = Number(w);
+  return Number.isFinite(n) && n >= 600;
+}
+
+function hasUnderline(style: CSSStyleDeclaration): boolean {
+  const deco = `${style.textDecoration} ${style.textDecorationLine}`.toLowerCase();
+  return deco.includes("underline");
+}
+
+/**
+ * Browsers often emit `<span style="font-weight: bold">` from execCommand. Our
+ * sanitizers drop those styles, so convert styled spans/fonts to semantic tags.
+ */
+export function normalizeInlineMarkup(html: string): string {
+  if (typeof window === "undefined" || !html.trim()) return html;
+
+  const doc = new DOMParser().parseFromString(`<div>${html}</div>`, "text/html");
+  const root = doc.body.firstElementChild;
+  if (!root) return html;
+
+  function convertSpanLike(el: HTMLElement) {
+    const tag = el.tagName.toUpperCase();
+    if (tag !== "SPAN" && tag !== "FONT") return;
+
+    const bold = isBoldWeight(el.style.fontWeight);
+    const italic = el.style.fontStyle === "italic";
+    const underline = hasUnderline(el.style);
+
+    if (!bold && !italic && !underline) {
+      const parent = el.parentNode;
+      if (!parent) return;
+      while (el.firstChild) parent.insertBefore(el.firstChild, el);
+      parent.removeChild(el);
+      return;
+    }
+
+    const fragment = doc.createDocumentFragment();
+    while (el.firstChild) fragment.appendChild(el.firstChild);
+
+    let wrapped: Node = fragment;
+    const wrap = (name: string) => {
+      const node = doc.createElement(name);
+      node.appendChild(wrapped);
+      wrapped = node;
+    };
+
+    if (bold) wrap("b");
+    if (italic) wrap("i");
+    if (underline) wrap("u");
+
+    el.replaceWith(wrapped);
+  }
+
+  function walk(node: Node) {
+    Array.from(node.childNodes).forEach(walk);
+    if (node instanceof HTMLElement) convertSpanLike(node);
+  }
+
+  walk(root);
+  return root.innerHTML;
+}
+
 /**
  * Sanitize rich HTML down to a tiny, attribute-free inline subset. Works in the
  * browser via DOMParser; on the server it falls back to a regex strip so stored
  * values are always safe to render.
  */
+function normalizeBoldSpansServer(raw: string): string {
+  return raw.replace(
+    /<span[^>]*style="[^"]*font-weight:\s*(?:bold|bolder|[6-9]\d{2})[^"]*"[^>]*>([\s\S]*?)<\/span>/gi,
+    "<b>$1</b>"
+  );
+}
+
 export function sanitizeRichHtml(input: unknown): string {
   if (typeof input !== "string" || !input.trim()) return "";
-  const raw = input.slice(0, RICH_TEXT_LIMITS.maxLength);
+  let raw = input.slice(0, RICH_TEXT_LIMITS.maxLength);
+  if (typeof window !== "undefined") {
+    raw = normalizeInlineMarkup(raw);
+  } else {
+    raw = normalizeBoldSpansServer(raw);
+  }
 
   if (typeof window === "undefined" || typeof window.DOMParser === "undefined") {
     // Server / no-DOM fallback: strip every tag except the allowed inline marks,
@@ -97,24 +175,39 @@ function escapeHtml(text: string): string {
     .replace(/>/g, "&gt;");
 }
 
-/** Plain-text version (tags stripped, <br> → space) for search, feed titles, etc. */
+/** Plain-text version (tags stripped, <br> → newline) for mirrors and search. */
 export function richToPlain(input: unknown): string {
   const html = sanitizeRichHtml(input);
   if (!html) return "";
   return html
-    .replace(/<br\s*\/?>/gi, " ")
+    .replace(/<br\s*\/?>/gi, "\n")
     .replace(/<[^>]+>/g, "")
     .replace(/&amp;/g, "&")
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">")
-    .replace(/\s+/g, " ")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n[ \t]+/g, "\n")
     .trim();
+}
+
+function coerceRichTextRecord(input: unknown): Record<string, unknown> | null {
+  if (input && typeof input === "object") return input as Record<string, unknown>;
+  if (typeof input === "string" && input.trim()) {
+    try {
+      const parsed = JSON.parse(input);
+      if (parsed && typeof parsed === "object") return parsed as Record<string, unknown>;
+    } catch {
+      // Legacy plain string — treat as unformatted html seed.
+      return { html: input };
+    }
+  }
+  return null;
 }
 
 /** Normalize + clamp a stored rich value. Returns undefined when there's nothing. */
 export function normalizeRichText(input: unknown): RichTextValue | undefined {
-  if (!input || typeof input !== "object") return undefined;
-  const src = input as Record<string, unknown>;
+  const src = coerceRichTextRecord(input);
+  if (!src) return undefined;
   const html = sanitizeRichHtml(src.html);
   const fontSize = clampNumber(
     src.fontSize,
@@ -167,5 +260,6 @@ export function richTextStyle(
 /** Make a RichTextValue from plain text (used to seed the editor from legacy drops). */
 export function richTextFromPlain(text: unknown): RichTextValue {
   const str = typeof text === "string" ? text : "";
-  return { html: escapeHtml(str) };
+  const html = escapeHtml(str).replace(/\r\n/g, "\n").replace(/\n/g, "<br>");
+  return { html };
 }

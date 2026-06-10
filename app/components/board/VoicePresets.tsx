@@ -185,13 +185,10 @@ export default function VoicePresets({
     }
   }
 
-  // Build the audio graph as soon as the element is mounted, so the very first
-  // playback already routes through the filter chain (lazy setup on first play
-  // could miss the start and made presets feel like they did nothing).
-  useEffect(() => {
-    ensureGraph();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  // NOTE: do NOT build the audio graph on mount. Creating an AudioContext before
+  // any user gesture leaves it "suspended", which silences the FIRST playback.
+  // The graph is built lazily on the first play / preset tap (a real gesture),
+  // so the context starts running and audio is audible right away.
 
   useEffect(() => {
     if (nodesRef.current) applyPreset(nodesRef.current, preset);

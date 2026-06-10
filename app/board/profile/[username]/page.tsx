@@ -1555,7 +1555,7 @@ export default function ProfileBoardViewPage({
                                   onClick={() => void openPayCheckout(drop)}
                                   disabled={payCheckoutBusyId === drop.id}
                                 >
-                                  {payCheckoutBusyId === drop.id ? "Opening..." : "Open checkout"}
+                                  {payCheckoutBusyId === drop.id ? "Opening..." : "Pay on Board"}
                                 </button>
                               ) : null}
                               {drop.type === "Doc" && signedUrl ? (

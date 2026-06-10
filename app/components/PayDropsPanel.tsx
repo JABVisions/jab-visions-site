@@ -145,7 +145,7 @@ export default function PayDropsPanel() {
                   disabled={busyId === drop.id}
                   className="mt-3 rounded-full border border-black/10 bg-white/70 px-3 py-2 text-[11px] font-extrabold uppercase tracking-[0.14em] text-[rgba(255,0,190,0.88)] disabled:cursor-wait disabled:opacity-60"
                 >
-                  {busyId === drop.id ? "Opening..." : "Open checkout"}
+                  {busyId === drop.id ? "Opening..." : "Pay on Board"}
                 </button>
               ) : null}
             </div>

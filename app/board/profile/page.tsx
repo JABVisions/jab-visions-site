@@ -2848,10 +2848,15 @@ export default function BoardProfileHubPage() {
 
         .status-pill {
           display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          line-height: 1;
           border-radius: 999px;
           border: 1px solid rgba(0, 0, 0, 0.1);
           background: rgba(255, 255, 255, 0.5);
-          padding: 8px 12px;
+          padding: 0 12px;
+          min-height: 28px;
+          box-sizing: border-box;
           font-size: 10px;
           font-weight: 800;
           letter-spacing: 0.18em;
@@ -2874,6 +2879,8 @@ export default function BoardProfileHubPage() {
         .profile-pills span {
           display: inline-flex;
           align-items: center;
+          justify-content: center;
+          line-height: 1;
           gap: 6px;
           min-height: 30px;
           border-radius: 999px;
@@ -3055,19 +3062,36 @@ export default function BoardProfileHubPage() {
         }
 
         .board-drop-badge {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          height: 24px;
+          flex: 0 0 auto;
+          box-sizing: border-box;
           border-radius: 999px;
-          padding: 6px 8px;
+          padding: 0 10px;
+          padding-top: 1px;
           font-size: 10px;
-          font-weight: 800;
-          letter-spacing: 0.12em;
+          font-weight: 950;
+          letter-spacing: 0.1em;
           text-transform: uppercase;
+          line-height: 1;
+          vertical-align: middle;
           background: rgba(0, 160, 80, 0.12);
           color: rgba(0, 160, 80, 0.92);
+          border: 1px solid rgba(0, 160, 80, 0.16);
         }
 
         .board-drop-badge.ghost {
-          background: rgba(0, 0, 0, 0.06);
-          color: rgba(0, 0, 0, 0.56);
+          background: rgba(255, 255, 255, 0.52);
+          color: rgba(0, 0, 0, 0.52);
+          border-color: rgba(0, 0, 0, 0.08);
+        }
+
+        .board-drop-badge.secondary {
+          color: rgba(0, 120, 105, 0.88);
+          background: rgba(220, 252, 240, 0.72);
+          border-color: rgba(0, 140, 120, 0.18);
         }
 
         .board-drop-media-frame {

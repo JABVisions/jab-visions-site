@@ -201,7 +201,7 @@ export default function PayDropsMiniPanel({
                   disabled={busyId === d.id}
                   className="mt-3 inline-flex rounded-full px-3 py-2 text-xs font-extrabold tracking-[0.12em] uppercase bg-white/70 border border-black/10 text-[rgba(255,0,190,0.9)] disabled:opacity-60 disabled:cursor-wait"
                 >
-                  {busyId === d.id ? "Opening..." : "Checkout →"}
+                  {busyId === d.id ? "Opening..." : "Pay on Board"}
                 </button>
               ) : null}
             </div>

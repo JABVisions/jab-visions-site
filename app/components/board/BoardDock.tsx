@@ -1329,7 +1329,13 @@ function DockPill({
         }
         .bd_pill.explore:hover { filter: brightness(1.06); }
         .bd_pill.explore.active { box-shadow: 0 0 0 1px rgba(255,255,255,0.20), 0 0 22px rgba(0,0,0,0.14); }
-        .bd_pillLabel { font-size: 12px; font-weight: 950; letter-spacing: 0.08em; text-transform: uppercase; }
+        .bd_pillLabel {
+          font-size: 12px;
+          font-weight: 950;
+          letter-spacing: 0.08em;
+          text-transform: uppercase;
+          line-height: 1;
+        }
         .bd_pillIcon { filter: drop-shadow(0 0 10px rgba(0,0,0,0.05)); }
         .bd_pill.explore .bd_pillIcon { filter: drop-shadow(0 0 10px rgba(255,255,255,0.10)); }
       `}</style>

@@ -29,6 +29,57 @@ export function isMusicDropType(dropType: string): boolean {
   return dt === "music" || dt.includes("music");
 }
 
+/** Parse bucket + object path from a Supabase storage URL baked into feed meta. */
+export function parseBoardStorageFromUrl(
+  url: string
+): { bucket: string; storagePath: string } | null {
+  if (!url) return null;
+  const match = url.match(
+    /\/storage\/v1\/object\/(?:public|sign|authenticated)\/([^/]+)\/([^?]+)/
+  );
+  if (!match) return null;
+  return {
+    bucket: decodeURIComponent(match[1]),
+    storagePath: decodeURIComponent(match[2]),
+  };
+}
+
+/** Resolve authoritative storage coords from meta fields or embedded storage URLs. */
+export function resolveStoredMediaCoords(opts: {
+  bucket?: string | null;
+  storagePath?: string | null;
+  mediaUrl?: string | null;
+  href?: string | null;
+}): { bucket: string; storagePath: string } | null {
+  if (opts.bucket?.trim() && opts.storagePath?.trim()) {
+    return { bucket: opts.bucket.trim(), storagePath: opts.storagePath.trim() };
+  }
+  for (const url of [opts.mediaUrl, opts.href]) {
+    if (!url) continue;
+    const parsed = parseBoardStorageFromUrl(url);
+    if (parsed) return parsed;
+  }
+  return null;
+}
+
+/** True when a Music Drop has an uploaded file in Board storage (not link-only streaming). */
+export function hasUploadedMusicStorage(opts: {
+  mediaKind?: string | null;
+  dropType?: string | null;
+  bucket?: string | null;
+  storagePath?: string | null;
+  mediaUrl?: string | null;
+  href?: string | null;
+}): boolean {
+  const isMusic = isMusicDropType(String(opts.dropType ?? ""));
+  if (!isMusic && opts.mediaKind !== "audio") return false;
+  if (resolveStoredMediaCoords(opts)) return true;
+  const direct = [opts.mediaUrl, opts.href].find(
+    (url) => url && isAudioFileUrl(url) && !isStreamingMusicUrl(url)
+  );
+  return !!direct;
+}
+
 /**
  * Pick the best on-platform audio source for a Music Drop (uploaded file).
  * Ignores streaming links and link-preview artwork.
@@ -52,7 +103,7 @@ export function resolveStoredAudioSrc(opts: {
   );
 
   for (const url of candidates) {
-    if (isAudioFileUrl(url)) return url;
+    if (isAudioFileUrl(url) && !isStreamingMusicUrl(url)) return url;
     if (isStreamingMusicUrl(url)) continue;
   }
 

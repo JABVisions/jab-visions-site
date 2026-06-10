@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type RefObject } from "react";
 import styles from "./VocalVisualizer.module.css";
 
 export type VocalVisualizerState = "idle" | "recording" | "playback" | "saved";
@@ -12,7 +12,7 @@ function configFor(state: VocalVisualizerState): StateConfig {
     case "recording":
       return { amp: 0.9, speed: 2.2, pulse: 3.0, boost: 1.4 };
     case "playback":
-      return { amp: 0.55, speed: 1.8, pulse: 1.7, boost: 1.05 };
+      return { amp: 0.72, speed: 1.8, pulse: 1.7, boost: 1.45 };
     case "saved":
       return { amp: 0.26, speed: 0.55, pulse: 0.45, boost: 1.0 };
     case "idle":
@@ -20,6 +20,14 @@ function configFor(state: VocalVisualizerState): StateConfig {
       return { amp: 0.16, speed: 0.85, pulse: 0.6, boost: 1.0 };
   }
 }
+
+// MediaElementSource can only be created once per <audio> element — cache graphs.
+type PlaybackGraph = {
+  ctx: AudioContext;
+  source: MediaElementAudioSourceNode;
+  analyser: AnalyserNode;
+};
+const playbackGraphs = new WeakMap<HTMLAudioElement, PlaybackGraph>();
 
 // Three thin, translucent line glyphs — cyan / magenta / lime — phase-offset so
 // they weave into a living, pointy waveform.
@@ -29,49 +37,81 @@ const LINES = [
   { hue: 150, alpha: 0.32, scale: 0.64, offset: 0, phase: 14 },
 ];
 
+const POINTS = 168;
+
+/** Map analyser time-domain samples into a pointy waveform that tracks voice energy. */
+function sampleTimeDomainWave(data: Uint8Array, points: number, gain = 1): number[] {
+  const wave: number[] = new Array(points);
+  const len = data.length;
+  for (let j = 0; j < points; j++) {
+    const start = Math.floor((j / points) * len);
+    const end = Math.max(start + 1, Math.floor(((j + 1) / points) * len));
+    let min = 128;
+    let max = 128;
+    for (let i = start; i < end; i++) {
+      const v = data[i] ?? 128;
+      if (v < min) min = v;
+      if (v > max) max = v;
+    }
+    const peak = ((max - min) / 255) * gain;
+    const center = ((data[start] ?? 128) - 128) / 128;
+    const sign = center >= 0 ? 1 : -1;
+    wave[j] = Math.max(-1, Math.min(1, peak * sign * 1.25 + center * 0.35));
+  }
+  return wave;
+}
+
 /**
  * Vocal Visualizer — thin, pointy, colored waveform lines that fill their
- * container. Renders the live microphone waveform (time-domain) while recording,
- * and a smooth simulated waveform for idle / playback / saved states.
+ * container. Uses live microphone data while recording and live playback
+ * analysis while an audio clip plays on the feed.
  */
 export default function VocalVisualizer({
   state,
   stream = null,
+  playbackAudioRef = null,
 }: {
   state: VocalVisualizerState;
   stream?: MediaStream | null;
+  /** When playing a voice/audio drop, pass the <audio> ref for real-time waveform. */
+  playbackAudioRef?: RefObject<HTMLAudioElement | null> | null;
 }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const rafRef = useRef<number>(0);
-  const audioCtxRef = useRef<AudioContext | null>(null);
-  const analyserRef = useRef<AnalyserNode | null>(null);
-  const sourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
-  const dataRef = useRef<Uint8Array | null>(null);
+
+  const micCtxRef = useRef<AudioContext | null>(null);
+  const micSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
+  const micAnalyserRef = useRef<AnalyserNode | null>(null);
+  const micDataRef = useRef<Uint8Array | null>(null);
+
+  const playbackAnalyserRef = useRef<AnalyserNode | null>(null);
+  const playbackDataRef = useRef<Uint8Array | null>(null);
+
   const stateRef = useRef(state);
   stateRef.current = state;
 
-  // Live audio analysis while recording (guarded for SSR / no mic / no WebAudio).
+  // Live microphone analysis while recording.
   useEffect(() => {
     const teardown = () => {
       try {
-        sourceRef.current?.disconnect();
+        micSourceRef.current?.disconnect();
       } catch {
         /* noop */
       }
       try {
-        analyserRef.current?.disconnect();
+        micAnalyserRef.current?.disconnect();
       } catch {
         /* noop */
       }
       try {
-        void audioCtxRef.current?.close();
+        void micCtxRef.current?.close();
       } catch {
         /* noop */
       }
-      sourceRef.current = null;
-      analyserRef.current = null;
-      dataRef.current = null;
-      audioCtxRef.current = null;
+      micSourceRef.current = null;
+      micAnalyserRef.current = null;
+      micDataRef.current = null;
+      micCtxRef.current = null;
     };
 
     if (state !== "recording" || !stream || typeof window === "undefined") {
@@ -88,13 +128,14 @@ export default function VocalVisualizer({
       const ac = new AC();
       const src = ac.createMediaStreamSource(stream);
       const analyser = ac.createAnalyser();
-      analyser.fftSize = 1024;
-      analyser.smoothingTimeConstant = 0.55;
+      analyser.fftSize = 2048;
+      analyser.smoothingTimeConstant = 0.42;
       src.connect(analyser);
-      audioCtxRef.current = ac;
-      sourceRef.current = src;
-      analyserRef.current = analyser;
-      dataRef.current = new Uint8Array(analyser.fftSize);
+      micCtxRef.current = ac;
+      micSourceRef.current = src;
+      micAnalyserRef.current = analyser;
+      micDataRef.current = new Uint8Array(analyser.fftSize);
+      void ac.resume();
     } catch {
       teardown();
     }
@@ -102,8 +143,54 @@ export default function VocalVisualizer({
     return teardown;
   }, [state, stream]);
 
-  // Draw loop. Fills the container (re-measures each frame) and reads the latest
-  // state so state changes never restart the loop.
+  // Live playback analysis — waveform follows the actual voice in the clip.
+  useEffect(() => {
+    const clearPlaybackRefs = () => {
+      playbackAnalyserRef.current = null;
+      playbackDataRef.current = null;
+    };
+
+    if (state !== "playback" || typeof window === "undefined") {
+      clearPlaybackRefs();
+      return;
+    }
+
+    const el = playbackAudioRef?.current;
+    if (!el) {
+      clearPlaybackRefs();
+      return;
+    }
+
+    const AC =
+      window.AudioContext ||
+      (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!AC) return;
+
+    try {
+      let graph = playbackGraphs.get(el);
+      if (!graph) {
+        const ctx = new AC();
+        const source = ctx.createMediaElementSource(el);
+        const analyser = ctx.createAnalyser();
+        analyser.fftSize = 2048;
+        analyser.smoothingTimeConstant = 0.28;
+        source.connect(analyser);
+        analyser.connect(ctx.destination);
+        graph = { ctx, source, analyser };
+        playbackGraphs.set(el, graph);
+      }
+
+      playbackAnalyserRef.current = graph.analyser;
+      playbackDataRef.current = new Uint8Array(graph.analyser.fftSize);
+      void graph.ctx.resume();
+    } catch {
+      clearPlaybackRefs();
+    }
+
+    return clearPlaybackRefs;
+  }, [state, playbackAudioRef]);
+
+  // Draw loop — reads live mic or playback analysers when available.
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -111,7 +198,6 @@ export default function VocalVisualizer({
     if (!ctx) return;
     const dpr = Math.min(typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1, 2);
 
-    const POINTS = 168;
     let running = true;
 
     const draw = () => {
@@ -126,24 +212,34 @@ export default function VocalVisualizer({
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       }
 
-      const cfg = configFor(stateRef.current);
+      const currentState = stateRef.current;
+      const cfg = configFor(currentState);
       const t = performance.now() / 1000;
-      const analyser = analyserRef.current;
-      const data = dataRef.current;
 
-      const wave: number[] = new Array(POINTS);
+      let analyser: AnalyserNode | null = null;
+      let data: Uint8Array | null = null;
+      let liveGain = 1;
+
+      if (currentState === "recording" && micAnalyserRef.current && micDataRef.current) {
+        analyser = micAnalyserRef.current;
+        data = micDataRef.current;
+        liveGain = 1.15;
+      } else if (currentState === "playback" && playbackAnalyserRef.current && playbackDataRef.current) {
+        analyser = playbackAnalyserRef.current;
+        data = playbackDataRef.current;
+        liveGain = 1.35;
+      }
+
+      let wave: number[];
       if (analyser && data) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         analyser.getByteTimeDomainData(data as any);
-        for (let j = 0; j < POINTS; j++) {
-          const idx = Math.floor((j / POINTS) * data.length);
-          wave[j] = ((data[idx] ?? 128) - 128) / 128;
-        }
+        wave = sampleTimeDomainWave(data, POINTS, liveGain);
       } else {
         const env = cfg.amp * (0.55 + 0.45 * Math.sin(t * cfg.pulse));
+        wave = new Array(POINTS);
         for (let j = 0; j < POINTS; j++) {
           const x = j / POINTS;
-          // Sharper harmonic mix → pointier peaks.
           wave[j] =
             env *
             (Math.sin(x * Math.PI * 2 * 3 + t * cfg.speed) * 0.5 +
@@ -167,14 +263,13 @@ export default function VocalVisualizer({
         ctx.beginPath();
         for (let j = 0; j < POINTS; j++) {
           const x = (j / (POINTS - 1)) * cssW;
-          // Gentle edge taper so lines resolve to the centerline at the sides.
           const taper = 0.35 + 0.65 * Math.sin((j / (POINTS - 1)) * Math.PI);
           const wv = wave[(j + line.phase) % POINTS] ?? wave[j];
           const y = midY + wv * maxAmp * line.scale * cfg.boost * taper + line.offset;
           if (j === 0) ctx.moveTo(x, y);
           else ctx.lineTo(x, y);
         }
-        const alpha = Math.max(0.14, Math.min(0.9, line.alpha * (0.5 + level * 1.7)));
+        const alpha = Math.max(0.14, Math.min(0.95, line.alpha * (0.42 + level * 2.1)));
         ctx.strokeStyle = `hsla(${line.hue}, 100%, 68%, ${alpha})`;
         ctx.lineWidth = 1.6;
         ctx.shadowColor = `hsla(${line.hue}, 100%, 64%, 0.8)`;

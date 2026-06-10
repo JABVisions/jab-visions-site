@@ -1072,11 +1072,13 @@ export default function ProjectCenter() {
           />
           <div className="grid gap-4 p-5">
             <div className="grid gap-3 md:grid-cols-[0.8fr_1.2fr]">
-              <input
+              <textarea
                 value={thoughtTitle}
                 onChange={(event) => setThoughtTitle(event.target.value)}
                 placeholder="Optional title"
-                className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white/85 placeholder:text-white/35 focus:outline-none focus:ring-2 focus:ring-lime-200/15"
+                rows={2}
+                aria-label="Optional title"
+                className="w-full resize-y rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm leading-snug text-white/85 placeholder:text-white/35 focus:outline-none focus:ring-2 focus:ring-lime-200/15"
               />
               <div className="flex flex-wrap gap-2">
                 {(["public", "private"] as const).map((visibility) => (

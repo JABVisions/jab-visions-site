@@ -92,6 +92,42 @@ export async function loadDropForEdit(id: string): Promise<DropItem | null> {
   return remote.find((x) => x && x.id === id) ?? null;
 }
 
+/** Load a drop's stored media from local cache, your profile, or the author's profile. */
+export async function loadDropMediaForFeed(
+  id: string,
+  ownerUserId?: string | null
+): Promise<DropItem | null> {
+  if (!id) return null;
+
+  const local = findLocalDropById(id);
+  if (local) return local;
+
+  const own = await loadDropForEdit(id);
+  if (own) return own;
+
+  const ownerId = ownerUserId?.trim();
+  if (!ownerId) return null;
+
+  try {
+    const supabase = supabaseBrowser();
+    const { data } = await supabase
+      .from("profiles")
+      .select("board_style")
+      .eq("id", ownerId)
+      .maybeSingle();
+    const boardStyle =
+      data?.board_style && typeof data.board_style === "object"
+        ? (data.board_style as Record<string, unknown>)
+        : null;
+    const drops = Array.isArray(boardStyle?.boardDrops)
+      ? (boardStyle.boardDrops as DropItem[])
+      : [];
+    return drops.find((x) => x && x.id === id) ?? null;
+  } catch {
+    return null;
+  }
+}
+
 export async function getCurrentUserId(): Promise<string | null> {
   try {
     const supabase = supabaseBrowser();
@@ -152,6 +188,10 @@ export async function uploadDropMedia(
  * mounted board surface re-renders with the new data.
  */
 export async function persistDropEdit(updated: DropItem): Promise<void> {
+  // Stamp the edit time so every surface can tell a fresh edit from a stale
+  // cached copy (ActivityCard uses this to avoid overriding newer server data
+  // with an out-of-date local snapshot).
+  updated = { ...updated, updatedAt: Date.now() };
   const userId = await getCurrentUserId();
 
   // 1) Supabase is authoritative: read the existing boardDrops, merge THIS drop

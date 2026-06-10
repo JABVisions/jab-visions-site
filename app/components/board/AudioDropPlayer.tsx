@@ -1,13 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import VocalVisualizer from "./VocalVisualizer";
 
 /**
- * Plays a recorded audio drop with the thin, pointy vocal waveform shown above
- * the controls — so voice/audio drops feel alive in the feed and anywhere on
- * Board. The waveform animates a "playing" wave while the clip plays and rests
- * to its quiet "saved" identity when paused.
+ * Plays a recorded audio drop with a live vocal waveform above the controls.
+ * While playing, the visualizer reads the actual audio signal so peaks move
+ * with your voice — not a pre-baked animation.
  */
 export default function AudioDropPlayer({
   src,
@@ -18,18 +17,24 @@ export default function AudioDropPlayer({
   autoPlay?: boolean;
   onError?: () => void;
 }) {
+  const audioRef = useRef<HTMLAudioElement>(null);
   const [playing, setPlaying] = useState(false);
 
   return (
     <div className="adp">
       <div className="adpViz">
-        <VocalVisualizer state={playing ? "playback" : "saved"} />
+        <VocalVisualizer
+          state={playing ? "playback" : "saved"}
+          playbackAudioRef={audioRef}
+        />
       </div>
       <audio
+        ref={audioRef}
         className="adpAudio"
         src={src}
         controls
         preload="metadata"
+        playsInline
         autoPlay={autoPlay}
         onPlay={() => setPlaying(true)}
         onPause={() => setPlaying(false)}

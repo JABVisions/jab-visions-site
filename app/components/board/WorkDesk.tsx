@@ -627,7 +627,7 @@ function PayDropStand({
               onClick={() => void openCheckout(item)}
               disabled={isBusy}
               className="group overflow-hidden rounded-2xl border border-white/10 bg-black/30 text-left transition hover:border-lime-200/35 hover:bg-white/8 focus:outline-none focus:ring-2 focus:ring-lime-200/40 disabled:cursor-wait disabled:opacity-70"
-              aria-label={`Open checkout for ${item.title}`}
+              aria-label={`Pay on Board for ${item.title}`}
             >
               <div className="min-h-[154px] p-2">
                 <div className="grid gap-2">
@@ -639,7 +639,7 @@ function PayDropStand({
                       ${(item.amountCents / 100).toFixed(2)}
                     </span>
                     <span className="rounded-full border border-lime-200/20 bg-lime-300/10 px-2 py-1 text-[9px] font-black uppercase tracking-[0.12em] text-lime-100/80">
-                      {isBusy ? "Opening" : "Checkout"}
+                      {isBusy ? "Opening" : "Pay on Board"}
                     </span>
                   </div>
 

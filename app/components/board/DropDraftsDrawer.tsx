@@ -140,6 +140,11 @@ export default function DropDraftsDrawer({
                 </div>
                 <div className="draftMeta">
                   <span className="draftKind">{kindLabel(draft.kind)}</span>
+                  {draft.count && draft.count > 1 ? (
+                    <span className="draftCount" title="Times this draft was saved">
+                      🗂 {draft.count}×
+                    </span>
+                  ) : null}
                   <span className="draftWhen">{formatWhen(draft.createdAt)}</span>
                 </div>
                 <div className="draftActions">
@@ -296,6 +301,10 @@ export default function DropDraftsDrawer({
             font-weight: 900;
             letter-spacing: 0.1em;
             text-transform: uppercase;
+            color: rgba(126, 246, 230, 0.9);
+          }
+          .draftCount {
+            font-weight: 900;
             color: rgba(126, 246, 230, 0.9);
           }
           .draftWhen {

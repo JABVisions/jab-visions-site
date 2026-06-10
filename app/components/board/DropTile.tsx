@@ -1,10 +1,24 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import clsx from "clsx";
 import { supabaseBrowser } from "@/lib/supabase/browser";
 import { removePayDrop, upsertPayDrop } from "@/lib/board/paydrops";
-import { appendLocalActivity, createActivity, type BoardActivity } from "@/lib/board/activity";
+import {
+  appendLocalActivity,
+  createActivity,
+  syncActivitiesForDropEdit,
+  type BoardActivity,
+} from "@/lib/board/activity";
 import { pushDrop } from "@/lib/board/drops/storage";
+import {
+  attachmentPreviewLabel,
+  mediaAttachmentChipLabel,
+  normalizeBoardDropType,
+  resolveDropMediaKind,
+  secondaryAttachmentLabel,
+  storageCoordsFromDrop,
+} from "@/lib/board/dropDisplay";
 import { emitBoardDropSignal } from "@/lib/board/dropSignals";
 import { fetchLinkPreview } from "@/lib/board/linkPreview";
 import { resolveLinkPreviewImage } from "@/lib/board/linkPreviewImages";
@@ -18,14 +32,26 @@ import {
   normalizeDropCustomizations,
   type DropCustomization,
 } from "@/lib/board/dropCustomizations";
-import { DROP_FLAVOR_ORDER, type DropFlavorKey } from "@/lib/board/dropFlavors";
-import { normalizeRichText, type RichTextValue } from "@/lib/board/richText";
+import {
+  DROP_FLAVOR_LINK_ROW,
+  DROP_FLAVOR_STUDIO_ROW,
+  type DropFlavorKey,
+} from "@/lib/board/dropFlavors";
+import { normalizeRichText, richTextFromPlain, type RichTextValue } from "@/lib/board/richText";
 import { RichText } from "./RichTextField";
+import { PayOnBoardButton } from "./PayOnBoardButton";
 import RemovableDropBadge from "./RemovableDropBadge";
+import { EyeToggle } from "./icons/EyeToggle";
 import DropStudioStage from "./DropStudioStage";
 import DropCommentsDrawer from "./DropCommentsDrawer";
 import AudioDropPlayer from "./AudioDropPlayer";
 import DropStudioOverlay from "./DropStudioOverlay";
+import {
+  DESCRIPT_SHARE_EVENT,
+  descriptPlainText,
+  type DescriptDestination,
+  type DescriptDoc,
+} from "@/lib/board/descriptDocs";
 
 type DropType =
   | "YouTube"
@@ -38,7 +64,7 @@ type DropType =
   | "Thought";
 type MediaKind = "image" | "video" | "audio";
 type PayProviderMode = "payment_link" | "stripe_connect";
-type StudioCaptureMode = "photo" | "video" | "audio" | "art";
+type StudioCaptureMode = "photo" | "video" | "audio" | "art" | "descript";
 
 // Map the canonical (creation-first) flavor order to this surface's DropType
 // labels, so the Drop tabs match the Drop Console and every other surface.
@@ -52,10 +78,19 @@ const MODE_BY_FLAVOR: Record<DropFlavorKey, DropType> = {
   link: "Link",
   doc: "Doc",
 };
-const MODE_ORDER: DropType[] = DROP_FLAVOR_ORDER.map((k) => MODE_BY_FLAVOR[k]);
+const STUDIO_MODE_ORDER: DropType[] = DROP_FLAVOR_STUDIO_ROW.map((k) => MODE_BY_FLAVOR[k]);
+const LINK_MODE_ORDER: DropType[] = DROP_FLAVOR_LINK_ROW.map((k) => MODE_BY_FLAVOR[k]);
 
 function displayDropType(type: DropType) {
   return type === "Media" ? "Vision" : type;
+}
+
+function boardTitleFields(raw: string, fallback = "Untitled") {
+  const title = raw.trim() || fallback;
+  return {
+    title,
+    titleRich: normalizeRichText(richTextFromPlain(title)),
+  };
 }
 
 export type DropItem = {
@@ -63,6 +98,11 @@ export type DropItem = {
   title: string;
   type: DropType;
   createdAt: number;
+  /** Last-edited timestamp. Used to decide whether a cached local copy is fresh
+   *  enough to override server feed data (see ActivityCard). */
+  updatedAt?: number;
+  /** How many Drop Studio drafts have been saved while making this drop. */
+  draftCount?: number;
 
   url?: string;
   embedUrl?: string | null;
@@ -617,6 +657,20 @@ export default function DropTile() {
   const [editStudioInitialFile, setEditStudioInitialFile] = useState<File | null>(null);
   const [editSaving, setEditSaving] = useState(false);
 
+  const editStudioAllowedModes = useMemo<StudioCaptureMode[]>(() => {
+    if (!editDrop) return ["photo", "video", "audio", "art"];
+    if (editDrop.type === "Doc") return ["descript"];
+    if (editDrop.type === "Thought") return ["audio", "art", "descript"];
+    if (editDrop.type === "Pay") return ["photo", "video", "audio", "art", "descript"];
+    return ["photo", "video", "art"];
+  }, [editDrop]);
+
+  const editDescriptDestination = useMemo<DescriptDestination>(() => {
+    if (editDrop?.type === "Thought") return "thought";
+    if (editDrop?.type === "Pay") return "pay";
+    return "doc";
+  }, [editDrop]);
+
   function openEdit(d: DropItem) {
     setEditDrop(d);
     setEditTitle(d.title || "");
@@ -704,7 +758,7 @@ export default function DropTile() {
       const cleanLink = editPayLink.trim() ? normalizeUrl(editPayLink) : null;
       const updated: DropItem = {
         ...d,
-        title: editTitle.trim() || d.title,
+        ...boardTitleFields(editTitle, d.title),
         description:
           d.type === "Thought" ? d.description : editDesc.trim() || undefined,
         thoughtText: d.type === "Thought" ? editDesc.trim() || undefined : d.thoughtText,
@@ -717,11 +771,27 @@ export default function DropTile() {
         paymentLink: d.type === "Pay" ? cleanLink ?? undefined : d.paymentLink,
         linkUrl: d.type === "Pay" ? cleanLink ?? d.linkUrl : d.linkUrl,
         customizations: compactDropCustomizations(editCustomizations) ?? d.customizations,
+        updatedAt: Date.now(),
         ...media,
       };
 
       const next = drops.map((x) => (x.id === d.id ? updated : x));
       persist(next);
+
+      // Propagate the edit to the shared feed (board_activity) so it shows on
+      // every device — not just this one's local cache. Mirrors the board-wide
+      // editor's persistDropEdit behavior.
+      try {
+        let mediaPreviewUrl: string | null = null;
+        if (updated.bucket && updated.storagePath) {
+          mediaPreviewUrl = await getSignedUrl(updated.bucket, updated.storagePath, 60 * 45);
+        } else if (updated.mediaUrl) {
+          mediaPreviewUrl = updated.mediaUrl;
+        }
+        await syncActivitiesForDropEdit({ ...updated, mediaPreviewUrl });
+      } catch {
+        // local persist already stands
+      }
 
       if (updated.type === "Pay") {
         upsertPayDrop(
@@ -772,17 +842,24 @@ export default function DropTile() {
   const previewHydrationRef = useRef<Set<string>>(new Set());
 
   const studioAllowedModes = useMemo<StudioCaptureMode[]>(
-    // Thought Drops are voice + art thoughts (no camera). Pay Drops can capture
-    // any media type (photo / video / voice / art) so supporters see the full
-    // request context. Vision Drops own the camera features (Vision/Video) + Art.
+    // Doc Drops are Descript-only. Thought = voice + art + Descript. Pay = all
+    // media + Descript. Vision = camera + art only.
     () =>
-      mode === "Thought"
-        ? ["audio", "art"]
-        : mode === "Pay"
-          ? ["photo", "video", "audio", "art"]
-          : ["photo", "video", "art"],
+      mode === "Doc"
+        ? ["descript"]
+        : mode === "Thought"
+          ? ["audio", "art", "descript"]
+          : mode === "Pay"
+            ? ["photo", "video", "audio", "art", "descript"]
+            : ["photo", "video", "art"],
     [mode]
   );
+
+  const studioDescriptDestination = useMemo<DescriptDestination>(() => {
+    if (mode === "Thought") return "thought";
+    if (mode === "Pay") return "pay";
+    return "doc";
+  }, [mode]);
 
   function openStudio(nextMode: StudioCaptureMode, initial: File | null = null) {
     setStudioInitialFile(initial);
@@ -793,6 +870,25 @@ export default function DropTile() {
     setStudioMode(null);
     setStudioInitialFile(null);
   }
+
+  useEffect(() => {
+    function onDescriptShare(event: Event) {
+      const doc = (event as CustomEvent<DescriptDoc>).detail;
+      if (!doc) return;
+      const plain = doc.plainText?.trim() || descriptPlainText(doc.html);
+      const cleanTitle = doc.title?.trim();
+      if (cleanTitle) setTitle(cleanTitle);
+      if (plain) {
+        const dest = doc.destination ?? studioDescriptDestination;
+        if (dest === "thought") setThoughtText(plain);
+        else if (dest === "pay") setPayDesc(plain);
+        else setDocDesc(plain);
+      }
+      setStudioMode(null);
+    }
+    window.addEventListener(DESCRIPT_SHARE_EVENT, onDescriptShare as EventListener);
+    return () => window.removeEventListener(DESCRIPT_SHARE_EVENT, onDescriptShare as EventListener);
+  }, [studioDescriptDestination]);
 
   // Clear any media a user attached (upload or capture) before posting, so they
   // can swap it out or start over. Resets the file, its source, the Studio
@@ -1205,6 +1301,34 @@ export default function DropTile() {
     void syncDropsToSupabase(cleaned);
   }
 
+  // Public/Private toggle straight from the profile board tile (parity with Drop
+  // Console + Work Board). Flips visibility, persists to boardDrops + Supabase,
+  // mirrors to the feed activity row, and notifies any other mounted surface.
+  function toggleDropVisibility(d: DropItem) {
+    const next: "public" | "private" =
+      (d.visibility ?? "public") === "public" ? "private" : "public";
+    const updated: DropItem = { ...d, visibility: next, updatedAt: Date.now() };
+    persist(drops.map((x) => (x.id === d.id ? updated : x)));
+    void (async () => {
+      try {
+        let mediaPreviewUrl: string | null = null;
+        if (updated.bucket && updated.storagePath) {
+          mediaPreviewUrl = await getSignedUrl(updated.bucket, updated.storagePath, 60 * 45);
+        } else if (updated.mediaUrl) {
+          mediaPreviewUrl = updated.mediaUrl;
+        }
+        await syncActivitiesForDropEdit({ ...updated, mediaPreviewUrl });
+      } catch {
+        // local persist already stands
+      }
+      try {
+        window.dispatchEvent(
+          new CustomEvent("board:drop:updated", { detail: { dropId: updated.id, drop: updated } })
+        );
+      } catch {}
+    })();
+  }
+
   const hint = useMemo(() => {
     if (mode === "Media") return "Upload a photo or video. It becomes a Vision Drop instantly.";
     if (mode === "Pay") return "Show what you're raising support for, set a price, and let supporters pay you on Board via Stripe (or add your own external payment link).";
@@ -1243,7 +1367,7 @@ export default function DropTile() {
     const normalized = normalizeUrl(url);
     if (!normalized) return flash(setMsg, "Paste a valid link.", 1600);
 
-    const t = title.trim() || "Untitled";
+    const titleFields = boardTitleFields(title);
     const { embedUrl, hostLabel } = makeEmbedByMode(mode, normalized);
 
     if ((mode === "YouTube" || mode === "Music") && !embedUrl) {
@@ -1258,7 +1382,7 @@ export default function DropTile() {
     const next: DropItem[] = [
       {
         id: safeId(),
-        title: t,
+        ...titleFields,
         type:
           mode === "YouTube"
             ? "YouTube"
@@ -1270,7 +1394,7 @@ export default function DropTile() {
         url: normalized,
         embedUrl: embedUrl ?? null,
         hostLabel,
-        headline: mode === "News" ? preview?.title ?? t : undefined,
+        headline: mode === "News" ? preview?.title ?? titleFields.title : undefined,
         previewTitle: preview?.title ?? undefined,
         previewDescription: preview?.description ?? undefined,
         previewImage: resolveLinkPreviewImage(normalized, preview?.image) ?? undefined,
@@ -1331,7 +1455,7 @@ export default function DropTile() {
     const isVideo = file.type.startsWith("video/");
     if (!isImage && !isVideo) return flash(setMsg, "Unsupported file type. Use image/video.", 2000);
 
-    const t = title.trim() || "Untitled";
+    const titleFields = boardTitleFields(title);
     const id = safeId();
 
     const up = await uploadFileToStorage({ bucket: BUCKET_MEDIA, file, dropId: id });
@@ -1341,7 +1465,7 @@ export default function DropTile() {
     const next: DropItem[] = [
       {
         id,
-        title: t,
+        ...titleFields,
         type: "Media",
         createdAt: Date.now(),
         bucket: up.bucket,
@@ -1376,7 +1500,10 @@ export default function DropTile() {
       /\.(mp3|wav|m4a|aac|ogg|flac)$/i.test(file.name);
     if (!isAudio) return flash(setMsg, "Music file must be audio: MP3, M4A, WAV, AAC, OGG, or FLAC.", 2400);
 
-    const t = title.trim() || file.name.replace(/\.[^.]+$/, "") || "Untitled";
+    const titleFields = boardTitleFields(
+      title,
+      file.name.replace(/\.[^.]+$/, "") || "Untitled"
+    );
     const id = safeId();
 
     const up = await uploadFileToStorage({ bucket: BUCKET_MEDIA, file, dropId: id });
@@ -1385,7 +1512,7 @@ export default function DropTile() {
     const next: DropItem[] = [
       {
         id,
-        title: t,
+        ...titleFields,
         type: "Music",
         createdAt: Date.now(),
         bucket: up.bucket,
@@ -1412,7 +1539,7 @@ export default function DropTile() {
   async function addDocDrop() {
     if (!file) return flash(setMsg, "Choose a document first.", 1600);
 
-    const t = title.trim() || "Untitled";
+    const titleFields = boardTitleFields(title);
     const id = safeId();
 
     const up = await uploadFileToStorage({ bucket: BUCKET_DOCS, file, dropId: id });
@@ -1421,7 +1548,7 @@ export default function DropTile() {
     const next: DropItem[] = [
       {
         id,
-        title: t,
+        ...titleFields,
         type: "Doc",
         createdAt: Date.now(),
         bucket: up.bucket,
@@ -1464,10 +1591,12 @@ export default function DropTile() {
       if (!uploaded) return;
     }
 
+    const titleFields = boardTitleFields(title, "Thought Drop");
+
     const next: DropItem[] = [
       {
         id,
-        title: cleanTitle || "Thought Drop",
+        ...titleFields,
         type: "Thought",
         createdAt: Date.now(),
         ...(uploaded
@@ -1514,7 +1643,7 @@ export default function DropTile() {
     if (cents === null) return flash(setMsg, "Enter a valid price (ex: 19.99).", 2000);
     if (cents <= 0) return flash(setMsg, "Price must be greater than 0.", 2000);
 
-    const t = title.trim() || "Untitled";
+    const titleFields = boardTitleFields(title);
     const id = safeId();
 
     const up = await uploadFileToStorage({ bucket: BUCKET_MEDIA, file, dropId: id });
@@ -1536,7 +1665,7 @@ export default function DropTile() {
     const next: DropItem[] = [
       {
         id,
-        title: t,
+        ...titleFields,
         type: "Pay",
         createdAt: Date.now(),
         bucket: up.bucket,
@@ -1567,7 +1696,7 @@ export default function DropTile() {
     upsertPayDrop(
       {
         id,
-        title: t,
+        title: titleFields.title,
         description: payDesc.trim() || undefined,
         amountCents: cents,
         recipientUserId,
@@ -1719,14 +1848,16 @@ export default function DropTile() {
     let cancelled = false;
 
     async function hydrateSignedUrls() {
-      const fileDrops = drops.filter((d) => d.bucket && d.storagePath);
+      const seen = new Set<string>();
 
-      for (const d of fileDrops) {
-        if (!d.bucket || !d.storagePath) continue;
-        const key = `${d.bucket}:${d.storagePath}`;
-        if (signedUrlRef.current[key] || signedUrlByKey[key]) continue;
+      for (const d of drops) {
+        const coords = storageCoordsFromDrop(d);
+        if (!coords) continue;
+        const key = `${coords.bucket}:${coords.storagePath}`;
+        if (seen.has(key) || signedUrlRef.current[key] || signedUrlByKey[key]) continue;
+        seen.add(key);
 
-        const url = await getSignedUrl(d.bucket, d.storagePath, 60 * 45);
+        const url = await getSignedUrl(coords.bucket, coords.storagePath, 60 * 45);
         if (cancelled) return;
         if (!url) continue;
       }
@@ -1835,50 +1966,95 @@ export default function DropTile() {
         </div>
       </div>
 
-      <div className="mode-row" role="tablist" aria-label="Drop type">
-        {MODE_ORDER.map((m) => (
-          <button
-            key={m}
-            type="button"
-            className={`mode-btn ${mode === m ? "on" : ""}`}
-            onClick={() => {
-              setMode(m);
-              setMsg(null);
+      <div className="mode-rows" role="tablist" aria-label="Drop type">
+        <div className="mode-row mode-row-studio">
+          {STUDIO_MODE_ORDER.map((m) => (
+            <button
+              key={m}
+              type="button"
+              className={`mode-btn ${mode === m ? "on" : ""}`}
+              onClick={() => {
+                setMode(m);
+                setMsg(null);
 
-              if (m === "Media" || m === "Doc" || m === "Pay" || m === "Thought") setUrl("");
-              if (m === "YouTube" || m === "News" || m === "Link") setFile(null);
-              if (m !== "Media") setDropCustomizations({});
-              setMediaSource(null);
-              setDropDesc("");
-              if (m !== "Thought") {
-                setThoughtText("");
-                setThoughtVisibility("public");
-              }
+                if (m === "Media" || m === "Doc" || m === "Pay" || m === "Thought") setUrl("");
+                if (m === "YouTube" || m === "News" || m === "Link") setFile(null);
+                if (m !== "Media") setDropCustomizations({});
+                setMediaSource(null);
+                setDropDesc("");
+                if (m !== "Thought") {
+                  setThoughtText("");
+                  setThoughtVisibility("public");
+                }
 
-              if (m !== "Pay") {
-                setPayPrice("");
-                setPayDesc("");
-                setPayLink("");
-                setPayProvider("stripe_connect");
-              }
-              if (m !== "Doc") setDocDesc("");
-            }}
-          >
-            {displayDropType(m)}
-          </button>
-        ))}
+                if (m !== "Pay") {
+                  setPayPrice("");
+                  setPayDesc("");
+                  setPayLink("");
+                  setPayProvider("stripe_connect");
+                }
+                if (m !== "Doc") setDocDesc("");
+              }}
+            >
+              {displayDropType(m)}
+            </button>
+          ))}
+        </div>
+        <div className="mode-row mode-row-links">
+          {LINK_MODE_ORDER.map((m) => (
+            <button
+              key={m}
+              type="button"
+              className={`mode-btn ${mode === m ? "on" : ""}`}
+              onClick={() => {
+                setMode(m);
+                setMsg(null);
+
+                if (m === "Media" || m === "Doc" || m === "Pay" || m === "Thought") setUrl("");
+                if (m === "YouTube" || m === "News" || m === "Link") setFile(null);
+                if (m !== "Media") setDropCustomizations({});
+                setMediaSource(null);
+                setDropDesc("");
+                if (m !== "Thought") {
+                  setThoughtText("");
+                  setThoughtVisibility("public");
+                }
+
+                if (m !== "Pay") {
+                  setPayPrice("");
+                  setPayDesc("");
+                  setPayLink("");
+                  setPayProvider("stripe_connect");
+                }
+                if (m !== "Doc") setDocDesc("");
+              }}
+            >
+              {displayDropType(m)}
+            </button>
+          ))}
+        </div>
       </div>
 
       <div className="drop-form">
-        <input
-          className="drop-input"
+        <textarea
+          className="drop-input drop-title-input"
           placeholder="Title"
           value={title}
           onChange={(e) => setTitle(e.target.value)}
+          rows={2}
+          aria-label="Title"
         />
 
         {mode === "Pay" ? (
           <>
+            <button
+              type="button"
+              className="capture-action studio-open-cta"
+              onClick={() => openStudio("descript")}
+            >
+              Open Drop Studio
+            </button>
+
             <div className="pay-provider-row">
               <button
                 type="button"
@@ -1982,6 +2158,19 @@ export default function DropTile() {
           </>
         ) : mode === "Doc" ? (
           <>
+            <div className="media-capture-field">
+              <button
+                type="button"
+                className="capture-action studio-open-cta"
+                onClick={() => openStudio("descript")}
+              >
+                Open Drop Studio
+              </button>
+              <div className="capture-help">
+                Write and format in Descript — Doc Drops use Descript only. Attach your file below.
+              </div>
+            </div>
+
             <div className="drop-file-control">
               <label className="capture-action upload-action">
                 Upload
@@ -2070,6 +2259,14 @@ export default function DropTile() {
           </div>
         ) : mode === "Thought" ? (
           <div className="thought-field">
+            <button
+              type="button"
+              className="capture-action studio-open-cta"
+              onClick={() => openStudio("descript")}
+            >
+              Open Drop Studio
+            </button>
+
             <div className="pay-provider-row">
               <button
                 type="button"
@@ -2242,13 +2439,20 @@ export default function DropTile() {
           </div>
         ) : (
           drops.map((d) => {
-            const isMedia = d.type === "Media";
-            const isAudioMusic = d.type === "Music" && d.mediaKind === "audio";
-            const isDoc = d.type === "Doc";
-            const isPay = d.type === "Pay";
-            const isThought = d.type === "Thought";
-            const isNews = d.type === "News";
-            const isLinky = d.type === "Link";
+            // Normalize the stored type so non-canonical values (e.g. "thought",
+            // "Pay Drop") still hit the right render branch. Strict === checks were
+            // letting these fall through to the link-card body — the "distorted"
+            // drops. Labels already normalized, so only the branch flags were off.
+            const dropType = normalizeBoardDropType(d.type);
+            const isMedia = dropType === "Media";
+            const isDoc = dropType === "Doc";
+            const isPay = dropType === "Pay";
+            const isThought = dropType === "Thought";
+            const isNews = dropType === "News";
+            const isLinky = dropType === "Link";
+            const isAudioMusic = dropType === "Music" && resolveDropMediaKind(d) === "audio";
+            // Drop types created/edited through Drop Studio carry a draft count.
+            const usesDropStudio = isMedia || isPay || isThought;
 
             const canEmbed = !!d.embedUrl;
             const kind: EmbedKind = d.embedUrl ? embedKindFromUrl(d.embedUrl) : "generic";
@@ -2259,8 +2463,27 @@ export default function DropTile() {
             const linkTitle = d.previewTitle || d.headline || d.title;
             const linkDescription = d.previewDescription;
 
-            const signedKey = d.bucket && d.storagePath ? `${d.bucket}:${d.storagePath}` : "";
+            const storageCoords = storageCoordsFromDrop(d);
+            const signedKey = storageCoords
+              ? `${storageCoords.bucket}:${storageCoords.storagePath}`
+              : d.bucket && d.storagePath
+                ? `${d.bucket}:${d.storagePath}`
+                : "";
             const signedUrl = signedKey ? signedUrlByKey[signedKey] : undefined;
+            const resolvedMediaKind = resolveDropMediaKind(d);
+            const mainTypeLabel = displayDropType(d.type).toUpperCase();
+            const secondaryLabel = secondaryAttachmentLabel(d);
+            const mediaChipLabel = mediaAttachmentChipLabel(d);
+            const thoughtImageSrc =
+              resolvedMediaKind === "image"
+                ? signedUrl || d.mediaUrl || d.url || undefined
+                : undefined;
+            const previewLabel = attachmentPreviewLabel(d);
+            const mediaPending = !!signedKey && !signedUrl;
+            const hasInlineOpenLink = (isNews || isLinky) && !!d.url;
+            const showFooterOpenOriginal =
+              !!d.url && !hasInlineOpenLink && !isThought && !isPay;
+            const showFooterOpenDoc = isDoc && !!signedUrl;
 
             return (
               <div key={d.id} className="drop-item">
@@ -2275,122 +2498,78 @@ export default function DropTile() {
                       canRemove
                       onRemove={() => removeDrop(d.id)}
                     />
-                    {d.hostLabel ? <span className="badge ghost">{d.hostLabel}</span> : null}
+                    {secondaryLabel ? (
+                      <span className="badge ghost secondary">{secondaryLabel}</span>
+                    ) : null}
                     {isPay && d.priceCents ? (
                       <span className="badge ghost">{formatPriceFromCents(d.priceCents)}</span>
                     ) : null}
-                    {d.badgeLabel ? <span className="badge ghost">{d.badgeLabel}</span> : null}
-                    {isThought ? (
-                      <span className="badge ghost">{(d.visibility ?? "public").toUpperCase()}</span>
-                    ) : null}
-                    {isThought && d.thoughtFormat ? (
-                      <span className="badge ghost">{d.thoughtFormat.toUpperCase()}</span>
-                    ) : null}
-                    {!isPay && d.fileName ? <span className="badge ghost">{d.fileName}</span> : null}
-                  </div>
-
-                  <div className="drop-actions">
-                    {d.url ? (
-                      <a className="drop-open" href={d.url} target="_blank" rel="noreferrer">
-                        OPEN
-                      </a>
-                    ) : null}
-
-                    {isPay ? (
-                      <button
-                        className="drop-mini"
-                        type="button"
-                        onClick={() => void openPayCheckout(d)}
-                        disabled={payCheckoutBusyId === d.id}
-                      >
-                        {payCheckoutBusyId === d.id ? "Opening…" : "Checkout →"}
-                      </button>
-                    ) : null}
-
-                    {isDoc && signedUrl ? (
-                      <a className="drop-mini" href={signedUrl} target="_blank" rel="noreferrer">
-                        OPEN DOC →
-                      </a>
-                    ) : null}
-
-                    {isMedia || isAudioMusic || (isThought && signedUrl) ? (
-                      <button className="drop-mini" onClick={() => openViewer(d.id)}>
-                        {isAudioMusic || d.mediaKind === "audio" ? "PLAY FULL" : "EXPAND"}
-                      </button>
-                    ) : null}
-
-                    <button className="drop-mini" type="button" onClick={() => setCommentsDropId(d.id)}>
+                    {/* Comment is the inline action in the type row: badge > label > comment. */}
+                    <button
+                      className="drop-mini drop-comment-inline"
+                      type="button"
+                      onClick={() => setCommentsDropId(d.id)}
+                    >
                       Comment{commentCountByDrop[d.id] ? ` ${commentCountByDrop[d.id]}` : ""}
                     </button>
-
-                    {/* Single creator control: opens the Edit Drop modal first
-                        (title/description/etc.), where media drops also get the
-                        in-modal Drop Studio launch. This board only shows the
-                        owner's own drops, so it's always a creator control. */}
-                    <button
-                      className="drop-mini studio-mini"
-                      type="button"
-                      onClick={() =>
-                        window.dispatchEvent(
-                          new CustomEvent("board:drop:edit", {
-                            detail: { dropId: d.id, drop: d },
-                          })
-                        )
-                      }
-                      title="Edit this drop in Drop Studio Editor"
-                    >
-                      🎬 Drop Studio Editor
-                    </button>
-
-                    {!isMedia && !canEmbed && isLinky && d.url ? (
-                      <a className="drop-mini" href={d.url} target="_blank" rel="noreferrer">
-                        Open →
-                      </a>
-                    ) : null}
                   </div>
                 </div>
 
-                {d.description && !isPay && !isDoc ? (
-                  <div className="drop-description">
-                    <RichText as="span" value={d.descriptionRich} plain={d.description} />
-                  </div>
-                ) : null}
-
-                {isThought && d.thoughtText ? (
-                  <div className="thought-body">{d.thoughtText}</div>
-                ) : null}
-
-                {isAudioMusic || ((isThought || isPay) && d.mediaKind === "audio") ? (
+                {/* Media attachment renders ABOVE the description (below it now). */}
+                <div className={clsx("drop-attachment-block", isPay && "pay-drop-attachment")}>
+                {isAudioMusic || ((isThought || isPay) && resolvedMediaKind === "audio") ? (
                   <div className={`audio-drop-card ${isThought ? "thought-audio-card" : ""}`}>
-                    <div className="audio-drop-label">{isThought ? "VOICE MEMO" : isPay ? "AUDIO" : "FULL SONG"}</div>
+                    <div className="audio-drop-label">
+                      {secondaryLabel?.toUpperCase() || (isThought ? "VOCAL" : isPay ? "AUDIO" : "FULL SONG")}
+                    </div>
                     {signedUrl ? (
                       <AudioDropPlayer src={signedUrl} />
-                    ) : (
+                    ) : mediaPending ? (
                       <div className="media-missing">
                         <div className="media-missing-title">Audio preparing…</div>
                         <div className="media-missing-sub">If this just uploaded, give it a moment.</div>
                       </div>
-                    )}
-                  </div>
-                ) : isThought && d.mediaKind === "image" ? (
-                  <div className="media-thumb natural-media thought-media-thumb" aria-label="Thought image preview">
-                    {signedUrl ? (
-                      <img src={signedUrl} alt={d.title} />
                     ) : (
                       <div className="media-missing">
-                        <div className="media-missing-title">Thought image preparing…</div>
-                        <div className="media-missing-sub">If this just uploaded, give it a moment.</div>
+                        <div className="media-missing-title">Audio unavailable</div>
+                        <div className="media-missing-sub">Refresh once. If it persists, check Storage policies.</div>
                       </div>
                     )}
                   </div>
-                ) : isMedia || isPay ? (
+                ) : isThought && resolvedMediaKind === "image" ? (
+                  <div className="media-thumb natural-media thought-media-thumb" aria-label="Thought art preview">
+                    {mediaChipLabel ? <span className="media-attachment-chip">{mediaChipLabel}</span> : null}
+                    {thoughtImageSrc ? (
+                      <div className="drop-studio-media-frame">
+                        <img src={thoughtImageSrc} alt={d.title} />
+                      </div>
+                    ) : mediaPending ? (
+                      <div className="media-missing">
+                        <div className="media-missing-title">Art preparing…</div>
+                        <div className="media-missing-sub">If this just uploaded, give it a moment.</div>
+                      </div>
+                    ) : (
+                      <div className="media-missing">
+                        <div className="media-missing-title">Art unavailable</div>
+                        <div className="media-missing-sub">Refresh once. If it persists, check Storage policies.</div>
+                      </div>
+                    )}
+                  </div>
+                ) : isMedia || (isPay && resolvedMediaKind && resolvedMediaKind !== "audio") ? (
                   <div
-                    className={`media-thumb ${isMedia ? "natural-media" : ""} ${isPay ? "pay-thumb" : ""}`}
+                    className={clsx(
+                      "media-thumb",
+                      isMedia && "natural-media",
+                      isPay && "pay-thumb"
+                    )}
                     aria-label={isPay ? "Pay drop image" : "Vision drop preview"}
                   >
+                    {isMedia && mediaChipLabel ? (
+                      <span className="media-attachment-chip">{mediaChipLabel}</span>
+                    ) : null}
                     {signedUrl ? (
                       <div className="drop-studio-media-frame">
-                        {d.mediaKind === "video" ? (
+                        {resolvedMediaKind === "video" ? (
                           <video src={signedUrl} controls playsInline preload="metadata" />
                         ) : (
                           <img src={signedUrl} alt={d.title} />
@@ -2398,6 +2577,11 @@ export default function DropTile() {
                         {isMedia ? (
                           <DropStudioOverlay customizations={d.customizations} />
                         ) : null}
+                      </div>
+                    ) : mediaPending ? (
+                      <div className="media-missing">
+                        <div className="media-missing-title">Media preparing…</div>
+                        <div className="media-missing-sub">If this just uploaded, give it a moment.</div>
                       </div>
                     ) : (
                       <div className="media-missing">
@@ -2464,18 +2648,12 @@ export default function DropTile() {
                           {d.mime ? ` • ${d.mime}` : null}
                         </div>
                       </div>
-                      {signedUrl ? (
-                        <a className="doc-open" href={signedUrl} target="_blank" rel="noreferrer">
-                          OPEN →
-                        </a>
-                      ) : (
-                        <span className="doc-wait">Preparing…</span>
-                      )}
+                      {signedUrl ? null : <span className="doc-wait">Preparing…</span>}
                     </div>
 
                     {d.description ? <div className="doc-desc">{d.description}</div> : null}
                   </div>
-                ) : d.url ? (
+                ) : d.url && !isThought && !isPay ? (
                   <a className="link-card link-cover-card" href={d.url} target="_blank" rel="noreferrer">
                     <div className="link-preview-art">
                       {linkCover ? (
@@ -2490,12 +2668,13 @@ export default function DropTile() {
                         />
                       ) : null}
                       <div className="link-preview-overlay" />
-                      <div className="link-preview-host">
-                        {fav ? <img className="newsFav" src={fav} alt="" /> : null}
-                        <span>{d.hostLabel ?? "LINK"}</span>
-                      </div>
+                      {mediaChipLabel ? (
+                        <div className="link-preview-host">
+                          <span>{mediaChipLabel}</span>
+                        </div>
+                      ) : null}
                       <div className="link-preview-copy">
-                        <div className="link-preview-label">Link Drop</div>
+                        <div className="link-preview-label">{previewLabel}</div>
                         <div className="link-preview-title">{linkTitle}</div>
                         {linkDescription ? (
                           <div className="link-preview-desc">{linkDescription}</div>
@@ -2509,7 +2688,96 @@ export default function DropTile() {
                   </a>
                 ) : null}
 
-                {isPay && d.description ? <div className="pay-desc">{d.description}</div> : null}
+                {/* "Captured on Board" provenance chip — directly under the media,
+                    above the Drop Studio Editor button. */}
+                {d.badgeLabel ? (
+                  <div className="drop-captured-row">
+                    <span className="badge ghost captured-badge">{d.badgeLabel}</span>
+                  </div>
+                ) : null}
+
+                {d.description && !isPay && !isDoc ? (
+                  <div className="drop-description">
+                    <RichText as="span" value={d.descriptionRich} plain={d.description} />
+                  </div>
+                ) : null}
+
+                {isPay && d.description ? (
+                  <div className="pay-desc pay-desc-top">
+                    <RichText as="span" value={d.descriptionRich} plain={d.description} />
+                  </div>
+                ) : null}
+
+                {isThought && d.thoughtText ? (
+                  <div className="thought-body">{d.thoughtText}</div>
+                ) : null}
+
+                {(showFooterOpenOriginal || showFooterOpenDoc) ? (
+                  <div className="drop-attachment-links">
+                    {showFooterOpenOriginal ? (
+                      <a className="drop-collection-open" href={d.url} target="_blank" rel="noreferrer">
+                        Open Original →
+                      </a>
+                    ) : null}
+                    {showFooterOpenDoc ? (
+                      <a className="drop-collection-open" href={signedUrl} target="_blank" rel="noreferrer">
+                        Open doc →
+                      </a>
+                    ) : null}
+                  </div>
+                ) : null}
+
+                <div className="drop-studio-slot">
+                  {/* Public/Private toggle sits at the bottom-left of the Studio
+                      button (compact eye: open = public, closed = private). */}
+                  <button
+                    type="button"
+                    className={`vis-eye vis-${d.visibility ?? "public"}`}
+                    onClick={() => toggleDropVisibility(d)}
+                    aria-pressed={(d.visibility ?? "public") === "private"}
+                    aria-label={`${
+                      (d.visibility ?? "public") === "public" ? "Public" : "Private"
+                    } drop — tap to toggle`}
+                    title={`${
+                      (d.visibility ?? "public") === "public" ? "Public" : "Private"
+                    } — tap to toggle`}
+                  >
+                    <EyeToggle open={(d.visibility ?? "public") === "public"} />
+                  </button>
+                  {usesDropStudio && (d.draftCount ?? 0) > 0 ? (
+                    <span className="drop-counts" title="Drafts saved in Drop Studio">
+                      🗂 {d.draftCount}
+                    </span>
+                  ) : null}
+                  <button
+                    type="button"
+                    className="drop-studio-editor-btn"
+                    onClick={() =>
+                      window.dispatchEvent(
+                        new CustomEvent("board:drop:edit", {
+                          detail: { dropId: d.id, drop: d },
+                        })
+                      )
+                    }
+                    title="Edit this drop in Drop Studio Editor"
+                  >
+                    <span className="drop-studio-editor-glyph" aria-hidden>
+                      🎬
+                    </span>
+                    <span className="drop-studio-editor-lbl">Drop Studio Editor</span>
+                  </button>
+                </div>
+                </div>
+
+                {isPay ? (
+                  <div className="pay-drop-footer">
+                    <PayOnBoardButton
+                      variant="collection"
+                      busy={payCheckoutBusyId === d.id}
+                      onClick={() => void openPayCheckout(d)}
+                    />
+                  </div>
+                ) : null}
               </div>
             );
           })
@@ -2579,14 +2847,10 @@ export default function DropTile() {
 
             {viewerDrop.type === "Pay" ? (
               <div className="viewerActions">
-                <button
-                  type="button"
-                  className="viewerCheckout"
+                <PayOnBoardButton
+                  busy={payCheckoutBusyId === viewerDrop.id}
                   onClick={() => void openPayCheckout(viewerDrop)}
-                  disabled={payCheckoutBusyId === viewerDrop.id}
-                >
-                  {payCheckoutBusyId === viewerDrop.id ? "Opening checkout…" : "Open checkout"}
-                </button>
+                />
               </div>
             ) : null}
 
@@ -2598,8 +2862,11 @@ export default function DropTile() {
       <DropStudioStage
         open={studioMode !== null}
         initialFile={studioInitialFile}
-        initialMode={studioMode ?? (mode === "Thought" ? "audio" : "photo")}
+        initialMode={
+          studioMode ?? (mode === "Doc" ? "descript" : mode === "Thought" ? "audio" : "photo")
+        }
         allowedModes={studioAllowedModes}
+        descriptDestination={studioDescriptDestination}
         value={dropCustomizations}
         onChange={setDropCustomizations}
         onComplete={(captured, src) => {
@@ -2644,11 +2911,13 @@ export default function DropTile() {
 
             <div className="edit-body">
               <label className="edit-label">Title</label>
-              <input
-                className="edit-input"
+              <textarea
+                className="edit-input edit-title-input"
                 value={editTitle}
                 onChange={(e) => setEditTitle(e.target.value)}
                 placeholder="Title"
+                rows={2}
+                aria-label="Title"
               />
 
               {editDrop.type === "Link" ||
@@ -2753,8 +3022,9 @@ export default function DropTile() {
       <DropStudioStage
         open={editStudioMode !== null}
         initialFile={editStudioInitialFile}
-        initialMode={editStudioMode ?? "photo"}
-        allowedModes={["photo", "video", "audio", "art"]}
+        initialMode={editStudioMode ?? (editDrop?.type === "Doc" ? "descript" : "photo")}
+        allowedModes={editStudioAllowedModes}
+        descriptDestination={editDescriptDestination}
         value={editCustomizations}
         onChange={setEditCustomizations}
         onComplete={(captured) => {
@@ -2799,6 +3069,29 @@ export default function DropTile() {
           width: 100%;
           height: 100%;
           object-fit: cover;
+        }
+
+        /* Profile media drops fill the standard 4:5 Board frame (cover) so they
+           read identically to the feed instead of sitting small with letterbox
+           bars. */
+        .media-thumb.natural-media .drop-studio-media-frame {
+          aspect-ratio: 4 / 5;
+          width: 100%;
+          max-width: 100%;
+          height: auto;
+          margin: 0 auto;
+          border-radius: 14px;
+          overflow: hidden;
+        }
+        .media-thumb.natural-media .drop-studio-media-frame > img,
+        .media-thumb.natural-media .drop-studio-media-frame > video {
+          width: 100%;
+          height: 100%;
+          max-width: 100%;
+          max-height: none;
+          object-fit: cover;
+          border: 0;
+          background: transparent;
         }
 
         .viewer-studio-frame > img,
@@ -2865,8 +3158,14 @@ export default function DropTile() {
           background: rgba(255, 255, 255, 0.35);
         }
 
-        .mode-row {
+        .mode-rows {
           margin-top: 12px;
+          display: grid;
+          gap: 10px;
+          min-width: 0;
+          max-width: 100%;
+        }
+        .mode-row {
           display: flex;
           gap: 10px;
           flex-wrap: wrap;
@@ -3257,7 +3556,8 @@ export default function DropTile() {
           background: rgba(255, 255, 255, 0.68);
           padding: 12px 14px;
           display: grid;
-          gap: 10px;
+          gap: 6px;
+          align-content: start;
           width: 100%;
           max-width: 100%;
           min-width: 0;
@@ -3265,12 +3565,24 @@ export default function DropTile() {
         }
 
         .drop-titleTop {
-          font-weight: 950;
+          font-weight: 650;
           color: rgba(0, 160, 80, 1);
           letter-spacing: 0.02em;
           min-width: 0;
           max-width: 100%;
           overflow-wrap: anywhere;
+          white-space: pre-wrap;
+        }
+
+        .drop-titleTop :global(b),
+        .drop-titleTop :global(strong) {
+          font-weight: 900;
+        }
+        .drop-title-input {
+          resize: vertical;
+          min-height: 52px;
+          line-height: 1.35;
+          font-family: inherit;
         }
 
         .drop-metaRow {
@@ -3315,6 +3627,73 @@ export default function DropTile() {
           cursor: pointer;
           text-decoration: none;
         }
+        /* Comment shares the badge row, so size it to the 24px pill height. */
+        .drop-comment-inline {
+          display: inline-flex;
+          align-items: center;
+          height: 24px;
+          padding: 0 12px;
+          font-size: 11px;
+          line-height: 1;
+          flex: 0 0 auto;
+        }
+        /* "Captured on Board" chip sits left-aligned under the media. */
+        .drop-captured-row {
+          display: flex;
+          justify-content: flex-start;
+        }
+        /* Sub-stats row under the type badge: Public/Private + drop counts. */
+        .drop-substats {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          flex-wrap: wrap;
+          min-width: 0;
+        }
+        .drop-counts {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          font-size: 11px;
+          font-weight: 800;
+          letter-spacing: 0.04em;
+          color: rgba(0, 0, 0, 0.5);
+        }
+        .drop-counts:empty {
+          display: none;
+        }
+        .draft-count {
+          display: inline-flex;
+          align-items: center;
+          gap: 4px;
+        }
+        /* Public/Private toggle — a small circular eye button (open = public,
+           closed = private). */
+        .vis-eye {
+          flex: 0 0 auto;
+          width: 26px;
+          height: 26px;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          padding: 0;
+          border-radius: 999px;
+          cursor: pointer;
+          border: 1px solid rgba(0, 140, 135, 0.28);
+          background: rgba(220, 252, 240, 0.7);
+          color: rgba(0, 140, 135, 0.95);
+          transition: background 140ms ease, border-color 140ms ease, color 140ms ease,
+            transform 120ms ease;
+        }
+        .vis-eye:hover {
+          transform: translateY(-1px);
+          border-color: rgba(0, 140, 135, 0.5);
+        }
+        .vis-eye.vis-private {
+          color: rgba(120, 60, 160, 0.95);
+          background: rgba(238, 230, 255, 0.72);
+          border-color: rgba(120, 60, 160, 0.28);
+        }
         /* Creator-only control — subtle, not a public reaction. */
         .edit-mini {
           border-color: rgba(126, 64, 255, 0.28);
@@ -3325,15 +3704,72 @@ export default function DropTile() {
           background: rgba(126, 64, 255, 0.16);
           box-shadow: 0 0 14px rgba(126, 64, 255, 0.18);
         }
-        /* Drop Studio Editor — creator control, only on media drops. */
-        .studio-mini {
-          border-color: rgba(255, 64, 160, 0.32);
+        .drop-attachment-block {
+          display: grid;
+          gap: 8px;
+          width: 100%;
+          min-width: 0;
+          align-content: start;
+        }
+
+        .drop-attachment-links {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          gap: 8px;
+          width: 100%;
+        }
+
+        .drop-studio-slot {
+          display: flex;
+          justify-content: center;
+          align-items: center;
+          gap: 8px;
+          width: 100%;
+          padding-top: 2px;
+        }
+
+        .drop-collection-open {
+          font-size: 12px;
+          font-weight: 900;
+          letter-spacing: 0.12em;
+          text-transform: uppercase;
+          color: rgba(255, 0, 190, 0.85);
+          text-decoration: underline;
+          text-underline-offset: 4px;
+        }
+
+        .drop-studio-editor-btn {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          gap: 8px;
+          border-radius: 999px;
+          padding: 10px 16px;
+          border: 1px solid rgba(255, 90, 170, 0.42);
           background: rgba(255, 64, 160, 0.08);
           color: rgba(190, 30, 120, 0.95);
+          cursor: pointer;
+          font-family: inherit;
         }
-        .studio-mini:hover {
+
+        .drop-studio-editor-btn:hover {
           background: rgba(255, 64, 160, 0.16);
-          box-shadow: 0 0 14px rgba(255, 64, 160, 0.2);
+          box-shadow: 0 0 16px rgba(255, 90, 170, 0.28);
+          color: rgba(210, 40, 130, 0.98);
+        }
+
+        .drop-studio-editor-glyph {
+          font-size: 15px;
+          line-height: 1;
+        }
+
+        .drop-studio-editor-lbl {
+          font-size: 10px;
+          font-weight: 950;
+          letter-spacing: 0.18em;
+          text-transform: uppercase;
         }
 
         /* ---- Edit drop modal ---- */
@@ -3404,6 +3840,11 @@ export default function DropTile() {
           text-transform: uppercase;
           color: rgba(180, 210, 230, 0.62);
           margin-top: 6px;
+        }
+        .edit-title-input {
+          min-height: 52px;
+          line-height: 1.35;
+          resize: vertical;
         }
         .edit-input,
         .edit-textarea {
@@ -3526,23 +3967,67 @@ export default function DropTile() {
         }
 
         .badge {
-          font-size: 11px;
-          font-weight: 900;
-          letter-spacing: 0.14em;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          height: 24px;
+          flex: 0 0 auto;
+          box-sizing: border-box;
+          font-size: 10px;
+          font-weight: 950;
+          letter-spacing: 0.1em;
           text-transform: uppercase;
-          padding: 6px 10px;
+          line-height: 1;
+          padding: 0 10px;
+          /* Match the feed's secondary pills (.metaBadge) exactly so profile
+             and feed read identically. */
+          padding-top: 1px;
           border-radius: 999px;
-          background: rgba(255, 255, 255, 0.72);
-          border: 1px solid rgba(0, 0, 0, 0.12);
-          color: rgba(0, 0, 0, 0.65);
+          background: rgba(255, 255, 255, 0.74);
+          border: 1px solid rgba(0, 0, 0, 0.1);
+          color: rgba(0, 0, 0, 0.58);
           max-width: 100%;
           overflow: hidden;
           text-overflow: ellipsis;
           white-space: nowrap;
+          vertical-align: middle;
         }
         .badge.ghost {
-          background: rgba(255, 255, 255, 0.52);
-          color: rgba(0, 0, 0, 0.52);
+          background: rgba(255, 255, 255, 0.64);
+          color: rgba(0, 0, 0, 0.58);
+          border-color: rgba(0, 0, 0, 0.08);
+        }
+        .badge.secondary {
+          color: rgba(0, 120, 105, 0.88);
+          background: rgba(220, 252, 240, 0.72);
+          border-color: rgba(0, 140, 120, 0.18);
+        }
+        .media-attachment-chip {
+          position: absolute;
+          top: 12px;
+          left: 12px;
+          z-index: 2;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          height: 24px;
+          padding: 0 10px;
+          padding-top: 1px;
+          border-radius: 999px;
+          border: 1px solid rgba(255, 255, 255, 0.28);
+          background: rgba(0, 0, 0, 0.48);
+          color: rgba(255, 255, 255, 0.94);
+          font-size: 10px;
+          font-weight: 950;
+          letter-spacing: 0.1em;
+          text-transform: uppercase;
+          line-height: 1;
+          backdrop-filter: blur(8px);
+          pointer-events: none;
+        }
+        .media-thumb.natural-media,
+        .thought-media-thumb {
+          position: relative;
         }
 
         .embed-shell {
@@ -3769,6 +4254,40 @@ export default function DropTile() {
         }
         .media-thumb.pay-thumb {
           cursor: default;
+          aspect-ratio: 4 / 3;
+          max-height: min(240px, 52vw);
+          display: grid;
+          place-items: center;
+          overflow: hidden;
+          background:
+            radial-gradient(circle at 18% 18%, rgba(52, 211, 153, 0.14), transparent 38%),
+            radial-gradient(circle at 82% 22%, rgba(255, 0, 190, 0.08), transparent 34%),
+            rgba(255, 255, 255, 0.72);
+        }
+        .media-thumb.pay-thumb .drop-studio-media-frame {
+          width: 100%;
+          height: 100%;
+          min-height: 0;
+          display: grid;
+          place-items: center;
+          overflow: hidden;
+        }
+        .media-thumb.pay-thumb img,
+        .media-thumb.pay-thumb video {
+          width: 100%;
+          height: 100%;
+          max-width: 100%;
+          max-height: 100%;
+          min-height: 0;
+          object-fit: cover;
+          border-radius: 14px;
+        }
+        .pay-drop-attachment .audio-drop-card {
+          padding: 12px;
+        }
+        .pay-drop-footer {
+          width: 100%;
+          min-width: 0;
         }
         .media-thumb.natural-media {
           width: 100%;
@@ -3778,6 +4297,8 @@ export default function DropTile() {
           border-radius: 0;
           overflow: visible;
           background: transparent;
+          padding: 0;
+          margin: 0;
         }
         .media-thumb img,
         .media-thumb video {
@@ -3792,7 +4313,10 @@ export default function DropTile() {
         }
         .media-thumb.natural-media img,
         .media-thumb.natural-media video {
+          width: auto;
+          height: auto;
           max-width: 100%;
+          max-height: min(420px, 62vh);
           border-radius: 14px;
           border: 1px solid rgba(0, 0, 0, 0.1);
           background: rgba(0, 0, 0, 0.055);
@@ -3987,20 +4511,6 @@ export default function DropTile() {
           padding: 0 14px 10px;
           background: rgba(255, 255, 255, 0.32);
         }
-        .viewerCheckout {
-          width: 100%;
-          border: 1px solid rgba(0, 0, 0, 0.14);
-          border-radius: 16px;
-          background: rgba(0, 0, 0, 0.86);
-          color: rgba(200, 255, 230, 0.96);
-          padding: 12px 14px;
-          font-size: 12px;
-          font-weight: 950;
-          letter-spacing: 0.14em;
-          text-transform: uppercase;
-          cursor: pointer;
-        }
-        .viewerCheckout:disabled,
         .drop-mini:disabled {
           opacity: 0.58;
           cursor: wait;
@@ -4068,9 +4578,14 @@ export default function DropTile() {
           white-space: pre-wrap;
           color: rgba(0, 0, 0, 0.62);
           font-size: 13px;
-          font-weight: 700;
+          font-weight: 600;
           line-height: 1.45;
           overflow-wrap: anywhere;
+        }
+
+        .drop-description :global(b),
+        .drop-description :global(strong) {
+          font-weight: 900;
         }
         .thought-body {
           border-radius: 18px;
@@ -4093,6 +4608,13 @@ export default function DropTile() {
           color: rgba(0, 0, 0, 0.6);
           line-height: 1.4;
           overflow-wrap: anywhere;
+        }
+        .pay-desc-top {
+          margin-bottom: 2px;
+          border-radius: 14px;
+          border: 1px solid rgba(16, 120, 80, 0.12);
+          background: rgba(240, 253, 244, 0.55);
+          padding: 10px 12px;
         }
 
         .link-card {
@@ -4140,17 +4662,20 @@ export default function DropTile() {
           top: 14px;
           display: inline-flex;
           align-items: center;
-          gap: 8px;
+          justify-content: center;
+          height: 24px;
           max-width: calc(100% - 28px);
           border-radius: 999px;
           border: 1px solid rgba(255, 255, 255, 0.32);
           background: rgba(0, 0, 0, 0.48);
-          padding: 7px 10px;
+          padding: 0 10px;
+          padding-top: 1px;
           color: rgba(255, 255, 255, 0.92);
           font-size: 10px;
           font-weight: 950;
-          letter-spacing: 0.14em;
+          letter-spacing: 0.1em;
           text-transform: uppercase;
+          line-height: 1;
           backdrop-filter: blur(10px);
         }
         .link-preview-host span {

@@ -10,6 +10,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import DropStudio from "./DropStudio";
 import BoardArtCanvas from "./BoardArtCanvas";
+import DescriptStudio from "./DescriptStudio";
+import type { DescriptDestination } from "@/lib/board/descriptDocs";
 import { BOARD_DROP_ASPECT_CSS, BOARD_DROP_ASPECT_RATIO } from "@/lib/board/mediaFormat";
 import type { DropCustomization } from "@/lib/board/dropCustomizations";
 import { saveDropDraft, draftToFile, type DropDraft } from "@/lib/board/dropDrafts";
@@ -17,13 +19,15 @@ import DropDraftsDrawer from "./DropDraftsDrawer";
 import VocalVisualizer from "./VocalVisualizer";
 import VoicePresets from "./VoicePresets";
 
-type CaptureMode = "photo" | "video" | "audio" | "art";
+type CaptureMode = "photo" | "video" | "audio" | "art" | "descript";
 type FacingMode = "user" | "environment";
 type Phase = "choose" | "capture" | "edit";
 
 const DEFAULT_CAPTURE_MODES: CaptureMode[] = ["photo", "video"];
-// Every media mode shows in the rail; ones not allowed for this drop are locked.
-const ALL_STUDIO_MODES: CaptureMode[] = ["photo", "video", "audio", "art"];
+// Every mode shows in the rail; media modes not allowed for this drop are locked.
+// Descript (the document editor) is always available — it produces a document,
+// not a media file, so it isn't gated by a drop's allowed media types.
+const ALL_STUDIO_MODES: CaptureMode[] = ["photo", "video", "audio", "art", "descript"];
 
 function preferredVideoMime() {
   if (typeof MediaRecorder === "undefined") return "";
@@ -64,6 +68,7 @@ function modeLabel(mode: CaptureMode) {
   if (mode === "audio") return "Voice";
   if (mode === "video") return "Video";
   if (mode === "art") return "Art";
+  if (mode === "descript") return "Descript";
   return "Vision";
 }
 
@@ -71,6 +76,7 @@ function modeGlyph(mode: CaptureMode) {
   if (mode === "audio") return "🎙️";
   if (mode === "video") return "🎬";
   if (mode === "art") return "🎨";
+  if (mode === "descript") return "📝";
   return "👁️";
 }
 
@@ -83,6 +89,7 @@ export default function DropStudioStage({
   onClose,
   allowedModes = DEFAULT_CAPTURE_MODES,
   initialMode = "photo",
+  descriptDestination = "doc",
 }: {
   open: boolean;
   initialFile: File | null;
@@ -92,6 +99,8 @@ export default function DropStudioStage({
   onClose: () => void;
   allowedModes?: CaptureMode[];
   initialMode?: CaptureMode;
+  /** Drop type already chosen in Drop Console — Descript shares back into it. */
+  descriptDestination?: DescriptDestination;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -195,7 +204,7 @@ export default function DropStudioStage({
     async (nextFacing: FacingMode) => {
       stopCamera();
       setError("");
-      if (mode === "audio" || mode === "art") return;
+      if (mode === "audio" || mode === "art" || mode === "descript") return;
       if (!navigator.mediaDevices?.getUserMedia) {
         setError("Camera unavailable here — upload a Vision instead.");
         return;
@@ -257,7 +266,14 @@ export default function DropStudioStage({
 
   // Run the live camera only while in capture phase for camera modes.
   useEffect(() => {
-    if (!open || phase !== "capture" || mode === "audio" || mode === "art") return;
+    if (
+      !open ||
+      phase !== "capture" ||
+      mode === "audio" ||
+      mode === "art" ||
+      mode === "descript"
+    )
+      return;
     void startCamera(facing);
     return stopCamera;
   }, [open, phase, facing, mode, startCamera, stopCamera]);
@@ -415,7 +431,7 @@ export default function DropStudioStage({
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="studioSheet">
+      <div className={`studioSheet ${mode === "descript" ? "studioSheetDescript" : ""}`}>
         <div className="studioBar">
           <div className="studioBarLeft">
             <div className="studioBrand">
@@ -423,11 +439,13 @@ export default function DropStudioStage({
               DROP STUDIO
             </div>
             <span className="studioPill">
-              {phase === "edit"
-                ? `${modeLabel(mode)} Tools`
-                : phase === "capture"
-                  ? "Capture Mode"
-                  : "New Drop"}
+              {mode === "descript"
+                ? "Descript"
+                : phase === "edit"
+                  ? `${modeLabel(mode)} Tools`
+                  : phase === "capture"
+                    ? "Capture Mode"
+                    : "New Drop"}
             </span>
           </div>
           <div className="studioBarRight">
@@ -439,7 +457,7 @@ export default function DropStudioStage({
             >
               🗂 Drafts
             </button>
-            {phase === "edit" ? (
+            {phase === "edit" && mode !== "descript" ? (
               <button type="button" className="studioGhost" onClick={retake}>
                 Retake
               </button>
@@ -464,8 +482,12 @@ export default function DropStudioStage({
                     className={`modeRailBtn ${mode === m ? "on" : ""} ${enabled ? "" : "locked"}`}
                     onClick={() => {
                       if (!enabled) return;
+                      if (m === "descript") {
+                        setMode("descript");
+                        return;
+                      }
                       // Switching mode mid-edit returns to live capture in that mode.
-                      if (phase === "edit") retake();
+                      if (phase === "edit" && mode !== "descript") retake();
                       setMode(m);
                     }}
                     disabled={recording || !enabled}
@@ -486,8 +508,10 @@ export default function DropStudioStage({
               })}
             </nav>
 
-            <div className="capMain">
-              {phase === "choose" ? (
+            <div className={`capMain ${mode === "descript" ? "capMainDescript" : ""}`}>
+              {mode === "descript" ? (
+                <DescriptStudio onClose={onClose} defaultDestination={descriptDestination} />
+              ) : phase === "choose" ? (
                 <div className="capChoose">
                   <div className="capChooseInner">
                     <div className="capChooseGlyphBig" aria-hidden>
@@ -806,6 +830,8 @@ export default function DropStudioStage({
           display: grid;
           grid-template-columns: 92px 1fr;
           min-height: 0;
+          min-width: 0;
+          overflow: hidden;
         }
         .modeRail {
           display: flex;
@@ -851,6 +877,29 @@ export default function DropStudioStage({
           display: grid;
           grid-template-rows: 1fr auto;
           min-height: 0;
+          min-width: 0;
+        }
+        /* Descript is text-heavy — give the monitor more width and prevent
+           the right edge of lines from clipping beside the mode rail. */
+        .studioSheetDescript {
+          width: min(
+            720px,
+            calc(
+              100vw - 16px - env(safe-area-inset-left) - env(safe-area-inset-right)
+            )
+          );
+          height: min(
+            920px,
+            calc(100dvh - 12px - env(safe-area-inset-top) - env(safe-area-inset-bottom))
+          );
+          max-height: calc(100dvh - 12px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+        }
+        .capMainDescript {
+          display: flex;
+          flex-direction: column;
+          min-width: 0;
+          width: 100%;
+          overflow: hidden;
         }
         .capFlip {
           justify-self: end;

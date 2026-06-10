@@ -242,6 +242,7 @@ export async function syncActivitiesForDropEdit(updated: {
   mime?: string;
   fileName?: string;
   mediaPreviewUrl?: string | null;
+  updatedAt?: number;
 }): Promise<void> {
   const dropId = updated.id;
   const nextBody =
@@ -249,7 +250,10 @@ export async function syncActivitiesForDropEdit(updated: {
       ? String(updated.thoughtText ?? updated.description ?? "").trim()
       : String(updated.description ?? "").trim();
 
-  const updatedActivities = patchLocalActivitiesMatchingDrop(dropId, (item) => {
+  // Reusable patcher so the SAME edit can be applied to a local cache row OR a
+  // row fetched straight from Supabase (a device that didn't create the drop has
+  // no local row to patch).
+  const patchActivityRow = (item: BoardActivity): BoardActivity => {
     const prevPreview =
       item.meta?.preview && typeof item.meta.preview === "object" ? item.meta.preview : {};
     const mediaKind = updated.mediaKind ?? item.meta?.mediaKind ?? prevPreview?.mediaKind ?? null;
@@ -264,6 +268,7 @@ export async function syncActivitiesForDropEdit(updated: {
       null;
     const nextMeta = {
       ...(item.meta ?? {}),
+      editedAt: updated.updatedAt ?? Date.now(),
       titleRich: updated.titleRich ?? item.meta?.titleRich ?? null,
       descriptionRich: updated.descriptionRich ?? item.meta?.descriptionRich ?? null,
       description: updated.description ?? item.meta?.description ?? null,
@@ -308,16 +313,46 @@ export async function syncActivitiesForDropEdit(updated: {
       image_url,
       meta: nextMeta,
     };
-  });
+  };
 
-  if (!updatedActivities.length) return;
+  // 1) Patch this device's local activity cache for instant feedback.
+  const patchedById = new Map<string, BoardActivity>();
+  for (const a of patchLocalActivitiesMatchingDrop(dropId, patchActivityRow)) {
+    patchedById.set(a.id, a);
+  }
 
+  // 2) Authoritatively patch the Supabase feed rows for this drop — by drop id,
+  //    NOT gated on the local cache. The feed (board_activity) is the shared,
+  //    cross-device source; the row id is a uuid while the drop id lives in
+  //    meta.dropId / meta.originalDropId. Without this, an edit made on a device
+  //    that didn't create the drop (or after a localStorage reset) never reaches
+  //    the feed, so it shows on the editing device only.
   try {
     const { supabaseBrowser } = await import("@/lib/supabase/browser");
     const sb = supabaseBrowser();
     const { data: auth } = await sb.auth.getUser();
     if (auth?.user) {
-      for (const activity of updatedActivities) {
+      // Match on meta.dropId / meta.originalDropId (the row id is a uuid; the
+      // drop id usually isn't). Only add an id match when the drop id is itself
+      // uuid-shaped, so we never feed a non-uuid into a uuid column comparison
+      // (which would error and fail the whole query).
+      const isUuid =
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(dropId);
+      const orFilter = [
+        `meta->>dropId.eq.${dropId}`,
+        `meta->>originalDropId.eq.${dropId}`,
+        ...(isUuid ? [`id.eq.${dropId}`] : []),
+      ].join(",");
+      const { data: rows } = await sb
+        .from("board_activity")
+        .select("*")
+        .eq("user_id", auth.user.id)
+        .or(orFilter);
+      for (const remote of (rows ?? []).map(normalizeActivity)) {
+        if (remote) patchedById.set(remote.id, patchActivityRow(remote));
+      }
+
+      for (const activity of patchedById.values()) {
         await sb
           .from("board_activity")
           .update({
@@ -332,11 +367,12 @@ export async function syncActivitiesForDropEdit(updated: {
       }
     }
   } catch {
-    // Local cache already reflects the edit.
+    // Local cache already reflects the edit on this device.
   }
 
+  // 3) Refresh any mounted feed / Activity Channel cards live.
   if (typeof window !== "undefined") {
-    for (const activity of updatedActivities) {
+    for (const activity of patchedById.values()) {
       window.dispatchEvent(
         new CustomEvent("board:activity:updated", { detail: activity })
       );

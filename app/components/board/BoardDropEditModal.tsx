@@ -25,13 +25,33 @@ import {
   normalizeRichText,
   richToPlain,
   richTextFromPlain,
+  sanitizeRichHtml,
   type RichTextValue,
 } from "@/lib/board/richText";
 import { RichTextField } from "./RichTextField";
+import {
+  DESCRIPT_SHARE_EVENT,
+  descriptPlainText,
+  type DescriptDoc,
+} from "@/lib/board/descriptDocs";
 
-type CaptureMode = "photo" | "video" | "audio" | "art";
+type CaptureMode = "photo" | "video" | "audio" | "art" | "descript";
 
 const LINK_TYPES = new Set(["Link", "News", "YouTube", "Music"]);
+
+function studioModesForDropType(type: DropItem["type"]): CaptureMode[] {
+  if (type === "Doc") return ["descript"];
+  if (type === "Thought") return ["audio", "art", "descript"];
+  if (type === "Pay") return ["photo", "video", "audio", "art", "descript"];
+  if (type === "Media") return ["photo", "video", "art"];
+  return ["photo", "video", "art"];
+}
+
+function descriptDestinationForDropType(type: DropItem["type"]): "doc" | "thought" | "pay" {
+  if (type === "Thought") return "thought";
+  if (type === "Pay") return "pay";
+  return "doc";
+}
 
 function normalizeUrl(input: unknown): string | null {
   if (typeof input !== "string") return null;
@@ -112,6 +132,11 @@ export default function BoardDropEditModal() {
   // target explicitly so it can be launched the moment a drop is opened — before
   // the `drop` state has committed — which is what the direct Drop Studio button
   // on a tile relies on.
+  const openDescriptStudioFor = useCallback(() => {
+    setStudioInitialFile(null);
+    setStudioMode("descript");
+  }, []);
+
   const openMediaStudioFor = useCallback(async (target: DropItem) => {
     let initial: File | null = null;
     // Prefer the stored file (signed URL); fall back to a direct media URL so
@@ -206,17 +231,53 @@ export default function BoardDropEditModal() {
         setToast("Couldn't find that drop to edit.");
         return;
       }
-      if (!((target.bucket && target.storagePath) || target.mediaUrl)) {
+      open(target);
+
+      const hasMedia = !!((target.bucket && target.storagePath) || target.mediaUrl);
+
+      if (target.type === "Doc" || target.type === "Thought" || target.type === "Pay") {
+        if (!hasMedia) {
+          openDescriptStudioFor();
+          return;
+        }
+      } else if (!hasMedia) {
         setToast("This drop has no media to edit in Drop Studio.");
         return;
       }
 
-      open(target);
+      if (target.type === "Doc") {
+        openDescriptStudioFor();
+        return;
+      }
+
       await openMediaStudioFor(target);
     }
     window.addEventListener("board:drop:studio", onStudio as EventListener);
     return () => window.removeEventListener("board:drop:studio", onStudio as EventListener);
-  }, [open, openMediaStudioFor, resolveDrop]);
+  }, [open, openDescriptStudioFor, openMediaStudioFor, resolveDrop]);
+
+  useEffect(() => {
+    function onDescriptShare(event: Event) {
+      const doc = (event as CustomEvent<DescriptDoc>).detail;
+      if (!doc) return;
+      const plain = doc.plainText?.trim() || descriptPlainText(doc.html);
+      const cleanTitle = doc.title?.trim();
+      if (cleanTitle) {
+        setTitleRich(
+          normalizeRichText({ html: sanitizeRichHtml(cleanTitle) }) ??
+            richTextFromPlain(cleanTitle)
+        );
+      }
+      if (doc.html || plain) {
+        setDescRich(
+          normalizeRichText({ html: sanitizeRichHtml(doc.html) }) ?? richTextFromPlain(plain)
+        );
+      }
+      setStudioMode(null);
+    }
+    window.addEventListener(DESCRIPT_SHARE_EVENT, onDescriptShare as EventListener);
+    return () => window.removeEventListener(DESCRIPT_SHARE_EVENT, onDescriptShare as EventListener);
+  }, []);
 
   // Esc closes (only when Drop Studio isn't on top handling its own Esc).
   useEffect(() => {
@@ -415,9 +476,13 @@ export default function BoardDropEditModal() {
   if (!drop && !toast) return null;
 
   const isLink = drop ? LINK_TYPES.has(drop.type) : false;
+  const isDoc = drop?.type === "Doc";
+  const isThought = drop?.type === "Thought";
+  const isPay = drop?.type === "Pay";
   const hasStoredMedia = !!(drop && drop.bucket && drop.storagePath);
   // Show the Drop Studio Editor whenever the drop has editable media — a stored
-  // file OR a direct media URL (feed drops only carry the latter).
+  // file OR a direct media URL (feed drops only carry the latter). Doc Drops
+  // always open Descript (no camera / voice / art modes).
   const hasMedia = !!(drop && (hasStoredMedia || drop.mediaUrl));
 
   return (
@@ -453,9 +518,8 @@ export default function BoardDropEditModal() {
                 value={titleRich}
                 onChange={setTitleRich}
                 placeholder="Title"
-                singleLine
                 ariaLabel="Title"
-                minHeight={40}
+                minHeight={52}
               />
 
               {isLink ? (
@@ -536,7 +600,22 @@ export default function BoardDropEditModal() {
                 </div>
               ) : null}
 
-              {hasMedia ? (
+              {isDoc || isThought || isPay ? (
+                <div className="bde-media-row">
+                  <button type="button" className="bde-studio-btn" onClick={openDescriptStudioFor}>
+                    🎬 Open Drop Studio
+                  </button>
+                  <span className="bde-media-note">
+                    {isDoc
+                      ? "Edit title and notes in Descript."
+                      : isThought
+                        ? "Write or refine your thought in Descript."
+                        : "Draft your Pay Drop copy in Descript."}
+                  </span>
+                </div>
+              ) : null}
+
+              {hasMedia && !isDoc ? (
                 <div className="bde-media-row">
                   <button type="button" className="bde-studio-btn" onClick={openMediaStudio}>
                     🎬 Drop Studio Editor
@@ -573,8 +652,11 @@ export default function BoardDropEditModal() {
       <DropStudioStage
         open={studioMode !== null}
         initialFile={studioInitialFile}
-        initialMode={studioMode ?? "photo"}
-        allowedModes={studioMode ? [studioMode] : ["photo"]}
+        initialMode={
+          studioMode ?? (drop?.type === "Doc" ? "descript" : "photo")
+        }
+        allowedModes={drop ? studioModesForDropType(drop.type) : ["photo"]}
+        descriptDestination={drop ? descriptDestinationForDropType(drop.type) : "doc"}
         value={customizations}
         onChange={setCustomizations}
         onComplete={(captured) => {

@@ -358,36 +358,34 @@ export default function HomeBoardFeedPage() {
 
   return (
     <div className="feed-page">
-      <div className="feed-bg" />
-
       <div className="feed-shell">
-        <div className="feed-controls">
-          <div className="feed-leftControls">
-            <div className="feed-sectionTitle">Community Feed</div>
-
-            <div className="feed-tabs">
-              <button
-                className={clsx("feed-tab", tab === "all" && "on")}
-                onClick={() => setTab("all")}
-              >
-                All Drops
-              </button>
-              <button
-                className={clsx("feed-tab", tab === "announcements" && "on")}
-                onClick={() => setTab("announcements")}
-              >
-                Announcements
-              </button>
-            </div>
-          </div>
-
-          <div className="feed-miniNote">
-            {loading ? "Loading…" : "Live feed"}
-          </div>
-        </div>
-
         <div className="feed-layout">
           <section className="feed-main">
+            <div className="feed-controls">
+              <div className="feed-leftControls">
+                <div className="feed-sectionTitle">Community Feed</div>
+
+                <div className="feed-tabs">
+                  <button
+                    className={clsx("feed-tab", tab === "all" && "on")}
+                    onClick={() => setTab("all")}
+                  >
+                    All Drops
+                  </button>
+                  <button
+                    className={clsx("feed-tab", tab === "announcements" && "on")}
+                    onClick={() => setTab("announcements")}
+                  >
+                    Announcements
+                  </button>
+                </div>
+              </div>
+
+              <div className="feed-miniNote">
+                {loading ? "Loading…" : "Live feed"}
+              </div>
+            </div>
+
             <div className="feed-cards">
               {safeItems.map((a) => (
                 <ActivityCard key={a.id} item={a} onRemove={removeItemFromFeed} />

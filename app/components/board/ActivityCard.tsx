@@ -15,7 +15,13 @@ import { fetchLinkPreview } from "@/lib/board/linkPreview";
 import { openHostedPayDropCheckout } from "@/lib/board/payCheckout";
 import { EVENTS as BOARD_STORE_EVENTS, removeDrops as removeFeedDrops } from "@/lib/boardStore";
 import { normalizeDropCustomizations } from "@/lib/board/dropCustomizations";
-import { findLocalDropByAnyId, getDropSignedUrl } from "@/lib/board/boardDropEditStore";
+import {
+  findLocalDropByAnyId,
+  getDropSignedUrl,
+  loadDropMediaForFeed,
+  persistDropEdit,
+} from "@/lib/board/boardDropEditStore";
+import { EyeToggle } from "./icons/EyeToggle";
 import { normalizeRichText, type RichTextValue } from "@/lib/board/richText";
 import { RichText } from "./RichTextField";
 import {
@@ -23,12 +29,28 @@ import {
   getDropCommentCount,
   syncDropCommentCounts,
 } from "@/lib/board/dropComments";
-import { isAudioFileUrl, resolveStoredAudioSrc } from "@/lib/board/musicPlayback";
+import {
+  hasUploadedMusicStorage,
+  isAudioFileUrl,
+  isMusicDropType,
+  isStreamingMusicUrl,
+  resolveStoredAudioSrc,
+  resolveStoredMediaCoords,
+} from "@/lib/board/musicPlayback";
 import { supabaseBrowser } from "@/lib/supabase/browser";
 import DropCommentsDrawer from "./DropCommentsDrawer";
 import AudioDropPlayer from "./AudioDropPlayer";
 import DropStudioOverlay from "./DropStudioOverlay";
 import RemovableDropBadge from "./RemovableDropBadge";
+import { PayOnBoardButton } from "./PayOnBoardButton";
+import {
+  isLikelyImageUrl as isBoardImageUrl,
+  normalizeBoardDropType,
+  resolveDropMediaKind,
+  resolveDropMediaKindFromMeta,
+  secondaryAttachmentLabelFromMeta,
+} from "@/lib/board/dropDisplay";
+import { parseBoardStorageFromUrl } from "@/lib/board/musicPlayback";
 
 const EVT_DEPOSIT = "board:bucketBrain:deposit";
 const EVT_OPEN = "board:bucketBrain:open";
@@ -530,6 +552,9 @@ export default function ActivityCard({
   const [descRichOverride, setDescRichOverride] = useState<RichTextValue | null>(null);
   // Bumped whenever this drop is edited, to re-resolve its canonical media.
   const [mediaRefreshTick, setMediaRefreshTick] = useState(0);
+  // Supabase boardDrops hydration — desktop has this in localStorage; mobile does not.
+  const [musicHasStoredFile, setMusicHasStoredFile] = useState(false);
+  const [musicHydrating, setMusicHydrating] = useState(false);
 
   const title = titleOverride ?? (item?.title || "Drop");
   const body = bodyOverride ?? ((item as any)?.body || (item as any)?.text || "");
@@ -601,14 +626,41 @@ export default function ActivityCard({
   // both so detection matches what actually renders.
   const mediaBucket = metaString(meta?.preview?.bucket, meta?.bucket);
   const mediaStoragePath = metaString(meta?.preview?.storagePath, meta?.storagePath);
+  // The owner's authoritative drop record (board_style.boardDrops) is the source
+  // of truth the profile renders from. Prefer it over the activity meta, whose
+  // media fields can go stale (e.g. an edited image still carrying an old "audio"
+  // kind/path → a Voice player on an image). Falls back to meta for others' drops.
+  const canonicalBoardDrop = useMemo(
+    () =>
+      findLocalDropByAnyId(
+        metaString(meta?.dropId),
+        metaString(meta?.originalDropId),
+        id
+      ),
+    [meta, id]
+  );
+  const canonicalMediaKind = canonicalBoardDrop
+    ? resolveDropMediaKind(canonicalBoardDrop) ?? ""
+    : "";
+  const feedMediaKind =
+    canonicalMediaKind || metaString(meta?.mediaKind, meta?.preview?.mediaKind);
+  const feedDropType = String(meta?.dropType ?? item?.kind ?? "").toLowerCase();
+  const musicDropType = feedDropType || metaString(meta?.dropType, meta?.drop_flavor);
+  const dropMediaUrl = metaString(meta?.mediaUrl);
+  const storedMediaCoords = resolveStoredMediaCoords({
+    bucket: mediaBucket,
+    storagePath: mediaStoragePath,
+    mediaUrl: dropMediaUrl,
+    href,
+  });
+  const storedMediaBucket = storedMediaCoords?.bucket || mediaBucket;
+  const storedMediaPath = storedMediaCoords?.storagePath || mediaStoragePath;
 
   // Feed `board_drop` items don't carry bucket/storagePath — only a rendered
   // media URL (meta.mediaUrl / meta.preview.image / image_url). Treat that URL
   // as the media source, but ONLY for genuinely media-bearing drops so a link
   // or news thumbnail never counts. Drop Studio loads from this URL when no
   // storage path exists, then re-uploads on save.
-  const feedMediaKind = metaString(meta?.mediaKind, meta?.preview?.mediaKind);
-  const feedDropType = String(meta?.dropType ?? item?.kind ?? "").toLowerCase();
   const isMediaBearingDrop =
     feedDropType.includes("media") ||
     feedDropType.includes("pay") ||
@@ -625,6 +677,21 @@ export default function ActivityCard({
 
   // Reconstruct a drop record from the feed item so it stays editable even when
   // it isn't in the local cache or server list yet. Shared by the Edit and Drop
+  // Public/Private toggle parity with the profile board. Persists against the
+  // authoritative boardDrops record (so we never overwrite it with a partial
+  // feed payload); persistDropEdit fires board:drop:updated so this card refreshes.
+  async function toggleDropVisibility() {
+    const base = canonicalBoardDrop;
+    if (!base) return;
+    const current = (base.visibility as "public" | "private" | undefined) ?? "public";
+    const next: "public" | "private" = current === "public" ? "private" : "public";
+    try {
+      await persistDropEdit({ ...base, visibility: next, updatedAt: Date.now() });
+    } catch {
+      // leave state unchanged on failure
+    }
+  }
+
   // Studio buttons; the editor prefers the authoritative record and only uses
   // this as a fallback.
   function buildEditableDrop() {
@@ -699,10 +766,14 @@ export default function ActivityCard({
         bucket?: string;
         storagePath?: string;
       };
+      const opensDescriptStudio =
+        fallbackDrop.type === "Doc" ||
+        fallbackDrop.type === "Thought" ||
+        fallbackDrop.type === "Pay";
       const hasStudioMedia = !!(
         dropMedia.mediaUrl || (dropMedia.bucket && dropMedia.storagePath)
       );
-      const eventName = hasStudioMedia ? "board:drop:studio" : "board:drop:edit";
+      const eventName = opensDescriptStudio || hasStudioMedia ? "board:drop:studio" : "board:drop:edit";
       window.dispatchEvent(
         new CustomEvent(eventName, {
           detail: { dropId, drop: fallbackDrop },
@@ -824,26 +895,71 @@ export default function ActivityCard({
   // Feed activity items bake the media URL at creation time, so an edit (new
   // storage path / new overlay) never shows through the stale feed payload.
   // Resolve the drop's CURRENT media from the canonical local boardDrops by id
-  // and sign a fresh URL — on mount and whenever this drop is edited. This makes
-  // the feed match the editor (and survives reloads).
+  // and sign a fresh URL — on mount and whenever this drop is edited. Mobile
+  // devices often lack local cache; always fall back to server meta + signing.
   useEffect(() => {
     let cancelled = false;
+    const isMusic = isMusicDropType(musicDropType);
+    const treatsAsAudio = isMusic || feedMediaKind === "audio";
+
+    async function applyPlayableUrl(url: string, kind?: string | null) {
+      if (cancelled || !url) return;
+      setSignedPreviewImage(url);
+      setMediaImageOverride(url);
+      // An explicit visual kind from the authoritative record wins over the
+      // meta-derived "treatsAsAudio" guess (prevents an image showing as audio).
+      if (kind === "image" || kind === "video") setMediaKindOverride(kind);
+      else if (treatsAsAudio || kind === "audio") setMediaKindOverride("audio");
+    }
+
+    async function signFromServerMeta() {
+      if (storedMediaBucket && storedMediaPath) {
+        const url = await getDropSignedUrl(storedMediaBucket, storedMediaPath, 60 * 45);
+        if (url) {
+          await applyPlayableUrl(url, "audio");
+          return;
+        }
+      }
+      const direct = [dropMediaUrl, href].find(
+        (url) => url && isAudioFileUrl(url) && !isStreamingMusicUrl(url)
+      );
+      if (direct && treatsAsAudio) await applyPlayableUrl(direct, "audio");
+    }
 
     const canonical = findLocalDropByAnyId(
       metaString(meta?.dropId),
       metaString(meta?.originalDropId),
       id
     );
-    if (!canonical) return;
 
-    if (canonical.mediaKind) setMediaKindOverride(canonical.mediaKind);
-    if ("customizations" in canonical) {
-      setCustomizationsOverride(normalizeDropCustomizations(canonical.customizations) ?? null);
+    if (!canonical) {
+      void signFromServerMeta();
+      return () => {
+        cancelled = true;
+      };
     }
-    if ("titleRich" in canonical) {
+
+    const serverEditedAt = typeof meta?.editedAt === "number" ? meta.editedAt : 0;
+    const localEditedAt =
+      typeof (canonical as { updatedAt?: number }).updatedAt === "number"
+        ? (canonical as { updatedAt?: number }).updatedAt!
+        : 0;
+    const localIsStale = Boolean(serverEditedAt && serverEditedAt > localEditedAt);
+
+    // Media (kind + file) comes from the authoritative boardDrops record
+    // regardless of the text-freshness guard — so an edited image never falls
+    // back to a stale audio kind/path. The guard still protects the text fields.
+    if (canonical.mediaKind) setMediaKindOverride(canonical.mediaKind);
+    const canonicalCustomizations = normalizeDropCustomizations(
+      (canonical as { customizations?: unknown }).customizations
+    );
+    if (!localIsStale && canonicalCustomizations) {
+      setCustomizationsOverride(canonicalCustomizations);
+    }
+    if (!localIsStale && "titleRich" in canonical) {
       setTitleRichOverride(normalizeRichText(canonical.titleRich) ?? null);
     }
-    if ("descriptionRich" in canonical) {
+    if (!localIsStale && "descriptionRich" in canonical) {
       setDescRichOverride(normalizeRichText(canonical.descriptionRich) ?? null);
     }
 
@@ -851,15 +967,18 @@ export default function ActivityCard({
       try {
         if (canonical.bucket && canonical.storagePath) {
           const url = await getDropSignedUrl(canonical.bucket, canonical.storagePath, 60 * 45);
-          if (!cancelled && url) {
-            setMediaImageOverride(url);
-            setSignedPreviewImage(url);
-          }
-        } else if (canonical.mediaUrl) {
-          if (!cancelled) {
-            setMediaImageOverride(canonical.mediaUrl);
-            setSignedPreviewImage(canonical.mediaUrl);
-          }
+          if (url) await applyPlayableUrl(url, canonical.mediaKind ?? null);
+          else await signFromServerMeta();
+        } else {
+          await signFromServerMeta();
+        }
+        if (
+          !cancelled &&
+          !storedMediaBucket &&
+          !storedMediaPath &&
+          canonical.mediaUrl
+        ) {
+          await applyPlayableUrl(canonical.mediaUrl, canonical.mediaKind ?? null);
         }
       } catch {
         // keep the existing feed image if we can't resolve the canonical media
@@ -869,7 +988,17 @@ export default function ActivityCard({
     return () => {
       cancelled = true;
     };
-  }, [meta, id, mediaRefreshTick]);
+  }, [
+    meta,
+    id,
+    mediaRefreshTick,
+    storedMediaBucket,
+    storedMediaPath,
+    musicDropType,
+    feedMediaKind,
+    dropMediaUrl,
+    href,
+  ]);
 
   const authorGlow =
     colorFromAura(meta?.authorAuraColor) ||
@@ -900,11 +1029,14 @@ export default function ActivityCard({
     (typeof preview?.description === "string" && preview.description) ||
     (typeof preview?.previewDescription === "string" && preview.previewDescription) ||
     "";
-  const previewBucket =
-    typeof preview?.bucket === "string" && preview.bucket ? preview.bucket : "";
-  const previewStoragePath =
-    typeof preview?.storagePath === "string" && preview.storagePath ? preview.storagePath : "";
-  const mediaKind = mediaKindOverride || metaString(meta?.mediaKind, preview?.mediaKind);
+  // Prefer a fresh edit override, then the RESOLVED kind (concrete image file/
+  // mime beats a stale stored "audio" kind), then the raw meta value. Fixes a
+  // drawn-image Pay/Vision drop rendering as a Voice player in the feed.
+  const mediaKind =
+    mediaKindOverride ||
+    canonicalMediaKind ||
+    resolveDropMediaKindFromMeta(meta) ||
+    metaString(meta?.mediaKind, preview?.mediaKind);
   const announcementMediaUrl = metaString(meta?.announcement_media_url);
   const announcementMediaType = metaString(meta?.announcement_media_type);
   const announcementImageUrl =
@@ -919,20 +1051,116 @@ export default function ActivityCard({
     "";
   const storedVideoSrc = mediaImageOverride || signedPreviewImage;
   const isStoredVideoDrop = mediaKind === "video" && !!storedVideoSrc;
+  const hasStoredAudioPath = !!(storedMediaBucket && storedMediaPath);
+  const isUploadedMusicDrop = hasUploadedMusicStorage({
+    mediaKind,
+    dropType: musicDropType,
+    bucket: storedMediaBucket,
+    storagePath: storedMediaPath,
+    mediaUrl: dropMediaUrl,
+    href,
+  });
   const storedAudioSrc = resolveStoredAudioSrc({
     mediaKind,
-    dropType: feedDropType || metaString(meta?.dropType, meta?.drop_flavor),
+    dropType: musicDropType,
     signedUrl: mediaImageOverride || signedPreviewImage,
-    mediaUrl: metaString(meta?.mediaUrl),
-    href: href && isAudioFileUrl(href) ? href : "",
-    hasStoragePath: !!(previewBucket && previewStoragePath),
+    mediaUrl: dropMediaUrl,
+    href:
+      href && isAudioFileUrl(href) && !isStreamingMusicUrl(href) ? href : "",
+    hasStoragePath: hasStoredAudioPath,
   });
   const isStoredAudioDrop = !!storedAudioSrc;
+  const showFullSongPlayer =
+    isStoredAudioDrop || isUploadedMusicDrop || musicHasStoredFile;
   const showAnnouncementImage =
     item?.kind === "announcement" &&
     !!resolvedPreviewImage &&
     !isStoredVideoDrop &&
-    !isStoredAudioDrop;
+    !showFullSongPlayer;
+
+  // Hydrate uploaded music from authoritative boardDrops (same path Drop Studio uses).
+  // Feed meta often only has the Spotify href; the file lives on boardDrops.
+  useEffect(() => {
+    setMusicHasStoredFile(false);
+    setMusicHydrating(false);
+
+    if (!isMusicDropType(musicDropType)) return;
+
+    const alreadyUploaded = hasUploadedMusicStorage({
+      mediaKind,
+      dropType: musicDropType,
+      bucket: storedMediaBucket,
+      storagePath: storedMediaPath,
+      mediaUrl: dropMediaUrl,
+      href,
+    });
+    if (alreadyUploaded) {
+      setMusicHasStoredFile(true);
+      return;
+    }
+
+    const dropId = metaString(meta?.dropId, meta?.originalDropId);
+    if (!dropId) return;
+
+    setMusicHydrating(true);
+    const ownerUserId = metaString(authorUserId, meta?.authorId);
+    let cancelled = false;
+
+    void (async () => {
+      try {
+        const drop = await loadDropMediaForFeed(dropId, ownerUserId);
+        if (cancelled || !drop) return;
+
+        const coords = resolveStoredMediaCoords({
+          bucket: drop.bucket,
+          storagePath: drop.storagePath,
+          mediaUrl: drop.mediaUrl || drop.url || drop.linkUrl,
+          href: drop.url || drop.linkUrl,
+        });
+        const directAudio = [drop.mediaUrl, drop.url, drop.linkUrl].find(
+          (url) =>
+            typeof url === "string" &&
+            url &&
+            isAudioFileUrl(url) &&
+            !isStreamingMusicUrl(url)
+        );
+
+        if (!coords && !directAudio) return;
+
+        setMusicHasStoredFile(true);
+        setMediaKindOverride("audio");
+
+        if (coords) {
+          const url = await getDropSignedUrl(coords.bucket, coords.storagePath, 60 * 45);
+          if (!cancelled && url) {
+            setSignedPreviewImage(url);
+            setMediaImageOverride(url);
+          }
+        } else if (directAudio && !cancelled) {
+          setSignedPreviewImage(directAudio);
+          setMediaImageOverride(directAudio);
+        }
+      } finally {
+        if (!cancelled) setMusicHydrating(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      setMusicHydrating(false);
+    };
+  }, [
+    id,
+    musicDropType,
+    mediaKind,
+    storedMediaBucket,
+    storedMediaPath,
+    dropMediaUrl,
+    href,
+    authorUserId,
+    meta,
+    mediaRefreshTick,
+  ]);
 
   useEffect(() => {
     setAnnouncementImagePosition({ x: 50, y: 50 });
@@ -1007,31 +1235,28 @@ export default function ActivityCard({
     // Only clear/sign when there's a storage path to sign. Otherwise leave
     // signedPreviewImage alone so the canonical-media effect below (which owns
     // the image for feed drops) isn't clobbered.
-    if (!previewBucket || !previewStoragePath) return;
+    if (!storedMediaBucket || !storedMediaPath) return;
 
-    // Edits land in boardDrops first — don't re-sign a stale baked preview path
-    // over the freshly-edited media the canonical effect resolves.
-    if (
-      findLocalDropByAnyId(
-        metaString(meta?.dropId),
-        metaString(meta?.originalDropId),
-        id
-      )
-    ) {
-      return;
-    }
+    // Only skip when local cache has authoritative storage coords (canonical effect
+    // owns signing). A partial local row on mobile must not block server signing.
+    const local = findLocalDropByAnyId(
+      metaString(meta?.dropId),
+      metaString(meta?.originalDropId),
+      id
+    );
+    if (local?.bucket && local?.storagePath) return;
 
     setSignedPreviewImage("");
 
     async function signPreviewImage() {
       try {
-        const supabase = supabaseBrowser();
-        const { data, error } = await supabase.storage
-          .from(previewBucket)
-          .createSignedUrl(previewStoragePath, 60 * 45);
-
-        if (!cancelled && !error && data?.signedUrl) {
-          setSignedPreviewImage(data.signedUrl);
+        const url = await getDropSignedUrl(storedMediaBucket, storedMediaPath, 60 * 45);
+        if (!cancelled && url) {
+          setSignedPreviewImage(url);
+          if (isMusicDropType(musicDropType) || feedMediaKind === "audio") {
+            setMediaImageOverride(url);
+            setMediaKindOverride("audio");
+          }
         }
       } catch {
         // Fall back to image_url/previewImage if storage signing fails.
@@ -1043,7 +1268,38 @@ export default function ActivityCard({
     return () => {
       cancelled = true;
     };
-  }, [previewBucket, previewStoragePath, meta, id, mediaRefreshTick]);
+  }, [storedMediaBucket, storedMediaPath, musicDropType, feedMediaKind, meta, id, mediaRefreshTick]);
+
+  // Recover a working image when only a stored Supabase URL is available with no
+  // re-signable path. Older announcements saved a PUBLIC url against a PRIVATE
+  // bucket, so the link 403s and the image never renders. Parse the bucket/path
+  // back out of the URL and sign it. (The effect above owns the case where a
+  // path is already present.)
+  useEffect(() => {
+    if (storedMediaBucket && storedMediaPath) return;
+    const candidate = announcementMediaUrl || previewImage || "";
+    const m = candidate.match(
+      /\/storage\/v1\/object\/(?:public|sign|authenticated)\/([^/]+)\/([^?]+)/
+    );
+    if (!m) return;
+    const bucket = decodeURIComponent(m[1]);
+    const path = decodeURIComponent(m[2]);
+    let cancelled = false;
+    void (async () => {
+      try {
+        const supabase = supabaseBrowser();
+        const { data, error } = await supabase.storage
+          .from(bucket)
+          .createSignedUrl(path, 60 * 45);
+        if (!cancelled && !error && data?.signedUrl) setSignedPreviewImage(data.signedUrl);
+      } catch {
+        // Leave the existing (possibly broken) URL; nothing better to show.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [announcementMediaUrl, previewImage, storedMediaBucket, storedMediaPath]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1122,6 +1378,22 @@ export default function ActivityCard({
     return formatDropKindLabel(k);
   }, [item, meta, preview]);
   const badgeLabel = metaString(meta?.badgeLabel, preview?.badgeLabel);
+  const secondaryMetaLabel = useMemo(() => secondaryAttachmentLabelFromMeta(meta), [meta]);
+  const previewKindLabel = secondaryMetaLabel || kindLabel;
+  const activityMediaKind = useMemo(() => resolveDropMediaKindFromMeta(meta), [meta]);
+  const normalizedDropType = useMemo(
+    () => normalizeBoardDropType(metaString(meta?.dropType, meta?.drop_flavor, preview?.dropType)),
+    [meta, preview]
+  );
+  const isThoughtDrop =
+    feedDropType.includes("thought") || normalizedDropType === "Thought";
+  const isBoardVisionDrop =
+    feedDropType.includes("media") ||
+    feedDropType.includes("vision") ||
+    normalizedDropType === "Media";
+  const isBoardStorageMedia =
+    !!(storedMediaBucket && storedMediaPath) ||
+    !!(href && parseBoardStorageFromUrl(href));
 
   const payDropId = metaString(meta?.dropId, preview?.dropId, id);
   const payProvider = metaString(meta?.payProvider, preview?.payProvider);
@@ -1136,6 +1408,22 @@ export default function ActivityCard({
     payProvider === "authorize_net_accept_hosted" ||
     payProvider === "payment_link" ||
     priceCents > 0;
+  const preferNativeAudioPreview =
+    !showFullSongPlayer &&
+    activityMediaKind === "audio" &&
+    (isThoughtDrop || isPayDrop || isBoardStorageMedia || isStoredAudioDrop);
+  const preferNativeImagePreview =
+    !!resolvedPreviewImage &&
+    !isStoredVideoDrop &&
+    !showFullSongPlayer &&
+    !preferNativeAudioPreview &&
+    (activityMediaKind === "image" ||
+      isThoughtDrop ||
+      isBoardVisionDrop ||
+      (isPayDrop && activityMediaKind !== "video" && activityMediaKind !== "audio") ||
+      (isBoardStorageMedia &&
+        isBoardImageUrl(resolvedPreviewImage || href || dropMediaUrl || "")));
+  const preferNativeBoardMedia = preferNativeImagePreview || preferNativeAudioPreview;
   const priceLabel = formatPriceFromCents(priceCents);
 
   // The feed item's `href` (and thus the embedded media URL) is baked when the
@@ -1220,10 +1508,14 @@ export default function ActivityCard({
         : "Open attachment";
   const compactSpotify = !!compact && embed.kind === "spotify";
 
-  // Show embed unless user forces fallback or embed fails. Stored audio drops
-  // use the full-song player instead of the generic audio embed.
+  // Show embed unless user forces fallback or embed fails. Uploaded music uses
+  // the full-song player — never a streaming preview embed (Spotify, etc.).
   const showEmbed =
-    !!embed.url && !embedFailed && embed.kind !== "none" && !isStoredAudioDrop;
+    !!embed.url &&
+    !embedFailed &&
+    embed.kind !== "none" &&
+    !showFullSongPlayer &&
+    !(isMusicDropType(musicDropType) && musicHydrating);
 
   function signal(folder: "pass" | "pin" | "push") {
     if (!id) return;
@@ -1418,7 +1710,8 @@ export default function ActivityCard({
         compact && "compact",
         compactSpotify && "compactSpotify",
         item?.kind === "announcement" && "announcementDrop",
-        isPushed && "pushedDrop"
+        isPushed && "pushedDrop",
+        isPayDrop && "payDropCard"
       )}
       style={
         {
@@ -1448,8 +1741,16 @@ export default function ActivityCard({
               <span className="metaBadge vibeBadge">{announcementVibeLabel}</span>
             ) : null}
             {badgeLabel ? <span className="metaBadge">{badgeLabel}</span> : null}
+            {secondaryMetaLabel ? (
+              <span className="metaBadge studioSubBadge">{secondaryMetaLabel}</span>
+            ) : null}
             {isPayDrop && priceLabel ? <span className="metaBadge">{priceLabel}</span> : null}
             {timeLabel ? <span className="metaBadge timeBadge">{timeLabel}</span> : null}
+            {canonicalBoardDrop?.draftCount ? (
+              <span className="metaBadge draftBadge" title="Drafts saved in Drop Studio">
+                🗂 {canonicalBoardDrop.draftCount}
+              </span>
+            ) : null}
           </div>
           <div className="title">
             <RichText as="span" value={titleRich} plain={title} />
@@ -1480,19 +1781,6 @@ export default function ActivityCard({
       {body ? (
         <div className="body">
           <RichText as="span" value={descRich} plain={body} />
-        </div>
-      ) : null}
-
-      {isPayDrop ? (
-        <div className="dropActions" aria-label="Pay Drop actions">
-          <button
-            type="button"
-            className="checkoutBtn"
-            onClick={openPayCheckout}
-            disabled={payCheckoutBusy}
-          >
-            {payCheckoutBusy ? "Opening..." : "Checkout ->"}
-          </button>
         </div>
       ) : null}
 
@@ -1619,7 +1907,8 @@ export default function ActivityCard({
       resolvedPreviewImage &&
       !isPayDrop &&
       !isStoredVideoDrop &&
-      !isStoredAudioDrop ? (
+      !showFullSongPlayer &&
+      !preferNativeBoardMedia ? (
         <a
           className="linkPreview"
           href={href}
@@ -1627,10 +1916,15 @@ export default function ActivityCard({
           rel={external ? "noreferrer" : undefined}
         >
           <div className="linkPreviewArt">
+            {secondaryMetaLabel ? (
+              <div className="linkCoverHostChip">
+                <span>{secondaryMetaLabel}</span>
+              </div>
+            ) : null}
             <img className="linkPreviewImg" src={resolvedPreviewImage} alt="" loading="lazy" />
             <div className="linkPreviewShade" />
             <div className="linkPreviewCopy">
-              <div className="linkPreviewLabel">{kindLabel}</div>
+              <div className="linkPreviewLabel">{previewKindLabel}</div>
               <div className="linkPreviewTitle">{previewTitle}</div>
               {previewDescription ? (
                 <div className="linkPreviewDesc">{previewDescription}</div>
@@ -1654,20 +1948,41 @@ export default function ActivityCard({
         </div>
       ) : null}
 
-      {!showEmbed && isStoredAudioDrop ? (
+      {!showEmbed &&
+      preferNativeAudioPreview &&
+      !showFullSongPlayer &&
+      storedAudioSrc ? (
         <div className="mediaFrame storedAudioFrame">
-          <div className="audioLabel">{isPayDrop ? "Audio" : "Full song"}</div>
+          <div className="audioLabel">
+            {secondaryMetaLabel?.toUpperCase() || (isThoughtDrop ? "Vocal" : isPayDrop ? "Audio" : "Full song")}
+          </div>
           <AudioDropPlayer src={storedAudioSrc} onError={() => setEmbedFailed(true)} />
+        </div>
+      ) : null}
+
+      {!showEmbed && (showFullSongPlayer || (isMusicDropType(musicDropType) && musicHydrating)) ? (
+        <div className="mediaFrame storedAudioFrame">
+          <div className="audioLabel">
+            {secondaryMetaLabel?.toUpperCase() || (isPayDrop ? "Audio" : "Full song")}
+          </div>
+          {storedAudioSrc ? (
+            <AudioDropPlayer src={storedAudioSrc} onError={() => setEmbedFailed(true)} />
+          ) : (
+            <div className="audioLoading">Loading full song…</div>
+          )}
         </div>
       ) : null}
 
       {!showEmbed &&
       resolvedPreviewImage &&
       !showAnnouncementImage &&
-      (!href || isPayDrop) &&
       !isStoredVideoDrop &&
-      !isStoredAudioDrop ? (
+      !showFullSongPlayer &&
+      preferNativeImagePreview ? (
         <div className="activityImagePreview">
+          {secondaryMetaLabel ? (
+            <span className="activityMediaChip">{secondaryMetaLabel}</span>
+          ) : null}
           <img
             className="activityImage"
             src={resolvedPreviewImage}
@@ -1686,7 +2001,7 @@ export default function ActivityCard({
       !resolvedPreviewImage &&
       !isPayDrop &&
       !isStoredVideoDrop &&
-      !isStoredAudioDrop ? (
+      !showFullSongPlayer ? (
         <a
           className="linkPreview linkCoverFallback"
           href={href}
@@ -1706,22 +2021,13 @@ export default function ActivityCard({
               />
             ) : null}
             <div className="linkPreviewShade" />
-            <div className="linkCoverHostChip">
-              {coverFavicon ? (
-                <img
-                  className="linkCoverFav"
-                  src={coverFavicon}
-                  alt=""
-                  loading="lazy"
-                  onError={(e) => {
-                    (e.currentTarget as HTMLImageElement).style.display = "none";
-                  }}
-                />
-              ) : null}
-              <span>{coverHost || "LINK"}</span>
-            </div>
+            {secondaryMetaLabel ? (
+              <div className="linkCoverHostChip">
+                <span>{secondaryMetaLabel}</span>
+              </div>
+            ) : null}
             <div className="linkPreviewCopy">
-              <div className="linkPreviewLabel">{kindLabel}</div>
+              <div className="linkPreviewLabel">{previewKindLabel}</div>
               <div className="linkPreviewTitle">{previewTitle}</div>
               {previewDescription ? (
                 <div className="linkPreviewDesc">{previewDescription}</div>
@@ -1740,70 +2046,98 @@ export default function ActivityCard({
         </a>
       ) : null}
 
-      {/* ✅ Reaction rail stays in card */}
+      {isPayDrop ? (
+        <PayOnBoardButton busy={payCheckoutBusy} onClick={() => void openPayCheckout()} />
+      ) : null}
+
+      {/* Reaction rail: row 1 = PASS · PIN · PUSH · privacy (right); row 2 = Comment + Studio */}
       <div className="rail" aria-label="Reaction rail">
-        <button
-          type="button"
-          className={clsx("rbtn pass", selectedReaction === "pass" && "selected")}
-          onClick={() => signal("pass")}
-          title="PASS (acknowledge)"
-        >
-          <span className="glyph" aria-hidden>
-            <PassGlyph />
-          </span>
-          <span className="lbl">PASS</span>
-        </button>
+        <div className="railRow railRowTop">
+          <div className="railCluster" aria-label="Drop reactions">
+            <button
+              type="button"
+              className={clsx("rbtn pass", selectedReaction === "pass" && "selected")}
+              onClick={() => signal("pass")}
+              title="PASS (acknowledge)"
+            >
+              <span className="glyph" aria-hidden>
+                <PassGlyph />
+              </span>
+              <span className="lbl">PASS</span>
+            </button>
 
-        <button
-          type="button"
-          className={clsx("rbtn pin", selectedReaction === "pin" && "selected")}
-          onClick={() => signal("pin")}
-          title="PIN (save)"
-        >
-          <span className="glyph" aria-hidden>
-            <StarGlyph />
-          </span>
-          <span className="lbl">PIN</span>
-        </button>
+            <button
+              type="button"
+              className={clsx("rbtn pin", selectedReaction === "pin" && "selected")}
+              onClick={() => signal("pin")}
+              title="PIN (save)"
+            >
+              <span className="glyph" aria-hidden>
+                <StarGlyph />
+              </span>
+              <span className="lbl">PIN</span>
+            </button>
 
-        <button
-          type="button"
-          className={clsx("rbtn push", selectedReaction === "push" && "selected")}
-          onClick={() => signal("push")}
-          title="PUSH (boost)"
-        >
-          <span className="glyph" aria-hidden>
-            <ArrowGlyph />
-          </span>
-          <span className="lbl">PUSH</span>
-        </button>
+            <button
+              type="button"
+              className={clsx("rbtn push", selectedReaction === "push" && "selected")}
+              onClick={() => signal("push")}
+              title="PUSH (boost)"
+            >
+              <span className="glyph" aria-hidden>
+                <ArrowGlyph />
+              </span>
+              <span className="lbl">PUSH</span>
+            </button>
 
-        <button
-          type="button"
-          className="rbtn comments"
-          onClick={() => setCommentsOpen(true)}
-          title="Comment"
-        >
-          <span className="glyph" aria-hidden>
-            <CommentGlyph />
-          </span>
-          <span className="lbl">Comment{commentCount ? ` ${commentCount}` : ""}</span>
-        </button>
+            {canManageDrop && item?.kind === "board_drop" && canonicalBoardDrop ? (
+              <button
+                type="button"
+                className={`visEye vis-${(canonicalBoardDrop.visibility as string) || "public"}`}
+                onClick={() => void toggleDropVisibility()}
+                aria-pressed={(canonicalBoardDrop.visibility ?? "public") === "private"}
+                aria-label={`${
+                  (canonicalBoardDrop.visibility ?? "public") === "public" ? "Public" : "Private"
+                } drop — tap to toggle`}
+                title={`${
+                  (canonicalBoardDrop.visibility ?? "public") === "public" ? "Public" : "Private"
+                } — tap to toggle`}
+              >
+                <EyeToggle open={(canonicalBoardDrop.visibility ?? "public") === "public"} />
+              </button>
+            ) : null}
+          </div>
+        </div>
 
-        {canManageDrop ? (
-          <button
-            type="button"
-            className="rbtn studiodrop"
-            onClick={openDropStudioEditor}
-            title="Edit this drop in Drop Studio Editor"
-          >
-            <span className="glyph" aria-hidden>
-              🎬
-            </span>
-            <span className="lbl">Drop Studio Editor</span>
-          </button>
-        ) : null}
+        <div className="railRow railRowBottom">
+          <div className="railCluster">
+            <button
+              type="button"
+              className="rbtn comments"
+              onClick={() => setCommentsOpen(true)}
+              title="Comment"
+            >
+              <span className="glyph" aria-hidden>
+                <CommentGlyph />
+              </span>
+              <span className="lbl">Comment{commentCount ? ` ${commentCount}` : ""}</span>
+            </button>
 
+            {canManageDrop ? (
+              <button
+                type="button"
+                className="rbtn studiodrop"
+                onClick={openDropStudioEditor}
+                title="Edit this drop in Drop Studio Editor"
+              >
+                <span className="glyph" aria-hidden>
+                  🎬
+                </span>
+                <span className="lbl">Drop Studio Editor</span>
+              </button>
+            ) : null}
+          </div>
+        </div>
       </div>
 
       <DropCommentsDrawer
@@ -1943,22 +2277,34 @@ export default function ActivityCard({
         .metaBadge {
           display: inline-flex;
           align-items: center;
-          min-height: 24px;
+          justify-content: center;
+          height: 24px;
+          flex: 0 0 auto;
+          box-sizing: border-box;
           border-radius: 999px;
           border: 1px solid rgba(0, 0, 0, 0.1);
           background: rgba(255, 255, 255, 0.74);
-          padding: 5px 9px;
+          padding: 0 10px;
+          padding-top: 1px;
           font-size: 10px;
           font-weight: 950;
-          letter-spacing: 0.14em;
+          letter-spacing: 0.1em;
           text-transform: uppercase;
+          line-height: 1;
           color: rgba(0, 140, 135, 0.95);
+          vertical-align: middle;
         }
 
         .metaBadge {
           color: rgba(0, 0, 0, 0.58);
           background: rgba(255, 255, 255, 0.64);
-          letter-spacing: 0.08em;
+          border-color: rgba(0, 0, 0, 0.08);
+        }
+
+        .studioSubBadge {
+          color: rgba(0, 120, 105, 0.88);
+          background: rgba(220, 252, 240, 0.72);
+          border-color: rgba(0, 140, 120, 0.18);
         }
 
         .timeBadge {
@@ -1972,12 +2318,49 @@ export default function ActivityCard({
           letter-spacing: 0.06em;
         }
 
+        .draftBadge {
+          gap: 4px;
+        }
+
+        /* Public/Private eye toggle (open = public, closed = private). */
+        .visEye {
+          flex: 0 0 auto;
+          width: 26px;
+          height: 26px;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          padding: 0;
+          border-radius: 999px;
+          cursor: pointer;
+          border: 1px solid rgba(0, 140, 135, 0.28);
+          background: rgba(220, 252, 240, 0.7);
+          color: rgba(0, 140, 135, 0.95);
+          transition: background 140ms ease, border-color 140ms ease, color 140ms ease,
+            transform 120ms ease;
+        }
+        .visEye:hover {
+          transform: translateY(-1px);
+          border-color: rgba(0, 140, 135, 0.5);
+        }
+        .visEye.vis-private {
+          color: rgba(120, 60, 160, 0.95);
+          background: rgba(238, 230, 255, 0.72);
+          border-color: rgba(120, 60, 160, 0.28);
+        }
+
         .title {
           font-size: 14px;
-          font-weight: 950;
+          font-weight: 650;
           color: rgba(0, 0, 0, 0.76);
           letter-spacing: 0.02em;
           overflow-wrap: anywhere;
+          white-space: pre-wrap;
+        }
+
+        .title :global(b),
+        .title :global(strong) {
+          font-weight: 900;
         }
 
         .authorMark {
@@ -2056,44 +2439,15 @@ export default function ActivityCard({
         .body {
           margin-top: 8px;
           font-size: 12px;
-          font-weight: 800;
+          font-weight: 600;
           color: rgba(0, 0, 0, 0.58);
           white-space: pre-wrap;
           line-height: 1.45;
         }
 
-        .dropActions {
-          margin-top: 12px;
-          display: flex;
-          justify-content: flex-start;
-          align-items: center;
-          gap: 10px;
-          flex-wrap: wrap;
-        }
-
-        .checkoutBtn {
-          min-height: 36px;
-          border-radius: 999px;
-          padding: 9px 14px;
-          border: 1px solid rgba(0, 0, 0, 0.1);
-          background: rgba(255, 255, 255, 0.88);
-          color: rgba(0, 0, 0, 0.68);
-          font-size: 11px;
-          font-weight: 950;
-          letter-spacing: 0.02em;
-          cursor: pointer;
-          box-shadow: 0 10px 24px rgba(0, 0, 0, 0.08);
-          transition: transform 140ms ease, filter 140ms ease;
-        }
-
-        .checkoutBtn:hover:not(:disabled) {
-          transform: translateY(-1px);
-          filter: brightness(1.02);
-        }
-
-        .checkoutBtn:disabled {
-          cursor: wait;
-          opacity: 0.68;
+        .body :global(b),
+        .body :global(strong) {
+          font-weight: 900;
         }
 
         /* embed */
@@ -2122,16 +2476,36 @@ export default function ActivityCard({
         }
 
         .embed.image,
-        .embed.video,
-        .embed.audio {
-          width: fit-content;
+        .embed.video {
+          /* Match the standard Board Drop frame (4:5, centered) so Pay/Vision
+             and every media drop read uniformly instead of shrinking to the
+             left in a smaller box. */
+          width: min(100%, calc(72vh * 4 / 5));
           max-width: 100%;
+          margin-left: auto;
+          margin-right: auto;
           border: 0;
           background: transparent;
         }
 
+        .embed.image .mediaFrame,
+        .embed.video .mediaFrame {
+          width: 100%;
+          aspect-ratio: 4 / 5;
+        }
+
+        .embed.image .img,
+        .embed.video .vid {
+          width: 100%;
+          height: 100%;
+          max-height: none;
+          object-fit: cover;
+        }
+
         .embed.audio {
           width: 100%;
+          border: 0;
+          background: transparent;
         }
 
         .linkPreview {
@@ -2225,19 +2599,47 @@ export default function ActivityCard({
           position: absolute;
           top: 14px;
           left: 14px;
+          z-index: 2;
           display: inline-flex;
           align-items: center;
-          gap: 8px;
-          padding: 6px 10px;
+          justify-content: center;
+          height: 24px;
+          padding: 0 10px;
+          padding-top: 1px;
           border-radius: 999px;
           background: rgba(0, 0, 0, 0.42);
           border: 1px solid rgba(255, 255, 255, 0.18);
           color: rgba(255, 255, 255, 0.92);
           font-size: 10px;
           font-weight: 950;
-          letter-spacing: 0.14em;
+          letter-spacing: 0.1em;
           text-transform: uppercase;
+          line-height: 1;
           backdrop-filter: blur(4px);
+        }
+
+        .activityMediaChip {
+          position: absolute;
+          top: 12px;
+          left: 12px;
+          z-index: 2;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          height: 24px;
+          padding: 0 10px;
+          padding-top: 1px;
+          border-radius: 999px;
+          border: 1px solid rgba(255, 255, 255, 0.28);
+          background: rgba(0, 0, 0, 0.48);
+          color: rgba(255, 255, 255, 0.94);
+          font-size: 10px;
+          font-weight: 950;
+          letter-spacing: 0.1em;
+          text-transform: uppercase;
+          line-height: 1;
+          backdrop-filter: blur(8px);
+          pointer-events: none;
         }
 
         .linkCoverFav {
@@ -2268,18 +2670,19 @@ export default function ActivityCard({
           object-fit: contain;
         }
 
-        /* Standard Board Drop frame (Drop Studio Vision/Art) so the feed reads
-           as a clean, consistent column — announcements keep their banner. */
+        /* Vision/media: natural aspect ratio, no crop box — matches Board Drop collection. */
         .activityImagePreview:not(.announcementMedia) {
-          aspect-ratio: 4 / 5;
-          width: min(100%, calc(72vh * 4 / 5));
+          width: fit-content;
+          max-width: 100%;
           margin: 12px auto 0;
+          background: rgba(0, 0, 0, 0.04);
         }
         .activityImagePreview:not(.announcementMedia) .activityImage {
-          width: 100%;
-          height: 100%;
-          max-height: none;
-          object-fit: cover;
+          width: auto;
+          max-width: 100%;
+          height: auto;
+          max-height: ${compact ? "min(320px, 58vh)" : "min(480px, 72vh)"};
+          object-fit: contain;
         }
 
         .announcementMedia {
@@ -2326,9 +2729,8 @@ export default function ActivityCard({
 
         .storedVideoFrame {
           margin-top: 12px;
-          /* Match the standard Board Drop frame so video drops sit uniform. */
-          aspect-ratio: 4 / 5;
-          width: min(100%, calc(72vh * 4 / 5));
+          width: 100%;
+          max-width: 100%;
           margin-left: auto;
           margin-right: auto;
           overflow: hidden;
@@ -2353,6 +2755,18 @@ export default function ActivityCard({
           letter-spacing: 0.16em;
           text-transform: uppercase;
           color: rgba(0, 0, 0, 0.58);
+        }
+
+        .audioLoading {
+          padding: 14px 12px;
+          border-radius: 12px;
+          border: 1px dashed rgba(0, 0, 0, 0.12);
+          background: rgba(255, 255, 255, 0.72);
+          font-size: 12px;
+          font-weight: 800;
+          letter-spacing: 0.08em;
+          color: rgba(0, 0, 0, 0.52);
+          text-align: center;
         }
 
         .img {
@@ -2438,8 +2852,27 @@ export default function ActivityCard({
         .rail {
           margin-top: 12px;
           display: flex;
-          gap: 10px;
+          flex-direction: column;
+          align-items: flex-start;
+          gap: 8px;
+        }
+
+        .railRow {
+          display: flex;
+          align-items: center;
+          justify-content: flex-start;
+          width: 100%;
+          min-width: 0;
+        }
+
+        .railCluster {
+          display: inline-flex;
+          align-items: center;
+          justify-content: flex-start;
+          gap: 8px;
           flex-wrap: wrap;
+          max-width: 100%;
+          min-width: 0;
         }
 
         .rbtn {

@@ -16,16 +16,23 @@ export type DropFlavorKey =
   | "link"
   | "doc";
 
+/** Full tab order — studio-first row, then link/embed row. */
 export const DROP_FLAVOR_ORDER: DropFlavorKey[] = [
   "thought",
   "media",
-  "music",
-  "youtube",
-  "link",
-  "news",
   "doc",
   "pay",
+  "youtube",
+  "news",
+  "music",
+  "link",
 ];
+
+/** Drop Studio surfaces (top row in creation UIs). */
+export const DROP_FLAVOR_STUDIO_ROW: DropFlavorKey[] = ["thought", "media", "doc", "pay"];
+
+/** Link / embed surfaces (second row). */
+export const DROP_FLAVOR_LINK_ROW: DropFlavorKey[] = ["youtube", "news", "music", "link"];
 
 export const DROP_FLAVOR_LABEL: Record<DropFlavorKey, string> = {
   thought: "Thought",

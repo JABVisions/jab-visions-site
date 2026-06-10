@@ -89,7 +89,32 @@ export default function RemovableDropBadge({
   }, [revealed]);
 
   if (!canRemove) {
-    return <span className="kind">{label}</span>;
+    return (
+      <span className="kind">
+        {label}
+        <style jsx>{`
+          .kind {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            height: 24px;
+            flex: 0 0 auto;
+            box-sizing: border-box;
+            border-radius: 999px;
+            border: 1px solid rgba(0, 0, 0, 0.1);
+            background: rgba(255, 255, 255, 0.74);
+            padding: 0 10px;
+            font-size: 10px;
+            font-weight: 950;
+            letter-spacing: 0.1em;
+            text-transform: uppercase;
+            line-height: 1;
+            color: rgba(0, 140, 135, 0.95);
+            vertical-align: middle;
+          }
+        `}</style>
+      </span>
+    );
   }
 
   async function commitRemove(event: React.SyntheticEvent) {
@@ -166,9 +191,12 @@ export default function RemovableDropBadge({
         .kindRemovable {
           position: relative;
           display: inline-flex;
-          align-items: stretch;
+          align-items: center;
+          justify-content: center;
           height: 24px;
+          flex: 0 0 auto;
           overflow: hidden;
+          vertical-align: middle;
           border-radius: 999px;
           border: 1px solid rgba(0, 0, 0, 0.1);
           background: rgba(255, 255, 255, 0.74);
@@ -207,6 +235,11 @@ export default function RemovableDropBadge({
              stuck halfway. */
           height: 48px;
           flex: 0 0 48px;
+          /* Top-anchor inside the 24px overflow-hidden pill. The button centers
+             its children (align-items:center); without this the 48px stack is
+             vertically centered and the rest state shows the SEAM between the two
+             faces — the label looks pushed halfway out of the pill. */
+          align-self: flex-start;
           transform: translateY(0);
           transition: transform 240ms cubic-bezier(0.22, 0.85, 0.32, 1);
         }
@@ -223,16 +256,19 @@ export default function RemovableDropBadge({
           justify-content: center;
           height: 24px;
           flex: 0 0 24px;
-          padding: 0 9px;
+          padding: 0 10px;
           font-size: 10px;
           font-weight: 950;
-          letter-spacing: 0.14em;
+          letter-spacing: 0.1em;
           text-transform: uppercase;
           white-space: nowrap;
+          line-height: 1;
         }
-
         .kindFace.label {
           color: rgba(0, 140, 135, 0.95);
+          /* Uppercase glyphs have no descenders, so optically nudge up a hair to
+             sit truly centered in the pill (no extra top padding pushing down). */
+          padding-bottom: 1px;
         }
 
         .kindFace.remove {

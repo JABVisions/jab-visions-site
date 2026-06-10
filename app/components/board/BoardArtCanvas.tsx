@@ -4,7 +4,8 @@
 // over a switchable background: dark or white paper, OR a captured photo (so the
 // same tools let you draw directly on a Vision). Save composites bg + strokes
 // into a PNG File that flows into the drop media flow.
-// Brush modes: paint (opaque), blend (soft-light mix), erase.
+// Brush modes: paint (opaque), blend (real smudge — drags & merges the painted
+// strokes underneath, like Procreate), erase.
 
 "use client";
 
@@ -57,6 +58,11 @@ export default function BoardArtCanvas({
   const lastPtRef = useRef<{ x: number; y: number } | null>(null);
   const wheelRef = useRef<HTMLDivElement | null>(null);
   const wheelDraggingRef = useRef(false);
+  // Smudge ("blend") brush state: an offscreen buffer holds the paint the brush
+  // is currently carrying, plus its device-pixel diameter.
+  const smudgeBufRef = useRef<HTMLCanvasElement | null>(null);
+  const smudgeCtxRef = useRef<CanvasRenderingContext2D | null>(null);
+  const blendDiamRef = useRef(0);
 
   type BrushMode = "paint" | "blend" | "erase";
 
@@ -157,6 +163,112 @@ export default function BoardArtCanvas({
     redoRef.current = [];
   }
 
+  // ---- Smudge / blend brush -------------------------------------------------
+  // A real smudge: it carries the strokes under the brush and drags them along
+  // the path, re-sampling as it travels so colors it passes over merge together
+  // (like Procreate). It deposits NO new color and only ever reads/writes the
+  // transparent strokes canvas — the photo/paper background sits underneath,
+  // untouched (picture/video > brush strokes > blend strokes).
+  const BLEND_STRENGTH = 0.94;
+
+  function ensureSmudgeBuffer(diameter: number) {
+    let buf = smudgeBufRef.current;
+    if (!buf) {
+      buf = document.createElement("canvas");
+      smudgeBufRef.current = buf;
+    }
+    if (buf.width !== diameter || buf.height !== diameter) {
+      buf.width = diameter;
+      buf.height = diameter;
+    }
+    smudgeCtxRef.current = buf.getContext("2d");
+  }
+
+  // Pick up the strokes under the brush into the buffer, masked to a soft circle
+  // so the smear has feathered edges and blends instead of stamping a hard box.
+  function grabSmudge(cxDev: number, cyDev: number, D: number) {
+    const bctx = smudgeCtxRef.current;
+    const canvas = canvasRef.current;
+    if (!bctx || !canvas) return;
+    const sx = cxDev - D / 2;
+    const sy = cyDev - D / 2;
+    bctx.globalCompositeOperation = "source-over";
+    bctx.globalAlpha = 1;
+    bctx.clearRect(0, 0, D, D);
+
+    // Draw-on-photo: the photo is the bottom layer (a separate <img>), so the
+    // smudge samples the VISIBLE composite — photo first, strokes on top — and
+    // then lays that smear onto the strokes layer. This is why blending drags
+    // the actual image, not just painted strokes. The photo itself stays put.
+    const img = bgImgRef.current;
+    if (onPhoto && img && img.naturalWidth > 0 && img.naturalHeight > 0) {
+      const W = canvas.width;
+      const H = canvas.height;
+      const iw0 = img.naturalWidth;
+      const ih0 = img.naturalHeight;
+      // Mirror the on-screen object-fit:cover mapping so the sampled region lines
+      // up exactly with what's displayed.
+      const scale = Math.max(W / iw0, H / ih0);
+      const ox = (W - iw0 * scale) / 2;
+      const oy = (H - ih0 * scale) / 2;
+      const srcX = (sx - ox) / scale;
+      const srcY = (sy - oy) / scale;
+      const srcSize = D / scale;
+      try {
+        bctx.drawImage(img, srcX, srcY, srcSize, srcSize, 0, 0, D, D);
+      } catch {}
+    }
+
+    // Strokes on top (clamp the source rect so edge smudges don't throw).
+    const ix = Math.max(0, sx);
+    const iy = Math.max(0, sy);
+    const iw = Math.min(canvas.width, sx + D) - ix;
+    const ih = Math.min(canvas.height, sy + D) - iy;
+    if (iw > 0 && ih > 0) {
+      bctx.drawImage(canvas, ix, iy, iw, ih, ix - sx, iy - sy, iw, ih);
+    }
+    bctx.globalCompositeOperation = "destination-in";
+    const g = bctx.createRadialGradient(D / 2, D / 2, 0, D / 2, D / 2, D / 2);
+    g.addColorStop(0, "rgba(0,0,0,1)");
+    g.addColorStop(0.55, "rgba(0,0,0,0.95)");
+    g.addColorStop(1, "rgba(0,0,0,0)");
+    bctx.fillStyle = g;
+    bctx.fillRect(0, 0, D, D);
+    bctx.globalCompositeOperation = "source-over";
+  }
+
+  // Drag the carried paint from (x0,y0) to (x1,y1): stamp it down at each step,
+  // then re-grab the (now blended) result so the color travels and merges.
+  function blendSegment(x0: number, y0: number, x1: number, y1: number, strength: number) {
+    const ctx = ctxRef.current;
+    const buf = smudgeBufRef.current;
+    if (!ctx || !buf) return;
+    const dpr = dprRef.current;
+    const D = blendDiamRef.current;
+    if (D <= 0) return;
+    const r = D / 2;
+    // Finer step spacing → more samples per move → a more sensitive, responsive
+    // smear that reacts to small movements.
+    const stepCss = Math.max(1, (D * 0.1) / dpr);
+    const dist = Math.hypot(x1 - x0, y1 - y0);
+    const steps = Math.max(1, Math.round(dist / stepCss));
+    for (let i = 1; i <= steps; i++) {
+      const t = i / steps;
+      const cxDev = (x0 + (x1 - x0) * t) * dpr;
+      const cyDev = (y0 + (y1 - y0) * t) * dpr;
+      // Lay carried paint at the new point (work in raw device pixels).
+      ctx.save();
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.globalCompositeOperation = "source-over";
+      ctx.globalAlpha = strength;
+      ctx.drawImage(buf, cxDev - r, cyDev - r);
+      ctx.restore();
+      // Re-pick the blended result to carry forward (decays + merges colors).
+      grabSmudge(cxDev, cyDev, D);
+    }
+    ctx.globalAlpha = 1;
+  }
+
   function onPointerDown(e: React.PointerEvent<HTMLCanvasElement>) {
     const ctx = ctxRef.current;
     if (!ctx) return;
@@ -166,12 +278,20 @@ export default function BoardArtCanvas({
     drawingRef.current = true;
     const { x, y } = pointFromXY(e.clientX, e.clientY);
     lastPtRef.current = { x, y };
+    if (brushMode === "blend") {
+      // Smudge: capture the strokes under the brush. No color is deposited, and
+      // a tap (no drag) leaves the canvas untouched, just like a real smudge.
+      const dpr = dprRef.current;
+      const D = Math.max(2, Math.round(size * dpr));
+      blendDiamRef.current = D;
+      ensureSmudgeBuffer(D);
+      grabSmudge(x * dpr, y * dpr, D);
+      return;
+    }
+
     if (brushMode === "erase") {
       ctx.globalCompositeOperation = "destination-out";
       ctx.globalAlpha = 1;
-    } else if (brushMode === "blend") {
-      ctx.globalCompositeOperation = "soft-light";
-      ctx.globalAlpha = 0.52;
     } else {
       ctx.globalCompositeOperation = "source-over";
       ctx.globalAlpha = 1;
@@ -203,6 +323,21 @@ export default function BoardArtCanvas({
         ? native.getCoalescedEvents()
         : [native];
 
+    if (brushMode === "blend") {
+      for (const sample of samples) {
+        const { x, y } = pointFromXY(sample.clientX, sample.clientY);
+        const last = lastPtRef.current ?? { x, y };
+        // Pressure sensitivity: a harder press smears more aggressively, a light
+        // touch is gentler. Mice/trackpads report 0 → treat as a medium press.
+        const rawPressure = (sample as PointerEvent).pressure;
+        const pressure = rawPressure && rawPressure > 0 ? rawPressure : 0.5;
+        const strength = Math.max(0.55, Math.min(0.99, BLEND_STRENGTH + (pressure - 0.5) * 0.5));
+        blendSegment(last.x, last.y, x, y, strength);
+        lastPtRef.current = { x, y };
+      }
+      return;
+    }
+
     for (const sample of samples) {
       const { x, y } = pointFromXY(sample.clientX, sample.clientY);
       const last = lastPtRef.current ?? { x, y };
@@ -221,7 +356,8 @@ export default function BoardArtCanvas({
     const ctx = ctxRef.current;
     const last = lastPtRef.current;
     // Finish the path at the final point so the very end of the stroke renders.
-    if (ctx && last) {
+    // (Blend has no path — it stamps as it moves — so skip the line finish.)
+    if (ctx && last && brushMode !== "blend") {
       ctx.lineTo(last.x, last.y);
       ctx.stroke();
     }
@@ -295,53 +431,25 @@ export default function BoardArtCanvas({
 
   return (
     <div className="artMode">
-      <div className={`artStage ${paper && !onPhoto ? "paper" : ""}`}>
-        {onPhoto ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img ref={bgImgRef} src={backgroundImageUrl} alt="" className="artBg" crossOrigin="anonymous" />
-        ) : null}
-        <canvas
-          ref={canvasRef}
-          className="artCanvas"
-          onPointerDown={onPointerDown}
-          onPointerMove={onPointerMove}
-          onPointerUp={onPointerUp}
-          onPointerCancel={onPointerUp}
-          onPointerLeave={onPointerUp}
-        />
+      <div className="artStageWrap">
+        <div className={`artStage ${paper && !onPhoto ? "paper" : ""}`}>
+          {onPhoto ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img ref={bgImgRef} src={backgroundImageUrl} alt="" className="artBg" crossOrigin="anonymous" />
+          ) : null}
+          <canvas
+            ref={canvasRef}
+            className="artCanvas"
+            onPointerDown={onPointerDown}
+            onPointerMove={onPointerMove}
+            onPointerUp={onPointerUp}
+            onPointerCancel={onPointerUp}
+            onPointerLeave={onPointerUp}
+          />
+        </div>
       </div>
 
       <div className="artTools">
-        <div className="artRow">
-          <div className="artColors">
-            {BOARD_COLORS.map((c) => (
-              <button
-                key={c}
-                type="button"
-                className={`artSwatch ${
-                  brushMode !== "erase" && color.toLowerCase() === c.toLowerCase() ? "on" : ""
-                }`}
-                style={{ background: c }}
-                onClick={() => {
-                  setBrushMode("paint");
-                  setColor(c);
-                }}
-                aria-label={`Color ${c}`}
-              />
-            ))}
-          </div>
-          {onPhoto ? null : (
-            <button
-              type="button"
-              className="artBgToggle"
-              onClick={() => setPaper((p) => !p)}
-              aria-pressed={paper}
-            >
-              {paper ? "Paper" : "Dark"}
-            </button>
-          )}
-        </div>
-
         <div className="artWheelRow">
           <div
             ref={wheelRef}
@@ -376,6 +484,33 @@ export default function BoardArtCanvas({
           </div>
 
           <div className="artWheelSide">
+            <div className="artColors">
+              {BOARD_COLORS.map((c) => (
+                <button
+                  key={c}
+                  type="button"
+                  className={`artSwatch ${
+                    brushMode !== "erase" && color.toLowerCase() === c.toLowerCase() ? "on" : ""
+                  }`}
+                  style={{ background: c }}
+                  onClick={() => {
+                    setBrushMode("paint");
+                    setColor(c);
+                  }}
+                  aria-label={`Color ${c}`}
+                />
+              ))}
+              {onPhoto ? null : (
+                <button
+                  type="button"
+                  className="artBgToggle artBgToggleInline"
+                  onClick={() => setPaper((p) => !p)}
+                  aria-pressed={paper}
+                >
+                  {paper ? "Paper" : "Dark"}
+                </button>
+              )}
+            </div>
             <div className="artLight">
               <span className="artFieldLabel">Light</span>
               <input
@@ -462,18 +597,34 @@ export default function BoardArtCanvas({
 
       <style jsx>{`
         .artMode {
-          display: grid;
-          grid-template-rows: 1fr auto;
+          display: flex;
+          flex-direction: column;
           min-height: 0;
           height: 100%;
+          width: 100%;
           gap: 10px;
           padding: 12px;
+        }
+        /* The stage flexes to whatever space is left after the tools, so the
+           color row + controls below it are always on-screen and never clipped
+           by the canvas — on desktop and mobile alike. */
+        .artStageWrap {
+          flex: 1 1 auto;
+          min-height: 0;
+          display: flex;
+          align-items: center;
+          justify-content: center;
         }
         .artStage {
           position: relative;
           aspect-ratio: 4 / 5;
-          width: min(100%, calc(54vh * 4 / 5));
-          height: auto;
+          /* height drives the size (the wrap gives it a definite height), width
+             follows the 4:5 ratio and is clamped by max-width. Without a definite
+             dimension the stage collapses / the cover-fit image blows up. */
+          height: 100%;
+          width: auto;
+          max-width: 100%;
+          max-height: 100%;
           margin: 0 auto;
           border-radius: 16px;
           overflow: hidden;
@@ -501,6 +652,7 @@ export default function BoardArtCanvas({
           cursor: crosshair;
         }
         .artTools {
+          flex: 0 0 auto;
           display: grid;
           gap: 10px;
         }
@@ -514,17 +666,22 @@ export default function BoardArtCanvas({
         .artColors {
           display: flex;
           flex-wrap: wrap;
-          gap: 8px;
+          gap: 7px;
           align-items: center;
-          justify-content: center;
+          justify-content: flex-start;
+        }
+        .artBgToggleInline {
+          padding: 4px 10px;
+          font-size: 10px;
         }
         .artSwatch {
-          width: 26px;
-          height: 26px;
+          width: 22px;
+          height: 22px;
           border-radius: 999px;
           border: 2px solid rgba(255, 255, 255, 0.35);
           cursor: pointer;
           padding: 0;
+          flex: 0 0 auto;
         }
         .artSwatch.on {
           border-color: #fff;
@@ -540,8 +697,8 @@ export default function BoardArtCanvas({
         }
         .artWheel {
           position: relative;
-          width: 116px;
-          height: 116px;
+          width: 104px;
+          height: 104px;
           border-radius: 999px;
           flex: 0 0 auto;
           cursor: crosshair;

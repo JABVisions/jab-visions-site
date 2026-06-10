@@ -5,6 +5,8 @@ import type {
   BoardActivityKind,
 } from "@/lib/board/activity";
 import { readDrops, type UniversalDrop } from "@/lib/board/drops/storage";
+import { patchMusicActivity } from "@/lib/board/musicMigration";
+import { normalizeRichText } from "@/lib/board/richText";
 import { resolveBoardProjects } from "@/lib/board/projects";
 import type { FeedDrop } from "@/lib/boardStore";
 
@@ -211,6 +213,12 @@ export function universalDropToActivity(drop: UniversalDrop): BoardActivity | nu
   if (!drop?.id || drop.visibility === "private") return null;
 
   const meta = drop.meta && typeof drop.meta === "object" ? drop.meta : {};
+  const titleRich =
+    normalizeRichText((drop as { titleRich?: unknown }).titleRich) ??
+    normalizeRichText(meta.titleRich);
+  const descriptionRich =
+    normalizeRichText((drop as { descriptionRich?: unknown }).descriptionRich) ??
+    normalizeRichText(meta.descriptionRich);
   const imageUrl =
     drop.imageUrl ||
     (drop.mediaKind === "image" ? drop.mediaUrl || drop.url || null : null);
@@ -237,6 +245,8 @@ export function universalDropToActivity(drop: UniversalDrop): BoardActivity | nu
     image_url: imageUrl,
     meta: {
       ...meta,
+      ...(titleRich ? { titleRich } : {}),
+      ...(descriptionRich ? { descriptionRich } : {}),
       source: drop.source || meta.source || "board_drops_storage",
       origin: drop.origin || meta.origin || null,
       dropId: drop.id,
@@ -254,13 +264,26 @@ export function universalDropToActivity(drop: UniversalDrop): BoardActivity | nu
       authorAuraIntensity: drop.authorAuraIntensity ?? null,
       mediaKind: drop.mediaKind || null,
       mediaUrl: drop.mediaUrl || null,
+      bucket: drop.bucket || (meta.bucket as string | undefined) || null,
+      storagePath: drop.storagePath || (meta.storagePath as string | undefined) || null,
+      fileName: drop.fileName || (meta.fileName as string | undefined) || null,
       preview: imageUrl
         ? {
             image: imageUrl,
             title,
             description: drop.description || drop.thoughtText || null,
+            bucket: drop.bucket || (meta.bucket as string | undefined) || null,
+            storagePath: drop.storagePath || (meta.storagePath as string | undefined) || null,
+            mediaKind: drop.mediaKind || null,
           }
-        : meta.preview ?? null,
+        : drop.bucket && drop.storagePath
+          ? {
+              ...(meta.preview && typeof meta.preview === "object" ? meta.preview : {}),
+              bucket: drop.bucket,
+              storagePath: drop.storagePath,
+              mediaKind: drop.mediaKind || null,
+            }
+          : meta.preview ?? null,
       signalSeed: {
         type: drop.type === "thought" ? "thought_drop_created" : "drop_created",
         dropId: drop.id,
@@ -274,9 +297,14 @@ export function mergeActivityWithFeed(
   feedItems: FeedDrop[]
 ) {
   return dedupeActivity([
-    ...activityItems.filter(Boolean),
-    ...feedItems.map(feedDropToActivity),
-    ...(readDrops().map(universalDropToActivity).filter(Boolean) as BoardActivity[]),
+    ...activityItems
+      .filter(Boolean)
+      .map((item) => patchMusicActivity(item).item),
+    ...feedItems.map(feedDropToActivity).map((item) => patchMusicActivity(item).item),
+    ...(readDrops()
+      .map(universalDropToActivity)
+      .filter(Boolean)
+      .map((item) => patchMusicActivity(item as BoardActivity).item) as BoardActivity[]),
     ...resolveBoardProjects().map(projectToActivity),
   ]);
 }

@@ -21,6 +21,8 @@ export type DropDraft = {
   fileName: string;
   mimeType: string;
   createdAt: number;
+  /** How many times this draft has been saved (revision count). */
+  count?: number;
 };
 
 function canUseStorage() {
@@ -87,13 +89,17 @@ export async function saveDropDraft(file: File, id?: string): Promise<DropDraft 
   }
   if (!dataUrl || dataUrl.length > MAX_DRAFT_DATAURL_BYTES) return null;
 
+  const draftId = id || `draft_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
+  const prior = readDropDrafts().find((d) => d.id === draftId);
   const draft: DropDraft = {
-    id: id || `draft_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`,
+    id: draftId,
     kind: kindForMime(file.type),
     dataUrl,
     fileName: file.name || "drop-draft",
     mimeType: file.type || "application/octet-stream",
     createdAt: Date.now(),
+    // Re-saving the same draft bumps its revision count.
+    count: (prior?.count ?? 0) + 1,
   };
 
   const next = [draft, ...readDropDrafts().filter((d) => d.id !== draft.id)];
@@ -103,6 +109,17 @@ export async function saveDropDraft(file: File, id?: string): Promise<DropDraft 
 
 export function removeDropDraft(id: string) {
   writeDropDrafts(readDropDrafts().filter((d) => d.id !== id));
+}
+
+/** Revision count for a draft id (how many times it's been saved). */
+export function getDropDraftCount(id: string): number {
+  if (!id) return 0;
+  return readDropDrafts().find((d) => d.id === id)?.count ?? 0;
+}
+
+/** Total number of saved drafts in Drop Studio. */
+export function getDropDraftTotal(): number {
+  return readDropDrafts().length;
 }
 
 function dataUrlToBlob(dataUrl: string): Blob {

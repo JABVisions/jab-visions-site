@@ -1,32 +1,19 @@
 .feed-page {
   position: relative;
   min-height: 100vh;
-  padding-bottom: 120px;
-}
-
-.feed-bg {
-  position: fixed;
-  inset: 0;
-  background: linear-gradient(
-      180deg,
-      rgba(255, 250, 210, 0.95),
-      rgba(255, 244, 180, 0.85)
-    ),
-    radial-gradient(
-      circle at 30% 0%,
-      rgba(255, 235, 190, 0.55),
-      transparent 60%
-    );
-  z-index: -1;
+  /* Let content run behind the floating dock — board-slot also pads for it. */
+  padding-bottom: 0;
+  --feed-rail-top: 16px;
+  --board-dock-clearance: calc(122px + env(safe-area-inset-bottom, 0px));
+  --feed-rail-scroll-pad: 40px;
 }
 
 .feed-shell {
-  width: 100%;
-  max-width: 1200px;
+  width: min(1250px, 78vw);
+  max-width: calc(100% - 32px);
   margin: 0 auto;
   padding: 16px;
-  display: grid;
-  gap: 14px;
+  padding-bottom: calc(var(--board-dock-clearance) + 16px);
   box-sizing: border-box;
 }
 
@@ -92,7 +79,7 @@
 
 .feed-layout {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 420px;
+  grid-template-columns: minmax(0, 1fr) min(420px, 34vw);
   gap: 16px;
   align-items: start;
 }
@@ -106,11 +93,24 @@
   gap: 14px;
 }
 
+/* Desktop: sticky right column (Drop Console + Bucket scroll inside the rail).
+   Mobile: only Drop Console is sticky; Bucket Brain scrolls with the feed. */
 .feed-rightRail {
   position: sticky;
-  top: 16px;
+  top: var(--feed-rail-top);
   display: grid;
   gap: 14px;
+  min-width: 0;
+  align-self: start;
+  align-content: start;
+  max-height: calc(100dvh - var(--feed-rail-top) - var(--board-dock-clearance));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-bottom: var(--feed-rail-scroll-pad);
+}
+
+.feed-dropConsoleSlot,
+.feed-bucketSlot {
   min-width: 0;
 }
 
@@ -124,38 +124,52 @@
   text-transform: uppercase;
 }
 
-@media (max-width: 980px) {
+@media (max-width: 860px) {
+  .feed-shell {
+    width: 100%;
+    max-width: 100%;
+  }
+
   .feed-layout {
     display: flex;
     flex-direction: column;
   }
 
-  .feed-dropConsoleSlot {
+  .feed-page {
+    --feed-rail-top: 8px;
+    --feed-rail-scroll-pad: 0;
+  }
+
+  /* Drop Console pins top-right area; Bucket Brain scrolls with the feed. */
+  .feed-rightRail {
     order: 1;
+    position: static;
     width: 100%;
-    min-width: 0;
+    max-height: none;
+    overflow: visible;
+    padding-bottom: 0;
+  }
+
+  .feed-dropConsoleSlot {
+    position: sticky;
+    top: var(--feed-rail-top);
+    z-index: 24;
+  }
+
+  .feed-bucketSlot {
+    position: static;
   }
 
   .feed-main {
     order: 2;
     width: 100%;
   }
-
-  .feed-rightRail {
-    display: contents;
-    position: static;
-  }
-
-  .feed-bucketSlot {
-    order: 3;
-    width: 100%;
-    min-width: 0;
-  }
 }
 
 @media (max-width: 640px) {
   .feed-shell {
     padding: 12px;
+    padding-bottom: calc(var(--board-dock-clearance) + 12px);
   }
 
   .feed-controls {

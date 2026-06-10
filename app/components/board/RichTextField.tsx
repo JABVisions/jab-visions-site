@@ -3,6 +3,7 @@
 import React, { useEffect, useRef } from "react";
 import {
   RICH_TEXT_LIMITS,
+  normalizeInlineMarkup,
   sanitizeRichHtml,
   richTextStyle,
   type RichTextValue,
@@ -20,14 +21,12 @@ export function RichTextField({
   value,
   onChange,
   placeholder,
-  singleLine = false,
   ariaLabel,
   minHeight = 44,
 }: {
   value: RichTextValue;
   onChange: (next: RichTextValue) => void;
   placeholder?: string;
-  singleLine?: boolean;
   ariaLabel?: string;
   minHeight?: number;
 }) {
@@ -59,21 +58,45 @@ export function RichTextField({
   function handleInput() {
     const el = editorRef.current;
     if (!el) return;
-    const html = sanitizeRichHtml(el.innerHTML);
-    lastHtmlRef.current = el.innerHTML;
+    const normalized = normalizeInlineMarkup(el.innerHTML);
+    const html = sanitizeRichHtml(normalized);
+    if (html !== el.innerHTML) {
+      el.innerHTML = html;
+    }
+    lastHtmlRef.current = html;
     emit({ html });
+  }
+
+  function wrapSelection(tag: "b" | "i" | "u") {
+    const el = editorRef.current;
+    const sel = window.getSelection();
+    if (!el || !sel || sel.rangeCount === 0 || sel.isCollapsed) return false;
+    const range = sel.getRangeAt(0);
+    if (!el.contains(range.commonAncestorContainer)) return false;
+    try {
+      const wrapper = document.createElement(tag);
+      range.surroundContents(wrapper);
+      sel.removeAllRanges();
+      const next = document.createRange();
+      next.selectNodeContents(wrapper);
+      sel.addRange(next);
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   function exec(command: "bold" | "italic" | "underline") {
     const el = editorRef.current;
     if (!el) return;
     el.focus();
-    // styleWithCSS=false → execCommand emits semantic <b>/<i>/<u> tags, which
-    // match our sanitizer allowlist.
-    try {
-      document.execCommand("styleWithCSS", false, "false");
-    } catch {}
-    document.execCommand(command);
+    const tag = command === "bold" ? "b" : command === "italic" ? "i" : "u";
+    if (!wrapSelection(tag)) {
+      try {
+        document.execCommand("styleWithCSS", false, "false");
+      } catch {}
+      document.execCommand(command);
+    }
     handleInput();
   }
 
@@ -176,7 +199,7 @@ export function RichTextField({
         contentEditable
         suppressContentEditableWarning
         role="textbox"
-        aria-multiline={!singleLine}
+        aria-multiline="true"
         aria-label={ariaLabel}
         data-placeholder={placeholder}
         style={editorStyle}
@@ -184,11 +207,9 @@ export function RichTextField({
         onBlur={handleInput}
         onKeyDown={(e) => {
           if (e.key !== "Enter") return;
-          // Single-line fields (title) never break. Multiline fields insert a
-          // real line break (<br>) so Enter "skips to the next line" reliably and
+          // Insert a real line break (<br>) so Enter skips to the next line and
           // survives sanitization (which keeps <br> but strips block wrappers).
           e.preventDefault();
-          if (singleLine) return;
           document.execCommand("insertLineBreak");
           handleInput();
         }}
@@ -256,10 +277,22 @@ export function RichTextField({
         .rtf-editor {
           padding: 10px 12px;
           font-size: 14px;
+          font-weight: 500;
           color: #1a1430;
           outline: none;
           word-break: break-word;
           white-space: pre-wrap;
+        }
+        .rtf-editor :global(b),
+        .rtf-editor :global(strong) {
+          font-weight: 800;
+        }
+        .rtf-editor :global(i),
+        .rtf-editor :global(em) {
+          font-style: italic;
+        }
+        .rtf-editor :global(u) {
+          text-decoration: underline;
         }
         .rtf-editor:empty::before {
           content: attr(data-placeholder);
@@ -287,18 +320,26 @@ export function RichText({
   as?: React.ElementType;
 }) {
   const html = value ? sanitizeRichHtml(value.html) : "";
+  const renderStyle: React.CSSProperties = {
+    ...(richTextStyle(value) ?? {}),
+  };
   if (html) {
     return (
-      <Tag
-        className={className}
-        style={richTextStyle(value)}
-        dangerouslySetInnerHTML={{ __html: html }}
-      />
+      <span className="boardRichInline">
+        <Tag
+          className={["boardRichInlineHost", className].filter(Boolean).join(" ")}
+          style={renderStyle}
+          dangerouslySetInnerHTML={{ __html: html }}
+        />
+      </span>
     );
   }
   if (plain) {
     return (
-      <Tag className={className} style={richTextStyle(value)}>
+      <Tag
+        className={["boardRichInlineHost", className].filter(Boolean).join(" ")}
+        style={renderStyle}
+      >
         {plain}
       </Tag>
     );

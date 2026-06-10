@@ -16,8 +16,9 @@ import {
   type DropCustomization,
 } from "@/lib/board/dropCustomizations";
 import {
-  DROP_FLAVOR_ORDER,
   DROP_FLAVOR_LABEL,
+  DROP_FLAVOR_LINK_ROW,
+  DROP_FLAVOR_STUDIO_ROW,
   DROP_FLAVOR_SUB,
   type DropFlavorKey,
 } from "@/lib/board/dropFlavors";
@@ -35,9 +36,16 @@ import DropStudioStage from "./DropStudioStage";
 import { RichTextField } from "./RichTextField";
 import {
   normalizeRichText,
+  richTextFromPlain,
   richToPlain,
   type RichTextValue,
 } from "@/lib/board/richText";
+import {
+  DESCRIPT_SHARE_EVENT,
+  descriptPlainText,
+  type DescriptDestination,
+  type DescriptDoc,
+} from "@/lib/board/descriptDocs";
 
 /* -------------------------------------------------------------------------- */
 /* utils */
@@ -65,7 +73,7 @@ const MODE_HINT: Record<DropMode, string> = {
 // so the Drop hierarchy stays identical across every creation surface.
 type DropFlavor = DropFlavorKey;
 type PayProviderMode = "payment_link" | "stripe_connect";
-type StudioCaptureMode = "photo" | "video" | "audio" | "art";
+type StudioCaptureMode = "photo" | "video" | "audio" | "art" | "descript";
 
 type AnnouncementVibe =
   | "hype"
@@ -253,7 +261,9 @@ export default function DropConsole({
   const [dropDescRich, setDropDescRich] = useState<RichTextValue>({ html: "" });
   const [mediaSource, setMediaSource] = useState<"upload" | "capture" | null>(null);
   const [thoughtText, setThoughtText] = useState("");
-  const [thoughtVisibility, setThoughtVisibility] = useState<"public" | "private">("public");
+  const [dropVisibility, setDropVisibility] = useState<"public" | "private">("public");
+  const [payDescRich, setPayDescRich] = useState<RichTextValue>({ html: "" });
+  const [docDescRich, setDocDescRich] = useState<RichTextValue>({ html: "" });
 
   const [tagsInput, setTagsInput] = useState("");
   const [payProvider, setPayProvider] =
@@ -401,19 +411,27 @@ export default function DropConsole({
       const payPriceCents = dropFlavor === "pay" ? parsePriceToCents(payPrice) : null;
       const boardDropDescription =
         dropFlavor === "pay"
-          ? payDesc.trim()
+          ? richToPlain(payDescRich.html) || payDesc.trim()
           : dropFlavor === "doc"
-          ? docDesc.trim()
-          : dropDesc.trim();
+          ? richToPlain(docDescRich.html) || docDesc.trim()
+          : richToPlain(dropDescRich.html) || dropDesc.trim();
       // Inline-formatted title/description for the feed + tile to render.
       const titleRichMeta = normalizeRichText(titleRich) ?? null;
       const descriptionRichMeta =
-        dropFlavor === "pay" || dropFlavor === "doc"
+        dropFlavor === "thought"
           ? null
+          : dropFlavor === "pay"
+          ? normalizeRichText(payDescRich) ?? null
+          : dropFlavor === "doc"
+          ? normalizeRichText(docDescRich) ?? null
           : normalizeRichText(dropDescRich) ?? null;
       const annMediaDraft = mode === "announcement" ? announceMediaUrl.trim() : "";
+      // Save Drop Studio customizations (text / stickers / effects) for ANY board
+      // drop that can carry media — Thought (art/photo), Vision, Pay — plus
+      // announcements with media. compactDropCustomizations() returns undefined
+      // when there are none, so flavors without overlays simply store nothing.
       const mediaCustomizations =
-        mode === "board_drop" && (dropFlavor === "media" || dropFlavor === "pay")
+        mode === "board_drop"
           ? compactDropCustomizations(dropCustomizations)
           : mode === "announcement" && annMediaDraft
             ? compactDropCustomizations(dropCustomizations)
@@ -561,7 +579,7 @@ export default function DropConsole({
                 description: boardDropDescription || null,
                 titleRich: titleRichMeta,
                 descriptionRich: descriptionRichMeta,
-                visibility: dropFlavor === "thought" ? thoughtVisibility : "public",
+                visibility: dropVisibility,
                 thoughtText: dropFlavor === "thought" ? thoughtText.trim() || cleanBody : null,
                 thoughtFormat,
                 authorId: identity.id,
@@ -670,7 +688,7 @@ export default function DropConsole({
                 description: boardDropDescription || null,
                 titleRich: titleRichMeta,
                 descriptionRich: descriptionRichMeta,
-                visibility: dropFlavor === "thought" ? thoughtVisibility : "public",
+                visibility: dropVisibility,
                 thoughtText: dropFlavor === "thought" ? thoughtText.trim() || cleanBody : null,
                 thoughtFormat,
                 authorId: identity.id,
@@ -715,36 +733,40 @@ export default function DropConsole({
 
       if (mode === "board_drop" && dropFlavor === "music" && resolvedMusicKind === "audio") {
         const dropId = boardDropId ?? newId("music");
-        pushDrop({
-          id: dropId,
-          type: "music",
-          title: cleanTitle || "Music Drop",
-          createdAt: Date.now(),
-          url: cleanAttach || undefined,
-          mediaUrl: cleanAttach || undefined,
-          mediaKind: "audio",
-          bucket: uploadedBucket || undefined,
-          storagePath: uploadedStoragePath || undefined,
-          fileName: uploadedFileName || undefined,
-          description: boardDropDescription || undefined,
-          authorId: identity.id,
-          authorName: identity.displayName,
-          authorUsername: identity.username || undefined,
-          authorAvatar: identity.avatar || undefined,
-          authorGlow: identity.glow,
-          authorAuraIntensity: identity.auraIntensity,
-          source: "drop_console",
-          origin: "board_drop_console",
-          meta: {
-            activityId: res.activity.id,
-            tags,
-          },
-        });
+        if (dropVisibility === "public") {
+          pushDrop({
+            id: dropId,
+            type: "music",
+            title: cleanTitle || "Music Drop",
+            createdAt: Date.now(),
+            url: cleanAttach || undefined,
+            mediaUrl: cleanAttach || undefined,
+            mediaKind: "audio",
+            bucket: uploadedBucket || undefined,
+            storagePath: uploadedStoragePath || undefined,
+            fileName: uploadedFileName || undefined,
+            description: boardDropDescription || undefined,
+            visibility: dropVisibility,
+            authorId: identity.id,
+            authorName: identity.displayName,
+            authorUsername: identity.username || undefined,
+            authorAvatar: identity.avatar || undefined,
+            authorGlow: identity.glow,
+            authorAuraIntensity: identity.auraIntensity,
+            source: "drop_console",
+            origin: "board_drop_console",
+            meta: {
+              activityId: res.activity.id,
+              tags,
+              descriptionRich: descriptionRichMeta,
+            },
+          });
+        }
       }
 
       if (mode === "board_drop" && dropFlavor === "thought") {
         const dropId = boardDropId ?? newId("thought");
-        if (thoughtVisibility === "public") {
+        if (dropVisibility === "public") {
           pushDrop({
             id: dropId,
             type: "thought",
@@ -752,6 +774,11 @@ export default function DropConsole({
             createdAt: Date.now(),
             url: cleanAttach || undefined,
             mediaUrl: cleanAttach || undefined,
+            // Keep the storage path so the feed can sign a fresh URL — a bare
+            // public URL 403s on the private board-media bucket (silent audio).
+            bucket: uploadedBucket || undefined,
+            storagePath: uploadedStoragePath || undefined,
+            fileName: uploadedFileName || undefined,
             mediaKind:
               attachMediaType === "audio"
                 ? "audio"
@@ -759,7 +786,7 @@ export default function DropConsole({
                   ? "image"
                   : undefined,
             description: boardDropDescription || undefined,
-            visibility: thoughtVisibility,
+            visibility: dropVisibility,
             thoughtFormat: thoughtFormat ?? "text",
             thoughtText: thoughtText.trim() || cleanBody,
             authorId: identity.id,
@@ -782,7 +809,7 @@ export default function DropConsole({
           userId: meId,
           title: cleanTitle || "Thought Drop",
           meta: {
-            visibility: thoughtVisibility,
+            visibility: dropVisibility,
             thoughtFormat,
             source: "drop_console",
           },
@@ -800,14 +827,16 @@ export default function DropConsole({
       setDropDesc("");
       setDropDescRich({ html: "" });
       setThoughtText("");
-      setThoughtVisibility("public");
+      setDropVisibility("public");
       setMediaSource(null);
       setTagsInput("");
       setAnnounceMediaUrl("");
       setPayPrice("");
       setPayDesc("");
+      setPayDescRich({ html: "" });
       setPayLink("");
       setDocDesc("");
+      setDocDescRich({ html: "" });
 
       setPostMsg("Dropped ✓");
       window.setTimeout(() => setPostMsg(null), 1500);
@@ -823,15 +852,59 @@ export default function DropConsole({
 
   const studioAllowedModes = useMemo<StudioCaptureMode[]>(
     () =>
-      // Thought = voice + art (no camera); Pay = every media type (photo /
-      // video / voice / art); Vision = camera modes + art.
+      // Thought = voice + art + descript; Pay = every media + descript; Vision = camera + art only.
       mode === "board_drop" && dropFlavor === "thought"
-        ? ["audio", "art"]
+        ? ["audio", "art", "descript"]
         : mode === "board_drop" && dropFlavor === "pay"
-          ? ["photo", "video", "audio", "art"]
-          : ["photo", "video", "art"],
+          ? ["photo", "video", "audio", "art", "descript"]
+          : mode === "board_drop" && dropFlavor === "doc"
+            ? ["descript"]
+            : mode === "board_drop" && dropFlavor === "music"
+              ? ["audio"]
+              : ["photo", "video", "art"],
     [dropFlavor, mode]
   );
+
+  const descriptDestination = useMemo<DescriptDestination>(() => {
+    if (mode === "announcement") return "announcement";
+    if (dropFlavor === "thought") return "thought";
+    if (dropFlavor === "pay") return "pay";
+    return "doc";
+  }, [dropFlavor, mode]);
+
+  useEffect(() => {
+    function onDescriptShare(event: Event) {
+      const doc = (event as CustomEvent<DescriptDoc>).detail;
+      if (!doc) return;
+      const plain = doc.plainText?.trim() || descriptPlainText(doc.html);
+      const cleanTitle = doc.title?.trim() || "Untitled Descript";
+      setSleeping(false);
+      setTitle(cleanTitle);
+      setTitleRich(richTextFromPlain(cleanTitle));
+      const dest = doc.destination ?? "doc";
+      if (dest === "announcement") {
+        setMode("announcement");
+        setBody(plain);
+      } else if (dest === "thought") {
+        setMode("board_drop");
+        setDropFlavor("thought");
+        setThoughtText(plain);
+      } else if (dest === "pay") {
+        setMode("board_drop");
+        setDropFlavor("pay");
+        setPayDesc(plain);
+        setPayDescRich(richTextFromPlain(plain));
+      } else {
+        setMode("board_drop");
+        setDropFlavor("doc");
+        setDocDesc(plain);
+        setDocDescRich(richTextFromPlain(plain));
+      }
+      setStudioMode(null);
+    }
+    window.addEventListener(DESCRIPT_SHARE_EVENT, onDescriptShare as EventListener);
+    return () => window.removeEventListener(DESCRIPT_SHARE_EVENT, onDescriptShare as EventListener);
+  }, []);
 
   // -------------------------
   // SLEEP DOCK (does NOT overlay your buckets)
@@ -902,8 +975,9 @@ export default function DropConsole({
       <DropStudioStage
         open={studioMode !== null}
         initialFile={null}
-        initialMode={studioMode ?? "photo"}
+        initialMode={studioMode ?? (dropFlavor === "doc" ? "descript" : "photo")}
         allowedModes={studioAllowedModes}
+        descriptDestination={descriptDestination}
         value={dropCustomizations}
         onChange={setDropCustomizations}
         onClose={() => setStudioMode(null)}
@@ -951,34 +1025,75 @@ export default function DropConsole({
               <div className="dcSectionNote">Staple attachments (embed-first).</div>
             </div>
 
-            <div className="dcDropTypeRow" role="tablist" aria-label="Drop type">
-              {DROP_FLAVOR_ORDER.map((t) => (
-                <button
-                  key={t}
-                  type="button"
-                  className={clsx("dcTypeBtn", dropFlavor === t && "on")}
-                  onClick={() => {
-                    setDropFlavor(t);
-                    setAttachUrl("");
-                    setUploadedFileName("");
-                    setDropDesc("");
-                    setThoughtText("");
-                    setMediaSource(null);
-                    setDropCustomizations({});
-                    if (t !== "pay") {
-                      setPayPrice("");
-                      setPayDesc("");
-                      setPayLink("");
-                      setPayProvider("stripe_connect");
-                    }
-                    if (t !== "doc") setDocDesc("");
-                    if (t !== "thought") setThoughtVisibility("public");
-                  }}
-                >
-                  <span>{DROP_FLAVOR_LABEL[t].toUpperCase()}</span>
-                  <small>{DROP_FLAVOR_SUB[t]}</small>
-                </button>
-              ))}
+            <div className="dcDropTypeRows" role="tablist" aria-label="Drop type">
+              <div className="dcDropTypeRow dcDropTypeRowStudio">
+                {DROP_FLAVOR_STUDIO_ROW.map((t) => (
+                  <button
+                    key={t}
+                    type="button"
+                    className={clsx("dcTypeBtn", dropFlavor === t && "on")}
+                    onClick={() => {
+                      setDropFlavor(t);
+                      setAttachUrl("");
+                      setUploadedFileName("");
+                      setDropDesc("");
+                      setDropDescRich({ html: "" });
+                      setThoughtText("");
+                      setMediaSource(null);
+                      setDropCustomizations({});
+                      if (t !== "pay") {
+                        setPayPrice("");
+                        setPayDesc("");
+                        setPayDescRich({ html: "" });
+                        setPayLink("");
+                        setPayProvider("stripe_connect");
+                      }
+                      if (t !== "doc") {
+                        setDocDesc("");
+                        setDocDescRich({ html: "" });
+                      }
+                      setDropVisibility("public");
+                    }}
+                  >
+                    <span>{DROP_FLAVOR_LABEL[t].toUpperCase()}</span>
+                    <small>{DROP_FLAVOR_SUB[t]}</small>
+                  </button>
+                ))}
+              </div>
+              <div className="dcDropTypeRow dcDropTypeRowLinks">
+                {DROP_FLAVOR_LINK_ROW.map((t) => (
+                  <button
+                    key={t}
+                    type="button"
+                    className={clsx("dcTypeBtn", dropFlavor === t && "on")}
+                    onClick={() => {
+                      setDropFlavor(t);
+                      setAttachUrl("");
+                      setUploadedFileName("");
+                      setDropDesc("");
+                      setDropDescRich({ html: "" });
+                      setThoughtText("");
+                      setMediaSource(null);
+                      setDropCustomizations({});
+                      if (t !== "pay") {
+                        setPayPrice("");
+                        setPayDesc("");
+                        setPayDescRich({ html: "" });
+                        setPayLink("");
+                        setPayProvider("stripe_connect");
+                      }
+                      if (t !== "doc") {
+                        setDocDesc("");
+                        setDocDescRich({ html: "" });
+                      }
+                      setDropVisibility("public");
+                    }}
+                  >
+                    <span>{DROP_FLAVOR_LABEL[t].toUpperCase()}</span>
+                    <small>{DROP_FLAVOR_SUB[t]}</small>
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
         )}
@@ -1073,10 +1188,9 @@ export default function DropConsole({
                 setTitleRich(v);
                 setTitle(richToPlain(v.html));
               }}
-              singleLine
               ariaLabel="Title"
+              minHeight={52}
               placeholder={mode === "forum_post" ? "Thread title (optional)" : "Title"}
-              minHeight={38}
             />
           </div>
 
@@ -1115,8 +1229,12 @@ export default function DropConsole({
               setCustomizations={setDropCustomizations}
               thoughtText={thoughtText}
               setThoughtText={setThoughtText}
-              thoughtVisibility={thoughtVisibility}
-              setThoughtVisibility={setThoughtVisibility}
+              dropVisibility={dropVisibility}
+              setDropVisibility={setDropVisibility}
+              payDescRich={payDescRich}
+              setPayDescRich={setPayDescRich}
+              docDescRich={docDescRich}
+              setDocDescRich={setDocDescRich}
             />
           ) : (
             <>
@@ -1219,8 +1337,14 @@ export default function DropConsole({
         .dcSectionNote { font-size: 12px; color: rgba(0,0,0,0.46); font-weight: 800; }
 
         .dcPills { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 10px; }
-        .dcDropTypeRow {
+        .dcDropTypeRows {
           margin-top: 8px;
+          display: grid;
+          gap: 10px;
+          min-width: 0;
+          max-width: 100%;
+        }
+        .dcDropTypeRow {
           display: flex;
           gap: 10px;
           flex-wrap: wrap;
@@ -1340,6 +1464,19 @@ export default function DropConsole({
           display: flex;
           flex-wrap: wrap;
           gap: 8px;
+        }
+        .visibilityRow {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 8px;
+          justify-content: flex-end;
+          width: 100%;
+          margin-bottom: 2px;
+        }
+        .mediaActionRow.pairRow .studioAction,
+        .mediaActionRow.pairRow .uploadAction {
+          flex: 1 1 100%;
+          width: 100%;
         }
         .providerChip {
           border: 1px solid rgba(0,0,0,0.12);
@@ -1654,7 +1791,7 @@ export default function DropConsole({
         .dcTileWrap {
           position: relative;
           border-radius: 28px;
-          background: rgba(255, 255, 255, 0.92);
+          background: #ffffff;
           border: 1px solid rgba(0, 0, 0, 0.08);
           box-shadow: 0 14px 40px rgba(0, 0, 0, 0.12);
           overflow: hidden;
@@ -1671,6 +1808,33 @@ export default function DropConsole({
         }
         .dc { position: relative; z-index: 1; }
       `}</style>
+    </div>
+  );
+}
+
+function DropVisibilityRow({
+  value,
+  onChange,
+}: {
+  value: "public" | "private";
+  onChange: (value: "public" | "private") => void;
+}) {
+  return (
+    <div className="visibilityRow" aria-label="Drop visibility">
+      <button
+        type="button"
+        className={clsx("providerChip", value === "public" && "on")}
+        onClick={() => onChange("public")}
+      >
+        Public
+      </button>
+      <button
+        type="button"
+        className={clsx("providerChip", value === "private" && "on")}
+        onClick={() => onChange("private")}
+      >
+        Private
+      </button>
     </div>
   );
 }
@@ -1704,8 +1868,12 @@ function BoardDropConsoleFields({
   setCustomizations,
   thoughtText,
   setThoughtText,
-  thoughtVisibility,
-  setThoughtVisibility,
+  dropVisibility,
+  setDropVisibility,
+  payDescRich,
+  setPayDescRich,
+  docDescRich,
+  setDocDescRich,
 }: {
   dropFlavor: DropFlavor;
   attachUrl: string;
@@ -1735,8 +1903,12 @@ function BoardDropConsoleFields({
   setCustomizations: (value: DropCustomization) => void;
   thoughtText: string;
   setThoughtText: (value: string) => void;
-  thoughtVisibility: "public" | "private";
-  setThoughtVisibility: (value: "public" | "private") => void;
+  dropVisibility: "public" | "private";
+  setDropVisibility: (value: "public" | "private") => void;
+  payDescRich: RichTextValue;
+  setPayDescRich: (value: RichTextValue) => void;
+  docDescRich: RichTextValue;
+  setDocDescRich: (value: RichTextValue) => void;
 }) {
   const showUrlField =
     dropFlavor === "youtube" ||
@@ -1751,48 +1923,68 @@ function BoardDropConsoleFields({
 
   return (
     <>
-      {dropFlavor === "thought" ? (
-        <div className="payProviderRow">
-          <button
-            type="button"
-            className={clsx("providerChip", thoughtVisibility === "public" && "on")}
-            onClick={() => setThoughtVisibility("public")}
-          >
-            Public
-          </button>
-          <button
-            type="button"
-            className={clsx("providerChip", thoughtVisibility === "private" && "on")}
-            onClick={() => setThoughtVisibility("private")}
-          >
-            Private
-          </button>
-        </div>
-      ) : null}
-
-      {dropFlavor === "pay" ? (
-        <div className="payProviderRow">
-          <button
-            type="button"
-            className={clsx("providerChip", payProvider === "stripe_connect" && "on")}
-            onClick={() => setPayProvider("stripe_connect")}
-          >
-            Pay on Board
-          </button>
-          <button
-            type="button"
-            className={clsx("providerChip", payProvider === "payment_link" && "on")}
-            onClick={() => setPayProvider("payment_link")}
-          >
-            Add Payment Link
-          </button>
-        </div>
-      ) : null}
+      <DropVisibilityRow value={dropVisibility} onChange={setDropVisibility} />
 
       {showFileLine ? (
         <div className="dcField">
-          <div className="mediaActionRow" aria-label="Drop media actions">
-            {dropFlavor === "media" || dropFlavor === "pay" || dropFlavor === "thought" ? (
+          <div
+            className={clsx(
+              "mediaActionRow",
+              (dropFlavor === "doc" || dropFlavor === "music") && "pairRow"
+            )}
+            aria-label="Drop media actions"
+          >
+            {dropFlavor === "doc" ? (
+              <>
+                <button
+                  type="button"
+                  className={clsx("mediaAction", "studioAction", uploading && "busy")}
+                  onClick={() => onOpenCamera("descript")}
+                  disabled={uploading}
+                >
+                  🎬 Open Drop Studio
+                </button>
+                <label className={clsx("mediaAction", "uploadAction", uploading && "busy")}>
+                  <span>{uploading ? "Uploading..." : "Upload File"}</span>
+                  <input
+                    className="fileInput"
+                    type="file"
+                    accept={fileAcceptForFlavor(dropFlavor)}
+                    disabled={uploading}
+                    onChange={(e) => {
+                      const file = e.currentTarget.files?.[0];
+                      if (file) uploadToBoardMedia(file, "upload");
+                      e.currentTarget.value = "";
+                    }}
+                  />
+                </label>
+              </>
+            ) : dropFlavor === "music" ? (
+              <>
+                <button
+                  type="button"
+                  className={clsx("mediaAction", "studioAction", uploading && "busy")}
+                  onClick={() => onOpenCamera("audio")}
+                  disabled={uploading}
+                >
+                  🎬 Open Drop Studio
+                </button>
+                <label className={clsx("mediaAction", "uploadAction", uploading && "busy")}>
+                  <span>{uploading ? "Uploading..." : "Upload File"}</span>
+                  <input
+                    className="fileInput"
+                    type="file"
+                    accept={fileAcceptForFlavor(dropFlavor)}
+                    disabled={uploading}
+                    onChange={(e) => {
+                      const file = e.currentTarget.files?.[0];
+                      if (file) uploadToBoardMedia(file, "upload");
+                      e.currentTarget.value = "";
+                    }}
+                  />
+                </label>
+              </>
+            ) : dropFlavor === "media" || dropFlavor === "pay" || dropFlavor === "thought" ? (
               <button
                 type="button"
                 className={clsx("mediaAction", "studioAction", uploading && "busy")}
@@ -1803,7 +1995,7 @@ function BoardDropConsoleFields({
               </button>
             ) : (
               <label className={clsx("mediaAction", "uploadAction", uploading && "busy")}>
-                <span>{uploading ? "Uploading..." : "Upload"}</span>
+                <span>{uploading ? "Uploading..." : "Upload File"}</span>
                 <input
                   className="fileInput"
                   type="file"
@@ -1826,12 +2018,20 @@ function BoardDropConsoleFields({
             )}
             {uploading ? <span className="fileSize">Uploading...</span> : null}
           </div>
-          {dropFlavor === "media" || dropFlavor === "pay" || dropFlavor === "thought" ? (
+          {dropFlavor === "media" ||
+          dropFlavor === "pay" ||
+          dropFlavor === "thought" ||
+          dropFlavor === "doc" ||
+          dropFlavor === "music" ? (
             <div className="captureHelp">
               {dropFlavor === "pay"
                 ? "Show what this request is for in real time."
                 : dropFlavor === "thought"
                 ? "Record a vocal thought or capture a quick visual note in Drop Studio."
+                : dropFlavor === "doc"
+                ? "Write in Descript, then attach your file — Doc Drops use Descript only."
+                : dropFlavor === "music"
+                ? "Record in Drop Studio or upload an audio file for full song playback."
                 : "Upload from your device or open Drop Studio capture."}
             </div>
           ) : null}
@@ -1942,6 +2142,7 @@ function BoardDropConsoleFields({
 
       {dropFlavor !== "pay" && dropFlavor !== "doc" && dropFlavor !== "thought" ? (
         <div className="dcField">
+          <div className="dcFieldLabel">Description</div>
           <RichTextField
             value={dropDescRich}
             onChange={(v) => {
@@ -1961,7 +2162,24 @@ function BoardDropConsoleFields({
 
       {dropFlavor === "pay" ? (
         <>
+          <div className="payProviderRow">
+            <button
+              type="button"
+              className={clsx("providerChip", payProvider === "stripe_connect" && "on")}
+              onClick={() => setPayProvider("stripe_connect")}
+            >
+              Pay on Board
+            </button>
+            <button
+              type="button"
+              className={clsx("providerChip", payProvider === "payment_link" && "on")}
+              onClick={() => setPayProvider("payment_link")}
+            >
+              Add Payment Link
+            </button>
+          </div>
           <div className="dcField">
+            <div className="dcFieldLabel">Price</div>
             <input
               className="dcInput"
               placeholder="Price (ex: 19.99)"
@@ -1971,12 +2189,16 @@ function BoardDropConsoleFields({
             />
           </div>
           <div className="dcField">
-            <textarea
-              className="dcTextarea"
+            <div className="dcFieldLabel">Description</div>
+            <RichTextField
+              value={payDescRich}
+              onChange={(v) => {
+                setPayDescRich(v);
+                setPayDesc(richToPlain(v.html));
+              }}
+              ariaLabel="Pay drop description"
               placeholder="Description (optional)"
-              value={payDesc}
-              onChange={(e) => setPayDesc(e.target.value)}
-              rows={3}
+              minHeight={66}
             />
           </div>
           <div className="dcField">
@@ -2001,12 +2223,16 @@ function BoardDropConsoleFields({
 
       {dropFlavor === "doc" ? (
         <div className="dcField">
-          <textarea
-            className="dcTextarea"
+          <div className="dcFieldLabel">Description</div>
+          <RichTextField
+            value={docDescRich}
+            onChange={(v) => {
+              setDocDescRich(v);
+              setDocDesc(richToPlain(v.html));
+            }}
+            ariaLabel="Doc drop notes"
             placeholder="Notes (optional) - logline, context, etc."
-            value={docDesc}
-            onChange={(e) => setDocDesc(e.target.value)}
-            rows={3}
+            minHeight={66}
           />
         </div>
       ) : null}
