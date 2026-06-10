@@ -1,4 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
+import { supabaseServer } from "@/lib/supabase/server";
+import { enforceRateLimit, RATE_LIMITS } from "@/lib/rateLimit";
 import type { FriendZoneOrbUser, FriendZoneState } from "@/lib/board/friendZoneSignals";
 
 export const runtime = "nodejs";
@@ -142,6 +144,21 @@ async function selectRows<T>(query: PromiseLike<{ data: T[] | null; error: unkno
 }
 
 export async function GET(req: Request) {
+  const limited = await enforceRateLimit(req, RATE_LIMITS.orbitUsers);
+  if (limited) return limited;
+
+  // Friend Zone is a members-only surface; this route can read with the
+  // service-role key below, so gate it behind a real session first.
+  const {
+    data: { user },
+  } = await supabaseServer().auth.getUser();
+  if (!user) {
+    return Response.json(
+      { ok: false, items: [], error: "Sign in required." },
+      { status: 401 }
+    );
+  }
+
   const supabase = supabaseReadable();
   if (!supabase) {
     return Response.json({ ok: false, items: [] });

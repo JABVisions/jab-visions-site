@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { supabaseServer } from "@/lib/supabase/server";
+import { enforceRateLimit, RATE_LIMITS } from "@/lib/rateLimit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -66,6 +67,9 @@ function storageError(error: { code?: string; message?: string } | null | undefi
 }
 
 export async function POST(req: NextRequest) {
+  const limited = await enforceRateLimit(req, RATE_LIMITS.glitchReports);
+  if (limited) return limited;
+
   let body: Record<string, unknown>;
 
   try {

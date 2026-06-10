@@ -1,6 +1,7 @@
 import { cookies } from "next/headers";
 import { createServerClient } from "@supabase/ssr";
 import type { BoardActivity, BoardActivityKind } from "@/lib/board/activity";
+import { enforceRateLimit, RATE_LIMITS } from "@/lib/rateLimit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -318,6 +319,9 @@ async function selectRows<T>(
 }
 
 export async function GET(req: Request) {
+  const limited = await enforceRateLimit(req, RATE_LIMITS.activity);
+  if (limited) return limited;
+
   const supabase = supabaseServer();
   const url = new URL(req.url);
   const limit = Math.max(1, Math.min(200, Number(url.searchParams.get("limit") || 80)));
