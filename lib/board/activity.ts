@@ -189,6 +189,161 @@ export function removeLocalActivity(
   setLocalActivity(next);
 }
 
+/** Whether a feed row represents the given board drop id. */
+export function activityMatchesDropId(item: BoardActivity, dropId: string): boolean {
+  if (!dropId) return false;
+  if (item.id === dropId) return true;
+  const m = item.meta;
+  if (!m || typeof m !== "object") return false;
+  return m.dropId === dropId || m.originalDropId === dropId;
+}
+
+/**
+ * Patch every local activity row tied to a board drop (by meta.dropId or id).
+ * Returns the patched rows so callers can sync Supabase + dispatch events.
+ */
+export function patchLocalActivitiesMatchingDrop(
+  dropId: string,
+  patcher: (item: BoardActivity) => BoardActivity
+): BoardActivity[] {
+  const prev = getLocalActivity();
+  const updatedItems: BoardActivity[] = [];
+  let changed = false;
+  const next = prev.map((item) => {
+    if (!activityMatchesDropId(item, dropId)) return item;
+    changed = true;
+    const patched = patcher(item);
+    updatedItems.push(patched);
+    return patched;
+  });
+  if (changed) {
+    setLocalActivity(next);
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new StorageEvent("storage", { key: STORAGE_KEY }));
+    }
+  }
+  return updatedItems;
+}
+
+/** Keep feed / Activity Channel rows in sync when a board drop is edited. */
+export async function syncActivitiesForDropEdit(updated: {
+  id: string;
+  title: string;
+  type?: string;
+  description?: string;
+  thoughtText?: string;
+  titleRich?: unknown;
+  descriptionRich?: unknown;
+  customizations?: unknown;
+  bucket?: string;
+  storagePath?: string;
+  mediaUrl?: string;
+  mediaKind?: string;
+  mime?: string;
+  fileName?: string;
+  mediaPreviewUrl?: string | null;
+}): Promise<void> {
+  const dropId = updated.id;
+  const nextBody =
+    updated.type === "Thought"
+      ? String(updated.thoughtText ?? updated.description ?? "").trim()
+      : String(updated.description ?? "").trim();
+
+  const updatedActivities = patchLocalActivitiesMatchingDrop(dropId, (item) => {
+    const prevPreview =
+      item.meta?.preview && typeof item.meta.preview === "object" ? item.meta.preview : {};
+    const mediaKind = updated.mediaKind ?? item.meta?.mediaKind ?? prevPreview?.mediaKind ?? null;
+    const bucket = updated.bucket ?? item.meta?.bucket ?? prevPreview?.bucket ?? null;
+    const storagePath =
+      updated.storagePath ?? item.meta?.storagePath ?? prevPreview?.storagePath ?? null;
+    const previewUrl =
+      updated.mediaPreviewUrl ??
+      updated.mediaUrl ??
+      item.meta?.mediaUrl ??
+      prevPreview?.image ??
+      null;
+    const nextMeta = {
+      ...(item.meta ?? {}),
+      titleRich: updated.titleRich ?? item.meta?.titleRich ?? null,
+      descriptionRich: updated.descriptionRich ?? item.meta?.descriptionRich ?? null,
+      description: updated.description ?? item.meta?.description ?? null,
+      thoughtText: updated.thoughtText ?? item.meta?.thoughtText ?? null,
+      customizations: updated.customizations ?? item.meta?.customizations ?? null,
+      bucket,
+      storagePath,
+      mediaUrl: previewUrl,
+      mediaKind,
+      mime: updated.mime ?? item.meta?.mime ?? prevPreview?.mime ?? null,
+      fileName: updated.fileName ?? item.meta?.fileName ?? prevPreview?.fileName ?? null,
+      preview: {
+        ...prevPreview,
+        bucket,
+        storagePath,
+        mediaKind,
+        mime: updated.mime ?? prevPreview?.mime ?? null,
+        fileName: updated.fileName ?? prevPreview?.fileName ?? null,
+        ...(mediaKind !== "audio" && previewUrl ? { image: previewUrl } : {}),
+      },
+    };
+
+    let image_url = item.image_url;
+    let href = item.href;
+    if (previewUrl) {
+      if (mediaKind === "audio") {
+        href = previewUrl;
+        image_url = null;
+      } else if (mediaKind === "video") {
+        href = previewUrl;
+        image_url = null;
+      } else {
+        image_url = previewUrl;
+      }
+    }
+
+    return {
+      ...item,
+      title: updated.title || item.title,
+      body: nextBody || item.body,
+      href,
+      image_url,
+      meta: nextMeta,
+    };
+  });
+
+  if (!updatedActivities.length) return;
+
+  try {
+    const { supabaseBrowser } = await import("@/lib/supabase/browser");
+    const sb = supabaseBrowser();
+    const { data: auth } = await sb.auth.getUser();
+    if (auth?.user) {
+      for (const activity of updatedActivities) {
+        await sb
+          .from("board_activity")
+          .update({
+            title: activity.title,
+            body: activity.body,
+            href: activity.href,
+            image_url: activity.image_url,
+            meta: activity.meta,
+          })
+          .eq("id", activity.id)
+          .eq("user_id", auth.user.id);
+      }
+    }
+  } catch {
+    // Local cache already reflects the edit.
+  }
+
+  if (typeof window !== "undefined") {
+    for (const activity of updatedActivities) {
+      window.dispatchEvent(
+        new CustomEvent("board:activity:updated", { detail: activity })
+      );
+    }
+  }
+}
+
 /* -------------------------------------------------------------------------- */
 /* remote helpers */
 /* -------------------------------------------------------------------------- */

@@ -3,8 +3,6 @@
 import React from "react";
 import Link from "next/link";
 import Image from "next/image";
-import Navbar from "@/app/components/Navbar";
-
 const artwork = [
   {
     src: "/assets/mercy_jonas.jpg",
@@ -61,8 +59,6 @@ const developmentVault = [
 export default function JabComicsPage() {
   return (
     <>
-      <Navbar />
-
       <main className="min-h-screen bg-black text-emerald-50 relative overflow-hidden">
         <div
           className="pointer-events-none absolute inset-0 opacity-20"

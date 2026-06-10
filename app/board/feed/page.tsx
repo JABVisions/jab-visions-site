@@ -1,5 +1,6 @@
 "use client";
 
+import "./feed.css";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { supabaseBrowser } from "@/lib/supabase/browser";
 
@@ -356,23 +357,23 @@ export default function HomeBoardFeedPage() {
   }, [sb, offset, hasMore, loading, tab, kinds]);
 
   return (
-    <div className="page">
-      <div className="bg" />
+    <div className="feed-page">
+      <div className="feed-bg" />
 
-      <div className="shell">
-        <div className="controls">
-          <div className="leftControls">
-            <div className="sectionTitle">Community Feed</div>
+      <div className="feed-shell">
+        <div className="feed-controls">
+          <div className="feed-leftControls">
+            <div className="feed-sectionTitle">Community Feed</div>
 
-            <div className="tabs">
+            <div className="feed-tabs">
               <button
-                className={clsx("tab", tab === "all" && "on")}
+                className={clsx("feed-tab", tab === "all" && "on")}
                 onClick={() => setTab("all")}
               >
                 All Drops
               </button>
               <button
-                className={clsx("tab", tab === "announcements" && "on")}
+                className={clsx("feed-tab", tab === "announcements" && "on")}
                 onClick={() => setTab("announcements")}
               >
                 Announcements
@@ -380,175 +381,34 @@ export default function HomeBoardFeedPage() {
             </div>
           </div>
 
-          <div className="miniNote">
+          <div className="feed-miniNote">
             {loading ? "Loading…" : "Live feed"}
           </div>
         </div>
 
-        <div className="layout">
-          <section className="feed">
-            <div className="cards">
+        <div className="feed-layout">
+          <section className="feed-main">
+            <div className="feed-cards">
               {safeItems.map((a) => (
                 <ActivityCard key={a.id} item={a} onRemove={removeItemFromFeed} />
               ))}
             </div>
 
-            <div ref={sentinelRef} className="sentinel">
+            <div ref={sentinelRef} className="feed-sentinel">
               {loading ? "Loading…" : hasMore ? "" : "End of feed"}
             </div>
           </section>
 
-          <aside className="rightRail">
-            <div className="dropConsoleSlot">
+          <aside className="feed-rightRail">
+            <div className="feed-dropConsoleSlot">
               <DropConsole />
             </div>
-            <div className="bucketSlot">
+            <div className="feed-bucketSlot">
               <DropsBucket />
             </div>
           </aside>
         </div>
       </div>
-
-      <style jsx>{`
-        .page {
-          position: relative;
-          min-height: 100vh;
-          padding-bottom: 120px;
-        }
-
-        .bg {
-          position: fixed;
-          inset: 0;
-          background: linear-gradient(
-              180deg,
-              rgba(255, 250, 210, 0.95),
-              rgba(255, 244, 180, 0.85)
-            ),
-            radial-gradient(
-              circle at 30% 0%,
-              rgba(255, 235, 190, 0.55),
-              transparent 60%
-            );
-          z-index: -1;
-        }
-
-        .shell {
-          max-width: 1200px;
-          margin: 0 auto;
-          padding: 16px;
-          display: grid;
-          gap: 14px;
-        }
-
-        .controls {
-          display: flex;
-          justify-content: space-between;
-          align-items: flex-end;
-        }
-
-        .leftControls {
-          display: grid;
-          gap: 10px;
-        }
-
-        .sectionTitle {
-          font-family: Georgia, "Times New Roman", serif;
-          font-size: 18px;
-          font-weight: 900;
-          letter-spacing: 0.12em;
-          text-transform: uppercase;
-          color: rgba(255, 255, 255, 0.92);
-          -webkit-text-stroke: 1.1px rgba(0, 0, 0, 0.95);
-          text-shadow:
-            1px 1px 0 rgba(0, 0, 0, 0.95),
-            -1px 1px 0 rgba(0, 0, 0, 0.95),
-            1px -1px 0 rgba(0, 0, 0, 0.95),
-            -1px -1px 0 rgba(0, 0, 0, 0.95);
-        }
-
-        .tabs {
-          display: flex;
-          gap: 10px;
-        }
-
-        .tab {
-          padding: 10px 16px;
-          border-radius: 999px;
-          background: rgba(255, 255, 255, 0.9);
-          border: 1px solid rgba(0, 0, 0, 0.1);
-          color: rgba(35, 30, 18, 0.88);
-          font-weight: 900;
-          text-transform: uppercase;
-          font-size: 12px;
-          cursor: pointer;
-        }
-
-        .tab.on {
-          color: rgb(0, 160, 80);
-          box-shadow: 0 0 0 2px rgba(0, 160, 80, 0.15);
-        }
-
-        .miniNote {
-          font-size: 11px;
-          font-weight: 900;
-          letter-spacing: 0.16em;
-          opacity: 0.5;
-          text-transform: uppercase;
-        }
-
-        .layout {
-          display: grid;
-          grid-template-columns: minmax(0, 1fr) 420px;
-          gap: 16px;
-          align-items: start;
-        }
-
-        .feed {
-          min-width: 0;
-        }
-
-        .cards {
-          display: grid;
-          gap: 14px;
-        }
-
-        .rightRail {
-          position: sticky;
-          top: 16px;
-          display: grid;
-          gap: 14px;
-        }
-
-        .sentinel {
-          padding: 16px;
-          text-align: center;
-          font-size: 11px;
-          font-weight: 900;
-          opacity: 0.4;
-          letter-spacing: 0.14em;
-          text-transform: uppercase;
-        }
-
-        @media (max-width: 980px) {
-          .layout {
-            display: flex;
-            flex-direction: column;
-          }
-          .dropConsoleSlot {
-            order: 1;
-          }
-          .feed {
-            order: 2;
-          }
-          .rightRail {
-            display: contents;
-            position: static;
-          }
-          .bucketSlot {
-            order: 3;
-          }
-        }
-      `}</style>
     </div>
   );
 }

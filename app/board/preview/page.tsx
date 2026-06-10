@@ -1,1 +1,1 @@
-export { default } from "../../board-preview/page";
+export { default } from "../../(site)/board-preview/page";

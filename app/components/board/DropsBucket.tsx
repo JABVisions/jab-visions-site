@@ -947,7 +947,7 @@ export default function DropsBucket({
       <style>{`
         .bucket { width: 100%; }
 
-        .shell {
+        .bucket .shell {
           border-radius: 26px;
           border: 1px solid rgba(0, 0, 0, 0.08);
           overflow: hidden;

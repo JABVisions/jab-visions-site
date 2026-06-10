@@ -1,6 +1,5 @@
 // File: /app/layout.tsx
 import "./globals.css";
-import Navbar from "./components/Navbar";
 import Script from "next/script";
 import { Analytics } from "@vercel/analytics/next";
 
@@ -41,8 +40,7 @@ export default function RootLayout({
         </Script>
       </head>
       <body className="bg-neutral-900 text-white">
-        <Navbar />
-        <div className="site-content">{children}</div>
+        {children}
         <Analytics />
       </body>
     </html>

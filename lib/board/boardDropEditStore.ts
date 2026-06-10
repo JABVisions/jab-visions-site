@@ -5,6 +5,7 @@
 // that same source so an edit done from the feed lands in the exact same place.
 
 import { supabaseBrowser } from "@/lib/supabase/browser";
+import { syncActivitiesForDropEdit } from "@/lib/board/activity";
 import type { DropItem } from "@/app/components/board/DropTile";
 
 const STORAGE_KEY = "jab_board_drops_v2";
@@ -47,6 +48,16 @@ export function findLocalDropById(id: string): DropItem | null {
   if (!id) return null;
   const { items } = loadAllLocalDrops();
   return items.find((x) => x.id === id) ?? null;
+}
+
+/** Try several ids (feed row id, meta.dropId, etc.) — first canonical hit wins. */
+export function findLocalDropByAnyId(...ids: Array<string | undefined | null>): DropItem | null {
+  for (const id of ids) {
+    if (!id) continue;
+    const found = findLocalDropById(id);
+    if (found) return found;
+  }
+  return null;
 }
 
 /** The owner's canonical drop list straight from Supabase (board_style.boardDrops). */
@@ -204,7 +215,20 @@ export async function persistDropEdit(updated: DropItem): Promise<void> {
     }
   }
 
-  // 3) Let mounted board surfaces refresh.
+  // 3) Mirror title/description/media into feed activity rows (Activity Channel).
+  try {
+    let mediaPreviewUrl: string | null = null;
+    if (updated.bucket && updated.storagePath) {
+      mediaPreviewUrl = await getDropSignedUrl(updated.bucket, updated.storagePath, 60 * 45);
+    } else if (updated.mediaUrl) {
+      mediaPreviewUrl = updated.mediaUrl;
+    }
+    await syncActivitiesForDropEdit({ ...updated, mediaPreviewUrl });
+  } catch {
+    // boardDrops edit still stands.
+  }
+
+  // 4) Let mounted board surfaces refresh.
   try {
     window.dispatchEvent(
       new CustomEvent("board:drop:updated", { detail: { dropId: updated.id, drop: updated } })

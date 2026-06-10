@@ -2268,10 +2268,10 @@ export default function DropTile() {
                   <RichText as="span" value={d.titleRich} plain={d.title} />
                 </div>
 
-                <div className="drop-labelRow">
+                <div className="drop-metaRow">
                   <div className="drop-badges">
                     <RemovableDropBadge
-                      label={`${displayDropType(d.type)} Drop`}
+                      label={displayDropType(d.type).toUpperCase()}
                       canRemove
                       onRemove={() => removeDrop(d.id)}
                     />
@@ -2288,9 +2288,7 @@ export default function DropTile() {
                     ) : null}
                     {!isPay && d.fileName ? <span className="badge ghost">{d.fileName}</span> : null}
                   </div>
-                </div>
 
-                <div className="drop-metaRow">
                   <div className="drop-actions">
                     {d.url ? (
                       <a className="drop-open" href={d.url} target="_blank" rel="noreferrer">
@@ -2387,7 +2385,7 @@ export default function DropTile() {
                   </div>
                 ) : isMedia || isPay ? (
                   <div
-                    className={`media-thumb ${isMedia ? "natural-media vision-media-thumb" : ""} ${isPay ? "pay-thumb" : ""}`}
+                    className={`media-thumb ${isMedia ? "natural-media" : ""} ${isPay ? "pay-thumb" : ""}`}
                     aria-label={isPay ? "Pay drop image" : "Vision drop preview"}
                   >
                     {signedUrl ? (
@@ -2789,14 +2787,18 @@ export default function DropTile() {
           border-radius: inherit;
         }
 
-        /* Profile grid: frame follows the media — full width, no crop. */
+        /* Profile grid: standard Board Drop frame so Vision tiles stay uniform.
+           (The expand viewer keeps the full media, so it's excluded.) */
+        .drop-studio-media-frame {
+          aspect-ratio: 4 / 5;
+          margin: 0 auto;
+        }
         .drop-studio-media-frame > img,
         .drop-studio-media-frame > video {
           display: block;
           width: 100%;
-          height: auto;
-          margin: 0 auto;
-          object-fit: contain;
+          height: 100%;
+          object-fit: cover;
         }
 
         .viewer-studio-frame > img,
@@ -3269,25 +3271,16 @@ export default function DropTile() {
           min-width: 0;
           max-width: 100%;
           overflow-wrap: anywhere;
-          text-align: center;
-        }
-
-        .drop-labelRow {
-          display: flex;
-          justify-content: center;
-          width: 100%;
-          min-width: 0;
         }
 
         .drop-metaRow {
           display: flex;
           align-items: center;
-          justify-content: center;
+          justify-content: flex-start;
           gap: 10px;
           flex-wrap: wrap;
           min-width: 0;
           max-width: 100%;
-          width: 100%;
         }
 
         .drop-actions {
@@ -3295,7 +3288,7 @@ export default function DropTile() {
           gap: 10px;
           align-items: center;
           flex-wrap: wrap;
-          justify-content: center;
+          justify-content: flex-start;
           width: 100%;
           min-width: 0;
           max-width: 100%;
@@ -3520,7 +3513,6 @@ export default function DropTile() {
           gap: 8px;
           flex-wrap: wrap;
           align-items: center;
-          justify-content: center;
           min-width: 0;
           max-width: 100%;
           /* Was overflow:hidden, which clipped the removable label's slide/glow.
@@ -3781,30 +3773,11 @@ export default function DropTile() {
         .media-thumb.natural-media {
           width: 100%;
           max-width: 100%;
+          justify-self: start;
           border: 0;
           border-radius: 0;
           overflow: visible;
           background: transparent;
-        }
-        /* Vision drops: picture centered, full width, natural aspect ratio. */
-        .media-thumb.vision-media-thumb {
-          justify-self: stretch;
-          width: 100%;
-          max-width: 100%;
-          display: block;
-          overflow: visible;
-          border: 0;
-          background: transparent;
-        }
-        .media-thumb.vision-media-thumb .drop-studio-media-frame {
-          width: 100%;
-          max-width: 100%;
-          height: auto;
-          margin: 0 auto;
-          overflow: visible;
-          border-radius: 14px;
-          border: 1px solid rgba(0, 0, 0, 0.1);
-          background: rgba(0, 0, 0, 0.055);
         }
         .media-thumb img,
         .media-thumb video {
@@ -3817,20 +3790,8 @@ export default function DropTile() {
           object-fit: contain;
           max-height: min(520px, 72vh);
         }
-        .media-thumb.vision-media-thumb .drop-studio-media-frame > img,
-        .media-thumb.vision-media-thumb .drop-studio-media-frame > video {
-          width: 100%;
-          height: auto;
-          max-width: 100%;
-          max-height: none;
-          margin: 0 auto;
-          object-fit: contain;
-          border-radius: 14px;
-          border: none;
-          background: rgba(0, 0, 0, 0.055);
-        }
-        .media-thumb.natural-media:not(.vision-media-thumb) img,
-        .media-thumb.natural-media:not(.vision-media-thumb) video {
+        .media-thumb.natural-media img,
+        .media-thumb.natural-media video {
           max-width: 100%;
           border-radius: 14px;
           border: 1px solid rgba(0, 0, 0, 0.1);
@@ -3841,7 +3802,7 @@ export default function DropTile() {
           min-height: 180px;
           background: #000;
         }
-        .media-thumb.natural-media:not(.vision-media-thumb) video {
+        .media-thumb.natural-media video {
           width: auto;
           height: auto;
           max-width: 100%;

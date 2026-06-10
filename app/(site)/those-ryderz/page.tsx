@@ -2,8 +2,6 @@
 
 import Image from 'next/image';
 import { useEffect, useRef, useState } from 'react';
-import Navbar from '../components/Navbar';
-
 const RYDERZ = [
   {
     id: 'rubi',
@@ -145,7 +143,6 @@ export default function ThoseRyderz() {
     <main className="ryderz-page">
       <canvas ref={canvasRef} className="ryderz-matrix" aria-hidden="true" />
       <div className="ryderz-scanlines" aria-hidden="true" />
-      <Navbar />
 
       <div className="pitch-shell">
         <section className="hero-tile">

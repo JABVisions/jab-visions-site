@@ -1,6 +1,5 @@
 "use client";
 
-import Navbar from "@/app/components/Navbar";
 import Link from "next/link";
 
 type Track = {
@@ -59,8 +58,6 @@ const artistFeatures = [
 export default function JabMusicPage() {
   return (
     <>
-      <Navbar />
-
       <main className="music-page">
         <div className="sonar-field" aria-hidden="true">
           <div className="sonar-origin">

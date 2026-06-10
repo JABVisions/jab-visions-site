@@ -296,7 +296,9 @@ export default function BoardDropEditModal() {
               drop: {
                 ...drop,
                 title: titlePlain || drop.title,
+                titleRich: titleRichClean,
                 description: descPlain || drop.description,
+                descriptionRich: descRichClean,
                 mediaUrl: mediaUrl ?? undefined,
                 mediaKind,
                 customizations: compactDropCustomizations(customizations) ?? drop.customizations,

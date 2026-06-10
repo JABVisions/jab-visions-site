@@ -2,8 +2,6 @@
 
 import React, { useState, FormEvent } from "react";
 import Link from "next/link";
-import Navbar from "@/app/components/Navbar";
-
 type Status = "idle" | "submitting" | "success" | "error";
 
 function formValue(formData: FormData, key: string) {
@@ -110,8 +108,6 @@ export default function JoinUs() {
 
   return (
     <>
-      <Navbar />
-
       <main className="min-h-screen bg-black text-emerald-100 relative overflow-hidden">
         {/* MATRIX GRID BACKGROUND */}
         <div
