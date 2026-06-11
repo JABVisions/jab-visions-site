@@ -5,6 +5,7 @@
 
 import { useEffect, useState } from "react";
 import { supabaseBrowser } from "@/lib/supabase/browser";
+import { ensureImageFileMinResolution } from "@/lib/board/imageQuality";
 import type { WorkCallItem } from "@/app/components/board/WorkCallsList";
 
 export type DropRoute =
@@ -431,14 +432,21 @@ export async function uploadMediaToSupabaseStorage(
   userId: string,
   file: File
 ): Promise<{ ok: true; publicUrl: string } | { ok: false }> {
-  const safeName = file.name.replace(/[^\w.\-]+/g, "_");
+  const uploadFile =
+    file.type.startsWith("image/") &&
+    file.type !== "image/gif" &&
+    file.type !== "image/svg+xml"
+      ? await ensureImageFileMinResolution(file)
+      : file;
+
+  const safeName = uploadFile.name.replace(/[^\w.\-]+/g, "_");
   const path = `${userId}/${Date.now()}_${safeName}`;
 
   const { error: upErr } = await withTimeout(
-    sb.storage.from("board-media").upload(path, file, {
+    sb.storage.from("board-media").upload(path, uploadFile, {
       cacheControl: "3600",
       upsert: false,
-      contentType: file.type,
+      contentType: uploadFile.type,
     }),
     12000
   ).catch(() => ({ error: new Error("upload_timeout") }));

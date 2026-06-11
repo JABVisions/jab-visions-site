@@ -6,6 +6,27 @@
             linear-gradient(180deg, #fff7c9, #fff3b0);
         }
 
+        .profile-board-section {
+          width: 100%;
+          box-sizing: border-box;
+          padding-left: max(1rem, env(safe-area-inset-left));
+          padding-right: max(1rem, env(safe-area-inset-right));
+        }
+
+        @media (min-width: 640px) {
+          .profile-board-section {
+            padding-left: max(1.5rem, env(safe-area-inset-left));
+            padding-right: max(1.5rem, env(safe-area-inset-right));
+          }
+        }
+
+        @media (min-width: 1024px) {
+          .profile-board-section {
+            padding-left: max(2rem, env(safe-area-inset-left));
+            padding-right: max(2rem, env(safe-area-inset-right));
+          }
+        }
+
         .sr-only-file {
           position: fixed;
           width: 1px;
@@ -16,8 +37,12 @@
 
         .poster-board {
           position: relative;
-          width: min(1180px, calc(100vw - 48px));
-          max-width: 1180px;
+          /* Size to the PARENT (the section already adds px-4/6/8 gutters), not the
+             raw viewport. Using 100vw here made the board wider than its padded
+             container, so auto-margins collapsed and it overflowed to the right
+             (cut off on mobile). 100% fits the container exactly and stays centered. */
+          width: 100%;
+          max-width: 100%;
           margin: 0 auto;
           border-radius: 34px;
           border: 2px solid rgba(0, 0, 0, 0.12);
@@ -98,7 +123,8 @@
 
         .profile-grid {
           display: grid;
-          grid-template-columns: minmax(280px, 0.95fr) minmax(340px, 1.2fr) minmax(280px, 0.95fr);
+          /* Favor the left stack (Board Drop Collection) so tiles aren't clipped. */
+          grid-template-columns: minmax(300px, 1.28fr) minmax(280px, 1fr) minmax(220px, 0.72fr);
           gap: 16px;
           min-width: 0;
         }
@@ -125,11 +151,33 @@
             inset 0 1px 0 rgba(255, 255, 255, 0.8);
         }
 
-        .left-column :global(.drop-tile) {
+        /* For store collection we don't want the surrounding inner-tile border/overlay —
+           it was visually cutting into tiles. Make the store collection use a clean
+           background without the rim/border and allow overflow so tiles aren't clipped. */
+        .inner-tile.store-collection-card {
+          border: none !important;
+          box-shadow: none !important;
+          overflow: visible;
+          padding: 12px;
+          background: rgba(255,255,255,0.9);
+        }
+
+        .profile-left-stack {
+          display: grid;
+          gap: 16px;
+          min-width: 0;
+        }
+
+        .left-column .drop-tile {
           width: 100%;
           max-width: 100%;
           min-width: 0;
-          overflow: hidden;
+          overflow: visible;
+        }
+
+        .profile-panel-drops .drop-tile,
+        .profile-panel-drops .drop-list {
+          overflow: visible;
         }
 
         .tile-head {
@@ -194,7 +242,7 @@
           overflow: visible;
         }
 
-        .drop-tile-panel :global(.drop-tile) {
+        .drop-tile-panel .drop-tile {
           margin: 0;
           width: 100%;
           max-width: 100%;
@@ -751,7 +799,7 @@
           width: auto;
           height: auto;
           max-width: 100%;
-          max-height: min(520px, 72vh);
+          max-height: min(1080px, 85vh);
           border-radius: 16px;
           border: 1px solid rgba(0, 0, 0, 0.1);
           object-fit: contain;
@@ -792,21 +840,28 @@
           min-width: 0;
           background: #282828;
           border-radius: 18px;
-          overflow: visible;
+          overflow-x: auto;
+          overflow-y: hidden;
+          direction: rtl;
+          scrollbar-width: none;
+          -ms-overflow-style: none;
         }
+        .board-drop-embed.spotify::-webkit-scrollbar { display: none; }
 
         .board-drop-embed.spotify iframe.spotify-frame {
           display: block;
-          width: 100%;
+          width: min(100%, 460px);
+          min-width: 460px;
           height: 80px;
           border: 0;
           border-radius: 18px;
+          max-width: none;
         }
 
         .board-drop-embed.spotify iframe {
-          min-width: 0;
-          width: 1px;
-          min-width: 100%;
+          width: min(100%, 460px);
+          min-width: 460px;
+          max-width: none;
         }
 
         .board-drop-description {
@@ -961,6 +1016,23 @@
           gap: 10px;
         }
 
+        /* Let PUSH sonar bursts escape column seams and tile borders. */
+        .profile-grid:has(.cardAmplifying),
+        .activity-feed-entry:has(.cardAmplifying),
+        .recent-drops-stack:has(.cardAmplifying),
+        .profile-panel-activity:has(.cardAmplifying),
+        .profile-right-stack:has(.cardAmplifying),
+        .center-column:has(.cardAmplifying) {
+          overflow: visible;
+          position: relative;
+          z-index: 80;
+        }
+
+        .inner-tile.profile-panel-activity:has(.cardAmplifying) {
+          overflow: visible;
+          z-index: 90;
+        }
+
         .board-whisper {
           margin: 4px 8px 8px;
           text-align: center;
@@ -1080,17 +1152,31 @@
             rgba(255, 255, 255, 0.82);
         }
 
-        .store-collection-grid {
+        .profile-store-drops-bottom {
+          margin: 24px auto 0;
+          width: min(640px, 100%);
+          max-width: 640px;
+          aspect-ratio: 1 / 1;
+          display: flex;
+          flex-direction: column;
+          min-height: 420px;
+        }
+
+        .profile-store-drops-bottom .store-collection-grid {
           display: grid;
           grid-template-columns: repeat(2, minmax(0, 1fr));
-          gap: 10px;
+          gap: 16px;
+          padding: 8px;
+          box-sizing: border-box;
+          flex: 1;
+          min-height: 0;
         }
 
         .store-slot {
           position: relative;
           min-height: 166px;
           border-radius: 18px;
-          overflow: hidden;
+          overflow: visible;
           border: 1px solid rgba(0, 0, 0, 0.1);
           text-decoration: none;
           color: inherit;
@@ -1345,16 +1431,16 @@
           max-width: 100%;
         }
 
-        .bucket-wrap :global(.bucket) {
+        .bucket-wrap .bucket {
           min-width: 0;
           max-width: 100%;
         }
 
-        .bucket-wrap :global(.bucket *) {
+        .bucket-wrap .bucket * {
           box-sizing: border-box;
         }
 
-        .bucket-wrap :global(.bucket .shell) {
+        .bucket-wrap .bucket .shell {
           min-width: 0;
           max-width: 100%;
           background: rgba(255, 251, 221, 0.78);
@@ -1362,39 +1448,39 @@
           box-shadow: none;
         }
 
-        .bucket-wrap :global(.bucket .topRow) {
+        .bucket-wrap .bucket .topRow {
           display: none;
         }
 
-        .bucket-wrap :global(.bucket .openBtn) {
+        .bucket-wrap .bucket .openBtn {
           width: 100%;
           white-space: normal;
         }
 
-        .bucket-wrap :global(.bucket .right) {
+        .bucket-wrap .bucket .right {
           width: 100%;
           min-width: 0;
         }
 
-        .bucket-wrap :global(.bucket .waveBar) {
+        .bucket-wrap .bucket .waveBar {
           align-items: stretch;
           flex-wrap: wrap;
         }
 
-        .bucket-wrap :global(.bucket .waveBtn) {
+        .bucket-wrap .bucket .waveBtn {
           flex: 1 1 112px;
           justify-content: center;
           min-width: 0;
         }
 
-        .bucket-wrap :global(.bucket .waveText),
-        .bucket-wrap :global(.bucket .folderText) {
+        .bucket-wrap .bucket .waveText,
+        .bucket-wrap .bucket .folderText {
           min-width: 0;
           flex-wrap: wrap;
           justify-content: center;
         }
 
-        .bucket-wrap :global(.bucket .waveMeta) {
+        .bucket-wrap .bucket .waveMeta {
           flex: 1 1 100%;
           min-width: 0;
           flex-wrap: wrap;
@@ -1402,12 +1488,12 @@
           text-align: center;
         }
 
-        .bucket-wrap :global(.bucket .folderRow) {
+        .bucket-wrap .bucket .folderRow {
           display: grid;
           grid-template-columns: repeat(3, minmax(0, 1fr));
         }
 
-        .bucket-wrap :global(.bucket .folder) {
+        .bucket-wrap .bucket .folder {
           justify-content: center;
           min-width: 0;
           padding-inline: 8px;
@@ -1415,7 +1501,7 @@
 
         @media (max-width: 1180px) {
           .profile-grid {
-            grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+            grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr);
           }
 
           .center-column {
@@ -1423,13 +1509,336 @@
           }
         }
 
-        @media (max-width: 980px) {
-          .profile-grid {
-            grid-template-columns: 1fr;
+        @media (min-width: 981px) {
+          .profile-left-stack,
+          .profile-right-stack {
+            display: grid;
+            gap: 16px;
+            grid-column: auto;
+            grid-row: auto;
           }
 
-          .center-column {
-            grid-column: auto;
+          .profile-mobile-only {
+            display: none !important;
+          }
+        }
+
+        @media (max-width: 980px) {
+          .board-bg {
+            overflow-x: clip;
+          }
+
+          .profile-board-section {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding-left: max(8px, env(safe-area-inset-left));
+            padding-right: max(8px, env(safe-area-inset-right));
+            overflow-x: clip;
+          }
+
+          .poster-board {
+            /* Center on the gradient and use a bit more screen width on phones. */
+            width: 100%;
+            max-width: min(1500px, calc(100dvw - 16px));
+            margin-inline: auto;
+            box-sizing: border-box;
+            padding: 12px;
+            border-radius: 22px;
+            overflow-x: clip;
+          }
+
+          .profile-grid {
+            grid-template-columns: minmax(0, 1.12fr) minmax(0, 0.88fr);
+            column-gap: 0;
+            row-gap: 10px;
+            container-type: inline-size;
+            align-items: start;
+          }
+
+          .left-column,
+          .center-column,
+          .right-column {
+            display: contents;
+          }
+
+          /*
+           * Mobile layout:
+           *   Left stack (col 1): Vision Wall → Board Drops → Store Drops
+           *   Right (col 2): Cover → Profile → Aura → Activity Channel
+           */
+          .profile-left-stack {
+            grid-column: 1;
+            grid-row: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            align-self: start;
+            min-width: 0;
+          }
+
+          .profile-right-stack {
+            grid-column: 2;
+            grid-row: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            align-self: start;
+            min-width: 0;
+          }
+
+          .profile-left-stack .profile-panel-vision,
+          .profile-left-stack .profile-panel-drops,
+          .profile-left-stack .store-collection-card,
+          .profile-right-stack .profile-panel-cover,
+          .profile-right-stack .profile-panel-identity,
+          .profile-right-stack .profile-panel-aura,
+          .profile-right-stack .profile-panel-activity {
+            width: 100%;
+            min-width: 0;
+          }
+
+          .profile-panel-cover {
+            border-top-left-radius: 0;
+            border-bottom-left-radius: 0;
+            border-left: none;
+          }
+
+          .profile-panel-cover .tile-sub,
+          .profile-panel-cover .cover-hint,
+          .profile-panel-cover .vision-cta-row {
+            display: none;
+          }
+
+          .profile-panel-cover .cover-shell {
+            height: auto;
+            min-height: 0;
+            aspect-ratio: 3 / 4;
+            max-height: min(36vh, 240px);
+          }
+
+          .profile-panel-cover .cover-img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+          }
+
+          .profile-panel-vision {
+            flex-shrink: 0;
+          }
+
+          .profile-panel-identity {
+            align-self: stretch;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            /* At least 2.5 vision-wall square heights (2-col grid, square slots) */
+            min-height: calc((((100cqi / 2) - 24px - 6px) / 2) * 2.5);
+            border-top-left-radius: 0;
+            border-bottom-left-radius: 0;
+            border-left: none;
+          }
+
+          .profile-panel-aura {
+            border-top-left-radius: 0;
+            border-bottom-left-radius: 0;
+            border-left: none;
+          }
+
+          .profile-panel-drops {
+            align-self: start;
+          }
+
+          .profile-panel-activity {
+            align-self: stretch;
+            display: flex;
+            flex-direction: column;
+            min-height: 0;
+            flex: 1 1 auto;
+            border-top-left-radius: 0;
+            border-bottom-left-radius: 0;
+            border-left: none;
+            box-shadow:
+              inset 1px 0 0 rgba(255, 255, 255, 0.55),
+              0 0 0 1px rgba(108, 255, 239, 0.34);
+          }
+
+          .profile-panel-drops .drop-tile {
+            width: 100%;
+            max-width: 100%;
+            min-width: 0;
+            border-top-right-radius: 0;
+            border-bottom-right-radius: 0;
+            border-right: none;
+            box-shadow:
+              inset -1px 0 0 rgba(255, 40, 201, 0.14),
+              0 0 0 1px rgba(108, 255, 239, 0.34);
+          }
+
+          .identity,
+          .profile-panel-aura,
+          .profile-panel-cover,
+          .store-collection-card {
+            align-self: start;
+            min-width: 0;
+          }
+
+          .profile-panel-identity .identity-row {
+            flex: 1;
+            flex-direction: column;
+            align-items: center;
+            text-align: center;
+            gap: 8px;
+            justify-content: center;
+          }
+
+          .profile-panel-identity .avatar-shell {
+            width: 64px;
+            height: 64px;
+          }
+
+          .profile-panel-identity .avatar-inner {
+            width: 52px;
+            height: 52px;
+          }
+
+          .profile-panel-identity .avatar-placeholder {
+            font-size: 20px;
+          }
+
+          .profile-panel-identity .name {
+            font-size: 17px;
+          }
+
+          .profile-panel-identity .status-pill {
+            margin-top: 4px;
+            min-height: 22px;
+            padding: 0 8px;
+            font-size: 9px;
+          }
+
+          .profile-panel-identity .bio,
+          .profile-panel-identity .energy-row,
+          .profile-panel-identity .micro-row,
+          .profile-panel-identity .avatar-actions {
+            display: none;
+          }
+
+          .profile-panel-identity .profile-pills {
+            margin-top: 6px;
+            gap: 4px;
+            width: 100%;
+          }
+
+          .profile-panel-identity .profile-pills span {
+            width: 100%;
+            justify-content: center;
+            min-height: 22px;
+            padding: 4px 8px;
+            font-size: 10px;
+          }
+
+          .profile-panel-activity .activity-feed-stack {
+            flex: 1 1 auto;
+            min-height: 0;
+            overflow-y: auto;
+            overscroll-behavior: contain;
+            -webkit-overflow-scrolling: touch;
+            padding-right: 2px;
+          }
+
+          .profile-panel-activity .activity-feed-stack:has(.cardAmplifying) {
+            overflow: visible;
+          }
+
+          .bookmarks-card,
+          .profile-mobile-hidden {
+            display: none !important;
+          }
+
+          .profile-left-stack .store-collection-card {
+            margin-top: 0;
+          }
+
+          .profile-left-stack .store-collection-card .tile-sub {
+            display: none;
+          }
+
+          .profile-left-stack .store-collection-grid {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 8px;
+          }
+
+          .profile-left-stack .store-slot {
+            min-height: 100px;
+          }
+
+          .profile-panel-aura .tile-sub {
+            display: none;
+          }
+
+          .profile-panel-aura .snap-grid {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 8px;
+          }
+
+          .profile-panel-aura .snap-card {
+            padding: 10px;
+          }
+
+          .profile-panel-aura .snap-label {
+            font-size: 9px;
+          }
+
+          .profile-panel-aura .snap-value {
+            font-size: 12px;
+          }
+
+          .profile-panel-aura .aura-swatch {
+            width: 18px;
+            height: 18px;
+          }
+
+          .inner-tile {
+            padding: 12px;
+            border-radius: 22px;
+          }
+
+          .tile-title {
+            font-size: 14px;
+          }
+
+          .tile-sub,
+          .tile-mini,
+          .vision-hint,
+          .cover-hint {
+            font-size: 10px;
+            line-height: 1.4;
+          }
+
+          .profile-panel-vision .vision-hint,
+          .profile-panel-vision .vision-cta-row {
+            display: none;
+          }
+
+          .vision-grid {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 6px;
+          }
+
+          .profile-panel-activity .tile-head {
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 6px;
+            margin-bottom: 10px;
+          }
+
+          .profile-panel-activity .tile-sub {
+            display: none;
+          }
+
+          .profile-panel-activity .tiny-cta {
+            font-size: 10px;
           }
 
           .identity-row {
@@ -1437,11 +1846,48 @@
           }
 
           .cover-shell {
-            min-height: 320px;
+            min-height: 280px;
+            height: auto;
           }
 
           .friend-zone-actions {
             grid-template-columns: 1fr;
+          }
+        }
+
+        @media (max-width: 520px) {
+          .profile-board-section {
+            padding-left: max(6px, env(safe-area-inset-left));
+            padding-right: max(6px, env(safe-area-inset-right));
+          }
+
+          .poster-board {
+            max-width: min(1500px, calc(100dvw - 12px));
+            padding: 10px;
+          }
+
+          .profile-grid {
+            row-gap: 8px;
+          }
+
+          .inner-tile {
+            padding: 10px;
+            border-radius: 18px;
+          }
+
+          .profile-panel-activity,
+          .profile-panel-drops .drop-tile {
+            border-radius: 18px;
+          }
+
+          .profile-panel-activity {
+            border-top-left-radius: 0;
+            border-bottom-left-radius: 0;
+          }
+
+          .profile-panel-drops .drop-tile {
+            border-top-right-radius: 0;
+            border-bottom-right-radius: 0;
           }
         }
 
@@ -1452,12 +1898,13 @@
               z-index: 400;
               display: grid;
               place-items: center;
-              padding: 16px;
+              padding: max(8px, env(safe-area-inset-top)) max(8px, env(safe-area-inset-right))
+                max(8px, env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left));
               background: rgba(6, 10, 16, 0.6);
               backdrop-filter: blur(10px);
             }
             .sticker-bin {
-              width: min(560px, 100%);
+              width: min(600px, calc(100dvw - 16px));
               max-height: min(80vh, 720px);
               display: flex;
               flex-direction: column;

@@ -186,7 +186,11 @@ export function removeLocalActivity(
 ) {
   const prev = getLocalActivity();
   const next = prev.filter((item) => !matcher(item));
+  if (next.length === prev.length) return;
   setLocalActivity(next);
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new StorageEvent("storage", { key: STORAGE_KEY }));
+  }
 }
 
 /** Whether a feed row represents the given board drop id. */
@@ -242,6 +246,7 @@ export async function syncActivitiesForDropEdit(updated: {
   mime?: string;
   fileName?: string;
   mediaPreviewUrl?: string | null;
+  visibility?: "public" | "private";
   updatedAt?: number;
 }): Promise<void> {
   const dropId = updated.id;
@@ -269,6 +274,9 @@ export async function syncActivitiesForDropEdit(updated: {
     const nextMeta = {
       ...(item.meta ?? {}),
       editedAt: updated.updatedAt ?? Date.now(),
+      ...(updated.visibility === "public" || updated.visibility === "private"
+        ? { visibility: updated.visibility }
+        : {}),
       titleRich: updated.titleRich ?? item.meta?.titleRich ?? null,
       descriptionRich: updated.descriptionRich ?? item.meta?.descriptionRich ?? null,
       description: updated.description ?? item.meta?.description ?? null,

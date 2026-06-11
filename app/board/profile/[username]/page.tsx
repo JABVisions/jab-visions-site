@@ -26,6 +26,12 @@ import {
   deriveActivityWhispers,
   type BoardWhisper as ProfileWhisper,
 } from "@/lib/board/whispers";
+import {
+  PROFILE_ACTIVITY_CHANNEL_FETCH_LIMIT,
+  PROFILE_ACTIVITY_CHANNEL_LIMIT,
+  resolveProfileActivityDrops,
+  dropVisibleToViewer,
+} from "@/lib/board/profileActivityChannel";
 import { supabaseBrowser } from "@/lib/supabase/browser";
 import DropStudioOverlay from "@/app/components/board/DropStudioOverlay";
 
@@ -33,7 +39,6 @@ const PROFILE_STORAGE_KEY = "jab_board_profile_v2";
 const OPTIONS_STORAGE_KEY = "board.options.v1";
 const DROP_STORAGE_KEY = "jab_board_drops_v2";
 const DROP_DELETED_STORAGE_KEY = "jab_board_drops_deleted_v1";
-const ACTIVITY_CHANNEL_LIMIT = 80;
 
 function activityBelongsToUser(item: BoardActivity, userId: string) {
   const meta = item.meta && typeof item.meta === "object" ? item.meta : null;
@@ -188,6 +193,7 @@ type DropItem = {
   linkUrl?: string;
   payProvider?: PayProviderMode;
   customizations?: DropCustomization;
+  visibility?: "public" | "private";
 };
 
 type RemoteBoardDrop = DropItem;
@@ -796,7 +802,7 @@ export default function ProfileBoardViewPage({
           .eq("id", userId)
           .maybeSingle();
         const response = await fetch(
-          `/api/board/activity?limit=${ACTIVITY_CHANNEL_LIMIT}`,
+          `/api/board/activity?limit=${PROFILE_ACTIVITY_CHANNEL_FETCH_LIMIT}`,
           { cache: "no-store" }
         );
         if (!response.ok) throw new Error("Could not load Board activity.");
@@ -825,7 +831,9 @@ export default function ProfileBoardViewPage({
             ? filterCurrentDropTileActivity(items, remoteDropIds)
             : filterDeletedActivity(items, deletedIds);
 
-        setRecentDrops(dedupeActivity(visibleItems));
+        setRecentDrops(
+          dedupeActivity(visibleItems).slice(0, PROFILE_ACTIVITY_CHANNEL_LIMIT)
+        );
         setRecentDropsLoading(false);
       } catch {
         if (cancelled) return;
@@ -857,7 +865,7 @@ export default function ProfileBoardViewPage({
             )
           ),
           readLocalDeletedDropIds()
-        ).slice(0, ACTIVITY_CHANNEL_LIMIT)
+        ).slice(0, PROFILE_ACTIVITY_CHANNEL_LIMIT)
       );
       setRecentDropsLoading(false);
     }
@@ -884,7 +892,7 @@ export default function ProfileBoardViewPage({
       const dropId = activityDropId(detail);
       if (dropId && readLocalDeletedDropIds().includes(dropId)) return;
       if (isDropTileActivity(detail) && (!dropId || !readLocalDropIds().includes(dropId))) return;
-      setRecentDrops((prev) => dedupeActivity([detail, ...prev]).slice(0, ACTIVITY_CHANNEL_LIMIT));
+      setRecentDrops((prev) => dedupeActivity([detail, ...prev]).slice(0, PROFILE_ACTIVITY_CHANNEL_LIMIT));
       setRecentDropsLoading(false);
     }
 
@@ -1280,6 +1288,26 @@ export default function ProfileBoardViewPage({
     [recentDrops]
   );
 
+  const viewerIsOwner = useMemo(
+    () => Boolean(selfUser && routeKey && selfUser === routeKey),
+    [selfUser, routeKey]
+  );
+
+  const visibleBoardDrops = useMemo(
+    () => boardDrops.filter((drop) => dropVisibleToViewer(drop.visibility, viewerIsOwner)),
+    [boardDrops, viewerIsOwner]
+  );
+
+  const profileActivityChannelDrops = useMemo(
+    () =>
+      resolveProfileActivityDrops(recentDrops, boardDrops, {
+        userId: remoteUserId,
+        username: routeKey,
+        displayName: profile.displayName,
+      }, { viewerIsOwner }),
+    [recentDrops, boardDrops, remoteUserId, routeKey, profile.displayName, viewerIsOwner]
+  );
+
   async function openPayCheckout(drop: DropItem) {
     const explicitPaymentLink = drop.payProvider === "payment_link" && drop.linkUrl;
 
@@ -1316,7 +1344,7 @@ export default function ProfileBoardViewPage({
 
   return (
     <main className="min-h-screen board-bg text-black">
-      <section className="mx-auto max-w-[1500px] px-4 pb-24 pt-14 sm:px-6 lg:px-8">
+      <section className="profile-board-section mx-auto max-w-[1500px] pb-24 pt-14">
         <div className="poster-board" style={{ boxShadow: aura.ring, borderColor: aura.border }}>
           <div className="board-top">
             <div>
@@ -1427,9 +1455,9 @@ export default function ProfileBoardViewPage({
                       Pulling the saved drop collection from this board tile.
                     </div>
                   </div>
-                ) : boardDrops.length > 0 ? (
+                ) : visibleBoardDrops.length > 0 ? (
                   <div className="board-drop-stack">
-                    {boardDrops.map((drop) => {
+                    {visibleBoardDrops.map((drop) => {
                       const signedKey =
                         drop.bucket && drop.storagePath
                           ? `${drop.bucket}:${drop.storagePath}`
@@ -1453,7 +1481,12 @@ export default function ProfileBoardViewPage({
                       const linkLabel = drop.type === "News" ? "News Drop" : "Link Drop";
 
                       return (
-                        <div key={drop.id} className="board-drop-item">
+                        <div
+                          key={drop.id}
+                          className={`board-drop-item${
+                            (drop.visibility ?? "public") === "private" ? " board-drop-item-private" : ""
+                          }`}
+                        >
                           <div className="board-drop-top">
                             <div className="board-drop-title">{drop.title}</div>
                             <div className="board-drop-badges">
@@ -1664,9 +1697,9 @@ export default function ProfileBoardViewPage({
                       Pulling live board activity into this profile preview.
                     </div>
                   </div>
-                ) : recentDrops.length > 0 ? (
+                ) : profileActivityChannelDrops.length > 0 ? (
                   <div className="recent-drops-stack activity-feed-stack">
-                    {recentDrops.map((item, index) => {
+                    {profileActivityChannelDrops.map((item, index) => {
                       const whispers = deriveActivityWhispers(item, index);
 
                       return (

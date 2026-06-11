@@ -9,13 +9,78 @@ export function normalizeBoardDropType(raw: string | null | undefined): string {
   if (!t) return "";
   if (t.includes("thought")) return "Thought";
   if (t.includes("pay")) return "Pay";
-  if (t.includes("music") || t.includes("audio")) return "Music";
-  if (t.includes("youtube")) return "YouTube";
+  if (t.includes("youtube") || t.includes("youtu.be")) return "YouTube";
+  if (
+    t.includes("music") ||
+    t.includes("audio") ||
+    t.includes("spotify") ||
+    t.includes("soundcloud")
+  ) {
+    return "Music";
+  }
   if (t.includes("news")) return "News";
-  if (t.includes("doc")) return "Doc";
-  if (t.includes("vision") || t.includes("media")) return "Media";
-  if (t === "link" || t.includes("link drop")) return "Link";
+  if (t.includes("doc") || t.includes("essay") || t.includes("script")) return "Doc";
+  if (t.includes("vision") || t.includes("media") || t.includes("photo") || t.includes("image")) {
+    return "Media";
+  }
+  if (t.includes("announcement")) return "Media";
+  if (t === "link" || t.includes("link drop") || t.includes("project")) return "Link";
+  if (t === "board_drop" || t === "board drop" || t === "drop") return "";
   return String(raw ?? "");
+}
+
+const CANONICAL_DROP_TYPES = [
+  "YouTube",
+  "Music",
+  "News",
+  "Link",
+  "Media",
+  "Pay",
+  "Doc",
+  "Thought",
+] as const;
+
+export type CanonicalDropType = (typeof CANONICAL_DROP_TYPES)[number];
+
+/** Map legacy / noisy stored types onto the canonical DropType labels. */
+export function canonicalDropType(
+  raw: string | null | undefined,
+  hints?: {
+    priceCents?: number;
+    embedUrl?: string | null;
+    thoughtText?: string;
+    bucket?: string;
+    storagePath?: string;
+    url?: string;
+  }
+): CanonicalDropType {
+  const normalized = normalizeBoardDropType(raw);
+  if (
+    normalized &&
+    CANONICAL_DROP_TYPES.includes(normalized as CanonicalDropType)
+  ) {
+    return normalized as CanonicalDropType;
+  }
+
+  const embed = String(hints?.embedUrl ?? "").toLowerCase();
+  const url = String(hints?.url ?? "").toLowerCase();
+  if (embed.includes("youtube") || embed.includes("youtu.be") || url.includes("youtube")) {
+    return "YouTube";
+  }
+  if (
+    embed.includes("spotify") ||
+    embed.includes("soundcloud") ||
+    embed.includes("music.apple") ||
+    url.includes("spotify") ||
+    url.includes("soundcloud")
+  ) {
+    return "Music";
+  }
+  if (typeof hints?.priceCents === "number" && hints.priceCents > 0) return "Pay";
+  if (hints?.thoughtText?.trim()) return "Thought";
+  if (hints?.bucket?.trim() && hints?.storagePath?.trim()) return "Media";
+
+  return "Link";
 }
 
 export function isLikelyImageUrl(href: string) {
@@ -46,60 +111,56 @@ function extFromName(value: string) {
 }
 
 export function resolveDropMediaKind(drop: DropLike): DropMediaKind {
-  // Concrete file signals are ground truth and override a STALE stored mediaKind
-  // — e.g. a Pay/Vision drop drawn into an image that still carries an old
-  // "audio" kind (which made the image render as a Voice player). We only force
-  // IMAGE here, not video/audio, to avoid the .webm ambiguity (Drop Studio voice
-  // memos are .webm but live in VIDEO_EXT); the steps below handle those.
-  const mime0 = String(drop.mime ?? "").toLowerCase();
-  const imageFile = [drop.fileName, drop.storagePath].some(
-    (c) => !!c && IMAGE_EXT.test(extFromName(c))
-  );
-  if (mime0.startsWith("image/") || imageFile) return "image";
-
-  const mk = String(drop.mediaKind ?? "").toLowerCase();
-  if (mk === "image" || mk === "video" || mk === "audio") return mk;
-
   const type = normalizeBoardDropType(drop.type);
   const tf = String(drop.thoughtFormat ?? "").toLowerCase();
   if (tf === "doodle") return "image";
   if (tf === "voice") return "audio";
 
-  if (type === "Thought") {
-    for (const candidate of [drop.fileName, drop.storagePath, drop.url, drop.mediaUrl]) {
-      if (!candidate) continue;
-      if (/vocal|voice/i.test(candidate)) return "audio";
-      if (/doodle|art/i.test(candidate)) return "image";
-    }
-    // Drop Studio voice captures often arrive as audio-only .webm
-    for (const candidate of [drop.fileName, drop.url, drop.mediaUrl, drop.storagePath]) {
-      if (candidate && /\.webm(\?|#|$)/i.test(extFromName(candidate))) return "audio";
+  const mime0 = String(drop.mime ?? "").toLowerCase();
+  if (mime0.startsWith("image/")) return "image";
+  if (mime0.startsWith("video/")) return "video";
+  if (mime0.startsWith("audio/")) return "audio";
+
+  const candidates = [drop.fileName, drop.storagePath, drop.url, drop.mediaUrl].filter(
+    Boolean
+  ) as string[];
+
+  if (candidates.some((c) => IMAGE_EXT.test(extFromName(c)))) return "image";
+
+  for (const candidate of candidates) {
+    if (/\.webm(\?|#|$)/i.test(extFromName(candidate))) {
+      return type === "Thought" ? "audio" : "video";
     }
   }
 
-  const mime = String(drop.mime ?? "").toLowerCase();
-  if (mime.startsWith("image/")) return "image";
-  if (mime.startsWith("video/")) return "video";
-  if (mime.startsWith("audio/")) return "audio";
-
-  for (const candidate of [drop.fileName, drop.url, drop.mediaUrl, drop.storagePath]) {
-    if (!candidate) continue;
+  for (const candidate of candidates) {
     const clean = extFromName(candidate);
-    if (IMAGE_EXT.test(clean)) return "image";
     if (VIDEO_EXT.test(clean)) return "video";
     if (AUDIO_EXT.test(clean)) return "audio";
   }
 
-  if (type === "Thought" || type === "Media" || type === "Pay") {
+  if (type === "Thought") {
+    for (const candidate of candidates) {
+      if (/vocal|voice/i.test(candidate)) return "audio";
+      if (/doodle|art/i.test(candidate)) return "image";
+    }
+  }
+
+  if (type === "Thought" || type === "Media" || type === "Pay" || type === "Music") {
     for (const candidate of [drop.url, drop.mediaUrl]) {
       if (candidate && parseBoardStorageFromUrl(candidate) && isLikelyImageUrl(candidate)) {
         return "image";
       }
     }
-    if (drop.bucket?.trim() && drop.storagePath?.trim() && !AUDIO_EXT.test(drop.storagePath)) {
-      if (!VIDEO_EXT.test(drop.storagePath)) return "image";
+    if (drop.bucket?.trim() && drop.storagePath?.trim()) {
+      if (VIDEO_EXT.test(drop.storagePath)) return "video";
+      if (AUDIO_EXT.test(drop.storagePath)) return "audio";
+      return "image";
     }
   }
+
+  const mk = String(drop.mediaKind ?? "").toLowerCase();
+  if (mk === "image" || mk === "video" || mk === "audio") return mk;
 
   return null;
 }

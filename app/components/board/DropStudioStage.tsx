@@ -13,6 +13,11 @@ import BoardArtCanvas from "./BoardArtCanvas";
 import DescriptStudio from "./DescriptStudio";
 import type { DescriptDestination } from "@/lib/board/descriptDocs";
 import { BOARD_DROP_ASPECT_CSS, BOARD_DROP_ASPECT_RATIO } from "@/lib/board/mediaFormat";
+import {
+  boardDropFramePixelSize,
+  canvasToJpegBlob,
+  ensureImageFileMinResolution,
+} from "@/lib/board/imageQuality";
 import type { DropCustomization } from "@/lib/board/dropCustomizations";
 import { saveDropDraft, draftToFile, type DropDraft } from "@/lib/board/dropDrafts";
 import DropDraftsDrawer from "./DropDraftsDrawer";
@@ -311,7 +316,7 @@ export default function DropStudioStage({
     void saveToDrafts(true);
   }
 
-  function takePhoto() {
+  async function takePhoto() {
     const v = videoRef.current;
     if (!v || !v.videoWidth || !v.videoHeight) return;
     // Cover-crop the live frame to the standard Board Drop ratio so the saved
@@ -327,9 +332,10 @@ export default function DropStudioStage({
     }
     const sx = (vw - sw) / 2;
     const sy = (vh - sh) / 2;
+    const { width, height } = boardDropFramePixelSize(sw, sh);
     const c = document.createElement("canvas");
-    c.width = Math.round(sw);
-    c.height = Math.round(sh);
+    c.width = width;
+    c.height = height;
     const ctx = c.getContext("2d");
     if (!ctx) return;
     // The front ("user") camera is previewed mirrored (see .capVideo.mirror), so
@@ -339,8 +345,11 @@ export default function DropStudioStage({
       ctx.translate(c.width, 0);
       ctx.scale(-1, 1);
     }
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
     ctx.drawImage(v, sx, sy, sw, sh, 0, 0, c.width, c.height);
-    c.toBlob((b) => b && commitBlob(b, "image", "capture"), "image/jpeg", 0.94);
+    const blob = await canvasToJpegBlob(c);
+    if (blob) commitBlob(blob, "image", "capture");
   }
 
   function startRecording() {
@@ -384,14 +393,18 @@ export default function DropStudioStage({
     if (recorderRef.current?.state === "recording") recorderRef.current.stop();
   }
 
-  function onUpload(f: File | undefined) {
+  async function onUpload(f: File | undefined) {
     if (!f) return;
-    fileRef.current = f;
+    const file =
+      f.type.startsWith("image/") && f.type !== "image/gif" && f.type !== "image/svg+xml"
+        ? await ensureImageFileMinResolution(f)
+        : f;
+    fileRef.current = file;
     setMedia(
-      URL.createObjectURL(f),
-      f.type.startsWith("audio/")
+      URL.createObjectURL(file),
+      file.type.startsWith("audio/")
         ? "audio"
-        : f.type.startsWith("video/")
+        : file.type.startsWith("video/")
           ? "video"
           : "image"
     );
@@ -414,7 +427,14 @@ export default function DropStudioStage({
     setPhase("capture");
   }
 
-  function done() {
+  async function done() {
+    if (
+      fileRef.current?.type.startsWith("image/") &&
+      fileRef.current.type !== "image/gif" &&
+      fileRef.current.type !== "image/svg+xml"
+    ) {
+      fileRef.current = await ensureImageFileMinResolution(fileRef.current);
+    }
     if (fileRef.current) onComplete(fileRef.current, source);
     onClose();
   }

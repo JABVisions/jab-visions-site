@@ -27,11 +27,16 @@ import {
   readBoardVisitWhispers,
 } from "@/lib/board/visitWhispers";
 import {
-  deriveActivityWhispers,
   createBoardWhisper,
+  deriveActivityWhispers,
   getBoardWhisper,
   type BoardWhisper as ProfileWhisper,
 } from "@/lib/board/whispers";
+import {
+  PROFILE_ACTIVITY_CHANNEL_FETCH_LIMIT,
+  PROFILE_ACTIVITY_CHANNEL_LIMIT,
+  resolveProfileActivityDrops,
+} from "@/lib/board/profileActivityChannel";
 import {
   STORE_DROP_BOOKMARKS_STORAGE_KEY,
   STORE_DROP_COLLECTION_STORAGE_KEY,
@@ -47,13 +52,13 @@ import {
   writeLightweightLocalStorage,
 } from "@/lib/board/profileStorage";
 import { supabaseBrowser } from "@/lib/supabase/browser";
+import { ensureImageFileMinResolution } from "@/lib/board/imageQuality";
 
 const PROFILE_STORAGE_KEY = BOARD_PROFILE_STORAGE_KEY;
 const OPTIONS_STORAGE_KEY = "board.options.v1";
 const PROFILE_UPDATED_EVENT = "board:profile:updated";
 const DROP_STORAGE_KEY = "jab_board_drops_v2";
 const DROP_DELETED_STORAGE_KEY = "jab_board_drops_deleted_v1";
-const ACTIVITY_CHANNEL_LIMIT = 80;
 
 function activityBelongsToUser(item: BoardActivity, userId: string) {
   const meta = item.meta && typeof item.meta === "object" ? item.meta : null;
@@ -318,6 +323,93 @@ function StoreDropCollectionSlot({ drop, index }: { drop: BoardStoreDrop | null;
         </div>
       </div>
     </a>
+  );
+}
+
+function StoreCollectionPanel({
+  slots,
+  className = "",
+}: {
+  slots: Array<BoardStoreDrop | null>;
+  className?: string;
+}) {
+  return (
+    <section className={`inner-tile store-collection-card ${className}`.trim()}>
+      <div className="tile-head">
+        <div>
+          <div className="tile-title">Store Drops Collection</div>
+          <div className="tile-sub">Collected artifacts and saved Store Drops from Explore.</div>
+        </div>
+      </div>
+      <div className="store-collection-grid">
+        {slots.map((drop, index) => (
+          <StoreDropCollectionSlot
+            key={drop?.id ?? `empty-store-slot-${index}`}
+            drop={drop}
+            index={index}
+          />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function CoverPosterPanel({
+  coverDataUrl,
+  coverInputRef,
+  onExpand,
+  className = "",
+}: {
+  coverDataUrl: string | null;
+  coverInputRef: React.RefObject<HTMLInputElement | null>;
+  onExpand: (src: string) => void;
+  className?: string;
+}) {
+  return (
+    <section className={`inner-tile cover profile-panel-cover ${className}`.trim()}>
+      <div className="tile-head">
+        <div>
+          <div className="tile-title">Cover Poster</div>
+          <div className="tile-sub">A vertical cover that frames your whole board vibe.</div>
+        </div>
+      </div>
+
+      <div className="cover-shell">
+        {coverDataUrl ? (
+          <button
+            type="button"
+            className="cover-button"
+            onClick={() => onExpand(coverDataUrl)}
+            aria-label="Expand cover poster"
+          >
+            <img className="cover-img" src={coverDataUrl} alt="Cover poster" />
+            <span className="cover-expand-hint">Expand poster</span>
+          </button>
+        ) : (
+          <button
+            type="button"
+            className="cover-empty"
+            onClick={() => coverInputRef.current?.click()}
+          >
+            <div className="plus">+</div>
+            <div className="label">UPLOAD COVER</div>
+          </button>
+        )}
+      </div>
+
+      <p className="cover-hint">
+        Think: magazine cover, film poster, or banner. Tap the poster to expand it, or use Update Cover to swap.
+      </p>
+      <div className="vision-cta-row">
+        <button
+          type="button"
+          className="tiny-cta"
+          onClick={() => coverInputRef.current?.click()}
+        >
+          Update cover →
+        </button>
+      </div>
+    </section>
   );
 }
 
@@ -1124,7 +1216,7 @@ export default function BoardProfileHubPage() {
           .eq("id", userId)
           .maybeSingle();
         const response = await fetch(
-          `/api/board/activity?limit=${ACTIVITY_CHANNEL_LIMIT}`,
+          `/api/board/activity?limit=${PROFILE_ACTIVITY_CHANNEL_FETCH_LIMIT}`,
           { cache: "no-store" }
         );
         if (!response.ok) throw new Error("Could not load Board activity.");
@@ -1153,7 +1245,9 @@ export default function BoardProfileHubPage() {
             ? filterCurrentDropTileActivity(items, remoteDropIds)
             : filterDeletedActivity(items, deletedIds);
 
-        setRecentDrops(dedupeActivity(visibleItems));
+        setRecentDrops(
+          dedupeActivity(visibleItems).slice(0, PROFILE_ACTIVITY_CHANNEL_LIMIT)
+        );
         setRecentDropsLoading(false);
       } catch {
         if (cancelled) return;
@@ -1165,7 +1259,7 @@ export default function BoardProfileHubPage() {
               activityBelongsToProfile(item, userId, routeKey)
             ),
             readLocalDeletedDropIds()
-          ).slice(0, ACTIVITY_CHANNEL_LIMIT)
+          ).slice(0, PROFILE_ACTIVITY_CHANNEL_LIMIT)
         );
         setRecentDropsLoading(false);
       }
@@ -1187,7 +1281,7 @@ export default function BoardProfileHubPage() {
       if (!activityBelongsToProfile(detail, remoteUserId, routeKey)) return;
       const dropId = activityDropId(detail);
       if (dropId && readLocalDeletedDropIds().includes(dropId)) return;
-      setRecentDrops((prev) => dedupeActivity([detail, ...prev]).slice(0, ACTIVITY_CHANNEL_LIMIT));
+      setRecentDrops((prev) => dedupeActivity([detail, ...prev]).slice(0, PROFILE_ACTIVITY_CHANNEL_LIMIT));
       setRecentDropsLoading(false);
     }
 
@@ -1205,7 +1299,7 @@ export default function BoardProfileHubPage() {
           !(activityDropId(item) && deleted.includes(activityDropId(item)!))
       );
       if (!privates.length) return;
-      setRecentDrops((prev) => dedupeActivity([...privates, ...prev]).slice(0, ACTIVITY_CHANNEL_LIMIT));
+      setRecentDrops((prev) => dedupeActivity([...privates, ...prev]).slice(0, PROFILE_ACTIVITY_CHANNEL_LIMIT));
     }
 
     window.addEventListener("board:activity:new", onActivityNew as EventListener);
@@ -1232,7 +1326,7 @@ export default function BoardProfileHubPage() {
             )
           ),
           readLocalDeletedDropIds()
-        ).slice(0, ACTIVITY_CHANNEL_LIMIT)
+        ).slice(0, PROFILE_ACTIVITY_CHANNEL_LIMIT)
       );
       setRecentDropsLoading(false);
     }
@@ -1264,7 +1358,7 @@ export default function BoardProfileHubPage() {
         (!dropId || !readLocalDropIds().includes(dropId))
       )
         return;
-      setRecentDrops((prev) => dedupeActivity([detail, ...prev]).slice(0, ACTIVITY_CHANNEL_LIMIT));
+      setRecentDrops((prev) => dedupeActivity([detail, ...prev]).slice(0, PROFILE_ACTIVITY_CHANNEL_LIMIT));
       setRecentDropsLoading(false);
     }
 
@@ -1590,6 +1684,21 @@ export default function BoardProfileHubPage() {
   }, [routeKey]);
 
   useEffect(() => {
+    function onDropUpdated(e: Event) {
+      const detail = (e as CustomEvent).detail || {};
+      const dropId = typeof detail.dropId === "string" ? detail.dropId : "";
+      const drop = detail.drop;
+      if (!dropId || !drop || typeof drop !== "object") return;
+      setBoardDrops((prev) =>
+        prev.map((d) => (d.id === dropId ? { ...d, ...(drop as DropItem) } : d))
+      );
+    }
+    window.addEventListener("board:drop:updated", onDropUpdated as EventListener);
+    return () =>
+      window.removeEventListener("board:drop:updated", onDropUpdated as EventListener);
+  }, []);
+
+  useEffect(() => {
     if (!boardDrops.length) return;
     let cancelled = false;
 
@@ -1695,6 +1804,16 @@ export default function BoardProfileHubPage() {
         return kind === "board_drop" && !title.startsWith("Project Drop:");
       }),
     [recentDrops]
+  );
+
+  const profileActivityChannelDrops = useMemo(
+    () =>
+      resolveProfileActivityDrops(recentDrops, boardDrops, {
+        userId: remoteUserId,
+        username: routeKey,
+        displayName: profile.displayName,
+      }, { viewerIsOwner: true }),
+    [recentDrops, boardDrops, remoteUserId, routeKey, profile.displayName]
   );
 
   async function openPayCheckout(drop: DropItem) {
@@ -1855,10 +1974,11 @@ export default function BoardProfileHubPage() {
 
   async function handleAvatarFile(file: File | null) {
     if (!file || !file.type.startsWith("image/")) return;
-    const dataUrl = await readFileAsDataUrl(file);
+    const processed = await ensureImageFileMinResolution(file);
+    const dataUrl = await readFileAsDataUrl(processed);
     setProfile((prev) => ({ ...prev, avatarDataUrl: dataUrl }));
 
-    const path = await uploadProfileImagePath(file, "board-avatars", "avatar");
+    const path = await uploadProfileImagePath(processed, "board-avatars", "avatar");
     if (path) {
       setProfile((prev) => ({ ...prev, avatarPath: path }));
       writeLocalProfilePatch({ avatarDataUrl: null, avatarPath: path });
@@ -1871,10 +1991,11 @@ export default function BoardProfileHubPage() {
 
   async function handleCoverFile(file: File | null) {
     if (!file || !file.type.startsWith("image/")) return;
-    const dataUrl = await readFileAsDataUrl(file);
+    const processed = await ensureImageFileMinResolution(file);
+    const dataUrl = await readFileAsDataUrl(processed);
     setProfile((prev) => ({ ...prev, coverDataUrl: dataUrl }));
 
-    const path = await uploadProfileImagePath(file, "board-images", "cover");
+    const path = await uploadProfileImagePath(processed, "board-images", "cover");
     if (path) {
       setProfile((prev) => ({ ...prev, coverPath: path }));
       writeLocalProfilePatch({ coverDataUrl: null, coverPath: path });
@@ -1888,7 +2009,8 @@ export default function BoardProfileHubPage() {
   async function handleVisionFile(file: File | null, slotIndex: number) {
     if (!file || !file.type.startsWith("image/")) return;
     const index = Math.max(0, Math.min(5, slotIndex));
-    const dataUrl = await readFileAsDataUrl(file);
+    const processed = await ensureImageFileMinResolution(file);
+    const dataUrl = await readFileAsDataUrl(processed);
     const nextSlots = [...profile.visionSlots];
     nextSlots[index] = dataUrl;
     const nextPaths =
@@ -1898,7 +2020,7 @@ export default function BoardProfileHubPage() {
 
     setProfile((prev) => ({ ...prev, visionSlots: nextSlots }));
 
-    const path = await uploadProfileImagePath(file, "board-images", `vision-${index + 1}`);
+    const path = await uploadProfileImagePath(processed, "board-images", `vision-${index + 1}`);
     if (path) {
       nextPaths[index] = path;
       setProfile((prev) => ({ ...prev, visionSlotPaths: nextPaths }));
@@ -1950,7 +2072,7 @@ export default function BoardProfileHubPage() {
           event.currentTarget.value = "";
         }}
       />
-      <section className="mx-auto max-w-[1500px] px-4 pb-24 pt-14 sm:px-6 lg:px-8">
+      <section className="profile-board-section mx-auto max-w-[1500px] pb-24 pt-14">
         <div className="poster-board" style={{ boxShadow: aura.ring, borderColor: aura.border }}>
           <div className="board-top">
             <div>
@@ -1977,7 +2099,8 @@ export default function BoardProfileHubPage() {
 
           <div className="profile-grid">
             <div className="left-column">
-              <section className="inner-tile">
+              <div className="profile-left-stack">
+              <section className="inner-tile profile-panel-vision">
                 <div className="tile-head">
                   <div>
                     <div className="tile-title">Vision Wall</div>
@@ -2048,11 +2171,21 @@ export default function BoardProfileHubPage() {
                 </div>
               </section>
 
-              <DropTile />
+              <div className="profile-panel-drops">
+                <DropTile />
+              </div>
+              </div>
             </div>
 
             <div className="center-column">
-              <section className="inner-tile identity">
+              <div className="profile-right-stack">
+              <CoverPosterPanel
+                coverDataUrl={profile.coverDataUrl}
+                coverInputRef={coverInputRef}
+                onExpand={(src) => setExpandedPhoto({ src, label: "Cover poster" })}
+                className="profile-mobile-only"
+              />
+              <section className="inner-tile identity profile-panel-identity">
                 <div className="identity-row">
                   <button
                     type="button"
@@ -2155,7 +2288,7 @@ export default function BoardProfileHubPage() {
                 </div>
               </section>
 
-              <section className="inner-tile">
+              <section className="inner-tile profile-panel-aura">
                 <div className="tile-head">
                   <div>
                     <div className="tile-title">Aura Snapshot</div>
@@ -2195,7 +2328,7 @@ export default function BoardProfileHubPage() {
                 </div>
               </section>
 
-              <section className="inner-tile">
+              <section className="inner-tile profile-panel-activity">
                 <div className="tile-head">
                   <div>
                     <div className="tile-title">Activity Channel</div>
@@ -2211,15 +2344,13 @@ export default function BoardProfileHubPage() {
                       Pulling live board activity into this profile preview.
                     </div>
                   </div>
-                ) : recentDrops.length > 0 ? (
+                ) : profileActivityChannelDrops.length > 0 ? (
                   <div className="recent-drops-stack activity-feed-stack">
                     {visitWhispers.map((whisper) => (
                       <BoardWhisper key={whisper.id} whisper={whisper} />
                     ))}
 
-                    {recentDrops.map((item, index) => {
-                      // 1–2 whispers per drop, derived from its real activity — so the
-                      // channel is denser and sometimes shows two in a row.
+                    {profileActivityChannelDrops.map((item, index) => {
                       const whispers = deriveActivityWhispers(item, index);
 
                       return (
@@ -2247,57 +2378,18 @@ export default function BoardProfileHubPage() {
                   </div>
                 )}
               </section>
+              </div>
             </div>
 
             <div className="right-column">
-              <section className="inner-tile cover">
-                <div className="tile-head">
-                  <div>
-                    <div className="tile-title">Cover Poster</div>
-                    <div className="tile-sub">A vertical cover that frames your whole board vibe.</div>
-                  </div>
-                </div>
+              <CoverPosterPanel
+                coverDataUrl={profile.coverDataUrl}
+                coverInputRef={coverInputRef}
+                onExpand={(src) => setExpandedPhoto({ src, label: "Cover poster" })}
+                className="profile-desktop-only profile-mobile-hidden"
+              />
 
-                <div className="cover-shell">
-                  {profile.coverDataUrl ? (
-                    <button
-                      type="button"
-                      className="cover-button"
-                      onClick={() =>
-                        setExpandedPhoto({ src: profile.coverDataUrl ?? "", label: "Cover poster" })
-                      }
-                      aria-label="Expand cover poster"
-                    >
-                      <img className="cover-img" src={profile.coverDataUrl} alt="Cover poster" />
-                      <span className="cover-expand-hint">Expand poster</span>
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      className="cover-empty"
-                      onClick={() => coverInputRef.current?.click()}
-                    >
-                      <div className="plus">+</div>
-                      <div className="label">UPLOAD COVER</div>
-                    </button>
-                  )}
-                </div>
-
-                <p className="cover-hint">
-                  Think: magazine cover, film poster, or banner. Tap the poster to expand it, or use Update Cover to swap.
-                </p>
-                <div className="vision-cta-row">
-                  <button
-                    type="button"
-                    className="tiny-cta"
-                    onClick={() => coverInputRef.current?.click()}
-                  >
-                    Update cover →
-                  </button>
-                </div>
-              </section>
-
-              <section className="inner-tile bookmarks-card">
+              <section className="inner-tile bookmarks-card profile-mobile-hidden">
                 <div className="tile-head">
                   <div>
                     <div className="tile-title">Board Bookmarks</div>
@@ -2313,27 +2405,13 @@ export default function BoardProfileHubPage() {
                   <BoardBookmark href="/board/options" title="Edit Profile" sub="avatar, bio, glow, vision" />
                 </div>
               </section>
-
-              <section className="inner-tile store-collection-card">
-                <div className="tile-head">
-                  <div>
-                    <div className="tile-title">Store Drops Collection</div>
-                    <div className="tile-sub">Collected artifacts and saved Store Drops from Explore.</div>
-                  </div>
-                </div>
-
-                <div className="store-collection-grid">
-                  {storeDropSlots.map((drop, index) => (
-                    <StoreDropCollectionSlot
-                      key={drop?.id ?? `empty-store-slot-${index}`}
-                      drop={drop}
-                      index={index}
-                    />
-                  ))}
-                </div>
-              </section>
             </div>
           </div>
+
+          <StoreCollectionPanel
+            slots={storeDropSlots}
+            className="profile-store-drops-bottom"
+          />
         </div>
       </section>
 

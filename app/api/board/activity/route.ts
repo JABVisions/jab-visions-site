@@ -153,6 +153,7 @@ function normalizeProfileBoardDrop(row: any): BoardActivity[] {
       const id = String(drop.id ?? "");
       return id && !deletedIds.includes(id);
     })
+    .filter((drop: any) => String(drop.visibility ?? "public").toLowerCase() !== "private")
     .map((drop: any): BoardActivity | null => {
       const id = String(drop.id ?? "");
       const type = String(drop.type ?? "Link");

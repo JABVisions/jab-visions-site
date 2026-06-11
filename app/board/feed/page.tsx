@@ -20,7 +20,6 @@ import {
 } from "@/lib/board/projects";
 import { EVENTS, readFeed, seedForumsIfEmpty } from "@/lib/boardStore";
 
-import { installBucketBrainBridge } from "@/lib/board/bucketBrain";
 
 function clsx(...parts: Array<string | false | null | undefined>) {
   return parts.filter(Boolean).join(" ");
@@ -218,7 +217,6 @@ export default function HomeBoardFeedPage() {
   }
 
   useEffect(() => {
-    installBucketBrainBridge();
     seedForumsIfEmpty();
     syncResolvedProjectsToStorage();
   }, []);

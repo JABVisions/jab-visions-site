@@ -11,6 +11,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { BOARD_DROP_ASPECT_RATIO } from "@/lib/board/mediaFormat";
+import { scaleCanvasToMinLongEdge } from "@/lib/board/imageQuality";
 
 function hslToHex(h: number, s: number, l: number) {
   const sN = s / 100;
@@ -424,7 +425,8 @@ export default function BoardArtCanvas({
     // …then the strokes on top.
     ctx.drawImage(canvas, 0, 0);
 
-    out.toBlob((blob) => {
+    const exportCanvas = scaleCanvasToMinLongEdge(out);
+    exportCanvas.toBlob((blob) => {
       if (blob) onSave(new File([blob], `board-art-${Date.now()}.png`, { type: "image/png" }));
     }, "image/png");
   }

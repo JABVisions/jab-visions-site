@@ -93,6 +93,13 @@
   gap: 14px;
 }
 
+.feed-main:has(.cardAmplifying),
+.feed-cards:has(.cardAmplifying) {
+  overflow: visible;
+  position: relative;
+  z-index: 40;
+}
+
 /* Desktop: sticky right column (Drop Console + Bucket scroll inside the rail).
    Mobile: only Drop Console is sticky; Bucket Brain scrolls with the feed. */
 .feed-rightRail {

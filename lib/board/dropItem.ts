@@ -19,6 +19,10 @@ import {
   richTextFromPlain,
   type RichTextValue,
 } from "@/lib/board/richText";
+import {
+  canonicalDropType,
+  resolveDropMediaKind,
+} from "@/lib/board/dropDisplay";
 
 export type DropType =
   | "YouTube"
@@ -446,10 +450,19 @@ export function normalizeDropItems(input: unknown, userId: string | null): DropI
   const deletedIds = readDeletedDropIds(userId);
   return dedupeDropItems(input
     .filter((x) => x && typeof x === "object")
-    .map((x: any): DropItem => ({
+    .map((x: any): DropItem => {
+      const type = canonicalDropType(x.type, {
+        priceCents: typeof x.priceCents === "number" ? x.priceCents : undefined,
+        embedUrl: typeof x.embedUrl === "string" ? x.embedUrl : null,
+        thoughtText: typeof x.thoughtText === "string" ? x.thoughtText : undefined,
+        bucket: typeof x.bucket === "string" ? x.bucket : undefined,
+        storagePath: typeof x.storagePath === "string" ? x.storagePath : undefined,
+        url: typeof x.url === "string" ? x.url : undefined,
+      });
+      const base: DropItem = {
       id: String(x.id ?? safeId()),
       title: String(x.title ?? "Untitled"),
-      type: (x.type as DropType) ?? "Link",
+      type,
       createdAt: Number(x.createdAt ?? Date.now()),
       url: typeof x.url === "string" ? x.url : undefined,
       embedUrl: typeof x.embedUrl === "string" ? x.embedUrl : null,
@@ -514,7 +527,11 @@ export function normalizeDropItems(input: unknown, userId: string | null): DropI
           ? x.thoughtFormat
           : undefined,
       thoughtText: typeof x.thoughtText === "string" ? x.thoughtText : undefined,
-    }))
+    };
+      const resolvedKind = resolveDropMediaKind(base);
+      if (resolvedKind) base.mediaKind = resolvedKind;
+      return base;
+    })
     .filter((d) => d.id && d.title && !deletedIds.includes(d.id)));
 }
 

@@ -198,6 +198,31 @@ export function writeBrain(next: BucketBrainState) {
   window.dispatchEvent(new Event(EVT_UPDATED));
 }
 
+export function isInBrain(folder: BucketFolder, activityId: string) {
+  const id = String(activityId || "");
+  if (!id) return false;
+  const brain = readBrain();
+  return (brain[folder] ?? []).some((entry) => String(entry.activityId) === id);
+}
+
+export function withdrawFromBrain(folder: BucketFolder, activityId: string) {
+  const id = String(activityId || "");
+  if (!id) return false;
+
+  const prev = readBrain();
+  const list = prev[folder] ?? [];
+  const nextList = list.filter((entry) => String(entry.activityId) !== id);
+  if (nextList.length === list.length) return false;
+
+  writeBrain({
+    ...prev,
+    [folder]: nextList,
+    updatedAt: now(),
+  } as BucketBrainState);
+
+  return true;
+}
+
 export function depositToBrain(
   folder: BucketFolder,
   activityId: string,
@@ -222,10 +247,6 @@ export function depositToBrain(
   } as BucketBrainState;
 
   writeBrain(next);
-
-  if (typeof window !== "undefined") {
-    window.dispatchEvent(new CustomEvent(EVT_OPEN, { detail: { folder } }));
-  }
 }
 
 export function waveBucketDrop(

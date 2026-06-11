@@ -6,6 +6,7 @@
 
 import { supabaseBrowser } from "@/lib/supabase/browser";
 import { syncActivitiesForDropEdit } from "@/lib/board/activity";
+import { ensureImageFileMinResolution } from "@/lib/board/imageQuality";
 import type { DropItem } from "@/app/components/board/DropTile";
 
 const STORAGE_KEY = "jab_board_drops_v2";
@@ -168,10 +169,17 @@ export async function uploadDropMedia(
   const userId = data.session?.user?.id;
   if (!userId) return null;
 
-  const storagePath = `${userId}/${dropId}/${Date.now()}-${sanitizeFileName(file.name)}`;
-  const { error } = await supabase.storage.from(BOARD_MEDIA_BUCKET).upload(storagePath, file, {
+  const uploadFile =
+    file.type.startsWith("image/") &&
+    file.type !== "image/gif" &&
+    file.type !== "image/svg+xml"
+      ? await ensureImageFileMinResolution(file)
+      : file;
+
+  const storagePath = `${userId}/${dropId}/${Date.now()}-${sanitizeFileName(uploadFile.name)}`;
+  const { error } = await supabase.storage.from(BOARD_MEDIA_BUCKET).upload(storagePath, uploadFile, {
     upsert: true,
-    contentType: file.type || "application/octet-stream",
+    contentType: uploadFile.type || "application/octet-stream",
     cacheControl: "3600",
   });
   if (error) {

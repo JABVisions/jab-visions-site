@@ -3,7 +3,7 @@
           width: 100%;
           max-width: 100%;
           min-width: 0;
-          overflow: hidden;
+          overflow: visible;
           box-sizing: border-box;
         }
 
@@ -39,7 +39,6 @@
            read identically to the feed instead of sitting small with letterbox
            bars. */
         .media-thumb.natural-media .drop-studio-media-frame {
-          aspect-ratio: 4 / 5;
           width: 100%;
           max-width: 100%;
           height: auto;
@@ -50,10 +49,10 @@
         .media-thumb.natural-media .drop-studio-media-frame > img,
         .media-thumb.natural-media .drop-studio-media-frame > video {
           width: 100%;
-          height: 100%;
+          height: auto;
           max-width: 100%;
-          max-height: none;
-          object-fit: cover;
+          max-height: min(1080px, 85vh);
+          object-fit: contain;
           border: 0;
           background: transparent;
         }
@@ -330,7 +329,7 @@
         .selected-media-preview video {
           display: block;
           width: 100%;
-          max-height: 280px;
+          max-height: min(1080px, 85vh);
           object-fit: contain;
           background: rgba(2, 12, 14, 0.96);
         }
@@ -411,7 +410,7 @@
           display: block;
           width: auto;
           max-width: 100%;
-          max-height: 260px;
+          max-height: min(1080px, 85vh);
           margin: 0 auto;
           border-radius: 14px;
           object-fit: contain;
@@ -495,7 +494,16 @@
           width: 100%;
           max-width: 100%;
           min-width: 0;
-          overflow: hidden;
+          overflow: visible;
+        }
+
+        /* Mobile only: reorder so the Music drop sits directly next to the Pay
+           drop. `--m-order` is computed per tile in JS (mobileOrderById); desktop
+           ignores it entirely and keeps natural source order. */
+        @media (max-width: 560px) {
+          .drop-list > .drop-item {
+            order: var(--m-order, 0);
+          }
         }
 
         .drop-empty {
@@ -528,6 +536,35 @@
           overflow: hidden;
         }
 
+        /* Owner-only private drops: muted midnight tile — chip colors stay untouched. */
+        .drop-item.drop-item-private {
+          background: linear-gradient(
+            180deg,
+            rgba(38, 42, 54, 0.96),
+            rgba(26, 29, 38, 0.98)
+          );
+          border-color: rgba(255, 255, 255, 0.08);
+          box-shadow:
+            inset 0 1px 0 rgba(255, 255, 255, 0.04),
+            0 12px 28px rgba(0, 0, 0, 0.22);
+        }
+
+        .drop-item.drop-item-private .drop-titleTop {
+          color: rgba(206, 214, 228, 0.94);
+        }
+
+        .drop-item.drop-item-private .drop-description,
+        .drop-item.drop-item-private .drop-hint,
+        .drop-item.drop-item-private .drop-collection-open {
+          color: rgba(186, 194, 210, 0.88);
+        }
+
+        .drop-item.drop-item-private .media-attachment-chip {
+          background: rgba(0, 0, 0, 0.48);
+          color: rgba(255, 255, 255, 0.94);
+          border-color: rgba(255, 255, 255, 0.28);
+        }
+
         .drop-titleTop {
           font-weight: 650;
           color: rgba(0, 160, 80, 1);
@@ -538,8 +575,8 @@
           white-space: pre-wrap;
         }
 
-        .drop-titleTop :global(b),
-        .drop-titleTop :global(strong) {
+        .drop-titleTop b,
+        .drop-titleTop strong {
           font-weight: 900;
         }
         .drop-title-input {
@@ -601,10 +638,66 @@
           line-height: 1;
           flex: 0 0 auto;
         }
-        /* "Captured on Board" chip sits left-aligned under the media. */
+        /* "Captured on Board" stacks under the media attachment chip on the image. */
         .drop-captured-row {
           display: flex;
           justify-content: flex-start;
+        }
+
+        .media-overlay-badges {
+          position: absolute;
+          top: 12px;
+          left: 12px;
+          z-index: 3;
+          display: flex;
+          flex-direction: column;
+          align-items: flex-start;
+          gap: 6px;
+          max-width: calc(100% - 24px);
+          pointer-events: none;
+        }
+
+        .media-overlay-badges .media-attachment-chip {
+          position: static;
+          top: auto;
+          left: auto;
+        }
+
+        .media-captured-badge {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          height: 24px;
+          padding: 0 10px;
+          padding-top: 1px;
+          border-radius: 999px;
+          border: 1px solid rgba(228, 232, 244, 0.42);
+          background: linear-gradient(
+            180deg,
+            rgba(156, 162, 178, 0.72),
+            rgba(108, 114, 128, 0.78)
+          );
+          color: rgba(248, 250, 255, 0.96);
+          font-size: 10px;
+          font-weight: 950;
+          letter-spacing: 0.08em;
+          text-transform: uppercase;
+          line-height: 1;
+          backdrop-filter: blur(8px);
+          box-shadow:
+            inset 0 1px 0 rgba(255, 255, 255, 0.18),
+            0 4px 14px rgba(0, 0, 0, 0.18);
+          white-space: nowrap;
+        }
+
+        .drop-item.drop-item-private .media-captured-badge {
+          border-color: rgba(228, 232, 244, 0.34);
+          background: linear-gradient(
+            180deg,
+            rgba(132, 138, 154, 0.74),
+            rgba(92, 98, 112, 0.8)
+          );
+          color: rgba(248, 250, 255, 0.94);
         }
         /* Sub-stats row under the type badge: Public/Private + drop counts. */
         .drop-substats {
@@ -687,11 +780,38 @@
 
         .drop-studio-slot {
           display: flex;
-          justify-content: center;
-          align-items: center;
+          flex-direction: column;
           gap: 8px;
           width: 100%;
           padding-top: 2px;
+        }
+        /* Comment sits on its own row, on top, full width. */
+        .drop-collection-comment {
+          width: 100%;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          border-radius: 999px;
+          padding: 9px 14px;
+          font-size: 12px;
+          font-weight: 800;
+          border: 1px solid rgba(0, 0, 0, 0.12);
+          background: rgba(255, 255, 255, 0.72);
+          color: rgba(0, 0, 0, 0.62);
+          cursor: pointer;
+          font-family: inherit;
+        }
+        .drop-collection-comment:hover {
+          border-color: rgba(0, 140, 135, 0.4);
+          background: rgba(255, 255, 255, 0.92);
+        }
+        /* Below the comment: privacy eye + draft count + slim Studio button. */
+        .drop-studio-controls {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 8px;
+          width: 100%;
         }
 
         .drop-collection-open {
@@ -708,9 +828,10 @@
           display: inline-flex;
           align-items: center;
           justify-content: center;
-          gap: 8px;
+          gap: 6px;
           border-radius: 999px;
-          padding: 10px 16px;
+          /* Slim, matching the Activity Channel Studio control. */
+          padding: 8px 12px;
           border: 1px solid rgba(255, 90, 170, 0.42);
           background: rgba(255, 64, 160, 0.08);
           color: rgba(190, 30, 120, 0.95);
@@ -732,8 +853,17 @@
         .drop-studio-editor-lbl {
           font-size: 10px;
           font-weight: 950;
-          letter-spacing: 0.18em;
+          letter-spacing: 0.12em;
           text-transform: uppercase;
+          white-space: nowrap;
+        }
+
+        /* Mobile: Studio button reads just "Drop Studio" — no clapper, no "Editor". */
+        @media (max-width: 560px) {
+          .dse-word-editor,
+          .drop-studio-editor-glyph {
+            display: none;
+          }
         }
 
         /* ---- Edit drop modal ---- */
@@ -913,6 +1043,15 @@
           cursor: not-allowed;
         }
 
+        @media (max-width: 560px) {
+          .edit-overlay {
+            padding: 8px;
+          }
+          .edit-sheet {
+            width: min(480px, calc(100dvw - 16px));
+          }
+        }
+
         .drop-badges {
           display: flex;
           gap: 8px;
@@ -926,7 +1065,7 @@
         }
         /* The removable drop-type label keeps its own clip; never let it shrink
            or distort beside the ghost pills. */
-        .drop-badges > :global(.kindRemovable) {
+        .drop-badges > .kindRemovable {
           flex: 0 0 auto;
         }
 
@@ -990,7 +1129,8 @@
           pointer-events: none;
         }
         .media-thumb.natural-media,
-        .thought-media-thumb {
+        .thought-media-thumb,
+        .media-thumb.pay-thumb {
           position: relative;
         }
 
@@ -1013,13 +1153,26 @@
         .embed-shell.spotify_track,
         .embed-shell.spotify_large {
           width: 100%;
+          overflow-x: auto;
+          overflow-y: hidden;
+          direction: rtl;
+          scrollbar-width: none;
+          -ms-overflow-style: none;
         }
+        .embed-shell.spotify_track::-webkit-scrollbar,
+        .embed-shell.spotify_large::-webkit-scrollbar { display: none; }
 
         .embed-shell.spotify_track iframe {
           height: 152px;
+          width: min(100%, 460px);
+          min-width: 460px;
+          max-width: none;
         }
         .embed-shell.spotify_large iframe {
           height: 352px;
+          width: min(100%, 460px);
+          min-width: 460px;
+          max-width: none;
         }
         .embed-shell.soundcloud iframe {
           height: 300px;
@@ -1273,14 +1426,14 @@
           margin: 0 auto;
           display: block;
           object-fit: contain;
-          max-height: min(520px, 72vh);
+          max-height: min(1080px, 85vh);
         }
         .media-thumb.natural-media img,
         .media-thumb.natural-media video {
           width: auto;
           height: auto;
           max-width: 100%;
-          max-height: min(420px, 62vh);
+          max-height: min(1080px, 85vh);
           border-radius: 14px;
           border: 1px solid rgba(0, 0, 0, 0.1);
           background: rgba(0, 0, 0, 0.055);
@@ -1295,6 +1448,40 @@
           height: auto;
           max-width: 100%;
           min-height: 0;
+        }
+
+        /* Standard Board framing for collection media: everything sits in the 4:5
+           Board thumbnail (cover) EXCEPT widescreen/landscape media, which keeps
+           its natural ratio. `.is-wide` is set on load (see tagWideMediaFrame) only
+           when the media's intrinsic width exceeds its height; without it, media
+           defaults to this framed 4:5 look. High specificity (:not(.is-wide) + the
+           full descendant chain) so it wins over the natural-media sizing above. */
+        .media-thumb.natural-media:not(.is-wide) {
+          border-radius: 18px;
+          overflow: hidden;
+          border: 1px solid rgba(0, 0, 0, 0.1);
+          background:
+            radial-gradient(circle at 18% 18%, rgba(255, 0, 190, 0.08), transparent 34%),
+            radial-gradient(circle at 80% 22%, rgba(0, 180, 255, 0.08), transparent 34%),
+            rgba(255, 255, 255, 0.6);
+        }
+        .media-thumb.natural-media:not(.is-wide) .drop-studio-media-frame {
+          aspect-ratio: 4 / 5;
+          width: 100%;
+          height: auto;
+          margin: 0 auto;
+          border-radius: inherit;
+        }
+        .media-thumb.natural-media:not(.is-wide) .drop-studio-media-frame > img,
+        .media-thumb.natural-media:not(.is-wide) .drop-studio-media-frame > video {
+          width: 100%;
+          height: 100%;
+          max-width: 100%;
+          max-height: none;
+          object-fit: cover;
+          border: 0;
+          border-radius: inherit;
+          background: transparent;
         }
 
         .audio-drop-card {
@@ -1547,8 +1734,8 @@
           overflow-wrap: anywhere;
         }
 
-        .drop-description :global(b),
-        .drop-description :global(strong) {
+        .drop-description b,
+        .drop-description strong {
           font-weight: 900;
         }
         .thought-body {

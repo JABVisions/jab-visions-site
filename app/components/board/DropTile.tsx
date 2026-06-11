@@ -92,6 +92,19 @@ import {
 // (boardDropEditStore, musicMigration) keep working unchanged.
 export type { DropItem } from "@/lib/board/dropItem";
 
+/**
+ * Tag a collection media thumb as widescreen once its real dimensions are known.
+ * Only landscape media (intrinsic width > height) keeps its natural ratio; portrait
+ * and square media fall back to the standard 4:5 Board frame (handled in CSS via
+ * `.media-thumb.natural-media:not(.is-wide)`).
+ */
+function tagWideMediaFrame(el: HTMLImageElement | HTMLVideoElement) {
+  const w = el instanceof HTMLVideoElement ? el.videoWidth : el.naturalWidth;
+  const h = el instanceof HTMLVideoElement ? el.videoHeight : el.naturalHeight;
+  const thumb = el.closest(".media-thumb");
+  if (!thumb || !w || !h) return;
+  thumb.classList.toggle("is-wide", w / h > 1.05);
+}
 
 export default function DropTile() {
   const [userId, setUserId] = useState<string | null>(null);
@@ -1412,6 +1425,30 @@ export default function DropTile() {
         ? "image/*,audio/*,.mp3,.m4a,.wav,.aac,.ogg,.flac"
         : ".pdf,.doc,.docx,.txt,.rtf,.md,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain,text/markdown";
 
+  // Mobile-only ordering: pull Music drop(s) to sit directly after the Pay drop.
+  // Applied via a per-tile `--m-order` CSS var that only takes effect inside the
+  // mobile media query, so desktop keeps the natural source order untouched.
+  const mobileOrderById = useMemo(() => {
+    const map: Record<string, number> = {};
+    const typeOf = (x: DropItem) => normalizeBoardDropType(x.type);
+    const payIdx = drops.findIndex((x) => typeOf(x) === "Pay");
+    const hasMusic = drops.some((x) => typeOf(x) === "Music");
+    if (payIdx < 0 || !hasMusic) {
+      drops.forEach((x, i) => { map[x.id] = i; });
+      return map;
+    }
+    const music = drops.filter((x) => typeOf(x) === "Music");
+    const ordered: DropItem[] = [];
+    drops
+      .filter((x) => typeOf(x) !== "Music")
+      .forEach((x) => {
+        ordered.push(x);
+        if (typeOf(x) === "Pay") ordered.push(...music);
+      });
+    ordered.forEach((x, i) => { map[x.id] = i; });
+    return map;
+  }, [drops]);
+
   return (
     <div className="inner-tile drop-tile">
       <div className="tile-head drop-tile-head">
@@ -1957,6 +1994,12 @@ export default function DropTile() {
             const mainTypeLabel = displayDropType(d.type).toUpperCase();
             const secondaryLabel = secondaryAttachmentLabel(d);
             const mediaChipLabel = mediaAttachmentChipLabel(d);
+            const showMediaChip = !!mediaChipLabel && !(isMedia && resolvedMediaKind === "image");
+            const hasVisualMediaThumb =
+              (isThought && resolvedMediaKind === "image") ||
+              isMedia ||
+              Boolean(isPay && resolvedMediaKind && resolvedMediaKind !== "audio");
+            const showCapturedOnMediaOverlay = Boolean(d.badgeLabel && hasVisualMediaThumb);
             const thoughtImageSrc =
               resolvedMediaKind === "image"
                 ? signedUrl || d.mediaUrl || d.url || undefined
@@ -1969,7 +2012,11 @@ export default function DropTile() {
             const showFooterOpenDoc = isDoc && !!signedUrl;
 
             return (
-              <div key={d.id} className="drop-item">
+              <div
+                key={d.id}
+                className={clsx("drop-item", (d.visibility ?? "public") === "private" && "drop-item-private")}
+                style={{ "--m-order": mobileOrderById[d.id] ?? 0 } as CSSProperties}
+              >
                 <div className="drop-titleTop">
                   <RichText as="span" value={d.titleRich} plain={d.title} />
                 </div>
@@ -1987,14 +2034,6 @@ export default function DropTile() {
                     {isPay && d.priceCents ? (
                       <span className="badge ghost">{formatPriceFromCents(d.priceCents)}</span>
                     ) : null}
-                    {/* Comment is the inline action in the type row: badge > label > comment. */}
-                    <button
-                      className="drop-mini drop-comment-inline"
-                      type="button"
-                      onClick={() => setCommentsDropId(d.id)}
-                    >
-                      Comment{commentCountByDrop[d.id] ? ` ${commentCountByDrop[d.id]}` : ""}
-                    </button>
                   </div>
                 </div>
 
@@ -2021,10 +2060,18 @@ export default function DropTile() {
                   </div>
                 ) : isThought && resolvedMediaKind === "image" ? (
                   <div className="media-thumb natural-media thought-media-thumb" aria-label="Thought art preview">
-                    {mediaChipLabel ? <span className="media-attachment-chip">{mediaChipLabel}</span> : null}
+                    <MediaOverlayBadges
+                      chipLabel={mediaChipLabel}
+                      showChip={showMediaChip}
+                      badgeLabel={showCapturedOnMediaOverlay ? d.badgeLabel : null}
+                    />
                     {thoughtImageSrc ? (
                       <div className="drop-studio-media-frame">
-                        <img src={thoughtImageSrc} alt={d.title} />
+                        <img
+                          src={thoughtImageSrc}
+                          alt={d.title}
+                          onLoad={(e) => tagWideMediaFrame(e.currentTarget)}
+                        />
                       </div>
                     ) : mediaPending ? (
                       <div className="media-missing">
@@ -2047,15 +2094,27 @@ export default function DropTile() {
                     )}
                     aria-label={isPay ? "Pay drop image" : "Vision drop preview"}
                   >
-                    {isMedia && mediaChipLabel ? (
-                      <span className="media-attachment-chip">{mediaChipLabel}</span>
-                    ) : null}
+                    <MediaOverlayBadges
+                      chipLabel={mediaChipLabel}
+                      showChip={showMediaChip}
+                      badgeLabel={showCapturedOnMediaOverlay ? d.badgeLabel : null}
+                    />
                     {signedUrl ? (
                       <div className="drop-studio-media-frame">
                         {resolvedMediaKind === "video" ? (
-                          <video src={signedUrl} controls playsInline preload="metadata" />
+                          <video
+                            src={signedUrl}
+                            controls
+                            playsInline
+                            preload="metadata"
+                            onLoadedMetadata={(e) => tagWideMediaFrame(e.currentTarget)}
+                          />
                         ) : (
-                          <img src={signedUrl} alt={d.title} />
+                          <img
+                            src={signedUrl}
+                            alt={d.title}
+                            onLoad={(e) => tagWideMediaFrame(e.currentTarget)}
+                          />
                         )}
                         {isMedia ? (
                           <DropStudioOverlay customizations={d.customizations} />
@@ -2171,14 +2230,6 @@ export default function DropTile() {
                   </a>
                 ) : null}
 
-                {/* "Captured on Board" provenance chip — directly under the media,
-                    above the Drop Studio Editor button. */}
-                {d.badgeLabel ? (
-                  <div className="drop-captured-row">
-                    <span className="badge ghost captured-badge">{d.badgeLabel}</span>
-                  </div>
-                ) : null}
-
                 {d.description && !isPay && !isDoc ? (
                   <div className="drop-description">
                     <RichText as="span" value={d.descriptionRich} plain={d.description} />
@@ -2188,6 +2239,12 @@ export default function DropTile() {
                 {isPay && d.description ? (
                   <div className="pay-desc pay-desc-top">
                     <RichText as="span" value={d.descriptionRich} plain={d.description} />
+                  </div>
+                ) : null}
+
+                {d.badgeLabel && !showCapturedOnMediaOverlay ? (
+                  <div className="drop-captured-row">
+                    <span className="media-captured-badge">{d.badgeLabel}</span>
                   </div>
                 ) : null}
 
@@ -2211,44 +2268,56 @@ export default function DropTile() {
                 ) : null}
 
                 <div className="drop-studio-slot">
-                  {/* Public/Private toggle sits at the bottom-left of the Studio
-                      button (compact eye: open = public, closed = private). */}
+                  {/* Comment sits on its own row, on top. */}
                   <button
                     type="button"
-                    className={`vis-eye vis-${d.visibility ?? "public"}`}
-                    onClick={() => toggleDropVisibility(d)}
-                    aria-pressed={(d.visibility ?? "public") === "private"}
-                    aria-label={`${
-                      (d.visibility ?? "public") === "public" ? "Public" : "Private"
-                    } drop — tap to toggle`}
-                    title={`${
-                      (d.visibility ?? "public") === "public" ? "Public" : "Private"
-                    } — tap to toggle`}
+                    className="drop-collection-comment"
+                    onClick={() => setCommentsDropId(d.id)}
+                    title="Comment"
                   >
-                    <EyeToggle open={(d.visibility ?? "public") === "public"} />
+                    Comment{commentCountByDrop[d.id] ? ` ${commentCountByDrop[d.id]}` : ""}
                   </button>
-                  {usesDropStudio && (d.draftCount ?? 0) > 0 ? (
-                    <span className="drop-counts" title="Drafts saved in Drop Studio">
-                      🗂 {d.draftCount}
-                    </span>
-                  ) : null}
-                  <button
-                    type="button"
-                    className="drop-studio-editor-btn"
-                    onClick={() =>
-                      window.dispatchEvent(
-                        new CustomEvent("board:drop:edit", {
-                          detail: { dropId: d.id, drop: d },
-                        })
-                      )
-                    }
-                    title="Edit this drop in Drop Studio Editor"
-                  >
-                    <span className="drop-studio-editor-glyph" aria-hidden>
-                      🎬
-                    </span>
-                    <span className="drop-studio-editor-lbl">Drop Studio Editor</span>
-                  </button>
+                  {/* Below it: privacy eye + (draft count) + slim Drop Studio Editor. */}
+                  <div className="drop-studio-controls">
+                    <button
+                      type="button"
+                      className={`vis-eye vis-${d.visibility ?? "public"}`}
+                      onClick={() => toggleDropVisibility(d)}
+                      aria-pressed={(d.visibility ?? "public") === "private"}
+                      aria-label={`${
+                        (d.visibility ?? "public") === "public" ? "Public" : "Private"
+                      } drop — tap to toggle`}
+                      title={`${
+                        (d.visibility ?? "public") === "public" ? "Public" : "Private"
+                      } — tap to toggle`}
+                    >
+                      <EyeToggle open={(d.visibility ?? "public") === "public"} />
+                    </button>
+                    {usesDropStudio && (d.draftCount ?? 0) > 0 ? (
+                      <span className="drop-counts" title="Drafts saved in Drop Studio">
+                        🗂 {d.draftCount}
+                      </span>
+                    ) : null}
+                    <button
+                      type="button"
+                      className="drop-studio-editor-btn"
+                      onClick={() =>
+                        window.dispatchEvent(
+                          new CustomEvent("board:drop:edit", {
+                            detail: { dropId: d.id, drop: d },
+                          })
+                        )
+                      }
+                      title="Edit this drop in Drop Studio Editor"
+                    >
+                      <span className="drop-studio-editor-glyph" aria-hidden>
+                        🎬
+                      </span>
+                      <span className="drop-studio-editor-lbl">
+                        Drop Studio<span className="dse-word-editor">&nbsp;Editor</span>
+                      </span>
+                    </button>
+                  </div>
                 </div>
                 </div>
 
@@ -2517,6 +2586,26 @@ export default function DropTile() {
         onClose={() => setEditStudioMode(null)}
       />
 
+    </div>
+  );
+}
+
+function MediaOverlayBadges({
+  chipLabel,
+  showChip,
+  badgeLabel,
+}: {
+  chipLabel: string | null;
+  showChip: boolean;
+  badgeLabel?: string | null;
+}) {
+  if (!showChip && !badgeLabel) return null;
+  return (
+    <div className="media-overlay-badges">
+      {showChip && chipLabel ? (
+        <span className="media-attachment-chip">{chipLabel}</span>
+      ) : null}
+      {badgeLabel ? <span className="media-captured-badge">{badgeLabel}</span> : null}
     </div>
   );
 }

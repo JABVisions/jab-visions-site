@@ -11,6 +11,56 @@
   overflow: hidden;
 }
 
+.card.privateDropCard {
+  background: linear-gradient(
+    180deg,
+    rgba(38, 42, 54, 0.96),
+    rgba(26, 29, 38, 0.98)
+  );
+  border-color: rgba(255, 255, 255, 0.1);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.04),
+    0 16px 40px rgba(0, 0, 0, 0.24);
+}
+
+.card.privateDropCard.pushedDrop {
+  border-color: rgba(255, 255, 255, 0.12);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.04),
+    0 16px 40px rgba(0, 0, 0, 0.24);
+  animation: none;
+}
+
+.card.privateDropCard .title,
+.card.privateDropCard .body,
+.card.privateDropCard .authorHandle,
+.card.privateDropCard .time {
+  color: rgba(206, 214, 228, 0.92);
+}
+
+.card.cardAmplifying {
+  overflow: visible;
+  z-index: 120;
+  animation: cardAmplifyLift 1200ms cubic-bezier(0.18, 0.72, 0.22, 1) forwards;
+}
+
+@keyframes cardAmplifyLift {
+  0% {
+    transform: scale(1);
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.1);
+  }
+  18% {
+    transform: scale(1.018);
+    box-shadow:
+      0 22px 52px rgba(0, 0, 0, 0.14),
+      0 0 32px color-mix(in srgb, var(--reaction-aura, #8ee7ff) 28%, transparent);
+  }
+  100% {
+    transform: scale(1);
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.1);
+  }
+}
+
 .announcementDrop {
   padding-bottom: 0;
 }
@@ -52,35 +102,111 @@
    drop is Pushed — amplifying the signal rather than reposting it. */
 .amplifyRings {
   position: absolute;
-  inset: 0;
-  z-index: 4;
+  inset: -35%;
+  z-index: 200;
   display: grid;
   place-items: center;
   pointer-events: none;
+  transform-style: preserve-3d;
+  perspective: 700px;
 }
+
+/* Fixed portal shell — paints above column seams and board chrome. */
+.amplifyRingsPortal {
+  position: fixed;
+  z-index: 10050;
+  pointer-events: none;
+}
+
+.amplifyRingsPortal .amplifyRings {
+  position: relative;
+  inset: auto;
+  width: 100%;
+  height: 100%;
+  perspective: 900px;
+}
+
+.amplifyRings::before {
+  content: "";
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  background: radial-gradient(
+    circle,
+    color-mix(in srgb, var(--reaction-aura, #8ee7ff) 92%, white) 0%,
+    color-mix(in srgb, var(--reaction-aura, #8ee7ff) 40%, transparent) 55%,
+    transparent 72%
+  );
+  box-shadow:
+    0 0 24px color-mix(in srgb, var(--reaction-aura, #8ee7ff) 75%, transparent),
+    0 0 48px color-mix(in srgb, var(--reaction-aura, #8ee7ff) 45%, transparent);
+  animation: amplifyCore 900ms cubic-bezier(0.18, 0.72, 0.22, 1) forwards;
+}
+
 .amplifyRings span {
   position: absolute;
-  width: 46px;
-  height: 46px;
+  width: 52px;
+  height: 52px;
   border-radius: 999px;
-  border: 2px solid var(--reaction-aura, #8ee7ff);
+  border: 2px solid color-mix(in srgb, var(--reaction-aura, #8ee7ff) 88%, white);
   opacity: 0;
-  animation: amplifyRing 1000ms cubic-bezier(0.22, 0.61, 0.36, 1) forwards;
+  box-shadow:
+    0 0 18px color-mix(in srgb, var(--reaction-aura, #8ee7ff) 55%, transparent),
+    0 0 36px color-mix(in srgb, var(--reaction-aura, #8ee7ff) 32%, transparent),
+    inset 0 0 12px color-mix(in srgb, var(--reaction-aura, #8ee7ff) 24%, transparent);
+  animation: amplifyRing 1100ms cubic-bezier(0.16, 0.72, 0.18, 1) forwards;
+  transform-style: preserve-3d;
+  backface-visibility: hidden;
 }
+
 .amplifyRings span:nth-child(2) {
-  animation-delay: 150ms;
+  animation-delay: 140ms;
+  border-width: 2.5px;
 }
-@keyframes amplifyRing {
+
+.amplifyRings span:nth-child(3) {
+  animation-delay: 280ms;
+  border-width: 1.5px;
+}
+
+@keyframes amplifyCore {
   0% {
-    transform: scale(0.55);
-    opacity: 0.5;
+    transform: translateZ(0) scale(0.35);
+    opacity: 0.95;
+  }
+  35% {
+    transform: translateZ(72px) scale(1.2);
+    opacity: 0.88;
   }
   100% {
-    transform: scale(9);
+    transform: translateZ(220px) scale(2.8);
     opacity: 0;
   }
 }
+
+@keyframes amplifyRing {
+  0% {
+    transform: translateZ(0) scale(0.35);
+    opacity: 0.72;
+    filter: blur(0);
+  }
+  25% {
+    opacity: 0.58;
+  }
+  100% {
+    transform: translateZ(260px) scale(18);
+    opacity: 0;
+    filter: blur(2px);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
+  .card.cardAmplifying {
+    animation: none;
+  }
+
+  .amplifyRings::before,
   .amplifyRings span {
     animation-duration: 1ms;
   }
@@ -122,6 +248,20 @@
   justify-content: flex-start;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+/* Secondary media label sits across from the type badge on the right. */
+.metaSecondary {
+  margin-left: auto;
+}
+
+/* Timestamp row under the badge row. */
+.metaRow2 {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  min-width: 0;
 }
 
 .kind,
@@ -209,8 +349,8 @@
   white-space: pre-wrap;
 }
 
-.title :global(b),
-.title :global(strong) {
+.title b,
+.title strong {
   font-weight: 900;
 }
 
@@ -295,8 +435,8 @@
   line-height: 1.45;
 }
 
-.body :global(b),
-.body :global(strong) {
+.body b,
+.body strong {
   font-weight: 900;
 }
 
@@ -317,8 +457,21 @@ iframe {
   background: rgba(255, 255, 255, 0.06);
 }
 
+.embed.spotify {
+  overflow-x: auto;
+  overflow-y: hidden;
+  direction: rtl;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.embed.spotify::-webkit-scrollbar { display: none; }
+
 .embed.spotify iframe {
   height: 160px;
+  width: min(100%, 460px);
+  min-width: 460px;
+  max-width: none;
 }
 
 .embed.apple_music iframe {
@@ -487,6 +640,53 @@ iframe {
   text-transform: uppercase;
   line-height: 1;
   backdrop-filter: blur(8px);
+  pointer-events: none;
+}
+
+.media-overlay-badges {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  max-width: calc(100% - 24px);
+  pointer-events: none;
+}
+
+.media-overlay-badges .activityMediaChip {
+  position: static;
+  top: auto;
+  left: auto;
+}
+
+.media-captured-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 24px;
+  padding: 0 10px;
+  padding-top: 1px;
+  border-radius: 999px;
+  border: 1px solid rgba(228, 232, 244, 0.42);
+  background: linear-gradient(
+    180deg,
+    rgba(156, 162, 178, 0.72),
+    rgba(108, 114, 128, 0.78)
+  );
+  color: rgba(248, 250, 255, 0.96);
+  font-size: 10px;
+  font-weight: 950;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  line-height: 1;
+  backdrop-filter: blur(8px);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.18),
+    0 4px 14px rgba(0, 0, 0, 0.18);
+  white-space: nowrap;
   pointer-events: none;
 }
 
@@ -694,17 +894,110 @@ iframe {
 }
 
 .rail {
-  margin-top: 12px;
+  --activity-rail-gap: 6px;
+  --activity-rail-btn-h: 36px;
+  margin-top: 8px;
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
+  align-items: stretch;
+  gap: var(--activity-rail-gap);
+}
+
+.compact .rail {
+  --activity-rail-btn-h: 34px;
+  --activity-rail-gap: 5px;
+}
+
+.rail .railCluster {
+  gap: var(--activity-rail-gap);
+}
+
+.rail .rbtn {
   gap: 8px;
+  min-height: var(--activity-rail-btn-h);
+  height: var(--activity-rail-btn-h);
+  padding: 0 12px;
+  box-sizing: border-box;
+}
+
+.rail .rbtn.activityDropComment {
+  width: 100%;
+  justify-content: center;
+  height: auto;
+  min-height: 0;
+  padding: 10px 12px;
+}
+
+.activityDropActionStack {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  width: 100%;
+  max-width: 100%;
+}
+
+.activityDropToolsSlot {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  padding-top: 2px;
+}
+
+.rail .rbtn .glyph {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+}
+
+.rail .rbtn .lbl {
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.rail .rbtn.activityDropComment .lbl {
+  letter-spacing: 0.1em;
+}
+
+.drop-studio-editor-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border-radius: 999px;
+  padding: 10px 16px;
+  border: 1px solid rgba(255, 90, 170, 0.42);
+  background: rgba(255, 64, 160, 0.08);
+  color: rgba(190, 30, 120, 0.95);
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.drop-studio-editor-btn:hover {
+  background: rgba(255, 64, 160, 0.16);
+  box-shadow: 0 0 16px rgba(255, 90, 170, 0.28);
+  color: rgba(210, 40, 130, 0.98);
+}
+
+.drop-studio-editor-glyph {
+  font-size: 15px;
+  line-height: 1;
+}
+
+.drop-studio-editor-lbl {
+  font-size: 10px;
+  font-weight: 950;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
 }
 
 .railRow {
   display: flex;
   align-items: center;
-  justify-content: flex-start;
+  justify-content: center;
   width: 100%;
   min-width: 0;
 }
@@ -712,11 +1005,15 @@ iframe {
 .railCluster {
   display: inline-flex;
   align-items: center;
-  justify-content: flex-start;
+  justify-content: center;
   gap: 8px;
   flex-wrap: wrap;
   max-width: 100%;
   min-width: 0;
+}
+
+.rail .railCluster {
+  gap: var(--activity-rail-gap);
 }
 
 .rbtn {
@@ -729,7 +1026,22 @@ iframe {
   background: rgba(255, 255, 255, 0.82);
   cursor: pointer;
   color: rgba(0, 0, 0, 0.62);
-  transition: transform 140ms ease, filter 140ms ease, border-color 140ms ease, box-shadow 140ms ease;
+  transition: transform 140ms ease, filter 140ms ease, border-color 280ms ease,
+    box-shadow 280ms ease, color 280ms ease, text-shadow 280ms ease;
+}
+.railRowTop .rbtn {
+  width: 38px;
+  min-width: 38px;
+  height: 38px;
+  padding: 0;
+  /* Icon-only circle: center the glyph (the base .rbtn has no justify-content,
+     so a single child was sitting flex-start / off to the left). */
+  justify-content: center;
+  gap: 0;
+}
+
+.railRowTop .rbtn .lbl {
+  display: none;
 }
 
 .rbtn:hover {
@@ -767,9 +1079,14 @@ iframe {
   text-shadow: 0 0 12px var(--reaction-aura, #8ee7ff);
 }
 
-.rbtn.selected .lbl {
+.rbtn.selected .lbl,
+.rbtn.selected .glyph {
   color: var(--reaction-aura, #8ee7ff);
   text-shadow: 0 0 12px var(--reaction-aura, #8ee7ff);
+}
+
+.rbtn.selected .glyph svg {
+  filter: drop-shadow(0 0 8px var(--reaction-aura, #8ee7ff));
 }
 
 /* Per-action hovers now unified under .rbtn:hover so the active aura
@@ -820,6 +1137,33 @@ iframe {
   background: rgba(255, 255, 255, 0.9);
   box-shadow: 0 12px 30px rgba(0, 0, 0, 0.12);
   color: rgba(0, 0, 0, 0.72);
+  animation: toastIn 220ms ease both;
+}
+
+.toast.toastOut {
+  animation: toastOut 280ms ease both;
+}
+
+@keyframes toastIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes toastOut {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(4px);
+  }
 }
 
 .compact .body {
@@ -889,4 +1233,15 @@ iframe {
   .authorAvatarFrame {
     --avatar-size: 40px;
   }
+
+  /* Mobile: Studio button reads just "Drop Studio" — no clapper, no "Editor". */
+  .dse-word-editor,
+  .drop-studio-editor-glyph {
+    display: none;
+  }
+}
+
+/* Profile board (compact) activity channel: avatar frame only, no @handle. */
+.compact .authorHandle {
+  display: none;
 }

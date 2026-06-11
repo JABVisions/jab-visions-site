@@ -1,7 +1,8 @@
 // File: app/components/board/ActivityCard.tsx
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import "./ActivityCard.css";
 import {
   appendLocalActivity,
@@ -9,7 +10,7 @@ import {
   removeLocalActivity,
   type BoardActivity,
 } from "@/lib/board/activity";
-import { readBrain } from "@/lib/board/bucketBrain";
+import { readBrain, withdrawFromBrain } from "@/lib/board/bucketBrain";
 import { removeDrops as removeUniversalDrops } from "@/lib/board/drops/storage";
 import { resolveLinkPreviewImage } from "@/lib/board/linkPreviewImages";
 import { fetchLinkPreview } from "@/lib/board/linkPreview";
@@ -52,6 +53,7 @@ import {
   secondaryAttachmentLabelFromMeta,
 } from "@/lib/board/dropDisplay";
 import { parseBoardStorageFromUrl } from "@/lib/board/musicPlayback";
+import type { DropItem } from "@/lib/board/dropItem";
 
 import {
   ANNOUNCEMENT_VIBES,
@@ -59,7 +61,6 @@ import {
   DROP_KIND_DISPLAY_RENAMES,
   EVT_BUCKET_UPDATED,
   EVT_DEPOSIT,
-  EVT_OPEN,
   activityOwnedByCurrentUser,
   clsx,
   colorFromAura,
@@ -97,17 +98,18 @@ import {
 type Props = {
   item: BoardActivity;
   compact?: boolean;
-  openBucketOnSignal?: boolean; // feels “command-center-ish”
   onRemove?: (dropId: string) => void;
 };
 
 export default function ActivityCard({
   item,
   compact,
-  openBucketOnSignal = false,
   onRemove,
 }: Props) {
   const [toast, setToast] = useState<string | null>(null);
+  const [toastVisible, setToastVisible] = useState(false);
+  const toastFadeTimerRef = useRef<number | null>(null);
+  const toastClearTimerRef = useRef<number | null>(null);
   const [embedFailed, setEmbedFailed] = useState(false);
   const [signedPreviewImage, setSignedPreviewImage] = useState<string>("");
   // Image fetched on the client for link drops whose stored record has no
@@ -115,9 +117,19 @@ export default function ActivityCard({
   const [hydratedImage, setHydratedImage] = useState<string>("");
   const [payCheckoutBusy, setPayCheckoutBusy] = useState(false);
   const [isRemovingDrop, setIsRemovingDrop] = useState(false);
-  const [selectedReaction, setSelectedReaction] = useState<"pass" | "pin" | "push" | null>(null);
+  const [selectedReactions, setSelectedReactions] = useState({
+    pass: false,
+    pin: false,
+    push: false,
+  });
   // Transient sonar burst when a drop's signal is amplified (Push).
+  const cardRef = useRef<HTMLDivElement>(null);
   const [amplifyBurst, setAmplifyBurst] = useState(false);
+  const [burstAnchor, setBurstAnchor] = useState<{
+    cx: number;
+    cy: number;
+    span: number;
+  } | null>(null);
   const [commentsOpen, setCommentsOpen] = useState(false);
   const [commentCount, setCommentCount] = useState(0);
   const [userAuraColor, setUserAuraColor] = useState(fallbackAuraColor);
@@ -165,6 +177,9 @@ export default function ActivityCard({
   const [descRichOverride, setDescRichOverride] = useState<RichTextValue | null>(null);
   // Bumped whenever this drop is edited, to re-resolve its canonical media.
   const [mediaRefreshTick, setMediaRefreshTick] = useState(0);
+  const [visibilityOverride, setVisibilityOverride] = useState<"public" | "private" | null>(
+    null
+  );
   // Supabase boardDrops hydration — desktop has this in localStorage; mobile does not.
   const [musicHasStoredFile, setMusicHasStoredFile] = useState(false);
   const [musicHydrating, setMusicHydrating] = useState(false);
@@ -250,13 +265,20 @@ export default function ActivityCard({
         metaString(meta?.originalDropId),
         id
       ),
-    [meta, id]
+    [meta, id, mediaRefreshTick]
   );
+  const dropVisibility: "public" | "private" =
+    visibilityOverride ??
+    (canonicalBoardDrop?.visibility as "public" | "private" | undefined) ??
+    (meta?.visibility as "public" | "private" | undefined) ??
+    "public";
   const canonicalMediaKind = canonicalBoardDrop
     ? resolveDropMediaKind(canonicalBoardDrop) ?? ""
     : "";
   const feedMediaKind =
-    canonicalMediaKind || metaString(meta?.mediaKind, meta?.preview?.mediaKind);
+    canonicalMediaKind ||
+    resolveDropMediaKindFromMeta(meta as Record<string, unknown>) ||
+    metaString(meta?.mediaKind, meta?.preview?.mediaKind);
   const feedDropType = String(meta?.dropType ?? item?.kind ?? "").toLowerCase();
   const musicDropType = feedDropType || metaString(meta?.dropType, meta?.drop_flavor);
   const dropMediaUrl = metaString(meta?.mediaUrl);
@@ -288,20 +310,49 @@ export default function ActivityCard({
       )
     : "";
 
+  function flashToast(message: string | null, duration = 1200) {
+    if (toastFadeTimerRef.current) window.clearTimeout(toastFadeTimerRef.current);
+    if (toastClearTimerRef.current) window.clearTimeout(toastClearTimerRef.current);
+    if (!message) {
+      setToastVisible(false);
+      setToast(null);
+      return;
+    }
+    setToast(message);
+    setToastVisible(true);
+    toastFadeTimerRef.current = window.setTimeout(
+      () => setToastVisible(false),
+      Math.max(180, duration - 280)
+    );
+    toastClearTimerRef.current = window.setTimeout(() => {
+      setToast(null);
+      setToastVisible(false);
+    }, duration);
+  }
+
+  function resolveEditableDropRecord(): DropItem | null {
+    if (canonicalBoardDrop) return canonicalBoardDrop;
+    if (item?.kind !== "board_drop") return null;
+    const { fallbackDrop } = buildEditableDrop();
+    return fallbackDrop as DropItem;
+  }
+
   // Reconstruct a drop record from the feed item so it stays editable even when
   // it isn't in the local cache or server list yet. Shared by the Edit and Drop
   // Public/Private toggle parity with the profile board. Persists against the
   // authoritative boardDrops record (so we never overwrite it with a partial
   // feed payload); persistDropEdit fires board:drop:updated so this card refreshes.
   async function toggleDropVisibility() {
-    const base = canonicalBoardDrop;
+    const base = resolveEditableDropRecord();
     if (!base) return;
-    const current = (base.visibility as "public" | "private" | undefined) ?? "public";
+    const current = dropVisibility;
     const next: "public" | "private" = current === "public" ? "private" : "public";
+    setVisibilityOverride(next);
     try {
       await persistDropEdit({ ...base, visibility: next, updatedAt: Date.now() });
+      flashToast(next === "private" ? "Drop is now private" : "Drop is now public", 1000);
     } catch {
-      // leave state unchanged on failure
+      setVisibilityOverride(null);
     }
   }
 
@@ -448,6 +499,9 @@ export default function ActivityCard({
       }
       if ("descriptionRich" in d) {
         setDescRichOverride(normalizeRichText(d.descriptionRich) ?? null);
+      }
+      if (d.visibility === "public" || d.visibility === "private") {
+        setVisibilityOverride(d.visibility);
       }
       void applyMediaFromDrop({
         bucket: typeof d.bucket === "string" ? d.bucket : undefined,
@@ -809,14 +863,15 @@ export default function ActivityCard({
       const identity = readLocalProfileIdentity();
       setUserAuraColor(identity.glowColor || fallbackAuraColor);
       if (!id) {
-        setSelectedReaction(null);
+        setSelectedReactions({ pass: false, pin: false, push: false });
         return;
       }
       const brain = readBrain();
-      const selected = (["pass", "pin", "push"] as const).find((folder) =>
-        (brain[folder] ?? []).some((entry) => String(entry.activityId) === id)
-      );
-      setSelectedReaction(selected ?? null);
+      setSelectedReactions({
+        pass: (brain.pass ?? []).some((entry) => String(entry.activityId) === id),
+        pin: (brain.pin ?? []).some((entry) => String(entry.activityId) === id),
+        push: (brain.push ?? []).some((entry) => String(entry.activityId) === id),
+      });
     };
 
     syncReactionState();
@@ -985,7 +1040,16 @@ export default function ActivityCard({
       preview?.type
     );
 
-    if (explicitDropKind) return formatDropKindLabel(explicitDropKind);
+    const normalized = normalizeBoardDropType(explicitDropKind);
+    if (normalized) return formatDropKindLabel(normalized);
+
+    const priceHint =
+      typeof meta?.priceCents === "number"
+        ? meta.priceCents
+        : typeof preview?.priceCents === "number"
+          ? preview.priceCents
+          : 0;
+    if (priceHint > 0) return formatDropKindLabel("Pay");
 
     const k = String((item as any)?.kind || (item as any)?.type || "drop");
     return formatDropKindLabel(k);
@@ -1036,6 +1100,8 @@ export default function ActivityCard({
       (isPayDrop && activityMediaKind !== "video" && activityMediaKind !== "audio") ||
       (isBoardStorageMedia &&
         isBoardImageUrl(resolvedPreviewImage || href || dropMediaUrl || "")));
+  const showCapturedOnMediaOverlay =
+    Boolean(badgeLabel) && preferNativeImagePreview && Boolean(resolvedPreviewImage);
   const preferNativeBoardMedia = preferNativeImagePreview || preferNativeAudioPreview;
   const priceLabel = formatPriceFromCents(priceCents);
 
@@ -1113,12 +1179,6 @@ export default function ActivityCard({
     isPayDrop,
     mediaKind,
   ]);
-  const attachmentLabel =
-    embed.kind === "spotify"
-      ? "Play full track in Spotify"
-      : embed.kind === "apple_music"
-        ? "Open in Apple Music"
-        : "Open attachment";
   const compactSpotify = !!compact && embed.kind === "spotify";
 
   // Show embed unless user forces fallback or embed fails. Uploaded music uses
@@ -1133,6 +1193,32 @@ export default function ActivityCard({
   function signal(folder: "pass" | "pin" | "push") {
     if (!id) return;
     const currentUser = readLocalProfileIdentity();
+    const alreadySelected = (readBrain()[folder] ?? []).some(
+      (entry) => String(entry.activityId) === id
+    );
+
+    if (alreadySelected) {
+      withdrawFromBrain(folder, id);
+      setSelectedReactions((prev) => ({ ...prev, [folder]: false }));
+
+      if (folder === "push") {
+        const userId = currentUserKey(currentUser);
+        const originalDropId = pushedRootId(item, meta);
+        removeLocalActivity((activity) => {
+          const activityMeta =
+            activity.meta && typeof activity.meta === "object" ? activity.meta : null;
+          return (
+            Boolean(activityMeta?.isPushed) &&
+            String(activityMeta?.originalDropId || "") === originalDropId &&
+            String(activityMeta?.pushedByUserId || "") === userId
+          );
+        });
+      }
+
+      const word = folder === "pass" ? "PASS" : folder === "pin" ? "PIN" : "PUSH";
+      flashToast(`${word} retracted`, 900);
+      return;
+    }
 
     window.dispatchEvent(
       new CustomEvent(EVT_DEPOSIT, {
@@ -1140,13 +1226,26 @@ export default function ActivityCard({
       })
     );
 
-    setSelectedReaction(folder);
+    setSelectedReactions((prev) => ({ ...prev, [folder]: true }));
 
     if (folder === "push") {
       // Amplify the signal: fire the sonar burst regardless of dedupe so the
-      // gesture always feels alive.
+      // gesture always feels alive. Portal to document.body so rings escape
+      // column dividers and stack above the whole board.
+      const rect = cardRef.current?.getBoundingClientRect();
+      if (rect) {
+        const span = Math.max(rect.width, rect.height, 220);
+        setBurstAnchor({
+          cx: rect.left + rect.width / 2,
+          cy: rect.top + rect.height / 2,
+          span,
+        });
+      }
       setAmplifyBurst(true);
-      window.setTimeout(() => setAmplifyBurst(false), 1100);
+      window.setTimeout(() => {
+        setAmplifyBurst(false);
+        setBurstAnchor(null);
+      }, 1200);
 
       const userId = currentUserKey(currentUser);
       const originalDropId = pushedRootId(item, meta);
@@ -1173,13 +1272,8 @@ export default function ActivityCard({
       }
     }
 
-    if (openBucketOnSignal) {
-      window.dispatchEvent(new CustomEvent(EVT_OPEN, { detail: { folder } }));
-    }
-
     const word = folder === "pass" ? "PASS" : folder === "pin" ? "PIN" : "PUSH";
-    setToast(folder === "push" ? "Signal amplified" : `${word} saved to Bucket`);
-    window.setTimeout(() => setToast(null), 1200);
+    flashToast(folder === "push" ? "Signal amplified" : `${word} saved to Bucket`, 1200);
   }
 
   async function openPayCheckout() {
@@ -1226,9 +1320,8 @@ export default function ActivityCard({
       await performDropRemoval();
     } catch (error) {
       console.error("Failed to remove drop from Board:", error);
-      if (typeof setToast === "function") {
-        setToast("Couldn't remove this drop. Try again.");
-        window.setTimeout(() => setToast(null), 1800);
+      if (typeof flashToast === "function") {
+        flashToast("Couldn't remove this drop. Try again.", 1800);
       }
     } finally {
       setIsRemovingDrop(false);
@@ -1280,8 +1373,7 @@ export default function ActivityCard({
     window.dispatchEvent(new CustomEvent("board:drop:removed", { detail: { id, dropId } }));
     window.dispatchEvent(new CustomEvent(BOARD_STORE_EVENTS.feedUpdated));
     onRemove?.(id);
-    setToast("Drop removed");
-    window.setTimeout(() => setToast(null), 1200);
+    flashToast("Drop removed", 1200);
   }
 
   function clampPan(value: number) {
@@ -1316,33 +1408,65 @@ export default function ActivityCard({
     }
   }
 
+  const reactionAura = userAuraColor || fallbackAuraColor;
+  const amplifyPortal =
+    amplifyBurst &&
+    burstAnchor &&
+    typeof document !== "undefined"
+      ? createPortal(
+          <div
+            className="amplifyRingsPortal"
+            style={{
+              left: burstAnchor.cx - (burstAnchor.span * 2.2) / 2,
+              top: burstAnchor.cy - (burstAnchor.span * 2.2) / 2,
+              width: burstAnchor.span * 2.2,
+              height: burstAnchor.span * 2.2,
+            }}
+            aria-hidden
+          >
+            <div
+              className="amplifyRings"
+              style={
+                {
+                  "--reaction-aura": reactionAura,
+                } as React.CSSProperties
+              }
+            >
+              <span />
+              <span />
+              <span />
+            </div>
+          </div>,
+          document.body
+        )
+      : null;
+
   return (
+    <>
     <div
+      ref={cardRef}
       className={clsx(
         "card",
         compact && "compact",
         compactSpotify && "compactSpotify",
         item?.kind === "announcement" && "announcementDrop",
         isPushed && "pushedDrop",
-        isPayDrop && "payDropCard"
+        isPayDrop && "payDropCard",
+        dropVisibility === "private" && item?.kind === "board_drop" && "privateDropCard",
+        amplifyBurst && "cardAmplifying"
       )}
       style={
         {
           "--author-glow": authorGlow,
           "--author-aura-power": String(displayAuraPower),
-          "--reaction-aura": userAuraColor || fallbackAuraColor,
+          "--reaction-aura": reactionAura,
         } as React.CSSProperties
       }
     >
-      {amplifyBurst ? (
-        <div className="amplifyRings" aria-hidden>
-          <span />
-          <span />
-        </div>
-      ) : null}
       {isPushed ? <div className="pushedByLabel">⚡ Amplified by {pushedByName}</div> : null}
       <div className="head">
         <div className="headCopy">
+          {/* Row 1: drop-type badge on the left, secondary media label across on the right. */}
           <div className="metaRow">
             <RemovableDropBadge
               label={kindLabel}
@@ -1353,18 +1477,26 @@ export default function ActivityCard({
             {announcementVibeLabel ? (
               <span className="metaBadge vibeBadge">{announcementVibeLabel}</span>
             ) : null}
-            {badgeLabel ? <span className="metaBadge">{badgeLabel}</span> : null}
-            {secondaryMetaLabel ? (
-              <span className="metaBadge studioSubBadge">{secondaryMetaLabel}</span>
+            {badgeLabel && !showCapturedOnMediaOverlay ? (
+              <span className="metaBadge">{badgeLabel}</span>
             ) : null}
             {isPayDrop && priceLabel ? <span className="metaBadge">{priceLabel}</span> : null}
-            {timeLabel ? <span className="metaBadge timeBadge">{timeLabel}</span> : null}
             {canonicalBoardDrop?.draftCount ? (
               <span className="metaBadge draftBadge" title="Drafts saved in Drop Studio">
                 🗂 {canonicalBoardDrop.draftCount}
               </span>
             ) : null}
+            {secondaryMetaLabel ? (
+              <span className="metaBadge studioSubBadge metaSecondary">{secondaryMetaLabel}</span>
+            ) : null}
           </div>
+
+          {timeLabel ? (
+            <div className="metaRow2">
+              <span className="metaBadge timeBadge">{timeLabel}</span>
+            </div>
+          ) : null}
+
           <div className="title">
             <RichText as="span" value={titleRich} plain={title} />
           </div>
@@ -1390,12 +1522,6 @@ export default function ActivityCard({
           </div>
         </div>
       </div>
-
-      {body ? (
-        <div className="body">
-          <RichText as="span" value={descRich} plain={body} />
-        </div>
-      ) : null}
 
       {/* ✅ EMBED (now media-aware) */}
       {showEmbed ? (
@@ -1452,35 +1578,9 @@ export default function ActivityCard({
             />
           )}
 
-          <div className="embedFoot">
-            {href ? (
-              <a
-                className="embedLink"
-                href={href}
-                target={external ? "_blank" : undefined}
-                rel={external ? "noreferrer" : undefined}
-              >
-                {attachmentLabel}
-              </a>
-            ) : (
-              <span className="embedLink dim">No attachment</span>
-            )}
-
-            {href ? (
-              <button
-                type="button"
-                className="embedFallback"
-                onClick={() => setEmbedFailed(true)}
-                title="If the embed is blocked, switch to link view"
-              >
-                Embed blocked? Show link
-              </button>
-            ) : null}
-          </div>
-
           {embed.kind === "spotify" ? (
             <div className="embedNote">
-              Streaming embeds may play a preview clip. Upload the audio file as a Music Drop for full in-Board playback, or open the link above in Spotify.
+              Streaming embeds may play a preview clip. Upload the audio file as a Music Drop for full in-Board playback.
             </div>
           ) : null}
         </div>
@@ -1593,8 +1693,15 @@ export default function ActivityCard({
       !showFullSongPlayer &&
       preferNativeImagePreview ? (
         <div className="activityImagePreview">
-          {secondaryMetaLabel ? (
-            <span className="activityMediaChip">{secondaryMetaLabel}</span>
+          {secondaryMetaLabel || showCapturedOnMediaOverlay ? (
+            <div className="media-overlay-badges">
+              {secondaryMetaLabel ? (
+                <span className="activityMediaChip">{secondaryMetaLabel}</span>
+              ) : null}
+              {showCapturedOnMediaOverlay ? (
+                <span className="media-captured-badge">{badgeLabel}</span>
+              ) : null}
+            </div>
           ) : null}
           <img
             className="activityImage"
@@ -1659,97 +1766,114 @@ export default function ActivityCard({
         </a>
       ) : null}
 
+      {/* Description sits directly under the media attachment. */}
+      {body ? (
+        <div className="body">
+          <RichText as="span" value={descRich} plain={body} />
+        </div>
+      ) : null}
+
       {isPayDrop ? (
         <PayOnBoardButton busy={payCheckoutBusy} onClick={() => void openPayCheckout()} />
       ) : null}
 
-      {/* Reaction rail: row 1 = PASS · PIN · PUSH · privacy (right); row 2 = Comment + Studio */}
+      {/* Reaction rail: PASS · PIN · PUSH, then Drop Studio tools (matches Board Drop Collection) */}
       <div className="rail" aria-label="Reaction rail">
         <div className="railRow railRowTop">
           <div className="railCluster" aria-label="Drop reactions">
             <button
               type="button"
-              className={clsx("rbtn pass", selectedReaction === "pass" && "selected")}
-              onClick={() => signal("pass")}
+              className={clsx("rbtn pass", selectedReactions.pass && "selected")}
+              onClick={(event) => {
+                event.stopPropagation();
+                signal("pass");
+              }}
               title="PASS (acknowledge)"
+              aria-label="Pass"
             >
               <span className="glyph" aria-hidden>
                 <PassGlyph />
               </span>
-              <span className="lbl">PASS</span>
             </button>
 
             <button
               type="button"
-              className={clsx("rbtn pin", selectedReaction === "pin" && "selected")}
-              onClick={() => signal("pin")}
+              className={clsx("rbtn pin", selectedReactions.pin && "selected")}
+              onClick={(event) => {
+                event.stopPropagation();
+                signal("pin");
+              }}
               title="PIN (save)"
+              aria-label="Pin"
             >
               <span className="glyph" aria-hidden>
                 <StarGlyph />
               </span>
-              <span className="lbl">PIN</span>
             </button>
 
             <button
               type="button"
-              className={clsx("rbtn push", selectedReaction === "push" && "selected")}
-              onClick={() => signal("push")}
+              className={clsx("rbtn push", selectedReactions.push && "selected")}
+              onClick={(event) => {
+                event.stopPropagation();
+                signal("push");
+              }}
               title="PUSH (boost)"
+              aria-label="Push"
             >
               <span className="glyph" aria-hidden>
                 <ArrowGlyph />
               </span>
-              <span className="lbl">PUSH</span>
             </button>
-
-            {canManageDrop && item?.kind === "board_drop" && canonicalBoardDrop ? (
-              <button
-                type="button"
-                className={`visEye vis-${(canonicalBoardDrop.visibility as string) || "public"}`}
-                onClick={() => void toggleDropVisibility()}
-                aria-pressed={(canonicalBoardDrop.visibility ?? "public") === "private"}
-                aria-label={`${
-                  (canonicalBoardDrop.visibility ?? "public") === "public" ? "Public" : "Private"
-                } drop — tap to toggle`}
-                title={`${
-                  (canonicalBoardDrop.visibility ?? "public") === "public" ? "Public" : "Private"
-                } — tap to toggle`}
-              >
-                <EyeToggle open={(canonicalBoardDrop.visibility ?? "public") === "public"} />
-              </button>
-            ) : null}
           </div>
         </div>
 
-        <div className="railRow railRowBottom">
-          <div className="railCluster">
-            <button
-              type="button"
-              className="rbtn comments"
-              onClick={() => setCommentsOpen(true)}
-              title="Comment"
-            >
-              <span className="glyph" aria-hidden>
-                <CommentGlyph />
-              </span>
-              <span className="lbl">Comment{commentCount ? ` ${commentCount}` : ""}</span>
-            </button>
+        <div className="activityDropActionStack">
+          <button
+            type="button"
+            className="rbtn activityDropComment"
+            onClick={() => setCommentsOpen(true)}
+            title="Comment"
+          >
+            <span className="lbl">
+              Comment{commentCount ? ` ${commentCount}` : ""}
+            </span>
+          </button>
 
-            {canManageDrop ? (
+          {canManageDrop ? (
+            <div className="activityDropToolsSlot">
+              {item?.kind === "board_drop" ? (
+                <button
+                  type="button"
+                  className={`visEye activityDropEye vis-${dropVisibility}`}
+                  onClick={() => void toggleDropVisibility()}
+                  aria-pressed={dropVisibility === "private"}
+                  aria-label={`${
+                    dropVisibility === "public" ? "Public" : "Private"
+                  } drop — tap to toggle`}
+                  title={`${
+                    dropVisibility === "public" ? "Public" : "Private"
+                  } — tap to toggle`}
+                >
+                  <EyeToggle open={dropVisibility === "public"} />
+                </button>
+              ) : null}
+
               <button
                 type="button"
-                className="rbtn studiodrop"
+                className="drop-studio-editor-btn activityDropStudio"
                 onClick={openDropStudioEditor}
                 title="Edit this drop in Drop Studio Editor"
               >
-                <span className="glyph" aria-hidden>
+                <span className="drop-studio-editor-glyph" aria-hidden>
                   🎬
                 </span>
-                <span className="lbl">Drop Studio Editor</span>
+                <span className="drop-studio-editor-lbl">
+                  Drop Studio<span className="dse-word-editor">&nbsp;Editor</span>
+                </span>
               </button>
-            ) : null}
-          </div>
+            </div>
+          ) : null}
         </div>
       </div>
 
@@ -1760,7 +1884,9 @@ export default function ActivityCard({
         dropTitle={title}
       />
 
-      {toast ? <div className="toast">{toast}</div> : null}
+      {toast ? (
+        <div className={clsx("toast", !toastVisible && "toastOut")}>{toast}</div>
+      ) : null}
 
       {/* Dynamic, compact-dependent values; static rules live in ActivityCard.css */}
       <style>{`
@@ -1779,19 +1905,21 @@ export default function ActivityCard({
           font-size: ${compact ? "16px" : "20px"};
         }
         .activityImage {
-          max-height: ${compact ? "260px" : "420px"};
+          max-height: ${compact ? "min(540px, 58vh)" : "min(1080px, 85vh)"};
         }
         .activityImagePreview:not(.announcementMedia) .activityImage {
-          max-height: ${compact ? "min(320px, 58vh)" : "min(480px, 72vh)"};
+          max-height: ${compact ? "min(540px, 58vh)" : "min(1080px, 85vh)"};
         }
         .announcementMedia {
           min-height: ${compact ? "380px" : "560px"};
         }
         .img {
-          max-height: ${compact ? "260px" : "420px"};
+          max-height: ${compact ? "min(540px, 58vh)" : "min(1080px, 85vh)"};
         }
       `}</style>
     </div>
+    {amplifyPortal}
+    </>
   );
 }
 
@@ -1857,20 +1985,6 @@ function ArrowGlyph() {
         strokeWidth="2.2"
         strokeLinejoin="round"
         strokeLinecap="round"
-      />
-    </svg>
-  );
-}
-
-function CommentGlyph() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">
-      <path
-        d="M4.5 6.8c0-1.25 1.02-2.3 2.3-2.3h10.4c1.28 0 2.3 1.05 2.3 2.3v6.6c0 1.25-1.02 2.3-2.3 2.3h-5.4L7.2 19v-3.3h-.4c-1.28 0-2.3-1.05-2.3-2.3V6.8z"
-        fill="transparent"
-        stroke="currentColor"
-        strokeWidth="2.1"
-        strokeLinejoin="round"
       />
     </svg>
   );

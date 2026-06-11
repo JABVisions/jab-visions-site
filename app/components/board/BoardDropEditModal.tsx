@@ -835,7 +835,14 @@ export default function BoardDropEditModal() {
           box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
         }
         @media (max-width: 540px) {
-          .bde-window { max-width: 100%; max-height: 90vh; }
+          .bde-overlay {
+            padding: 10px;
+          }
+          .bde-window {
+            width: min(560px, calc(100dvw - 20px));
+            max-width: calc(100dvw - 20px);
+            max-height: 92vh;
+          }
           .bde-pay-row { flex-direction: column; }
         }
       `}</style>

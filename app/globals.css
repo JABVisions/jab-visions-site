@@ -312,6 +312,13 @@ body {
   }
 }
 
+/* Remove redundant media-type chips that overlay attachments */
+.media-attachment-chip,
+.activityMediaChip,
+.linkCoverHostChip {
+  display: none !important;
+}
+
 /* Board rich text — shared across feed cards, profile tiles, and editors. */
 .boardRichInline,
 .boardRichInlineHost {

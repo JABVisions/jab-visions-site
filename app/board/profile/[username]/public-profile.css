@@ -6,6 +6,27 @@
             linear-gradient(180deg, #fff7c9, #fff3b0);
         }
 
+        .profile-board-section {
+          width: 100%;
+          box-sizing: border-box;
+          padding-left: max(1rem, env(safe-area-inset-left));
+          padding-right: max(1rem, env(safe-area-inset-right));
+        }
+
+        @media (min-width: 640px) {
+          .profile-board-section {
+            padding-left: max(1.5rem, env(safe-area-inset-left));
+            padding-right: max(1.5rem, env(safe-area-inset-right));
+          }
+        }
+
+        @media (min-width: 1024px) {
+          .profile-board-section {
+            padding-left: max(2rem, env(safe-area-inset-left));
+            padding-right: max(2rem, env(safe-area-inset-right));
+          }
+        }
+
         .poster-board {
           position: relative;
           width: 100%;
@@ -81,7 +102,7 @@
 
         .profile-grid {
           display: grid;
-          grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.15fr) minmax(0, 0.95fr);
+          grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr) minmax(0, 0.75fr);
           gap: 16px;
           min-width: 0;
         }
@@ -388,6 +409,22 @@
           overflow: hidden;
         }
 
+        .board-drop-item.board-drop-item-private {
+          background: linear-gradient(
+            180deg,
+            rgba(38, 42, 54, 0.96),
+            rgba(26, 29, 38, 0.98)
+          );
+          border-color: rgba(255, 255, 255, 0.08);
+          box-shadow:
+            inset 0 1px 0 rgba(255, 255, 255, 0.04),
+            0 12px 28px rgba(0, 0, 0, 0.22);
+        }
+
+        .board-drop-item.board-drop-item-private .board-drop-title {
+          color: rgba(206, 214, 228, 0.94);
+        }
+
         .board-drop-top {
           display: flex;
           gap: 10px;
@@ -446,7 +483,7 @@
           width: auto;
           height: auto;
           max-width: 100%;
-          max-height: min(520px, 72vh);
+          max-height: min(1080px, 85vh);
           border-radius: 16px;
           border: 1px solid rgba(0, 0, 0, 0.1);
           object-fit: contain;
@@ -513,21 +550,28 @@
           min-width: 0;
           background: #282828;
           border-radius: 18px;
-          overflow: visible;
+          overflow-x: auto;
+          overflow-y: hidden;
+          direction: rtl;
+          scrollbar-width: none;
+          -ms-overflow-style: none;
         }
+        .board-drop-embed.spotify::-webkit-scrollbar { display: none; }
 
         .board-drop-embed.spotify iframe.spotify-frame {
           display: block;
-          width: 100%;
+          width: min(100%, 460px);
+          min-width: 460px;
           height: 80px;
           border: 0;
           border-radius: 18px;
+          max-width: none;
         }
 
         .board-drop-embed.spotify iframe {
-          min-width: 0;
-          width: 1px;
-          min-width: 100%;
+          width: min(100%, 460px);
+          min-width: 460px;
+          max-width: none;
         }
 
         .board-drop-description {
@@ -680,6 +724,13 @@
         .activity-feed-entry {
           display: grid;
           gap: 10px;
+        }
+
+        .activity-feed-entry:has(.cardAmplifying),
+        .recent-drops-stack:has(.cardAmplifying) {
+          overflow: visible;
+          position: relative;
+          z-index: 80;
         }
 
         .board-whisper {
@@ -853,16 +904,16 @@
           max-width: 100%;
         }
 
-        .bucket-wrap :global(.bucket) {
+        .bucket-wrap .bucket {
           min-width: 0;
           max-width: 100%;
         }
 
-        .bucket-wrap :global(.bucket *) {
+        .bucket-wrap .bucket * {
           box-sizing: border-box;
         }
 
-        .bucket-wrap :global(.bucket .shell) {
+        .bucket-wrap .bucket .shell {
           min-width: 0;
           max-width: 100%;
           background: rgba(255, 251, 221, 0.78);
@@ -870,39 +921,39 @@
           box-shadow: none;
         }
 
-        .bucket-wrap :global(.bucket .topRow) {
+        .bucket-wrap .bucket .topRow {
           display: none;
         }
 
-        .bucket-wrap :global(.bucket .openBtn) {
+        .bucket-wrap .bucket .openBtn {
           width: 100%;
           white-space: normal;
         }
 
-        .bucket-wrap :global(.bucket .right) {
+        .bucket-wrap .bucket .right {
           width: 100%;
           min-width: 0;
         }
 
-        .bucket-wrap :global(.bucket .waveBar) {
+        .bucket-wrap .bucket .waveBar {
           align-items: stretch;
           flex-wrap: wrap;
         }
 
-        .bucket-wrap :global(.bucket .waveBtn) {
+        .bucket-wrap .bucket .waveBtn {
           flex: 1 1 112px;
           justify-content: center;
           min-width: 0;
         }
 
-        .bucket-wrap :global(.bucket .waveText),
-        .bucket-wrap :global(.bucket .folderText) {
+        .bucket-wrap .bucket .waveText,
+        .bucket-wrap .bucket .folderText {
           min-width: 0;
           flex-wrap: wrap;
           justify-content: center;
         }
 
-        .bucket-wrap :global(.bucket .waveMeta) {
+        .bucket-wrap .bucket .waveMeta {
           flex: 1 1 100%;
           min-width: 0;
           flex-wrap: wrap;
@@ -910,12 +961,12 @@
           text-align: center;
         }
 
-        .bucket-wrap :global(.bucket .folderRow) {
+        .bucket-wrap .bucket .folderRow {
           display: grid;
           grid-template-columns: repeat(3, minmax(0, 1fr));
         }
 
-        .bucket-wrap :global(.bucket .folder) {
+        .bucket-wrap .bucket .folder {
           justify-content: center;
           min-width: 0;
           padding-inline: 8px;
@@ -923,7 +974,7 @@
 
         @media (max-width: 1180px) {
           .profile-grid {
-            grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+            grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr);
           }
 
           .center-column {
@@ -932,6 +983,29 @@
         }
 
         @media (max-width: 980px) {
+          .board-bg {
+            overflow-x: clip;
+          }
+
+          .profile-board-section {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding-left: max(8px, env(safe-area-inset-left));
+            padding-right: max(8px, env(safe-area-inset-right));
+            overflow-x: clip;
+          }
+
+          .poster-board {
+            width: 100%;
+            max-width: min(1500px, calc(100dvw - 16px));
+            margin-inline: auto;
+            box-sizing: border-box;
+            padding: 12px;
+            border-radius: 22px;
+            overflow-x: clip;
+          }
+
           .profile-grid {
             grid-template-columns: 1fr;
           }

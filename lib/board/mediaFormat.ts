@@ -12,3 +12,5 @@ export const BOARD_DROP_ASPECT_CSS = `${BOARD_DROP_ASPECT_W} / ${BOARD_DROP_ASPE
 
 /** Numeric ratio (width / height) for canvas crop math. */
 export const BOARD_DROP_ASPECT_RATIO = BOARD_DROP_ASPECT_W / BOARD_DROP_ASPECT_H;
+
+// Board photo output targets ≥1080px on the long edge — see lib/board/imageQuality.ts.

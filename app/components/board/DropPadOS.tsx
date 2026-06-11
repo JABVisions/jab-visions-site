@@ -8,6 +8,11 @@ import ProjectCenter from "@/app/components/board/ProjectCenter";
 import StoreDropTile, { type StoreDrop } from "@/app/components/board/StoreDropTile";
 import DropStudioStage from "@/app/components/board/DropStudioStage";
 import type { DropCustomization } from "@/lib/board/dropCustomizations";
+import {
+  DESCRIPT_SHARE_EVENT,
+  descriptPlainText,
+  type DescriptDoc,
+} from "@/lib/board/descriptDocs";
 import { DROP_PAD_ASSETS_UPDATED_EVENT } from "@/lib/board/dropPadAssets";
 import { readPayDrops } from "@/lib/board/paydrops";
 import { readBoardProjects } from "@/lib/board/projects";
@@ -526,6 +531,9 @@ export default function DropPadOS({
 
   // ✅ Drop Pad OS 4 — Drop Studio launches straight from the lock screen.
   const [studioOpen, setStudioOpen] = useState(false);
+  const [studioInitialMode, setStudioInitialMode] = useState<
+    "photo" | "video" | "audio" | "art" | "descript"
+  >("photo");
   const [studioValue, setStudioValue] = useState<DropCustomization>({});
 
   // ✅ Profile Work Board (the spatial page to the right of the orb home).
@@ -1045,6 +1053,49 @@ export default function DropPadOS({
     triggerDropPlacedIndicator("SYSTEM: Work Drop placed in Assets");
   };
 
+  const addWorkDropFromDescript = async (doc: DescriptDoc) => {
+    setStudioOpen(false);
+    setStudioValue({});
+    const now = Date.now();
+    const plain = doc.plainText?.trim() || descriptPlainText(doc.html);
+    if (!plain && !doc.title?.trim()) {
+      triggerDropPlacedIndicator("SYSTEM: Descript was empty");
+      return;
+    }
+
+    const asset: AssetItem = {
+      id: uid(),
+      kind: "note",
+      title: doc.title?.trim() || `Work Drop · ${new Date(now).toLocaleDateString()}`,
+      description: plain.slice(0, 500) || undefined,
+      createdAt: now,
+      payload: { text: plain },
+    };
+
+    setAssets((prev) => {
+      const next = [asset, ...prev];
+      syncAssetsLocal(next);
+      return next;
+    });
+
+    if (userId) {
+      setSyncing(true);
+      await withTimeout(upsertAssetToSupabase(sb, userId, asset), 8000).catch(() => ({ ok: false }));
+      setSyncing(false);
+    }
+    triggerDropPlacedIndicator("SYSTEM: Descript Work Drop placed in Assets");
+  };
+
+  useEffect(() => {
+    function onDescriptShare(event: Event) {
+      const doc = (event as CustomEvent<DescriptDoc>).detail;
+      if (!doc || doc.destination !== "work") return;
+      void addWorkDropFromDescript(doc);
+    }
+    window.addEventListener(DESCRIPT_SHARE_EVENT, onDescriptShare as EventListener);
+    return () => window.removeEventListener(DESCRIPT_SHARE_EVENT, onDescriptShare as EventListener);
+  }, [userId, sb]);
+
   const placeAsset = async (asset: AssetItem, destination: DropDestination) => {
     if (destination === "portfolio") {
       syncPortfolioDropsLocal([asset, ...portfolioDrops]);
@@ -1460,15 +1511,32 @@ export default function DropPadOS({
                     Power on to open the holographic Drops menu.
                   </div>
 
-                  <button
-                    type="button"
-                    onClick={() => setStudioOpen(true)}
-                    className="group relative z-10 mt-6 inline-flex items-center gap-2 rounded-full border border-cyan-200/30 bg-gradient-to-b from-cyan-300/15 to-fuchsia-400/10 px-6 py-3 text-sm font-extrabold uppercase tracking-[0.18em] text-cyan-50/90 shadow-[0_0_24px_rgba(126,226,255,0.28)] backdrop-blur-sm transition hover:from-cyan-300/25 hover:to-fuchsia-400/18 hover:shadow-[0_0_32px_rgba(126,226,255,0.42)]"
-                    aria-label="Open Drop Studio"
-                  >
-                    <span aria-hidden className="text-base leading-none">🎬</span>
-                    Drop Studio
-                  </button>
+                  <div className="flex flex-wrap items-center justify-center gap-3 mt-6">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setStudioInitialMode("photo");
+                        setStudioOpen(true);
+                      }}
+                      className="group relative z-10 inline-flex items-center gap-2 rounded-full border border-cyan-200/30 bg-gradient-to-b from-cyan-300/15 to-fuchsia-400/10 px-6 py-3 text-sm font-extrabold uppercase tracking-[0.18em] text-cyan-50/90 shadow-[0_0_24px_rgba(126,226,255,0.28)] backdrop-blur-sm transition hover:from-cyan-300/25 hover:to-fuchsia-400/18 hover:shadow-[0_0_32px_rgba(126,226,255,0.42)]"
+                      aria-label="Open Drop Studio"
+                    >
+                      <span aria-hidden className="text-base leading-none">🎬</span>
+                      Drop Studio
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setStudioInitialMode("descript");
+                        setStudioOpen(true);
+                      }}
+                      className="group relative z-10 inline-flex items-center gap-2 rounded-full border border-slate-200/30 bg-gradient-to-b from-slate-200/14 to-slate-400/10 px-6 py-3 text-sm font-extrabold uppercase tracking-[0.18em] text-slate-50/90 shadow-[0_0_24px_rgba(200,210,230,0.22)] backdrop-blur-sm transition hover:from-slate-200/22 hover:to-slate-400/16 hover:shadow-[0_0_32px_rgba(200,210,230,0.34)]"
+                      aria-label="Open Descript in Drop Studio"
+                    >
+                      <span aria-hidden className="text-base leading-none">📝</span>
+                      Descript
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -2056,8 +2124,9 @@ export default function DropPadOS({
       <DropStudioStage
         open={studioOpen}
         initialFile={null}
-        initialMode="photo"
-        allowedModes={["photo", "video", "audio", "art"]}
+        initialMode={studioInitialMode}
+        allowedModes={["photo", "video", "audio", "art", "descript"]}
+        descriptDestination="work"
         value={studioValue}
         onChange={setStudioValue}
         onClose={() => setStudioOpen(false)}

@@ -23,7 +23,6 @@ import {
   waveBucketDrop,
   BUCKET_BRAIN_KEY,
   EVT_UPDATED,
-  EVT_OPEN,
 } from "@/lib/board/bucketBrain";
 
 function clsx(...parts: Array<string | false | null | undefined>) {
@@ -327,20 +326,6 @@ export default function DropsBucket({
       window.removeEventListener(EVT_UPDATED, onUpdated as EventListener);
       window.removeEventListener("storage", onUpdated as EventListener);
     };
-  }, []);
-
-  useEffect(() => {
-    const onOpenBucket = (event: Event) => {
-      const detail = ((event as CustomEvent).detail ?? {}) as { folder?: BucketFolder };
-      if (detail.folder && FOLDERS.some((folder) => folder.key === detail.folder)) {
-        setActive(detail.folder);
-      }
-      setBrain(readBrain());
-      setOpen(true);
-    };
-
-    window.addEventListener(EVT_OPEN, onOpenBucket as EventListener);
-    return () => window.removeEventListener(EVT_OPEN, onOpenBucket as EventListener);
   }, []);
 
   useEffect(() => {
@@ -1006,12 +991,6 @@ function BucketDropCard({
   const showFullSongPlayer = !!storedAudioSrc;
   const showEmbed =
     !!embed.url && !embedFailed && embed.kind !== "none" && !showFullSongPlayer;
-  const attachmentLabel =
-    embed.kind === "spotify"
-      ? "Play full track in Spotify"
-      : embed.kind === "apple_music"
-        ? "Open in Apple Music"
-        : "Open attachment";
   const waveCount = entry.waveCount ?? 0;
   const lastWavedLabel = entry.lastWavedAt ? formatLastWaved(entry.lastWavedAt) : "";
 
@@ -1136,25 +1115,10 @@ function BucketDropCard({
               onError={() => setEmbedFailed(true)}
             />
           )}
-          <div className="embedFoot">
-            {href ? (
-              <a className="embedLink" href={href} target={external ? "_blank" : undefined} rel={external ? "noreferrer" : undefined}>
-                {attachmentLabel}
-              </a>
-            ) : (
-              <span className="embedLink dim">No attachment</span>
-            )}
-
-            {href && (
-              <button type="button" className="embedFallback" onClick={() => setEmbedFailed(true)}>
-                Embed blocked? Show link
-              </button>
-            )}
-          </div>
 
           {embed.kind === "spotify" ? (
             <div className="embedNote">
-              Spotify’s embed can fall back to a preview clip in some browser sessions. Use the link above for full playback in Spotify.
+              Spotify’s embed can fall back to a preview clip in some browser sessions.
             </div>
           ) : null}
         </div>
@@ -1268,8 +1232,21 @@ function BucketDropCard({
         .memoryMissing { margin-top: 10px; border-radius: 14px; border: 1px solid rgba(255, 0, 190, 0.18); background: rgba(255, 0, 190, 0.08); color: rgba(255, 210, 246, 0.86); padding: 10px; font-size: 11px; font-weight: 800; line-height: 1.45; }
 
         .embed { margin-top: 12px; border-radius: 18px; overflow: hidden; border: 1px solid rgba(120, 255, 240, 0.14); background: rgba(0, 0, 0, 0.22); }
+        .embed.spotify {
+          overflow-x: auto;
+          overflow-y: hidden;
+          direction: rtl;
+          scrollbar-width: none;
+          -ms-overflow-style: none;
+        }
+        .embed.spotify::-webkit-scrollbar { display: none; }
         iframe { width: 100%; height: 240px; border: none; display: block; background: rgba(255, 255, 255, 0.05); }
-        .embed.spotify iframe { height: 160px; }
+        .embed.spotify iframe {
+          height: 160px;
+          width: min(100%, 460px);
+          min-width: 460px;
+          max-width: none;
+        }
         .embed.apple_music iframe { height: 175px; }
         .mediaFrame { background: rgba(255, 255, 255, 0.04); }
         .img { width: 100%; height: auto; display: block; }

@@ -38,12 +38,17 @@ import {
 import { pushDrop, readDrops, writeDrops } from "@/lib/board/drops/storage";
 import { readCurrentBoardIdentity } from "@/lib/board/currentProfile";
 import { emitBoardDropSignal } from "@/lib/board/dropSignals";
+import {
+  DESCRIPT_SHARE_EVENT,
+  descriptPlainText,
+  type DescriptDoc,
+} from "@/lib/board/descriptDocs";
 
 function clsx(...parts: Array<string | false | null | undefined>) {
   return parts.filter(Boolean).join(" ");
 }
 
-type StudioCaptureMode = "photo" | "video" | "audio" | "art";
+type StudioCaptureMode = "photo" | "video" | "audio" | "art" | "descript";
 const WORK_THOUGHT_BUCKET = "board-media";
 
 function sanitizeStudioFileName(name: string) {
@@ -383,6 +388,21 @@ export default function ProjectCenter() {
     setThoughtMediaSource(null);
     setThoughtCustomizations({});
   }
+
+  useEffect(() => {
+    function onDescriptShare(event: Event) {
+      const doc = (event as CustomEvent<DescriptDoc>).detail;
+      if (!doc || (doc.destination && doc.destination !== "work")) return;
+      const plain = doc.plainText?.trim() || descriptPlainText(doc.html);
+      if (doc.title?.trim()) setThoughtTitle(doc.title.trim());
+      if (plain) setThoughtText(plain);
+      setThoughtStudioMode(null);
+      setThoughtMessage("Descript loaded into Work Drop Station.");
+      window.setTimeout(() => setThoughtMessage(null), 1800);
+    }
+    window.addEventListener(DESCRIPT_SHARE_EVENT, onDescriptShare as EventListener);
+    return () => window.removeEventListener(DESCRIPT_SHARE_EVENT, onDescriptShare as EventListener);
+  }, []);
 
   async function uploadThoughtMedia(file: File, dropId: string) {
     try {
@@ -1068,7 +1088,7 @@ export default function ProjectCenter() {
           <SectionHeader
             eyebrow="WORK DROP"
             title="Work Drop Station"
-            subtitle="Capture a Work Drop — a quick idea, note, or production spark in any media (photo, video, voice, or art)."
+            subtitle="Capture a Work Drop — photo, video, voice, art, or write in Descript for scripts, notes, and production docs."
           />
           <div className="grid gap-4 p-5">
             <div className="grid gap-3 md:grid-cols-[0.8fr_1.2fr]">
@@ -1129,7 +1149,16 @@ export default function ProjectCenter() {
               >
                 🎬 Capture in Drop Studio
               </button>
-              <span className="text-xs text-white/40">Photo, video, voice, or art — the full Drop Studio.</span>
+              <button
+                type="button"
+                onClick={() => setThoughtStudioMode("descript")}
+                className="rounded-full border border-slate-200/25 bg-slate-300/12 px-4 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-slate-50/88 transition hover:bg-slate-300/20"
+              >
+                📝 Write in Descript
+              </button>
+              <span className="text-xs text-white/40">
+                Photo, video, voice, art, or Descript — the full Drop Studio.
+              </span>
             </div>
 
             {thoughtMediaPreview ? (
@@ -1371,7 +1400,8 @@ export default function ProjectCenter() {
           open={thoughtStudioMode !== null}
           initialFile={null}
           initialMode={thoughtStudioMode ?? "photo"}
-          allowedModes={["photo", "video", "audio", "art"]}
+          allowedModes={["photo", "video", "audio", "art", "descript"]}
+          descriptDestination="work"
           value={thoughtCustomizations}
           onChange={setThoughtCustomizations}
           onClose={() => setThoughtStudioMode(null)}
