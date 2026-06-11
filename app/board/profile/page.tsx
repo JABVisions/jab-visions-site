@@ -274,23 +274,6 @@ function BoardWhisper({ whisper }: { whisper: ProfileWhisper }) {
   );
 }
 
-function BoardBookmark({
-  href,
-  title,
-  sub,
-}: {
-  href: string;
-  title: string;
-  sub: string;
-}) {
-  return (
-    <Link href={href} className="bookmark-link">
-      <span className="bookmark-title">{title}</span>
-      <span className="bookmark-sub">{sub}</span>
-    </Link>
-  );
-}
-
 function StoreDropCollectionSlot({ drop, index }: { drop: BoardStoreDrop | null; index: number }) {
   if (!drop) {
     return (
@@ -2183,7 +2166,7 @@ export default function BoardProfileHubPage() {
                 coverDataUrl={profile.coverDataUrl}
                 coverInputRef={coverInputRef}
                 onExpand={(src) => setExpandedPhoto({ src, label: "Cover poster" })}
-                className="profile-mobile-only"
+                className=""
               />
               <section className="inner-tile identity profile-panel-identity">
                 <div className="identity-row">
@@ -2381,31 +2364,6 @@ export default function BoardProfileHubPage() {
               </div>
             </div>
 
-            <div className="right-column">
-              <CoverPosterPanel
-                coverDataUrl={profile.coverDataUrl}
-                coverInputRef={coverInputRef}
-                onExpand={(src) => setExpandedPhoto({ src, label: "Cover poster" })}
-                className="profile-desktop-only profile-mobile-hidden"
-              />
-
-              <section className="inner-tile bookmarks-card profile-mobile-hidden">
-                <div className="tile-head">
-                  <div>
-                    <div className="tile-title">Board Bookmarks</div>
-                    <div className="tile-sub">Fast jumps that feel like tabs in your brain.</div>
-                  </div>
-                </div>
-
-                <div className="bookmark-stack">
-                  <BoardBookmark href="/board/forums" title="Forums Hub" sub="threads, topics, announcements" />
-                  <BoardBookmark href="/board/work" title="Work Board" sub="tasks, roles, collabs" />
-                  <BoardBookmark href="/board/feed" title="Community Feed" sub="status, boards, thread links" />
-                  <BoardBookmark href="/board/options" title="Options" sub="privacy, aura, Friend Zone, settings" />
-                  <BoardBookmark href="/board/options" title="Edit Profile" sub="avatar, bio, glow, vision" />
-                </div>
-              </section>
-            </div>
           </div>
 
           <StoreCollectionPanel

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import DropStudioStage from "./DropStudioStage";
+import { EyeToggle } from "./icons/EyeToggle";
 import type { DropItem } from "./DropTile";
 import {
   type DropCustomization,
@@ -45,6 +46,33 @@ function studioModesForDropType(type: DropItem["type"]): CaptureMode[] {
   if (type === "Pay") return ["photo", "video", "audio", "art", "descript"];
   if (type === "Media") return ["photo", "video", "art"];
   return ["photo", "video", "art"];
+}
+
+/**
+ * Once a drop has saved media, its media TYPE is fixed — editing must not let the
+ * user switch a video into a photo, audio into video, etc. (that would make drop
+ * categorization meaningless). So we narrow the studio's allowed modes to only
+ * those that produce the SAME media kind as what's already saved:
+ *   audio  -> ["audio"]      video -> ["video"]
+ *   image  -> the image tools valid for this drop type (photo and/or art)
+ * Text/descript drops (no saved media kind) keep the full set so the body can
+ * still be written. The rail disables every mode outside this set.
+ */
+function lockedStudioModes(drop: DropItem | null): CaptureMode[] {
+  if (!drop) return ["photo"];
+  const base = studioModesForDropType(drop.type);
+  switch (drop.mediaKind) {
+    case "audio":
+      return ["audio"];
+    case "video":
+      return ["video"];
+    case "image": {
+      const imageModes = base.filter((m) => m === "photo" || m === "art");
+      return imageModes.length ? imageModes : ["photo"];
+    }
+    default:
+      return base;
+  }
 }
 
 function descriptDestinationForDropType(type: DropItem["type"]): "doc" | "thought" | "pay" {
@@ -300,6 +328,17 @@ export default function BoardDropEditModal() {
     await openMediaStudioFor(drop);
   }
 
+  // Unified Drop Studio entry: media drops open the capture studio, text drops
+  // (Doc / Thought / Pay) open Descript. One button across every drop type.
+  function openStudioEditor() {
+    if (!drop) return;
+    if (hasMedia && !isDoc) {
+      void openMediaStudio();
+    } else {
+      openDescriptStudioFor();
+    }
+  }
+
   async function publicUrlForUpload(file: File, dropId: string) {
     const up = await uploadDropMedia(file, dropId);
     if (!up) return null;
@@ -419,7 +458,7 @@ export default function BoardDropEditModal() {
         description: drop.type === "Thought" ? drop.description : descPlain || undefined,
         descriptionRich: descRichClean,
         thoughtText: drop.type === "Thought" ? descPlain || undefined : drop.thoughtText,
-        visibility: drop.type === "Thought" ? visibility : drop.visibility,
+        visibility,
         url: isLink ? (linkUrl.trim() ? normalizeUrl(linkUrl) ?? drop.url : drop.url) : drop.url,
         priceCents: drop.type === "Pay" ? cents ?? drop.priceCents : drop.priceCents,
         paymentLink: drop.type === "Pay" ? cleanLink ?? undefined : drop.paymentLink,
@@ -512,6 +551,35 @@ export default function BoardDropEditModal() {
               </button>
             </div>
 
+            {/* Uniform top bar for every Drop Studio editor intro: privacy eye
+                toggle (left) + Open Studio Editor (right). Replaces the old bottom
+                Public/Private + Open Descript controls. Shown for studio-editable
+                drop types (Doc / Thought / Pay / any media drop). */}
+            {isDoc || isThought || isPay || hasMedia ? (
+              <div className="bde-studio-launch">
+                <button
+                  type="button"
+                  className={`bde-vis-eye ${visibility === "private" ? "is-private" : ""}`}
+                  onClick={() => setVisibility(visibility === "public" ? "private" : "public")}
+                  aria-label={
+                    visibility === "public"
+                      ? "Public — tap to set Private"
+                      : "Private — tap to set Public"
+                  }
+                  title={visibility === "public" ? "Public" : "Private"}
+                >
+                  <EyeToggle open={visibility === "public"} size={16} />
+                </button>
+                <button
+                  type="button"
+                  className="bde-studio-btn bde-studio-open"
+                  onClick={openStudioEditor}
+                >
+                  🎬 Open Studio Editor
+                </button>
+              </div>
+            ) : null}
+
             <div className="bde-body">
               <label className="bde-label">Title</label>
               <RichTextField
@@ -578,53 +646,6 @@ export default function BoardDropEditModal() {
                 </div>
               ) : null}
 
-              {drop.type === "Thought" ? (
-                <div className="bde-visibility">
-                  <span className="bde-label">Visibility</span>
-                  <div className="bde-vis-group">
-                    <button
-                      type="button"
-                      className={`bde-vis ${visibility === "public" ? "on" : ""}`}
-                      onClick={() => setVisibility("public")}
-                    >
-                      Public
-                    </button>
-                    <button
-                      type="button"
-                      className={`bde-vis ${visibility === "private" ? "on" : ""}`}
-                      onClick={() => setVisibility("private")}
-                    >
-                      Private
-                    </button>
-                  </div>
-                </div>
-              ) : null}
-
-              {isDoc || isThought || isPay ? (
-                <div className="bde-media-row">
-                  <button type="button" className="bde-studio-btn" onClick={openDescriptStudioFor}>
-                    🎬 Open Drop Studio
-                  </button>
-                  <span className="bde-media-note">
-                    {isDoc
-                      ? "Edit title and notes in Descript."
-                      : isThought
-                        ? "Write or refine your thought in Descript."
-                        : "Draft your Pay Drop copy in Descript."}
-                  </span>
-                </div>
-              ) : null}
-
-              {hasMedia && !isDoc ? (
-                <div className="bde-media-row">
-                  <button type="button" className="bde-studio-btn" onClick={openMediaStudio}>
-                    🎬 Drop Studio Editor
-                  </button>
-                  <span className="bde-media-note">
-                    {pendingFile ? "New media ready — save to apply." : "Replace photo, video, or audio."}
-                  </span>
-                </div>
-              ) : null}
             </div>
 
             <div className="bde-actions">
@@ -655,7 +676,7 @@ export default function BoardDropEditModal() {
         initialMode={
           studioMode ?? (drop?.type === "Doc" ? "descript" : "photo")
         }
-        allowedModes={drop ? studioModesForDropType(drop.type) : ["photo"]}
+        allowedModes={lockedStudioModes(drop)}
         descriptDestination={drop ? descriptDestinationForDropType(drop.type) : "doc"}
         value={customizations}
         onChange={setCustomizations}
@@ -791,6 +812,46 @@ export default function BoardDropEditModal() {
         }
         .bde-studio-btn:hover { border-color: rgba(160, 110, 255, 0.8); }
         .bde-media-note { font-size: 12px; color: #8a839a; }
+
+        /* Uniform top bar: circular privacy eye toggle + Open Studio Editor. */
+        .bde-studio-launch {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          padding: 12px 18px 0;
+        }
+        .bde-studio-launch .bde-studio-open {
+          flex: 1;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          gap: 8px;
+        }
+        .bde-vis-eye {
+          flex: 0 0 auto;
+          width: 38px;
+          height: 38px;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          padding: 0;
+          border-radius: 999px;
+          cursor: pointer;
+          border: 1px solid rgba(0, 140, 135, 0.4);
+          background: rgba(220, 252, 240, 0.85);
+          color: rgba(0, 140, 135, 0.95);
+          transition: background 140ms ease, border-color 140ms ease,
+            color 140ms ease, transform 120ms ease;
+        }
+        .bde-vis-eye:hover {
+          transform: translateY(-1px);
+          border-color: rgba(0, 140, 135, 0.7);
+        }
+        .bde-vis-eye.is-private {
+          color: rgba(120, 60, 160, 0.95);
+          background: rgba(238, 230, 255, 0.85);
+          border-color: rgba(120, 60, 160, 0.4);
+        }
         .bde-actions {
           display: flex;
           gap: 10px;

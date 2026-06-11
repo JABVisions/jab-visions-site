@@ -42,6 +42,7 @@ import {
 import { supabaseBrowser } from "@/lib/supabase/browser";
 import DropCommentsDrawer from "./DropCommentsDrawer";
 import AudioDropPlayer from "./AudioDropPlayer";
+import FeedVideo from "./FeedVideo";
 import DropStudioOverlay from "./DropStudioOverlay";
 import RemovableDropBadge from "./RemovableDropBadge";
 import { PayOnBoardButton } from "./PayOnBoardButton";
@@ -425,21 +426,12 @@ export default function ActivityCard({
   function openDropStudioEditor() {
     try {
       const { dropId, fallbackDrop } = buildEditableDrop();
-      const dropMedia = fallbackDrop as {
-        mediaUrl?: string;
-        bucket?: string;
-        storagePath?: string;
-      };
-      const opensDescriptStudio =
-        fallbackDrop.type === "Doc" ||
-        fallbackDrop.type === "Thought" ||
-        fallbackDrop.type === "Pay";
-      const hasStudioMedia = !!(
-        dropMedia.mediaUrl || (dropMedia.bucket && dropMedia.storagePath)
-      );
-      const eventName = opensDescriptStudio || hasStudioMedia ? "board:drop:studio" : "board:drop:edit";
+      // Always land on the title/description edit screen first — never auto-launch
+      // capture. From there the user chooses "Drop Studio Editor" (capture) or
+      // "Open Descript". (Previously fired board:drop:studio, which jumped straight
+      // into the studio.)
       window.dispatchEvent(
-        new CustomEvent(eventName, {
+        new CustomEvent("board:drop:edit", {
           detail: { dropId, drop: fallbackDrop },
         })
       );
@@ -1541,11 +1533,9 @@ export default function ActivityCard({
 
           {embed.kind === "video" && (
             <div className="mediaFrame">
-              <video
+              <FeedVideo
                 className="vid"
                 src={embed.url}
-                controls
-                playsInline
                 onError={() => setEmbedFailed(true)}
               />
               <DropStudioOverlay customizations={dropCustomizations} />
@@ -1649,12 +1639,9 @@ export default function ActivityCard({
 
       {!showEmbed && isStoredVideoDrop ? (
         <div className="mediaFrame storedVideoFrame">
-          <video
+          <FeedVideo
             className="vid"
             src={storedVideoSrc}
-            controls
-            playsInline
-            preload="metadata"
             onError={() => setEmbedFailed(true)}
           />
           <DropStudioOverlay customizations={dropCustomizations} />

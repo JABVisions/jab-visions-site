@@ -433,6 +433,19 @@
   color: rgba(0, 0, 0, 0.58);
   white-space: pre-wrap;
   line-height: 1.45;
+  /* Long / large-font descriptions stay bounded and scroll in place — no frame,
+     no visible scrollbar, the tile never grows. Just slide over the text. The
+     max-height is in em, so it caps to the same line count even at big fonts. */
+  max-height: 9.4em;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
+  scrollbar-width: none;
+}
+.body::-webkit-scrollbar {
+  width: 0;
+  height: 0;
 }
 
 .body b,
@@ -1167,10 +1180,14 @@ iframe {
 }
 
 .compact .body {
-  display: -webkit-box;
-  -webkit-line-clamp: 3;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
+  /* Profile board: keep the tight ~3-line footprint, but scroll for the rest
+     instead of truncating with an ellipsis. Overrides the base body's taller cap. */
+  max-height: 4.5em;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
+  scrollbar-width: none;
 }
 
 .compactSpotify {

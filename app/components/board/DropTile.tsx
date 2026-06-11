@@ -39,6 +39,7 @@ import { EyeToggle } from "./icons/EyeToggle";
 import DropStudioStage from "./DropStudioStage";
 import DropCommentsDrawer from "./DropCommentsDrawer";
 import AudioDropPlayer from "./AudioDropPlayer";
+import FeedVideo from "./FeedVideo";
 import DropStudioOverlay from "./DropStudioOverlay";
 import {
   DESCRIPT_SHARE_EVENT,
@@ -126,7 +127,10 @@ export default function DropTile() {
   const [payProvider, setPayProvider] = useState<PayProviderMode>("stripe_connect");
   const [docDesc, setDocDesc] = useState("");
   const [thoughtText, setThoughtText] = useState("");
-  const [thoughtVisibility, setThoughtVisibility] = useState<"public" | "private">("public");
+  // True while the current draft's text came from Descript mode, so the created
+  // drop gets the glossy Descript thumbnail. Reset once the drop is added.
+  const descriptOriginRef = useRef(false);
+  const [dropVisibility, setDropVisibility] = useState<"public" | "private">("public");
   const [drops, setDrops] = useState<DropItem[]>([]);
   const [viewerOpen, setViewerOpen] = useState(false);
   const [viewerId, setViewerId] = useState<string | null>(null);
@@ -380,6 +384,9 @@ export default function DropTile() {
         else if (dest === "pay") setPayDesc(plain);
         else setDocDesc(plain);
       }
+      // Mark this draft as Descript-authored so the created drop renders the
+      // glossy Descript thumbnail (only Descript-mode drops get it).
+      descriptOriginRef.current = true;
       setStudioMode(null);
     }
     window.addEventListener(DESCRIPT_SHARE_EVENT, onDescriptShare as EventListener);
@@ -895,6 +902,7 @@ export default function DropTile() {
         previewDescription: preview?.description ?? undefined,
         previewImage: resolveLinkPreviewImage(normalized, preview?.image) ?? undefined,
         description: dropDesc.trim() || undefined,
+        visibility: dropVisibility,
         createdAt: Date.now(),
       },
       ...drops,
@@ -964,6 +972,7 @@ export default function DropTile() {
         ...titleFields,
         type: "Media",
         createdAt: Date.now(),
+        visibility: dropVisibility,
         bucket: up.bucket,
         storagePath: up.storagePath,
         fileName: file.name,
@@ -1011,6 +1020,7 @@ export default function DropTile() {
         ...titleFields,
         type: "Music",
         createdAt: Date.now(),
+        visibility: dropVisibility,
         bucket: up.bucket,
         storagePath: up.storagePath,
         fileName: file.name,
@@ -1047,6 +1057,7 @@ export default function DropTile() {
         ...titleFields,
         type: "Doc",
         createdAt: Date.now(),
+        visibility: dropVisibility,
         bucket: up.bucket,
         storagePath: up.storagePath,
         fileName: file.name,
@@ -1108,9 +1119,10 @@ export default function DropTile() {
             }
           : {}),
         description: cleanDesc || undefined,
-        visibility: thoughtVisibility,
+        visibility: dropVisibility,
         thoughtFormat,
         thoughtText: cleanThought || undefined,
+        fromDescript: descriptOriginRef.current || undefined,
       },
       ...drops,
     ];
@@ -1120,10 +1132,11 @@ export default function DropTile() {
     setTitle("");
     setDropDesc("");
     setThoughtText("");
-    setThoughtVisibility("public");
+    setDropVisibility("public");
     setFile(null);
     setMediaSource(null);
-    flash(setMsg, thoughtVisibility === "private" ? "Private thought saved ✓" : "Thought dropped ✓", 1400);
+    descriptOriginRef.current = false;
+    flash(setMsg, dropVisibility === "private" ? "Private thought saved ✓" : "Thought dropped ✓", 1400);
   }
 
   async function addPayDrop() {
@@ -1164,6 +1177,7 @@ export default function DropTile() {
         ...titleFields,
         type: "Pay",
         createdAt: Date.now(),
+        visibility: dropVisibility,
         bucket: up.bucket,
         storagePath: up.storagePath,
         fileName: file.name,
@@ -1425,6 +1439,28 @@ export default function DropTile() {
         ? "image/*,audio/*,.mp3,.m4a,.wav,.aac,.ogg,.flac"
         : ".pdf,.doc,.docx,.txt,.rtf,.md,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain,text/markdown";
 
+  // Drop types that open the Drop Studio editor put the eye toggle beside the
+  // studio button; the rest put it to the left of the title field.
+  const usesStudioEditor =
+    mode === "Pay" || mode === "Doc" || mode === "Media" || mode === "Thought";
+
+  // Shared circular privacy eye toggle (open = public, closed = private).
+  const visEyeToggle = (
+    <button
+      type="button"
+      className={`vis-eye vis-${dropVisibility}`}
+      onClick={() => setDropVisibility(dropVisibility === "public" ? "private" : "public")}
+      aria-label={
+        dropVisibility === "public"
+          ? "Public — tap to set Private"
+          : "Private — tap to set Public"
+      }
+      title={dropVisibility === "public" ? "Public" : "Private"}
+    >
+      <EyeToggle open={dropVisibility === "public"} />
+    </button>
+  );
+
   // Mobile-only ordering: pull Music drop(s) to sit directly after the Pay drop.
   // Applied via a per-tile `--m-order` CSS var that only takes effect inside the
   // mobile media query, so desktop keeps the natural source order untouched.
@@ -1504,7 +1540,7 @@ export default function DropTile() {
                 setDropDesc("");
                 if (m !== "Thought") {
                   setThoughtText("");
-                  setThoughtVisibility("public");
+                  setDropVisibility("public");
                 }
 
                 if (m !== "Pay") {
@@ -1537,7 +1573,7 @@ export default function DropTile() {
                 setDropDesc("");
                 if (m !== "Thought") {
                   setThoughtText("");
-                  setThoughtVisibility("public");
+                  setDropVisibility("public");
                 }
 
                 if (m !== "Pay") {
@@ -1556,24 +1592,30 @@ export default function DropTile() {
       </div>
 
       <div className="drop-form">
-        <textarea
-          className="drop-input drop-title-input"
-          placeholder="Title"
-          value={title}
-          onChange={(e) => setTitle(e.target.value)}
-          rows={2}
-          aria-label="Title"
-        />
+        <div className={usesStudioEditor ? "drop-title-wrap" : "drop-title-wrap with-vis"}>
+          {!usesStudioEditor ? visEyeToggle : null}
+          <textarea
+            className="drop-input drop-title-input"
+            placeholder="Title"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            rows={2}
+            aria-label="Title"
+          />
+        </div>
 
         {mode === "Pay" ? (
           <>
-            <button
-              type="button"
-              className="capture-action studio-open-cta"
-              onClick={() => openStudio("descript")}
-            >
-              Open Drop Studio
-            </button>
+            <div className="thought-studio-row">
+              {visEyeToggle}
+              <button
+                type="button"
+                className="capture-action studio-open-cta"
+                onClick={() => openStudio("descript")}
+              >
+                Open Drop Studio
+              </button>
+            </div>
 
             <div className="pay-provider-row">
               <button
@@ -1679,13 +1721,16 @@ export default function DropTile() {
         ) : mode === "Doc" ? (
           <>
             <div className="media-capture-field">
-              <button
-                type="button"
-                className="capture-action studio-open-cta"
-                onClick={() => openStudio("descript")}
-              >
-                Open Drop Studio
-              </button>
+              <div className="thought-studio-row">
+                {visEyeToggle}
+                <button
+                  type="button"
+                  className="capture-action studio-open-cta"
+                  onClick={() => openStudio("descript")}
+                >
+                  Open Drop Studio
+                </button>
+              </div>
               <div className="capture-help">
                 Write and format in Descript — Doc Drops use Descript only. Attach your file below.
               </div>
@@ -1731,13 +1776,16 @@ export default function DropTile() {
           </>
         ) : mode === "Media" ? (
           <div className="media-capture-field">
-            <button
-              type="button"
-              className="capture-action studio-open-cta"
-              onClick={() => openStudio(file?.type.startsWith("video/") ? "video" : "photo", file)}
-            >
-              {file ? "Edit in Drop Studio" : "Open Drop Studio"}
-            </button>
+            <div className="thought-studio-row">
+              {visEyeToggle}
+              <button
+                type="button"
+                className="capture-action studio-open-cta"
+                onClick={() => openStudio(file?.type.startsWith("video/") ? "video" : "photo", file)}
+              >
+                {file ? "Edit in Drop Studio" : "Open Drop Studio"}
+              </button>
+            </div>
 
             {selectedMediaPreview ? (
               <div className="studio-preview-wrap">
@@ -1779,28 +1827,31 @@ export default function DropTile() {
           </div>
         ) : mode === "Thought" ? (
           <div className="thought-field">
-            <button
-              type="button"
-              className="capture-action studio-open-cta"
-              onClick={() => openStudio("descript")}
-            >
-              Open Drop Studio
-            </button>
-
-            <div className="pay-provider-row">
+            {/* Privacy eye toggle (left) + Open Drop Studio — uniform with the
+                other drop types. Upload/capture removed; thoughts go through Drop
+                Studio. */}
+            <div className="thought-studio-row">
               <button
                 type="button"
-                className={`provider-chip ${thoughtVisibility === "public" ? "on" : ""}`}
-                onClick={() => setThoughtVisibility("public")}
+                className={`vis-eye vis-${dropVisibility}`}
+                onClick={() =>
+                  setDropVisibility(dropVisibility === "public" ? "private" : "public")
+                }
+                aria-label={
+                  dropVisibility === "public"
+                    ? "Public — tap to set Private"
+                    : "Private — tap to set Public"
+                }
+                title={dropVisibility === "public" ? "Public" : "Private"}
               >
-                Public
+                <EyeToggle open={dropVisibility === "public"} />
               </button>
               <button
                 type="button"
-                className={`provider-chip ${thoughtVisibility === "private" ? "on" : ""}`}
-                onClick={() => setThoughtVisibility("private")}
+                className="capture-action studio-open-cta"
+                onClick={() => openStudio("descript")}
               >
-                Private
+                Open Drop Studio
               </button>
             </div>
 
@@ -1811,37 +1862,6 @@ export default function DropTile() {
               onChange={(e) => setThoughtText(e.target.value)}
               rows={4}
             />
-
-            <div className="drop-file-control">
-              <div className="capture-actions">
-                <label className="capture-action upload-action">
-                  Upload
-                  <input
-                    className="file-input"
-                    type="file"
-                    accept={fileAccept}
-                    onChange={(e) => {
-                      setFile(e.currentTarget.files?.[0] ?? null);
-                      setMediaSource(e.currentTarget.files?.[0] ? "upload" : null);
-                      e.currentTarget.value = "";
-                    }}
-                  />
-                </label>
-                <button type="button" className="capture-action" onClick={() => openStudio("audio")}>
-                  Capture
-                </button>
-              </div>
-              <div className="file-meta file-status">
-                {file ? (
-                  <>
-                    <span className="file-name">{file.name}</span>
-                    <span className="file-size">{Math.round(file.size / 1024)} KB</span>
-                  </>
-                ) : (
-                  <span className="file-name dim">Record a voice memo, or upload a doodle/image.</span>
-                )}
-              </div>
-            </div>
 
             {selectedMediaPreview ? (
               <div className="thought-selected-preview">
@@ -2102,11 +2122,8 @@ export default function DropTile() {
                     {signedUrl ? (
                       <div className="drop-studio-media-frame">
                         {resolvedMediaKind === "video" ? (
-                          <video
+                          <FeedVideo
                             src={signedUrl}
-                            controls
-                            playsInline
-                            preload="metadata"
                             onLoadedMetadata={(e) => tagWideMediaFrame(e.currentTarget)}
                           />
                         ) : (
@@ -2248,8 +2265,14 @@ export default function DropTile() {
                   </div>
                 ) : null}
 
-                {isThought && d.thoughtText ? (
-                  <div className="thought-body">{d.thoughtText}</div>
+                {isThought && d.thoughtText && d.thoughtText !== d.description ? (
+                  d.fromDescript ? (
+                    // Only Descript-authored thoughts get the glossy 4:5 thumbnail.
+                    <div className="thought-body">{d.thoughtText}</div>
+                  ) : (
+                    // Every other thought renders in the scrollable description section.
+                    <div className="drop-description">{d.thoughtText}</div>
+                  )
                 ) : null}
 
                 {(showFooterOpenOriginal || showFooterOpenDoc) ? (

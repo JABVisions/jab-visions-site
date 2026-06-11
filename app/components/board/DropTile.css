@@ -254,6 +254,30 @@
           border-color: rgba(126, 226, 255, 0.5);
           box-shadow: 0 0 16px rgba(126, 226, 255, 0.22);
         }
+        /* Studio drop menus: privacy eye toggle (left) beside Open Drop Studio. */
+        .thought-studio-row {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+        }
+        .thought-studio-row .studio-open-cta {
+          flex: 1;
+          width: auto;
+        }
+
+        /* Non-studio drop menus: privacy eye toggle to the left of the title. */
+        .drop-title-wrap {
+          width: 100%;
+        }
+        .drop-title-wrap.with-vis {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+        }
+        .drop-title-wrap.with-vis .drop-title-input {
+          flex: 1;
+          min-width: 0;
+        }
         .studio-launch-preview {
           display: block;
           width: 100%;
@@ -1732,6 +1756,18 @@
           font-weight: 600;
           line-height: 1.45;
           overflow-wrap: anywhere;
+          /* Bounded, frameless in-place scroll for long / large-font descriptions:
+             no visible scrollbar, tile keeps its size, just slide over the text. */
+          max-height: 7.5em;
+          overflow-y: auto;
+          overscroll-behavior: contain;
+          -webkit-overflow-scrolling: touch;
+          touch-action: pan-y;
+          scrollbar-width: none;
+        }
+        .drop-description::-webkit-scrollbar {
+          width: 0;
+          height: 0;
         }
 
         .drop-description b,
@@ -1752,6 +1788,19 @@
           line-height: 1.5;
           white-space: pre-wrap;
           overflow-wrap: anywhere;
+          /* Frame the glossy Descript/thought thumbnail to the standard 4:5
+             media-chip ratio. Long docs scroll inside the chip (no scrollbar, no
+             frame growth) so the tile stays uniform with media drops. */
+          aspect-ratio: 4 / 5;
+          overflow-y: auto;
+          overscroll-behavior: contain;
+          -webkit-overflow-scrolling: touch;
+          touch-action: pan-y;
+          scrollbar-width: none;
+        }
+        .thought-body::-webkit-scrollbar {
+          width: 0;
+          height: 0;
         }
 
         .pay-desc {

@@ -6,7 +6,7 @@
 
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import DropStudio from "./DropStudio";
 import BoardArtCanvas from "./BoardArtCanvas";
@@ -27,6 +27,18 @@ import VoicePresets from "./VoicePresets";
 type CaptureMode = "photo" | "video" | "audio" | "art" | "descript";
 type FacingMode = "user" | "environment";
 type Phase = "choose" | "capture" | "edit";
+
+/** A single page/slot in an in-progress Dropbook collection. */
+export type DropbookChip = {
+  id: string;
+  /** Set when a drop is committed to the Dropbook shelf. */
+  dropId?: string;
+  mode?: CaptureMode;
+  previewUrl?: string;
+  label?: string;
+};
+
+const DROPBOOK_SHELF_MAX_SLOTS = 4;
 
 const DEFAULT_CAPTURE_MODES: CaptureMode[] = ["photo", "video"];
 // Every mode shows in the rail; media modes not allowed for this drop are locked.
@@ -130,6 +142,9 @@ export default function DropStudioStage({
   const [saveNote, setSaveNote] = useState("");
   const saveNoteTimerRef = useRef<number | null>(null);
   const [draftsOpen, setDraftsOpen] = useState(false);
+  const [isDropbookMode, setIsDropbookMode] = useState(false);
+  const [dropbookCreating, setDropbookCreating] = useState(false);
+  const [dropbookChips, setDropbookChips] = useState<DropbookChip[]>([]);
   const [audioPlaying, setAudioPlaying] = useState(false);
 
   const flashSaveNote = useCallback((message: string) => {
@@ -244,6 +259,14 @@ export default function DropStudioStage({
     }
     document.body.style.overflow = "hidden";
     setDrawOpen(false);
+    setIsDropbookMode(false);
+    setDropbookCreating(false);
+    setDropbookChips((prev) => {
+      prev.forEach((chip) => {
+        if (chip.previewUrl?.startsWith("blob:")) URL.revokeObjectURL(chip.previewUrl);
+      });
+      return [];
+    });
     const safeMode = allowedModes.includes(initialMode) ? initialMode : allowedModes[0] ?? "photo";
     setMode(safeMode);
     if (initialFile) {
@@ -286,11 +309,71 @@ export default function DropStudioStage({
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key !== "Escape") return;
+      onClose();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [open, onClose]);
+
+  /**
+   * TODO(dropbooks): call after a drop is successfully created while `isDropbookMode`
+   * is true — e.g. from `done()` before/after `onComplete`.
+   * Adds a chip to the shelf and keeps empty placeholder slots visible.
+   */
+  const appendDropbookChip = useCallback((chip: Omit<DropbookChip, "id"> & { id?: string }) => {
+    setDropbookChips((prev) => {
+      if (prev.length >= DROPBOOK_SHELF_MAX_SLOTS) return prev;
+      return [
+        ...prev,
+        {
+          id: chip.id ?? `dropbook-chip-${Date.now()}_${Math.random().toString(16).slice(2, 6)}`,
+          dropId: chip.dropId,
+          mode: chip.mode,
+          previewUrl: chip.previewUrl,
+          label: chip.label,
+        },
+      ];
+    });
+  }, []);
+
+  /** TODO(dropbooks): wire chip selection to reopen/edit that drop in the studio. */
+  const selectDropbookChip = useCallback((_chipId: string) => {
+    // Placeholder — future: load chip.dropId back into the editor.
+  }, []);
+
+  const dropbookShelfSlots = useMemo(() => {
+    const emptyCount = Math.max(DROPBOOK_SHELF_MAX_SLOTS - dropbookChips.length, 0);
+    const emptySlots = Array.from({ length: emptyCount }, (_, i) => ({
+      id: `dropbook-empty-${i}`,
+      empty: true as const,
+    }));
+    return [
+      ...dropbookChips.map((chip) => ({ ...chip, empty: false as const })),
+      ...emptySlots,
+    ].slice(0, DROPBOOK_SHELF_MAX_SLOTS);
+  }, [dropbookChips]);
+
+  const dropbookShelfFull = dropbookChips.length >= DROPBOOK_SHELF_MAX_SLOTS;
+
+  const resetCreationSurface = useCallback(() => {
+    fileRef.current = null;
+    if (urlRef.current) {
+      URL.revokeObjectURL(urlRef.current);
+      urlRef.current = "";
+    }
+    setMediaUrl("");
+    setDrawOpen(false);
+    setAudioPlaying(false);
+    setPhase("choose");
+    stopCamera();
+    draftIdRef.current = "";
+  }, [stopCamera]);
+
+  const returnToDropbookShelf = useCallback(() => {
+    resetCreationSurface();
+    setDropbookCreating(false);
+  }, [resetCreationSurface]);
 
   // Cleanup the object URL on unmount.
   useEffect(() => () => {
@@ -435,7 +518,27 @@ export default function DropStudioStage({
     ) {
       fileRef.current = await ensureImageFileMinResolution(fileRef.current);
     }
-    if (fileRef.current) onComplete(fileRef.current, source);
+
+    const file = fileRef.current;
+    if (!file) return;
+
+    if (isDropbookMode) {
+      const previewUrl =
+        mediaKind === "image" || mediaKind === "video"
+          ? URL.createObjectURL(file)
+          : undefined;
+      onComplete(file, source);
+      appendDropbookChip({
+        mode,
+        previewUrl,
+        label: modeLabel(mode),
+      });
+      returnToDropbookShelf();
+      flashSaveNote("Page added to Dropbook ✦");
+      return;
+    }
+
+    onComplete(file, source);
     onClose();
   }
 
@@ -459,13 +562,15 @@ export default function DropStudioStage({
               DROP STUDIO
             </div>
             <span className="studioPill">
-              {mode === "descript"
-                ? "Descript"
-                : phase === "edit"
-                  ? `${modeLabel(mode)} Tools`
-                  : phase === "capture"
-                    ? "Capture Mode"
-                    : "New Drop"}
+              {isDropbookMode
+                ? "Dropbook Mode"
+                : mode === "descript"
+                  ? "Descript"
+                  : phase === "edit"
+                    ? `${modeLabel(mode)} Tools`
+                    : phase === "capture"
+                      ? "Capture Mode"
+                      : "New Drop"}
             </span>
           </div>
           <div className="studioBarRight">
@@ -492,48 +597,163 @@ export default function DropStudioStage({
           {/* One surface: the mode rail stays put while the center moves between
               live capture and editing, so editing feels continuous with shooting. */}
           <div className="capStage">
-            <nav className="modeRail" aria-label="Drop Studio modes">
-              {ALL_STUDIO_MODES.map((m) => {
-                const enabled = allowedModes.includes(m);
-                return (
-                  <button
-                    key={m}
-                    type="button"
-                    className={`modeRailBtn ${mode === m ? "on" : ""} ${enabled ? "" : "locked"}`}
-                    onClick={() => {
-                      if (!enabled) return;
-                      if (m === "descript") {
-                        setMode("descript");
-                        return;
+            <div className={`capTopBand ${isDropbookMode ? "dropbookModeActive" : ""}`}>
+              <nav className="modeRail" aria-label="Drop Studio modes">
+                {ALL_STUDIO_MODES.map((m) => {
+                  const enabled = allowedModes.includes(m);
+                  return (
+                    <button
+                      key={m}
+                      type="button"
+                      className={`modeRailBtn ${mode === m ? "on" : ""} ${enabled ? "" : "locked"} ${
+                        isDropbookMode ? "dropbookOrbit" : ""
+                      }`}
+                      onClick={() => {
+                        if (!enabled) return;
+                        if (isDropbookMode) {
+                          if (dropbookShelfFull) {
+                            flashSaveNote("Dropbook holds up to 4 pages");
+                            return;
+                          }
+                          setDropbookCreating(true);
+                        }
+                        if (m === "descript") {
+                          setMode("descript");
+                          return;
+                        }
+                        // Switching mode mid-edit returns to live capture in that mode.
+                        if (phase === "edit" && mode !== "descript") retake();
+                        setMode(m);
+                      }}
+                      disabled={recording || !enabled}
+                      title={
+                        enabled
+                          ? modeLabel(m)
+                          : m === "audio"
+                            ? "Voice is available on Thought Drops"
+                            : `${modeLabel(m)} isn't available for this drop`
                       }
-                      // Switching mode mid-edit returns to live capture in that mode.
-                      if (phase === "edit" && mode !== "descript") retake();
-                      setMode(m);
-                    }}
-                    disabled={recording || !enabled}
-                    title={
-                      enabled
-                        ? modeLabel(m)
-                        : m === "audio"
-                          ? "Voice is available on Thought Drops"
-                          : `${modeLabel(m)} isn't available for this drop`
-                    }
-                  >
-                    <span className="modeGlyph" aria-hidden>
-                      {modeGlyph(m)}
-                    </span>
-                    <span className="modeName">{modeLabel(m)}</span>
-                  </button>
-                );
-              })}
-            </nav>
+                    >
+                      <span className="modeGlyph" aria-hidden>
+                        {modeGlyph(m)}
+                      </span>
+                      <span className="modeName">{modeLabel(m)}</span>
+                    </button>
+                  );
+                })}
+              </nav>
 
-            <div className={`capMain ${mode === "descript" ? "capMainDescript" : ""}`}>
-              {mode === "descript" ? (
+              <button
+                type="button"
+                className={`dropbookEntry ${isDropbookMode ? "dropbookEntryActive" : ""}`}
+                onClick={() => {
+                  setIsDropbookMode((active) => {
+                    const next = !active;
+                    if (next) {
+                      setDropbookCreating(false);
+                      resetCreationSurface();
+                    } else {
+                      setDropbookCreating(false);
+                    }
+                    return next;
+                  });
+                }}
+                aria-pressed={isDropbookMode}
+              >
+                <span className="dropbookEntryGlyph" aria-hidden>
+                  📖
+                </span>
+                <span className="dropbookEntryLabel">
+                  {isDropbookMode ? "Dropbook Mode" : "Start a Dropbook"}
+                </span>
+              </button>
+            </div>
+
+            <div
+              className={`capMain ${mode === "descript" ? "capMainDescript" : ""} ${
+                isDropbookMode ? "capMainDropbook" : ""
+              } ${dropbookCreating ? "capMainCreating" : ""}`}
+            >
+              {isDropbookMode ? (
+                <div className="dropbookShelfWrap">
+                  <div
+                    className={`dropbookShelfZone ${dropbookCreating ? "slidUp" : ""}`}
+                    aria-label="Dropbook chip shelf"
+                  >
+                    <div className="dropbookShelfHead">
+                      <span className="dropbookWordmark dropbookShelfLabel">Dropbook Shelf</span>
+                      <span className="dropbookShelfHint">
+                        {dropbookShelfFull
+                          ? "4 pages — your Dropbook is full"
+                          : "Create drops to fill your Dropbook"}
+                      </span>
+                    </div>
+                    <div className="dropbookShelfScroll">
+                      {dropbookShelfSlots.map((slot, index) =>
+                        slot.empty ? (
+                          <div
+                            key={slot.id}
+                            className="dropbookChip empty"
+                            aria-label={`Empty Dropbook slot ${index + 1}`}
+                          >
+                            <span className="dropbookChipIndex">{index + 1}</span>
+                            <span className="dropbookChipPlus" aria-hidden>
+                              +
+                            </span>
+                          </div>
+                        ) : (
+                          <button
+                            key={slot.id}
+                            type="button"
+                            className="dropbookChip filled"
+                            onClick={() => selectDropbookChip(slot.id)}
+                            aria-label={slot.label ?? `Dropbook page ${index + 1}`}
+                          >
+                            {slot.previewUrl ? (
+                              // eslint-disable-next-line @next/next/no-img-element
+                              <img
+                                className="dropbookChipPreview"
+                                src={slot.previewUrl}
+                                alt=""
+                              />
+                            ) : (
+                              <span className="dropbookChipModeGlyph" aria-hidden>
+                                {slot.mode ? modeGlyph(slot.mode) : "✦"}
+                              </span>
+                            )}
+                            <span className="dropbookChipFooter">
+                              {slot.label ?? (slot.mode ? modeLabel(slot.mode) : "Drop")}
+                            </span>
+                          </button>
+                        )
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+
+              <div className="capMainBody">
+              {isDropbookMode && !dropbookCreating ? (
+                <div className="dropbookTitleScreen" aria-label="Dropbook title screen">
+                  <h1 className="dropbookWordmark dropbookTitleHero">Dropbook</h1>
+                  <div className="dropbookTitleFooter">
+                    <div className="dropbookTitleGlyph" aria-hidden>
+                      {modeGlyph(mode)}
+                    </div>
+                    <p className="dropbookTitleSub">Your Dropbook is ready</p>
+                    <p className="dropbookTitleHint">
+                      Choose a media type above to add your next page.
+                    </p>
+                  </div>
+                </div>
+              ) : mode === "descript" ? (
                 <DescriptStudio onClose={onClose} defaultDestination={descriptDestination} />
               ) : phase === "choose" ? (
                 <div className="capChoose">
                   <div className="capChooseInner">
+                    {isDropbookMode ? (
+                      <div className="dropbookMonitorLabel">Dropbook</div>
+                    ) : null}
                     <div className="capChooseGlyphBig" aria-hidden>
                       {modeGlyph(mode)}
                     </div>
@@ -729,6 +949,7 @@ export default function DropStudioStage({
                   )}
                 </div>
               )}
+              </div>
             </div>
           </div>
         </div>
@@ -848,30 +1069,76 @@ export default function DropStudioStage({
         /* ---- capture phase ---- */
         .capStage {
           display: grid;
-          grid-template-columns: 92px 1fr;
+          grid-template-rows: auto 1fr;
+          grid-template-columns: 1fr;
           min-height: 0;
           min-width: 0;
           overflow: hidden;
         }
-        .modeRail {
+        .capTopBand {
           display: flex;
           flex-direction: column;
-          gap: 8px;
-          padding: 12px 8px;
+          gap: 10px;
+          padding: 10px 12px 12px;
+          border-bottom: 1px solid rgba(255, 255, 255, 0.1);
           background: rgba(255, 255, 255, 0.04);
-          border-right: 1px solid rgba(255, 255, 255, 0.1);
-          overflow: auto;
+        }
+        .modeRail {
+          display: flex;
+          flex-direction: row;
+          gap: 8px;
+          padding: 0;
+          overflow-x: auto;
+          scrollbar-width: none;
+          -ms-overflow-style: none;
+        }
+        .modeRail::-webkit-scrollbar {
+          display: none;
         }
         .modeRailBtn {
+          position: relative;
           display: grid;
           justify-items: center;
           gap: 4px;
-          padding: 10px 4px;
+          flex: 1 0 auto;
+          min-width: 64px;
+          padding: 10px 8px;
           border-radius: 16px;
           border: 1px solid transparent;
           background: rgba(255, 255, 255, 0.05);
           color: rgba(255, 255, 255, 0.7);
           cursor: pointer;
+          transition:
+            transform 160ms ease,
+            box-shadow 160ms ease,
+            border-color 160ms ease,
+            background 160ms ease;
+        }
+        .dropbookModeActive .modeRailBtn.dropbookOrbit::after {
+          content: "";
+          position: absolute;
+          inset: -2px;
+          border-radius: 18px;
+          border: 1px solid rgba(126, 226, 255, 0.42);
+          box-shadow:
+            0 0 10px rgba(126, 226, 255, 0.28),
+            0 0 18px rgba(255, 79, 216, 0.14),
+            inset 0 0 8px rgba(255, 209, 45, 0.08);
+          pointer-events: none;
+          opacity: 1;
+          animation: dropbookOrbitPulse 2.6s ease-in-out infinite;
+          transition: opacity 320ms ease;
+        }
+        @keyframes dropbookOrbitPulse {
+          0%,
+          100% {
+            transform: scale(1);
+            opacity: 0.62;
+          }
+          50% {
+            transform: scale(1.03);
+            opacity: 1;
+          }
         }
         .modeRailBtn.on {
           color: #06121a;
@@ -879,9 +1146,337 @@ export default function DropStudioStage({
           border-color: rgba(255, 255, 255, 0.5);
           box-shadow: 0 0 16px rgba(126, 226, 255, 0.4);
         }
+        .modeRailBtn.locked {
+          opacity: 0.42;
+        }
         .modeRailBtn:disabled {
           opacity: 0.5;
           cursor: not-allowed;
+        }
+        .dropbookEntry {
+          position: relative;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 10px;
+          width: 100%;
+          min-height: 42px;
+          padding: 10px 16px;
+          border-radius: 14px;
+          border: 1px solid rgba(255, 209, 45, 0.38);
+          background:
+            linear-gradient(
+              120deg,
+              rgba(255, 209, 45, 0.14) 0%,
+              rgba(126, 226, 255, 0.1) 52%,
+              rgba(255, 79, 216, 0.08) 100%
+            ),
+            rgba(255, 255, 255, 0.06);
+          color: rgba(255, 255, 255, 0.94);
+          font-family: inherit;
+          font-size: 11px;
+          font-weight: 950;
+          letter-spacing: 0.16em;
+          text-transform: uppercase;
+          cursor: pointer;
+          overflow: hidden;
+          box-shadow:
+            inset 0 1px 0 rgba(255, 255, 255, 0.2),
+            0 0 24px rgba(255, 209, 45, 0.14);
+          transition:
+            transform 160ms ease,
+            box-shadow 180ms ease,
+            border-color 180ms ease;
+        }
+        .dropbookEntry:hover {
+          transform: translateY(-1px);
+          border-color: rgba(255, 209, 45, 0.58);
+          box-shadow:
+            inset 0 1px 0 rgba(255, 255, 255, 0.24),
+            0 0 32px rgba(255, 209, 45, 0.22),
+            0 10px 28px rgba(0, 0, 0, 0.22);
+        }
+        .dropbookEntry:active {
+          transform: translateY(0);
+        }
+        .dropbookEntryActive {
+          border-color: rgba(255, 209, 45, 0.72);
+          background:
+            linear-gradient(
+              120deg,
+              rgba(255, 209, 45, 0.22) 0%,
+              rgba(126, 226, 255, 0.16) 52%,
+              rgba(255, 79, 216, 0.12) 100%
+            ),
+            rgba(255, 255, 255, 0.1);
+          box-shadow:
+            inset 0 1px 0 rgba(255, 255, 255, 0.28),
+            0 0 36px rgba(255, 209, 45, 0.28);
+        }
+        .dropbookEntryGlyph {
+          font-size: 16px;
+          line-height: 1;
+          filter: drop-shadow(0 0 10px rgba(255, 209, 45, 0.45));
+        }
+        .dropbookEntryLabel {
+          white-space: nowrap;
+        }
+        @media (min-width: 561px) {
+          .dropbookEntry {
+            width: min(480px, 94%);
+            margin-inline: auto;
+          }
+        }
+        .capMainDropbook {
+          grid-template-rows: auto 1fr;
+        }
+        .capMainCreating {
+          grid-template-rows: 1fr;
+        }
+        .capMainCreating .dropbookShelfWrap {
+          max-height: 0;
+          opacity: 0;
+          margin: 0;
+          pointer-events: none;
+        }
+        .capMainBody {
+          min-height: 0;
+          min-width: 0;
+          display: grid;
+          grid-template-rows: 1fr auto;
+          overflow: hidden;
+        }
+        .dropbookShelfWrap {
+          overflow: hidden;
+          flex: 0 0 auto;
+          max-height: 320px;
+          transition:
+            max-height 420ms cubic-bezier(0.22, 1, 0.36, 1),
+            opacity 320ms ease,
+            margin 320ms ease;
+        }
+        .dropbookShelfZone {
+          display: flex;
+          flex-direction: column;
+          gap: 10px;
+          padding: 12px 14px 10px;
+          border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+          background:
+            linear-gradient(180deg, rgba(255, 209, 45, 0.06), rgba(126, 226, 255, 0.04)),
+            rgba(255, 255, 255, 0.03);
+          transform: translateY(0);
+          transition: transform 420ms cubic-bezier(0.22, 1, 0.36, 1);
+        }
+        .dropbookShelfZone.slidUp {
+          transform: translateY(calc(-100% - 12px));
+        }
+        .capMainDropbook:not(.capMainCreating) .capMainBody {
+          position: relative;
+        }
+        .dropbookTitleScreen {
+          position: relative;
+          width: 100%;
+          height: 100%;
+          min-height: 0;
+        }
+        .dropbookWordmark {
+          font-family: inherit;
+          font-weight: 950;
+          letter-spacing: 0.22em;
+          text-transform: uppercase;
+          color: rgba(255, 209, 45, 0.88);
+        }
+        .dropbookTitleHero {
+          position: absolute;
+          top: 50%;
+          left: 50%;
+          margin: 0;
+          padding: 0;
+          width: max-content;
+          max-width: calc(100% - 32px);
+          font-size: clamp(1.65rem, 6.5vw, 2.35rem);
+          line-height: 1;
+          letter-spacing: 0.22em;
+          color: rgb(255, 209, 45);
+          text-shadow: none;
+          filter: none;
+          transform: translate(-50%, -50%);
+          text-align: center;
+        }
+        .dropbookTitleFooter {
+          position: absolute;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          display: grid;
+          justify-items: center;
+          gap: 10px;
+          padding: 0 clamp(16px, 4vw, 32px) clamp(20px, 5vh, 32px);
+          text-align: center;
+        }
+        .dropbookTitleGlyph {
+          font-size: clamp(1.75rem, 6vw, 2.25rem);
+          line-height: 1;
+        }
+        .dropbookTitleSub {
+          margin: 0;
+          font-size: clamp(0.95rem, 2.8vw, 1.12rem);
+          font-weight: 900;
+          letter-spacing: 0.02em;
+          color: rgba(255, 255, 255, 0.88);
+        }
+        .dropbookTitleHint {
+          margin: 0;
+          max-width: 300px;
+          font-size: clamp(0.82rem, 2.4vw, 0.92rem);
+          line-height: 1.55;
+          color: rgba(236, 255, 251, 0.52);
+        }
+        .dropbookMonitorLabel {
+          font-size: 11px;
+          font-weight: 950;
+          letter-spacing: 0.26em;
+          text-transform: uppercase;
+          color: rgba(255, 209, 45, 0.92);
+          text-shadow: 0 0 14px rgba(255, 209, 45, 0.28);
+        }
+        .dropbookShelfHead {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          gap: 2px;
+          text-align: center;
+        }
+        .dropbookShelfLabel {
+          font-size: 9px;
+        }
+        .dropbookShelfHint {
+          font-size: 10px;
+          font-weight: 700;
+          letter-spacing: 0.04em;
+          color: rgba(236, 255, 251, 0.52);
+        }
+        .dropbookShelfScroll {
+          display: flex;
+          gap: 12px;
+          overflow-x: auto;
+          overflow-y: hidden;
+          padding: 4px 6px 8px;
+          scrollbar-width: thin;
+          scrollbar-color: rgba(126, 226, 255, 0.35) transparent;
+          justify-content: center;
+          max-width: min(520px, 100%);
+          margin-inline: auto;
+          width: 100%;
+        }
+        .dropbookShelfScroll::-webkit-scrollbar {
+          height: 4px;
+        }
+        .dropbookShelfScroll::-webkit-scrollbar-thumb {
+          border-radius: 999px;
+          background: rgba(126, 226, 255, 0.35);
+        }
+        .dropbookChip {
+          position: relative;
+          flex: 0 0 auto;
+          width: 92px;
+          aspect-ratio: 4 / 5;
+          border-radius: 14px;
+          overflow: hidden;
+          display: grid;
+          grid-template-rows: 1fr auto;
+          align-items: stretch;
+          border: 1px solid rgba(126, 226, 255, 0.32);
+          background:
+            linear-gradient(160deg, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0.04)),
+            rgba(8, 12, 18, 0.55);
+          box-shadow:
+            inset 0 1px 0 rgba(255, 255, 255, 0.16),
+            0 0 18px rgba(126, 226, 255, 0.12);
+          transition:
+            transform 160ms ease,
+            border-color 160ms ease,
+            box-shadow 160ms ease;
+        }
+        .dropbookChip.empty {
+          place-items: center;
+          grid-template-rows: 1fr;
+          border-style: dashed;
+          border-color: rgba(126, 226, 255, 0.22);
+          background:
+            linear-gradient(160deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.02)),
+            rgba(6, 10, 16, 0.42);
+        }
+        .dropbookChip.filled {
+          padding: 0;
+          cursor: pointer;
+          font-family: inherit;
+          color: inherit;
+        }
+        .dropbookChip.filled:hover {
+          transform: translateY(-2px);
+          border-color: rgba(255, 209, 45, 0.45);
+          box-shadow:
+            inset 0 1px 0 rgba(255, 255, 255, 0.18),
+            0 0 18px rgba(255, 209, 45, 0.18);
+        }
+        .dropbookChipIndex {
+          position: absolute;
+          top: 6px;
+          left: 7px;
+          font-size: 9px;
+          font-weight: 950;
+          letter-spacing: 0.08em;
+          color: rgba(236, 255, 251, 0.5);
+        }
+        .dropbookChipPlus {
+          font-size: 26px;
+          font-weight: 300;
+          line-height: 1;
+          color: rgba(126, 226, 255, 0.58);
+          text-shadow: 0 0 14px rgba(126, 226, 255, 0.38);
+        }
+        .dropbookChipPreview {
+          width: 100%;
+          height: 100%;
+          object-fit: cover;
+          display: block;
+        }
+        .dropbookChipModeGlyph {
+          display: grid;
+          place-items: center;
+          height: 100%;
+          font-size: 22px;
+        }
+        .dropbookChipFooter {
+          padding: 4px 6px 5px;
+          font-size: 8px;
+          font-weight: 950;
+          letter-spacing: 0.1em;
+          text-transform: uppercase;
+          text-align: center;
+          color: rgba(236, 255, 251, 0.78);
+          background: rgba(0, 0, 0, 0.38);
+          border-top: 1px solid rgba(255, 255, 255, 0.08);
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+        @media (max-width: 560px) {
+          .dropbookChip {
+            width: 76px;
+            border-radius: 12px;
+          }
+          .dropbookShelfWrap {
+            max-height: 280px;
+          }
+          .dropbookShelfZone {
+            padding: 10px 10px 8px;
+          }
+          .dropbookShelfScroll {
+            gap: 10px;
+            justify-content: flex-start;
+          }
         }
         .modeGlyph {
           font-size: 18px;
@@ -921,6 +1516,12 @@ export default function DropStudioStage({
           width: 100%;
           overflow: hidden;
         }
+        .capMainDescript .capMainBody {
+          flex: 1;
+          min-height: 0;
+          display: flex;
+          flex-direction: column;
+        }
         .capFlip {
           justify-self: end;
           border-radius: 999px;
@@ -935,18 +1536,15 @@ export default function DropStudioStage({
           cursor: pointer;
         }
         @media (max-width: 560px) {
-          .capStage {
-            grid-template-columns: 1fr;
-            grid-template-rows: auto 1fr;
+          .capTopBand {
+            padding: 8px 10px 10px;
+            gap: 8px;
           }
-          .modeRail {
-            flex-direction: row;
-            border-right: 0;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-            overflow-x: auto;
-          }
-          .modeRailBtn {
-            flex: 1 0 auto;
+          .dropbookEntry {
+            min-height: 38px;
+            padding: 9px 14px;
+            font-size: 10px;
+            letter-spacing: 0.14em;
           }
         }
         .capViewport {

@@ -1088,7 +1088,7 @@ export default function ProjectCenter() {
           <SectionHeader
             eyebrow="WORK DROP"
             title="Work Drop Station"
-            subtitle="Capture a Work Drop — photo, video, voice, art, or write in Descript for scripts, notes, and production docs."
+            subtitle="Write a Work Drop in Descript — scripts, notes, and production docs."
           />
           <div className="grid gap-4 p-5">
             <div className="grid gap-3 md:grid-cols-[0.8fr_1.2fr]">
@@ -1128,36 +1128,15 @@ export default function ProjectCenter() {
             />
 
             <div className="flex flex-wrap items-center gap-2">
-              <label className="cursor-pointer rounded-full border border-white/10 bg-black/25 px-4 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-white/70 transition hover:bg-white/10">
-                Upload
-                <input
-                  type="file"
-                  accept="image/*,video/*,audio/*,.mp3,.m4a,.wav,.aac,.ogg,.flac"
-                  className="hidden"
-                  onChange={(event) => {
-                    const f = event.currentTarget.files?.[0] ?? null;
-                    setThoughtFile(f);
-                    setThoughtMediaSource(f ? "upload" : null);
-                    event.currentTarget.value = "";
-                  }}
-                />
-              </label>
-              <button
-                type="button"
-                onClick={() => setThoughtStudioMode("photo")}
-                className="rounded-full border border-cyan-200/25 bg-cyan-400/12 px-4 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-cyan-50/85 transition hover:bg-cyan-400/20"
-              >
-                🎬 Capture in Drop Studio
-              </button>
               <button
                 type="button"
                 onClick={() => setThoughtStudioMode("descript")}
                 className="rounded-full border border-slate-200/25 bg-slate-300/12 px-4 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-slate-50/88 transition hover:bg-slate-300/20"
               >
-                📝 Write in Descript
+                ✍️ Open Descript
               </button>
               <span className="text-xs text-white/40">
-                Photo, video, voice, art, or Descript — the full Drop Studio.
+                Write your Work Drop in Descript — scripts, notes, and production docs.
               </span>
             </div>
 

@@ -123,9 +123,12 @@
 
         .profile-grid {
           display: grid;
-          /* Favor the left stack (Board Drop Collection) so tiles aren't clipped. */
-          grid-template-columns: minmax(300px, 1.28fr) minmax(280px, 1fr) minmax(220px, 0.72fr);
-          gap: 16px;
+          /* Two-column premium layout — desktop now mirrors the mobile structure:
+             col 1 = Vision Wall + Board Drops, col 2 = Cover → Identity → Aura →
+             Activity. Left favored slightly so drop tiles stay roomy. The old third
+             column was removed. */
+          grid-template-columns: minmax(0, 1.08fr) minmax(0, 0.92fr);
+          gap: 18px;
           min-width: 0;
         }
 
@@ -1104,7 +1107,12 @@
         }
 
         .cover-shell {
-          height: 420px;
+          /* Cover poster is a tall portrait (at least 4:5) so it reads like a
+             real poster and extends down the column toward the Board Drop
+             Collection. */
+          aspect-ratio: 4 / 5;
+          height: auto;
+          min-height: 420px;
         }
 
         .bookmarks-card {
@@ -1499,16 +1507,6 @@
           padding-inline: 8px;
         }
 
-        @media (max-width: 1180px) {
-          .profile-grid {
-            grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr);
-          }
-
-          .center-column {
-            grid-column: 1 / -1;
-          }
-        }
-
         @media (min-width: 981px) {
           .profile-left-stack,
           .profile-right-stack {
@@ -1520,6 +1518,19 @@
 
           .profile-mobile-only {
             display: none !important;
+          }
+
+          /* Store Drops on desktop: a single full-width row of 4 artifacts
+             instead of the 2x2 square. (Mobile keeps the square below.) */
+          .profile-store-drops-bottom {
+            width: 100%;
+            max-width: 100%;
+            aspect-ratio: auto;
+            min-height: 0;
+          }
+
+          .profile-store-drops-bottom .store-collection-grid {
+            grid-template-columns: repeat(4, minmax(0, 1fr));
           }
         }
 

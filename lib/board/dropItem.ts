@@ -110,6 +110,9 @@ export type DropItem = {
   visibility?: "public" | "private";
   thoughtFormat?: "text" | "voice" | "doodle";
   thoughtText?: string;
+  /** True only when the drop's text was authored in Descript mode. Drives the
+   *  glossy Descript thumbnail; every other drop uses the description section. */
+  fromDescript?: boolean;
   /** Inline-formatted title/description (bold/italic/underline + field-level
    *  size & spacing). Plain `title`/`description` remain the fallback. */
   titleRich?: RichTextValue;
@@ -527,6 +530,7 @@ export function normalizeDropItems(input: unknown, userId: string | null): DropI
           ? x.thoughtFormat
           : undefined,
       thoughtText: typeof x.thoughtText === "string" ? x.thoughtText : undefined,
+      fromDescript: x.fromDescript === true ? true : undefined,
     };
       const resolvedKind = resolveDropMediaKind(base);
       if (resolvedKind) base.mediaKind = resolvedKind;
