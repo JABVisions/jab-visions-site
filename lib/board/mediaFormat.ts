@@ -89,11 +89,14 @@ export function isSocialMediaUrl(url: string): boolean {
   }
 }
 
-/** Link chips and embeds default to landscape 16:9; uploaded studio media keeps 4:5 unless rotated. */
+/** Link chips and embeds default to landscape 16:9; uploaded studio media keeps saved frame. */
 export function resolveBoardDropDisplayFrame(
   customizations?: { effects?: { frame?: string | null } | null } | null,
   opts?: { dropType?: string; href?: string; intrinsic?: { width: number; height: number } }
 ): DropMediaFrame {
+  const saved = customizations?.effects?.frame;
+  if (saved === "landscape" || saved === "portrait") return saved;
+
   const dropType = opts?.dropType ?? "";
   if (isLinkStyleBoardDrop(dropType)) return "landscape";
   if (opts?.href && isSocialMediaUrl(opts.href)) return "landscape";

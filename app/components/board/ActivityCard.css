@@ -347,6 +347,30 @@
   letter-spacing: 0.02em;
   overflow-wrap: anywhere;
   white-space: pre-wrap;
+  line-height: 1.35;
+  max-height: calc(14px * 1.35 * 3);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
+  scrollbar-width: none;
+}
+
+.title::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+.title .boardRichInlineHost {
+  display: block;
+  font-size: 14px !important;
+  line-height: 1.35 !important;
+  max-width: 100%;
+}
+
+.title .boardRichInlineHost [style*="font-size"] {
+  font-size: clamp(11px, 14px, 20px) !important;
+  line-height: 1.35 !important;
 }
 
 .title b,
@@ -434,14 +458,25 @@
   white-space: pre-wrap;
   line-height: 1.45;
   /* Long / large-font descriptions stay bounded and scroll in place — no frame,
-     no visible scrollbar, the tile never grows. Just slide over the text. The
-     max-height is in em, so it caps to the same line count even at big fonts. */
-  max-height: 9.4em;
+     no visible scrollbar, the tile never grows. Just slide over the text. */
+  max-height: calc(12px * 1.45 * 6.5);
   overflow-y: auto;
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
   touch-action: pan-y;
   scrollbar-width: none;
+}
+
+.body .boardRichInlineHost {
+  display: block;
+  font-size: 12px !important;
+  line-height: 1.45 !important;
+  max-width: 100%;
+}
+
+.body .boardRichInlineHost [style*="font-size"] {
+  font-size: clamp(10px, 12px, 18px) !important;
+  line-height: 1.45 !important;
 }
 .body::-webkit-scrollbar {
   width: 0;
@@ -483,11 +518,20 @@ iframe {
   min-height: 0;
 }
 
-.linkPreview.is-wide .linkPreviewArt {
+.linkPreview.is-wide .linkPreviewArt,
+.linkPreview .linkPreviewArt {
   aspect-ratio: 16 / 9;
+  width: 100%;
+  min-height: 0;
+}
+
+.linkPreview.is-portrait-framed .linkPreviewArt {
+  aspect-ratio: 4 / 5;
 }
 
 .embed.spotify {
+  width: 100%;
+  max-width: 100%;
   overflow-x: auto;
   overflow-y: hidden;
   direction: rtl;
@@ -499,9 +543,9 @@ iframe {
 
 .embed.spotify iframe {
   height: 160px;
-  width: min(100%, 460px);
-  min-width: 460px;
-  max-width: none;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .embed.apple_music iframe {
@@ -883,6 +927,16 @@ iframe {
   overflow-wrap: anywhere;
 }
 
+.activityDescriptChipBody .boardRichInlineHost {
+  font-size: 14px !important;
+  line-height: 1.5 !important;
+}
+
+.activityDescriptChipBody .boardRichInlineHost [style*="font-size"] {
+  font-size: clamp(10px, 14px, 18px) !important;
+  line-height: 1.5 !important;
+}
+
 .activityDescriptChipBody::-webkit-scrollbar {
   width: 0;
   height: 0;
@@ -948,15 +1002,37 @@ iframe {
   width: 100%;
 }
 
-/* Profile board (compact): music matches the narrower 4:5 chip footprint. */
+/* Profile board (compact): match feed framing — full-width link/music/media chips. */
 .card.compact .storedAudioFrame,
 .card.compact .embed.spotify,
 .card.compact .embed.apple_music,
 .card.compact .embed.soundcloud,
-.card.compact .embed.audio {
-  width: min(100%, calc(72vh * 4 / 5));
-  margin-left: auto;
-  margin-right: auto;
+.card.compact .embed.audio,
+.card.compact .embed.youtube,
+.card.compact .linkPreview {
+  width: 100%;
+  max-width: 100%;
+  margin-left: 0;
+  margin-right: 0;
+}
+
+.card.compact .activityImagePreview:not(.announcementMedia),
+.card.compact .storedVideoFrame,
+.card.compact .embed.image,
+.card.compact .embed.video,
+.card.compact .activityDescriptChip {
+  width: 100%;
+  max-width: 100%;
+  margin-left: 0;
+  margin-right: 0;
+}
+
+.card.compact .activityImagePreview.is-wide:not(.announcementMedia),
+.card.compact .storedVideoFrame.is-wide,
+.card.compact .embed.image.is-wide,
+.card.compact .embed.video.is-wide {
+  width: 100%;
+  max-width: 100%;
 }
 
 .card.compact .embed.spotify iframe,
@@ -1080,6 +1156,7 @@ iframe {
 .compact .rail {
   --activity-rail-btn-h: 34px;
   --activity-rail-gap: 5px;
+  margin-top: 6px;
 }
 
 .rail .railCluster {
@@ -1340,10 +1417,22 @@ iframe {
   }
 }
 
+.compact .activityDropActionStack {
+  gap: 6px;
+}
+
+.compact .activityDropToolsSlot {
+  padding-top: 0;
+  gap: 6px;
+}
+
+.compact .drop-studio-editor-btn {
+  padding: 8px 14px;
+}
+
 .compact .body {
-  /* Profile board: keep the tight ~3-line footprint, but scroll for the rest
-     instead of truncating with an ellipsis. Overrides the base body's taller cap. */
-  max-height: 4.5em;
+  /* Profile board: tight scroll box with fixed px cap so large fonts don't stretch the tile. */
+  max-height: calc(12px * 1.45 * 4.5);
   overflow-y: auto;
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;

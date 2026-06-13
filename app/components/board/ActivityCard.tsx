@@ -233,6 +233,27 @@ export default function ActivityCard({
     resolveBoardDropDisplayFrame(dropCustomizations, { dropType: feedDropType, href })
   );
   const feedMediaRotationStyle = dropMediaRotationStyle(dropCustomizations?.effects?.rotation ?? 0);
+  const mediaFrameTagOpts = useMemo(
+    () => ({ dropType: feedDropType, href }),
+    [feedDropType, href]
+  );
+  const tagMediaFrame = (el: HTMLImageElement | HTMLVideoElement) => {
+    tagDropMediaFrame(el, dropCustomizations, mediaFrameTagOpts);
+  };
+
+  useEffect(() => {
+    const savedFrame = dropCustomizations?.effects?.frame;
+    if (savedFrame !== "landscape" && savedFrame !== "portrait") return;
+    const root = cardRef.current;
+    if (!root) return;
+    const isWide = savedFrame === "landscape";
+    for (const host of root.querySelectorAll<HTMLElement>(
+      ".activityImagePreview, .storedVideoFrame, .embed.image, .embed.video"
+    )) {
+      host.classList.toggle("is-wide", isWide);
+      host.classList.toggle("is-portrait-framed", !isWide);
+    }
+  }, [dropCustomizations?.effects?.frame]);
   // Comments are keyed to the canonical drop id (not the feed activity row id),
   // so they save and load consistently across the feed, grid, and profile.
   const commentDropId = metaString(meta?.dropId, meta?.originalDropId, (item as any)?.id);
@@ -1276,8 +1297,6 @@ export default function ActivityCard({
     isPayDrop,
     mediaKind,
   ]);
-  const compactSpotify = !!compact && embed.kind === "spotify";
-
   // Show embed unless user forces fallback or embed fails. Uploaded music uses
   // the full-song player — never a streaming preview embed (Spotify, etc.).
   const showEmbed =
@@ -1603,7 +1622,6 @@ export default function ActivityCard({
       className={clsx(
         "card",
         compact && "compact",
-        compactSpotify && "compactSpotify",
         item?.kind === "announcement" && "announcementDrop",
         isPushed && "pushedDrop",
         isPayDrop && "payDropCard",
@@ -1688,7 +1706,7 @@ export default function ActivityCard({
                 alt={title || "Vision drop"}
                 className="img"
                 loading="lazy"
-                onLoad={(e) => tagDropMediaFrame(e.currentTarget, dropCustomizations)}
+                onLoad={(e) => tagMediaFrame(e.currentTarget)}
                 onError={() => setEmbedFailed(true)}
               />
               <DropStudioOverlay customizations={dropCustomizations} />
@@ -1701,7 +1719,7 @@ export default function ActivityCard({
                 className="vid"
                 src={embed.url}
                 style={feedMediaRotationStyle}
-                onLoadedMetadata={(e) => tagDropMediaFrame(e.currentTarget, dropCustomizations)}
+                onLoadedMetadata={(e) => tagMediaFrame(e.currentTarget)}
                 onError={() => setEmbedFailed(true)}
               />
               <DropStudioOverlay customizations={dropCustomizations} />
@@ -1815,7 +1833,7 @@ export default function ActivityCard({
             className="vid"
             src={storedVideoSrc}
             style={feedMediaRotationStyle}
-            onLoadedMetadata={(e) => tagDropMediaFrame(e.currentTarget, dropCustomizations)}
+            onLoadedMetadata={(e) => tagMediaFrame(e.currentTarget)}
             onError={() => setEmbedFailed(true)}
           />
           <DropStudioOverlay customizations={dropCustomizations} />
@@ -1869,7 +1887,7 @@ export default function ActivityCard({
             src={resolvedPreviewImage}
             alt={title || "Board drop image"}
             loading="lazy"
-            onLoad={(e) => tagDropMediaFrame(e.currentTarget, dropCustomizations)}
+            onLoad={(e) => tagMediaFrame(e.currentTarget)}
           />
           <DropStudioOverlay customizations={dropCustomizations} />
         </div>
@@ -2066,29 +2084,6 @@ export default function ActivityCard({
           .authorAvatarFrame {
             --avatar-size: 40px;
           }
-        }
-        .linkPreview.is-wide .linkPreviewArt,
-        .linkPreviewArt.is-wide {
-          aspect-ratio: 16 / 9;
-          min-height: 0;
-        }
-        .linkPreview:not(.is-wide) .linkPreviewArt {
-          min-height: ${compact ? "170px" : "230px"};
-        }
-        .linkPreviewTitle {
-          font-size: ${compact ? "16px" : "20px"};
-        }
-        .activityImage {
-          max-height: ${compact ? "min(540px, 58vh)" : "min(1080px, 85vh)"};
-        }
-        .activityImagePreview:not(.announcementMedia) .activityImage {
-          max-height: ${compact ? "min(540px, 58vh)" : "min(1080px, 85vh)"};
-        }
-        .announcementMedia {
-          min-height: ${compact ? "380px" : "560px"};
-        }
-        .img {
-          max-height: ${compact ? "min(540px, 58vh)" : "min(1080px, 85vh)"};
         }
       `}</style>
     </div>

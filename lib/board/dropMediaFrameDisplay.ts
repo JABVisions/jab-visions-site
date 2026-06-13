@@ -44,6 +44,13 @@ export function tagDropMediaFrame(
   }
 
   const savedFrame = customizations?.effects?.frame;
+  if (savedFrame === "landscape" || savedFrame === "portrait") {
+    const isWide = savedFrame === "landscape";
+    host.classList.toggle("is-wide", isWide);
+    host.classList.toggle("is-portrait-framed", !isWide);
+    return;
+  }
+
   const w = el instanceof HTMLVideoElement ? el.videoWidth : el.naturalWidth;
   const h = el instanceof HTMLVideoElement ? el.videoHeight : el.naturalHeight;
   const rotation = normalizeDropMediaRotation(customizations?.effects?.rotation);
@@ -53,14 +60,11 @@ export function tagDropMediaFrame(
         ? { width: h, height: w }
         : { width: w, height: h }
       : undefined;
-  const frame =
-    savedFrame === "landscape" || savedFrame === "portrait"
-      ? savedFrame
-      : resolveBoardDropDisplayFrame(customizations, {
-          dropType: opts?.dropType,
-          href: opts?.href,
-          intrinsic,
-        });
+  const frame = resolveBoardDropDisplayFrame(customizations, {
+    dropType: opts?.dropType,
+    href: opts?.href,
+    intrinsic,
+  });
   const isWide = frame === "landscape";
   host.classList.toggle("is-wide", isWide);
   host.classList.toggle("is-portrait-framed", !isWide);
