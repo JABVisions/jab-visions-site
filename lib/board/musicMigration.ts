@@ -1,6 +1,6 @@
 import type { BoardActivity } from "@/lib/board/activity";
 import { getLocalActivity, setLocalActivity } from "@/lib/board/activity";
-import type { DropItem } from "@/app/components/board/DropTile";
+import type { DropItem } from "@/lib/board/dropItem";
 import {
   loadAllLocalDrops,
   getCurrentUserId,

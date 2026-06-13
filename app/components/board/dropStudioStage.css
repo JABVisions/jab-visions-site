@@ -1,0 +1,1297 @@
+.studioStage {
+  position: fixed;
+  inset: 0;
+  /* Above the board navbar/dock and other floating board UI so the
+     studio is never clipped by them, especially on mobile. */
+  z-index: 100050;
+  display: grid;
+  place-items: center;
+  /* Respect notches and the home-indicator / browser chrome so the sheet
+     (and its top bar + bottom "Use" button) stay fully on-screen. */
+  padding: max(10px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right))
+    max(10px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
+  background:
+    radial-gradient(circle at 22% 14%, rgba(126, 226, 255, 0.16), transparent 34%),
+    radial-gradient(circle at 80% 16%, rgba(255, 0, 190, 0.14), transparent 32%),
+    rgba(6, 10, 16, 0.72);
+  backdrop-filter: blur(12px);
+}
+.studioSheet {
+  width: min(560px, calc(100vw - 20px));
+  /* Size against the dynamic viewport minus the safe-area padding the
+     stage already applies, so the sheet never extends under the dock,
+     navbar, notch, or home indicator on mobile. Taller cap + slimmer
+     margins give the monitor and the attachment drawer more room. */
+  height: min(
+    880px,
+    calc(100dvh - 20px - env(safe-area-inset-top) - env(safe-area-inset-bottom))
+  );
+  max-height: calc(100dvh - 20px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+  display: grid;
+  grid-template-rows: auto 1fr;
+  border-radius: 28px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background:
+    linear-gradient(150deg, rgba(255, 255, 255, 0.1), rgba(0, 0, 0, 0.32)),
+    rgba(9, 13, 19, 0.86);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.22),
+    0 0 50px rgba(126, 226, 255, 0.18),
+    0 30px 90px rgba(0, 0, 0, 0.55);
+}
+.studioBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.05);
+}
+.studioBarLeft {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.studioBrand {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 12px;
+  font-weight: 950;
+  letter-spacing: 0.22em;
+  color: rgba(255, 255, 255, 0.92);
+}
+.studioPill {
+  font-size: 9px;
+  font-weight: 950;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  padding: 5px 9px;
+  border-radius: 999px;
+  color: #06121a;
+  background: radial-gradient(circle at 30% 20%, #fff, #7ee2ff);
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  box-shadow: 0 0 12px rgba(126, 226, 255, 0.4);
+  white-space: nowrap;
+}
+.studioDot {
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  background: radial-gradient(circle at 35% 30%, #fff, #7ee2ff);
+  box-shadow: 0 0 12px rgba(126, 226, 255, 0.8);
+}
+.studioBarRight {
+  display: inline-flex;
+  gap: 8px;
+}
+.studioGhost {
+  border-radius: 999px;
+  padding: 7px 13px;
+  font-size: 12px;
+  font-weight: 900;
+  color: rgba(255, 255, 255, 0.86);
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  cursor: pointer;
+}
+.dropbookCaptureExit {
+  width: 34px;
+  height: 34px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 72, 105, 0.62);
+  background:
+    radial-gradient(circle at 30% 24%, rgba(255, 120, 140, 0.28), transparent 52%),
+    rgba(255, 45, 80, 0.2);
+  color: #ff4d6d;
+  font-size: 15px;
+  font-weight: 950;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.16),
+    0 0 16px rgba(255, 45, 80, 0.22);
+  transition:
+    transform 150ms ease,
+    box-shadow 150ms ease,
+    border-color 150ms ease;
+}
+.dropbookCaptureExit:hover {
+  transform: scale(1.05);
+  border-color: rgba(255, 110, 130, 0.88);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.2),
+    0 0 22px rgba(255, 45, 80, 0.36);
+}
+.dropbookEntryRow {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  width: 100%;
+}
+.dropbookEntryRow .dropbookEntry {
+  flex: 1 1 auto;
+  min-width: 0;
+  width: auto;
+}
+.dropbookHomeBtn {
+  flex: 0 0 42px;
+  width: 42px;
+  min-height: 42px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 209, 45, 0.48);
+  background:
+    linear-gradient(160deg, rgba(255, 209, 45, 0.16), rgba(126, 226, 255, 0.1)),
+    rgba(8, 12, 18, 0.72);
+  color: rgba(255, 209, 45, 0.94);
+  cursor: pointer;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.14),
+    0 0 14px rgba(255, 209, 45, 0.16);
+  transition:
+    transform 150ms ease,
+    box-shadow 150ms ease,
+    border-color 150ms ease;
+}
+.dropbookHomeBtn:hover {
+  transform: translateY(-1px);
+  border-color: rgba(255, 209, 45, 0.72);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.18),
+    0 0 20px rgba(255, 209, 45, 0.28);
+}
+.dropbookHomeIcon {
+  font-size: 17px;
+  line-height: 1;
+  font-weight: 900;
+  transform: translateY(-1px);
+}
+.studioBody {
+  min-height: 0;
+  display: grid;
+}
+
+/* ---- capture phase ---- */
+.capStage {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-columns: 1fr;
+  min-height: 0;
+  min-width: 0;
+  /* Let the mode-rail glow paint outside the row; monitor area clips below. */
+  overflow: visible;
+}
+.capTopBand {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 8px 10px 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.04);
+  overflow: visible;
+  position: relative;
+  z-index: 2;
+}
+.modeRail {
+  display: flex;
+  flex-direction: row;
+  gap: 8px;
+  /* Breathing room so button rims + box-shadow aren't clipped by the rail scrollport. */
+  padding: 16px 12px 18px;
+  margin: -8px -4px 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  scroll-padding-inline: 12px;
+}
+.modeRail::-webkit-scrollbar {
+  display: none;
+}
+.modeRailBtn {
+  position: relative;
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+  flex: 1 0 auto;
+  min-width: 64px;
+  padding: 10px 8px;
+  border-radius: 16px;
+  border: none;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.7);
+  cursor: pointer;
+  overflow: visible;
+  transition:
+    transform 160ms ease,
+    box-shadow 160ms ease,
+    border-color 160ms ease,
+    background 160ms ease;
+}
+.dropbookModeActive .modeRailBtn.dropbookOrbit::after {
+  content: "";
+  position: absolute;
+  inset: -2px;
+  border-radius: 18px;
+  border: 1px solid rgba(126, 226, 255, 0.42);
+  box-shadow:
+    0 0 10px rgba(126, 226, 255, 0.28),
+    0 0 18px rgba(255, 79, 216, 0.14),
+    inset 0 0 8px rgba(255, 209, 45, 0.08);
+  pointer-events: none;
+  opacity: 1;
+  animation: dropbookOrbitPulse 2.6s ease-in-out infinite;
+  transition: opacity 320ms ease;
+}
+@keyframes dropbookOrbitPulse {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 0.62;
+  }
+  50% {
+    transform: scale(1.03);
+    opacity: 1;
+  }
+}
+.modeRailBtn.on {
+  color: #06121a;
+  background: radial-gradient(circle at 30% 20%, #fff, #7ee2ff);
+  border-color: rgba(255, 255, 255, 0.5);
+  box-shadow: 0 0 16px rgba(126, 226, 255, 0.4);
+}
+.modeRailBtn.locked {
+  opacity: 0.42;
+}
+.modeRailBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.dropbookEntry {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 42px;
+  padding: 10px 16px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 209, 45, 0.38);
+  background:
+    linear-gradient(
+      120deg,
+      rgba(255, 209, 45, 0.14) 0%,
+      rgba(126, 226, 255, 0.1) 52%,
+      rgba(255, 79, 216, 0.08) 100%
+    ),
+    rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.94);
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 950;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  cursor: pointer;
+  overflow: hidden;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.2),
+    0 0 24px rgba(255, 209, 45, 0.14);
+  transition:
+    transform 160ms ease,
+    box-shadow 180ms ease,
+    border-color 180ms ease;
+}
+.dropbookEntry:hover {
+  transform: translateY(-1px);
+  border-color: rgba(255, 209, 45, 0.58);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.24),
+    0 0 32px rgba(255, 209, 45, 0.22),
+    0 10px 28px rgba(0, 0, 0, 0.22);
+}
+.dropbookEntry:active {
+  transform: translateY(0);
+}
+.dropbookEntryActive {
+  border-color: rgba(255, 209, 45, 0.72);
+  background:
+    linear-gradient(
+      120deg,
+      rgba(255, 209, 45, 0.22) 0%,
+      rgba(126, 226, 255, 0.16) 52%,
+      rgba(255, 79, 216, 0.12) 100%
+    ),
+    rgba(255, 255, 255, 0.1);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.28),
+    0 0 36px rgba(255, 209, 45, 0.28);
+}
+.dropbookEntryGlyph {
+  font-size: 16px;
+  line-height: 1;
+  filter: drop-shadow(0 0 10px rgba(255, 209, 45, 0.45));
+}
+.dropbookEntryLabel {
+  white-space: nowrap;
+}
+@media (min-width: 561px) {
+  .dropbookEntryRow {
+    width: min(480px, 94%);
+    margin-inline: auto;
+  }
+}
+.capMainDropbook {
+  grid-template-rows: auto minmax(0, 1fr);
+}
+.dropbookMonitorHost {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+}
+.capMainCreating {
+  grid-template-rows: 1fr;
+}
+.capMainCreating .dropbookShelfWrap {
+  display: none;
+}
+.capMainCreating .capMainBody:has(.dropbookCoverEditor) {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+}
+/* Splash has no shelf row — monitor body fills the stage below the mode rail. */
+.capMain.capMainDropbook.capMainSplash {
+  grid-template-rows: minmax(0, 1fr);
+  min-height: 0;
+  height: 100%;
+}
+.capMain.capMainDropbook.capMainSplash > .capMainBody {
+  min-height: 0;
+}
+.capMainBody:has(.dropbookIntroSplash) {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+}
+.capMainBody {
+  min-height: 0;
+  min-width: 0;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  overflow: hidden;
+}
+/* Capture — chip grows in the space above; shutter row never gets covered. */
+.capMain.capMainMonitor {
+  grid-template-rows: minmax(0, 1fr);
+}
+.capMainBody:has(.capMonitorHost) {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+  grid-template-rows: minmax(0, 1fr);
+}
+.capMonitorHost {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: 100%;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.capMonitorHost :global([data-drop-chip-host]) {
+  flex: 1 1 auto;
+  width: 100%;
+  height: 100%;
+  max-height: 100%;
+  min-height: 0;
+  align-self: stretch;
+}
+.capControlsOverlay {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 8;
+  padding: 10px 14px max(12px, env(safe-area-inset-bottom));
+  background: linear-gradient(180deg, transparent 0%, rgba(0, 0, 0, 0.42) 38%, rgba(0, 0, 0, 0.72) 100%);
+  pointer-events: none;
+}
+.capControlsOverlay .capActionRow {
+  pointer-events: auto;
+}
+.dropbookShelfWrap {
+  overflow: hidden;
+  flex: 0 0 auto;
+  max-height: 320px;
+  transition:
+    max-height 420ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 320ms ease,
+    margin 320ms ease;
+}
+.dropbookShelfZone {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  background:
+    linear-gradient(180deg, rgba(255, 209, 45, 0.06), rgba(126, 226, 255, 0.04)),
+    rgba(255, 255, 255, 0.03);
+  transform: translateY(0);
+  transition: transform 420ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.dropbookShelfZone.slidUp {
+  transform: translateY(calc(-100% - 12px));
+}
+.capMainDropbook:not(.capMainCreating) .capMainBody {
+  position: relative;
+}
+.dropbookTitleScreen {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+}
+.dropbookWordmark {
+  font-family: "Nunito", ui-rounded, "SF Pro Rounded", -apple-system, BlinkMacSystemFont,
+    sans-serif;
+  font-weight: 900;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: rgba(255, 209, 45, 0.88);
+}
+.dropbookTitleHero {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  margin: 0;
+  padding: 0;
+  width: max-content;
+  max-width: calc(100% - 32px);
+  font-size: clamp(1.65rem, 6.5vw, 2.35rem);
+  line-height: 1;
+  letter-spacing: 0.22em;
+  color: rgb(255, 209, 45);
+  text-shadow: none;
+  filter: none;
+  transform: translate(-50%, -50%);
+  text-align: center;
+}
+.dropbookMonitorPrompt {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  width: 100%;
+  text-align: center;
+  padding: 0 clamp(16px, 4vw, 28px);
+}
+.dropbookCoverChooseStack .dropbookMonitorPrompt {
+  padding-top: 4px;
+}
+.dropbookTitleFooter {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  padding: 0 clamp(16px, 4vw, 32px) clamp(20px, 5vh, 32px);
+  text-align: center;
+}
+.dropbookTitleFooter .dropbookMonitorPrompt {
+  padding: 0;
+}
+.dropbookTitleGlyph {
+  font-size: clamp(1.75rem, 6vw, 2.25rem);
+  line-height: 1;
+}
+.dropbookTitleSub {
+  margin: 0;
+  font-size: clamp(0.95rem, 2.8vw, 1.12rem);
+  font-weight: 900;
+  letter-spacing: 0.02em;
+  color: rgba(255, 255, 255, 0.88);
+}
+.dropbookTitleHint {
+  margin: 0;
+  max-width: 300px;
+  font-size: clamp(0.82rem, 2.4vw, 0.92rem);
+  line-height: 1.55;
+  color: rgba(236, 255, 251, 0.52);
+}
+.dropbookTitleCenter {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding-inline: clamp(16px, 4vw, 32px);
+  pointer-events: none;
+}
+.dropbookTitleCenter .dropbookTitleHero:not(.dropbookTitleHeroSplash) {
+  position: static;
+  transform: none;
+}
+.dropbookIntroSplash {
+  position: relative;
+  z-index: 4;
+  flex: 1 1 auto;
+  width: 100%;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: clamp(20px, 5vh, 40px) clamp(16px, 4vw, 32px);
+  background:
+    radial-gradient(circle at 50% 46%, rgba(255, 209, 45, 0.14), transparent 52%),
+    radial-gradient(circle at 50% 54%, rgba(126, 226, 255, 0.08), transparent 58%),
+    rgba(0, 0, 0, 0.72);
+  animation: dropbookIntroBg 1.8s ease forwards;
+}
+.dropbookTitleHeroSplash {
+  margin: 0;
+  padding: 0;
+  font-size: clamp(1.5rem, 5.8vw, 2.1rem);
+  line-height: 1.15;
+  letter-spacing: 0.22em;
+  color: rgb(255, 209, 45);
+  text-align: center;
+  animation: dropbookIntroTitle 1.8s ease forwards;
+  text-shadow:
+    0 0 18px rgba(255, 209, 45, 0.55),
+    0 0 36px rgba(255, 209, 45, 0.28),
+    0 0 64px rgba(126, 226, 255, 0.14);
+}
+@keyframes dropbookIntroBg {
+  0% {
+    opacity: 1;
+    background-color: rgba(0, 0, 0, 0.92);
+  }
+  18% {
+    opacity: 1;
+    background-color: rgba(0, 0, 0, 0.62);
+  }
+  72% {
+    opacity: 1;
+    background-color: rgba(0, 0, 0, 0.42);
+  }
+  100% {
+    opacity: 0;
+    background-color: transparent;
+  }
+}
+@keyframes dropbookIntroTitle {
+  0% {
+    opacity: 0;
+    transform: scale(0.94);
+    filter: blur(2px);
+  }
+  16% {
+    opacity: 1;
+    transform: scale(1);
+    filter: blur(0);
+  }
+  72% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.03);
+  }
+}
+.dropbookLandingGlyph {
+  font-size: clamp(2rem, 7vw, 2.75rem);
+  line-height: 1;
+  filter: drop-shadow(0 0 16px rgba(255, 209, 45, 0.32));
+}
+.dropbookCoverWorkspace {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: clamp(8px, 2vh, 16px) clamp(16px, 4vw, 28px) clamp(16px, 4vw, 28px);
+  gap: 10px;
+  scrollbar-width: none;
+}
+.dropbookCoverWorkspace::-webkit-scrollbar {
+  display: none;
+}
+.dropbookCoverChooseStack {
+  display: grid;
+  justify-items: center;
+  gap: 14px;
+  width: min(360px, 100%);
+}
+.dropbookCoverChooseHead {
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+  text-align: center;
+}
+.dropbookCoverChooseGlyphBig {
+  font-size: clamp(2rem, 7vw, 2.75rem);
+  line-height: 1;
+  filter: drop-shadow(0 0 16px rgba(255, 209, 45, 0.32));
+}
+.dropbookCoverStage {
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+  overflow: hidden;
+  padding: 0;
+}
+.dropbookCoverChooseLead {
+  margin: 0;
+  text-align: center;
+  font-size: clamp(0.95rem, 2.8vw, 1.08rem);
+  font-weight: 900;
+  color: rgba(255, 255, 255, 0.9);
+}
+.dropbookCoverChooseBtns {
+  display: grid;
+  gap: 10px;
+}
+.dropbookCoverChooseBtn {
+  display: grid;
+  gap: 4px;
+  justify-items: center;
+  padding: 12px 8px;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.92);
+  font-family: inherit;
+  cursor: pointer;
+  transition: transform 160ms ease, opacity 160ms ease;
+}
+.dropbookCoverChooseBtn:hover {
+  transform: translateY(-1px);
+  opacity: 0.92;
+}
+.dropbookCoverChooseGlyph {
+  font-size: 28px;
+  line-height: 1;
+}
+.dropbookCoverChooseTitle {
+  font-size: 12px;
+  font-weight: 950;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+.dropbookCoverChooseHint {
+  font-size: 11px;
+  color: rgba(236, 255, 251, 0.56);
+}
+.dropbookCoverEditor {
+  display: grid;
+  grid-template-rows: auto auto 1fr;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  gap: 8px;
+  padding: 10px 12px 12px;
+}
+.dropbookCoverEditorHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.dropbookCoverBack {
+  padding: 6px 10px !important;
+  font-size: 11px !important;
+}
+.dropbookCoverEditorTitle {
+  font-size: 10px;
+  font-weight: 950;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: rgba(255, 209, 45, 0.88);
+}
+.dropbookCoverColorRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.dropbookCoverColorLabel {
+  font-size: 9px;
+  font-weight: 950;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: rgba(236, 255, 251, 0.62);
+}
+.dropbookCoverColorSwatches {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.dropbookColorSwatch {
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  border: 2px solid rgba(255, 255, 255, 0.22);
+  cursor: pointer;
+  padding: 0;
+}
+.dropbookColorSwatch.on {
+  border-color: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 0 12px rgba(255, 255, 255, 0.35);
+}
+.dropbookCoverSlate {
+  position: relative;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  aspect-ratio: 4 / 5;
+  border-radius: 14px;
+  overflow: hidden;
+  border: 1px solid rgba(126, 226, 255, 0.32);
+  background:
+    linear-gradient(160deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.03)),
+    rgba(8, 12, 18, 0.55);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.14),
+    0 0 18px rgba(126, 226, 255, 0.1);
+  transition:
+    transform 180ms ease,
+    border-color 180ms ease,
+    box-shadow 180ms ease;
+}
+.dropbookCoverSlate.stage {
+  width: clamp(168px, 44vw, 248px);
+}
+.dropbookCoverSlate.empty.outline {
+  border-style: dashed;
+  border-color: rgba(126, 226, 255, 0.22);
+  background:
+    linear-gradient(160deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.02)),
+    rgba(6, 10, 16, 0.42);
+  box-shadow: none;
+}
+.dropbookCoverSlate.empty.outline .dropbookCoverSlateBody {
+  background: transparent;
+}
+.dropbookCoverSlate.empty.colorFilled {
+  border-style: solid;
+  border-color: color-mix(in srgb, var(--book-color, #171717) 72%, rgba(126, 226, 255, 0.35));
+  background: var(--book-color, #171717);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.1),
+    0 0 20px color-mix(in srgb, var(--book-color, #171717) 40%, transparent);
+}
+.dropbookCoverSlate.empty.colorFilled .dropbookCoverSlateBody {
+  background: var(--book-color, #171717);
+}
+.dropbookCoverColorRowChoose {
+  justify-content: center;
+  width: 100%;
+}
+.dropbookCoverSlate.shelf {
+  flex: 0 0 auto;
+  width: 92px;
+  border-radius: 14px;
+  cursor: pointer;
+  font-family: inherit;
+  color: inherit;
+  padding: 0;
+}
+.dropbookCoverSlate.empty:not(.colorFilled) .dropbookCoverSlateBody {
+  background: transparent;
+}
+.dropbookCoverSlate.dragOver {
+  transform: translateY(-3px) scale(1.03);
+  border-color: rgba(255, 209, 45, 0.72);
+  box-shadow:
+    0 0 32px rgba(255, 209, 45, 0.28),
+    0 0 22px color-mix(in srgb, var(--book-color, #2563eb) 40%, transparent);
+}
+.dropbookCoverSlateBody {
+  display: grid;
+  place-items: center;
+  min-height: 0;
+  overflow: hidden;
+}
+.dropbookCoverSlatePreview {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.dropbookCoverSlatePlus {
+  font-size: 26px;
+  font-weight: 300;
+  line-height: 1;
+  color: rgba(126, 226, 255, 0.58);
+  text-shadow: 0 0 14px rgba(126, 226, 255, 0.38);
+}
+.dropbookCoverSlateFoot {
+  padding: 5px 8px 6px;
+  font-size: 8px;
+  font-weight: 950;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  text-align: center;
+  color: rgba(236, 255, 251, 0.82);
+  background: rgba(0, 0, 0, 0.42);
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+.dropbookCoverSlate.stage .dropbookCoverSlateFoot {
+  font-size: 9px;
+  padding: 6px 10px 7px;
+}
+.dropbookCoverSlateCanvas {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+.capMainDropbook:not(.capMainCreating) .capMainBody:has(.dropbookTitleScreen),
+.capMainDropbook:not(.capMainCreating) .capMainBody:has(.dropbookCoverEditor),
+.capMainDropbook:not(.capMainCreating) .capMainBody:has(.dropbookCoverWorkspace) {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr);
+}
+.dropbookMonitorLabel {
+  font-size: 11px;
+  font-weight: 950;
+  letter-spacing: 0.26em;
+  text-transform: uppercase;
+  color: rgba(255, 209, 45, 0.92);
+  text-shadow: 0 0 14px rgba(255, 209, 45, 0.28);
+}
+.dropbookShelfHead {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  text-align: center;
+}
+.dropbookShelfLabel {
+  font-size: 9px;
+}
+.dropbookShelfHint {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: rgba(236, 255, 251, 0.52);
+}
+.dropbookShelfScroll {
+  display: flex;
+  gap: 12px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 4px 6px 8px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(126, 226, 255, 0.35) transparent;
+  justify-content: center;
+  max-width: min(520px, 100%);
+  margin-inline: auto;
+  width: 100%;
+}
+.dropbookShelfScroll::-webkit-scrollbar {
+  height: 4px;
+}
+.dropbookShelfScroll::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgba(126, 226, 255, 0.35);
+}
+.dropbookShelfTinted {
+  box-shadow: inset 0 -1px 0 color-mix(in srgb, var(--dropbook-book-color, #2563eb) 28%, transparent);
+}
+@media (max-width: 560px) {
+  .dropbookShelfWrap {
+    max-height: 280px;
+  }
+  .dropbookShelfZone {
+    padding: 10px 10px 8px;
+  }
+  .dropbookShelfScroll {
+    gap: 10px;
+    justify-content: flex-start;
+  }
+}
+.modeGlyph {
+  font-size: 18px;
+  line-height: 1;
+}
+.modeName {
+  font-size: 9px;
+  font-weight: 950;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.capMain {
+  display: grid;
+  grid-template-rows: 1fr auto;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+/* Descript is text-heavy — give the monitor more width and prevent
+   the right edge of lines from clipping beside the mode rail. */
+.studioSheetDescript {
+  width: min(
+    720px,
+    calc(
+      100vw - 16px - env(safe-area-inset-left) - env(safe-area-inset-right)
+    )
+  );
+  height: min(
+    920px,
+    calc(100dvh - 12px - env(safe-area-inset-top) - env(safe-area-inset-bottom))
+  );
+  max-height: calc(100dvh - 12px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+}
+.capMainDescript {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  width: 100%;
+  overflow: hidden;
+}
+.capMainDescript .capMainBody {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.capFlip {
+  justify-self: end;
+  border-radius: 999px;
+  padding: 9px 14px;
+  font-size: 11px;
+  font-weight: 950;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.82);
+  background: rgba(0, 0, 0, 0.38);
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  cursor: pointer;
+  backdrop-filter: blur(8px);
+}
+.capError {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  top: 12px;
+  z-index: 7;
+  padding: 10px 12px;
+  border-radius: 12px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: rgba(255, 255, 255, 0.92);
+  background: rgba(120, 20, 40, 0.72);
+  border: 1px solid rgba(255, 120, 150, 0.35);
+}
+@media (max-width: 560px) {
+  .capTopBand {
+    padding: 6px 8px 8px;
+    gap: 8px;
+  }
+  .modeRail {
+    padding: 12px 8px 14px;
+    margin: -4px -2px 0;
+  }
+  .dropbookEntry {
+    min-height: 38px;
+    padding: 9px 14px;
+    font-size: 10px;
+    letter-spacing: 0.14em;
+  }
+}
+.capVideo {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.capVideo.mirror {
+  transform: scaleX(-1);
+}
+.vocalMonitor {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 20px 16px 92px;
+  text-align: center;
+  color: rgba(236, 255, 251, 0.94);
+}
+.vocalMonitorLabel {
+  flex: 0 0 auto;
+  font-size: 10px;
+  font-weight: 950;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: rgba(126, 226, 255, 0.88);
+  text-shadow: 0 0 14px rgba(126, 226, 255, 0.28);
+}
+.vocalVizFill {
+  flex: 1 1 auto;
+  width: 100%;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.reviewViz {
+  width: 100%;
+  height: clamp(150px, 30vh, 260px);
+}
+.vocalOrb {
+  width: 146px;
+  height: 146px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  border: 1px solid rgba(126, 226, 255, 0.38);
+  background:
+    radial-gradient(circle at 34% 26%, rgba(255, 255, 255, 0.38), transparent 16%),
+    radial-gradient(circle, rgba(126, 226, 255, 0.26), rgba(255, 0, 190, 0.08) 54%, rgba(0, 0, 0, 0.32));
+  box-shadow:
+    0 0 44px rgba(126, 226, 255, 0.22),
+    inset 0 0 32px rgba(255, 255, 255, 0.08);
+}
+.vocalOrb span {
+  width: 54px;
+  height: 54px;
+  border-radius: 999px;
+  background: radial-gradient(circle at 35% 30%, #fff, #7ee2ff);
+  box-shadow: 0 0 26px rgba(126, 226, 255, 0.65);
+}
+.vocalOrb.recording {
+  border-color: rgba(255, 45, 109, 0.64);
+  box-shadow:
+    0 0 0 14px rgba(255, 45, 109, 0.07),
+    0 0 44px rgba(255, 45, 109, 0.24),
+    inset 0 0 32px rgba(255, 255, 255, 0.08);
+  animation: shutterPulse 1.1s ease-in-out infinite;
+}
+.vocalTitle {
+  font-size: 1.45rem;
+  font-weight: 950;
+  letter-spacing: 0;
+}
+.vocalCopy {
+  margin: 8px 0 0;
+  color: rgba(236, 255, 251, 0.66);
+  font-size: 0.9rem;
+  line-height: 1.55;
+}
+.capModes {
+  display: inline-flex;
+  gap: 8px;
+  justify-content: center;
+}
+.capChip {
+  border-radius: 999px;
+  padding: 7px 14px;
+  font-size: 11px;
+  font-weight: 950;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.78);
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  cursor: pointer;
+}
+.capChip.on {
+  color: #06121a;
+  background: radial-gradient(circle at 30% 20%, #fff, #7ee2ff);
+  border-color: rgba(255, 255, 255, 0.55);
+}
+.capActionRow {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+}
+.capUpload {
+  justify-self: start;
+  border-radius: 999px;
+  padding: 9px 14px;
+  font-size: 12px;
+  font-weight: 900;
+  color: rgba(255, 255, 255, 0.86);
+  background: rgba(0, 0, 0, 0.32);
+  border: none;
+  cursor: pointer;
+  backdrop-filter: blur(8px);
+}
+.capUpload input {
+  display: none;
+}
+.capSpacer {
+  display: block;
+}
+.capShutter {
+  justify-self: center;
+  width: 70px;
+  height: 70px;
+  border-radius: 999px;
+  border: 3px solid rgba(255, 255, 255, 0.55);
+  background: radial-gradient(circle at 35% 30%, #fff, #cfeeff);
+  box-shadow: 0 0 24px rgba(126, 226, 255, 0.5);
+  cursor: pointer;
+}
+.capShutter.video {
+  background: radial-gradient(circle at 35% 30%, #fff, #ff9ad1);
+  box-shadow: 0 0 24px rgba(255, 45, 109, 0.45);
+}
+.capShutter.vocal {
+  background: radial-gradient(circle at 35% 30%, #fff, #7ee2ff 54%, #ff9ad1);
+  box-shadow:
+    0 0 24px rgba(126, 226, 255, 0.46),
+    0 0 34px rgba(255, 45, 190, 0.18);
+}
+.capShutter.recording {
+  background: #ff2d6d;
+  border-color: #ff2d6d;
+  animation: shutterPulse 1.1s ease-in-out infinite;
+}
+@keyframes shutterPulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(255, 45, 109, 0.5);
+  }
+  50% {
+    box-shadow: 0 0 0 12px rgba(255, 45, 109, 0);
+  }
+}
+
+.capMainBody:has(.capEdit) {
+  display: flex;
+  flex-direction: column;
+}
+.capMainBody:has(.capEdit) .capEdit {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: auto;
+}
+/* ---- edit phase ---- */
+.editStage,
+.capEdit {
+  min-height: 0;
+  overflow: hidden;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+/* The monitor + tools + attachment panel scroll together as one surface,
+   so the whole panel (stickers, effects, etc.) is always reachable. */
+.capEditScroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  display: grid;
+  gap: 14px;
+  align-content: start;
+  padding-right: 2px;
+  /* Clearance so the last items in the attachment panel (layer list,
+     enhance copy, etc.) fully scroll into view above the pinned actions. */
+  padding-bottom: 14px;
+}
+/* The action buttons stay pinned below the scroll area so "Use this …"
+   is always visible no matter how far you scroll the panel. */
+.capEditCanvas {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+}
+/* Full-height host for the editor when it runs the draggable attachment
+   bottom-sheet — the sheet anchors to the bottom of this area. */
+.capStudioHost {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.vocalReview {
+  display: grid;
+  gap: 16px;
+  border-radius: 24px;
+  border: 1px solid rgba(126, 226, 255, 0.28);
+  padding: 20px;
+  background:
+    radial-gradient(circle at 20% 0%, rgba(126, 226, 255, 0.16), transparent 34%),
+    rgba(255, 255, 255, 0.07);
+  box-shadow:
+    0 0 30px rgba(126, 226, 255, 0.16),
+    inset 0 0 24px rgba(255, 255, 255, 0.04);
+}
+.vocalReview audio {
+  width: 100%;
+}
+.vocalReview p {
+  margin: 0;
+  color: rgba(236, 255, 251, 0.68);
+  font-size: 0.86rem;
+  line-height: 1.5;
+}
+.editActions {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+}
+.saveNote {
+  width: 100%;
+  text-align: center;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  color: rgba(150, 255, 240, 0.92);
+  text-shadow: 0 0 12px rgba(120, 255, 234, 0.4);
+}
+.studioDone {
+  justify-self: center;
+  border-radius: 999px;
+  padding: 12px 26px;
+  font-size: 13px;
+  font-weight: 950;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #06121a;
+  background: radial-gradient(circle at 30% 20%, #fff, #7ee2ff);
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  box-shadow: 0 0 22px rgba(126, 226, 255, 0.45);
+  cursor: pointer;
+}
+@media (prefers-reduced-motion: reduce) {
+  .capShutter.recording {
+    animation: none;
+  }
+}

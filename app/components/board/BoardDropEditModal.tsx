@@ -1,10 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
-import DropStudioStage from "./DropStudioStage";
+import LazyDropStudioStage from "./LazyDropStudioStage";
 import { EyeToggle } from "./icons/EyeToggle";
-import type { DropItem } from "./DropTile";
+import type { DropItem } from "@/lib/board/dropItem";
 import {
   type DropCustomization,
   normalizeDropCustomizations,
@@ -124,6 +124,7 @@ export default function BoardDropEditModal() {
   const [payLink, setPayLink] = useState("");
   const [visibility, setVisibility] = useState<"public" | "private">("public");
   const [customizations, setCustomizations] = useState<DropCustomization>({});
+  const studioCustomizationsRef = useRef<DropCustomization>({});
   const [pendingFile, setPendingFile] = useState<File | null>(null);
   const [studioMode, setStudioMode] = useState<CaptureMode | null>(null);
   const [studioInitialFile, setStudioInitialFile] = useState<File | null>(null);
@@ -141,7 +142,9 @@ export default function BoardDropEditModal() {
     setPayPrice(d.priceCents ? (d.priceCents / 100).toFixed(2) : "");
     setPayLink(d.paymentLink || d.linkUrl || "");
     setVisibility(d.visibility ?? "public");
-    setCustomizations(normalizeDropCustomizations(d.customizations) ?? {});
+    const nextCustomizations = normalizeDropCustomizations(d.customizations) ?? {};
+    setCustomizations(nextCustomizations);
+    studioCustomizationsRef.current = nextCustomizations;
     setPendingFile(null);
     setStudioMode(null);
     setStudioInitialFile(null);
@@ -154,7 +157,16 @@ export default function BoardDropEditModal() {
     setStudioMode(null);
     setStudioInitialFile(null);
     setSaving(false);
+    document.body.style.overflow = "";
   }, []);
+
+  const customizationsForSave = useCallback(
+    () =>
+      compactDropCustomizations(
+        studioMode !== null ? studioCustomizationsRef.current : customizations
+      ),
+    [studioMode, customizations]
+  );
 
   // Load a drop's stored media (if any) and open Drop Studio on it. Takes the
   // target explicitly so it can be launched the moment a drop is opened — before
@@ -383,7 +395,7 @@ export default function BoardDropEditModal() {
           meta: {
             announcement_media_url: mediaUrl,
             announcement_media_type: annMediaType,
-            customizations: compactDropCustomizations(customizations) ?? null,
+            customizations: customizationsForSave() ?? null,
             titleRich: titleRichClean,
             descriptionRich: descRichClean,
           },
@@ -401,7 +413,7 @@ export default function BoardDropEditModal() {
                 descriptionRich: descRichClean,
                 mediaUrl: mediaUrl ?? undefined,
                 mediaKind,
-                customizations: compactDropCustomizations(customizations) ?? drop.customizations,
+                customizations: customizationsForSave() ?? drop.customizations,
               },
             },
           })
@@ -463,7 +475,7 @@ export default function BoardDropEditModal() {
         priceCents: drop.type === "Pay" ? cents ?? drop.priceCents : drop.priceCents,
         paymentLink: drop.type === "Pay" ? cleanLink ?? undefined : drop.paymentLink,
         linkUrl: drop.type === "Pay" ? cleanLink ?? drop.linkUrl : drop.linkUrl,
-        customizations: compactDropCustomizations(customizations) ?? drop.customizations,
+        customizations: customizationsForSave() ?? drop.customizations,
         ...media,
       };
 
@@ -670,7 +682,7 @@ export default function BoardDropEditModal() {
           (you can redraw, add stickers/text/filters, replace with the same kind),
           but you can't switch a photo drop into a video/audio/art drop and turn it
           into a different drop. So we lock the studio to the current media's mode. */}
-      <DropStudioStage
+      <LazyDropStudioStage
         open={studioMode !== null}
         initialFile={studioInitialFile}
         initialMode={
@@ -679,7 +691,11 @@ export default function BoardDropEditModal() {
         allowedModes={lockedStudioModes(drop)}
         descriptDestination={drop ? descriptDestinationForDropType(drop.type) : "doc"}
         value={customizations}
-        onChange={setCustomizations}
+        studioDraftRef={studioCustomizationsRef}
+        onChange={(next) => {
+          setCustomizations(next);
+          studioCustomizationsRef.current = next;
+        }}
         onComplete={(captured) => {
           setPendingFile(captured);
           setStudioMode(null);

@@ -1,0 +1,95 @@
+/* Media-type hero — large emoji + title + prompt (Vision Drop, etc.) */
+
+.capChoose {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  padding: 20px 18px 96px;
+  box-sizing: border-box;
+  text-align: center;
+  color: rgba(236, 255, 251, 0.94);
+  pointer-events: none;
+}
+
+.capChooseInner {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  text-align: center;
+  max-width: 280px;
+  pointer-events: none;
+}
+
+.capChooseGlyphBig {
+  font-size: clamp(42px, 12vw, 56px);
+  line-height: 1;
+  filter: drop-shadow(0 0 22px rgba(126, 226, 255, 0.4));
+}
+
+.capChooseTitle {
+  font-size: 1.3rem;
+  font-weight: 950;
+  color: rgba(255, 255, 255, 0.95);
+  letter-spacing: 0.02em;
+}
+
+.capChooseSub {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: rgba(236, 255, 251, 0.6);
+  max-width: 280px;
+}
+
+/* Dropbook body — centered hero below shelf / above cover options */
+.dropbookStageMonitor {
+  position: relative;
+  inset: auto;
+  width: 100%;
+  flex: 1 1 auto;
+  min-height: 0;
+  height: auto;
+  display: grid;
+  place-items: center;
+  padding: 16px 18px;
+  box-sizing: border-box;
+  text-align: center;
+  pointer-events: none;
+}
+
+.dropbookStageMonitor .capChooseInner {
+  gap: 8px;
+  width: 100%;
+  max-width: 300px;
+  margin-inline: auto;
+}
+
+.capChooseInteractive {
+  pointer-events: auto;
+  cursor: pointer;
+  border: none;
+  appearance: none;
+  -webkit-appearance: none;
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  width: 100%;
+  text-align: center;
+  transition: transform 150ms ease, opacity 150ms ease;
+}
+
+.capChooseInteractive:hover {
+  transform: translateY(-1px);
+  opacity: 0.94;
+}
+
+.capChooseInteractive:hover .capChooseTitle {
+  color: rgba(126, 226, 255, 0.96);
+}
+
+.capChooseInteractive:focus-visible {
+  outline: 2px solid rgba(126, 226, 255, 0.55);
+  outline-offset: 3px;
+}

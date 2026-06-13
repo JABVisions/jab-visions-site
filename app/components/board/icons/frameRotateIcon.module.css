@@ -1,0 +1,18 @@
+.icon {
+  transform: rotate(var(--rest-rotate, 0deg));
+  transition: transform 280ms cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+
+.icon.spinning {
+  transition: none;
+  animation: frameRotateSpin 420ms cubic-bezier(0.22, 0.61, 0.36, 1) forwards;
+}
+
+@keyframes frameRotateSpin {
+  from {
+    transform: rotate(var(--spin-from, 0deg));
+  }
+  to {
+    transform: rotate(var(--spin-to, 90deg));
+  }
+}

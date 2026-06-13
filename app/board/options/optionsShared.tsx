@@ -54,6 +54,8 @@ export type BoardSettings = BoardOptionsSettings & {
     allowTags: boolean;
     allowReposts: boolean;
     hideFollowerList: boolean;
+    /** When on, every new Drop defaults to Private. */
+    defaultDropsPrivate: boolean;
 
     friendGroupsEnabled: boolean;
     defaultShareScope: DefaultShareScope;
@@ -122,6 +124,7 @@ export const DEFAULT_SETTINGS: BoardSettings = {
     allowTags: true,
     allowReposts: true,
     hideFollowerList: false,
+    defaultDropsPrivate: false,
 
     friendGroupsEnabled: true,
     defaultShareScope: "friend_zone",

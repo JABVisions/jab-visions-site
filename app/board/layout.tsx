@@ -6,6 +6,7 @@ import BoardDock from "@/app/components/board/BoardDock";
 import BoardUtilityHeader from "@/app/components/board/BoardUtilityHeader";
 import BoardDropEditModal from "@/app/components/board/BoardDropEditModal";
 import MusicDropMigration from "@/app/components/board/MusicDropMigration";
+import AnnouncementMediaRepair from "@/app/components/board/AnnouncementMediaRepair";
 import DropTaxonomyMigration from "@/app/components/board/DropTaxonomyMigration";
 import CloudSyncBridge from "@/app/components/board/CloudSyncBridge";
 import BucketBrainBridge from "@/app/components/board/BucketBrainBridge";
@@ -44,6 +45,7 @@ export default function BoardLayout({ children }: { children: React.ReactNode })
       {!isAuthRoute ? (
         <>
           <MusicDropMigration />
+          <AnnouncementMediaRepair />
           <DropTaxonomyMigration />
         </>
       ) : null}

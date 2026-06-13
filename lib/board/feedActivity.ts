@@ -6,6 +6,7 @@ import type {
 } from "@/lib/board/activity";
 import { readDrops, type UniversalDrop } from "@/lib/board/drops/storage";
 import { patchMusicActivity } from "@/lib/board/musicMigration";
+import { patchBrokenAnnouncementFeed } from "@/lib/board/announcementMediaOverrides";
 import { normalizeRichText } from "@/lib/board/richText";
 import { resolveBoardProjects } from "@/lib/board/projects";
 import type { FeedDrop } from "@/lib/boardStore";
@@ -256,6 +257,7 @@ export function universalDropToActivity(drop: UniversalDrop): BoardActivity | nu
       visibility: drop.visibility || "public",
       thoughtFormat: drop.thoughtFormat || null,
       thoughtText: drop.thoughtText || null,
+      fromDescript: (drop as { fromDescript?: boolean }).fromDescript === true ? true : null,
       authorId: drop.authorId || null,
       authorName: drop.authorName || null,
       authorUsername: drop.authorUsername || null,
@@ -296,15 +298,93 @@ export function mergeActivityWithFeed(
   activityItems: BoardActivity[],
   feedItems: FeedDrop[]
 ) {
-  return dedupeActivity([
-    ...activityItems
-      .filter(Boolean)
-      .map((item) => patchMusicActivity(item).item),
-    ...feedItems.map(feedDropToActivity).map((item) => patchMusicActivity(item).item),
-    ...(readDrops()
-      .map(universalDropToActivity)
-      .filter(Boolean)
-      .map((item) => patchMusicActivity(item as BoardActivity).item) as BoardActivity[]),
-    ...resolveBoardProjects().map(projectToActivity),
-  ]);
+  return patchBrokenAnnouncementFeed(
+    dedupeActivity([
+      ...activityItems
+        .filter(Boolean)
+        .map((item) => patchMusicActivity(item).item),
+      ...feedItems.map(feedDropToActivity).map((item) => patchMusicActivity(item).item),
+      ...(readDrops()
+        .map(universalDropToActivity)
+        .filter(Boolean)
+        .map((item) => patchMusicActivity(item as BoardActivity).item) as BoardActivity[]),
+      ...resolveBoardProjects().map(projectToActivity),
+    ])
+  );
+}
+
+const DELETED_DROP_KEY_PREFIX = "jab_board_drops_deleted_v1";
+
+/** Every deleted-id list in localStorage (bare + per-user scoped keys). */
+export function readFeedDeletedDropIds(): string[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const ids = new Set<string>();
+    for (let i = 0; i < window.localStorage.length; i += 1) {
+      const key = window.localStorage.key(i);
+      if (!key || !key.startsWith(DELETED_DROP_KEY_PREFIX)) continue;
+      const raw = window.localStorage.getItem(key);
+      const parsed = raw ? JSON.parse(raw) : [];
+      if (!Array.isArray(parsed)) continue;
+      for (const id of parsed) {
+        const clean = String(id || "").trim();
+        if (clean) ids.add(clean);
+      }
+    }
+    return Array.from(ids);
+  } catch {
+    return [];
+  }
+}
+
+export function filterDeletedFeedItems(items: BoardActivity[]): BoardActivity[] {
+  const deleted = new Set(readFeedDeletedDropIds());
+  if (!deleted.size) return items;
+  return items.filter((item) => {
+    if (deleted.has(item.id)) return false;
+    const meta = item.meta && typeof item.meta === "object" ? item.meta : null;
+    const dropId = String(meta?.dropId || "");
+    const originalDropId = String(meta?.originalDropId || "");
+    if (dropId && deleted.has(dropId)) return false;
+    if (originalDropId && deleted.has(originalDropId)) return false;
+    return true;
+  });
+}
+
+/** Overlay local/feed storage onto the current feed without dropping remote-only rows. */
+export function mergeFeedWithLocalOverlay(
+  prev: BoardActivity[],
+  localOverlay: BoardActivity[],
+  opts?: { kinds?: BoardActivityKind[] }
+): BoardActivity[] {
+  const scoped = filterDeletedFeedItems(
+    (opts?.kinds?.length
+      ? localOverlay.filter((item) => opts.kinds!.includes(item.kind))
+      : localOverlay
+    ).filter((item) => item.meta?.visibility !== "private")
+  );
+
+  if (!scoped.length) {
+    return filterDeletedFeedItems(prev);
+  }
+
+  const localIds = new Set(scoped.map((item) => item.id));
+  const localDropIds = new Set(
+    scoped.flatMap((item) => {
+      const meta = item.meta && typeof item.meta === "object" ? item.meta : null;
+      return [String(meta?.dropId || ""), String(meta?.originalDropId || "")].filter(Boolean);
+    })
+  );
+
+  const remoteKept = prev.filter((item) => {
+    if (localIds.has(item.id)) return false;
+    const meta = item.meta && typeof item.meta === "object" ? item.meta : null;
+    const dropId = String(meta?.dropId || "");
+    const originalDropId = String(meta?.originalDropId || "");
+    if (dropId && localDropIds.has(dropId)) return false;
+    if (originalDropId && localDropIds.has(originalDropId)) return false;
+    return true;
+  });
+
+  return patchBrokenAnnouncementFeed(filterDeletedFeedItems(dedupeActivity([...scoped, ...remoteKept])));
 }

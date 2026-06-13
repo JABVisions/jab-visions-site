@@ -22,6 +22,7 @@ import {
 } from "@/lib/board/dropDisplay";
 import { emitBoardDropSignal } from "@/lib/board/dropSignals";
 import { fetchLinkPreview } from "@/lib/board/linkPreview";
+import { getDropSignedUrl } from "@/lib/board/boardDropEditStore";
 import { resolveLinkPreviewImage } from "@/lib/board/linkPreviewImages";
 import { openHostedPayDropCheckout } from "@/lib/board/payCheckout";
 import {
@@ -32,11 +33,12 @@ import {
   compactDropCustomizations,
   type DropCustomization,
 } from "@/lib/board/dropCustomizations";
+import { tagDropMediaFrame } from "@/lib/board/dropMediaFrameDisplay";
 import { RichText } from "./RichTextField";
 import { PayOnBoardButton } from "./PayOnBoardButton";
 import RemovableDropBadge from "./RemovableDropBadge";
 import { EyeToggle } from "./icons/EyeToggle";
-import DropStudioStage from "./DropStudioStage";
+import LazyDropStudioStage from "./LazyDropStudioStage";
 import DropCommentsDrawer from "./DropCommentsDrawer";
 import AudioDropPlayer from "./AudioDropPlayer";
 import FeedVideo from "./FeedVideo";
@@ -92,20 +94,6 @@ import {
 // Re-export so existing `import type { DropItem } from ".../DropTile"` callers
 // (boardDropEditStore, musicMigration) keep working unchanged.
 export type { DropItem } from "@/lib/board/dropItem";
-
-/**
- * Tag a collection media thumb as widescreen once its real dimensions are known.
- * Only landscape media (intrinsic width > height) keeps its natural ratio; portrait
- * and square media fall back to the standard 4:5 Board frame (handled in CSS via
- * `.media-thumb.natural-media:not(.is-wide)`).
- */
-function tagWideMediaFrame(el: HTMLImageElement | HTMLVideoElement) {
-  const w = el instanceof HTMLVideoElement ? el.videoWidth : el.naturalWidth;
-  const h = el instanceof HTMLVideoElement ? el.videoHeight : el.naturalHeight;
-  const thumb = el.closest(".media-thumb");
-  if (!thumb || !w || !h) return;
-  thumb.classList.toggle("is-wide", w / h > 1.05);
-}
 
 export default function DropTile() {
   const [userId, setUserId] = useState<string | null>(null);
@@ -336,6 +324,7 @@ export default function DropTile() {
   }
 
   const signedUrlRef = useRef<Record<string, string>>({});
+  const [failedSignKeys, setFailedSignKeys] = useState<Record<string, true>>({});
   const [signedUrlByKey, setSignedUrlByKey] = useState<Record<string, string>>({});
   // Tracks link/news drops we've already tried to back-fill a thumbnail for,
   // so the hydration effect never re-fetches the same drop in a loop.
@@ -749,6 +738,7 @@ export default function DropTile() {
           bucket: item.bucket ?? null,
           fileName: item.fileName ?? null,
           customizations: item.customizations ?? null,
+          fromDescript: item.fromDescript === true ? true : null,
         },
       });
 
@@ -855,15 +845,17 @@ export default function DropTile() {
   async function getSignedUrl(bucket: string, path: string, expiresIn = 60 * 30) {
     const key = `${bucket}:${path}`;
     if (signedUrlRef.current[key]) return signedUrlRef.current[key];
+    if (failedSignKeys[key]) return null;
 
-    const supabase = supabaseBrowser();
-    const { data, error } = await supabase.storage.from(bucket).createSignedUrl(path, expiresIn);
+    const url = await getDropSignedUrl(bucket, path, expiresIn);
+    if (!url) {
+      setFailedSignKeys((prev) => (prev[key] ? prev : { ...prev, [key]: true }));
+      return null;
+    }
 
-    if (error || !data?.signedUrl) return null;
-
-    signedUrlRef.current[key] = data.signedUrl;
-    setSignedUrlByKey((p) => ({ ...p, [key]: data.signedUrl }));
-    return data.signedUrl;
+    signedUrlRef.current[key] = url;
+    setSignedUrlByKey((p) => (p[key] ? p : { ...p, [key]: url }));
+    return url;
   }
 
   async function addLinkDrop() {
@@ -1064,6 +1056,7 @@ export default function DropTile() {
         fileSize: file.size,
         mime: file.type,
         description: docDesc.trim() || undefined,
+        fromDescript: descriptOriginRef.current || undefined,
       },
       ...drops,
     ];
@@ -1073,6 +1066,7 @@ export default function DropTile() {
     setTitle("");
     setFile(null);
     setDocDesc("");
+    descriptOriginRef.current = false;
     flash(setMsg, "Doc added ✓", 1400);
   }
 
@@ -1357,27 +1351,29 @@ export default function DropTile() {
   useEffect(() => {
     let cancelled = false;
 
-    async function hydrateSignedUrls() {
-      const seen = new Set<string>();
+    const keysToFetch: Array<{ bucket: string; storagePath: string; key: string }> = [];
+    const seen = new Set<string>();
 
-      for (const d of drops) {
-        const coords = storageCoordsFromDrop(d);
-        if (!coords) continue;
-        const key = `${coords.bucket}:${coords.storagePath}`;
-        if (seen.has(key) || signedUrlRef.current[key] || signedUrlByKey[key]) continue;
-        seen.add(key);
-
-        const url = await getSignedUrl(coords.bucket, coords.storagePath, 60 * 45);
-        if (cancelled) return;
-        if (!url) continue;
-      }
+    for (const d of drops) {
+      const coords = storageCoordsFromDrop(d);
+      if (!coords) continue;
+      const key = `${coords.bucket}:${coords.storagePath}`;
+      if (seen.has(key) || signedUrlRef.current[key]) continue;
+      seen.add(key);
+      keysToFetch.push({ ...coords, key });
     }
 
-    hydrateSignedUrls();
+    void Promise.all(
+      keysToFetch.map(async ({ bucket, storagePath }) => {
+        if (cancelled) return;
+        await getSignedUrl(bucket, storagePath, 60 * 45);
+      })
+    );
+
     return () => {
       cancelled = true;
     };
-  }, [drops, signedUrlByKey]);
+  }, [drops]);
 
   // Back-fill thumbnails for link/news drops that were saved before the
   // preview pipeline could resolve an image (e.g. an Instagram link that
@@ -2025,7 +2021,7 @@ export default function DropTile() {
                 ? signedUrl || d.mediaUrl || d.url || undefined
                 : undefined;
             const previewLabel = attachmentPreviewLabel(d);
-            const mediaPending = !!signedKey && !signedUrl;
+            const mediaPending = !!signedKey && !signedUrl && !failedSignKeys[signedKey];
             const hasInlineOpenLink = (isNews || isLinky) && !!d.url;
             const showFooterOpenOriginal =
               !!d.url && !hasInlineOpenLink && !isThought && !isPay;
@@ -2090,7 +2086,7 @@ export default function DropTile() {
                         <img
                           src={thoughtImageSrc}
                           alt={d.title}
-                          onLoad={(e) => tagWideMediaFrame(e.currentTarget)}
+                          onLoad={(e) => tagDropMediaFrame(e.currentTarget, d.customizations)}
                         />
                       </div>
                     ) : mediaPending ? (
@@ -2124,13 +2120,13 @@ export default function DropTile() {
                         {resolvedMediaKind === "video" ? (
                           <FeedVideo
                             src={signedUrl}
-                            onLoadedMetadata={(e) => tagWideMediaFrame(e.currentTarget)}
+                            onLoadedMetadata={(e) => tagDropMediaFrame(e.currentTarget, d.customizations)}
                           />
                         ) : (
                           <img
                             src={signedUrl}
                             alt={d.title}
-                            onLoad={(e) => tagWideMediaFrame(e.currentTarget)}
+                            onLoad={(e) => tagDropMediaFrame(e.currentTarget, d.customizations)}
                           />
                         )}
                         {isMedia ? (
@@ -2198,6 +2194,14 @@ export default function DropTile() {
                     </div>
                   </a>
                 ) : isDoc ? (
+                  d.fromDescript && d.description ? (
+                    <div className="media-thumb natural-media" aria-label="Descript document preview">
+                      <div className="thought-body">
+                        {d.title ? <div className="doc-chip-title">{d.title}</div> : null}
+                        {d.description}
+                      </div>
+                    </div>
+                  ) : (
                   <div className="doc-card">
                     <div className="doc-row">
                       <div className="doc-left">
@@ -2212,6 +2216,7 @@ export default function DropTile() {
 
                     {d.description ? <div className="doc-desc">{d.description}</div> : null}
                   </div>
+                  )
                 ) : d.url && !isThought && !isPay ? (
                   <a className="link-card link-cover-card" href={d.url} target="_blank" rel="noreferrer">
                     <div className="link-preview-art">
@@ -2265,14 +2270,14 @@ export default function DropTile() {
                   </div>
                 ) : null}
 
-                {isThought && d.thoughtText && d.thoughtText !== d.description ? (
+                {isThought && d.thoughtText ? (
                   d.fromDescript ? (
                     // Only Descript-authored thoughts get the glossy 4:5 thumbnail.
                     <div className="thought-body">{d.thoughtText}</div>
-                  ) : (
+                  ) : d.thoughtText !== d.description ? (
                     // Every other thought renders in the scrollable description section.
                     <div className="drop-description">{d.thoughtText}</div>
-                  )
+                  ) : null
                 ) : null}
 
                 {(showFooterOpenOriginal || showFooterOpenDoc) ? (
@@ -2434,7 +2439,7 @@ export default function DropTile() {
         </div>
       ) : null}
 
-      <DropStudioStage
+      <LazyDropStudioStage
         open={studioMode !== null}
         initialFile={studioInitialFile}
         initialMode={
@@ -2594,7 +2599,7 @@ export default function DropTile() {
         </div>
       ) : null}
 
-      <DropStudioStage
+      <LazyDropStudioStage
         open={editStudioMode !== null}
         initialFile={editStudioInitialFile}
         initialMode={editStudioMode ?? (editDrop?.type === "Doc" ? "descript" : "photo")}

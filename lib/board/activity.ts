@@ -236,6 +236,7 @@ export async function syncActivitiesForDropEdit(updated: {
   type?: string;
   description?: string;
   thoughtText?: string;
+  fromDescript?: boolean;
   titleRich?: unknown;
   descriptionRich?: unknown;
   customizations?: unknown;
@@ -281,6 +282,12 @@ export async function syncActivitiesForDropEdit(updated: {
       descriptionRich: updated.descriptionRich ?? item.meta?.descriptionRich ?? null,
       description: updated.description ?? item.meta?.description ?? null,
       thoughtText: updated.thoughtText ?? item.meta?.thoughtText ?? null,
+      fromDescript:
+        updated.fromDescript === true
+          ? true
+          : updated.fromDescript === false
+            ? null
+            : item.meta?.fromDescript ?? null,
       customizations: updated.customizations ?? item.meta?.customizations ?? null,
       bucket,
       storagePath,

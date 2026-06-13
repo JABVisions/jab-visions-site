@@ -7,7 +7,8 @@
 import { supabaseBrowser } from "@/lib/supabase/browser";
 import { syncActivitiesForDropEdit } from "@/lib/board/activity";
 import { ensureImageFileMinResolution } from "@/lib/board/imageQuality";
-import type { DropItem } from "@/app/components/board/DropTile";
+import type { DropItem } from "@/lib/board/dropItem";
+import { rememberDeletedDropId } from "@/lib/board/dropItem";
 
 const STORAGE_KEY = "jab_board_drops_v2";
 export const BOARD_MEDIA_BUCKET = "board-media";
@@ -139,20 +140,57 @@ export async function getCurrentUserId(): Promise<string | null> {
   }
 }
 
+const signedUrlInflight = new Map<string, Promise<string | null>>();
+const signedUrlCache = new Map<string, { url: string; expiresAt: number }>();
+const SIGN_URL_TIMEOUT_MS = 12_000;
+
 /** Signed URL for existing drop media (to reload it into Drop Studio). */
 export async function getDropSignedUrl(
   bucket: string,
   path: string,
   expiresIn = 60 * 30
 ): Promise<string | null> {
-  try {
-    const supabase = supabaseBrowser();
-    const { data, error } = await supabase.storage.from(bucket).createSignedUrl(path, expiresIn);
-    if (error || !data?.signedUrl) return null;
-    return data.signedUrl;
-  } catch {
-    return null;
-  }
+  const cleanBucket = bucket?.trim();
+  const cleanPath = path?.trim();
+  if (!cleanBucket || !cleanPath) return null;
+
+  const key = `${cleanBucket}:${cleanPath}`;
+  const now = Date.now();
+  const cached = signedUrlCache.get(key);
+  if (cached && cached.expiresAt > now + 30_000) return cached.url;
+
+  const inflight = signedUrlInflight.get(key);
+  if (inflight) return inflight;
+
+  const request = (async () => {
+    try {
+      const supabase = supabaseBrowser();
+      const signTask = supabase.storage
+        .from(cleanBucket)
+        .createSignedUrl(cleanPath, expiresIn)
+        .then(({ data, error }) => (error || !data?.signedUrl ? null : data.signedUrl));
+
+      const url = await Promise.race([
+        signTask,
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), SIGN_URL_TIMEOUT_MS)),
+      ]);
+
+      if (url) {
+        signedUrlCache.set(key, {
+          url,
+          expiresAt: now + expiresIn * 1000 - 60_000,
+        });
+      }
+      return url;
+    } catch {
+      return null;
+    } finally {
+      signedUrlInflight.delete(key);
+    }
+  })();
+
+  signedUrlInflight.set(key, request);
+  return request;
 }
 
 function sanitizeFileName(name: string) {
@@ -282,4 +320,98 @@ export async function persistDropEdit(updated: DropItem): Promise<void> {
       new CustomEvent("board:drop:updated", { detail: { dropId: updated.id, drop: updated } })
     );
   } catch {}
+}
+
+/** Remove a drop from every local boardDrops mirror and the Supabase profile list. */
+export async function removeDropFromBoardStore(
+  dropId: string,
+  alsoIds: string[] = [],
+  knownUserId?: string | null
+): Promise<void> {
+  const purge = new Set([dropId, ...alsoIds].filter(Boolean));
+  if (!purge.size) return;
+
+  const userId =
+    knownUserId ??
+    (await Promise.race([
+      getCurrentUserId(),
+      new Promise<null>((resolve) => window.setTimeout(() => resolve(null), 3000)),
+    ]));
+
+  if (typeof window !== "undefined") {
+    const keysToUpdate = new Set<string>();
+    const { items, keyById } = loadAllLocalDrops();
+    for (const d of items) {
+      if (d?.id && purge.has(d.id) && keyById[d.id]) keysToUpdate.add(keyById[d.id]);
+    }
+    keysToUpdate.add(scopedKey(STORAGE_KEY, userId));
+
+    for (let i = 0; i < window.localStorage.length; i += 1) {
+      const key = window.localStorage.key(i);
+      if (!key || (key !== STORAGE_KEY && !key.startsWith(`${STORAGE_KEY}:`))) continue;
+      keysToUpdate.add(key);
+    }
+
+    for (const key of keysToUpdate) {
+      const arr = readArray(key);
+      const next = arr.filter((x) => x && typeof x === "object" && !purge.has(String(x.id || "")));
+      if (next.length !== arr.length) {
+        try {
+          window.localStorage.setItem(key, JSON.stringify(next));
+        } catch {}
+      }
+    }
+
+    for (const id of purge) {
+      rememberDeletedDropId(id, userId);
+    }
+  }
+
+  try {
+    if (!userId) return;
+    void syncRemoveDropFromProfile(userId, purge);
+  } catch {
+    // Local removal still stands.
+  }
+}
+
+async function syncRemoveDropFromProfile(userId: string, purge: Set<string>): Promise<void> {
+  try {
+    const supabase = supabaseBrowser();
+    const profileResult = await Promise.race([
+      supabase.from("profiles").select("board_style").eq("id", userId).maybeSingle(),
+      new Promise<{ data: null }>((resolve) =>
+        window.setTimeout(() => resolve({ data: null }), 5000)
+      ),
+    ]);
+    const profile = profileResult?.data;
+    const currentStyle =
+      profile?.board_style && typeof profile.board_style === "object"
+        ? profile.board_style
+        : {};
+    const existing: DropItem[] = Array.isArray((currentStyle as any).boardDrops)
+      ? (currentStyle as any).boardDrops
+      : [];
+    const mergedList = existing.filter((x) => x && !purge.has(x.id));
+    const deletedRaw = (currentStyle as any).boardDropsDeleted;
+    const deleted = Array.isArray(deletedRaw) ? deletedRaw.map(String) : [];
+    const nextDeleted = Array.from(new Set([...deleted, ...purge])).slice(0, 500);
+
+    await Promise.race([
+      supabase.from("profiles").upsert(
+        {
+          id: userId,
+          board_style: {
+            ...currentStyle,
+            boardDrops: mergedList,
+            boardDropsDeleted: nextDeleted,
+          },
+        },
+        { onConflict: "id" }
+      ),
+      new Promise<void>((resolve) => window.setTimeout(resolve, 5000)),
+    ]);
+  } catch {
+    // Local removal still stands.
+  }
 }

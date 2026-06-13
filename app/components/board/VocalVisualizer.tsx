@@ -70,11 +70,15 @@ export default function VocalVisualizer({
   state,
   stream = null,
   playbackAudioRef = null,
+  disableTap = false,
 }: {
   state: VocalVisualizerState;
   stream?: MediaStream | null;
   /** When playing a voice/audio drop, pass the <audio> ref for real-time waveform. */
   playbackAudioRef?: RefObject<HTMLAudioElement | null> | null;
+  /** Skip the Web-Audio tap (e.g. a cross-origin clip with no CORS) so we never
+   *  mute the element — playback stays audible with a non-reactive waveform. */
+  disableTap?: boolean;
 }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const rafRef = useRef<number>(0);
@@ -150,7 +154,7 @@ export default function VocalVisualizer({
       playbackDataRef.current = null;
     };
 
-    if (state !== "playback" || typeof window === "undefined") {
+    if (state !== "playback" || typeof window === "undefined" || disableTap) {
       clearPlaybackRefs();
       return;
     }
@@ -188,7 +192,7 @@ export default function VocalVisualizer({
     }
 
     return clearPlaybackRefs;
-  }, [state, playbackAudioRef]);
+  }, [state, playbackAudioRef, disableTap]);
 
   // Draw loop — reads live mic or playback analysers when available.
   useEffect(() => {

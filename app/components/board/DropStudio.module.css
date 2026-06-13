@@ -515,97 +515,420 @@
   color: #ffc4dc !important;
 }
 
-/* ---- Attachment panel as a draggable bottom-sheet ("holo drawer") ---- */
-.sheetStudio {
-  position: relative;
+.previewInFrame {
+  position: absolute;
+  inset: 0;
+  width: 100%;
   height: 100%;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  padding: 14px;
+  max-width: 100%;
+  max-height: 100%;
+  aspect-ratio: unset;
+  margin: 0;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  background: transparent;
 }
 
-.monitorArea {
+.mediaLayer {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  z-index: 1;
+}
+
+.mediaLayer > img,
+.mediaLayer > video {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  background: #02070a;
+}
+
+.previewInFrame > img,
+.previewInFrame > video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* ---- Palette drawer (lives inside palettePanel — no nested panel chrome) ---- */
+.workbenchDock {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+  color: #e8fff8;
+}
+
+.workbenchHead {
+  flex: 0 0 auto;
+  font-size: 0.58rem;
+  font-weight: 950;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: #7ff5e7;
+  text-shadow: 0 0 12px rgba(110, 255, 234, 0.28);
+}
+
+.workbenchTools {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  flex: 0 0 auto;
+  padding: 6px;
+  border: 1px solid rgba(167, 244, 232, 0.16);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.05);
+  box-shadow: inset 0 0 14px rgba(255, 255, 255, 0.04);
+}
+
+.workbenchTools button {
+  min-width: 0;
+  width: 100%;
+  padding: 0.58rem 0.45rem;
+  border-radius: 999px;
+  border: 1px solid rgba(167, 244, 232, 0.22);
+  background: rgba(255, 255, 255, 0.07);
+  color: #e8fff8;
+  font: inherit;
+  font-size: 0.64rem;
+  font-weight: 950;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  line-height: 1.15;
+  white-space: normal;
+  cursor: pointer;
+  transition:
+    transform 160ms ease,
+    border-color 160ms ease,
+    background 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.workbenchTools button:hover,
+.workbenchToolActive {
+  border-color: rgba(119, 247, 225, 0.72) !important;
+  background:
+    radial-gradient(circle at top, rgba(255, 255, 255, 0.12), transparent 55%),
+    rgba(89, 240, 216, 0.18) !important;
+  box-shadow: 0 0 16px rgba(72, 238, 211, 0.22);
+  transform: translateY(-1px);
+  color: #bffff4 !important;
+}
+
+.workbenchPaletteScroll {
   flex: 1 1 auto;
   min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
   display: flex;
   flex-direction: column;
   gap: 8px;
-  align-items: center;
-  justify-content: flex-start;
-  /* Reserve room so the collapsed sheet's grabber + tools never hide the
-     bottom of the monitor. */
-  padding-bottom: 96px;
+  padding: 6px 8px 10px;
 }
 
-.attachmentSheet {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  z-index: 2;
-  height: min(62%, 480px);
-  display: flex;
-  flex-direction: column;
-  border-top-left-radius: 24px;
-  border-top-right-radius: 24px;
-  border: 1px solid rgba(132, 244, 231, 0.34);
-  border-bottom: 0;
-  /* Holographic glass: translucent so the bottom of the creation (the monitor)
-     stays visible behind the panel — frosted by the backdrop blur below. */
-  background:
-    radial-gradient(circle at 18% 0%, rgba(82, 240, 213, 0.16), transparent 46%),
-    radial-gradient(circle at 92% 4%, rgba(255, 117, 219, 0.12), transparent 40%),
-    linear-gradient(180deg, rgba(8, 26, 33, 0.26), rgba(6, 10, 22, 0.42));
-  box-shadow:
-    0 -16px 46px rgba(0, 0, 0, 0.3),
-    0 0 30px rgba(53, 230, 211, 0.16),
-    inset 0 1px 0 rgba(255, 255, 255, 0.2);
-  backdrop-filter: blur(16px) saturate(1.15);
-  -webkit-backdrop-filter: blur(16px) saturate(1.15);
-  transform: translateY(0);
-  transition: transform 300ms cubic-bezier(0.22, 0.61, 0.36, 1);
-  touch-action: none;
-}
-.attachmentSheetDragging {
-  transition: none;
+.workbenchDrawer {
+  flex: 0 0 auto;
+  min-height: 0;
+  display: grid;
+  gap: 8px;
+  align-content: start;
 }
 
-.sheetPeek {
+.workbenchArtTools {
   flex: 0 0 auto;
   display: grid;
   gap: 8px;
-  padding: 4px 12px 10px;
+  margin-top: 2px;
+  padding-top: 8px;
 }
 
-.sheetHandle {
-  display: grid;
-  place-items: center;
+.workbenchDrawer input {
   width: 100%;
-  padding: 8px 0 4px;
-  background: transparent;
-  border: 0;
-  cursor: grab;
-  touch-action: none;
-}
-.sheetHandle:active {
-  cursor: grabbing;
-}
-.sheetGrip {
-  width: 48px;
-  height: 5px;
-  border-radius: 999px;
-  background: rgba(150, 255, 240, 0.6);
-  box-shadow: 0 0 12px rgba(120, 255, 234, 0.55);
+  padding: 0.68rem 0.72rem;
+  border-radius: 14px;
+  border: 1px solid rgba(167, 244, 232, 0.2);
+  background: rgba(255, 255, 255, 0.06);
+  color: #e8fff8;
+  font: inherit;
+  font-size: 0.72rem;
+  outline: none;
+  box-shadow: inset 0 0 14px rgba(255, 255, 255, 0.035);
 }
 
-.sheetScroll {
+.workbenchDrawer input::placeholder {
+  color: rgba(220, 255, 248, 0.48);
+}
+
+.workbenchDrawer button {
+  border: 1px solid rgba(167, 244, 232, 0.2);
+  background: rgba(255, 255, 255, 0.06);
+  color: #e8fff8;
+  font: inherit;
+  cursor: pointer;
+  padding: 0.52rem 0.58rem;
+  border-radius: 12px;
+  font-size: 0.68rem;
+  font-weight: 900;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  transition:
+    transform 160ms ease,
+    border-color 160ms ease,
+    background 160ms ease;
+}
+
+.workbenchDrawer button:hover:not(:disabled),
+.workbenchDrawer .selectedAction {
+  border-color: rgba(119, 247, 225, 0.72);
+  background:
+    radial-gradient(circle at top, rgba(255, 255, 255, 0.12), transparent 55%),
+    rgba(89, 240, 216, 0.16);
+  box-shadow: 0 0 14px rgba(72, 238, 211, 0.18);
+}
+
+.workbenchDrawer button:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
+}
+
+.workbenchDrawer .emojiGrid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.workbenchDrawer .emojiGrid button {
+  min-height: 34px;
+  font-size: 0.95rem;
+  letter-spacing: 0;
+  text-transform: none;
+  border-radius: 12px;
+}
+
+.workbenchDrawer .effectGrid,
+.workbenchDrawer .actionGrid {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.workbenchDrawer .effectGrid button,
+.workbenchDrawer .actionGrid button {
+  width: 100%;
+  text-align: center;
+}
+
+.workbenchDrawer .groupLabel {
+  font-size: 0.58rem;
+}
+
+.workbenchDrawer .effectSection,
+.workbenchDrawer .enhanceTool {
+  padding: 0.55rem;
+  border-radius: 14px;
+}
+
+.workbenchDrawer .effectSection p,
+.workbenchDrawer .enhanceTool p {
+  font-size: 0.62rem;
+  line-height: 1.35;
+}
+
+.workbenchDrawer .layerRow {
+  font-size: 0.64rem;
+  padding: 0.42rem 0.48rem 0.42rem 0.62rem;
+}
+
+.workbenchDrawer .layerRow button {
+  padding: 0.38rem 0.48rem;
+  font-size: 0.6rem;
+}
+
+/* Legacy sheet layout — kept for compact embeds */
+.sheetStudio {
+  --studio-rail-w: 112px;
+  position: relative;
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  gap: 0;
+  padding: 0;
+  overflow: hidden;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.sheetStudioFill {
+  flex: 1 1 auto;
+  width: 100%;
+  min-width: 0;
+  align-self: stretch;
+}
+
+.sheetStudio::before {
+  display: none;
+}
+
+.sheetStudio .monitorArea {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 0 8px 0 0;
+}
+
+.sheetStudio .hint {
+  display: none;
+}
+
+.sheetStudio .preview {
+  /* Height-first: fill the monitor column so the drop chip is larger than the
+     old bottom-deck layout (which stole ~200px of vertical space). */
+  flex: 0 1 auto;
+  width: auto;
+  height: 100%;
+  max-height: 100%;
+  max-width: 100%;
+  aspect-ratio: 4 / 5;
+  margin: 0 auto;
+}
+
+.attachmentDock {
+  flex: 0 0 var(--studio-rail-w);
+  width: var(--studio-rail-w);
+  min-width: var(--studio-rail-w);
+  max-width: var(--studio-rail-w);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  gap: 6px;
+  padding: 6px 5px;
+  border-radius: 16px;
+  border: 1px solid rgba(132, 244, 231, 0.28);
+  background:
+    radial-gradient(circle at 18% 0%, rgba(82, 240, 213, 0.12), transparent 46%),
+    linear-gradient(180deg, rgba(8, 26, 33, 0.52), rgba(6, 10, 22, 0.68));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.12),
+    0 0 16px rgba(53, 230, 211, 0.1);
+  overflow: hidden;
+}
+
+.sheetStudio .tools {
+  grid-template-columns: 1fr;
+  gap: 4px;
+  flex: 0 0 auto;
+  padding: 4px;
+  border-radius: 12px;
+}
+
+.sheetStudio .tools button {
+  width: 100%;
+  padding: 0.42rem 0.2rem;
+  font-size: 0.5rem;
+  letter-spacing: 0.05em;
+  line-height: 1.15;
+  text-align: center;
+  white-space: normal;
+  word-break: break-word;
+}
+
+.dockDrawer {
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
-  padding: 0 12px 16px;
+  padding: 0 1px 4px;
+}
+
+.sheetStudio .drawer input {
+  padding: 0.55rem 0.5rem;
+  font-size: 0.62rem;
+}
+
+.sheetStudio .drawer button {
+  padding: 0.45rem 0.42rem;
+  font-size: 0.54rem;
+}
+
+.sheetStudio .emojiGrid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.sheetStudio .emojiGrid button {
+  min-height: 28px;
+  font-size: 0.82rem;
+}
+
+.sheetStudio .effectGrid,
+.sheetStudio .actionGrid {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.sheetStudio .effectGrid button,
+.sheetStudio .actionGrid button {
+  width: 100%;
+  text-align: center;
+}
+
+.sheetStudio .enhanceTool {
+  grid-template-columns: 1fr;
+  padding: 0.45rem;
+}
+
+.sheetStudio .groupLabel {
+  font-size: 0.5rem;
+}
+
+.sheetStudio .effectSection p,
+.sheetStudio .enhanceTool p {
+  font-size: 0.52rem;
+}
+
+@media (max-width: 640px) {
+  .sheetStudio {
+    flex-direction: column;
+  }
+  .sheetStudio .monitorArea {
+    padding: 0 0 6px;
+  }
+  .sheetStudio .preview {
+    height: auto;
+    width: min(100%, calc(58vh * 4 / 5));
+    max-height: 58vh;
+  }
+  .attachmentDock {
+    flex: 0 0 auto;
+    width: 100%;
+    min-width: 0;
+    max-width: none;
+    max-height: 38%;
+  }
+  .sheetStudio .tools {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .sheetStudio .tools button {
+    width: auto;
+    font-size: 0.58rem;
+  }
+  .sheetStudio .effectGrid,
+  .sheetStudio .actionGrid {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
 }
 
 .compact {

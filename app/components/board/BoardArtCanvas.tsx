@@ -10,7 +10,10 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { BOARD_DROP_ASPECT_RATIO } from "@/lib/board/mediaFormat";
+import ArtPaletteTools, { type ArtBrushMode } from "./ArtPaletteTools";
+import DropChipWorkbench from "./DropChipWorkbench";
+import DropStudioPaletteDeck, { type ObjectTool } from "./DropStudioPaletteDeck";
+import styles from "./boardArtCanvas.module.css";
 import { scaleCanvasToMinLongEdge } from "@/lib/board/imageQuality";
 
 function hslToHex(h: number, s: number, l: number) {
@@ -28,26 +31,21 @@ function hslToHex(h: number, s: number, l: number) {
 
 const DARK_BG = "#0b0f16";
 const PAPER_BG = "#fdfaf2";
-const BOARD_COLORS = [
-  "#FF4FD8",
-  "#7EE2FF",
-  "#B7FF2D",
-  "#FFD12D",
-  "#FF2D6D",
-  "#7A44FF",
-  "#FFFFFF",
-  "#111111",
-];
-
 export default function BoardArtCanvas({
   onSave,
   backgroundImageUrl,
   saveLabel = "Use art →",
+  operatingTable = false,
+  layout = "side",
 }: {
   onSave: (file: File) => void;
   /** When set, strokes draw on top of this image (draw-on-photo for Vision). */
   backgroundImageUrl?: string;
   saveLabel?: string;
+  /** Uniform 4:5 monitor + Palette overlay (Drop Studio stage). */
+  operatingTable?: boolean;
+  /** Dropbook cover — tools below the chip instead of beside it. */
+  layout?: "side" | "stack";
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const ctxRef = useRef<CanvasRenderingContext2D | null>(null);
@@ -65,12 +63,11 @@ export default function BoardArtCanvas({
   const smudgeCtxRef = useRef<CanvasRenderingContext2D | null>(null);
   const blendDiamRef = useRef(0);
 
-  type BrushMode = "paint" | "blend" | "erase";
-
+  const [objectTool, setObjectTool] = useState<ObjectTool>("text");
   const [color, setColor] = useState("#FF4FD8");
   const [size, setSize] = useState(8);
   const [paper, setPaper] = useState(false); // dark by default
-  const [brushMode, setBrushMode] = useState<BrushMode>("paint");
+  const [brushMode, setBrushMode] = useState<ArtBrushMode>("paint");
   const [light, setLight] = useState(65);
   const [wheelHue, setWheelHue] = useState(318);
   const [wheelSat, setWheelSat] = useState(100);
@@ -431,385 +428,108 @@ export default function BoardArtCanvas({
     }, "image/png");
   }
 
+  const stageEl = (
+    <div
+      data-art-canvas-stage
+      className={[
+        styles.stage,
+        paper && !onPhoto ? styles.stagePaper : "",
+        operatingTable ? styles.stageInFrame : "",
+      ]
+        .filter(Boolean)
+        .join(" ")}
+    >
+      {onPhoto ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          ref={bgImgRef}
+          data-art-canvas-bg
+          src={backgroundImageUrl}
+          alt=""
+          className={styles.bg}
+          crossOrigin="anonymous"
+        />
+      ) : null}
+      <canvas
+        ref={canvasRef}
+        className={styles.canvas}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onPointerCancel={onPointerUp}
+        onPointerLeave={onPointerUp}
+      />
+    </div>
+  );
+
+  const artToolsEl = (
+    <ArtPaletteTools
+      wheelRef={wheelRef}
+      color={color}
+      size={size}
+      light={light}
+      wheelHue={wheelHue}
+      wheelSat={wheelSat}
+      brushMode={brushMode}
+      paper={paper}
+      onPhoto={onPhoto}
+      saveLabel={saveLabel}
+      onPickFromWheel={(x, y) => pickFromWheel(x, y)}
+      onWheelPointerMove={(x, y) => {
+        if (wheelDraggingRef.current) pickFromWheel(x, y);
+      }}
+      onWheelDragStart={() => {
+        wheelDraggingRef.current = true;
+      }}
+      onWheelDragEnd={() => {
+        wheelDraggingRef.current = false;
+      }}
+      onColorPick={(c) => {
+        setBrushMode("paint");
+        setColor(c);
+      }}
+      onLightChange={(l) => {
+        setLight(l);
+        setBrushMode("paint");
+        setColor(hslToHex(wheelHue, wheelSat, l));
+      }}
+      onSizeChange={setSize}
+      onBrushModeChange={setBrushMode}
+      onPaperToggle={() => setPaper((p) => !p)}
+      onUndo={undo}
+      onRedo={redo}
+      onClear={clearCanvas}
+      onSave={save}
+    />
+  );
+
+  const toolsEl = (
+    <div className={[styles.tools, layout === "stack" ? styles.toolsDeck : ""].filter(Boolean).join(" ")}>
+      {artToolsEl}
+    </div>
+  );
+
+  const deckPanelEl = (
+    <DropStudioPaletteDeck tool={objectTool} onToolChange={setObjectTool} artTools={artToolsEl} />
+  );
+
+  if (operatingTable) {
+    return (
+      <div className={styles.operatingHost} data-art-operating-host>
+        <DropChipWorkbench chip={stageEl} deck={deckPanelEl} />
+      </div>
+    );
+  }
+
   return (
-    <div className="artMode">
-      <div className="artStageWrap">
-        <div className={`artStage ${paper && !onPhoto ? "paper" : ""}`}>
-          {onPhoto ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img ref={bgImgRef} src={backgroundImageUrl} alt="" className="artBg" crossOrigin="anonymous" />
-          ) : null}
-          <canvas
-            ref={canvasRef}
-            className="artCanvas"
-            onPointerDown={onPointerDown}
-            onPointerMove={onPointerMove}
-            onPointerUp={onPointerUp}
-            onPointerCancel={onPointerUp}
-            onPointerLeave={onPointerUp}
-          />
-        </div>
+    <div
+      data-art-canvas-root
+      className={[styles.mode, layout === "stack" ? styles.modeStack : ""].filter(Boolean).join(" ")}
+    >
+      <div data-art-canvas-stage-wrap className={styles.stageWrap}>
+        {stageEl}
       </div>
-
-      <div className="artTools">
-        <div className="artWheelRow">
-          <div
-            ref={wheelRef}
-            className="artWheel"
-            role="slider"
-            aria-label="Color wheel"
-            aria-valuetext={color}
-            onPointerDown={(e) => {
-              e.currentTarget.setPointerCapture(e.pointerId);
-              wheelDraggingRef.current = true;
-              pickFromWheel(e.clientX, e.clientY);
-            }}
-            onPointerMove={(e) => {
-              if (wheelDraggingRef.current) pickFromWheel(e.clientX, e.clientY);
-            }}
-            onPointerUp={() => {
-              wheelDraggingRef.current = false;
-            }}
-            onPointerCancel={() => {
-              wheelDraggingRef.current = false;
-            }}
-          >
-            <span
-              className="artWheelDot"
-              style={{
-                left: `${50 + Math.cos((wheelHue * Math.PI) / 180) * (wheelSat / 2)}%`,
-                top: `${50 + Math.sin((wheelHue * Math.PI) / 180) * (wheelSat / 2)}%`,
-                background: color,
-              }}
-              aria-hidden
-            />
-          </div>
-
-          <div className="artWheelSide">
-            <div className="artColors">
-              {BOARD_COLORS.map((c) => (
-                <button
-                  key={c}
-                  type="button"
-                  className={`artSwatch ${
-                    brushMode !== "erase" && color.toLowerCase() === c.toLowerCase() ? "on" : ""
-                  }`}
-                  style={{ background: c }}
-                  onClick={() => {
-                    setBrushMode("paint");
-                    setColor(c);
-                  }}
-                  aria-label={`Color ${c}`}
-                />
-              ))}
-              {onPhoto ? null : (
-                <button
-                  type="button"
-                  className="artBgToggle artBgToggleInline"
-                  onClick={() => setPaper((p) => !p)}
-                  aria-pressed={paper}
-                >
-                  {paper ? "Paper" : "Dark"}
-                </button>
-              )}
-            </div>
-            <div className="artLight">
-              <span className="artFieldLabel">Light</span>
-              <input
-                type="range"
-                min={10}
-                max={92}
-                value={light}
-                onChange={(e) => {
-                  const l = Number(e.target.value);
-                  setLight(l);
-                  setBrushMode("paint");
-                  setColor(hslToHex(wheelHue, wheelSat, l));
-                }}
-                aria-label="Lightness"
-              />
-            </div>
-            <div className="artBrush">
-              <span className="artFieldLabel">Brush</span>
-              <span
-                className="artBrushDot"
-                style={{
-                  width: Math.max(6, size),
-                  height: Math.max(6, size),
-                  background: brushMode === "erase" ? "transparent" : color,
-                  border: brushMode === "erase" ? "2px dashed rgba(255,255,255,0.7)" : undefined,
-                  boxShadow:
-                    brushMode === "blend"
-                      ? `0 0 14px ${color}, 0 0 6px rgba(255,255,255,0.45)`
-                      : undefined,
-                }}
-                aria-hidden
-              />
-              <input
-                type="range"
-                min={2}
-                max={48}
-                value={size}
-                onChange={(e) => setSize(Number(e.target.value))}
-                aria-label="Brush size"
-              />
-            </div>
-          </div>
-        </div>
-
-        <div className="artActions">
-          <button
-            type="button"
-            className={`artGhost ${brushMode === "paint" ? "on" : ""}`}
-            onClick={() => setBrushMode("paint")}
-            aria-pressed={brushMode === "paint"}
-          >
-            Paint
-          </button>
-          <button
-            type="button"
-            className={`artGhost ${brushMode === "blend" ? "on" : ""}`}
-            onClick={() => setBrushMode("blend")}
-            aria-pressed={brushMode === "blend"}
-          >
-            Blend
-          </button>
-          <button
-            type="button"
-            className={`artGhost ${brushMode === "erase" ? "on" : ""}`}
-            onClick={() => setBrushMode("erase")}
-            aria-pressed={brushMode === "erase"}
-          >
-            Eraser
-          </button>
-          <button type="button" className="artGhost" onClick={undo}>
-            Undo
-          </button>
-          <button type="button" className="artGhost" onClick={redo}>
-            Redo
-          </button>
-          <button type="button" className="artGhost" onClick={clearCanvas}>
-            Clear
-          </button>
-          <button type="button" className="artSave" onClick={save}>
-            {saveLabel}
-          </button>
-        </div>
-      </div>
-
-      <style jsx>{`
-        .artMode {
-          display: flex;
-          flex-direction: column;
-          min-height: 0;
-          height: 100%;
-          width: 100%;
-          gap: 10px;
-          padding: 12px;
-        }
-        /* The stage flexes to whatever space is left after the tools, so the
-           color row + controls below it are always on-screen and never clipped
-           by the canvas — on desktop and mobile alike. */
-        .artStageWrap {
-          flex: 1 1 auto;
-          min-height: 0;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-        }
-        .artStage {
-          position: relative;
-          aspect-ratio: 4 / 5;
-          /* height drives the size (the wrap gives it a definite height), width
-             follows the 4:5 ratio and is clamped by max-width. Without a definite
-             dimension the stage collapses / the cover-fit image blows up. */
-          height: 100%;
-          width: auto;
-          max-width: 100%;
-          max-height: 100%;
-          margin: 0 auto;
-          border-radius: 16px;
-          overflow: hidden;
-          border: 1px solid rgba(255, 255, 255, 0.16);
-          background: ${DARK_BG};
-          box-shadow: inset 0 0 30px rgba(0, 0, 0, 0.5);
-        }
-        .artStage.paper {
-          background: ${PAPER_BG};
-        }
-        .artBg {
-          position: absolute;
-          inset: 0;
-          width: 100%;
-          height: 100%;
-          object-fit: cover;
-          pointer-events: none;
-        }
-        .artCanvas {
-          position: absolute;
-          inset: 0;
-          width: 100%;
-          height: 100%;
-          touch-action: none;
-          cursor: crosshair;
-        }
-        .artTools {
-          flex: 0 0 auto;
-          display: grid;
-          gap: 10px;
-        }
-        .artRow {
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          gap: 12px;
-          flex-wrap: wrap;
-        }
-        .artColors {
-          display: flex;
-          flex-wrap: wrap;
-          gap: 7px;
-          align-items: center;
-          justify-content: flex-start;
-        }
-        .artBgToggleInline {
-          padding: 4px 10px;
-          font-size: 10px;
-        }
-        .artSwatch {
-          width: 22px;
-          height: 22px;
-          border-radius: 999px;
-          border: 2px solid rgba(255, 255, 255, 0.35);
-          cursor: pointer;
-          padding: 0;
-          flex: 0 0 auto;
-        }
-        .artSwatch.on {
-          border-color: #fff;
-          box-shadow: 0 0 12px rgba(255, 255, 255, 0.6);
-          transform: scale(1.12);
-        }
-        .artWheelRow {
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          gap: 16px;
-          flex-wrap: wrap;
-        }
-        .artWheel {
-          position: relative;
-          width: 104px;
-          height: 104px;
-          border-radius: 999px;
-          flex: 0 0 auto;
-          cursor: crosshair;
-          touch-action: none;
-          background:
-            radial-gradient(circle, #fff 0%, rgba(255, 255, 255, 0) 70%),
-            conic-gradient(
-              from 90deg,
-              hsl(0, 100%, 60%),
-              hsl(60, 100%, 60%),
-              hsl(120, 100%, 60%),
-              hsl(180, 100%, 60%),
-              hsl(240, 100%, 60%),
-              hsl(300, 100%, 60%),
-              hsl(360, 100%, 60%)
-            );
-          border: 1px solid rgba(255, 255, 255, 0.28);
-          box-shadow:
-            inset 0 0 14px rgba(0, 0, 0, 0.35),
-            0 0 18px rgba(126, 226, 255, 0.18);
-        }
-        .artWheelDot {
-          position: absolute;
-          width: 14px;
-          height: 14px;
-          border-radius: 999px;
-          transform: translate(-50%, -50%);
-          border: 2px solid #fff;
-          box-shadow: 0 0 8px rgba(0, 0, 0, 0.55);
-          pointer-events: none;
-        }
-        .artWheelSide {
-          display: grid;
-          gap: 10px;
-          flex: 1 1 200px;
-          min-width: 180px;
-        }
-        .artLight,
-        .artBrush {
-          display: flex;
-          align-items: center;
-          gap: 10px;
-        }
-        .artFieldLabel {
-          flex: 0 0 auto;
-          width: 40px;
-          font-size: 10px;
-          font-weight: 950;
-          letter-spacing: 0.12em;
-          text-transform: uppercase;
-          color: rgba(126, 246, 230, 0.82);
-        }
-        .artLight input,
-        .artBrush input {
-          flex: 1 1 auto;
-          width: 100%;
-        }
-        .artBgToggle {
-          border-radius: 999px;
-          padding: 7px 14px;
-          font-size: 11px;
-          font-weight: 950;
-          letter-spacing: 0.1em;
-          text-transform: uppercase;
-          color: rgba(255, 255, 255, 0.86);
-          background: rgba(255, 255, 255, 0.1);
-          border: 1px solid rgba(255, 255, 255, 0.22);
-          cursor: pointer;
-        }
-        .artBrushDot {
-          border-radius: 999px;
-          flex: 0 0 auto;
-          box-shadow: 0 0 10px rgba(255, 255, 255, 0.3);
-        }
-        .artActions {
-          display: flex;
-          gap: 8px;
-          justify-content: center;
-          flex-wrap: wrap;
-        }
-        .artGhost {
-          border-radius: 999px;
-          padding: 9px 16px;
-          font-size: 12px;
-          font-weight: 900;
-          color: rgba(255, 255, 255, 0.86);
-          background: rgba(255, 255, 255, 0.1);
-          border: 1px solid rgba(255, 255, 255, 0.2);
-          cursor: pointer;
-        }
-        .artGhost.on {
-          color: #06121a;
-          background: radial-gradient(circle at 30% 20%, #fff, #7ee2ff);
-          border-color: rgba(255, 255, 255, 0.6);
-          box-shadow: 0 0 14px rgba(126, 226, 255, 0.4);
-        }
-        .artSave {
-          border-radius: 999px;
-          padding: 9px 20px;
-          font-size: 12px;
-          font-weight: 950;
-          letter-spacing: 0.08em;
-          color: #06121a;
-          background: radial-gradient(circle at 30% 20%, #fff, #7ee2ff);
-          border: 1px solid rgba(255, 255, 255, 0.5);
-          box-shadow: 0 0 18px rgba(126, 226, 255, 0.45);
-          cursor: pointer;
-        }
-      `}</style>
+      {toolsEl}
     </div>
   );
 }

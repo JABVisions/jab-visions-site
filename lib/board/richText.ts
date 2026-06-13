@@ -1,18 +1,18 @@
 // Lightweight, safe rich text for Board drop titles & descriptions.
 //
-// Model: inline marks (bold / italic / underline) are stored as sanitized HTML;
-// size + letter spacing + line spacing are FIELD-LEVEL numeric styles applied to
-// the whole field. Keeping the allowed-tag set tiny (no attributes at all) makes
-// sanitization trivial and the XSS surface effectively nil.
+// Model: inline marks (bold / italic / underline) and per-selection typography
+// (font-size, letter-spacing, line-height, font-family) are stored as sanitized
+// HTML on <span style="…"> wrappers. Legacy field-level fontSize / letterSpacing /
+// lineHeight still apply as a base style on the whole field when rendering.
 
 export type RichTextValue = {
-  /** Sanitized inline HTML (only <b>/<strong>/<i>/<em>/<u>/<br>). */
+  /** Sanitized inline HTML (semantic tags + safe styled spans). */
   html: string;
-  /** Field-level font size in px. */
+  /** Legacy field-level font size in px (base style for unmarked text). */
   fontSize?: number;
-  /** Field-level letter spacing in em. */
+  /** Legacy field-level letter spacing in em. */
   letterSpacing?: number;
-  /** Field-level line height (unitless multiplier). */
+  /** Legacy field-level line height (unitless multiplier). */
   lineHeight?: number;
 };
 
@@ -29,8 +29,22 @@ function clampNumber(value: unknown, min: number, max: number): number | undefin
   return Math.min(max, Math.max(min, n));
 }
 
-// Allowed inline tags. Everything else (including all attributes) is dropped.
-const ALLOWED_TAGS = new Set(["B", "STRONG", "I", "EM", "U", "BR"]);
+// Allowed inline tags. SPAN may carry a tightly-whitelisted style attribute.
+const ALLOWED_TAGS = new Set(["B", "STRONG", "I", "EM", "U", "BR", "SPAN"]);
+const ALLOWED_SPAN_STYLES = new Set([
+  "font-size",
+  "letter-spacing",
+  "line-height",
+  "font-family",
+]);
+
+const FONT_FAMILY_WHITELIST = [
+  'georgia, "times new roman", serif',
+  '"sf mono", menlo, consolas, monospace',
+  '"avenir next", "nunito", "helvetica neue", sans-serif',
+  'impact, "arial black", sans-serif',
+  '"comic sans ms", "comic sans", cursive',
+];
 
 function isBoldWeight(weight: string): boolean {
   const w = weight.trim().toLowerCase();
@@ -49,6 +63,87 @@ function hasUnderline(style: CSSStyleDeclaration): boolean {
  * Browsers often emit `<span style="font-weight: bold">` from execCommand. Our
  * sanitizers drop those styles, so convert styled spans/fonts to semantic tags.
  */
+export function safeFontSize(value: string | null | undefined): string {
+  const v = (value || "").trim().toLowerCase();
+  if (!v) return "";
+  if (/^(xx-small|x-small|small|medium|large|x-large|xx-large)$/.test(v)) return v;
+  if (/^\d{1,3}(\.\d+)?(px|pt|em|rem|%)$/.test(v)) return v;
+  return "";
+}
+
+export function safeLetterSpacing(value: string | null | undefined): string {
+  const v = (value || "").trim().toLowerCase();
+  if (!v) return "";
+  if (/^-?\d{1,2}(\.\d+)?(em|px)$/.test(v)) return v;
+  return "";
+}
+
+export function safeLineHeight(value: string | null | undefined): string {
+  const v = (value || "").trim().toLowerCase();
+  if (!v) return "";
+  if (/^\d{1,2}(\.\d+)?$/.test(v)) return v;
+  if (/^\d{1,3}(\.\d+)?(px|em|rem|%)$/.test(v)) return v;
+  return "";
+}
+
+export function safeFontFamily(value: string | null | undefined): string {
+  const v = (value || "").trim().toLowerCase().replace(/\s+/g, " ");
+  if (!v) return "";
+  const exact = FONT_FAMILY_WHITELIST.find((entry) => entry.toLowerCase() === v);
+  if (exact) return exact;
+  return (
+    FONT_FAMILY_WHITELIST.find((entry) => {
+      const lead = entry.split(",")[0]?.replace(/"/g, "").trim().toLowerCase();
+      return lead ? v.includes(lead) : false;
+    }) ?? ""
+  );
+}
+
+function readSpanStyle(el: HTMLElement): string[] {
+  const parts: string[] = [];
+  const fontSize = safeFontSize(el.style.fontSize);
+  const letterSpacing = safeLetterSpacing(el.style.letterSpacing);
+  const lineHeight = safeLineHeight(el.style.lineHeight);
+  const fontFamily = safeFontFamily(el.style.fontFamily);
+  if (fontSize) parts.push(`font-size:${fontSize}`);
+  if (letterSpacing) parts.push(`letter-spacing:${letterSpacing}`);
+  if (lineHeight) parts.push(`line-height:${lineHeight}`);
+  if (fontFamily) parts.push(`font-family:${fontFamily}`);
+  return parts;
+}
+
+function applySpanStyle(el: HTMLElement, parts: string[]) {
+  el.removeAttribute("style");
+  if (!parts.length) return;
+  el.setAttribute("style", parts.join(";"));
+}
+
+export function sanitizeSpanStyleAttribute(raw: string | null | undefined): string {
+  if (!raw || typeof raw !== "string") return "";
+  const parts: string[] = [];
+  for (const chunk of raw.split(";")) {
+    const idx = chunk.indexOf(":");
+    if (idx <= 0) continue;
+    const prop = chunk.slice(0, idx).trim().toLowerCase();
+    const val = chunk.slice(idx + 1).trim();
+    if (!ALLOWED_SPAN_STYLES.has(prop) || !val) continue;
+    if (prop === "font-size") {
+      const clean = safeFontSize(val);
+      if (clean) parts.push(`font-size:${clean}`);
+    } else if (prop === "letter-spacing") {
+      const clean = safeLetterSpacing(val);
+      if (clean) parts.push(`letter-spacing:${clean}`);
+    } else if (prop === "line-height") {
+      const clean = safeLineHeight(val);
+      if (clean) parts.push(`line-height:${clean}`);
+    } else if (prop === "font-family") {
+      const clean = safeFontFamily(val);
+      if (clean) parts.push(`font-family:${clean}`);
+    }
+  }
+  return parts.join(";");
+}
+
 export function normalizeInlineMarkup(html: string): string {
   if (typeof window === "undefined" || !html.trim()) return html;
 
@@ -63,8 +158,16 @@ export function normalizeInlineMarkup(html: string): string {
     const bold = isBoldWeight(el.style.fontWeight);
     const italic = el.style.fontStyle === "italic";
     const underline = hasUnderline(el.style);
+    const styleParts = readSpanStyle(el);
 
     if (!bold && !italic && !underline) {
+      if (styleParts.length) {
+        const span = doc.createElement("span");
+        applySpanStyle(span, styleParts);
+        while (el.firstChild) span.appendChild(el.firstChild);
+        el.replaceWith(span);
+        return;
+      }
       const parent = el.parentNode;
       if (!parent) return;
       while (el.firstChild) parent.insertBefore(el.firstChild, el);
@@ -85,6 +188,12 @@ export function normalizeInlineMarkup(html: string): string {
     if (bold) wrap("b");
     if (italic) wrap("i");
     if (underline) wrap("u");
+    if (styleParts.length) {
+      const span = doc.createElement("span");
+      applySpanStyle(span, styleParts);
+      span.appendChild(wrapped);
+      wrapped = span;
+    }
 
     el.replaceWith(wrapped);
   }
@@ -148,6 +257,15 @@ export function sanitizeRichHtml(input: unknown): string {
       const tag = el.tagName.toUpperCase();
       if (tag === "BR") {
         out += "<br>";
+        return;
+      }
+      if (tag === "SPAN") {
+        const style = sanitizeSpanStyleAttribute(el.getAttribute("style"));
+        if (style) {
+          out += `<span style="${style}">${walk(el)}</span>`;
+        } else {
+          out += walk(el);
+        }
         return;
       }
       if (ALLOWED_TAGS.has(tag)) {
@@ -242,7 +360,7 @@ export function hasRichFormatting(value: RichTextValue | null | undefined): bool
   if (value.fontSize != null || value.letterSpacing != null || value.lineHeight != null) {
     return true;
   }
-  return /<(b|strong|i|em|u)>/i.test(value.html || "");
+  return /<(b|strong|i|em|u|span)/i.test(value.html || "");
 }
 
 /** Build the field-level inline style object for rendering. */

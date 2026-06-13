@@ -7,7 +7,7 @@
 // (dropDrafts.ts) and other Drop Studio state.
 
 import { supabaseBrowser } from "@/lib/supabase/browser";
-import { normalizeInlineMarkup } from "@/lib/board/richText";
+import { normalizeInlineMarkup, safeFontSize } from "@/lib/board/richText";
 
 export const DESCRIPT_DOCS_STORAGE_KEY = "jab_descript_docs_v1";
 export const DESCRIPT_THEME_KEY = "jab_descript_theme_v1";
@@ -221,13 +221,18 @@ export function sanitizeDescriptHtml(input: unknown): string {
           }
           continue;
         }
-        // Allowed tag: strip every attribute except a safe text-align style.
+        // Allowed tag: strip every attribute except safe text-align + font-size
+        // styles, so alignment and the writer's chosen sizes are preserved.
         const align =
           el.style?.textAlign && ALLOWED_ALIGN.has(el.style.textAlign)
             ? el.style.textAlign
             : "";
+        const fontSize = safeFontSize(el.style?.fontSize);
         for (const attr of Array.from(el.attributes)) el.removeAttribute(attr.name);
-        if (align) el.setAttribute("style", `text-align:${align}`);
+        const styleParts: string[] = [];
+        if (align) styleParts.push(`text-align:${align}`);
+        if (fontSize) styleParts.push(`font-size:${fontSize}`);
+        if (styleParts.length) el.setAttribute("style", styleParts.join(";"));
         walk(el);
       } else if (child.nodeType !== Node.TEXT_NODE) {
         child.parentNode?.removeChild(child);

@@ -1,12 +1,21 @@
 "use client";
 
 import type React from "react";
-import { useEffect, useRef, useState } from "react";
+import { memo, useRef, useState } from "react";
 import {
   compactDropCustomizations,
   type DropCustomization,
+  type DropStudioEffects,
 } from "@/lib/board/dropCustomizations";
+import {
+  normalizeDropMediaRotation,
+  resolveDropMediaFrame,
+  type DropMediaFrame,
+} from "@/lib/board/mediaFormat";
+import { dropMediaRotationStyle } from "@/lib/board/dropMediaFrameDisplay";
+import DropChipWorkbench from "./DropChipWorkbench";
 import DropStudioOverlay from "./DropStudioOverlay";
+import DropStudioPaletteDeck, { type ObjectTool } from "./DropStudioPaletteDeck";
 import {
   STICKER_PACKS,
   stickerTypeForPack,
@@ -51,20 +60,51 @@ const OVERLAYS = [
   { label: "Shimmer", value: "shimmer" },
 ];
 
-type Tool = "text" | "stickers" | "button" | "effects" | "filters" | "enhance";
+type Tool = ObjectTool;
+
+function toolLabel(item: Tool) {
+  switch (item) {
+    case "text":
+      return "Text";
+    case "stickers":
+      return "Stickers";
+    case "button":
+      return "Button";
+    case "effects":
+      return "Effects";
+    case "filters":
+      return "Filters";
+    case "enhance":
+      return "Enhance";
+    default:
+      return item;
+  }
+}
 
 function makeId(prefix: string) {
   return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
-export default function DropStudio({
+function hasStudioEffects(effects?: DropStudioEffects | null) {
+  if (!effects) return false;
+  return Boolean(
+    effects.filter ||
+      effects.overlay ||
+      effects.frame ||
+      effects.rotation
+  );
+}
+
+function DropStudio({
   mediaUrl,
   mediaKind,
   value,
   onChange,
   compact = false,
   hideHeader = false,
-  sheet = false,
+  operatingTable = false,
+  artTools,
+  onMediaError,
 }: {
   mediaUrl: string;
   mediaKind: "image" | "video";
@@ -72,8 +112,12 @@ export default function DropStudio({
   onChange: (next: DropCustomization) => void;
   compact?: boolean;
   hideHeader?: boolean;
-  /** Render the attachment tools as a draggable bottom-sheet ("holo drawer"). */
-  sheet?: boolean;
+  /** Uniform 4:5 monitor + Palette overlay (Drop Studio stage). */
+  operatingTable?: boolean;
+  /** Art brush tools — rendered below object tool panels in the Palette drawer. */
+  artTools?: React.ReactNode;
+  /** Rebuild preview URL if a blob fails to paint (e.g. revoked object URL). */
+  onMediaError?: () => void;
 }) {
   const previewRef = useRef<HTMLDivElement | null>(null);
   const [tool, setTool] = useState<Tool>("text");
@@ -82,89 +126,6 @@ export default function DropStudio({
     kind: "text" | "sticker";
     id: string;
   } | null>(null);
-
-  // ---- Attachment panel as a draggable bottom-sheet (sheet mode only) ----
-  // Resting positions are CSS-driven (collapsed = only the grabber + tools peek,
-  // open = full panel), so the sheet starts collapsed with no measurement flash.
-  // Drag uses live pixel translate; on release it snaps back to a resting state.
-  const sheetRef = useRef<HTMLDivElement | null>(null);
-  const sheetPeekRef = useRef<HTMLDivElement | null>(null);
-  const sheetDragRef = useRef<{ startY: number; startTranslate: number; moved: boolean } | null>(
-    null
-  );
-  const [sheetState, setSheetState] = useState<"collapsed" | "open">("collapsed");
-  const [dragTranslate, setDragTranslate] = useState<number | null>(null); // null = not dragging
-  const [peekH, setPeekH] = useState(120);
-
-  useEffect(() => {
-    if (!sheet) return;
-    const measure = () => {
-      const h = sheetPeekRef.current?.offsetHeight;
-      if (h && h > 0) setPeekH(h);
-    };
-    measure();
-    if (typeof ResizeObserver === "undefined" || !sheetPeekRef.current) return;
-    const ro = new ResizeObserver(measure);
-    ro.observe(sheetPeekRef.current);
-    return () => ro.disconnect();
-  }, [sheet]);
-
-  function sheetMaxTranslate() {
-    const sheetHeight = sheetRef.current?.offsetHeight ?? 0;
-    const peek = sheetPeekRef.current?.offsetHeight ?? peekH;
-    return Math.max(0, sheetHeight - peek);
-  }
-
-  function restingTranslate() {
-    return sheetState === "open" ? 0 : sheetMaxTranslate();
-  }
-
-  function openSheet() {
-    setDragTranslate(null);
-    setSheetState("open");
-  }
-
-  function onSheetHandleDown(e: React.PointerEvent<HTMLButtonElement>) {
-    e.currentTarget.setPointerCapture(e.pointerId);
-    const start = restingTranslate();
-    sheetDragRef.current = { startY: e.clientY, startTranslate: start, moved: false };
-    setDragTranslate(start);
-  }
-
-  function onSheetHandleMove(e: React.PointerEvent<HTMLButtonElement>) {
-    const st = sheetDragRef.current;
-    if (!st) return;
-    const dy = e.clientY - st.startY;
-    if (Math.abs(dy) > 4) st.moved = true;
-    const next = Math.min(Math.max(st.startTranslate + dy, 0), sheetMaxTranslate());
-    setDragTranslate(next);
-  }
-
-  function onSheetHandleUp() {
-    const st = sheetDragRef.current;
-    if (!st) {
-      setDragTranslate(null);
-      return;
-    }
-    const max = sheetMaxTranslate();
-    const current = dragTranslate ?? st.startTranslate;
-    if (!st.moved) {
-      // Tap on the grabber toggles open/closed.
-      setSheetState((prev) => (prev === "open" ? "collapsed" : "open"));
-    } else {
-      // Released after a drag — snap to the nearer end.
-      setSheetState(current > max / 2 ? "collapsed" : "open");
-    }
-    setDragTranslate(null);
-    sheetDragRef.current = null;
-  }
-
-  const sheetTransform =
-    dragTranslate != null
-      ? `translateY(${dragTranslate}px)`
-      : sheetState === "open"
-        ? "translateY(0px)"
-        : `translateY(calc(100% - ${peekH}px))`;
 
   const normalized = compactDropCustomizations(value) ?? {};
 
@@ -211,11 +172,39 @@ export default function DropStudio({
     };
     update({
       ...normalized,
-      effects:
-        nextEffects.filter || nextEffects.overlay
-          ? nextEffects
-          : undefined,
+      effects: hasStudioEffects(nextEffects) ? nextEffects : undefined,
     });
+  }
+
+  function setMediaFrame(frame: DropMediaFrame) {
+    const nextEffects = {
+      ...(normalized.effects ?? {}),
+      frame,
+    };
+    update({
+      ...normalized,
+      effects: hasStudioEffects(nextEffects) ? nextEffects : undefined,
+    });
+  }
+
+  function rotateMedia() {
+    const current = normalizeDropMediaRotation(normalized.effects?.rotation);
+    const next = ((current + 90) % 360) as 0 | 90 | 180 | 270;
+    const nextEffects = {
+      ...(normalized.effects ?? {}),
+      rotation: next || null,
+    };
+    update({
+      ...normalized,
+      effects: hasStudioEffects(nextEffects) ? nextEffects : undefined,
+    });
+  }
+
+  const mediaFrame = resolveDropMediaFrame(normalized);
+  const mediaRotationStyle = dropMediaRotationStyle(normalized.effects?.rotation ?? 0);
+
+  function toggleMediaFrame() {
+    setMediaFrame(mediaFrame === "landscape" ? "portrait" : "landscape");
   }
 
   function removeItem(kind: "text" | "sticker", id: string) {
@@ -261,7 +250,7 @@ export default function DropStudio({
   const previewEl = (
     <div
       ref={previewRef}
-      className={`${styles.preview} ${
+      className={`${styles.preview} ${operatingTable ? styles.previewInFrame : ""} ${
         normalized.effects?.filter ? styles[`filter_${normalized.effects.filter}`] ?? "" : ""
       } ${
         normalized.effects?.overlay ? styles[`overlay_${normalized.effects.overlay}`] ?? "" : ""
@@ -271,11 +260,28 @@ export default function DropStudio({
       onPointerCancel={() => setDragging(null)}
       onPointerLeave={() => setDragging(null)}
     >
-      {mediaKind === "video" ? (
-        <video src={mediaUrl} controls playsInline preload="metadata" />
-      ) : (
-        <img src={mediaUrl} alt="Drop Studio media preview" />
-      )}
+      {mediaUrl ? (
+        <div className={styles.mediaLayer}>
+          {mediaKind === "video" ? (
+            <video
+              key={mediaUrl}
+              src={mediaUrl}
+              controls
+              playsInline
+              preload="metadata"
+              style={mediaRotationStyle}
+            />
+          ) : (
+            <img
+              key={mediaUrl}
+              src={mediaUrl}
+              alt="Drop Studio media preview"
+              style={mediaRotationStyle}
+              onError={() => onMediaError?.()}
+            />
+          )}
+        </div>
+      ) : null}
       <DropStudioOverlay
         customizations={normalized}
         editable
@@ -294,36 +300,29 @@ export default function DropStudio({
     </div>
   );
 
+  const toolsClassName = styles.tools;
+  const drawerClassName = styles.drawer;
+  const activeToolClassName = styles.activeTool;
+
   const toolbarEl = (
-    <div className={styles.tools} aria-label="Drop Studio tools">
+    <div className={toolsClassName} aria-label="Drop Studio tools">
       {(["text", "stickers", "button", "effects", "filters", "enhance"] as Tool[]).map((item) => (
         <button
           key={item}
           type="button"
-          className={tool === item ? styles.activeTool : ""}
-          onClick={() => {
-            setTool(item);
-            if (sheet) openSheet();
-          }}
+          className={tool === item ? activeToolClassName : undefined}
+          onPointerDown={(event) => event.currentTarget.setPointerCapture(event.pointerId)}
+          onClick={() => setTool(item)}
+          title={toolLabel(item)}
         >
-          {item === "text"
-            ? "Text"
-            : item === "stickers"
-              ? "Stickers"
-              : item === "button"
-                ? "Button"
-                : item === "effects"
-                  ? "Effects"
-                  : item === "filters"
-                    ? "Filters"
-                    : "Enhance"}
+          {toolLabel(item)}
         </button>
       ))}
     </div>
   );
 
-  const drawerEl = (
-    <div className={`${styles.drawer} ${sheet ? styles.sheetScroll : ""}`}>
+  const drawerPanelsEl = (
+    <>
         {tool === "text" ? (
           <div className={styles.toolStack}>
             <div className={styles.textTool}>
@@ -487,6 +486,29 @@ export default function DropStudio({
         {tool === "enhance" ? (
           <div className={styles.enhanceTool}>
             <div>
+              <div className={styles.groupLabel}>Media Frame</div>
+              <p>Portrait 4:5 is the Board default. Landscape fits wide photos and video.</p>
+            </div>
+            <div className={styles.effectGrid}>
+              <button
+                type="button"
+                className={mediaFrame === "portrait" ? styles.selectedAction : ""}
+                onClick={() => setMediaFrame("portrait")}
+              >
+                Portrait 4:5
+              </button>
+              <button
+                type="button"
+                className={mediaFrame === "landscape" ? styles.selectedAction : ""}
+                onClick={() => setMediaFrame("landscape")}
+              >
+                Landscape 16:9
+              </button>
+              <button type="button" onClick={rotateMedia}>
+                Rotate 90°
+              </button>
+            </div>
+            <div>
               <div className={styles.groupLabel}>Quality Enhancement</div>
               <p>Apply a clean visual lift now. Future versions can route this to AI/media processing.</p>
             </div>
@@ -499,56 +521,42 @@ export default function DropStudio({
             </button>
           </div>
         ) : null}
-      </div>
+    </>
   );
 
+  const drawerEl = <div className={drawerClassName}>{drawerPanelsEl}</div>;
+
+  const deckPanelEl = (
+    <DropStudioPaletteDeck
+      tool={tool}
+      onToolChange={setTool}
+      drawer={drawerPanelsEl}
+      artTools={artTools}
+    />
+  );
+
+  if (operatingTable) {
+    return (
+      <DropChipWorkbench
+        chip={previewEl}
+        deck={deckPanelEl}
+        mediaFrame={mediaFrame}
+        onToggleFrame={toggleMediaFrame}
+      />
+    );
+  }
+
   return (
-    <section
-      className={`${styles.studio} ${compact ? styles.compact : ""} ${
-        sheet ? styles.sheetStudio : ""
-      }`}
-    >
+    <section className={`${styles.studio} ${compact ? styles.compact : ""}`}>
       {headerEl}
-      {sheet ? (
-        <>
-          <div className={styles.monitorArea}>
-            {previewEl}
-            {hintEl}
-          </div>
-          <div
-            ref={sheetRef}
-            className={`${styles.attachmentSheet} ${
-              dragTranslate != null ? styles.attachmentSheetDragging : ""
-            }`}
-            style={{ transform: sheetTransform }}
-          >
-            <div className={styles.sheetPeek} ref={sheetPeekRef}>
-              <button
-                type="button"
-                className={styles.sheetHandle}
-                onPointerDown={onSheetHandleDown}
-                onPointerMove={onSheetHandleMove}
-                onPointerUp={onSheetHandleUp}
-                onPointerCancel={onSheetHandleUp}
-                aria-label="Drag to pull the attachment panel up or down"
-              >
-                <span className={styles.sheetGrip} aria-hidden />
-              </button>
-              {toolbarEl}
-            </div>
-            {drawerEl}
-          </div>
-        </>
-      ) : (
-        <>
-          {previewEl}
-          {hintEl}
-          {toolbarEl}
-          {drawerEl}
-        </>
-      )}
+      {previewEl}
+      {hintEl}
+      {toolbarEl}
+      {drawerEl}
 
       {/* Future Drop Studio layers: deeper Aura Effects and animated Board sticker assets. */}
     </section>
   );
 }
+
+export default memo(DropStudio);

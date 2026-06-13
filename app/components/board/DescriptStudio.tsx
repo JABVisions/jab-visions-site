@@ -45,7 +45,9 @@ type ToolId =
   | "numbered"
   | "alignLeft"
   | "alignCenter"
-  | "alignRight";
+  | "alignRight"
+  | "fontSmaller"
+  | "fontLarger";
 
 type Phase = "launcher" | "editor";
 
@@ -105,6 +107,7 @@ const DESCRIPT_DAY_CSS = `
   }
   .descript.day .dBody:empty::before { color: rgba(40, 50, 65, 0.38); }
   .descript.day .dBody :global(h2) { color: #1a3a52; }
+  .descript.day .dBody :global(h2:not(:first-child)) { border-top-color: rgba(80, 140, 220, 0.4); }
   .descript.day .dBody :global(blockquote) {
     color: #3a4a5c;
     border-left-color: rgba(80, 140, 220, 0.65);
@@ -154,12 +157,18 @@ export default function DescriptStudio({
   onClose,
   onShared,
   startInEditor = false,
+  initialDoc = null,
+  shareLabel,
   defaultDestination = "doc",
 }: {
   onClose?: () => void;
   onShared?: (doc: DescriptDoc) => void;
   /** Skip the launcher when reopening from a host that already picked a doc. */
   startInEditor?: boolean;
+  /** Open this doc in the editor on mount (Dropbook page re-edit). */
+  initialDoc?: DescriptDoc | null;
+  /** Override the primary share CTA label (e.g. Dropbook shelf). */
+  shareLabel?: string;
   /** Drop type chosen in Drop Console before opening Descript. */
   defaultDestination?: DescriptDestination;
 }) {
@@ -405,6 +414,13 @@ export default function DescriptStudio({
     setDestination(doc.destination ?? defaultDestination);
   }
 
+  const initialDocOpenedRef = useRef(false);
+  useEffect(() => {
+    if (!initialDoc || initialDocOpenedRef.current) return;
+    initialDocOpenedRef.current = true;
+    resumeDraft(initialDoc);
+  }, [initialDoc]);
+
   function focusBody() {
     bodyRef.current?.focus();
   }
@@ -422,6 +438,26 @@ export default function DescriptStudio({
       const normalized = normalizeInlineMarkup(el.innerHTML);
       if (normalized !== el.innerHTML) el.innerHTML = normalized;
     }
+    refreshCounts();
+    refreshActive();
+  }
+
+  // Grow/shrink the selected text one step (1–7, mapped to CSS keyword sizes by
+  // the browser). styleWithCSS=true emits <span style="font-size:…"> which the
+  // normalizer + sanitizer now preserve, so the size sticks after save.
+  function changeFontSize(dir: 1 | -1) {
+    focusBody();
+    let level = 3;
+    try {
+      level = parseInt(String(document.queryCommandValue("fontSize") || "3"), 10) || 3;
+    } catch {}
+    level = Math.min(7, Math.max(1, level + dir));
+    try {
+      document.execCommand("styleWithCSS", false, "true");
+    } catch {}
+    try {
+      document.execCommand("fontSize", false, String(level));
+    } catch {}
     refreshCounts();
     refreshActive();
   }
@@ -461,6 +497,10 @@ export default function DescriptStudio({
         return runCommand("justifyCenter");
       case "alignRight":
         return runCommand("justifyRight");
+      case "fontSmaller":
+        return changeFontSize(-1);
+      case "fontLarger":
+        return changeFontSize(1);
     }
   }
 
@@ -514,10 +554,14 @@ export default function DescriptStudio({
     const doc = save();
     if (!doc) return;
     const payload = { ...doc, destination };
+    if (onShared) {
+      onShared(payload);
+      flashNote(shareLabel ? "Added to Dropbook ✦" : "Saved ✦");
+      return;
+    }
     try {
       window.dispatchEvent(new CustomEvent(DESCRIPT_SHARE_EVENT, { detail: payload }));
     } catch {}
-    onShared?.(payload);
     flashNote(`Sent to Drop Console as ${DEST_LABELS[destination] ?? "drop"} ✓`);
     onClose?.();
   }
@@ -533,6 +577,8 @@ export default function DescriptStudio({
     { id: "alignLeft", label: "Align left", glyph: "⇤", group: 3 },
     { id: "alignCenter", label: "Align center", glyph: "↔", group: 3 },
     { id: "alignRight", label: "Align right", glyph: "⇥", group: 3 },
+    { id: "fontSmaller", label: "Smaller text", glyph: "A−", group: 4 },
+    { id: "fontLarger", label: "Bigger text", glyph: "A+", group: 4 },
   ];
 
   if (phase === "launcher") {
@@ -1003,7 +1049,7 @@ export default function DescriptStudio({
       ) : null}
 
       <div className="dToolbar" role="toolbar" aria-label="Formatting">
-        {[0, 1, 2, 3].map((group) => (
+        {[0, 1, 2, 3, 4].map((group) => (
           <div className="dToolGroup" key={group}>
             {TOOLS.filter((t) => t.group === group).map((t) => (
               <button
@@ -1060,7 +1106,7 @@ export default function DescriptStudio({
             🗂 Save
           </button>
           <button type="button" className="dShare" onClick={shareToBoard}>
-            Share to Board →
+            {shareLabel ?? "Share to Board →"}
           </button>
         </div>
       </div>
@@ -1379,6 +1425,13 @@ export default function DescriptStudio({
         .dBody :global(h2) {
           font-size: 1.32em;
           color: #d7f6ff;
+        }
+        /* Page break: each H2 starts a new "page", so draw a divider line above
+           it (skipping the very first heading). */
+        .dBody :global(h2:not(:first-child)) {
+          margin-top: 1.15em;
+          padding-top: 0.95em;
+          border-top: 1px dashed rgba(126, 226, 255, 0.42);
         }
         .dBody :global(blockquote) {
           margin: 0.5em 0;

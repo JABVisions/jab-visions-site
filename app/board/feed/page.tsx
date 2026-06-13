@@ -13,7 +13,8 @@ import {
   type BoardActivity,
   type BoardActivityKind,
 } from "@/lib/board/activity";
-import { mergeActivityWithFeed } from "@/lib/board/feedActivity";
+import { mergeActivityWithFeed, mergeFeedWithLocalOverlay } from "@/lib/board/feedActivity";
+import { patchBrokenAnnouncementFeed } from "@/lib/board/announcementMediaOverrides";
 import {
   BOARD_PROJECTS_UPDATED_EVENT,
   syncResolvedProjectsToStorage,
@@ -199,21 +200,44 @@ export default function HomeBoardFeedPage() {
   }, [kinds]);
 
   const safeItems = useMemo(
-    () => (Array.isArray(items) ? items : []).filter(Boolean),
+    () => patchBrokenAnnouncementFeed((Array.isArray(items) ? items : []).filter(Boolean)),
     [items]
   );
 
-  function removeItemFromFeed(removedId: string) {
+  function removeDropFromFeed(activityId: string, canonicalDropId?: string, purgeIds?: string[]) {
+    const purge = new Set(
+      [activityId, canonicalDropId, ...(purgeIds ?? [])].filter(
+        (value): value is string => Boolean(value)
+      )
+    );
+    if (!purge.size) return;
+
     setItems((current) =>
       current.filter((item) => {
         const meta = item.meta && typeof item.meta === "object" ? item.meta : null;
-        return (
-          item.id !== removedId &&
-          String(meta?.dropId || "") !== removedId &&
-          String(meta?.originalDropId || "") !== removedId
-        );
+        const dropId = String(meta?.dropId || "");
+        const originalDropId = String(meta?.originalDropId || "");
+        if (purge.has(item.id)) return false;
+        if (dropId && purge.has(dropId)) return false;
+        if (originalDropId && purge.has(originalDropId)) return false;
+        return true;
       })
     );
+  }
+
+  function applyLocalFeedOverlay() {
+    const localActivity = getLocalActivity();
+    const sharedFeed = readFeed();
+    const merged = mergeActivityWithFeed(localActivity, sharedFeed);
+    setItems((prev) => {
+      const next = mergeFeedWithLocalOverlay(prev, merged, { kinds });
+      if (next.length) return next.slice(0, PAGE_SIZE);
+      if (prev.length) return prev;
+      return visibleFallbackItems.slice(0, PAGE_SIZE);
+    });
+    setHasMore(false);
+    setOffset(PAGE_SIZE);
+    setLoading(false);
   }
 
   useEffect(() => {
@@ -226,27 +250,17 @@ export default function HomeBoardFeedPage() {
 
     function syncFromLocal() {
       try {
-        const localActivity = getLocalActivity();
-        const sharedFeed = readFeed();
         if (!alive) return;
-        const merged = mergeActivityWithFeed(localActivity, sharedFeed);
-        const scoped = (kinds?.length
-          ? merged.filter((item) => kinds.includes(item.kind))
-          : merged
-        ).filter((item) => !isPrivateDropActivity(item));
-        setItems(
-          (scoped.length ? scoped : visibleFallbackItems).slice(0, PAGE_SIZE)
-        );
-        setHasMore(false);
-        setOffset(PAGE_SIZE);
+        applyLocalFeedOverlay();
       } catch {
         if (alive) {
-          setItems(visibleFallbackItems.slice(0, PAGE_SIZE));
+          setItems((prev) =>
+            prev.length ? prev : visibleFallbackItems.slice(0, PAGE_SIZE)
+          );
           setHasMore(false);
           setOffset(PAGE_SIZE);
+          setLoading(false);
         }
-      } finally {
-        if (alive) setLoading(false);
       }
     }
 
@@ -270,11 +284,15 @@ export default function HomeBoardFeedPage() {
         const localActivity = getLocalActivity();
         const sharedFeed = readFeed();
         const merged = mergeActivityWithFeed([...cleaned, ...localActivity], sharedFeed);
-        const nextItems = (merged.length ? merged : visibleFallbackItems).filter(
-          (item) => !isPrivateDropActivity(item)
+        const nextItems = mergeFeedWithLocalOverlay(
+          cleaned.filter((item) => !isPrivateDropActivity(item)),
+          merged,
+          { kinds }
         );
 
-        setItems(nextItems);
+        setItems(
+          nextItems.length ? nextItems : visibleFallbackItems.filter((item) => !isPrivateDropActivity(item))
+        );
         setHasMore(cleaned.length === PAGE_SIZE);
         setOffset(cleaned.length);
       } catch {
@@ -286,12 +304,19 @@ export default function HomeBoardFeedPage() {
 
     run();
     const onFeedUpdated = () => syncFromLocal();
+    const onDropRemoved = (event: Event) => {
+      const detail = (event as CustomEvent<{ id?: string; dropId?: string; purgeIds?: string[] }>)
+        .detail;
+      removeDropFromFeed(detail?.id || "", detail?.dropId, detail?.purgeIds);
+    };
     window.addEventListener(EVENTS.feedUpdated, onFeedUpdated as EventListener);
+    window.addEventListener("board:drop:removed", onDropRemoved as EventListener);
     window.addEventListener(BOARD_PROJECTS_UPDATED_EVENT, onFeedUpdated as EventListener);
     window.addEventListener(PROJECT_DROPS_UPDATED_EVENT, onFeedUpdated as EventListener);
     return () => {
       alive = false;
       window.removeEventListener(EVENTS.feedUpdated, onFeedUpdated as EventListener);
+      window.removeEventListener("board:drop:removed", onDropRemoved as EventListener);
       window.removeEventListener(
         BOARD_PROJECTS_UPDATED_EVENT,
         onFeedUpdated as EventListener
@@ -301,7 +326,7 @@ export default function HomeBoardFeedPage() {
         onFeedUpdated as EventListener
       );
     };
-  }, [sb, tab, kinds]);
+  }, [sb, tab, kinds, visibleFallbackItems]);
 
   useEffect(() => {
     const onNew = (e: any) => {
@@ -386,7 +411,7 @@ export default function HomeBoardFeedPage() {
 
             <div className="feed-cards">
               {safeItems.map((a) => (
-                <ActivityCard key={a.id} item={a} onRemove={removeItemFromFeed} />
+                <ActivityCard key={a.id} item={a} onRemove={removeDropFromFeed} />
               ))}
             </div>
 

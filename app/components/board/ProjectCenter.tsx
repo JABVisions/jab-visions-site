@@ -5,7 +5,7 @@ import ProjectDropMenu, {
   type ProjectDrop,
 } from "@/app/components/board/projects/ProjectDropMenu";
 import DropCommentsDrawer from "@/app/components/board/DropCommentsDrawer";
-import DropStudioStage from "@/app/components/board/DropStudioStage";
+import LazyDropStudioStage from "@/app/components/board/LazyDropStudioStage";
 import { compactDropCustomizations, type DropCustomization } from "@/lib/board/dropCustomizations";
 import {
   addDropPadAsset,
@@ -1375,7 +1375,7 @@ export default function ProjectCenter() {
           dropId={commentsProject ? projectCommentDropId(commentsProject.id) : ""}
           dropTitle={commentsProject?.title}
         />
-        <DropStudioStage
+        <LazyDropStudioStage
           open={thoughtStudioMode !== null}
           initialFile={null}
           initialMode={thoughtStudioMode ?? "photo"}

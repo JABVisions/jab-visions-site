@@ -8,20 +8,29 @@ import {
   appendLocalActivity,
   getLocalActivity,
   removeLocalActivity,
+  activityMatchesDropId,
   type BoardActivity,
 } from "@/lib/board/activity";
 import { readBrain, withdrawFromBrain } from "@/lib/board/bucketBrain";
 import { removeDrops as removeUniversalDrops } from "@/lib/board/drops/storage";
+import { rememberDeletedDropId } from "@/lib/board/dropItem";
 import { resolveLinkPreviewImage } from "@/lib/board/linkPreviewImages";
 import { fetchLinkPreview } from "@/lib/board/linkPreview";
 import { openHostedPayDropCheckout } from "@/lib/board/payCheckout";
-import { EVENTS as BOARD_STORE_EVENTS, removeDrops as removeFeedDrops } from "@/lib/boardStore";
+import { removeDrops as removeFeedDrops } from "@/lib/boardStore";
 import { normalizeDropCustomizations } from "@/lib/board/dropCustomizations";
+import {
+  dropMediaFrameClassName,
+  dropMediaRotationStyle,
+  tagDropMediaFrame,
+} from "@/lib/board/dropMediaFrameDisplay";
+import { isLinkStyleBoardDrop, isSocialMediaUrl, resolveBoardDropDisplayFrame } from "@/lib/board/mediaFormat";
 import {
   findLocalDropByAnyId,
   getDropSignedUrl,
   loadDropMediaForFeed,
   persistDropEdit,
+  removeDropFromBoardStore,
 } from "@/lib/board/boardDropEditStore";
 import { EyeToggle } from "./icons/EyeToggle";
 import { normalizeRichText, type RichTextValue } from "@/lib/board/richText";
@@ -54,6 +63,7 @@ import {
   secondaryAttachmentLabelFromMeta,
 } from "@/lib/board/dropDisplay";
 import { parseBoardStorageFromUrl } from "@/lib/board/musicPlayback";
+import { ANNOUNCEMENT_JPEG_OVERRIDES } from "@/lib/board/announcementMediaOverrides";
 import type { DropItem } from "@/lib/board/dropItem";
 
 import {
@@ -84,6 +94,10 @@ import {
   normalizeIdentityKey,
   pushedRootId,
   readLocalProfileIdentity,
+  resolveActivityEmbed,
+  resolveBoardDropFlavor,
+  resolveDescriptChipText,
+  shouldShowDescriptMediaChip,
   storedUrl,
   toAppleMusicEmbed,
   toSoundCloudEmbed,
@@ -99,7 +113,7 @@ import {
 type Props = {
   item: BoardActivity;
   compact?: boolean;
-  onRemove?: (dropId: string) => void;
+  onRemove?: (activityId: string, canonicalDropId?: string) => void;
 };
 
 export default function ActivityCard({
@@ -111,6 +125,7 @@ export default function ActivityCard({
   const [toastVisible, setToastVisible] = useState(false);
   const toastFadeTimerRef = useRef<number | null>(null);
   const toastClearTimerRef = useRef<number | null>(null);
+  const lastMediaSignKeyRef = useRef("");
   const [embedFailed, setEmbedFailed] = useState(false);
   const [signedPreviewImage, setSignedPreviewImage] = useState<string>("");
   // Image fetched on the client for link drops whose stored record has no
@@ -135,6 +150,7 @@ export default function ActivityCard({
   const [commentCount, setCommentCount] = useState(0);
   const [userAuraColor, setUserAuraColor] = useState(fallbackAuraColor);
   const [announcementImagePosition, setAnnouncementImagePosition] = useState({ x: 50, y: 50 });
+  const [announcementImageSrc, setAnnouncementImageSrc] = useState<string | null>(null);
   const [announcementDrag, setAnnouncementDrag] = useState<{
     clientX: number;
     clientY: number;
@@ -182,7 +198,6 @@ export default function ActivityCard({
     null
   );
   // Supabase boardDrops hydration — desktop has this in localStorage; mobile does not.
-  const [musicHasStoredFile, setMusicHasStoredFile] = useState(false);
   const [musicHydrating, setMusicHydrating] = useState(false);
 
   const title = titleOverride ?? (item?.title || "Drop");
@@ -191,17 +206,33 @@ export default function ActivityCard({
   const timeLabel = formatDropTime((item as any)?.created_at);
 
   // Be tolerant: href can be stored a few ways depending on older drops
-  const href =
-    (typeof (item as any)?.href === "string" && (item as any).href) ||
-    (typeof (item as any)?.url === "string" && (item as any).url) ||
-    (typeof (item as any)?.link === "string" && (item as any).link) ||
-    "";
   const rawMeta = (item as any)?.meta;
   const meta = rawMeta && typeof rawMeta === "object" ? rawMeta : null;
   const preview = meta?.preview ?? meta ?? null;
+  const href =
+    metaString(
+      (item as any)?.href,
+      (item as any)?.url,
+      (item as any)?.link,
+      preview?.url,
+      meta?.url
+    ) || "";
+  const bakedEmbedUrl = metaString(meta?.embedUrl, preview?.embedUrl);
   const dropCustomizations =
     customizationsOverride ??
     normalizeDropCustomizations(meta?.customizations ?? preview?.customizations);
+  const boardDropFlavor = resolveBoardDropFlavor(meta, preview);
+  const feedDropType = boardDropFlavor || String(item?.kind ?? "").toLowerCase();
+  const isMusicDrop = isMusicDropType(boardDropFlavor || feedDropType);
+  const isLinkStyleDrop =
+    !isMusicDrop &&
+    (isLinkStyleBoardDrop(feedDropType) ||
+      isLinkStyleBoardDrop(boardDropFlavor) ||
+      (Boolean(href) && (isSocialMediaUrl(href) || computeEmbed(href).kind === "youtube")));
+  const feedMediaFrameClass = dropMediaFrameClassName(
+    resolveBoardDropDisplayFrame(dropCustomizations, { dropType: feedDropType, href })
+  );
+  const feedMediaRotationStyle = dropMediaRotationStyle(dropCustomizations?.effects?.rotation ?? 0);
   // Comments are keyed to the canonical drop id (not the feed activity row id),
   // so they save and load consistently across the feed, grid, and profile.
   const commentDropId = metaString(meta?.dropId, meta?.originalDropId, (item as any)?.id);
@@ -255,18 +286,16 @@ export default function ActivityCard({
   // both so detection matches what actually renders.
   const mediaBucket = metaString(meta?.preview?.bucket, meta?.bucket);
   const mediaStoragePath = metaString(meta?.preview?.storagePath, meta?.storagePath);
+  const metaDropId = metaString(meta?.dropId);
+  const metaOriginalDropId = metaString(meta?.originalDropId);
+  const metaEditedAt = typeof meta?.editedAt === "number" ? meta.editedAt : 0;
   // The owner's authoritative drop record (board_style.boardDrops) is the source
   // of truth the profile renders from. Prefer it over the activity meta, whose
   // media fields can go stale (e.g. an edited image still carrying an old "audio"
   // kind/path → a Voice player on an image). Falls back to meta for others' drops.
   const canonicalBoardDrop = useMemo(
-    () =>
-      findLocalDropByAnyId(
-        metaString(meta?.dropId),
-        metaString(meta?.originalDropId),
-        id
-      ),
-    [meta, id, mediaRefreshTick]
+    () => findLocalDropByAnyId(metaDropId, metaOriginalDropId, id),
+    [metaDropId, metaOriginalDropId, id, mediaRefreshTick]
   );
   const dropVisibility: "public" | "private" =
     visibilityOverride ??
@@ -280,8 +309,7 @@ export default function ActivityCard({
     canonicalMediaKind ||
     resolveDropMediaKindFromMeta(meta as Record<string, unknown>) ||
     metaString(meta?.mediaKind, meta?.preview?.mediaKind);
-  const feedDropType = String(meta?.dropType ?? item?.kind ?? "").toLowerCase();
-  const musicDropType = feedDropType || metaString(meta?.dropType, meta?.drop_flavor);
+  const musicDropType = boardDropFlavor || feedDropType;
   const dropMediaUrl = metaString(meta?.mediaUrl);
   const storedMediaCoords = resolveStoredMediaCoords({
     bucket: mediaBucket,
@@ -291,6 +319,10 @@ export default function ActivityCard({
   });
   const storedMediaBucket = storedMediaCoords?.bucket || mediaBucket;
   const storedMediaPath = storedMediaCoords?.storagePath || mediaStoragePath;
+  const bakedFeedImage =
+    (typeof (item as any)?.image_url === "string" && (item as any).image_url) ||
+    metaString(meta?.preview?.image, meta?.preview?.previewImage) ||
+    "";
 
   // Feed `board_drop` items don't carry bucket/storagePath — only a rendered
   // media URL (meta.mediaUrl / meta.preview.image / image_url). Treat that URL
@@ -298,8 +330,10 @@ export default function ActivityCard({
   // or news thumbnail never counts. Drop Studio loads from this URL when no
   // storage path exists, then re-uploads on save.
   const isMediaBearingDrop =
-    feedDropType.includes("media") ||
-    feedDropType.includes("pay") ||
+    boardDropFlavor.includes("media") ||
+    boardDropFlavor.includes("pay") ||
+    boardDropFlavor.includes("music") ||
+    boardDropFlavor.includes("audio") ||
     feedDropType.includes("music") ||
     feedDropType.includes("audio") ||
     Boolean(feedMediaKind);
@@ -549,7 +583,7 @@ export default function ActivityCard({
       window.removeEventListener("board:drop:updated", onDropUpdated as EventListener);
       window.removeEventListener("board:activity:updated", onActivityUpdated as EventListener);
     };
-  }, [meta, id]);
+  }, [metaDropId, metaOriginalDropId, id]);
 
   // Feed activity items bake the media URL at creation time, so an edit (new
   // storage path / new overlay) never shows through the stale feed payload.
@@ -558,6 +592,8 @@ export default function ActivityCard({
   // devices often lack local cache; always fall back to server meta + signing.
   useEffect(() => {
     let cancelled = false;
+    if (isLinkStyleDrop) return;
+
     const isMusic = isMusicDropType(musicDropType);
     const treatsAsAudio = isMusic || feedMediaKind === "audio";
 
@@ -565,19 +601,59 @@ export default function ActivityCard({
       if (cancelled || !url) return;
       setSignedPreviewImage(url);
       setMediaImageOverride(url);
-      // An explicit visual kind from the authoritative record wins over the
-      // meta-derived "treatsAsAudio" guess (prevents an image showing as audio).
-      if (kind === "image" || kind === "video") setMediaKindOverride(kind);
-      else if (treatsAsAudio || kind === "audio") setMediaKindOverride("audio");
+
+      let resolved = kind || null;
+      if (resolved !== "image" && resolved !== "video" && resolved !== "audio") {
+        const guessed = guessMediaKind(url);
+        if (guessed === "image" || guessed === "video" || guessed === "audio") {
+          resolved = guessed;
+        }
+      }
+      if (
+        resolved !== "image" &&
+        resolved !== "video" &&
+        resolved !== "audio" &&
+        storedMediaPath
+      ) {
+        const path = storedMediaPath.toLowerCase();
+        if (/\.(jpe?g|png|gif|webp|heic|bmp|svg)(\?|#|$)/.test(path)) resolved = "image";
+        else if (/\.(mp4|webm|mov|m4v)(\?|#|$)/.test(path)) resolved = "video";
+        else if (/\.(mp3|m4a|wav|aac|ogg|flac|weba)(\?|#|$)/.test(path)) resolved = "audio";
+        else if (storedMediaBucket) resolved = "image";
+      }
+
+      if (resolved === "image" || resolved === "video") {
+        setMediaKindOverride(resolved);
+        return;
+      }
+      if (
+        resolved === "audio" ||
+        (treatsAsAudio && isAudioFileUrl(url) && !isStreamingMusicUrl(url))
+      ) {
+        setMediaKindOverride("audio");
+        return;
+      }
+      if (feedMediaKind === "image" || feedMediaKind === "video") {
+        setMediaKindOverride(feedMediaKind);
+      }
     }
 
     async function signFromServerMeta() {
       if (storedMediaBucket && storedMediaPath) {
         const url = await getDropSignedUrl(storedMediaBucket, storedMediaPath, 60 * 45);
         if (url) {
-          await applyPlayableUrl(url, "audio");
+          const kind =
+            feedMediaKind ||
+            resolveDropMediaKindFromMeta(meta as Record<string, unknown>) ||
+            null;
+          await applyPlayableUrl(url, kind);
           return;
         }
+      }
+      if (bakedFeedImage) {
+        const kind = feedMediaKind || guessMediaKind(bakedFeedImage) || null;
+        await applyPlayableUrl(bakedFeedImage, kind);
+        return;
       }
       const direct = [dropMediaUrl, href].find(
         (url) => url && isAudioFileUrl(url) && !isStreamingMusicUrl(url)
@@ -585,11 +661,7 @@ export default function ActivityCard({
       if (direct && treatsAsAudio) await applyPlayableUrl(direct, "audio");
     }
 
-    const canonical = findLocalDropByAnyId(
-      metaString(meta?.dropId),
-      metaString(meta?.originalDropId),
-      id
-    );
+    const canonical = findLocalDropByAnyId(metaDropId, metaOriginalDropId, id);
 
     if (!canonical) {
       void signFromServerMeta();
@@ -598,7 +670,7 @@ export default function ActivityCard({
       };
     }
 
-    const serverEditedAt = typeof meta?.editedAt === "number" ? meta.editedAt : 0;
+    const serverEditedAt = metaEditedAt;
     const localEditedAt =
       typeof (canonical as { updatedAt?: number }).updatedAt === "number"
         ? (canonical as { updatedAt?: number }).updatedAt!
@@ -612,7 +684,8 @@ export default function ActivityCard({
     const canonicalCustomizations = normalizeDropCustomizations(
       (canonical as { customizations?: unknown }).customizations
     );
-    if (!localIsStale && canonicalCustomizations) {
+    // Frame/rotation/stickers always follow the authoritative boardDrops record.
+    if (canonicalCustomizations) {
       setCustomizationsOverride(canonicalCustomizations);
     }
     if (!localIsStale && "titleRich" in canonical) {
@@ -648,7 +721,9 @@ export default function ActivityCard({
       cancelled = true;
     };
   }, [
-    meta,
+    metaDropId,
+    metaOriginalDropId,
+    metaEditedAt,
     id,
     mediaRefreshTick,
     storedMediaBucket,
@@ -657,6 +732,8 @@ export default function ActivityCard({
     feedMediaKind,
     dropMediaUrl,
     href,
+    bakedFeedImage,
+    isLinkStyleDrop,
   ]);
 
   const authorGlow =
@@ -730,7 +807,8 @@ export default function ActivityCard({
   });
   const isStoredAudioDrop = !!storedAudioSrc;
   const showFullSongPlayer =
-    isStoredAudioDrop || isUploadedMusicDrop || musicHasStoredFile;
+    !!storedAudioSrc ||
+    (isUploadedMusicDrop && (musicHydrating || hasStoredAudioPath));
   const showAnnouncementImage =
     item?.kind === "announcement" &&
     !!resolvedPreviewImage &&
@@ -740,25 +818,24 @@ export default function ActivityCard({
   // Hydrate uploaded music from authoritative boardDrops (same path Drop Studio uses).
   // Feed meta often only has the Spotify href; the file lives on boardDrops.
   useEffect(() => {
-    setMusicHasStoredFile(false);
     setMusicHydrating(false);
 
     if (!isMusicDropType(musicDropType)) return;
 
-    const alreadyUploaded = hasUploadedMusicStorage({
-      mediaKind,
-      dropType: musicDropType,
-      bucket: storedMediaBucket,
-      storagePath: storedMediaPath,
-      mediaUrl: dropMediaUrl,
-      href,
-    });
-    if (alreadyUploaded) {
-      setMusicHasStoredFile(true);
+    if (
+      hasUploadedMusicStorage({
+        mediaKind,
+        dropType: musicDropType,
+        bucket: storedMediaBucket,
+        storagePath: storedMediaPath,
+        mediaUrl: dropMediaUrl,
+        href,
+      })
+    ) {
       return;
     }
 
-    const dropId = metaString(meta?.dropId, meta?.originalDropId);
+    const dropId = metaString(metaDropId, metaOriginalDropId);
     if (!dropId) return;
 
     setMusicHydrating(true);
@@ -786,7 +863,6 @@ export default function ActivityCard({
 
         if (!coords && !directAudio) return;
 
-        setMusicHasStoredFile(true);
         setMediaKindOverride("audio");
 
         if (coords) {
@@ -817,14 +893,21 @@ export default function ActivityCard({
     dropMediaUrl,
     href,
     authorUserId,
-    meta,
+    metaDropId,
+    metaOriginalDropId,
     mediaRefreshTick,
   ]);
 
   useEffect(() => {
     setAnnouncementImagePosition({ x: 50, y: 50 });
     setAnnouncementDrag(null);
+    setAnnouncementImageSrc(null);
   }, [id, resolvedPreviewImage]);
+
+  const announcementDisplayImage =
+    announcementImageSrc ||
+    ANNOUNCEMENT_JPEG_OVERRIDES[id] ||
+    resolvedPreviewImage;
 
   useEffect(() => {
     const identity = readLocalProfileIdentity();
@@ -892,21 +975,17 @@ export default function ActivityCard({
   useEffect(() => {
     let cancelled = false;
 
-    // Only clear/sign when there's a storage path to sign. Otherwise leave
-    // signedPreviewImage alone so the canonical-media effect below (which owns
-    // the image for feed drops) isn't clobbered.
+    if (isLinkStyleDrop) return;
     if (!storedMediaBucket || !storedMediaPath) return;
 
-    // Only skip when local cache has authoritative storage coords (canonical effect
-    // owns signing). A partial local row on mobile must not block server signing.
-    const local = findLocalDropByAnyId(
-      metaString(meta?.dropId),
-      metaString(meta?.originalDropId),
-      id
-    );
+    const local = findLocalDropByAnyId(metaDropId, metaOriginalDropId, id);
     if (local?.bucket && local?.storagePath) return;
 
-    setSignedPreviewImage("");
+    const signKey = `${storedMediaBucket}:${storedMediaPath}`;
+    if (lastMediaSignKeyRef.current !== signKey) {
+      lastMediaSignKeyRef.current = signKey;
+      setSignedPreviewImage("");
+    }
 
     async function signPreviewImage() {
       try {
@@ -916,10 +995,21 @@ export default function ActivityCard({
           if (isMusicDropType(musicDropType) || feedMediaKind === "audio") {
             setMediaImageOverride(url);
             setMediaKindOverride("audio");
+          } else {
+            const kind =
+              feedMediaKind ||
+              resolveDropMediaKindFromMeta(meta as Record<string, unknown>) ||
+              guessMediaKind(url);
+            if (kind === "image" || kind === "video" || kind === "audio") {
+              setMediaImageOverride(url);
+              setMediaKindOverride(kind);
+            }
           }
+        } else if (!cancelled && bakedFeedImage) {
+          setSignedPreviewImage(bakedFeedImage);
         }
       } catch {
-        // Fall back to image_url/previewImage if storage signing fails.
+        if (!cancelled && bakedFeedImage) setSignedPreviewImage(bakedFeedImage);
       }
     }
 
@@ -928,14 +1018,25 @@ export default function ActivityCard({
     return () => {
       cancelled = true;
     };
-  }, [storedMediaBucket, storedMediaPath, musicDropType, feedMediaKind, meta, id, mediaRefreshTick]);
-
+  }, [
+    storedMediaBucket,
+    storedMediaPath,
+    musicDropType,
+    feedMediaKind,
+    metaDropId,
+    metaOriginalDropId,
+    id,
+    mediaRefreshTick,
+    bakedFeedImage,
+    isLinkStyleDrop,
+  ]);
   // Recover a working image when only a stored Supabase URL is available with no
   // re-signable path. Older announcements saved a PUBLIC url against a PRIVATE
   // bucket, so the link 403s and the image never renders. Parse the bucket/path
   // back out of the URL and sign it. (The effect above owns the case where a
   // path is already present.)
   useEffect(() => {
+    if (isLinkStyleDrop) return;
     if (storedMediaBucket && storedMediaPath) return;
     const candidate = announcementMediaUrl || previewImage || "";
     const m = candidate.match(
@@ -947,19 +1048,17 @@ export default function ActivityCard({
     let cancelled = false;
     void (async () => {
       try {
-        const supabase = supabaseBrowser();
-        const { data, error } = await supabase.storage
-          .from(bucket)
-          .createSignedUrl(path, 60 * 45);
-        if (!cancelled && !error && data?.signedUrl) setSignedPreviewImage(data.signedUrl);
+        const url = await getDropSignedUrl(bucket, path, 60 * 45);
+        if (!cancelled && url) setSignedPreviewImage(url);
+        else if (!cancelled && candidate) setSignedPreviewImage(candidate);
       } catch {
-        // Leave the existing (possibly broken) URL; nothing better to show.
+        if (!cancelled && candidate) setSignedPreviewImage(candidate);
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [announcementMediaUrl, previewImage, storedMediaBucket, storedMediaPath]);
+  }, [announcementMediaUrl, previewImage, storedMediaBucket, storedMediaPath, isLinkStyleDrop]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1079,9 +1178,11 @@ export default function ActivityCard({
     priceCents > 0;
   const preferNativeAudioPreview =
     !showFullSongPlayer &&
-    activityMediaKind === "audio" &&
+    mediaKind === "audio" &&
     (isThoughtDrop || isPayDrop || isBoardStorageMedia || isStoredAudioDrop);
   const preferNativeImagePreview =
+    !isLinkStyleDrop &&
+    !isMusicDrop &&
     !!resolvedPreviewImage &&
     !isStoredVideoDrop &&
     !showFullSongPlayer &&
@@ -1101,23 +1202,27 @@ export default function ActivityCard({
   // drop is created, so an edit never reaches it. When we've resolved the drop's
   // CURRENT media from the canonical store (mediaImageOverride), use that as the
   // embedded media so edits — drawings, replaced photo/video — show in the feed.
-  const embed = useMemo(() => {
-    if (
-      mediaImageOverride &&
-      (mediaKindOverride === "image" ||
-        mediaKindOverride === "video" ||
-        mediaKindOverride === "audio")
-    ) {
-      const kind: EmbedKind =
-        mediaKindOverride === "video"
-          ? "video"
-          : mediaKindOverride === "audio"
-            ? "audio"
-            : "image";
-      return { kind, url: mediaImageOverride };
-    }
-    return computeEmbed(href);
-  }, [href, mediaImageOverride, mediaKindOverride]);
+  const embed = useMemo(
+    () =>
+      resolveActivityEmbed({
+        streamHref: href,
+        bakedEmbedUrl,
+        mediaImageOverride,
+        mediaKindOverride,
+        isMusicDrop,
+        isUploadedMusic: isUploadedMusicDrop,
+        allowMediaOverride: !isLinkStyleDrop && !isMusicDrop,
+      }),
+    [
+      href,
+      bakedEmbedUrl,
+      mediaImageOverride,
+      mediaKindOverride,
+      isMusicDrop,
+      isUploadedMusicDrop,
+      isLinkStyleDrop,
+    ]
+  );
   const external = href ? isExternalHref(href) : false;
 
   // Host + favicon for the universal link-drop cover (shown when a link has no
@@ -1181,6 +1286,59 @@ export default function ActivityCard({
     embed.kind !== "none" &&
     !showFullSongPlayer &&
     !(isMusicDropType(musicDropType) && musicHydrating);
+
+  const fromDescript =
+    meta?.fromDescript === true || canonicalBoardDrop?.fromDescript === true;
+  const descriptMeta = useMemo(
+    () => ({
+      ...(meta ?? {}),
+      dropType:
+        meta?.dropType ??
+        meta?.drop_flavor ??
+        (canonicalBoardDrop?.type ? String(canonicalBoardDrop.type) : undefined),
+      thoughtText: metaString(meta?.thoughtText, canonicalBoardDrop?.thoughtText),
+      description: metaString(meta?.description, canonicalBoardDrop?.description),
+      fromDescript: fromDescript ? true : undefined,
+    }),
+    [meta, canonicalBoardDrop, fromDescript]
+  );
+  const descriptMediaChip = useMemo(
+    () =>
+      shouldShowDescriptMediaChip({
+        meta: descriptMeta,
+        body,
+        fromDescript,
+        hasVisualMedia: Boolean(
+          showEmbed ||
+            resolvedPreviewImage ||
+            isStoredVideoDrop ||
+            showFullSongPlayer ||
+            preferNativeAudioPreview
+        ),
+      }),
+    [
+      descriptMeta,
+      body,
+      fromDescript,
+      showEmbed,
+      resolvedPreviewImage,
+      isStoredVideoDrop,
+      showFullSongPlayer,
+      preferNativeAudioPreview,
+    ]
+  );
+  const showDescriptMediaChip = descriptMediaChip.show;
+  const descriptChipText = descriptMediaChip.text;
+  const resolvedDescriptionText = useMemo(
+    () => resolveDescriptChipText(descriptMeta, body),
+    [descriptMeta, body]
+  );
+  const showBodyText = Boolean(
+    resolvedDescriptionText &&
+      (!showDescriptMediaChip ||
+        resolvedDescriptionText.trim() !== descriptChipText.trim())
+  );
+  const bodyPlain = showBodyText ? resolvedDescriptionText : "";
 
   function signal(folder: "pass" | "pin" | "push") {
     if (!id) return;
@@ -1323,49 +1481,54 @@ export default function ActivityCard({
   async function performDropRemoval() {
     if (!id) return;
     const dropId = metaString(meta?.dropId, meta?.originalDropId, id);
-    removeLocalActivity((activity) => {
-      const activityMeta =
-        activity.meta && typeof activity.meta === "object"
-          ? (activity.meta as Record<string, any>)
-          : null;
-      return (
-        activity.id === id ||
-        activity.id === dropId ||
-        metaString(activityMeta?.dropId, activityMeta?.originalDropId) === dropId
-      );
-    });
-    removeUniversalDrops(
-      (drop) =>
-        drop.id === id ||
-        drop.id === dropId ||
-        metaString(drop.meta?.activityId, drop.meta?.dropId) === id ||
-        metaString(drop.meta?.activityId, drop.meta?.dropId) === dropId
+    const purgeIds = Array.from(new Set([id, dropId].filter(Boolean)));
+    const ownerId = authorUserId || currentAuthUserId;
+
+    for (const purgeId of purgeIds) {
+      rememberDeletedDropId(purgeId, ownerId);
+    }
+
+    removeLocalActivity(
+      (activity) =>
+        purgeIds.includes(activity.id) || activityMatchesDropId(activity, dropId)
     );
+    removeUniversalDrops((drop) => purgeIds.includes(drop.id));
     removeFeedDrops((drop) => {
       const feedMeta = drop.meta && typeof drop.meta === "object" ? drop.meta : null;
       return (
-        drop.id === id ||
-        drop.id === dropId ||
-        metaString(feedMeta?.activityId, feedMeta?.dropId) === id ||
-        metaString(feedMeta?.activityId, feedMeta?.dropId) === dropId
+        purgeIds.includes(drop.id) ||
+        purgeIds.includes(metaString(feedMeta?.activityId, feedMeta?.dropId))
       );
     });
 
+    onRemove?.(id, dropId);
+    window.dispatchEvent(
+      new CustomEvent("board:drop:removed", { detail: { id, dropId, purgeIds } })
+    );
+    flashToast("Drop removed", 1200);
+
+    void removeDropFromBoardStore(dropId, purgeIds, ownerId);
+    void purgeRemoteActivityRows(purgeIds);
+  }
+
+  async function purgeRemoteActivityRows(purgeIds: string[]) {
     try {
       const sb = supabaseBrowser();
-      const { data: auth } = await sb.auth.getUser();
-      const authUserId = auth?.user?.id;
-      if (authUserId && authorUserId === authUserId) {
-        await sb.from("board_activity").delete().eq("id", id).eq("user_id", authUserId);
+      const authResult = await Promise.race([
+        sb.auth.getUser(),
+        new Promise<{ data: { user: null } }>((resolve) =>
+          window.setTimeout(() => resolve({ data: { user: null } }), 4000)
+        ),
+      ]);
+      const authUserId = authResult?.data?.user?.id;
+      if (!authUserId || authorUserId !== authUserId) return;
+
+      for (const rowId of purgeIds) {
+        await sb.from("board_activity").delete().eq("id", rowId).eq("user_id", authUserId);
       }
     } catch {
-      // Board remains local-first; remote deletion can retry later when Supabase is reachable.
+      // Local-first: deleted ids are remembered; remote rows can be retried later.
     }
-
-    window.dispatchEvent(new CustomEvent("board:drop:removed", { detail: { id, dropId } }));
-    window.dispatchEvent(new CustomEvent(BOARD_STORE_EVENTS.feedUpdated));
-    onRemove?.(id);
-    flashToast("Drop removed", 1200);
   }
 
   function clampPan(value: number) {
@@ -1517,7 +1680,7 @@ export default function ActivityCard({
 
       {/* ✅ EMBED (now media-aware) */}
       {showEmbed ? (
-        <div className={clsx("embed", embed.kind)}>
+        <div className={clsx("embed", embed.kind, feedMediaFrameClass)}>
           {embed.kind === "image" && (
             <div className="mediaFrame">
               <img
@@ -1525,6 +1688,7 @@ export default function ActivityCard({
                 alt={title || "Vision drop"}
                 className="img"
                 loading="lazy"
+                onLoad={(e) => tagDropMediaFrame(e.currentTarget, dropCustomizations)}
                 onError={() => setEmbedFailed(true)}
               />
               <DropStudioOverlay customizations={dropCustomizations} />
@@ -1536,6 +1700,8 @@ export default function ActivityCard({
               <FeedVideo
                 className="vid"
                 src={embed.url}
+                style={feedMediaRotationStyle}
+                onLoadedMetadata={(e) => tagDropMediaFrame(e.currentTarget, dropCustomizations)}
                 onError={() => setEmbedFailed(true)}
               />
               <DropStudioOverlay customizations={dropCustomizations} />
@@ -1581,7 +1747,7 @@ export default function ActivityCard({
           className={clsx("activityImagePreview announcementMedia", announcementDrag && "dragging")}
           style={
             {
-              "--announcement-image": `url("${resolvedPreviewImage.replace(/"/g, '\\"')}")`,
+              "--announcement-image": `url("${announcementDisplayImage.replace(/"/g, '\\"')}")`,
             } as React.CSSProperties
           }
           onPointerDown={startAnnouncementDrag}
@@ -1593,10 +1759,16 @@ export default function ActivityCard({
         >
           <img
             className="activityImage"
-            src={resolvedPreviewImage}
+            src={announcementDisplayImage}
             alt={title || "Announcement image"}
             loading="lazy"
             draggable={false}
+            onError={() => {
+              const override = ANNOUNCEMENT_JPEG_OVERRIDES[id];
+              if (override && announcementImageSrc !== override) {
+                setAnnouncementImageSrc(override);
+              }
+            }}
             style={{
               objectPosition: `${announcementImagePosition.x}% ${announcementImagePosition.y}%`,
             }}
@@ -1613,7 +1785,7 @@ export default function ActivityCard({
       !showFullSongPlayer &&
       !preferNativeBoardMedia ? (
         <a
-          className="linkPreview"
+          className={clsx("linkPreview", feedMediaFrameClass)}
           href={href}
           target={external ? "_blank" : undefined}
           rel={external ? "noreferrer" : undefined}
@@ -1638,10 +1810,12 @@ export default function ActivityCard({
       ) : null}
 
       {!showEmbed && isStoredVideoDrop ? (
-        <div className="mediaFrame storedVideoFrame">
+        <div className={clsx("mediaFrame storedVideoFrame", feedMediaFrameClass)}>
           <FeedVideo
             className="vid"
             src={storedVideoSrc}
+            style={feedMediaRotationStyle}
+            onLoadedMetadata={(e) => tagDropMediaFrame(e.currentTarget, dropCustomizations)}
             onError={() => setEmbedFailed(true)}
           />
           <DropStudioOverlay customizations={dropCustomizations} />
@@ -1660,7 +1834,7 @@ export default function ActivityCard({
         </div>
       ) : null}
 
-      {!showEmbed && (showFullSongPlayer || (isMusicDropType(musicDropType) && musicHydrating)) ? (
+      {!showEmbed && showFullSongPlayer ? (
         <div className="mediaFrame storedAudioFrame">
           <div className="audioLabel">
             {secondaryMetaLabel?.toUpperCase() || (isPayDrop ? "Audio" : "Full song")}
@@ -1679,7 +1853,7 @@ export default function ActivityCard({
       !isStoredVideoDrop &&
       !showFullSongPlayer &&
       preferNativeImagePreview ? (
-        <div className="activityImagePreview">
+        <div className={clsx("activityImagePreview", feedMediaFrameClass)}>
           {secondaryMetaLabel || showCapturedOnMediaOverlay ? (
             <div className="media-overlay-badges">
               {secondaryMetaLabel ? (
@@ -1695,6 +1869,7 @@ export default function ActivityCard({
             src={resolvedPreviewImage}
             alt={title || "Board drop image"}
             loading="lazy"
+            onLoad={(e) => tagDropMediaFrame(e.currentTarget, dropCustomizations)}
           />
           <DropStudioOverlay customizations={dropCustomizations} />
         </div>
@@ -1710,7 +1885,7 @@ export default function ActivityCard({
       !isStoredVideoDrop &&
       !showFullSongPlayer ? (
         <a
-          className="linkPreview linkCoverFallback"
+          className={clsx("linkPreview linkCoverFallback", feedMediaFrameClass)}
           href={href}
           target="_blank"
           rel="noreferrer"
@@ -1753,10 +1928,17 @@ export default function ActivityCard({
         </a>
       ) : null}
 
+      {!showEmbed && showDescriptMediaChip ? (
+        <div className="activityDescriptChip" aria-label="Descript document preview">
+          {title ? <div className="activityDescriptChipTitle">{title}</div> : null}
+          <div className="activityDescriptChipBody">{descriptChipText}</div>
+        </div>
+      ) : null}
+
       {/* Description sits directly under the media attachment. */}
-      {body ? (
+      {showBodyText ? (
         <div className="body">
-          <RichText as="span" value={descRich} plain={body} />
+          <RichText as="span" value={descRich} plain={bodyPlain} />
         </div>
       ) : null}
 
@@ -1885,7 +2067,12 @@ export default function ActivityCard({
             --avatar-size: 40px;
           }
         }
-        .linkPreviewArt {
+        .linkPreview.is-wide .linkPreviewArt,
+        .linkPreviewArt.is-wide {
+          aspect-ratio: 16 / 9;
+          min-height: 0;
+        }
+        .linkPreview:not(.is-wide) .linkPreviewArt {
           min-height: ${compact ? "170px" : "230px"};
         }
         .linkPreviewTitle {

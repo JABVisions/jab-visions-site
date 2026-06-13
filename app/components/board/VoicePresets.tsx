@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import styles from "./voicePresets.module.css";
 
 export type VoicePresetKey = "clean" | "warm" | "radio" | "concert" | "dream";
 
@@ -132,9 +133,13 @@ function applyPreset(n: Nodes, preset: VoicePresetKey) {
 export default function VoicePresets({
   src,
   onPlayingChange,
+  layout = "horizontal",
+  compactDeck = false,
 }: {
   src: string;
   onPlayingChange?: (playing: boolean) => void;
+  layout?: "horizontal" | "vertical";
+  compactDeck?: boolean;
 }) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const nodesRef = useRef<Nodes | null>(null);
@@ -210,19 +215,31 @@ export default function VoicePresets({
   );
 
   return (
-    <div className="vpRack">
-      <div className="vpHead">
-        <span className="vpEyebrow">Vocal Enhancement</span>
-        <span className="vpHint">Pick a sound — no audio knobs required.</span>
-      </div>
-      <div className="vpChips" role="tablist" aria-label="Voice presets">
+    <div
+      className={[
+        styles.rack,
+        layout === "vertical" ? styles.rackVertical : "",
+        compactDeck ? styles.rackDeck : "",
+      ]
+        .filter(Boolean)
+        .join(" ")}
+    >
+      {compactDeck ? (
+        <div className={styles.deckHead}>Palette</div>
+      ) : (
+        <div className={styles.head}>
+          <span className={styles.eyebrow}>Vocal Enhancement</span>
+          <span className={styles.hint}>Pick a sound — no audio knobs required.</span>
+        </div>
+      )}
+      <div className={styles.chips} role="tablist" aria-label="Voice presets">
         {PRESETS.map((p) => (
           <button
             key={p.key}
             type="button"
             role="tab"
             aria-selected={preset === p.key}
-            className={`vpChip ${preset === p.key ? "on" : ""}`}
+            className={[styles.chip, preset === p.key ? styles.chipOn : ""].filter(Boolean).join(" ")}
             onClick={() => {
               ensureGraph();
               setPreset(p.key);
@@ -235,6 +252,7 @@ export default function VoicePresets({
       </div>
       <audio
         ref={audioRef}
+        className={styles.audio}
         src={src}
         controls
         preload="metadata"
@@ -246,60 +264,6 @@ export default function VoicePresets({
         onPause={() => onPlayingChange?.(false)}
         onEnded={() => onPlayingChange?.(false)}
       />
-
-      <style jsx>{`
-        .vpRack {
-          display: grid;
-          gap: 10px;
-        }
-        .vpHead {
-          display: flex;
-          align-items: baseline;
-          justify-content: space-between;
-          gap: 8px;
-          flex-wrap: wrap;
-        }
-        .vpEyebrow {
-          font-size: 10px;
-          font-weight: 950;
-          letter-spacing: 0.22em;
-          text-transform: uppercase;
-          color: #7ff5e7;
-        }
-        .vpHint {
-          font-size: 11px;
-          color: rgba(220, 255, 248, 0.55);
-        }
-        .vpChips {
-          display: flex;
-          flex-wrap: wrap;
-          gap: 7px;
-        }
-        .vpChip {
-          border-radius: 999px;
-          padding: 7px 12px;
-          font-size: 11px;
-          font-weight: 900;
-          letter-spacing: 0.04em;
-          color: rgba(232, 255, 248, 0.78);
-          background: rgba(255, 255, 255, 0.06);
-          border: 1px solid rgba(167, 244, 232, 0.2);
-          cursor: pointer;
-          transition: transform 140ms ease, background 140ms ease;
-        }
-        .vpChip:hover {
-          transform: translateY(-1px);
-        }
-        .vpChip.on {
-          color: #06121a;
-          background: radial-gradient(circle at 30% 20%, #fff, #7ee2ff);
-          border-color: rgba(255, 255, 255, 0.55);
-          box-shadow: 0 0 14px rgba(126, 226, 255, 0.4);
-        }
-        .vpRack audio {
-          width: 100%;
-        }
-      `}</style>
     </div>
   );
 }

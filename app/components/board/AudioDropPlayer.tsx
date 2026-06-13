@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import VocalVisualizer from "./VocalVisualizer";
 
 /**
@@ -19,6 +19,15 @@ export default function AudioDropPlayer({
 }) {
   const audioRef = useRef<HTMLAudioElement>(null);
   const [playing, setPlaying] = useState(false);
+  // Start by loading with CORS so the visualizer can tap the signal. If that
+  // load fails (a source that doesn't send CORS headers), fall back to a plain
+  // load with the tap disabled — audio still plays, we just drop the live wave.
+  const [corsBlocked, setCorsBlocked] = useState(false);
+
+  // Reset the CORS attempt whenever the clip changes.
+  useEffect(() => {
+    setCorsBlocked(false);
+  }, [src]);
 
   return (
     <div className="adp">
@@ -26,12 +35,19 @@ export default function AudioDropPlayer({
         <VocalVisualizer
           state={playing ? "playback" : "saved"}
           playbackAudioRef={audioRef}
+          disableTap={corsBlocked}
         />
       </div>
       <audio
+        key={corsBlocked ? "nocors" : "cors"}
         ref={audioRef}
         className="adpAudio"
         src={src}
+        // Load with CORS so the VocalVisualizer can tap the signal with
+        // createMediaElementSource WITHOUT the browser muting cross-origin
+        // (Supabase) audio as a security taint. Supabase storage serves
+        // Access-Control-Allow-Origin, so this also lets the real waveform read.
+        crossOrigin={corsBlocked ? undefined : "anonymous"}
         controls
         preload="metadata"
         playsInline
@@ -39,7 +55,15 @@ export default function AudioDropPlayer({
         onPlay={() => setPlaying(true)}
         onPause={() => setPlaying(false)}
         onEnded={() => setPlaying(false)}
-        onError={onError}
+        onError={() => {
+          // First failure with CORS on: retry once without it (keeps audio
+          // working for non-CORS hosts). Only bubble a real error after that.
+          if (!corsBlocked) {
+            setCorsBlocked(true);
+            return;
+          }
+          onError?.();
+        }}
       />
 
       <style jsx>{`

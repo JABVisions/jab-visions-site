@@ -2157,6 +2157,11 @@ export default function BoardProfileHubPage() {
               <div className="profile-panel-drops">
                 <DropTile />
               </div>
+
+              <StoreCollectionPanel
+                slots={storeDropSlots}
+                className="profile-store-drops-bottom"
+              />
               </div>
             </div>
 
@@ -2365,11 +2370,6 @@ export default function BoardProfileHubPage() {
             </div>
 
           </div>
-
-          <StoreCollectionPanel
-            slots={storeDropSlots}
-            className="profile-store-drops-bottom"
-          />
         </div>
       </section>
 

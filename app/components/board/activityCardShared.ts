@@ -68,6 +68,19 @@ export function metaString(...values: unknown[]) {
   return "";
 }
 
+/** Canonical drop flavor from feed meta (Music, Media, Link, …) — not the activity row kind. */
+export function resolveBoardDropFlavor(
+  meta: Record<string, unknown> | null | undefined,
+  preview?: Record<string, unknown> | null | undefined
+): string {
+  return metaString(
+    meta?.dropType,
+    meta?.drop_flavor,
+    meta?.dropFlavor,
+    preview?.dropType
+  ).toLowerCase();
+}
+
 export function storedUrl(...values: unknown[]) {
   const clean = metaString(...values);
   return clean.startsWith("data:") ? "" : clean;
@@ -428,4 +441,121 @@ export function computeEmbed(href: string): { kind: EmbedKind; url: string } {
   if (mk !== "none") return { kind: mk, url: href };
 
   return { kind: "none", url: "" };
+}
+
+function embedFromBakedUrl(embedUrl: string): { kind: EmbedKind; url: string } {
+  const clean = embedUrl.trim();
+  if (!clean) return { kind: "none", url: "" };
+
+  try {
+    const host = new URL(clean).hostname.toLowerCase();
+    if (host.includes("open.spotify.com")) return { kind: "spotify", url: clean };
+    if (host.includes("youtube.com") || host.includes("youtube-nocookie.com")) {
+      return { kind: "youtube", url: clean };
+    }
+    if (host.includes("soundcloud.com")) return { kind: "soundcloud", url: clean };
+    if (host.includes("music.apple.com")) return { kind: "apple_music", url: clean };
+  } catch {
+    // fall through to extension sniff
+  }
+
+  const mk = guessMediaKind(clean);
+  if (mk !== "none") return { kind: mk, url: clean };
+  return { kind: "none", url: "" };
+}
+
+/** Resolve the best embed for a feed card — stream href, baked embedUrl, or uploaded override. */
+export function resolveActivityEmbed(opts: {
+  streamHref: string;
+  bakedEmbedUrl?: string;
+  mediaImageOverride?: string | null;
+  mediaKindOverride?: string | null;
+  isMusicDrop?: boolean;
+  isUploadedMusic?: boolean;
+  allowMediaOverride?: boolean;
+}): { kind: EmbedKind; url: string } {
+  const override = opts.mediaImageOverride?.trim() || "";
+  const overrideKind = opts.mediaKindOverride;
+
+  if (opts.isMusicDrop && override) {
+    if (
+      overrideKind === "audio" ||
+      opts.isUploadedMusic ||
+      guessMediaKind(override) === "audio"
+    ) {
+      return { kind: "audio", url: override };
+    }
+  }
+
+  if (opts.allowMediaOverride && override) {
+    if (overrideKind === "video") return { kind: "video", url: override };
+    if (overrideKind === "audio") return { kind: "audio", url: override };
+    if (overrideKind === "image") return { kind: "image", url: override };
+    const guessed = guessMediaKind(override);
+    if (guessed !== "none") return { kind: guessed, url: override };
+  }
+
+  const fromHref = computeEmbed(opts.streamHref);
+  if (fromHref.kind !== "none") return fromHref;
+
+  const baked = opts.bakedEmbedUrl?.trim() || "";
+  if (baked) {
+    const fromBaked = embedFromBakedUrl(baked);
+    if (fromBaked.kind !== "none") return fromBaked;
+  }
+
+  return { kind: "none", url: "" };
+}
+
+function isGenericBoardDropCaption(text: string) {
+  const trimmed = text.trim();
+  if (!trimmed) return true;
+  return (
+    /^New .+ drop added to Board\.?$/i.test(trimmed) ||
+    /^New .+ drop from .+\.?$/i.test(trimmed) ||
+    /^A thought landed on Board\.?$/i.test(trimmed)
+  );
+}
+
+/** Plain text to show inside the glossy 4:5 Descript media chip. */
+export function resolveDescriptChipText(
+  meta: Record<string, unknown> | null | undefined,
+  body?: string | null
+): string {
+  const dropType = resolveBoardDropFlavor(meta);
+  const thoughtText = metaString(meta?.thoughtText);
+  const description = metaString(meta?.description);
+  const plainBody = typeof body === "string" ? body.trim() : "";
+  const bodyCandidate = isGenericBoardDropCaption(plainBody) ? "" : plainBody;
+
+  if (dropType.includes("thought")) {
+    return thoughtText || description || bodyCandidate;
+  }
+  if (dropType.includes("doc")) {
+    return description || thoughtText || bodyCandidate;
+  }
+  return thoughtText || description || bodyCandidate;
+}
+
+/** Whether a drop should render the glossy Descript 4:5 thumbnail in feed/profile. */
+export function shouldShowDescriptMediaChip(opts: {
+  meta?: Record<string, unknown> | null;
+  body?: string | null;
+  fromDescript?: boolean;
+  hasVisualMedia?: boolean;
+}): { show: boolean; text: string } {
+  const meta = opts.meta;
+  const dropType = resolveBoardDropFlavor(meta);
+  const text = resolveDescriptChipText(meta, opts.body);
+  if (!text || opts.hasVisualMedia || isGenericBoardDropCaption(text)) {
+    return { show: false, text: "" };
+  }
+
+  const fromDescript = opts.fromDescript === true || meta?.fromDescript === true;
+  const isThought = dropType.includes("thought");
+  const isDoc = dropType.includes("doc");
+
+  if (fromDescript && (isThought || isDoc)) return { show: true, text };
+  if (isThought || isDoc) return { show: true, text };
+  return { show: false, text: "" };
 }

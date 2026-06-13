@@ -28,6 +28,9 @@ export type DropStudioActionButton = {
 export type DropStudioEffects = {
   filter?: string | null;
   overlay?: string | null;
+  /** Portrait 4:5 (default) or landscape 16:9 chip — lives in customizations JSON. */
+  frame?: "portrait" | "landscape" | null;
+  rotation?: 0 | 90 | 180 | 270 | null;
 };
 
 export type DropCustomization = {
@@ -147,7 +150,17 @@ export function normalizeDropCustomizations(
       : null;
   const filter = rawEffects ? cleanEffectValue(rawEffects.filter) : null;
   const overlay = rawEffects ? cleanEffectValue(rawEffects.overlay) : null;
-  const effects = filter || overlay ? { filter, overlay } : undefined;
+  const frame: DropStudioEffects["frame"] =
+    rawEffects?.frame === "landscape" || rawEffects?.frame === "portrait"
+      ? rawEffects.frame
+      : null;
+  const rotRaw = rawEffects ? Number(rawEffects.rotation) : 0;
+  const rotation =
+    rotRaw === 90 || rotRaw === 180 || rotRaw === 270 ? (rotRaw as 90 | 180 | 270) : null;
+  const effects =
+    filter || overlay || frame || rotation
+      ? { filter, overlay, frame, rotation }
+      : undefined;
 
   if (!textLabels.length && !stickers.length && !actionButton && !effects) return undefined;
   return { textLabels, stickers, actionButton, ...(effects ? { effects } : {}) };

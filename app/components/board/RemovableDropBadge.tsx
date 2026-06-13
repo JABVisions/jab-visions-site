@@ -121,8 +121,11 @@ export default function RemovableDropBadge({
     event.preventDefault();
     event.stopPropagation();
     if (isRemoving) return;
-    await onRemove();
-    hide();
+    try {
+      await onRemove();
+    } finally {
+      hide();
+    }
   }
 
   function handleClick(event: React.MouseEvent<HTMLButtonElement>) {

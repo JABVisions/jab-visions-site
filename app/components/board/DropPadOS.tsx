@@ -6,7 +6,7 @@ import { supabaseBrowser } from "@/lib/supabase/browser";
 import WorkCallsList, { type WorkCallItem } from "@/app/components/board/WorkCallsList";
 import ProjectCenter from "@/app/components/board/ProjectCenter";
 import StoreDropTile, { type StoreDrop } from "@/app/components/board/StoreDropTile";
-import DropStudioStage from "@/app/components/board/DropStudioStage";
+import LazyDropStudioStage from "@/app/components/board/LazyDropStudioStage";
 import type { DropCustomization } from "@/lib/board/dropCustomizations";
 import {
   DESCRIPT_SHARE_EVENT,
@@ -1476,10 +1476,7 @@ export default function DropPadOS({
       {/* Scrollable + extendable iPad screen */}
       <div className="relative z-10 mt-4 px-5 sm:px-6 pb-6">
         <div
-          className={clsx(
-            "relative w-full rounded-3xl border border-white/10 bg-white/[0.03]",
-            "overflow-y-auto overflow-x-hidden"
-          )}
+          className="osScreenViewport relative w-full rounded-3xl border border-white/10 bg-white/[0.03]"
           style={{ height: `${screenPx}px` }}
         >
           {/* scanlines */}
@@ -2121,7 +2118,7 @@ export default function DropPadOS({
         </div>
       ) : null}
 
-      <DropStudioStage
+      <LazyDropStudioStage
         open={studioOpen}
         initialFile={null}
         initialMode={studioInitialMode}
@@ -2134,6 +2131,20 @@ export default function DropPadOS({
       />
 
       <style jsx>{`
+        /* Main monitor — scroll when needed, but no bulky OS scrollbar rail. */
+        .osScreenViewport {
+          overflow-x: hidden;
+          overflow-y: auto;
+          -webkit-overflow-scrolling: touch;
+          scrollbar-width: none;
+          -ms-overflow-style: none;
+        }
+        .osScreenViewport::-webkit-scrollbar {
+          display: none;
+          width: 0;
+          height: 0;
+        }
+
         .osMenuRoot {
           position: relative;
           overflow: hidden;
@@ -2385,6 +2396,13 @@ export default function DropPadOS({
         }
         .osProfilePage {
           overflow-y: auto;
+          scrollbar-width: none;
+          -ms-overflow-style: none;
+        }
+        .osProfilePage::-webkit-scrollbar {
+          display: none;
+          width: 0;
+          height: 0;
         }
         .pwb {
           display: grid;

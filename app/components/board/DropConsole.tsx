@@ -3,7 +3,7 @@
 
 import "./DropConsole.css";
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { supabaseBrowser } from "@/lib/supabase/browser";
 
 import { createActivity, type BoardActivityKind } from "@/lib/board/activity";
@@ -31,9 +31,9 @@ import {
   seedForumsIfEmpty,
   type BoardUser,
 } from "@/lib/boardStore";
-import DropStudio from "./DropStudio";
+import dynamic from "next/dynamic";
 import DropStudioOverlay from "./DropStudioOverlay";
-import DropStudioStage from "./DropStudioStage";
+import LazyDropStudioStage from "./LazyDropStudioStage";
 import { RichTextField } from "./RichTextField";
 import {
   normalizeRichText,
@@ -47,6 +47,8 @@ import {
   type DescriptDestination,
   type DescriptDoc,
 } from "@/lib/board/descriptDocs";
+
+const DropStudio = dynamic(() => import("./DropStudio"), { ssr: false });
 
 /* -------------------------------------------------------------------------- */
 /* utils */
@@ -273,6 +275,7 @@ export default function DropConsole({
   const [payDesc, setPayDesc] = useState("");
   const [payLink, setPayLink] = useState("");
   const [docDesc, setDocDesc] = useState("");
+  const descriptOriginRef = useRef(false);
 
   // Forum Post mode
   const [forumId, setForumId] = useState<string>("general");
@@ -353,7 +356,13 @@ export default function DropConsole({
     setUploading(true);
 
     try {
-      const ext = (file.name.split(".").pop() || "bin").toLowerCase();
+      let uploadFile = file;
+      if (file.type.startsWith("image/") && file.type !== "image/gif" && file.type !== "image/svg+xml") {
+        const { convertHeicToJpegIfNeeded } = await import("@/lib/board/imageQuality");
+        uploadFile = await convertHeicToJpegIfNeeded(file);
+      }
+
+      const ext = (uploadFile.name.split(".").pop() || "bin").toLowerCase();
       const bucket = mode === "board_drop" && dropFlavor === "doc" ? "board-docs" : "board-media";
       const path = `uploads/${meId ?? "demo"}/${Date.now()}_${Math.random()
         .toString(16)
@@ -361,10 +370,10 @@ export default function DropConsole({
 
       const { error } = await sb.storage
         .from(bucket)
-        .upload(path, file, {
+        .upload(path, uploadFile, {
           cacheControl: "3600",
           upsert: false,
-          contentType: file.type || undefined,
+          contentType: uploadFile.type || undefined,
         });
 
       if (error) throw error;
@@ -375,7 +384,7 @@ export default function DropConsole({
       if (mode === "announcement") setAnnounceMediaUrl(url);
       if (mode === "board_drop") {
         setAttachUrl(url);
-        setUploadedFileName(file.name);
+        setUploadedFileName(uploadFile.name);
         setUploadedBucket(bucket);
         setUploadedStoragePath(path);
         setMediaSource(source);
@@ -583,6 +592,7 @@ export default function DropConsole({
                 visibility: dropVisibility,
                 thoughtText: dropFlavor === "thought" ? thoughtText.trim() || cleanBody : null,
                 thoughtFormat,
+                fromDescript: descriptOriginRef.current ? true : null,
                 authorId: identity.id,
                 authorName: identity.displayName,
                 authorUsername: identity.username || null,
@@ -692,6 +702,7 @@ export default function DropConsole({
                 visibility: dropVisibility,
                 thoughtText: dropFlavor === "thought" ? thoughtText.trim() || cleanBody : null,
                 thoughtFormat,
+                fromDescript: descriptOriginRef.current ? true : null,
                 authorId: identity.id,
                 authorName: identity.displayName,
                 authorUsername: identity.username || null,
@@ -838,6 +849,7 @@ export default function DropConsole({
       setPayLink("");
       setDocDesc("");
       setDocDescRich({ html: "" });
+      descriptOriginRef.current = false;
 
       setPostMsg("Dropped ✓");
       window.setTimeout(() => setPostMsg(null), 1500);
@@ -901,6 +913,7 @@ export default function DropConsole({
         setDocDesc(plain);
         setDocDescRich(richTextFromPlain(plain));
       }
+      descriptOriginRef.current = true;
       setStudioMode(null);
     }
     window.addEventListener(DESCRIPT_SHARE_EVENT, onDescriptShare as EventListener);
@@ -930,7 +943,7 @@ export default function DropConsole({
 
   const content = (
     <div className="dc">
-      <DropStudioStage
+      <LazyDropStudioStage
         open={studioMode !== null}
         initialFile={null}
         initialMode={studioMode ?? (dropFlavor === "doc" ? "descript" : "photo")}
