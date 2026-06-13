@@ -4,6 +4,7 @@ import type {
   BoardActivity,
   BoardActivityKind,
 } from "@/lib/board/activity";
+import { getLocalActivity, setLocalActivity } from "@/lib/board/activity";
 import { readDrops, type UniversalDrop } from "@/lib/board/drops/storage";
 import { patchMusicActivity } from "@/lib/board/musicMigration";
 import { patchBrokenAnnouncementFeed } from "@/lib/board/announcementMediaOverrides";
@@ -294,23 +295,73 @@ export function universalDropToActivity(drop: UniversalDrop): BoardActivity | nu
   };
 }
 
+export type MergeActivityWithFeedOptions = {
+  /** Include universal drops + project mirrors from localStorage (default true). */
+  includeStorageMirrors?: boolean;
+};
+
+function collectActivityDropIds(item: BoardActivity): string[] {
+  const meta = item.meta && typeof item.meta === "object" ? item.meta : null;
+  return [String(meta?.dropId || ""), String(meta?.originalDropId || "")].filter(Boolean);
+}
+
+const RECENT_PENDING_MS = 3 * 60 * 1000;
+
+function isRecentPendingActivity(item: BoardActivity) {
+  const time = new Date(String(item.created_at || "")).getTime();
+  return Number.isFinite(time) && Date.now() - time < RECENT_PENDING_MS;
+}
+
+function isOptimisticFeedMirror(item: BoardActivity) {
+  return (
+    item.id.startsWith("local_") ||
+    item.id.startsWith("feed_") ||
+    item.id.startsWith("rt_")
+  );
+}
+
 export function mergeActivityWithFeed(
   activityItems: BoardActivity[],
-  feedItems: FeedDrop[]
+  feedItems: FeedDrop[],
+  opts?: MergeActivityWithFeedOptions
 ) {
+  const includeStorageMirrors = opts?.includeStorageMirrors !== false;
+  const storageMirrors = includeStorageMirrors
+    ? [
+        ...(readDrops()
+          .map(universalDropToActivity)
+          .filter(Boolean)
+          .map((item) => patchMusicActivity(item as BoardActivity).item) as BoardActivity[]),
+        ...resolveBoardProjects().map(projectToActivity),
+      ]
+    : [];
+
   return patchBrokenAnnouncementFeed(
     dedupeActivity([
       ...activityItems
         .filter(Boolean)
         .map((item) => patchMusicActivity(item).item),
       ...feedItems.map(feedDropToActivity).map((item) => patchMusicActivity(item).item),
-      ...(readDrops()
-        .map(universalDropToActivity)
-        .filter(Boolean)
-        .map((item) => patchMusicActivity(item as BoardActivity).item) as BoardActivity[]),
-      ...resolveBoardProjects().map(projectToActivity),
+      ...storageMirrors,
     ])
   );
+}
+
+/** Drop stale local activity rows once a server page is available. */
+export function pruneLocalActivityCacheFromServer(serverItems: BoardActivity[]) {
+  if (typeof window === "undefined" || !serverItems.length) return;
+
+  const serverIds = new Set(serverItems.map((item) => item.id));
+  const serverDropIds = new Set(serverItems.flatMap(collectActivityDropIds));
+  const pending = getLocalActivity().filter((item) => {
+    if (item.id.startsWith("local_")) return true;
+    if (serverIds.has(item.id)) return false;
+    const dropIds = collectActivityDropIds(item);
+    if (dropIds.some((id) => serverDropIds.has(id))) return false;
+    return isRecentPendingActivity(item);
+  });
+
+  setLocalActivity(dedupeActivity([...serverItems, ...pending]));
 }
 
 const DELETED_DROP_KEY_PREFIX = "jab_board_drops_deleted_v1";
@@ -351,40 +402,46 @@ export function filterDeletedFeedItems(items: BoardActivity[]): BoardActivity[] 
   });
 }
 
-/** Overlay local/feed storage onto the current feed without dropping remote-only rows. */
+/**
+ * Merge a local overlay onto server feed rows.
+ * Server/Supabase rows win; local only fills optimistic gaps (in-flight posts).
+ */
 export function mergeFeedWithLocalOverlay(
-  prev: BoardActivity[],
+  serverItems: BoardActivity[],
   localOverlay: BoardActivity[],
   opts?: { kinds?: BoardActivityKind[] }
 ): BoardActivity[] {
-  const scoped = filterDeletedFeedItems(
-    (opts?.kinds?.length
-      ? localOverlay.filter((item) => opts.kinds!.includes(item.kind))
-      : localOverlay
-    ).filter((item) => item.meta?.visibility !== "private")
+  const filterKinds = (items: BoardActivity[]) =>
+    opts?.kinds?.length ? items.filter((item) => opts.kinds!.includes(item.kind)) : items;
+
+  const serverScoped = filterDeletedFeedItems(
+    filterKinds(serverItems).filter((item) => item.meta?.visibility !== "private")
+  );
+  const localScoped = filterDeletedFeedItems(
+    filterKinds(localOverlay).filter((item) => item.meta?.visibility !== "private")
   );
 
-  if (!scoped.length) {
-    return filterDeletedFeedItems(prev);
+  if (!localScoped.length) {
+    return patchBrokenAnnouncementFeed(serverScoped);
   }
 
-  const localIds = new Set(scoped.map((item) => item.id));
-  const localDropIds = new Set(
-    scoped.flatMap((item) => {
-      const meta = item.meta && typeof item.meta === "object" ? item.meta : null;
-      return [String(meta?.dropId || ""), String(meta?.originalDropId || "")].filter(Boolean);
-    })
-  );
+  if (!serverScoped.length) {
+    return patchBrokenAnnouncementFeed(dedupeActivity(localScoped));
+  }
 
-  const remoteKept = prev.filter((item) => {
-    if (localIds.has(item.id)) return false;
-    const meta = item.meta && typeof item.meta === "object" ? item.meta : null;
-    const dropId = String(meta?.dropId || "");
-    const originalDropId = String(meta?.originalDropId || "");
-    if (dropId && localDropIds.has(dropId)) return false;
-    if (originalDropId && localDropIds.has(originalDropId)) return false;
-    return true;
+  const serverById = new Map(serverScoped.map((item) => [item.id, item]));
+  const serverDropIds = new Set(serverScoped.flatMap(collectActivityDropIds));
+
+  const pendingLocal = localScoped.filter((item) => {
+    if (serverById.has(item.id)) return false;
+    const dropIds = collectActivityDropIds(item);
+    if (dropIds.some((id) => serverDropIds.has(id))) return false;
+    if (item.id.startsWith("universal_") || item.id.startsWith("project_drop_")) return false;
+    if (isOptimisticFeedMirror(item)) return true;
+    return isRecentPendingActivity(item);
   });
 
-  return patchBrokenAnnouncementFeed(filterDeletedFeedItems(dedupeActivity([...scoped, ...remoteKept])));
+  return patchBrokenAnnouncementFeed(
+    filterDeletedFeedItems(dedupeActivity([...serverScoped, ...pendingLocal]))
+  );
 }

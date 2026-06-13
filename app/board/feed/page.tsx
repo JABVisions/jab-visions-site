@@ -13,7 +13,13 @@ import {
   type BoardActivity,
   type BoardActivityKind,
 } from "@/lib/board/activity";
-import { mergeActivityWithFeed, mergeFeedWithLocalOverlay } from "@/lib/board/feedActivity";
+import {
+  dedupeActivity,
+  filterDeletedFeedItems,
+  mergeActivityWithFeed,
+  mergeFeedWithLocalOverlay,
+  pruneLocalActivityCacheFromServer,
+} from "@/lib/board/feedActivity";
 import { patchBrokenAnnouncementFeed } from "@/lib/board/announcementMediaOverrides";
 import {
   BOARD_PROJECTS_UPDATED_EVENT,
@@ -228,7 +234,9 @@ export default function HomeBoardFeedPage() {
   function applyLocalFeedOverlay() {
     const localActivity = getLocalActivity();
     const sharedFeed = readFeed();
-    const merged = mergeActivityWithFeed(localActivity, sharedFeed);
+    const merged = mergeActivityWithFeed(localActivity, sharedFeed, {
+      includeStorageMirrors: true,
+    });
     setItems((prev) => {
       const next = mergeFeedWithLocalOverlay(prev, merged, { kinds });
       if (next.length) return next.slice(0, PAGE_SIZE);
@@ -248,28 +256,7 @@ export default function HomeBoardFeedPage() {
   useEffect(() => {
     let alive = true;
 
-    function syncFromLocal() {
-      try {
-        if (!alive) return;
-        applyLocalFeedOverlay();
-      } catch {
-        if (alive) {
-          setItems((prev) =>
-            prev.length ? prev : visibleFallbackItems.slice(0, PAGE_SIZE)
-          );
-          setHasMore(false);
-          setOffset(PAGE_SIZE);
-          setLoading(false);
-        }
-      }
-    }
-
-    async function run() {
-      setLoading(false);
-      setOffset(0);
-      setHasMore(true);
-      syncFromLocal();
-
+    async function refetchFromServer() {
       try {
         const data = await Promise.race([
           fetchSupabaseActivity({ limit: PAGE_SIZE, offset: 0, kinds }),
@@ -277,33 +264,45 @@ export default function HomeBoardFeedPage() {
             window.setTimeout(() => reject(new Error("Feed request timed out")), FEED_TIMEOUT_MS)
           ),
         ]);
-
         if (!alive) return;
 
         const cleaned = Array.isArray(data) ? data : [];
+        const publicServer = cleaned.filter((item) => !isPrivateDropActivity(item));
+        pruneLocalActivityCacheFromServer(publicServer);
+
         const localActivity = getLocalActivity();
         const sharedFeed = readFeed();
-        const merged = mergeActivityWithFeed([...cleaned, ...localActivity], sharedFeed);
-        const nextItems = mergeFeedWithLocalOverlay(
-          cleaned.filter((item) => !isPrivateDropActivity(item)),
-          merged,
-          { kinds }
-        );
+        const merged = mergeActivityWithFeed(localActivity, sharedFeed, {
+          includeStorageMirrors: false,
+        });
+        const nextItems = mergeFeedWithLocalOverlay(publicServer, merged, { kinds });
 
         setItems(
-          nextItems.length ? nextItems : visibleFallbackItems.filter((item) => !isPrivateDropActivity(item))
+          nextItems.length
+            ? nextItems
+            : visibleFallbackItems.filter((item) => !isPrivateDropActivity(item))
         );
         setHasMore(cleaned.length === PAGE_SIZE);
         setOffset(cleaned.length);
       } catch {
-        syncFromLocal();
+        if (!alive) return;
+        applyLocalFeedOverlay();
       } finally {
         if (alive) setLoading(false);
       }
     }
 
+    async function run() {
+      setLoading(true);
+      setOffset(0);
+      setHasMore(true);
+      await refetchFromServer();
+    }
+
     run();
-    const onFeedUpdated = () => syncFromLocal();
+    const onFeedUpdated = () => {
+      void refetchFromServer();
+    };
     const onDropRemoved = (event: Event) => {
       const detail = (event as CustomEvent<{ id?: string; dropId?: string; purgeIds?: string[] }>)
         .detail;
@@ -364,8 +363,11 @@ export default function HomeBoardFeedPage() {
           });
 
           const cleaned = Array.isArray(next) ? next : [];
+          const publicPage = cleaned.filter((item) => !isPrivateDropActivity(item));
 
-          setItems((prev) => [...prev, ...cleaned]);
+          setItems((prev) =>
+            filterDeletedFeedItems(dedupeActivity([...prev, ...publicPage]))
+          );
           setHasMore(cleaned.length === PAGE_SIZE);
           setOffset((p) => p + cleaned.length);
         } finally {

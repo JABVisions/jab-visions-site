@@ -2,12 +2,11 @@
 
 import { useEffect } from "react";
 import { migrateLegacyMusicDrops } from "@/lib/board/musicMigration";
+import { deferClientWork } from "@/lib/board/deferClientWork";
 
 /** Runs once per browser to patch existing Music Drops for full-song playback. */
 export default function MusicDropMigration() {
-  useEffect(() => {
-    void migrateLegacyMusicDrops();
-  }, []);
+  useEffect(() => deferClientWork(() => migrateLegacyMusicDrops()), []);
 
   return null;
 }

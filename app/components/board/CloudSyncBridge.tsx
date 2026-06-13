@@ -3,6 +3,7 @@
 import { useEffect } from "react";
 import { supabaseBrowser } from "@/lib/supabase/browser";
 import { hydrateCloudDrops } from "@/lib/board/cloudSync";
+import { deferClientWork } from "@/lib/board/deferClientWork";
 
 /**
  * Pulls cloud copies of the user's drops (universal + Pay Drops) into
@@ -11,18 +12,21 @@ import { hydrateCloudDrops } from "@/lib/board/cloudSync";
  */
 export default function CloudSyncBridge() {
   useEffect(() => {
-    void hydrateCloudDrops();
+    const cancelDeferred = deferClientWork(() => hydrateCloudDrops(), 5000);
 
     const supabase = supabaseBrowser();
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((event) => {
       if (event === "SIGNED_IN" || event === "TOKEN_REFRESHED") {
-        void hydrateCloudDrops();
+        deferClientWork(() => hydrateCloudDrops(), 2000);
       }
     });
 
-    return () => subscription.unsubscribe();
+    return () => {
+      cancelDeferred();
+      subscription.unsubscribe();
+    };
   }, []);
 
   return null;
