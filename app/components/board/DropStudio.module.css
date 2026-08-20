@@ -78,9 +78,20 @@
 
 .preview {
   position: relative;
-  width: 100%;
-  min-height: 240px;
-  max-height: 540px;
+  /* Standard Board Drop frame — matches the Drop Studio camera viewport so the
+     shot doesn't resize between capture and edit. Height-driven and capped so
+     the monitor stays a comfortable, stable size and the attachment tools below
+     (Text / Stickers / etc.) never overshadow it. */
+  aspect-ratio: 4 / 5;
+  /* Fill the available frame width (the binding constraint inside the Studio
+     sheet), capped by height so it can't run off-screen. Matches the camera
+     viewport's 4:5 frame so capture → edit is the same size and shape, and the
+     panel below stays reachable via the Studio's single scroll surface. */
+  width: min(100%, calc(58vh * 4 / 5));
+  height: auto;
+  max-width: 100%;
+  margin: 0 auto;
+  flex: 0 0 auto;
   overflow: hidden;
   border: 1px solid rgba(255, 255, 255, 0.18);
   border-radius: 22px;
@@ -115,9 +126,7 @@
   display: block;
   width: 100%;
   height: 100%;
-  min-height: 240px;
-  max-height: 540px;
-  object-fit: contain;
+  object-fit: cover;
   background: #02070a;
   transition: filter 220ms ease, transform 220ms ease;
 }
@@ -167,6 +176,41 @@
   filter: saturate(1.38) contrast(1.1) brightness(1.1) drop-shadow(0 0 16px rgba(255, 94, 220, 0.24));
 }
 
+.filter_signal-glow > img,
+.filter_signal-glow > video {
+  filter: saturate(1.18) contrast(1.06) brightness(1.08) drop-shadow(0 0 22px rgba(122, 255, 231, 0.3));
+}
+
+.filter_dream-fog > img,
+.filter_dream-fog > video {
+  filter: saturate(1.1) contrast(0.94) brightness(1.1) blur(0.35px);
+}
+
+.filter_bucket-vision > img,
+.filter_bucket-vision > video {
+  filter: saturate(1.22) hue-rotate(18deg) contrast(1.08) brightness(0.96) drop-shadow(0 0 16px rgba(95, 214, 255, 0.22));
+}
+
+.filter_pulse > img,
+.filter_pulse > video {
+  filter: saturate(1.32) contrast(1.12) brightness(1.04);
+}
+
+.filter_neon-signal > img,
+.filter_neon-signal > video {
+  filter: saturate(1.48) contrast(1.12) brightness(1.1) drop-shadow(0 0 18px rgba(255, 94, 220, 0.28));
+}
+
+.filter_artifact > img,
+.filter_artifact > video {
+  filter: sepia(0.16) saturate(1.16) contrast(1.04) brightness(1.02) hue-rotate(-8deg);
+}
+
+.filter_clean-enhance > img,
+.filter_clean-enhance > video {
+  filter: saturate(1.12) contrast(1.1) brightness(1.06);
+}
+
 .overlay_sparkle::after {
   background-image:
     radial-gradient(circle at 14% 18%, rgba(255, 255, 255, 0.92) 0 1px, transparent 2px),
@@ -210,6 +254,7 @@
 
 .overlay_blur-edge::after {
   box-shadow: inset 0 0 42px 18px rgba(2, 7, 10, 0.72);
+  -webkit-backdrop-filter: blur(0.6px);
   backdrop-filter: blur(0.6px);
 }
 
@@ -243,12 +288,15 @@
 }
 
 .tools {
+  /* The Studio lives in a narrow (~440px) sheet, so 6 pills in one row overlap
+     and clip their labels. Lay them out 3-across (two tidy rows) so every tool
+     name stays readable regardless of viewport width. */
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 7px;
-  padding: 5px;
+  padding: 6px;
   border: 1px solid rgba(167, 244, 232, 0.14);
-  border-radius: 999px;
+  border-radius: 22px;
   background: rgba(255, 255, 255, 0.045);
   box-shadow: inset 0 0 18px rgba(255, 255, 255, 0.035);
 }
@@ -308,20 +356,31 @@
 }
 
 .drawer {
-  min-height: 52px;
+  /* The attachment panel shows its full content. The Drop Studio body scrolls
+     as one surface (see .capEditScroll in DropStudioStage), so everything in the
+     panel is always reachable by scrolling instead of being clipped to a sliver. */
+  min-height: 120px;
 }
 
 .toolStack,
 .effectsTool,
+.enhanceTool,
 .effectSection {
   display: grid;
   gap: 9px;
 }
 
 .textTool {
+  /* Single column so the input spans the full panel width — the Drop Studio
+     lives inside a narrow (~440px) sheet, so a side-by-side input + button was
+     squeezing the field and clipping its prompt text. Button sits below. */
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: 1fr;
   gap: 7px;
+}
+
+.textTool input {
+  text-overflow: ellipsis;
 }
 
 .drawer input {
@@ -400,6 +459,25 @@
   line-height: 1.4;
 }
 
+.enhanceTool {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  padding: 0.72rem;
+  border: 1px solid rgba(167, 244, 232, 0.14);
+  border-radius: 20px;
+  background:
+    radial-gradient(circle at top left, rgba(107, 255, 231, 0.1), transparent 42%),
+    radial-gradient(circle at right, rgba(255, 107, 222, 0.08), transparent 42%),
+    rgba(255, 255, 255, 0.04);
+}
+
+.enhanceTool p {
+  margin: 0.2rem 0 0;
+  color: rgba(220, 255, 248, 0.62);
+  font-size: 0.64rem;
+  line-height: 1.45;
+}
+
 .layerList {
   display: grid;
   gap: 5px;
@@ -435,6 +513,456 @@
 .removeButton {
   border-color: rgba(255, 146, 190, 0.42) !important;
   color: #ffc4dc !important;
+}
+
+.previewInFrame {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  max-width: 100%;
+  max-height: 100%;
+  aspect-ratio: unset;
+  margin: 0;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  background: transparent;
+}
+
+.mediaLayer {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  z-index: 1;
+}
+
+.mediaLayer > img,
+.mediaLayer > video {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  background: #02070a;
+}
+
+/* Editing is a fit view: keep every edge of the captured photo/video visible.
+   Published Drop cards retain their own cover-style presentation. */
+.previewInFrame .mediaLayer > img,
+.previewInFrame .mediaLayer > video {
+  object-fit: contain;
+  object-position: 50% 50%;
+}
+
+.previewInFrame > img,
+.previewInFrame > video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* ---- Palette drawer (lives inside palettePanel — no nested panel chrome) ---- */
+.workbenchDock {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+  color: #e8fff8;
+}
+
+.workbenchHead {
+  flex: 0 0 auto;
+  font-size: 0.58rem;
+  font-weight: 950;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: #7ff5e7;
+  text-shadow: 0 0 12px rgba(110, 255, 234, 0.28);
+}
+
+.workbenchTools {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  flex: 0 0 auto;
+  padding: 6px;
+  border: 1px solid rgba(167, 244, 232, 0.16);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.05);
+  box-shadow: inset 0 0 14px rgba(255, 255, 255, 0.04);
+}
+
+.workbenchTools button {
+  min-width: 0;
+  width: 100%;
+  padding: 0.58rem 0.45rem;
+  border-radius: 999px;
+  border: 1px solid rgba(167, 244, 232, 0.22);
+  background: rgba(255, 255, 255, 0.07);
+  color: #e8fff8;
+  font: inherit;
+  font-size: 0.64rem;
+  font-weight: 950;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  line-height: 1.15;
+  white-space: normal;
+  cursor: pointer;
+  transition:
+    transform 160ms ease,
+    border-color 160ms ease,
+    background 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.workbenchTools button:hover,
+.workbenchToolActive {
+  border-color: rgba(119, 247, 225, 0.72) !important;
+  background:
+    radial-gradient(circle at top, rgba(255, 255, 255, 0.12), transparent 55%),
+    rgba(89, 240, 216, 0.18) !important;
+  box-shadow: 0 0 16px rgba(72, 238, 211, 0.22);
+  transform: translateY(-1px);
+  color: #bffff4 !important;
+}
+
+.workbenchPaletteScroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 6px 8px 10px;
+}
+
+.workbenchDrawer {
+  flex: 0 0 auto;
+  min-height: 0;
+  display: grid;
+  gap: 8px;
+  align-content: start;
+}
+
+.workbenchArtTools {
+  flex: 0 0 auto;
+  display: grid;
+  gap: 8px;
+  margin-top: 2px;
+  padding-top: 8px;
+}
+
+.inlineArtPalette {
+  display: grid;
+  gap: 8px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(167, 244, 232, 0.18);
+}
+
+.inlineArtHeading {
+  font-size: 0.58rem;
+  font-weight: 950;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: #ff9de7;
+  text-shadow: 0 0 12px rgba(255, 79, 216, 0.3);
+}
+
+.artCanvasLayer {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+  cursor: crosshair;
+}
+
+.workbenchDrawer input {
+  width: 100%;
+  padding: 0.68rem 0.72rem;
+  border-radius: 14px;
+  border: 1px solid rgba(167, 244, 232, 0.2);
+  background: rgba(255, 255, 255, 0.06);
+  color: #e8fff8;
+  font: inherit;
+  font-size: 0.72rem;
+  outline: none;
+  box-shadow: inset 0 0 14px rgba(255, 255, 255, 0.035);
+}
+
+.workbenchDrawer input::placeholder {
+  color: rgba(220, 255, 248, 0.48);
+}
+
+.workbenchDrawer button {
+  border: 1px solid rgba(167, 244, 232, 0.2);
+  background: rgba(255, 255, 255, 0.06);
+  color: #e8fff8;
+  font: inherit;
+  cursor: pointer;
+  padding: 0.52rem 0.58rem;
+  border-radius: 12px;
+  font-size: 0.68rem;
+  font-weight: 900;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  transition:
+    transform 160ms ease,
+    border-color 160ms ease,
+    background 160ms ease;
+}
+
+.workbenchDrawer button:hover:not(:disabled),
+.workbenchDrawer .selectedAction {
+  border-color: rgba(119, 247, 225, 0.72);
+  background:
+    radial-gradient(circle at top, rgba(255, 255, 255, 0.12), transparent 55%),
+    rgba(89, 240, 216, 0.16);
+  box-shadow: 0 0 14px rgba(72, 238, 211, 0.18);
+}
+
+.workbenchDrawer button:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
+}
+
+.workbenchDrawer .emojiGrid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.workbenchDrawer .emojiGrid button {
+  min-height: 34px;
+  font-size: 0.95rem;
+  letter-spacing: 0;
+  text-transform: none;
+  border-radius: 12px;
+}
+
+.workbenchDrawer .effectGrid,
+.workbenchDrawer .actionGrid {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.workbenchDrawer .effectGrid button,
+.workbenchDrawer .actionGrid button {
+  width: 100%;
+  text-align: center;
+}
+
+.workbenchDrawer .groupLabel {
+  font-size: 0.58rem;
+}
+
+.workbenchDrawer .effectSection,
+.workbenchDrawer .enhanceTool {
+  padding: 0.55rem;
+  border-radius: 14px;
+}
+
+.workbenchDrawer .effectSection p,
+.workbenchDrawer .enhanceTool p {
+  font-size: 0.62rem;
+  line-height: 1.35;
+}
+
+.workbenchDrawer .layerRow {
+  font-size: 0.64rem;
+  padding: 0.42rem 0.48rem 0.42rem 0.62rem;
+}
+
+.workbenchDrawer .layerRow button {
+  padding: 0.38rem 0.48rem;
+  font-size: 0.6rem;
+}
+
+/* Legacy sheet layout — kept for compact embeds */
+.sheetStudio {
+  --studio-rail-w: 112px;
+  position: relative;
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  gap: 0;
+  padding: 0;
+  overflow: hidden;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.sheetStudioFill {
+  flex: 1 1 auto;
+  width: 100%;
+  min-width: 0;
+  align-self: stretch;
+}
+
+.sheetStudio::before {
+  display: none;
+}
+
+.sheetStudio .monitorArea {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 0 8px 0 0;
+}
+
+.sheetStudio .hint {
+  display: none;
+}
+
+.sheetStudio .preview {
+  /* Height-first: fill the monitor column so the drop chip is larger than the
+     old bottom-deck layout (which stole ~200px of vertical space). */
+  flex: 0 1 auto;
+  width: auto;
+  height: 100%;
+  max-height: 100%;
+  max-width: 100%;
+  aspect-ratio: 4 / 5;
+  margin: 0 auto;
+}
+
+.attachmentDock {
+  flex: 0 0 var(--studio-rail-w);
+  width: var(--studio-rail-w);
+  min-width: var(--studio-rail-w);
+  max-width: var(--studio-rail-w);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  gap: 6px;
+  padding: 6px 5px;
+  border-radius: 16px;
+  border: 1px solid rgba(132, 244, 231, 0.28);
+  background:
+    radial-gradient(circle at 18% 0%, rgba(82, 240, 213, 0.12), transparent 46%),
+    linear-gradient(180deg, rgba(8, 26, 33, 0.52), rgba(6, 10, 22, 0.68));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.12),
+    0 0 16px rgba(53, 230, 211, 0.1);
+  overflow: hidden;
+}
+
+.sheetStudio .tools {
+  grid-template-columns: 1fr;
+  gap: 4px;
+  flex: 0 0 auto;
+  padding: 4px;
+  border-radius: 12px;
+}
+
+.sheetStudio .tools button {
+  width: 100%;
+  padding: 0.42rem 0.2rem;
+  font-size: 0.5rem;
+  letter-spacing: 0.05em;
+  line-height: 1.15;
+  text-align: center;
+  white-space: normal;
+  word-break: break-word;
+}
+
+.dockDrawer {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  padding: 0 1px 4px;
+}
+
+.sheetStudio .drawer input {
+  padding: 0.55rem 0.5rem;
+  font-size: 0.62rem;
+}
+
+.sheetStudio .drawer button {
+  padding: 0.45rem 0.42rem;
+  font-size: 0.54rem;
+}
+
+.sheetStudio .emojiGrid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.sheetStudio .emojiGrid button {
+  min-height: 28px;
+  font-size: 0.82rem;
+}
+
+.sheetStudio .effectGrid,
+.sheetStudio .actionGrid {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.sheetStudio .effectGrid button,
+.sheetStudio .actionGrid button {
+  width: 100%;
+  text-align: center;
+}
+
+.sheetStudio .enhanceTool {
+  grid-template-columns: 1fr;
+  padding: 0.45rem;
+}
+
+.sheetStudio .groupLabel {
+  font-size: 0.5rem;
+}
+
+.sheetStudio .effectSection p,
+.sheetStudio .enhanceTool p {
+  font-size: 0.52rem;
+}
+
+@media (max-width: 640px) {
+  .sheetStudio {
+    flex-direction: column;
+  }
+  .sheetStudio .monitorArea {
+    padding: 0 0 6px;
+  }
+  .sheetStudio .preview {
+    height: auto;
+    width: min(100%, calc(58vh * 4 / 5));
+    max-height: 58vh;
+  }
+  .attachmentDock {
+    flex: 0 0 auto;
+    width: 100%;
+    min-width: 0;
+    max-width: none;
+    max-height: 38%;
+  }
+  .sheetStudio .tools {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .sheetStudio .tools button {
+    width: auto;
+    font-size: 0.58rem;
+  }
+  .sheetStudio .effectGrid,
+  .sheetStudio .actionGrid {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
 }
 
 .compact {
@@ -498,7 +1026,7 @@
 
   .tools {
     border-radius: 18px;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
   .textTool {
@@ -507,5 +1035,9 @@
 
   .emojiGrid {
     grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
+
+  .enhanceTool {
+    grid-template-columns: 1fr;
   }
 }

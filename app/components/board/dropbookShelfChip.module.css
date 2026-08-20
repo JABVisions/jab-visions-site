@@ -1,0 +1,204 @@
+/* Dropbook shelf chips — fixed 4:5 tiles (CSS module so sizing never drops). */
+
+.chip {
+  position: relative;
+  flex: 0 0 92px;
+  width: 92px;
+  min-width: 92px;
+  max-width: 92px;
+  height: auto;
+  aspect-ratio: 4 / 5;
+  box-sizing: border-box;
+  padding: 0;
+  margin: 0;
+  border-radius: 14px;
+  overflow: hidden;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  align-items: stretch;
+  border: 1px solid rgba(126, 226, 255, 0.32);
+  background:
+    linear-gradient(160deg, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0.04)),
+    rgba(8, 12, 18, 0.55);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.16),
+    0 0 18px rgba(126, 226, 255, 0.12);
+  transition:
+    transform 160ms ease,
+    border-color 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.empty {
+  place-items: center;
+  grid-template-rows: minmax(0, 1fr);
+  border-style: dashed;
+  border-color: rgba(126, 226, 255, 0.22);
+  background:
+    linear-gradient(160deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.02)),
+    rgba(6, 10, 16, 0.42);
+}
+
+.chipButton,
+.emptyInteractive {
+  appearance: none;
+  -webkit-appearance: none;
+  font-family: inherit;
+  color: inherit;
+  text-align: inherit;
+  cursor: pointer;
+}
+
+.emptyInteractive:hover {
+  transform: translateY(-2px);
+  border-color: rgba(126, 226, 255, 0.42);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.18),
+    0 0 18px rgba(126, 226, 255, 0.18);
+}
+
+.empty .index {
+  font-size: 8px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.filled {
+  min-height: 0;
+}
+
+.filled:hover {
+  transform: translateY(-2px);
+  border-color: rgba(255, 209, 45, 0.45);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.18),
+    0 0 18px rgba(255, 209, 45, 0.18);
+}
+
+.dragOver {
+  transform: translateY(-2px);
+  border-color: rgba(255, 209, 45, 0.45);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.18),
+    0 0 18px rgba(255, 209, 45, 0.18);
+}
+
+.index {
+  position: absolute;
+  top: 6px;
+  left: 7px;
+  z-index: 2;
+  font-size: 9px;
+  font-weight: 950;
+  letter-spacing: 0.08em;
+  color: rgba(236, 255, 251, 0.5);
+  pointer-events: none;
+}
+
+.plus {
+  font-size: 26px;
+  font-weight: 300;
+  line-height: 1;
+  color: rgba(126, 226, 255, 0.58);
+  text-shadow: 0 0 14px rgba(126, 226, 255, 0.38);
+  pointer-events: none;
+}
+
+.preview {
+  grid-row: 1;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  max-width: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.modeGlyph {
+  grid-row: 1;
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  font-size: 22px;
+}
+
+/* Glossy 4:5 Descript thumbnail — matches Board thought-body chip framing */
+.descriptPreview {
+  grid-row: 1;
+  min-height: 0;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 6px 7px 5px;
+  box-sizing: border-box;
+  overflow: hidden;
+  text-align: left;
+  background:
+    radial-gradient(circle at 12% 10%, rgba(255, 79, 216, 0.14), transparent 42%),
+    radial-gradient(circle at 88% 18%, rgba(45, 124, 255, 0.12), transparent 46%),
+    linear-gradient(160deg, rgba(255, 255, 255, 0.88), rgba(255, 255, 255, 0.68));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.55);
+}
+
+.descriptTitle {
+  flex: 0 0 auto;
+  font-size: 7px;
+  font-weight: 950;
+  line-height: 1.2;
+  letter-spacing: 0.04em;
+  color: rgba(0, 0, 0, 0.78);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.descriptBody {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  font-size: 6.5px;
+  font-weight: 800;
+  line-height: 1.45;
+  color: rgba(0, 0, 0, 0.62);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.descriptBody::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+.footer {
+  grid-row: 2;
+  padding: 4px 6px 5px;
+  font-size: 8px;
+  font-weight: 950;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  text-align: center;
+  color: rgba(236, 255, 251, 0.78);
+  background: rgba(0, 0, 0, 0.38);
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+@media (max-width: 560px) {
+  .chip {
+    flex-basis: 76px;
+    width: 76px;
+    min-width: 76px;
+    max-width: 76px;
+    border-radius: 12px;
+  }
+}

@@ -19,10 +19,9 @@ import {
   type DropCustomization,
 } from "@/lib/board/dropCustomizations";
 import { DROP_FLAVOR_ORDER, type DropFlavorKey } from "@/lib/board/dropFlavors";
-import CameraDropPortal from "./CameraDropPortal";
 import RemovableDropBadge from "./RemovableDropBadge";
 import DropCommentsDrawer from "./DropCommentsDrawer";
-import DropStudio from "./DropStudio";
+import LazyDropStudioStage from "./LazyDropStudioStage";
 import DropStudioOverlay from "./DropStudioOverlay";
 
 type DropType =
@@ -580,7 +579,7 @@ export default function DropTile() {
   const [commentsDropId, setCommentsDropId] = useState<string | null>(null);
   const [commentCountByDrop, setCommentCountByDrop] = useState<Record<string, number>>({});
   const [payCheckoutBusyId, setPayCheckoutBusyId] = useState<string | null>(null);
-  const [cameraMode, setCameraMode] = useState<"photo" | "video" | null>(null);
+  const [studioOpen, setStudioOpen] = useState(false);
   const [mediaSource, setMediaSource] = useState<"upload" | "capture" | null>(null);
   const [selectedMediaPreview, setSelectedMediaPreview] = useState("");
   const [dropCustomizations, setDropCustomizations] = useState<DropCustomization>({});
@@ -839,6 +838,7 @@ export default function DropTile() {
             storagePath: item.storagePath ?? null,
             bucket: item.bucket ?? null,
             fileName: item.fileName ?? null,
+            customizations: item.customizations ?? null,
           },
         };
         appendLocalActivity(localActivity);
@@ -954,6 +954,7 @@ export default function DropTile() {
             bucket: item.bucket ?? null,
             storagePath: item.storagePath ?? null,
             fileName: item.fileName ?? null,
+            customizations: item.customizations ?? null,
           },
         });
         emitBoardDropSignal({
@@ -1233,6 +1234,7 @@ export default function DropTile() {
     }
 
     const id = safeId();
+    const customizations = compactDropCustomizations(dropCustomizations);
     let uploaded: { bucket: string; storagePath: string } | null = null;
 
     if (file) {
@@ -1262,6 +1264,7 @@ export default function DropTile() {
         visibility: thoughtVisibility,
         thoughtFormat,
         thoughtText: cleanThought || undefined,
+        ...(customizations ? { customizations } : {}),
       },
       ...drops,
     ];
@@ -1274,14 +1277,19 @@ export default function DropTile() {
     setThoughtVisibility("public");
     setFile(null);
     setMediaSource(null);
+    setDropCustomizations({});
     flash(setMsg, thoughtVisibility === "private" ? "Private thought saved ✓" : "Thought dropped ✓", 1400);
   }
 
   async function addPayDrop() {
-    if (!file) return flash(setMsg, "Upload or capture proof/context first.", 1600);
+    if (!file) return flash(setMsg, "Create or upload proof/context first.", 1600);
     const isImage = file.type.startsWith("image/");
     const isVideo = file.type.startsWith("video/");
-    if (!isImage && !isVideo) return flash(setMsg, "Pay Drop media must be an image or video.", 2000);
+    const isAudio = isAudioFile(file);
+    if (!isImage && !isVideo && !isAudio) {
+      return flash(setMsg, "Pay Drop context must be an image, video, or audio file.", 2000);
+    }
+    const payMediaKind: MediaKind = isVideo ? "video" : isAudio ? "audio" : "image";
 
     const cents = parsePriceToCents(payPrice);
     if (cents === null) return flash(setMsg, "Enter a valid price (ex: 19.99).", 2000);
@@ -1289,6 +1297,7 @@ export default function DropTile() {
 
     const t = title.trim() || "Untitled";
     const id = safeId();
+    const customizations = compactDropCustomizations(dropCustomizations);
 
     const up = await uploadFileToStorage({ bucket: BUCKET_MEDIA, file, dropId: id });
     if (!up) return;
@@ -1316,7 +1325,7 @@ export default function DropTile() {
         fileName: file.name,
         fileSize: file.size,
         mime: file.type,
-        mediaKind: isVideo ? "video" : "image",
+        mediaKind: payMediaKind,
         priceCents: cents,
         description: payDesc.trim() || undefined,
         linkUrl: normalizedLinkUrl ?? undefined,
@@ -1329,6 +1338,7 @@ export default function DropTile() {
         recipientUsername,
         recipientDisplayName,
         recipientStripeAccountId,
+        ...(customizations ? { customizations } : {}),
       },
       ...drops,
     ];
@@ -1363,7 +1373,7 @@ export default function DropTile() {
             : "External Payment Link",
         bucket: up.bucket,
         storagePath: up.storagePath,
-        mediaKind: isVideo ? "video" : "image",
+        mediaKind: payMediaKind,
         mediaSource: mediaSource ?? "upload",
       },
       userId
@@ -1376,6 +1386,7 @@ export default function DropTile() {
     setPayLink("");
     setPayProvider("stripe_connect");
     setMediaSource(null);
+    setDropCustomizations({});
     flash(setMsg, "Pay drop added ✓", 1400);
   }
 
@@ -1614,7 +1625,9 @@ export default function DropTile() {
 
               if (m === "Media" || m === "Doc" || m === "Pay" || m === "Thought") setUrl("");
               if (m === "YouTube" || m === "News" || m === "Link") setFile(null);
-              if (m !== "Media") setDropCustomizations({});
+              if (m !== "Media" && m !== "Thought" && m !== "Pay") {
+                setDropCustomizations({});
+              }
               setMediaSource(null);
               setDropDesc("");
               if (m !== "Thought") {
@@ -1665,6 +1678,13 @@ export default function DropTile() {
 
             <div className="drop-file-control">
               <div className="capture-actions">
+                <button
+                  type="button"
+                  className="capture-action upload-action"
+                  onClick={() => setStudioOpen(true)}
+                >
+                  Open Drop Studio
+                </button>
                 <label className="capture-action upload-action">
                   Upload
                   <input
@@ -1677,9 +1697,6 @@ export default function DropTile() {
                     }}
                   />
                 </label>
-                <button type="button" className="capture-action" onClick={() => setCameraMode("photo")}>
-                  Capture
-                </button>
               </div>
               <div className="file-meta file-status">
                 {file ? (
@@ -1688,16 +1705,21 @@ export default function DropTile() {
                     <span className="file-size">{Math.round(file.size / 1024)} KB</span>
                   </>
                 ) : (
-                  <span className="file-name dim">Upload or capture request context.</span>
+                  <span className="file-name dim">Open Drop Studio or upload request context.</span>
                 )}
               </div>
               {selectedMediaPreview ? (
-                <div className="selected-media-preview">
-                  {file?.type.startsWith("video/") ? (
+                <div className="selected-media-preview drop-studio-media-frame">
+                  {file && isAudioFile(file) ? (
+                    <audio src={selectedMediaPreview} controls preload="metadata" />
+                  ) : file?.type.startsWith("video/") ? (
                     <video src={selectedMediaPreview} controls playsInline />
                   ) : (
                     <img src={selectedMediaPreview} alt="Pay Drop context preview" />
                   )}
+                  {file && !isAudioFile(file) ? (
+                    <DropStudioOverlay customizations={dropCustomizations} />
+                  ) : null}
                   {mediaSource === "capture" ? <span>Captured on Board</span> : null}
                 </div>
               ) : null}
@@ -1771,27 +1793,27 @@ export default function DropTile() {
           </>
         ) : mode === "Media" ? (
           <div className="media-capture-field">
-            <div className="capture-actions" aria-label="Capture media with this device">
+            <div className="capture-actions" aria-label="Vision Drop Studio action">
+              <button
+                type="button"
+                className="capture-action upload-action"
+                onClick={() => setStudioOpen(true)}
+              >
+                Open Drop Studio
+              </button>
               <label className="capture-action upload-action">
                 Upload
                 <input
                   className="file-input"
                   type="file"
                   accept={fileAccept}
-                onChange={(e) => {
-                  setFile(e.currentTarget.files?.[0] ?? null);
-                  setMediaSource(e.currentTarget.files?.[0] ? "upload" : null);
-                  e.currentTarget.value = "";
-                }}
+                  onChange={(e) => {
+                    setFile(e.currentTarget.files?.[0] ?? null);
+                    setMediaSource(e.currentTarget.files?.[0] ? "upload" : null);
+                    e.currentTarget.value = "";
+                  }}
                 />
               </label>
-              <button
-                type="button"
-                className="capture-action"
-                onClick={() => setCameraMode("photo")}
-              >
-                Capture
-              </button>
             </div>
             <div className="file-meta file-status">
               {file ? (
@@ -1800,16 +1822,18 @@ export default function DropTile() {
                   <span className="file-size">{Math.round(file.size / 1024)} KB</span>
                 </>
               ) : (
-                <span className="file-name dim">Upload a photo/video or capture one live.</span>
+                <span className="file-name dim">Create a photo or video in Drop Studio.</span>
               )}
             </div>
             {selectedMediaPreview ? (
-              <DropStudio
-                mediaUrl={selectedMediaPreview}
-                mediaKind={file?.type.startsWith("video/") ? "video" : "image"}
-                value={dropCustomizations}
-                onChange={setDropCustomizations}
-              />
+              <div className="selected-media-preview drop-studio-media-frame">
+                {file?.type.startsWith("video/") ? (
+                  <video src={selectedMediaPreview} controls playsInline />
+                ) : (
+                  <img src={selectedMediaPreview} alt="Vision Drop preview" />
+                )}
+                <DropStudioOverlay customizations={dropCustomizations} />
+              </div>
             ) : null}
             <textarea
               className="drop-textarea"
@@ -1819,7 +1843,7 @@ export default function DropTile() {
               rows={3}
             />
             <div className="capture-help">
-              Upload from your device or open the Board camera portal.
+              Upload directly, or open the full editor for Vision, Video, Voice, Art, or Descript.
             </div>
           </div>
         ) : mode === "Thought" ? (
@@ -1850,19 +1874,28 @@ export default function DropTile() {
             />
 
             <div className="drop-file-control">
-              <label className="capture-action upload-action">
-                Upload
-                <input
-                  className="file-input"
-                  type="file"
-                  accept={fileAccept}
-                  onChange={(e) => {
-                    setFile(e.currentTarget.files?.[0] ?? null);
-                    setMediaSource(e.currentTarget.files?.[0] ? "upload" : null);
-                    e.currentTarget.value = "";
-                  }}
-                />
-              </label>
+              <div className="capture-actions">
+                <button
+                  type="button"
+                  className="capture-action upload-action"
+                  onClick={() => setStudioOpen(true)}
+                >
+                  Open Drop Studio
+                </button>
+                <label className="capture-action upload-action">
+                  Upload
+                  <input
+                    className="file-input"
+                    type="file"
+                    accept={fileAccept}
+                    onChange={(e) => {
+                      setFile(e.currentTarget.files?.[0] ?? null);
+                      setMediaSource(e.currentTarget.files?.[0] ? "upload" : null);
+                      e.currentTarget.value = "";
+                    }}
+                  />
+                </label>
+              </div>
               <div className="file-meta file-status">
                 {file ? (
                   <>
@@ -1880,7 +1913,10 @@ export default function DropTile() {
                 {file && isAudioFile(file) ? (
                   <audio src={selectedMediaPreview} controls preload="metadata" />
                 ) : (
-                  <img src={selectedMediaPreview} alt="Thought attachment preview" />
+                  <div className="drop-studio-media-frame">
+                    <img src={selectedMediaPreview} alt="Thought attachment preview" />
+                    <DropStudioOverlay customizations={dropCustomizations} />
+                  </div>
                 )}
                 <span>{file && isAudioFile(file) ? "Voice memo thought" : "Doodle/image thought"}</span>
               </div>
@@ -2078,9 +2114,11 @@ export default function DropTile() {
                   <div className="thought-body">{d.thoughtText}</div>
                 ) : null}
 
-                {isAudioMusic || (isThought && d.mediaKind === "audio") ? (
+                {isAudioMusic || ((isThought || isPay) && d.mediaKind === "audio") ? (
                   <div className={`audio-drop-card ${isThought ? "thought-audio-card" : ""}`}>
-                    <div className="audio-drop-label">{isThought ? "VOICE MEMO" : "FULL SONG"}</div>
+                    <div className="audio-drop-label">
+                      {isThought ? "VOICE MEMO" : isPay ? "PAY DROP AUDIO" : "FULL SONG"}
+                    </div>
                     {signedUrl ? (
                       <audio src={signedUrl} controls preload="metadata" />
                     ) : (
@@ -2093,7 +2131,10 @@ export default function DropTile() {
                 ) : isThought && d.mediaKind === "image" ? (
                   <div className="media-thumb natural-media thought-media-thumb" aria-label="Thought image preview">
                     {signedUrl ? (
-                      <img src={signedUrl} alt={d.title} />
+                      <div className="drop-studio-media-frame">
+                        <img src={signedUrl} alt={d.title} />
+                        <DropStudioOverlay customizations={d.customizations} />
+                      </div>
                     ) : (
                       <div className="media-missing">
                         <div className="media-missing-title">Thought image preparing…</div>
@@ -2113,9 +2154,7 @@ export default function DropTile() {
                         ) : (
                           <img src={signedUrl} alt={d.title} />
                         )}
-                        {isMedia ? (
-                          <DropStudioOverlay customizations={d.customizations} />
-                        ) : null}
+                        <DropStudioOverlay customizations={d.customizations} />
                       </div>
                     ) : (
                       <div className="media-missing">
@@ -2267,16 +2306,12 @@ export default function DropTile() {
                   ) : viewerDrop.mediaKind === "video" ? (
                     <div className="viewer-studio-frame">
                       <video src={(viewerSignedUrl || signedUrlByKey[viewerSignedKey])!} controls autoPlay playsInline />
-                      {viewerDrop.type === "Media" ? (
-                        <DropStudioOverlay customizations={viewerDrop.customizations} />
-                      ) : null}
+                      <DropStudioOverlay customizations={viewerDrop.customizations} />
                     </div>
                   ) : (
                     <div className="viewer-studio-frame">
                       <img src={(viewerSignedUrl || signedUrlByKey[viewerSignedKey])!} alt={viewerDrop.title} />
-                      {viewerDrop.type === "Media" ? (
-                        <DropStudioOverlay customizations={viewerDrop.customizations} />
-                      ) : null}
+                      <DropStudioOverlay customizations={viewerDrop.customizations} />
                     </div>
                   )
                 ) : (
@@ -2313,14 +2348,23 @@ export default function DropTile() {
         </div>
       ) : null}
 
-      <CameraDropPortal
-        open={cameraMode !== null}
-        initialMode={cameraMode ?? "photo"}
-        onClose={() => setCameraMode(null)}
-        onCapture={(capturedFile) => {
-          setFile(capturedFile);
-          setMediaSource("capture");
+      <LazyDropStudioStage
+        open={studioOpen && (mode === "Media" || mode === "Thought" || mode === "Pay")}
+        initialFile={file}
+        initialMode={mode === "Thought" ? "audio" : "photo"}
+        allowedModes={
+          mode === "Thought"
+            ? ["audio", "art", "descript"]
+            : ["photo", "video", "audio", "art", "descript"]
+        }
+        descriptDestination={mode === "Thought" ? "thought" : mode === "Pay" ? "pay" : "doc"}
+        value={dropCustomizations}
+        onChange={setDropCustomizations}
+        onComplete={(studioFile, source) => {
+          setFile(studioFile);
+          setMediaSource(source);
         }}
+        onClose={() => setStudioOpen(false)}
       />
 
       <DropCommentsDrawer
@@ -2330,7 +2374,7 @@ export default function DropTile() {
         dropTitle={drops.find((drop) => drop.id === commentsDropId)?.title}
       />
 
-      <style>{`
+      <style suppressHydrationWarning>{`
         .drop-tile {
           width: 100%;
           max-width: 100%;
@@ -2363,9 +2407,11 @@ export default function DropTile() {
 
         .drop-tile-head {
           display: flex;
+          flex-direction: column;
           align-items: center;
-          justify-content: space-between;
+          justify-content: center;
           gap: 16px;
+          text-align: center;
         }
 
         .drop-avatar-frame {
@@ -2422,6 +2468,7 @@ export default function DropTile() {
         .mode-row {
           margin-top: 12px;
           display: flex;
+          justify-content: center;
           gap: 10px;
           flex-wrap: wrap;
           min-width: 0;
@@ -2447,7 +2494,7 @@ export default function DropTile() {
 
         @media (max-width: 560px) {
           .drop-tile-head {
-            align-items: flex-start;
+            align-items: center;
           }
 
           .drop-avatar-frame {

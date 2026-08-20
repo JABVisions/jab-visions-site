@@ -2,19 +2,25 @@
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
+import { Eye, EyeOff, SlidersHorizontal } from "lucide-react";
 import {
   appendLocalActivity,
   getLocalActivity,
   removeLocalActivity,
+  setLocalActivity,
   type BoardActivity,
 } from "@/lib/board/activity";
 import { readBrain } from "@/lib/board/bucketBrain";
+import { removeDropFromBoardStore } from "@/lib/board/boardDropEditStore";
 import { removeDrops as removeUniversalDrops } from "@/lib/board/drops/storage";
 import { resolveLinkPreviewImage } from "@/lib/board/linkPreviewImages";
 import { fetchLinkPreview } from "@/lib/board/linkPreview";
 import { openHostedPayDropCheckout } from "@/lib/board/payCheckout";
 import { EVENTS as BOARD_STORE_EVENTS, removeDrops as removeFeedDrops } from "@/lib/boardStore";
-import { normalizeDropCustomizations } from "@/lib/board/dropCustomizations";
+import {
+  normalizeDropCustomizations,
+  type DropCustomization,
+} from "@/lib/board/dropCustomizations";
 import {
   DROP_COMMENTS_UPDATED_EVENT,
   getDropCommentCount,
@@ -474,6 +480,7 @@ export default function ActivityCard({
   const [hydratedImage, setHydratedImage] = useState<string>("");
   const [payCheckoutBusy, setPayCheckoutBusy] = useState(false);
   const [isRemovingDrop, setIsRemovingDrop] = useState(false);
+  const [dropHidden, setDropHidden] = useState(false);
   const [selectedReaction, setSelectedReaction] = useState<"pass" | "pin" | "push" | null>(null);
   // Transient sonar burst when a drop's signal is amplified (Push).
   const [amplifyBurst, setAmplifyBurst] = useState(false);
@@ -523,8 +530,11 @@ export default function ActivityCard({
   const rawMeta = (item as any)?.meta;
   const meta = rawMeta && typeof rawMeta === "object" ? rawMeta : null;
   const preview = meta?.preview ?? meta ?? null;
-  const dropCustomizations = normalizeDropCustomizations(
+  const storedDropCustomizations = normalizeDropCustomizations(
     meta?.customizations ?? preview?.customizations
+  );
+  const [dropCustomizations, setDropCustomizations] = useState<DropCustomization | undefined>(
+    storedDropCustomizations
   );
   const authorUserId = String((item as any)?.user_id || "");
   const authorName = metaString(
@@ -610,6 +620,10 @@ export default function ActivityCard({
     !!resolvedPreviewImage &&
     !isStoredVideoDrop &&
     !isStoredAudioDrop;
+  useEffect(() => {
+    setDropCustomizations(storedDropCustomizations);
+    setDropHidden(false);
+  }, [id]);
 
   useEffect(() => {
     setAnnouncementImagePosition({ x: 50, y: 50 });
@@ -797,6 +811,12 @@ export default function ActivityCard({
   const priceLabel = formatPriceFromCents(priceCents);
 
   const embed = useMemo(() => computeEmbed(href), [href]);
+  const studioMediaUrl =
+    resolvedPreviewImage ||
+    (embed.kind === "image" || embed.kind === "video" ? embed.url : "");
+  const studioMediaKind: "image" | "video" =
+    isStoredVideoDrop || embed.kind === "video" ? "video" : "image";
+  const canOpenStudio = isCurrentUserDrop && Boolean(studioMediaUrl);
   const external = href ? isExternalHref(href) : false;
 
   // Host + favicon for the universal link-drop cover (shown when a link has no
@@ -969,6 +989,17 @@ export default function ActivityCard({
   async function performDropRemoval() {
     if (!id) return;
     const dropId = metaString(meta?.dropId, meta?.originalDropId, id);
+    let authUserId = currentAuthUserId || null;
+
+    if (!authUserId) {
+      try {
+        const sb = supabaseBrowser();
+        const { data: auth } = await sb.auth.getUser();
+        authUserId = auth?.user?.id ?? null;
+      } catch {}
+    }
+
+    await removeDropFromBoardStore(dropId, [id], authUserId);
     removeLocalActivity((activity) => {
       const activityMeta =
         activity.meta && typeof activity.meta === "object"
@@ -999,10 +1030,15 @@ export default function ActivityCard({
 
     try {
       const sb = supabaseBrowser();
-      const { data: auth } = await sb.auth.getUser();
-      const authUserId = auth?.user?.id;
       if (authUserId && authorUserId === authUserId) {
-        await sb.from("board_activity").delete().eq("id", id).eq("user_id", authUserId);
+        await Promise.all([
+          sb.from("board_activity").delete().eq("id", id).eq("user_id", authUserId),
+          sb
+            .from("board_activity")
+            .delete()
+            .eq("user_id", authUserId)
+            .eq("meta->>dropId", dropId),
+        ]);
       }
     } catch {
       // Board remains local-first; remote deletion can retry later when Supabase is reachable.
@@ -1054,7 +1090,8 @@ export default function ActivityCard({
         compact && "compact",
         compactSpotify && "compactSpotify",
         item?.kind === "announcement" && "announcementDrop",
-        isPushed && "pushedDrop"
+        isPushed && "pushedDrop",
+        dropHidden && "dropHidden"
       )}
       style={
         {
@@ -1113,6 +1150,79 @@ export default function ActivityCard({
 
       {body ? <div className="body">{body}</div> : null}
 
+      {isCurrentUserDrop ? (
+        <div className="ownerTools" aria-label="Drop owner controls">
+          {canOpenStudio ? (
+            <button
+              type="button"
+              className="ownerToolBtn studioBtn"
+              onClick={() => {
+                const rawType = String(
+                  meta?.drop_flavor ?? meta?.dropFlavor ?? meta?.dropType ?? "media"
+                ).toLowerCase();
+                const type = rawType.includes("thought")
+                  ? "Thought"
+                  : rawType.includes("pay")
+                    ? "Pay"
+                    : rawType.includes("music") || rawType.includes("audio")
+                      ? "Music"
+                      : rawType.includes("doc")
+                        ? "Doc"
+                        : rawType.includes("youtube")
+                          ? "YouTube"
+                          : rawType.includes("news")
+                            ? "News"
+                            : rawType.includes("link")
+                              ? "Link"
+                              : "Media";
+                const dropId = metaString(meta?.dropId, meta?.originalDropId, id);
+                window.dispatchEvent(
+                  new CustomEvent("board:drop:studio", {
+                    detail: {
+                      dropId,
+                      drop: {
+                        id: dropId,
+                        title,
+                        type,
+                        createdAt: Date.parse(item?.created_at ?? "") || Date.now(),
+                        description: body || undefined,
+                        mediaUrl: studioMediaUrl || undefined,
+                        mediaKind: studioMediaKind,
+                        bucket: metaString(meta?.bucket, preview?.bucket) || undefined,
+                        storagePath:
+                          metaString(meta?.storagePath, preview?.storagePath) || undefined,
+                        fileName: metaString(meta?.fileName, preview?.fileName) || undefined,
+                        mime: metaString(meta?.mime, preview?.mime) || undefined,
+                        customizations: dropCustomizations,
+                        editSource: item?.kind === "announcement" ? "announcement" : "board_drop",
+                      },
+                    },
+                  })
+                );
+              }}
+            >
+              <SlidersHorizontal size={16} strokeWidth={2.5} aria-hidden />
+              Drop Studio Editor
+            </button>
+          ) : null}
+          <button
+            type="button"
+            className={clsx("ownerToolBtn visibilityBtn", dropHidden && "active")}
+            onClick={() => setDropHidden((hidden) => !hidden)}
+            aria-pressed={dropHidden}
+            aria-label={dropHidden ? "Show entire drop" : "Hide entire drop"}
+            title={dropHidden ? "Show Drop" : "Hide Drop"}
+          >
+            {dropHidden ? (
+              <EyeOff size={18} strokeWidth={2.5} aria-hidden />
+            ) : (
+              <Eye size={18} strokeWidth={2.5} aria-hidden />
+            )}
+            <span className="srOnly">{dropHidden ? "Show Drop" : "Hide Drop"}</span>
+          </button>
+        </div>
+      ) : null}
+
       {isPayDrop ? (
         <div className="dropActions" aria-label="Pay Drop actions">
           <button
@@ -1130,7 +1240,7 @@ export default function ActivityCard({
       {showEmbed ? (
         <div className={clsx("embed", embed.kind)}>
           {embed.kind === "image" && (
-            <div className="mediaFrame">
+            <div className="mediaFrame imageMediaFrame">
               <img
                 src={embed.url}
                 alt={title || "Vision drop"}
@@ -1446,6 +1556,40 @@ export default function ActivityCard({
           box-shadow: 0 16px 40px rgba(0, 0, 0, 0.1);
           padding: 12px;
           overflow: hidden;
+          transition: background 180ms ease, border-color 180ms ease, box-shadow 180ms ease;
+        }
+
+        .card.dropHidden {
+          min-height: 104px;
+          display: flex;
+          flex-direction: column;
+          justify-content: space-between;
+          background:
+            radial-gradient(circle at 82% 18%, rgba(139, 92, 255, 0.14), transparent 34%),
+            linear-gradient(145deg, #11131a, #050609);
+          border-color: rgba(139, 92, 255, 0.34);
+          box-shadow:
+            inset 0 1px 0 rgba(255, 255, 255, 0.05),
+            0 16px 40px rgba(0, 0, 0, 0.3);
+        }
+
+        .card.dropHidden::before {
+          content: "Hidden Drop";
+          display: block;
+          color: rgba(220, 211, 255, 0.76);
+          font-size: 11px;
+          font-weight: 950;
+          letter-spacing: 0.18em;
+          text-transform: uppercase;
+        }
+
+        .card.dropHidden > :not(.ownerTools):not(.toast):not(style) {
+          display: none !important;
+        }
+
+        .card.dropHidden .ownerTools {
+          margin: 0;
+          justify-content: flex-end;
         }
 
         .announcementDrop {
@@ -1672,6 +1816,68 @@ export default function ActivityCard({
           flex-wrap: wrap;
         }
 
+        .ownerTools {
+          margin-top: 10px;
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          flex-wrap: nowrap;
+          max-width: 100%;
+        }
+
+        .ownerToolBtn {
+          min-height: 34px;
+          border-radius: 999px;
+          padding: 8px 12px;
+          border: 1px solid rgba(0, 0, 0, 0.11);
+          background: rgba(255, 255, 255, 0.78);
+          color: rgba(0, 0, 0, 0.68);
+          font-size: 10px;
+          font-weight: 950;
+          letter-spacing: 0.1em;
+          text-transform: uppercase;
+          cursor: pointer;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          gap: 7px;
+        }
+
+        .studioBtn {
+          border-color: rgba(0, 166, 160, 0.3);
+          color: rgba(0, 124, 120, 0.95);
+          min-width: 0;
+          white-space: normal;
+        }
+
+        .visibilityBtn {
+          width: 38px;
+          min-width: 38px;
+          padding: 0;
+          color: rgba(0, 0, 0, 0.56);
+          transition: color 150ms ease, border-color 150ms ease, background 150ms ease, box-shadow 150ms ease;
+        }
+
+        .visibilityBtn:hover,
+        .visibilityBtn.active {
+          color: #8b5cff;
+          border-color: rgba(139, 92, 255, 0.62);
+          background: rgba(139, 92, 255, 0.14);
+          box-shadow: 0 0 18px rgba(139, 92, 255, 0.34);
+        }
+
+        .srOnly {
+          position: absolute;
+          width: 1px;
+          height: 1px;
+          padding: 0;
+          margin: -1px;
+          overflow: hidden;
+          clip: rect(0, 0, 0, 0);
+          white-space: nowrap;
+          border: 0;
+        }
+
         .checkoutBtn {
           min-height: 36px;
           border-radius: 999px;
@@ -1858,13 +2064,16 @@ export default function ActivityCard({
             radial-gradient(circle at 18% 18%, rgba(255, 0, 190, 0.08), transparent 34%),
             radial-gradient(circle at 80% 22%, rgba(0, 180, 255, 0.08), transparent 34%),
             rgba(0, 0, 0, 0.055);
+          width: 100%;
+          display: block;
         }
 
         .activityImage {
-          width: auto;
+          width: 100%;
+          height: auto;
           max-width: 100%;
-          max-height: ${compact ? "260px" : "420px"};
-          margin: 0 auto;
+          max-height: none;
+          margin: 0;
           display: block;
           object-fit: contain;
         }
@@ -1904,11 +2113,24 @@ export default function ActivityCard({
 
         .mediaFrame {
           position: relative;
-          width: fit-content;
+          width: 100%;
           max-width: 100%;
+          aspect-ratio: 4 / 3;
+          display: grid;
+          place-items: center;
           overflow: hidden;
           border-radius: 16px;
           background: rgba(0, 0, 0, 0.06);
+        }
+
+        .imageMediaFrame {
+          aspect-ratio: auto;
+          display: block;
+        }
+
+        .imageMediaFrame .img {
+          height: auto;
+          max-height: none;
         }
 
         .storedVideoFrame {
@@ -1936,19 +2158,83 @@ export default function ActivityCard({
         }
 
         .img {
-          width: auto;
+          width: 100%;
           max-width: 100%;
-          max-height: ${compact ? "260px" : "420px"};
-          height: auto;
+          height: 100%;
+          max-height: 100%;
+          object-fit: contain;
           display: block;
         }
 
         .vid {
-          width: auto;
+          width: 100%;
           max-width: 100%;
+          height: 100%;
+          object-fit: contain;
           display: block;
           background: #000;
-          max-height: 520px;
+          max-height: 100%;
+        }
+
+        .storedAudioFrame {
+          aspect-ratio: auto;
+          display: block;
+        }
+
+        .studioModal {
+          position: fixed;
+          inset: 0;
+          z-index: 90;
+          display: grid;
+          place-items: center;
+          padding: 18px;
+        }
+
+        .studioBackdrop {
+          position: absolute;
+          inset: 0;
+          border: 0;
+          background: rgba(0, 0, 0, 0.7);
+          backdrop-filter: blur(8px);
+          cursor: pointer;
+        }
+
+        .studioPanel {
+          position: relative;
+          width: min(760px, 100%);
+          max-height: calc(100vh - 36px);
+          overflow: auto;
+          border-radius: 26px;
+          padding: 14px;
+          background: rgba(8, 13, 18, 0.98);
+          box-shadow: 0 28px 90px rgba(0, 0, 0, 0.48);
+        }
+
+        .studioModalHead {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 12px;
+          padding: 2px 4px 12px;
+          color: #fff;
+        }
+
+        .studioModalHead button,
+        .studioSaveBtn {
+          border-radius: 999px;
+          border: 1px solid rgba(255, 255, 255, 0.2);
+          padding: 9px 14px;
+          background: rgba(255, 255, 255, 0.12);
+          color: #fff;
+          font-weight: 900;
+          cursor: pointer;
+        }
+
+        .studioSaveBtn {
+          width: 100%;
+          margin-top: 12px;
+          background: #fff;
+          color: #07110f;
         }
 
         .aud {

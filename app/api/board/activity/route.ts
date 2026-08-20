@@ -296,6 +296,24 @@ function dedupe(items: BoardActivity[]) {
   );
 }
 
+function filterProfileDeletedActivity(items: BoardActivity[], profileRows: any[]) {
+  const deletedByUser = new Map<string, Set<string>>();
+  for (const profile of profileRows) {
+    const userId = String(profile?.id ?? "");
+    const deleted = profile?.board_style?.boardDropsDeleted;
+    if (!userId || !Array.isArray(deleted)) continue;
+    deletedByUser.set(userId, new Set(deleted.map(String)));
+  }
+
+  return items.filter((item) => {
+    const deleted = item.user_id ? deletedByUser.get(String(item.user_id)) : null;
+    if (!deleted?.size) return true;
+    const meta = item.meta && typeof item.meta === "object" ? item.meta : null;
+    const dropId = String(meta?.dropId ?? meta?.originalDropId ?? "");
+    return !dropId || !deleted.has(dropId);
+  });
+}
+
 async function selectRows<T>(
   query: PromiseLike<{ data: T[] | null; error: any }>,
   label = "unknown"
@@ -373,13 +391,13 @@ export async function GET(req: Request) {
       ),
     ]);
 
-  const items = dedupe([
+  const items = dedupe(filterProfileDeletedActivity([
     ...activityRows.map(normalizeActivityRow).filter(Boolean),
     ...legacyDropRows.map(normalizeLegacyBoardDrop).filter(Boolean),
     ...boardPostRows.map((row) => normalizePostRow(row, "board_posts")).filter(Boolean),
     ...postRows.map((row) => normalizePostRow(row, "posts")).filter(Boolean),
     ...profileRows.flatMap(normalizeProfileBoardDrop),
-  ] as BoardActivity[]);
+  ] as BoardActivity[], profileRows));
 
   const scoped = kinds.length
     ? items.filter((item) => kinds.includes(item.kind))

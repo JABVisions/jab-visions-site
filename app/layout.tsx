@@ -1,8 +1,9 @@
 // File: /app/layout.tsx
 import "./globals.css";
-import Navbar from "./components/Navbar";
 import Script from "next/script";
 import { Analytics } from "@vercel/analytics/next";
+import SiteShell from "./components/SiteShell";
+import AuthFragmentRedirect from "./components/AuthFragmentRedirect";
 
 export const metadata = {
   title: "JAB Visions™ Official Website",
@@ -41,8 +42,8 @@ export default function RootLayout({
         </Script>
       </head>
       <body className="bg-neutral-900 text-white">
-        <Navbar />
-        <div className="site-content">{children}</div>
+        <AuthFragmentRedirect />
+        <SiteShell>{children}</SiteShell>
         <Analytics />
       </body>
     </html>

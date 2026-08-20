@@ -99,6 +99,8 @@ type ProfilePayload = {
   displayName?: string;
   bio?: string;
   glowColor?: string;
+  auraColor?: keyof typeof AURA_HEX | null;
+  energyLevel?: number;
   avatarDataUrl?: string | null;
   avatarUrl?: string | null;
   avatarPath?: string | null;
@@ -141,7 +143,7 @@ type RemoteBoardStyle = {
   displayName?: string;
   bio?: string;
   glowColor?: string;
-  auraColor?: keyof typeof AURA_HEX;
+  auraColor?: keyof typeof AURA_HEX | null;
   avatarDataUrl?: string | null;
   avatarPath?: string | null;
   coverDataUrl?: string | null;
@@ -359,7 +361,7 @@ function signalLabelFromColor(hex: string) {
     "#111111": "Selfish Black",
     "#ffd12d": "Pride Yellow",
     "#ff2d2d": "Really Red",
-    "#ff7a1a": "Cautious Orange",
+    "#ff7a1a": "Juicy Orange",
     "#7a44ff": "Royal Purple",
     "#b7ff2d": "Nature Green",
   };
@@ -871,6 +873,10 @@ export default function BoardProfileHubPage() {
         bio: stored?.bio?.trim() || base.bio,
         glowColor,
         auraMood: stored?.auraMood ?? base.auraMood,
+        energyLevel:
+          typeof stored?.energyLevel === "number"
+            ? clamp(stored.energyLevel, 0, 100)
+            : base.energyLevel ?? 60,
         avatarDataUrl: stored?.avatarPath
           ? null
           : stored?.avatarDataUrl !== undefined
@@ -1637,6 +1643,7 @@ export default function BoardProfileHubPage() {
       glow: hexToRgba(profile.glowColor, 0.18 + intensity * 0.18),
     };
   }, [profile.glowColor, auraIntensity]);
+  const energyLevel = clamp(profile.energyLevel ?? 60, 0, 100);
 
   const mood = AURA_MOODS[profile.auraMood] ?? AURA_MOODS.locked_in;
   const signalLabel = signalLabelFromColor(profile.glowColor);
@@ -1714,9 +1721,12 @@ export default function BoardProfileHubPage() {
       if ("coverPath" in patch) optionPatch.coverPath = patch.coverPath ?? null;
       if ("visionSlots" in patch) optionPatch.visionSlots = patch.visionSlots;
       if ("visionSlotPaths" in patch) optionPatch.visionSlotPaths = patch.visionSlotPaths;
+      const nextOptions: Record<string, unknown> = { ...options, ...optionPatch };
+      if ("auraColor" in patch) nextOptions.auraColor = patch.auraColor;
+      else if ("glowColor" in patch) nextOptions.auraColor = null;
       writeLightweightLocalStorage(
         OPTIONS_STORAGE_KEY,
-        sanitizeBoardOptionsForStorage({ ...options, ...optionPatch })
+        sanitizeBoardOptionsForStorage(nextOptions)
       );
 
       window.dispatchEvent(new Event("storage"));
@@ -1738,6 +1748,13 @@ export default function BoardProfileHubPage() {
         ...prev,
       ].slice(0, 6)
     );
+  }
+
+  function changeAuraColor(auraColor: keyof typeof AURA_HEX) {
+    const color = AURA_HEX[auraColor];
+    setProfile((prev) => ({ ...prev, glowColor: color }));
+    writeLocalProfilePatch({ glowColor: color, auraColor });
+    void persistBoardStylePatch({ glowColor: color, auraColor });
   }
 
   async function persistBoardStylePatch(patch: Partial<RemoteBoardStyle>) {
@@ -1927,7 +1944,7 @@ export default function BoardProfileHubPage() {
 
           <div className="profile-grid">
             <div className="left-column">
-              <section className="inner-tile">
+              <section className="inner-tile profile-vision">
                 <div className="tile-head">
                   <div>
                     <div className="tile-title">Vision Wall</div>
@@ -1998,11 +2015,14 @@ export default function BoardProfileHubPage() {
                 </div>
               </section>
 
-              <DropTile />
+              <div className="profile-board-drop">
+                <DropTile />
+              </div>
             </div>
 
             <div className="center-column">
-              <section className="inner-tile identity">
+              <section className="inner-tile identity profile-identity">
+                <h1 className="name profile-name">{profile.displayName}</h1>
                 <div className="identity-row">
                   <button
                     type="button"
@@ -2027,7 +2047,6 @@ export default function BoardProfileHubPage() {
                   </button>
 
                   <div className="identity-meta">
-                    <h1 className="name">{profile.displayName}</h1>
                     <div className="status-pill aura-active">Aura active</div>
                     <p className="bio">{profile.bio}</p>
                     <div className="profile-pills">
@@ -2041,13 +2060,13 @@ export default function BoardProfileHubPage() {
                       style={
                         {
                           "--board-glow": profile.glowColor,
-                          "--energy": `${profile.energyLevel ?? 60}%`,
+                          "--energy": `${energyLevel}%`,
                         } as React.CSSProperties
                       }
                     >
                       <div className="energy-head">
                         <span className="energy-label">Energy</span>
-                        <span className="energy-value">{profile.energyLevel ?? 60}</span>
+                        <span className="energy-value">{energyLevel}</span>
                       </div>
                       <input
                         className="energy-slider"
@@ -2055,15 +2074,17 @@ export default function BoardProfileHubPage() {
                         min={0}
                         max={100}
                         step={1}
-                        value={profile.energyLevel ?? 60}
-                        onChange={(e) =>
-                          setProfile((p) => ({ ...p, energyLevel: Number(e.target.value) }))
-                        }
-                        onPointerUp={() => {
-                          const level = profile.energyLevel ?? 60;
-                          void persistBoardStylePatch({ energyLevel: level });
-                          notifyEnergyChange(level);
+                        value={energyLevel}
+                        onChange={(e) => {
+                          const level = clamp(Number(e.target.value), 0, 100);
+                          setProfile((p) => ({ ...p, energyLevel: level }));
+                          writeLocalProfilePatch({ energyLevel: level });
                         }}
+                        onPointerUp={() => {
+                          void persistBoardStylePatch({ energyLevel });
+                          notifyEnergyChange(energyLevel);
+                        }}
+                        onKeyUp={() => void persistBoardStylePatch({ energyLevel })}
                         aria-label="Energy level"
                       />
                     </div>
@@ -2092,21 +2113,43 @@ export default function BoardProfileHubPage() {
                 </div>
               </section>
 
-              <section className="inner-tile">
+              <section className="inner-tile profile-aura">
                 <div className="tile-head">
                   <div>
                     <div className="tile-title">Aura Snapshot</div>
                     <div className="tile-sub">Shape the pulse of your board right here from Profile.</div>
                   </div>
-                  <span className="aura-swatch" style={{ background: profile.glowColor, boxShadow: `0 0 24px ${aura.glow}` }} />
+                  <div className="aura-color-picker" role="group" aria-label="Choose profile aura color">
+                    <div className="aura-palette">
+                      {(Object.entries(AURA_HEX) as Array<[keyof typeof AURA_HEX, string]>).map(
+                        ([auraColor, color]) => {
+                          const active = profile.glowColor.toLowerCase() === color.toLowerCase();
+                          const label = signalLabelFromColor(color);
+                          return (
+                            <button
+                              key={auraColor}
+                              type="button"
+                              className={`aura-color-option ${active ? "active" : ""}`}
+                              style={{ background: color, boxShadow: active ? `0 0 20px ${color}` : undefined }}
+                              onClick={() => changeAuraColor(auraColor)}
+                              aria-label={`Use ${label} aura`}
+                              aria-pressed={active}
+                              title={label}
+                            />
+                          );
+                        }
+                      )}
+                    </div>
+                    <span className="aura-color-label">{signalLabel}</span>
+                  </div>
                 </div>
 
                 <div className="snap-grid">
                   <div className="snap-card">
                     <div className="snap-label">Energy</div>
-                    <div className="snap-value">{auraIntensity}%</div>
+                    <div className="snap-value">{energyLevel}%</div>
                     <div className="energy-bar">
-                      <div className="energy-fill" style={{ width: `${auraIntensity}%`, background: profile.glowColor }} />
+                      <div className="energy-fill" style={{ width: `${energyLevel}%`, background: profile.glowColor }} />
                     </div>
                   </div>
 
@@ -2132,7 +2175,7 @@ export default function BoardProfileHubPage() {
                 </div>
               </section>
 
-              <section className="inner-tile">
+              <section className="inner-tile profile-activity">
                 <div className="tile-head">
                   <div>
                     <div className="tile-title">Activity Channel</div>
@@ -2185,7 +2228,7 @@ export default function BoardProfileHubPage() {
             </div>
 
             <div className="right-column">
-              <section className="inner-tile cover">
+              <section className="inner-tile cover profile-cover">
                 <div className="tile-head">
                   <div>
                     <div className="tile-title">Cover Poster</div>
@@ -2232,7 +2275,7 @@ export default function BoardProfileHubPage() {
                 </div>
               </section>
 
-              <section className="inner-tile bookmarks-card">
+              <section className="inner-tile bookmarks-card profile-bookmarks">
                 <div className="tile-head">
                   <div>
                     <div className="tile-title">Board Bookmarks</div>
@@ -2249,7 +2292,7 @@ export default function BoardProfileHubPage() {
                 </div>
               </section>
 
-              <section className="inner-tile store-collection-card">
+              <section className="inner-tile store-collection-card profile-store">
                 <div className="tile-head">
                   <div>
                     <div className="tile-title">Store Drops Collection</div>
@@ -2396,7 +2439,12 @@ export default function BoardProfileHubPage() {
 
         .profile-grid {
           display: grid;
-          grid-template-columns: minmax(280px, 0.95fr) minmax(340px, 1.2fr) minmax(280px, 0.95fr);
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          grid-template-areas:
+            "identity aura"
+            "vision cover"
+            "board activity"
+            "bookmarks store";
           gap: 16px;
           min-width: 0;
         }
@@ -2404,11 +2452,41 @@ export default function BoardProfileHubPage() {
         .left-column,
         .center-column,
         .right-column {
-          display: grid;
-          gap: 16px;
-          align-content: start;
+          display: contents;
+        }
+
+        .profile-vision {
+          grid-area: vision;
+        }
+
+        .profile-cover {
+          grid-area: cover;
+        }
+
+        .profile-identity {
+          grid-area: identity;
+        }
+
+        .profile-board-drop {
+          grid-area: board;
           min-width: 0;
           max-width: 100%;
+        }
+
+        .profile-activity {
+          grid-area: activity;
+        }
+
+        .profile-aura {
+          grid-area: aura;
+        }
+
+        .profile-bookmarks {
+          grid-area: bookmarks;
+        }
+
+        .profile-store {
+          grid-area: store;
         }
 
         .inner-tile {
@@ -2432,10 +2510,13 @@ export default function BoardProfileHubPage() {
 
         .tile-head {
           display: flex;
-          justify-content: space-between;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
           gap: 12px;
           margin-bottom: 14px;
           min-width: 0;
+          text-align: center;
         }
 
         .tile-title {
@@ -2669,8 +2750,10 @@ export default function BoardProfileHubPage() {
 
         .identity-row {
           display: flex;
+          flex-direction: column;
           gap: 16px;
           align-items: center;
+          text-align: center;
         }
 
         .avatar-shell {
@@ -2758,11 +2841,17 @@ export default function BoardProfileHubPage() {
         }
 
         .name {
-          font-size: 34px;
+          font-size: clamp(18px, 4vw, 34px);
           line-height: 1;
           font-weight: 900;
           letter-spacing: -0.04em;
           color: #35a24b;
+          overflow-wrap: anywhere;
+        }
+
+        .profile-name {
+          margin: 0 0 16px;
+          text-align: center;
         }
 
         .handle {
@@ -2779,7 +2868,7 @@ export default function BoardProfileHubPage() {
 
         .identity-meta {
           min-width: 0;
-          flex: 1;
+          width: 100%;
         }
 
         .status-pill {
@@ -2912,12 +3001,43 @@ export default function BoardProfileHubPage() {
           gap: 8px;
         }
 
-        .aura-swatch {
-          width: 46px;
-          height: 46px;
-          flex: 0 0 auto;
-          border-radius: 12px;
-          border: 1px solid rgba(255, 255, 255, 0.58);
+        .aura-color-picker {
+          display: inline-flex;
+          flex-direction: column;
+          align-items: center;
+          gap: 7px;
+          width: min(100%, 180px);
+        }
+
+        .aura-palette {
+          display: grid;
+          grid-template-columns: repeat(4, minmax(0, 1fr));
+          gap: 7px;
+          width: 100%;
+        }
+
+        .aura-color-option {
+          width: 100%;
+          aspect-ratio: 1;
+          min-width: 0;
+          border-radius: 10px;
+          border: 2px solid rgba(255, 255, 255, 0.72);
+          cursor: pointer;
+          transition: transform 150ms ease, border-color 150ms ease, box-shadow 150ms ease;
+        }
+
+        .aura-color-option:hover,
+        .aura-color-option.active {
+          transform: scale(1.08);
+          border-color: rgba(0, 0, 0, 0.72);
+        }
+
+        .aura-color-label {
+          color: rgba(0, 0, 0, 0.58);
+          font-size: 10px;
+          font-weight: 900;
+          letter-spacing: 0.1em;
+          text-transform: uppercase;
         }
 
         .note-card {
@@ -3660,24 +3780,21 @@ export default function BoardProfileHubPage() {
         @media (max-width: 1180px) {
           .profile-grid {
             grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-          }
-
-          .center-column {
-            grid-column: 1 / -1;
+            grid-template-areas:
+              "identity aura"
+              "vision cover"
+              "board activity"
+              "bookmarks store";
           }
         }
 
-        @media (max-width: 980px) {
+        @media (max-width: 720px) {
           .profile-grid {
-            grid-template-columns: 1fr;
-          }
-
-          .center-column {
-            grid-column: auto;
+            gap: 8px;
           }
 
           .identity-row {
-            align-items: flex-start;
+            align-items: center;
           }
 
           .cover-shell {

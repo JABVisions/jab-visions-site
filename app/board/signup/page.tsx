@@ -2,8 +2,8 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
-import { supabaseBrowser } from "@/lib/supabase/browser";
+import { useEffect, useState } from "react";
+import { isSupabaseConfigured } from "@/lib/supabase/browser";
 
 const MONTHS = [
   { value: "1", label: "January" },
@@ -26,7 +26,7 @@ const AURA_COLORS = [
   { key: "greed_black", label: "Selfish Black", hex: "#111111", emblem: "■" },
   { key: "pride_yellow", label: "Pride Yellow", hex: "#FFD12D", emblem: "■" },
   { key: "envy_red", label: "Really Red", hex: "#FF2D2D", emblem: "■" },
-  { key: "gluttony_orange", label: "Cautious Orange", hex: "#FF7A1A", emblem: "■" },
+  { key: "gluttony_orange", label: "Juicy Orange", hex: "#FF7A1A", emblem: "■" },
   { key: "wrath_purple", label: "Royal Purple", hex: "#7A44FF", emblem: "■" },
   { key: "lilly_yellowgreen", label: "Nature Green", hex: "#B7FF2D", emblem: "■" },
 ];
@@ -71,7 +71,7 @@ function getAgeFromBirthDate(month: string, day: string, year: string) {
 
 export default function BoardSignupPage() {
   const router = useRouter();
-  const sb = useMemo(() => supabaseBrowser(), []);
+  const authAvailable = isSupabaseConfigured();
 
   const [fullName, setFullName] = useState("");
   const [username, setUsername] = useState("");
@@ -95,6 +95,11 @@ export default function BoardSignupPage() {
   const birthYears = Array.from({ length: 121 }, (_, index) => String(currentYear - index));
   const selectedSignalColor =
     AURA_COLORS.find((color) => color.key === signalColor) ?? AURA_COLORS[0];
+
+  useEffect(() => {
+    const confirmationError = new URLSearchParams(window.location.search).get("error");
+    if (confirmationError) setErr(confirmationError);
+  }, []);
 
   function validatePassword(pw: string) {
     if (pw.length < 8) return "Password must be at least 8 characters.";
@@ -141,25 +146,22 @@ export default function BoardSignupPage() {
       setErr(pwErr);
       return;
     }
+    if (!authAvailable) {
+      setErr(
+        "Supabase is not connected. Add NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY to .env.local, then restart the development server."
+      );
+      return;
+    }
 
     setLoading(true);
     try {
-      const { data: existingProfile } = await sb
-        .from("profiles")
-        .select("id")
-        .eq("username", nextUsername)
-        .maybeSingle();
-
-      if (existingProfile?.id) {
-        setErr("That username is already taken. Try another one.");
-        return;
-      }
-
-      const { data, error } = await sb.auth.signUp({
-        email: email.trim(),
-        password,
-        options: {
-          data: {
+      const response = await fetch("/api/board/auth/signup", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          email: email.trim(),
+          password,
+          metadata: {
             onboarding: "v1",
             full_name: nextFullName,
             display_name: nextFullName,
@@ -178,29 +180,24 @@ export default function BoardSignupPage() {
             board_signal_label: selectedSignal.label,
             board_signal_hex: selectedSignal.hex,
           },
-        },
+        }),
       });
+      const result = await response.json();
 
-      if (error) {
-        setErr(error.message);
+      if (!response.ok || !result.ok) {
+        setErr(result.message || "Signup failed. Please try again.");
         return;
       }
 
-      // Supabase may require email confirmation depending on your project settings.
-      // If confirmation is ON, data.user may be null until email verified.
-      setOk(
-        data.user
-          ? "Account created. Redirecting…"
-          : "Account created. Please check your email to confirm, then log in."
-      );
-
-      // If user exists immediately, redirect; otherwise take them to login.
-      if (data.user) {
+      // Supabase can return a user before email confirmation. Only an active
+      // session is allowed through the authenticated Board gate.
+      if (result.hasSession) {
+        setOk("Account created. Redirecting...");
         await fetch("/api/board/profile/ensure", { method: "POST" }).catch(() => undefined);
-        router.push("/board/work"); // change to your real post-signup route
+        router.replace("/board/work");
         router.refresh();
       } else {
-        router.push("/board/login");
+        setOk("Account created. Check your email to confirm your account, then log in.");
       }
     } catch (e: any) {
       setErr(e?.message || "Signup failed. Please try again.");
@@ -247,6 +244,12 @@ export default function BoardSignupPage() {
           <p className="mt-2 text-sm opacity-80">
             Set up your Board identity. Drop, connect, build.
           </p>
+
+          {!authAvailable ? (
+            <div className="mt-4 rounded-2xl border border-amber-200/25 bg-amber-200/10 p-3 text-xs leading-5 text-amber-50">
+              Supabase setup is required before a new account can be created. The signup form remains available below.
+            </div>
+          ) : null}
 
           <form className="mt-6 grid gap-4" onSubmit={onSignup}>
             <div className="grid gap-4 md:grid-cols-2">

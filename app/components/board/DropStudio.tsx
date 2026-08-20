@@ -1,12 +1,22 @@
 "use client";
 
 import type React from "react";
-import { useRef, useState } from "react";
+import { memo, useRef, useState } from "react";
 import {
   compactDropCustomizations,
   type DropCustomization,
+  type DropStudioEffects,
 } from "@/lib/board/dropCustomizations";
+import {
+  normalizeDropMediaRotation,
+  resolveDropMediaFrame,
+  type DropMediaFrame,
+} from "@/lib/board/mediaFormat";
+import { dropMediaRotationStyle } from "@/lib/board/dropMediaFrameDisplay";
+import DropChipWorkbench from "./DropChipWorkbench";
+import DropStudioArtPalette from "./DropStudioArtPalette";
 import DropStudioOverlay from "./DropStudioOverlay";
+import DropStudioPaletteDeck, { type ObjectTool } from "./DropStudioPaletteDeck";
 import {
   STICKER_PACKS,
   stickerTypeForPack,
@@ -29,15 +39,14 @@ const ACTIONS = [
 
 const FILTERS = [
   { label: "None", value: null },
-  { label: "Soft Glow", value: "soft-glow" },
-  { label: "Cool Tone", value: "cool-tone" },
-  { label: "Warm Fade", value: "warm-fade" },
-  { label: "Dream Blur", value: "dream-blur" },
+  { label: "Signal Glow", value: "signal-glow" },
+  { label: "Dream Fog", value: "dream-fog" },
+  { label: "Bucket Vision", value: "bucket-vision" },
+  { label: "Pulse", value: "pulse" },
+  { label: "Neon Signal", value: "neon-signal" },
   { label: "Night Glass", value: "night-glass" },
-  { label: "Vintage Light", value: "vintage-light" },
-  { label: "High Contrast", value: "high-contrast" },
-  { label: "Monochrome", value: "monochrome" },
-  { label: "Neon Lift", value: "neon-lift" },
+  { label: "Artifact", value: "artifact" },
+  { label: "Clean Enhance", value: "clean-enhance" },
 ];
 
 const OVERLAYS = [
@@ -47,30 +56,69 @@ const OVERLAYS = [
   { label: "Film Grain", value: "film-grain" },
   { label: "Soft Vignette", value: "soft-vignette" },
   { label: "Scanlines", value: "scanlines" },
-  { label: "Blur Edge", value: "blur-edge" },
   { label: "Light Leak", value: "light-leak" },
   { label: "Aura Ring", value: "aura-ring" },
   { label: "Shimmer", value: "shimmer" },
 ];
 
-type Tool = "text" | "stickers" | "button" | "effects";
+type Tool = ObjectTool;
+
+function toolLabel(item: Tool) {
+  switch (item) {
+    case "text":
+      return "Text";
+    case "stickers":
+      return "Stickers";
+    case "button":
+      return "Button";
+    case "effects":
+      return "Effects";
+    case "filters":
+      return "Filters";
+    case "enhance":
+      return "Enhance";
+    default:
+      return item;
+  }
+}
 
 function makeId(prefix: string) {
   return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
-export default function DropStudio({
+function hasStudioEffects(effects?: DropStudioEffects | null) {
+  if (!effects) return false;
+  return Boolean(
+    effects.filter ||
+      effects.overlay ||
+      effects.frame ||
+      effects.rotation
+  );
+}
+
+function DropStudio({
   mediaUrl,
   mediaKind,
   value,
   onChange,
   compact = false,
+  hideHeader = false,
+  operatingTable = false,
+  artTools,
+  onMediaError,
 }: {
   mediaUrl: string;
   mediaKind: "image" | "video";
   value: DropCustomization;
   onChange: (next: DropCustomization) => void;
   compact?: boolean;
+  hideHeader?: boolean;
+  /** Uniform 4:5 monitor + Palette overlay (Drop Studio stage). */
+  operatingTable?: boolean;
+  /** Art brush tools — rendered below object tool panels in the Palette drawer. */
+  artTools?: React.ReactNode;
+  /** Rebuild preview URL if a blob fails to paint (e.g. revoked object URL). */
+  onMediaError?: () => void;
 }) {
   const previewRef = useRef<HTMLDivElement | null>(null);
   const [tool, setTool] = useState<Tool>("text");
@@ -125,11 +173,39 @@ export default function DropStudio({
     };
     update({
       ...normalized,
-      effects:
-        nextEffects.filter || nextEffects.overlay
-          ? nextEffects
-          : undefined,
+      effects: hasStudioEffects(nextEffects) ? nextEffects : undefined,
     });
+  }
+
+  function setMediaFrame(frame: DropMediaFrame) {
+    const nextEffects = {
+      ...(normalized.effects ?? {}),
+      frame,
+    };
+    update({
+      ...normalized,
+      effects: hasStudioEffects(nextEffects) ? nextEffects : undefined,
+    });
+  }
+
+  function rotateMedia() {
+    const current = normalizeDropMediaRotation(normalized.effects?.rotation);
+    const next = ((current + 90) % 360) as 0 | 90 | 180 | 270;
+    const nextEffects = {
+      ...(normalized.effects ?? {}),
+      rotation: next || null,
+    };
+    update({
+      ...normalized,
+      effects: hasStudioEffects(nextEffects) ? nextEffects : undefined,
+    });
+  }
+
+  const mediaFrame = resolveDropMediaFrame(normalized);
+  const mediaRotationStyle = dropMediaRotationStyle(normalized.effects?.rotation ?? 0);
+
+  function toggleMediaFrame() {
+    setMediaFrame(mediaFrame === "landscape" ? "portrait" : "landscape");
   }
 
   function removeItem(kind: "text" | "sticker", id: string) {
@@ -162,68 +238,96 @@ export default function DropStudio({
     });
   }
 
-  return (
-    <section className={`${styles.studio} ${compact ? styles.compact : ""}`}>
-      <div className={styles.header}>
-        <div>
-          <div className={styles.eyebrow}>Drop Studio</div>
-          <div className={styles.title}>Customize this media drop.</div>
+  const headerEl = hideHeader ? null : (
+    <div className={styles.header}>
+      <div>
+        <div className={styles.eyebrow}>Drop Studio</div>
+        <div className={styles.title}>Customize this media drop.</div>
+      </div>
+      <span className={styles.version}>Vision Tools</span>
+    </div>
+  );
+
+  const previewEl = (
+    <div
+      ref={previewRef}
+      className={`${styles.preview} ${operatingTable ? styles.previewInFrame : ""} ${
+        normalized.effects?.filter ? styles[`filter_${normalized.effects.filter}`] ?? "" : ""
+      } ${
+        normalized.effects?.overlay ? styles[`overlay_${normalized.effects.overlay}`] ?? "" : ""
+      }`}
+      onPointerMove={moveItem}
+      onPointerUp={() => setDragging(null)}
+      onPointerCancel={() => setDragging(null)}
+      onPointerLeave={() => setDragging(null)}
+    >
+      {mediaUrl ? (
+        <div className={styles.mediaLayer}>
+          {mediaKind === "video" ? (
+            <video
+              key={mediaUrl}
+              src={mediaUrl}
+              controls
+              playsInline
+              preload="metadata"
+              style={mediaRotationStyle}
+            />
+          ) : (
+            <img
+              key={mediaUrl}
+              src={mediaUrl}
+              alt="Drop Studio media preview"
+              style={mediaRotationStyle}
+              onError={() => onMediaError?.()}
+            />
+          )}
         </div>
-        <span className={styles.version}>Vision Tools</span>
-      </div>
+      ) : null}
+      <DropStudioOverlay
+        customizations={
+          operatingTable && normalized.artOverlayUrl
+            ? { ...normalized, artOverlayUrl: undefined }
+            : normalized
+        }
+        editable
+        onMove={(kind, id, event) => {
+          event.currentTarget.setPointerCapture(event.pointerId);
+          setDragging({ kind, id });
+        }}
+        onRemove={removeItem}
+      />
+    </div>
+  );
 
-      <div
-        ref={previewRef}
-        className={`${styles.preview} ${
-          normalized.effects?.filter ? styles[`filter_${normalized.effects.filter}`] ?? "" : ""
-        } ${
-          normalized.effects?.overlay ? styles[`overlay_${normalized.effects.overlay}`] ?? "" : ""
-        }`}
-        onPointerMove={moveItem}
-        onPointerUp={() => setDragging(null)}
-        onPointerCancel={() => setDragging(null)}
-        onPointerLeave={() => setDragging(null)}
-      >
-        {mediaKind === "video" ? (
-          <video src={mediaUrl} controls playsInline preload="metadata" />
-        ) : (
-          <img src={mediaUrl} alt="Drop Studio media preview" />
-        )}
-        <DropStudioOverlay
-          customizations={normalized}
-          editable
-          onMove={(kind, id, event) => {
-            event.currentTarget.setPointerCapture(event.pointerId);
-            setDragging({ kind, id });
-          }}
-          onRemove={removeItem}
-        />
-      </div>
+  const hintEl = (
+    <div className={styles.hint}>
+      Drag labels and emojis. Use the layer list to remove anything on mobile.
+    </div>
+  );
 
-      <div className={styles.hint}>
-        Drag labels and emojis. Use the layer list to remove anything on mobile.
-      </div>
+  const toolsClassName = styles.tools;
+  const drawerClassName = styles.drawer;
+  const activeToolClassName = styles.activeTool;
 
-      <div className={styles.tools} aria-label="Drop Studio tools">
-        {(["text", "stickers", "button", "effects"] as Tool[]).map((item) => (
-          <button
-            key={item}
-            type="button"
-            className={tool === item ? styles.activeTool : ""}
-            onClick={() => setTool(item)}
-          >
-            {item === "text"
-              ? "Text"
-              : item === "stickers"
-                ? "Stickers"
-                : item === "button"
-                  ? "Button"
-                  : "Effects"}
-          </button>
-        ))}
-      </div>
+  const toolbarEl = (
+    <div className={toolsClassName} aria-label="Drop Studio tools">
+      {(["text", "stickers", "button", "effects", "filters", "enhance"] as Tool[]).map((item) => (
+        <button
+          key={item}
+          type="button"
+          className={tool === item ? activeToolClassName : undefined}
+          onPointerDown={(event) => event.currentTarget.setPointerCapture(event.pointerId)}
+          onClick={() => setTool(item)}
+          title={toolLabel(item)}
+        >
+          {toolLabel(item)}
+        </button>
+      ))}
+    </div>
+  );
 
-      <div className={styles.drawer}>
+  const drawerPanelsEl = (
+    <>
         {tool === "text" ? (
           <div className={styles.toolStack}>
             <div className={styles.textTool}>
@@ -237,7 +341,7 @@ export default function DropStudio({
                     addText();
                   }
                 }}
-                placeholder="Add a short floating label"
+                placeholder="Type a word or phrase to float on your drop"
               />
               <button type="button" onClick={addText} disabled={!text.trim()}>
                 Add Text
@@ -330,12 +434,12 @@ export default function DropStudio({
           </div>
         ) : null}
 
-        {tool === "effects" ? (
+        {tool === "filters" ? (
           <div className={styles.effectsTool}>
             <div className={styles.effectSection}>
               <div>
                 <div className={styles.groupLabel}>Filters</div>
-                <p>Soft color treatments for the media signal.</p>
+                <p>Board-native color treatments for the media signal.</p>
               </div>
               <div className={styles.effectGrid}>
                 {FILTERS.map((filter) => (
@@ -354,7 +458,11 @@ export default function DropStudio({
                 ))}
               </div>
             </div>
+          </div>
+        ) : null}
 
+        {tool === "effects" ? (
+          <div className={styles.effectsTool}>
             <div className={styles.effectSection}>
               <div>
                 <div className={styles.groupLabel}>Visual Effects</div>
@@ -379,9 +487,96 @@ export default function DropStudio({
             </div>
           </div>
         ) : null}
-      </div>
+
+        {tool === "enhance" ? (
+          <div className={styles.enhanceTool}>
+            <div>
+              <div className={styles.groupLabel}>Media Frame</div>
+              <p>Portrait 4:5 is the Board default. Landscape fits wide photos and video.</p>
+            </div>
+            <div className={styles.effectGrid}>
+              <button
+                type="button"
+                className={mediaFrame === "portrait" ? styles.selectedAction : ""}
+                onClick={() => setMediaFrame("portrait")}
+              >
+                Portrait 4:5
+              </button>
+              <button
+                type="button"
+                className={mediaFrame === "landscape" ? styles.selectedAction : ""}
+                onClick={() => setMediaFrame("landscape")}
+              >
+                Landscape 16:9
+              </button>
+              <button type="button" onClick={rotateMedia}>
+                Rotate 90°
+              </button>
+            </div>
+            <div>
+              <div className={styles.groupLabel}>Quality Enhancement</div>
+              <p>Apply a clean visual lift now. Future versions can route this to AI/media processing.</p>
+            </div>
+            <button
+              type="button"
+              className={styles.selectedAction}
+              onClick={() => setEffect("filter", "clean-enhance")}
+            >
+              Apply Clean Enhance
+            </button>
+          </div>
+        ) : null}
+    </>
+  );
+
+  const drawerEl = <div className={drawerClassName}>{drawerPanelsEl}</div>;
+
+  const inlineArtTools = operatingTable ? (
+    <>
+      <DropStudioArtPalette
+        hostRef={previewRef}
+        initialOverlayUrl={normalized.artOverlayUrl}
+        onOverlayChange={(artOverlayUrl) =>
+          update({ ...normalized, artOverlayUrl })
+        }
+      />
+      {artTools}
+    </>
+  ) : (
+    artTools
+  );
+
+  const deckPanelEl = (
+    <DropStudioPaletteDeck
+      tool={tool}
+      onToolChange={setTool}
+      drawer={drawerPanelsEl}
+      artTools={inlineArtTools}
+    />
+  );
+
+  if (operatingTable) {
+    return (
+      <DropChipWorkbench
+        chip={previewEl}
+        deck={deckPanelEl}
+        mediaFrame={mediaFrame}
+        onToggleFrame={toggleMediaFrame}
+      />
+    );
+  }
+
+  return (
+    <section className={`${styles.studio} ${compact ? styles.compact : ""}`}>
+      {headerEl}
+      {previewEl}
+      {hintEl}
+      {toolbarEl}
+      {drawerEl}
 
       {/* Future Drop Studio layers: deeper Aura Effects and animated Board sticker assets. */}
     </section>
   );
 }
+
+export default memo(DropStudio);

@@ -14,9 +14,18 @@ body {
   padding-top: 66px;
 }
 
+.site-content--board {
+  min-height: 100svh;
+  padding-top: 0;
+}
+
 @media (max-width: 767px) {
   .site-content {
     padding-top: 54px;
+  }
+
+  .site-content--board {
+    padding-top: 0;
   }
 }
 

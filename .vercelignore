@@ -1,0 +1,13 @@
+.next
+.vercel
+.git
+.github
+.env
+.env.*
+!.env.example
+node_modules
+*.log
+*.tsbuildinfo
+.vscode
+BOARD_REFINEMENT_AUDIT.md
+BOARD_SYSTEMS_PLAN.md

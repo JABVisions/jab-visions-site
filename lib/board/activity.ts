@@ -111,12 +111,288 @@ export function appendLocalActivity(item: BoardActivity) {
   setLocalActivity(next);
 }
 
+export function updateLocalActivity(
+  id: string,
+  updater: (item: BoardActivity) => BoardActivity
+): BoardActivity | null {
+  const prev = getLocalActivity();
+  let updated: BoardActivity | null = null;
+  const next = prev.map((item) => {
+    if (item.id !== id) return item;
+    updated = updater(item);
+    return updated;
+  });
+  if (!updated) return null;
+  setLocalActivity(next);
+  return updated;
+}
+
+export type ActivityEditPatch = {
+  title?: string | null;
+  body?: string;
+  href?: string | null;
+  image_url?: string | null;
+  meta?: Record<string, any> | null;
+};
+
+/** Update a feed activity row (announcements, etc.) in local cache + Supabase. */
+export async function persistActivityEdit(
+  activityId: string,
+  patch: ActivityEditPatch
+): Promise<BoardActivity | null> {
+  const updated = updateLocalActivity(activityId, (item) => ({
+    ...item,
+    title: patch.title !== undefined ? patch.title : item.title,
+    body: patch.body ?? item.body,
+    href: patch.href !== undefined ? patch.href : item.href,
+    image_url: patch.image_url !== undefined ? patch.image_url : item.image_url,
+    meta: patch.meta ? { ...(item.meta ?? {}), ...patch.meta } : item.meta,
+  }));
+  if (!updated) return null;
+
+  try {
+    const { supabaseBrowser } = await import("@/lib/supabase/browser");
+    const sb = supabaseBrowser();
+    const { data: auth } = await sb.auth.getUser();
+    if (auth?.user) {
+      await sb
+        .from("board_activity")
+        .update({
+          title: updated.title,
+          body: updated.body,
+          href: updated.href,
+          image_url: updated.image_url,
+          meta: updated.meta,
+        })
+        .eq("id", activityId)
+        .eq("user_id", auth.user.id);
+    }
+  } catch {
+    // Local edit still stands.
+  }
+
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent("board:activity:updated", { detail: updated }));
+    window.dispatchEvent(
+      new StorageEvent("storage", { key: STORAGE_KEY })
+    );
+  }
+
+  return updated;
+}
+
 export function removeLocalActivity(
   matcher: (item: BoardActivity) => boolean
 ) {
   const prev = getLocalActivity();
   const next = prev.filter((item) => !matcher(item));
+  if (next.length === prev.length) return;
   setLocalActivity(next);
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new StorageEvent("storage", { key: STORAGE_KEY }));
+  }
+}
+
+/** Whether a feed row represents the given board drop id. */
+export function activityMatchesDropId(item: BoardActivity, dropId: string): boolean {
+  if (!dropId) return false;
+  if (item.id === dropId) return true;
+  const m = item.meta;
+  if (!m || typeof m !== "object") return false;
+  return m.dropId === dropId || m.originalDropId === dropId;
+}
+
+/**
+ * Patch every local activity row tied to a board drop (by meta.dropId or id).
+ * Returns the patched rows so callers can sync Supabase + dispatch events.
+ */
+export function patchLocalActivitiesMatchingDrop(
+  dropId: string,
+  patcher: (item: BoardActivity) => BoardActivity
+): BoardActivity[] {
+  const prev = getLocalActivity();
+  const updatedItems: BoardActivity[] = [];
+  let changed = false;
+  const next = prev.map((item) => {
+    if (!activityMatchesDropId(item, dropId)) return item;
+    changed = true;
+    const patched = patcher(item);
+    updatedItems.push(patched);
+    return patched;
+  });
+  if (changed) {
+    setLocalActivity(next);
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new StorageEvent("storage", { key: STORAGE_KEY }));
+    }
+  }
+  return updatedItems;
+}
+
+/** Keep feed / Activity Channel rows in sync when a board drop is edited. */
+export async function syncActivitiesForDropEdit(updated: {
+  id: string;
+  title: string;
+  type?: string;
+  description?: string;
+  thoughtText?: string;
+  fromDescript?: boolean;
+  titleRich?: unknown;
+  descriptionRich?: unknown;
+  customizations?: unknown;
+  bucket?: string;
+  storagePath?: string;
+  mediaUrl?: string;
+  mediaKind?: string;
+  mime?: string;
+  fileName?: string;
+  mediaPreviewUrl?: string | null;
+  visibility?: "public" | "private";
+  updatedAt?: number;
+}): Promise<void> {
+  const dropId = updated.id;
+  const nextBody =
+    updated.type === "Thought"
+      ? String(updated.thoughtText ?? updated.description ?? "").trim()
+      : String(updated.description ?? "").trim();
+
+  // Reusable patcher so the SAME edit can be applied to a local cache row OR a
+  // row fetched straight from Supabase (a device that didn't create the drop has
+  // no local row to patch).
+  const patchActivityRow = (item: BoardActivity): BoardActivity => {
+    const prevPreview =
+      item.meta?.preview && typeof item.meta.preview === "object" ? item.meta.preview : {};
+    const mediaKind = updated.mediaKind ?? item.meta?.mediaKind ?? prevPreview?.mediaKind ?? null;
+    const bucket = updated.bucket ?? item.meta?.bucket ?? prevPreview?.bucket ?? null;
+    const storagePath =
+      updated.storagePath ?? item.meta?.storagePath ?? prevPreview?.storagePath ?? null;
+    const previewUrl =
+      updated.mediaPreviewUrl ??
+      updated.mediaUrl ??
+      item.meta?.mediaUrl ??
+      prevPreview?.image ??
+      null;
+    const nextMeta = {
+      ...(item.meta ?? {}),
+      editedAt: updated.updatedAt ?? Date.now(),
+      ...(updated.visibility === "public" || updated.visibility === "private"
+        ? { visibility: updated.visibility }
+        : {}),
+      titleRich: updated.titleRich ?? item.meta?.titleRich ?? null,
+      descriptionRich: updated.descriptionRich ?? item.meta?.descriptionRich ?? null,
+      description: updated.description ?? item.meta?.description ?? null,
+      thoughtText: updated.thoughtText ?? item.meta?.thoughtText ?? null,
+      fromDescript:
+        updated.fromDescript === true
+          ? true
+          : updated.fromDescript === false
+            ? null
+            : item.meta?.fromDescript ?? null,
+      customizations: updated.customizations ?? item.meta?.customizations ?? null,
+      bucket,
+      storagePath,
+      mediaUrl: previewUrl,
+      mediaKind,
+      mime: updated.mime ?? item.meta?.mime ?? prevPreview?.mime ?? null,
+      fileName: updated.fileName ?? item.meta?.fileName ?? prevPreview?.fileName ?? null,
+      preview: {
+        ...prevPreview,
+        bucket,
+        storagePath,
+        mediaKind,
+        mime: updated.mime ?? prevPreview?.mime ?? null,
+        fileName: updated.fileName ?? prevPreview?.fileName ?? null,
+        ...(mediaKind !== "audio" && previewUrl ? { image: previewUrl } : {}),
+      },
+    };
+
+    let image_url = item.image_url;
+    let href = item.href;
+    if (previewUrl) {
+      if (mediaKind === "audio") {
+        href = previewUrl;
+        image_url = null;
+      } else if (mediaKind === "video") {
+        href = previewUrl;
+        image_url = null;
+      } else {
+        image_url = previewUrl;
+      }
+    }
+
+    return {
+      ...item,
+      title: updated.title || item.title,
+      body: nextBody || item.body,
+      href,
+      image_url,
+      meta: nextMeta,
+    };
+  };
+
+  // 1) Patch this device's local activity cache for instant feedback.
+  const patchedById = new Map<string, BoardActivity>();
+  for (const a of patchLocalActivitiesMatchingDrop(dropId, patchActivityRow)) {
+    patchedById.set(a.id, a);
+  }
+
+  // 2) Authoritatively patch the Supabase feed rows for this drop — by drop id,
+  //    NOT gated on the local cache. The feed (board_activity) is the shared,
+  //    cross-device source; the row id is a uuid while the drop id lives in
+  //    meta.dropId / meta.originalDropId. Without this, an edit made on a device
+  //    that didn't create the drop (or after a localStorage reset) never reaches
+  //    the feed, so it shows on the editing device only.
+  try {
+    const { supabaseBrowser } = await import("@/lib/supabase/browser");
+    const sb = supabaseBrowser();
+    const { data: auth } = await sb.auth.getUser();
+    if (auth?.user) {
+      // Match on meta.dropId / meta.originalDropId (the row id is a uuid; the
+      // drop id usually isn't). Only add an id match when the drop id is itself
+      // uuid-shaped, so we never feed a non-uuid into a uuid column comparison
+      // (which would error and fail the whole query).
+      const isUuid =
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(dropId);
+      const orFilter = [
+        `meta->>dropId.eq.${dropId}`,
+        `meta->>originalDropId.eq.${dropId}`,
+        ...(isUuid ? [`id.eq.${dropId}`] : []),
+      ].join(",");
+      const { data: rows } = await sb
+        .from("board_activity")
+        .select("*")
+        .eq("user_id", auth.user.id)
+        .or(orFilter);
+      for (const remote of (rows ?? []).map(normalizeActivity)) {
+        if (remote) patchedById.set(remote.id, patchActivityRow(remote));
+      }
+
+      for (const activity of patchedById.values()) {
+        await sb
+          .from("board_activity")
+          .update({
+            title: activity.title,
+            body: activity.body,
+            href: activity.href,
+            image_url: activity.image_url,
+            meta: activity.meta,
+          })
+          .eq("id", activity.id)
+          .eq("user_id", auth.user.id);
+      }
+    }
+  } catch {
+    // Local cache already reflects the edit on this device.
+  }
+
+  // 3) Refresh any mounted feed / Activity Channel cards live.
+  if (typeof window !== "undefined") {
+    for (const activity of patchedById.values()) {
+      window.dispatchEvent(
+        new CustomEvent("board:activity:updated", { detail: activity })
+      );
+    }
+  }
 }
 
 /* -------------------------------------------------------------------------- */

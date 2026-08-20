@@ -380,7 +380,7 @@ const AURA_SWATCHES: { key: AuraKey; label: string; hex: string }[] = [
     { key: "greed_black", label: "Selfish Black", hex: "#111111" },
     { key: "pride_yellow", label: "Pride", hex: "#FFD12D" },
     { key: "envy_red", label: "Really Red", hex: "#FF2D2D" },
-    { key: "gluttony_orange", label: "Cautious Orange", hex: "#FF7A1A" },
+    { key: "gluttony_orange", label: "Juicy Orange", hex: "#FF7A1A" },
     { key: "wrath_purple", label: "Royal Purple", hex: "#7A44FF" },
     { key: "lilly_yellowgreen", label: "Nature Green", hex: "#B7FF2D" },
 ];

@@ -4,6 +4,7 @@ import React from "react";
 import { usePathname } from "next/navigation";
 import BoardDock from "@/app/components/board/BoardDock";
 import BoardUtilityHeader from "@/app/components/board/BoardUtilityHeader";
+import BoardDropEditModal from "@/app/components/board/BoardDropEditModal";
 
 export default function BoardLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -19,6 +20,7 @@ export default function BoardLayout({ children }: { children: React.ReactNode })
 
   const isAuthRoute =
     pathname === "/board/login" ||
+    pathname === "/board/forgot-password" ||
     pathname === "/board/signup" ||
     pathname === "/board/reset-password";
 
@@ -33,6 +35,7 @@ export default function BoardLayout({ children }: { children: React.ReactNode })
 
       {/* ✅ Keep the Board dock available on the Board gate/welcome page too. */}
       {!isAuthRoute ? <BoardDock /> : null}
+      {!isAuthRoute ? <BoardDropEditModal /> : null}
 
       <style>{`
         .board-root {

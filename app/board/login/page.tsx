@@ -1,13 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
-import { supabaseBrowser } from "@/lib/supabase/browser";
+import { useState } from "react";
+import { isSupabaseConfigured } from "@/lib/supabase/browser";
 
 export default function BoardLoginPage() {
-  const router = useRouter();
-  const sb = useMemo(() => supabaseBrowser(), []);
+  const authAvailable = isSupabaseConfigured();
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -15,7 +13,6 @@ export default function BoardLoginPage() {
   const [agree, setAgree] = useState(false);
 
   const [loading, setLoading] = useState(false);
-  const [resetting, setResetting] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [ok, setOk] = useState<string | null>(null);
 
@@ -32,16 +29,24 @@ export default function BoardLoginPage() {
       setErr("Please enter your email and password.");
       return;
     }
+    if (!authAvailable) {
+      setErr(
+        "Supabase is not connected. Add NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY to .env.local, then restart the development server."
+      );
+      return;
+    }
 
     setLoading(true);
     try {
-      const { error } = await sb.auth.signInWithPassword({
-        email: email.trim(),
-        password,
+      const response = await fetch("/api/board/auth/login", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ email: email.trim(), password }),
       });
+      const result = await response.json();
 
-      if (error) {
-        setErr(error.message);
+      if (!response.ok || !result.ok) {
+        setErr(result.message || "Login failed. Please try again.");
         return;
       }
 
@@ -59,39 +64,6 @@ export default function BoardLoginPage() {
       setErr(e?.message || "Login failed. Please try again.");
     } finally {
       setLoading(false);
-    }
-  }
-
-  async function onForgotPassword() {
-    setErr(null);
-    setOk(null);
-
-    if (!email.trim()) {
-      setErr("Enter your email first, then use Forgot password.");
-      return;
-    }
-
-    setResetting(true);
-    try {
-      const redirectTo =
-        typeof window !== "undefined"
-          ? `${window.location.origin}/board/reset-password`
-          : undefined;
-
-      const { error } = await sb.auth.resetPasswordForEmail(email.trim(), {
-        redirectTo,
-      });
-
-      if (error) {
-        setErr(error.message);
-        return;
-      }
-
-      setOk("Password reset link sent. Check your email.");
-    } catch (e: any) {
-      setErr(e?.message || "Could not send reset email.");
-    } finally {
-      setResetting(false);
     }
   }
 
@@ -128,6 +100,12 @@ export default function BoardLoginPage() {
             Welcome back. Sign in to continue.
           </p>
 
+          {!authAvailable ? (
+            <div className="mt-4 rounded-2xl border border-amber-200/25 bg-amber-200/10 p-3 text-xs leading-5 text-amber-50">
+              Supabase setup is required before credentials can be verified. The login form remains available below.
+            </div>
+          ) : null}
+
           <form className="mt-6 grid gap-4" onSubmit={onLogin}>
             <div className="grid gap-2">
               <label className="text-xs opacity-70">Email</label>
@@ -152,14 +130,12 @@ export default function BoardLoginPage() {
                 autoComplete="current-password"
               />
               <div className="flex justify-end">
-                <button
-                  type="button"
-                  onClick={onForgotPassword}
-                  disabled={resetting}
-                  className="text-xs underline opacity-80 hover:opacity-100 disabled:opacity-60"
+                <Link
+                  href="/board/reset-password"
+                  className="text-xs underline opacity-80 hover:opacity-100"
                 >
-                  {resetting ? "Sending…" : "Forgot password?"}
-                </button>
+                  Forgot password?
+                </Link>
               </div>
             </div>
 

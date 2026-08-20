@@ -20,12 +20,15 @@ export const DROP_FLAVOR_ORDER: DropFlavorKey[] = [
   "thought",
   "media",
   "music",
+  "pay",
   "youtube",
   "link",
   "news",
   "doc",
-  "pay",
 ];
+
+export const DROP_FLAVOR_STUDIO_ROW: DropFlavorKey[] = ["thought", "media", "doc", "pay"];
+export const DROP_FLAVOR_LINK_ROW: DropFlavorKey[] = ["youtube", "news", "music", "link"];
 
 export const DROP_FLAVOR_LABEL: Record<DropFlavorKey, string> = {
   thought: "Thought",

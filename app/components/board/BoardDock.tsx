@@ -731,7 +731,8 @@ export default function BoardDock() {
         .bd_wrap { position: fixed; left: 0; right: 0; bottom: 0; z-index: 40; pointer-events: none; }
         .bd_shell {
           pointer-events: auto;
-          width: min(1120px, calc(100% - 24px));
+          width: min(1380px, calc(100% - 24px));
+          max-width: calc(100vw - 24px);
           margin: 0 auto;
           margin-bottom: calc(12px + env(safe-area-inset-bottom));
           padding: 10px 12px;
@@ -763,7 +764,14 @@ export default function BoardDock() {
           color: rgba(255,0,190,0.92);
           text-shadow: 0 0 12px rgba(255,0,190,0.14);
         }
-        .bd_nav { display: flex; align-items: center; gap: 8px; flex: 1; flex-wrap: nowrap; min-width: 0; }
+        .bd_nav {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          flex: 1 0 auto;
+          flex-wrap: nowrap;
+          min-width: max-content;
+        }
 
         .bd_zoneBtn {
           border: 1px solid rgba(0,0,0,0.12);
@@ -797,9 +805,10 @@ export default function BoardDock() {
         }
         .bd_zoneChev { color: rgba(0,0,0,0.55); transform: translateY(-1px); }
 
-        @media (max-width: 760px) {
+        @media (max-width: 1180px) {
           .bd_shell {
             width: calc(100% - 16px);
+            max-width: calc(100vw - 16px);
             border-radius: 28px;
             flex-wrap: nowrap;
             justify-content: flex-start;
@@ -1258,6 +1267,7 @@ function DockPill({
           color: rgba(0,0,0,0.68);
           transition: transform 160ms ease, filter 160ms ease, box-shadow 160ms ease;
           white-space: nowrap;
+          flex: 0 0 auto;
         }
         .bd_pill:hover { transform: translateY(-1px); filter: brightness(1.02); }
         .bd_pill.active {

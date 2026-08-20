@@ -29,7 +29,7 @@ import {
   type BoardUser,
 } from "@/lib/boardStore";
 import CameraDropPortal from "./CameraDropPortal";
-import DropStudio from "./DropStudio";
+import LazyDropStudioStage from "./LazyDropStudioStage";
 
 /* -------------------------------------------------------------------------- */
 /* utils */
@@ -711,9 +711,6 @@ export default function DropConsole({
     }
   }
 
-  const showMediaUploadForBoardDrop =
-    mode === "board_drop" && dropFlavor === "media";
-
   // -------------------------
   // SLEEP DOCK (does NOT overlay your buckets)
   // -------------------------
@@ -968,7 +965,6 @@ export default function DropConsole({
               uploading={uploading}
               uploadErr={uploadErr}
               uploadToBoardMedia={uploadToBoardMedia}
-              onOpenCamera={setCameraMode}
               dropDesc={dropDesc}
               setDropDesc={setDropDesc}
               mediaSource={mediaSource}
@@ -1092,16 +1088,17 @@ export default function DropConsole({
         .dcPills { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 10px; }
         .dcDropTypeRow {
           margin-top: 8px;
-          display: flex;
-          gap: 10px;
-          flex-wrap: wrap;
+          display: grid;
+          grid-template-columns: repeat(4, minmax(0, 1fr));
+          gap: 8px;
           min-width: 0;
           max-width: 100%;
         }
         .dcTypeBtn {
-          min-width: 72px;
+          min-width: 0;
+          width: 100%;
           border-radius: 999px;
-          padding: 8px 12px;
+          padding: 8px 10px;
           border: 1px solid rgba(0,0,0,0.12);
           background: rgba(255,255,255,0.70);
           color: rgba(0,0,0,0.62);
@@ -1492,7 +1489,6 @@ function BoardDropConsoleFields({
   uploading,
   uploadErr,
   uploadToBoardMedia,
-  onOpenCamera,
   dropDesc,
   setDropDesc,
   mediaSource,
@@ -1520,7 +1516,6 @@ function BoardDropConsoleFields({
   uploading: boolean;
   uploadErr: string | null;
   uploadToBoardMedia: (file: File, source?: "upload" | "capture") => void;
-  onOpenCamera: (mode: "photo" | "video") => void;
   dropDesc: string;
   setDropDesc: (value: string) => void;
   mediaSource: "upload" | "capture" | null;
@@ -1541,6 +1536,7 @@ function BoardDropConsoleFields({
   thoughtVisibility: "public" | "private";
   setThoughtVisibility: (value: "public" | "private") => void;
 }) {
+  const [studioOpen, setStudioOpen] = useState(false);
   const showUrlField =
     dropFlavor === "youtube" ||
     dropFlavor === "news" ||
@@ -1595,29 +1591,32 @@ function BoardDropConsoleFields({
       {showFileLine ? (
         <div className="dcField">
           <div className="mediaActionRow" aria-label="Drop media actions">
-            <label className={clsx("mediaAction", "uploadAction", uploading && "busy")}>
-              <span>{uploading ? "Uploading..." : "Upload"}</span>
-              <input
-                className="fileInput"
-                type="file"
-                accept={fileAcceptForFlavor(dropFlavor)}
-                disabled={uploading}
-                onChange={(e) => {
-                  const file = e.currentTarget.files?.[0];
-                  if (file) uploadToBoardMedia(file, "upload");
-                  e.currentTarget.value = "";
-                }}
-              />
-            </label>
-            {dropFlavor === "media" || dropFlavor === "pay" ? (
+            {dropFlavor === "media" || dropFlavor === "thought" || dropFlavor === "pay" ? (
               <button
                 type="button"
-                className={clsx("mediaAction", "captureAction", uploading && "busy")}
-                onClick={() => onOpenCamera("photo")}
-                disabled={uploading}
+                className="mediaAction uploadAction"
+                onClick={() => setStudioOpen(true)}
               >
-                Capture
+                Open Drop Studio
               </button>
+            ) : null}
+            {dropFlavor !== "media" ? (
+              <label
+                className={clsx("mediaAction", "uploadAction", uploading && "busy")}
+              >
+                <span>{uploading ? "Uploading..." : "Upload"}</span>
+                <input
+                  className="fileInput"
+                  type="file"
+                  accept={fileAcceptForFlavor(dropFlavor)}
+                  disabled={uploading}
+                  onChange={(e) => {
+                    const file = e.currentTarget.files?.[0];
+                    if (file) uploadToBoardMedia(file, "upload");
+                    e.currentTarget.value = "";
+                  }}
+                />
+              </label>
             ) : null}
           </div>
           <div className="fileMeta fileStatus">
@@ -1628,11 +1627,13 @@ function BoardDropConsoleFields({
             )}
             {uploading ? <span className="fileSize">Uploading...</span> : null}
           </div>
-          {dropFlavor === "media" || dropFlavor === "pay" ? (
+          {dropFlavor === "media" || dropFlavor === "thought" || dropFlavor === "pay" ? (
             <div className="captureHelp">
               {dropFlavor === "pay"
-                ? "Show what this request is for in real time."
-                : "Upload from your device or open the Board camera portal."}
+                ? "Open Drop Studio or attach context for this payment request."
+                : dropFlavor === "thought"
+                  ? "Open Drop Studio for Voice, Art, or Descript."
+                  : "Open the editor to design this media drop."}
             </div>
           ) : null}
           {uploadErr ? <div className="dcErr">{uploadErr}</div> : null}
@@ -1650,20 +1651,26 @@ function BoardDropConsoleFields({
         </div>
       ) : null}
 
-      {dropFlavor === "media" && attachUrl ? (
-        <DropStudio
-          mediaUrl={attachUrl}
-          mediaKind={
-            inferMediaType(attachUrl) === "video" ||
-            /\.(mp4|webm|mov|m4v)$/i.test(uploadedFileName)
-              ? "video"
-              : "image"
-          }
-          value={customizations}
-          onChange={setCustomizations}
-          compact
-        />
-      ) : null}
+      <LazyDropStudioStage
+        open={
+          studioOpen &&
+          (dropFlavor === "media" || dropFlavor === "thought" || dropFlavor === "pay")
+        }
+        initialFile={null}
+        initialMode={dropFlavor === "thought" ? "audio" : "photo"}
+        allowedModes={
+          dropFlavor === "thought"
+            ? ["audio", "art", "descript"]
+            : ["photo", "video", "audio", "art", "descript"]
+        }
+        descriptDestination={
+          dropFlavor === "thought" ? "thought" : dropFlavor === "pay" ? "pay" : "doc"
+        }
+        value={customizations}
+        onChange={setCustomizations}
+        onComplete={(file) => uploadToBoardMedia(file, "capture")}
+        onClose={() => setStudioOpen(false)}
+      />
 
       {dropFlavor === "thought" ? (
         <>

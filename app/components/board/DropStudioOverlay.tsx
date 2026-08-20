@@ -41,6 +41,16 @@ export default function DropStudioOverlay({
         <span className={styles.effectLayer} aria-hidden="true" />
       ) : null}
 
+      {value.artOverlayUrl ? (
+        <img
+          className={styles.artOverlay}
+          src={value.artOverlayUrl}
+          alt=""
+          aria-hidden="true"
+          draggable={false}
+        />
+      ) : null}
+
       {value.textLabels?.map((label) => (
         <button
           key={label.id}

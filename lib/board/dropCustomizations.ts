@@ -28,6 +28,9 @@ export type DropStudioActionButton = {
 export type DropStudioEffects = {
   filter?: string | null;
   overlay?: string | null;
+  /** Portrait 4:5 (default) or landscape 16:9 chip — lives in customizations JSON. */
+  frame?: "portrait" | "landscape" | null;
+  rotation?: 0 | 90 | 180 | 270 | null;
 };
 
 export type DropCustomization = {
@@ -35,6 +38,8 @@ export type DropCustomization = {
   stickers?: DropStudioSticker[];
   actionButton?: DropStudioActionButton | null;
   effects?: DropStudioEffects;
+  /** Transparent drawing layer used by the Art Palette over video media. */
+  artOverlayUrl?: string;
 };
 
 function clampPosition(value: unknown, fallback: number) {
@@ -147,10 +152,35 @@ export function normalizeDropCustomizations(
       : null;
   const filter = rawEffects ? cleanEffectValue(rawEffects.filter) : null;
   const overlay = rawEffects ? cleanEffectValue(rawEffects.overlay) : null;
-  const effects = filter || overlay ? { filter, overlay } : undefined;
+  const frame: DropStudioEffects["frame"] =
+    rawEffects?.frame === "landscape" || rawEffects?.frame === "portrait"
+      ? rawEffects.frame
+      : null;
+  const rotRaw = rawEffects ? Number(rawEffects.rotation) : 0;
+  const rotation =
+    rotRaw === 90 || rotRaw === 180 || rotRaw === 270 ? (rotRaw as 90 | 180 | 270) : null;
+  const effects =
+    filter || overlay || frame || rotation
+      ? { filter, overlay, frame, rotation }
+      : undefined;
+  const rawArtOverlay =
+    typeof source.artOverlayUrl === "string" ? source.artOverlayUrl.trim() : "";
+  const artOverlayUrl =
+    rawArtOverlay.length <= 2_000_000 &&
+    /^(data:image\/(?:png|webp);base64,|https?:\/\/)/i.test(rawArtOverlay)
+      ? rawArtOverlay
+      : undefined;
 
-  if (!textLabels.length && !stickers.length && !actionButton && !effects) return undefined;
-  return { textLabels, stickers, actionButton, ...(effects ? { effects } : {}) };
+  if (!textLabels.length && !stickers.length && !actionButton && !effects && !artOverlayUrl) {
+    return undefined;
+  }
+  return {
+    textLabels,
+    stickers,
+    actionButton,
+    ...(effects ? { effects } : {}),
+    ...(artOverlayUrl ? { artOverlayUrl } : {}),
+  };
 }
 
 export function compactDropCustomizations(

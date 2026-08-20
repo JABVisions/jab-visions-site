@@ -85,8 +85,9 @@ export default function CameraDropPortal({
 
     const videoConstraints = {
       facingMode: { ideal: nextFacingMode },
-      width: { ideal: 1920 },
-      height: { ideal: 1080 },
+      width: { ideal: 1080 },
+      height: { ideal: 1350 },
+      aspectRatio: { ideal: 4 / 5 },
     };
 
     try {
@@ -157,12 +158,39 @@ export default function CameraDropPortal({
   function takePhoto() {
     const video = videoRef.current;
     if (!video || !video.videoWidth || !video.videoHeight) return;
+    const displayedRatio = video.clientWidth > 0 && video.clientHeight > 0
+      ? video.clientWidth / video.clientHeight
+      : 4 / 5;
+    const sourceRatio = video.videoWidth / video.videoHeight;
+    let sourceWidth = video.videoWidth;
+    let sourceHeight = video.videoHeight;
+    if (sourceRatio > displayedRatio) {
+      sourceWidth = video.videoHeight * displayedRatio;
+    } else {
+      sourceHeight = video.videoWidth / displayedRatio;
+    }
+    const sourceX = (video.videoWidth - sourceWidth) / 2;
+    const sourceY = (video.videoHeight - sourceHeight) / 2;
     const canvas = document.createElement("canvas");
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
+    canvas.width = Math.max(1, Math.round(sourceWidth));
+    canvas.height = Math.max(1, Math.round(sourceHeight));
     const context = canvas.getContext("2d");
     if (!context) return;
-    context.drawImage(video, 0, 0, canvas.width, canvas.height);
+    if (facingMode === "user") {
+      context.translate(canvas.width, 0);
+      context.scale(-1, 1);
+    }
+    context.drawImage(
+      video,
+      sourceX,
+      sourceY,
+      sourceWidth,
+      sourceHeight,
+      0,
+      0,
+      canvas.width,
+      canvas.height
+    );
     canvas.toBlob((blob) => {
       if (blob) setCaptured(blob);
     }, "image/jpeg", 0.94);
