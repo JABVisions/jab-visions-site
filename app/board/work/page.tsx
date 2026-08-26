@@ -277,8 +277,8 @@ export default function WorkPage() {
             min-height: unset;
           }
           .qar-shell {
-            max-width: 220px;
-            height: 360px;
+            max-width: 430px;
+            height: auto;
           }
           .droppad-shell {
             max-width: 520px;
