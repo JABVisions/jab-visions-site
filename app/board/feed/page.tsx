@@ -373,7 +373,7 @@ export default function HomeBoardFeedPage() {
       <div className="shell">
         <div className="controls">
           <div className="leftControls">
-            <div className="sectionTitle">Community Feed</div>
+            <div className="sectionTitle">Activity Channel</div>
 
             <div className="tabs">
               <button
