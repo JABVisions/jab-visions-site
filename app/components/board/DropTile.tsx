@@ -1931,7 +1931,7 @@ export default function DropTile() {
             />
 
             <div className="capture-help">
-              Public thoughts can enter the Community Feed. Private thoughts stay in your Activity Channel.
+              Public thoughts can enter the Activity Channel. Private thoughts stay on your board.
             </div>
           </div>
         ) : mode === "Music" ? (

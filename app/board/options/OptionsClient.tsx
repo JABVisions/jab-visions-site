@@ -941,19 +941,122 @@ function BankingPayDropsPanel({
     settings: BoardSettings;
     setSettings: React.Dispatch<React.SetStateAction<BoardSettings>>;
 }) {
+    const [stripeAccountId, setStripeAccountId] = useState<string | null>(null);
+    const [connectStatus, setConnectStatus] = useState<{
+        chargesEnabled: boolean;
+        payoutsEnabled: boolean;
+        detailsSubmitted: boolean;
+        requirementsDue: string[];
+        loading: boolean;
+        error: string | null;
+    }>({
+        chargesEnabled: false,
+        payoutsEnabled: false,
+        detailsSubmitted: false,
+        requirementsDue: [],
+        loading: true,
+        error: null,
+    });
+
+    useEffect(() => {
+        let cancelled = false;
+
+        async function hydrateStripeStatus() {
+            try {
+                const supabase = supabaseBrowser();
+                const { data: auth } = await supabase.auth.getUser();
+                const uid = auth?.user?.id;
+                if (!uid) {
+                    if (!cancelled) {
+                        setConnectStatus((s) => ({ ...s, loading: false }));
+                    }
+                    return;
+                }
+
+                const { data: prof } = await supabase
+                    .from("profiles")
+                    .select("board_style")
+                    .eq("id", uid)
+                    .maybeSingle();
+                const style =
+                    prof?.board_style && typeof prof.board_style === "object"
+                        ? (prof.board_style as Record<string, any>)
+                        : {};
+                const accountId =
+                    typeof style.stripeAccountId === "string" ? style.stripeAccountId.trim() : "";
+
+                if (!accountId) {
+                    if (!cancelled) {
+                        setStripeAccountId(null);
+                        setConnectStatus((s) => ({ ...s, loading: false }));
+                    }
+                    return;
+                }
+
+                if (!cancelled) setStripeAccountId(accountId);
+
+                const res = await fetch(
+                    `/api/paydrops/stripe/connect?accountId=${encodeURIComponent(accountId)}`
+                );
+                const data = await res.json().catch(() => null);
+                if (!res.ok || !data?.ok) {
+                    throw new Error(data?.error || "Could not load Stripe status.");
+                }
+
+                if (!cancelled) {
+                    setConnectStatus({
+                        chargesEnabled: Boolean(data.chargesEnabled),
+                        payoutsEnabled: Boolean(data.payoutsEnabled),
+                        detailsSubmitted: Boolean(data.detailsSubmitted),
+                        requirementsDue: Array.isArray(data.requirementsDue)
+                            ? data.requirementsDue.map(String)
+                            : [],
+                        loading: false,
+                        error: null,
+                    });
+                }
+            } catch (error) {
+                if (!cancelled) {
+                    setConnectStatus((s) => ({
+                        ...s,
+                        loading: false,
+                        error: error instanceof Error ? error.message : "Could not load Stripe status.",
+                    }));
+                }
+            }
+        }
+
+        void hydrateStripeStatus();
+        return () => {
+            cancelled = true;
+        };
+    }, []);
+
+    const derivedStatus: BankingStatus = !stripeAccountId
+        ? "bank_not_connected"
+        : connectStatus.requirementsDue.length > 0 || !connectStatus.detailsSubmitted
+          ? "verification_needed"
+          : connectStatus.payoutsEnabled
+            ? "cash_out_available"
+            : connectStatus.chargesEnabled
+              ? "ready_for_pay_drops"
+              : "processor_setup_required";
+
     const profile = {
         ...bankingProfile,
+        status: derivedStatus,
+        payoutsEnabled: connectStatus.payoutsEnabled,
         payDropsEnabled: settings.payDropsEnabled,
         showPayDropsOnProfile: settings.showPayDropsOnProfile,
         notifyOnPayDrop: settings.notifyOnPayDrop,
+        bankName: stripeAccountId ? "Stripe Connect" : null,
+        bankLast4: stripeAccountId ? stripeAccountId.slice(-4) : null,
     };
-    const statusLabel = BANKING_STATUS_LABELS[profile.status];
-    const bankingConnected = Boolean(profile.bankName && profile.bankLast4);
-    const cashOutDisabled =
-        !profile.payoutsEnabled ||
-        !bankingConnected ||
-        profile.availableBalance <= 0 ||
-        profile.status !== "cash_out_available";
+    const statusLabel = connectStatus.loading
+        ? "Checking Stripe…"
+        : BANKING_STATUS_LABELS[profile.status];
+    const bankingConnected = Boolean(stripeAccountId);
+    const cashOutDisabled = true; // Cash-out transfer API not wired yet; Stripe manages payouts.
 
     async function connectBanking() {
         // Kick off Stripe Connect (Express) onboarding. The route creates/links the
@@ -1020,12 +1123,13 @@ function BankingPayDropsPanel({
     }
 
     function cashOut() {
-        // TODO: Fetch payout status.
-        // TODO: Fetch Pay Drop balance.
-        // TODO: Create cash-out transfer.
-        // TODO: Listen for payment/payout webhooks.
-        // TODO: Store safe transaction records in Supabase.
-        console.log("Cash Out clicked", { processor: profile.processor });
+        if (typeof window !== "undefined") {
+            window.alert(
+                connectStatus.payoutsEnabled
+                    ? "Payouts are managed by Stripe Connect. Eligible balances transfer to your linked bank on Stripe’s schedule."
+                    : "Finish Stripe Connect setup before payouts can reach your bank."
+            );
+        }
     }
 
     const balanceCards = [
@@ -1061,7 +1165,7 @@ function BankingPayDropsPanel({
                             Banking & Pay Drops
                         </div>
                         <p className={cx("mt-2 max-w-3xl text-sm", night ? "text-white/64" : "text-black/58")}>
-                            Connect your payout account, manage Pay Drop earnings, and transfer eligible balances to your bank.
+                            Connect Stripe for payouts, manage Pay Drop earnings, and keep bank details off Board.
                         </p>
                     </div>
 
@@ -1123,11 +1227,18 @@ function BankingPayDropsPanel({
                     >
                         <div className={cx("text-base font-black", night ? "text-white/88" : "text-black/80")}>
                             {bankingConnected
-                                ? `${profile.bankName} ending in ${profile.bankLast4}`
+                                ? `Stripe Connect · ${
+                                      connectStatus.payoutsEnabled
+                                          ? "payouts enabled"
+                                          : connectStatus.detailsSubmitted
+                                            ? "setup incomplete"
+                                            : "connected"
+                                  }${profile.bankLast4 ? ` · …${profile.bankLast4}` : ""}`
                                 : "No payout account connected"}
                         </div>
                         <p className={cx("mt-2 text-xs leading-relaxed", night ? "text-white/55" : "text-black/55")}>
-                            Banking details are handled securely through our payment processor. Board only stores payout status and safe account metadata.
+                            Banking details stay with Stripe. Board only stores your connected account id and payout status flags.
+                            {connectStatus.error ? ` ${connectStatus.error}` : ""}
                         </p>
                         <button
                             type="button"
@@ -1139,7 +1250,7 @@ function BankingPayDropsPanel({
                                     : "border-[#139b69]/25 bg-[#dffff1] text-[#146d50] hover:bg-[#cefde8]"
                             )}
                         >
-                            Connect Banking
+                            {bankingConnected ? "Continue Stripe Setup" : "Connect Stripe"}
                         </button>
                     </div>
                 </Card>
@@ -1169,7 +1280,7 @@ function BankingPayDropsPanel({
                             Cash Out to Bank
                         </button>
                         <p className={cx("mt-3 text-xs leading-relaxed", night ? "text-white/55" : "text-black/55")}>
-                            Payout timing depends on the payment processor and the receiving bank.
+                            Payouts are managed by Stripe Connect once setup is complete. Board does not store full bank numbers.
                         </p>
                     </div>
                 </Card>

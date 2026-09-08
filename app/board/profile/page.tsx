@@ -25,7 +25,6 @@ import {
   readBoardVisitWhispers,
 } from "@/lib/board/visitWhispers";
 import {
-  PROFILE_ACTIVITY_WHISPERS,
   getBoardWhisper,
   createBoardWhisper,
   type BoardWhisper as ProfileWhisper,
@@ -1681,7 +1680,7 @@ export default function BoardProfileHubPage() {
       });
     } catch (error) {
       window.alert(
-        error instanceof Error ? error.message : "Could not open National Bankcard checkout."
+        error instanceof Error ? error.message : "Could not open Stripe checkout."
       );
     } finally {
       setPayCheckoutBusyId(null);
@@ -2193,7 +2192,7 @@ export default function BoardProfileHubPage() {
                   </div>
                 ) : recentDrops.length > 0 ? (
                   <div className="recent-drops-stack activity-feed-stack">
-                    {[...visitWhispers, PROFILE_ACTIVITY_WHISPERS[0]].map((whisper) => (
+                    {visitWhispers.map((whisper) => (
                       <BoardWhisper key={whisper.id} whisper={whisper} />
                     ))}
 

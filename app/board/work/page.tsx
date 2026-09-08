@@ -258,10 +258,10 @@ export default function WorkPage() {
           .work-row {
             grid-template-columns: 1fr;
           }
-          .desk {
+          .droppad {
             order: 1;
           }
-          .droppad {
+          .desk {
             order: 2;
           }
           .qar {

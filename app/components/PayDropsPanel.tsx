@@ -100,7 +100,7 @@ export default function PayDropsPanel() {
       });
     } catch (error) {
       window.alert(
-        error instanceof Error ? error.message : "Could not open National Bankcard checkout."
+        error instanceof Error ? error.message : "Could not open Stripe checkout."
       );
     } finally {
       setBusyId(null);
@@ -113,7 +113,7 @@ export default function PayDropsPanel() {
         Pay Drops
       </div>
       <div className="mt-2 text-sm text-black/70">
-        BOARD payment shell is ready for direct links now and National Bankcard hosted checkout next.
+        BOARD payment shell is ready for Stripe Checkout and direct payment links.
       </div>
 
       <div className="mt-4 grid gap-3">

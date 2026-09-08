@@ -392,7 +392,7 @@ export default function HomeBoardFeedPage() {
           </div>
 
           <div className="miniNote">
-            {loading ? "Loading…" : "Live feed"}
+            {loading ? "Loading…" : "Activity Channel"}
           </div>
         </div>
 

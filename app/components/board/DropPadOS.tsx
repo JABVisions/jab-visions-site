@@ -714,10 +714,10 @@ function BoardDropsScreen({
   onBeginPlace: (kind: AssetKind) => void;
 }) {
   // Creation-first order, mirroring lib/board/dropFlavors.ts: native-creation
-  // Drops lead (Vision, Note≈Thought), then the link-ingest types.
+  // Drops lead (Vision, Thought), then the link-ingest types.
   const DROP_TYPES: Array<{ kind: AssetKind; title: string; desc: string; hint: string }> = [
     { kind: "media", title: "Vision", desc: "Image embed", hint: "Upload an image" },
-    { kind: "note", title: "Note", desc: "Text drop", hint: "Write something short" },
+    { kind: "note", title: "Thought", desc: "Text drop", hint: "Write something short" },
     { kind: "youtube", title: "YouTube", desc: "YouTube video embed", hint: "Paste a YouTube link" },
     { kind: "music", title: "Music", desc: "Spotify / SoundCloud", hint: "Paste a music link" },
     { kind: "link", title: "Link", desc: "Any URL", hint: "Paste a link" },

@@ -22,8 +22,9 @@ import {
 } from "@/lib/board/dropCustomizations";
 import { recordBoardVisitWhisper } from "@/lib/board/visitWhispers";
 import {
-  PROFILE_ACTIVITY_WHISPERS,
+  getBoardWhisper,
   type BoardWhisper as ProfileWhisper,
+  type BoardWhisperEventType,
 } from "@/lib/board/whispers";
 import { supabaseBrowser } from "@/lib/supabase/browser";
 import DropStudioOverlay from "@/app/components/board/DropStudioOverlay";
@@ -208,6 +209,25 @@ function BoardWhisper({ whisper }: { whisper: ProfileWhisper }) {
       {whisper.text}
     </p>
   );
+}
+
+// Bucket Brain: derive ambient whispers from real activity on this profile.
+function deriveActivityWhisper(
+  item: { id: string; kind?: string | null; meta?: Record<string, any> | null },
+  seed: string
+): ProfileWhisper {
+  const meta = (item.meta ?? {}) as Record<string, any>;
+  const flavor = String(meta.signalType ?? meta.dropType ?? item.kind ?? "");
+
+  let eventType: BoardWhisperEventType = "drop_view";
+  if (meta.isPushed) eventType = "drop_push";
+  else if (flavor === "energy_change") eventType = "drop_pin";
+  else if (flavor === "profile_update") eventType = "profile_view";
+  else if (/store/i.test(flavor)) eventType = "drop_view";
+  else if (flavor === "Pay") eventType = "drop_view";
+
+  const w = getBoardWhisper(eventType, `${item.id}:${seed}`);
+  return { id: `aw-${item.id}`, type: "whisper", tone: w.tone, text: w.text, eventType };
 }
 
 const AURA_HEX = {
@@ -1310,7 +1330,7 @@ export default function ProfileBoardViewPage({
       });
     } catch (error) {
       window.alert(
-        error instanceof Error ? error.message : "Could not open National Bankcard checkout."
+        error instanceof Error ? error.message : "Could not open Stripe checkout."
       );
     } finally {
       setPayCheckoutBusyId(null);
@@ -1669,9 +1689,9 @@ export default function ProfileBoardViewPage({
                   </div>
                 ) : recentDrops.length > 0 ? (
                   <div className="recent-drops-stack activity-feed-stack">
-                    <BoardWhisper whisper={PROFILE_ACTIVITY_WHISPERS[0]} />
                     {recentDrops.map((item, index) => {
-                      const whisper = PROFILE_ACTIVITY_WHISPERS[index + 1];
+                      const whisper =
+                        index % 2 === 0 ? deriveActivityWhisper(item, String(index)) : null;
 
                       return (
                         <div key={item.id} className="activity-feed-entry">

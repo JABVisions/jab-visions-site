@@ -958,7 +958,7 @@ export default function ProjectCenter() {
 
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="text-xs text-white/45">
-                Public thoughts can enter the Feed. Private thoughts stay in your Activity Channel.
+                Public thoughts can enter the Activity Channel. Private thoughts stay on your board.
               </div>
               <button
                 type="button"
