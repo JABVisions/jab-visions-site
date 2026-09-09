@@ -13,6 +13,7 @@ export const DROPBOOK_PROGRESS_UPDATED_EVENT = "board:dropbook-progress:updated"
 const MAX_ASSET_DATAURL_BYTES = 6_000_000;
 
 export type StoredDropbookCaptureMode = "photo" | "video" | "audio" | "art" | "descript";
+export type StoredDropbookLinkFlavor = "youtube" | "news" | "music" | "link";
 
 export type StoredDropbookMedia = {
   dataUrl?: string;
@@ -29,6 +30,10 @@ export type StoredDropbookPage = {
   mode?: StoredDropbookCaptureMode;
   label?: string;
   captureSource?: "capture" | "upload";
+  /** Link / embed page (YouTube clip, news, music, generic URL). */
+  linkFlavor?: StoredDropbookLinkFlavor;
+  linkUrl?: string;
+  embedUrl?: string;
   media?: StoredDropbookMedia;
 };
 
@@ -221,6 +226,11 @@ function progressToRestored(saved: DropbookProgress): RestoredDropbookProgress {
   }
 
   const pages: RestoredDropbookPage[] = saved.pages.map((page) => {
+    const linkFields = {
+      linkFlavor: page.linkFlavor,
+      linkUrl: page.linkUrl,
+      embedUrl: page.embedUrl,
+    };
     if (!page.media) {
       return {
         id: page.id,
@@ -228,6 +238,7 @@ function progressToRestored(saved: DropbookProgress): RestoredDropbookProgress {
         mode: page.mode,
         label: page.label,
         captureSource: page.captureSource,
+        ...linkFields,
       };
     }
     if (page.media.publicUrl) {
@@ -238,6 +249,7 @@ function progressToRestored(saved: DropbookProgress): RestoredDropbookProgress {
         label: page.label,
         captureSource: page.captureSource,
         previewUrl: page.media.publicUrl,
+        ...linkFields,
       };
     }
     const file = dataUrlToFile(page.media);
@@ -248,6 +260,7 @@ function progressToRestored(saved: DropbookProgress): RestoredDropbookProgress {
         mode: page.mode,
         label: page.label,
         captureSource: page.captureSource,
+        ...linkFields,
       };
     }
     return {
@@ -258,6 +271,7 @@ function progressToRestored(saved: DropbookProgress): RestoredDropbookProgress {
       captureSource: page.captureSource,
       previewUrl: mediaToPreview(file),
       sourceFile: file,
+      ...linkFields,
     };
   });
 
@@ -331,6 +345,9 @@ export type SaveDropbookProgressInput = {
     mode?: StoredDropbookCaptureMode;
     label?: string;
     captureSource?: "capture" | "upload";
+    linkFlavor?: StoredDropbookLinkFlavor;
+    linkUrl?: string;
+    embedUrl?: string;
     previewUrl?: string;
     sourceFile?: File;
   }>;
@@ -360,6 +377,28 @@ export async function saveDropbookProgress(
 
   const pages: StoredDropbookPage[] = [];
   for (const page of input.pages) {
+    if (page.linkFlavor && page.linkUrl) {
+      const remotePreview =
+        page.previewUrl && !page.previewUrl.startsWith("blob:") && !page.previewUrl.startsWith("data:")
+          ? {
+              fileName: "link-preview",
+              mimeType: "image/jpeg",
+              publicUrl: page.previewUrl,
+            }
+          : null;
+      pages.push({
+        id: page.id,
+        dropId: page.dropId,
+        mode: page.mode,
+        label: page.label,
+        captureSource: page.captureSource,
+        linkFlavor: page.linkFlavor,
+        linkUrl: page.linkUrl,
+        embedUrl: page.embedUrl,
+        media: remotePreview ?? undefined,
+      });
+      continue;
+    }
     const media = await fileOrPreviewToMedia(page.sourceFile, page.previewUrl, `dropbook-page-${page.id}`);
     if ((page.sourceFile || page.previewUrl) && !media) skippedAssets += 1;
     pages.push({
@@ -409,6 +448,21 @@ export async function saveDropbookProgress(
 
     const cloudPages: StoredDropbookPage[] = [];
     for (const page of input.pages) {
+      const localPage = pages.find((p) => p.id === page.id);
+      if (page.linkFlavor && page.linkUrl) {
+        cloudPages.push({
+          id: page.id,
+          dropId: page.dropId,
+          mode: page.mode,
+          label: page.label,
+          captureSource: page.captureSource,
+          linkFlavor: page.linkFlavor,
+          linkUrl: page.linkUrl,
+          embedUrl: page.embedUrl,
+          media: localPage?.media,
+        });
+        continue;
+      }
       const cloudMedia = await fileOrPreviewToCloudMedia(
         userId,
         page.sourceFile,
@@ -416,7 +470,6 @@ export async function saveDropbookProgress(
         `dropbook-page-${page.id}`
       );
       if ((page.sourceFile || page.previewUrl) && !cloudMedia) skippedCloud += 1;
-      const localPage = pages.find((p) => p.id === page.id);
       cloudPages.push({
         id: page.id,
         dropId: page.dropId,
@@ -458,6 +511,9 @@ export type RestoredDropbookPage = {
   mode?: StoredDropbookCaptureMode;
   label?: string;
   captureSource?: "capture" | "upload";
+  linkFlavor?: StoredDropbookLinkFlavor;
+  linkUrl?: string;
+  embedUrl?: string;
   previewUrl?: string;
   sourceFile?: File;
 };

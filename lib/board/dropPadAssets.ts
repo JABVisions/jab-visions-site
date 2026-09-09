@@ -7,7 +7,7 @@
 export const DROP_PAD_ASSETS_STORAGE_KEY = "jab_drop_pad_assets_v4";
 export const DROP_PAD_ASSETS_UPDATED_EVENT = "board:droppad:assets:updated";
 
-export type DropPadAssetKind = "media" | "music" | "youtube" | "link" | "doc" | "note";
+export type DropPadAssetKind = "media" | "music" | "youtube" | "link" | "doc" | "note" | "dropbook";
 
 export type DropPadAsset = {
   id: string;
@@ -21,6 +21,21 @@ export type DropPadAsset = {
     embedUrl?: string;
     url?: string;
     text?: string;
+    /** Serialized Dropbook shelf for Assets recognition / reopen. */
+    dropbook?: {
+      bookColor?: string;
+      coverUrl?: string;
+      pageCount: number;
+      pages: Array<{
+        id: string;
+        label?: string;
+        mode?: string;
+        linkFlavor?: string;
+        linkUrl?: string;
+        embedUrl?: string;
+        previewUrl?: string;
+      }>;
+    };
   };
 };
 

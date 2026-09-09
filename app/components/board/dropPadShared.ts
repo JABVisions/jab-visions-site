@@ -36,7 +36,7 @@ export type DropBubble = {
   emoji?: string;
 };
 
-export type AssetKind = "media" | "music" | "youtube" | "link" | "doc" | "note";
+export type AssetKind = "media" | "music" | "youtube" | "link" | "doc" | "note" | "dropbook";
 export type DropDestination = "assets" | "portfolio" | "projects";
 
 export type AssetItem = {
@@ -59,6 +59,22 @@ export type AssetItem = {
 
     // note
     text?: string;
+
+    // dropbook collection
+    dropbook?: {
+      bookColor?: string;
+      coverUrl?: string;
+      pageCount: number;
+      pages: Array<{
+        id: string;
+        label?: string;
+        mode?: string;
+        linkFlavor?: string;
+        linkUrl?: string;
+        embedUrl?: string;
+        previewUrl?: string;
+      }>;
+    };
   };
 };
 
@@ -142,6 +158,8 @@ export function kindLabel(kind: AssetKind) {
       return "Link Drop";
     case "note":
       return "Note Drop";
+    case "dropbook":
+      return "Dropbook";
   }
 }
 
@@ -159,6 +177,8 @@ export function kindEmoji(kind: AssetKind) {
       return "🔗";
     case "note":
       return "📝";
+    case "dropbook":
+      return "📕";
   }
 }
 

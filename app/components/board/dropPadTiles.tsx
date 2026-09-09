@@ -188,6 +188,48 @@ export function NoteDropTile({ a }: { a: AssetItem }) {
   );
 }
 
+export function DropbookDropTile({ a }: { a: AssetItem }) {
+  const book = a.payload?.dropbook;
+  const coverUrl = book?.coverUrl;
+  const pageCount = book?.pageCount ?? 0;
+  const bookColor = book?.bookColor || "#171717";
+
+  return (
+    <TileFrame>
+      <DropHeader
+        emoji={kindEmoji("dropbook")}
+        title={a.title}
+        meta={`Dropbook · ${pageCount} page${pageCount === 1 ? "" : "s"}`}
+        description={a.description}
+      />
+      <div className="mt-3 px-4 pb-4">
+        <div
+          className="relative overflow-hidden rounded-2xl border border-white/10"
+          style={{
+            background: `linear-gradient(145deg, ${bookColor}, rgba(0,0,0,0.85))`,
+            minHeight: 160,
+          }}
+        >
+          {coverUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={coverUrl}
+              alt=""
+              className="block h-auto max-h-72 w-full object-cover opacity-90"
+              loading="lazy"
+            />
+          ) : (
+            <div className="grid min-h-40 place-items-center text-sm text-white/70">Dropbook</div>
+          )}
+          <div className="absolute bottom-0 inset-x-0 bg-gradient-to-t from-black/70 to-transparent px-3 py-2 text-xs text-white/80">
+            Cover + {pageCount} drop{pageCount === 1 ? "" : "s"}
+          </div>
+        </div>
+      </div>
+    </TileFrame>
+  );
+}
+
 export function EmbeddedAssetTile({ a }: { a: AssetItem }) {
   switch (a.kind) {
     case "media":
@@ -202,6 +244,8 @@ export function EmbeddedAssetTile({ a }: { a: AssetItem }) {
       return <DocDropTile a={a} />;
     case "note":
       return <NoteDropTile a={a} />;
+    case "dropbook":
+      return <DropbookDropTile a={a} />;
     default:
       return <NoteDropTile a={a} />;
   }

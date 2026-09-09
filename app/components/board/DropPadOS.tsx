@@ -1053,6 +1053,95 @@ export default function DropPadOS({
     triggerDropPlacedIndicator("SYSTEM: Work Drop placed in Assets");
   };
 
+  const addWorkLinkToAssets = async (drop: {
+    flavor: "youtube" | "news" | "music" | "link";
+    url: string;
+    embedUrl?: string;
+    title?: string;
+  }) => {
+    setStudioOpen(false);
+    setStudioValue({});
+    const now = Date.now();
+    const kind: AssetKind =
+      drop.flavor === "youtube"
+        ? "youtube"
+        : drop.flavor === "music"
+          ? "music"
+          : drop.flavor === "news" || drop.flavor === "link"
+            ? "link"
+            : "link";
+
+    const asset: AssetItem = {
+      id: uid(),
+      kind,
+      title: drop.title || `${kindLabel(kind)} · ${new Date(now).toLocaleDateString()}`,
+      createdAt: now,
+      payload:
+        kind === "youtube" || kind === "music"
+          ? { embedUrl: drop.embedUrl || drop.url, url: drop.url }
+          : { url: drop.url },
+    };
+
+    syncAssetsLocal([asset, ...assets]);
+    if (userId) {
+      setSyncing(true);
+      await withTimeout(upsertAssetToSupabase(sb, userId, asset), 8000).catch(() => ({ ok: false }));
+      setSyncing(false);
+    }
+    triggerDropPlacedIndicator(`SYSTEM: ${kindLabel(kind)} placed in Assets`);
+  };
+
+  const addDropbookToAssets = async (payload: {
+    id: string;
+    title: string;
+    bookColor: string;
+    coverUrl?: string;
+    pages: Array<{
+      id: string;
+      label?: string;
+      mode?: string;
+      linkFlavor?: string;
+      linkUrl?: string;
+      embedUrl?: string;
+      previewUrl?: string;
+    }>;
+  }) => {
+    const now = Date.now();
+    const asset: AssetItem = {
+      id: payload.id.startsWith("dropbook") ? payload.id : `dropbook-${payload.id}`,
+      kind: "dropbook",
+      title: payload.title,
+      description: `${payload.pages.length} page${payload.pages.length === 1 ? "" : "s"} · accessible Dropbook`,
+      createdAt: now,
+      payload: {
+        mediaUrl: payload.coverUrl,
+        dropbook: {
+          bookColor: payload.bookColor,
+          coverUrl: payload.coverUrl,
+          pageCount: payload.pages.length,
+          pages: payload.pages.map((page) => ({
+            id: page.id,
+            label: page.label,
+            mode: page.mode,
+            linkFlavor: page.linkFlavor,
+            linkUrl: page.linkUrl,
+            embedUrl: page.embedUrl,
+            previewUrl: page.previewUrl,
+          })),
+        },
+      },
+    };
+
+    syncAssetsLocal([asset, ...assets.filter((item) => item.id !== asset.id)]);
+    if (userId) {
+      setSyncing(true);
+      await withTimeout(upsertAssetToSupabase(sb, userId, asset), 8000).catch(() => ({ ok: false }));
+      setSyncing(false);
+    }
+    jumpToAssets();
+    triggerDropPlacedIndicator("SYSTEM: Dropbook placed in Assets");
+  };
+
   const addWorkDropFromDescript = async (doc: DescriptDoc) => {
     setStudioOpen(false);
     setStudioValue({});
@@ -2128,6 +2217,8 @@ export default function DropPadOS({
         onChange={setStudioValue}
         onClose={() => setStudioOpen(false)}
         onComplete={(file) => void addWorkDropToAssets(file)}
+        onCompleteLink={(drop) => void addWorkLinkToAssets(drop)}
+        onCompleteDropbook={(payload) => void addDropbookToAssets(payload)}
       />
 
       <style jsx>{`

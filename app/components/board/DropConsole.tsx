@@ -953,6 +953,11 @@ export default function DropConsole({
         onChange={setDropCustomizations}
         onClose={() => setStudioMode(null)}
         onComplete={(file) => uploadToBoardMedia(file, "capture")}
+        onCompleteLink={(drop) => {
+          setDropFlavor(drop.flavor);
+          setAttachUrl(drop.url);
+          setStudioMode(null);
+        }}
       />
       <div className="dcInner">
         <div className="dcTop">
