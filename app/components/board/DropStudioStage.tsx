@@ -50,6 +50,7 @@ import { saveDropDraft, draftToFile, type DropDraft } from "@/lib/board/dropDraf
 import DropDraftsDrawer from "./DropDraftsDrawer";
 import VocalVisualizer from "./VocalVisualizer";
 import VoicePresets from "./VoicePresets";
+import VoiceStudio from "./VoiceStudio";
 import {
   DROP_FLAVOR_LABEL,
   DROP_FLAVOR_LINK_ROW,
@@ -308,6 +309,8 @@ export default function DropStudioStage({
   const [linkError, setLinkError] = useState("");
   const dropbookPersistTimerRef = useRef<number | null>(null);
   const coverPickRef = useRef<HTMLInputElement>(null);
+  /** Voice Studio booth — an extension of Voice mode, not a replacement. */
+  const [voiceStudioOpen, setVoiceStudioOpen] = useState(false);
   const [audioPlaying, setAudioPlaying] = useState(false);
   const [studioValue, setStudioValue] = useState<DropCustomization>(value);
 
@@ -479,6 +482,7 @@ export default function DropStudioStage({
     setStudioValue(initialStudio);
     writeStudioDraft(initialStudio);
     setDrawOpen(false);
+    setVoiceStudioOpen(false);
     setIsDropbookMode(false);
     setDropbookCreating(false);
     setDropbookIntroPhase(null);
@@ -2107,6 +2111,18 @@ export default function DropStudioStage({
                     ) : null}
                   </div>
                 </div>
+              ) : mode === "audio" &&
+                voiceStudioOpen &&
+                (phase === "choose" || phase === "capture") ? (
+                <div className="capMonitorHost voiceStudioHost">
+                  <VoiceStudio
+                    onComplete={(file) => {
+                      setVoiceStudioOpen(false);
+                      commitBlob(file, "audio", "capture");
+                    }}
+                    onCancel={() => setVoiceStudioOpen(false)}
+                  />
+                </div>
               ) : phase === "choose" ? (
                 <div className="capMonitorHost">
                   <DropChipStage
@@ -2141,7 +2157,18 @@ export default function DropStudioStage({
                               mode === "audio" ? "Start recording" : mode === "art" ? "Start drawing" : "Start capture"
                             }
                           />
-                          <span className="capSpacer" />
+                          {mode === "audio" ? (
+                            <button
+                              type="button"
+                              className="capStudioBtn"
+                              onClick={() => setVoiceStudioOpen(true)}
+                              title="Open Voice Studio"
+                            >
+                              Studio
+                            </button>
+                          ) : (
+                            <span className="capSpacer" />
+                          )}
                         </div>
                       </div>
                     }
@@ -2222,7 +2249,15 @@ export default function DropStudioStage({
                             )}
 
                             {mode === "audio" ? (
-                              <span className="capSpacer" />
+                              <button
+                                type="button"
+                                className="capStudioBtn"
+                                onClick={() => setVoiceStudioOpen(true)}
+                                disabled={recording}
+                                title="Open Voice Studio"
+                              >
+                                Studio
+                              </button>
                             ) : (
                               <button
                                 type="button"
