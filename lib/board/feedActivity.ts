@@ -4,7 +4,11 @@ import type {
   BoardActivity,
   BoardActivityKind,
 } from "@/lib/board/activity";
+import { getLocalActivity, setLocalActivity } from "@/lib/board/activity";
 import { readDrops, type UniversalDrop } from "@/lib/board/drops/storage";
+import { patchMusicActivity } from "@/lib/board/musicMigration";
+import { patchBrokenAnnouncementFeed } from "@/lib/board/announcementMediaOverrides";
+import { normalizeRichText } from "@/lib/board/richText";
 import { resolveBoardProjects } from "@/lib/board/projects";
 import type { FeedDrop } from "@/lib/boardStore";
 
@@ -211,6 +215,12 @@ export function universalDropToActivity(drop: UniversalDrop): BoardActivity | nu
   if (!drop?.id || drop.visibility === "private") return null;
 
   const meta = drop.meta && typeof drop.meta === "object" ? drop.meta : {};
+  const titleRich =
+    normalizeRichText((drop as { titleRich?: unknown }).titleRich) ??
+    normalizeRichText(meta.titleRich);
+  const descriptionRich =
+    normalizeRichText((drop as { descriptionRich?: unknown }).descriptionRich) ??
+    normalizeRichText(meta.descriptionRich);
   const imageUrl =
     drop.imageUrl ||
     (drop.mediaKind === "image" ? drop.mediaUrl || drop.url || null : null);
@@ -237,6 +247,8 @@ export function universalDropToActivity(drop: UniversalDrop): BoardActivity | nu
     image_url: imageUrl,
     meta: {
       ...meta,
+      ...(titleRich ? { titleRich } : {}),
+      ...(descriptionRich ? { descriptionRich } : {}),
       source: drop.source || meta.source || "board_drops_storage",
       origin: drop.origin || meta.origin || null,
       dropId: drop.id,
@@ -246,6 +258,7 @@ export function universalDropToActivity(drop: UniversalDrop): BoardActivity | nu
       visibility: drop.visibility || "public",
       thoughtFormat: drop.thoughtFormat || null,
       thoughtText: drop.thoughtText || null,
+      fromDescript: (drop as { fromDescript?: boolean }).fromDescript === true ? true : null,
       authorId: drop.authorId || null,
       authorName: drop.authorName || null,
       authorUsername: drop.authorUsername || null,
@@ -254,13 +267,26 @@ export function universalDropToActivity(drop: UniversalDrop): BoardActivity | nu
       authorAuraIntensity: drop.authorAuraIntensity ?? null,
       mediaKind: drop.mediaKind || null,
       mediaUrl: drop.mediaUrl || null,
+      bucket: drop.bucket || (meta.bucket as string | undefined) || null,
+      storagePath: drop.storagePath || (meta.storagePath as string | undefined) || null,
+      fileName: drop.fileName || (meta.fileName as string | undefined) || null,
       preview: imageUrl
         ? {
             image: imageUrl,
             title,
             description: drop.description || drop.thoughtText || null,
+            bucket: drop.bucket || (meta.bucket as string | undefined) || null,
+            storagePath: drop.storagePath || (meta.storagePath as string | undefined) || null,
+            mediaKind: drop.mediaKind || null,
           }
-        : meta.preview ?? null,
+        : drop.bucket && drop.storagePath
+          ? {
+              ...(meta.preview && typeof meta.preview === "object" ? meta.preview : {}),
+              bucket: drop.bucket,
+              storagePath: drop.storagePath,
+              mediaKind: drop.mediaKind || null,
+            }
+          : meta.preview ?? null,
       signalSeed: {
         type: drop.type === "thought" ? "thought_drop_created" : "drop_created",
         dropId: drop.id,
@@ -269,14 +295,153 @@ export function universalDropToActivity(drop: UniversalDrop): BoardActivity | nu
   };
 }
 
+export type MergeActivityWithFeedOptions = {
+  /** Include universal drops + project mirrors from localStorage (default true). */
+  includeStorageMirrors?: boolean;
+};
+
+function collectActivityDropIds(item: BoardActivity): string[] {
+  const meta = item.meta && typeof item.meta === "object" ? item.meta : null;
+  return [String(meta?.dropId || ""), String(meta?.originalDropId || "")].filter(Boolean);
+}
+
+const RECENT_PENDING_MS = 3 * 60 * 1000;
+
+function isRecentPendingActivity(item: BoardActivity) {
+  const time = new Date(String(item.created_at || "")).getTime();
+  return Number.isFinite(time) && Date.now() - time < RECENT_PENDING_MS;
+}
+
+function isOptimisticFeedMirror(item: BoardActivity) {
+  return (
+    item.id.startsWith("local_") ||
+    item.id.startsWith("feed_") ||
+    item.id.startsWith("rt_")
+  );
+}
+
 export function mergeActivityWithFeed(
   activityItems: BoardActivity[],
-  feedItems: FeedDrop[]
+  feedItems: FeedDrop[],
+  opts?: MergeActivityWithFeedOptions
 ) {
-  return dedupeActivity([
-    ...activityItems.filter(Boolean),
-    ...feedItems.map(feedDropToActivity),
-    ...(readDrops().map(universalDropToActivity).filter(Boolean) as BoardActivity[]),
-    ...resolveBoardProjects().map(projectToActivity),
-  ]);
+  const includeStorageMirrors = opts?.includeStorageMirrors !== false;
+  const storageMirrors = includeStorageMirrors
+    ? [
+        ...(readDrops()
+          .map(universalDropToActivity)
+          .filter(Boolean)
+          .map((item) => patchMusicActivity(item as BoardActivity).item) as BoardActivity[]),
+        ...resolveBoardProjects().map(projectToActivity),
+      ]
+    : [];
+
+  return patchBrokenAnnouncementFeed(
+    dedupeActivity([
+      ...activityItems
+        .filter(Boolean)
+        .map((item) => patchMusicActivity(item).item),
+      ...feedItems.map(feedDropToActivity).map((item) => patchMusicActivity(item).item),
+      ...storageMirrors,
+    ])
+  );
+}
+
+/** Drop stale local activity rows once a server page is available. */
+export function pruneLocalActivityCacheFromServer(serverItems: BoardActivity[]) {
+  if (typeof window === "undefined" || !serverItems.length) return;
+
+  const serverIds = new Set(serverItems.map((item) => item.id));
+  const serverDropIds = new Set(serverItems.flatMap(collectActivityDropIds));
+  const pending = getLocalActivity().filter((item) => {
+    if (item.id.startsWith("local_")) return true;
+    if (serverIds.has(item.id)) return false;
+    const dropIds = collectActivityDropIds(item);
+    if (dropIds.some((id) => serverDropIds.has(id))) return false;
+    return isRecentPendingActivity(item);
+  });
+
+  setLocalActivity(dedupeActivity([...serverItems, ...pending]));
+}
+
+const DELETED_DROP_KEY_PREFIX = "jab_board_drops_deleted_v1";
+
+/** Every deleted-id list in localStorage (bare + per-user scoped keys). */
+export function readFeedDeletedDropIds(): string[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const ids = new Set<string>();
+    for (let i = 0; i < window.localStorage.length; i += 1) {
+      const key = window.localStorage.key(i);
+      if (!key || !key.startsWith(DELETED_DROP_KEY_PREFIX)) continue;
+      const raw = window.localStorage.getItem(key);
+      const parsed = raw ? JSON.parse(raw) : [];
+      if (!Array.isArray(parsed)) continue;
+      for (const id of parsed) {
+        const clean = String(id || "").trim();
+        if (clean) ids.add(clean);
+      }
+    }
+    return Array.from(ids);
+  } catch {
+    return [];
+  }
+}
+
+export function filterDeletedFeedItems(items: BoardActivity[]): BoardActivity[] {
+  const deleted = new Set(readFeedDeletedDropIds());
+  if (!deleted.size) return items;
+  return items.filter((item) => {
+    if (deleted.has(item.id)) return false;
+    const meta = item.meta && typeof item.meta === "object" ? item.meta : null;
+    const dropId = String(meta?.dropId || "");
+    const originalDropId = String(meta?.originalDropId || "");
+    if (dropId && deleted.has(dropId)) return false;
+    if (originalDropId && deleted.has(originalDropId)) return false;
+    return true;
+  });
+}
+
+/**
+ * Merge a local overlay onto server feed rows.
+ * Server/Supabase rows win; local only fills optimistic gaps (in-flight posts).
+ */
+export function mergeFeedWithLocalOverlay(
+  serverItems: BoardActivity[],
+  localOverlay: BoardActivity[],
+  opts?: { kinds?: BoardActivityKind[] }
+): BoardActivity[] {
+  const filterKinds = (items: BoardActivity[]) =>
+    opts?.kinds?.length ? items.filter((item) => opts.kinds!.includes(item.kind)) : items;
+
+  const serverScoped = filterDeletedFeedItems(
+    filterKinds(serverItems).filter((item) => item.meta?.visibility !== "private")
+  );
+  const localScoped = filterDeletedFeedItems(
+    filterKinds(localOverlay).filter((item) => item.meta?.visibility !== "private")
+  );
+
+  if (!localScoped.length) {
+    return patchBrokenAnnouncementFeed(serverScoped);
+  }
+
+  if (!serverScoped.length) {
+    return patchBrokenAnnouncementFeed(dedupeActivity(localScoped));
+  }
+
+  const serverById = new Map(serverScoped.map((item) => [item.id, item]));
+  const serverDropIds = new Set(serverScoped.flatMap(collectActivityDropIds));
+
+  const pendingLocal = localScoped.filter((item) => {
+    if (serverById.has(item.id)) return false;
+    const dropIds = collectActivityDropIds(item);
+    if (dropIds.some((id) => serverDropIds.has(id))) return false;
+    if (item.id.startsWith("universal_") || item.id.startsWith("project_drop_")) return false;
+    if (isOptimisticFeedMirror(item)) return true;
+    return isRecentPendingActivity(item);
+  });
+
+  return patchBrokenAnnouncementFeed(
+    filterDeletedFeedItems(dedupeActivity([...serverScoped, ...pendingLocal]))
+  );
 }

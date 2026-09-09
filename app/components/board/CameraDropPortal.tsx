@@ -2,6 +2,12 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { BOARD_DROP_ASPECT_RATIO } from "@/lib/board/mediaFormat";
+import {
+  boardDropFramePixelSize,
+  canvasToJpegBlob,
+  ensureImageFileMinResolution,
+} from "@/lib/board/imageQuality";
 import styles from "./CameraDropPortal.module.css";
 
 type CaptureMode = "photo" | "video";
@@ -85,9 +91,8 @@ export default function CameraDropPortal({
 
     const videoConstraints = {
       facingMode: { ideal: nextFacingMode },
-      width: { ideal: 1080 },
-      height: { ideal: 1350 },
-      aspectRatio: { ideal: 4 / 5 },
+      width: { ideal: 1920 },
+      height: { ideal: 1080 },
     };
 
     try {
@@ -155,45 +160,31 @@ export default function CameraDropPortal({
     });
   }
 
-  function takePhoto() {
+  async function takePhoto() {
     const video = videoRef.current;
     if (!video || !video.videoWidth || !video.videoHeight) return;
-    const displayedRatio = video.clientWidth > 0 && video.clientHeight > 0
-      ? video.clientWidth / video.clientHeight
-      : 4 / 5;
-    const sourceRatio = video.videoWidth / video.videoHeight;
-    let sourceWidth = video.videoWidth;
-    let sourceHeight = video.videoHeight;
-    if (sourceRatio > displayedRatio) {
-      sourceWidth = video.videoHeight * displayedRatio;
-    } else {
-      sourceHeight = video.videoWidth / displayedRatio;
+    const ratio = BOARD_DROP_ASPECT_RATIO;
+    const vw = video.videoWidth;
+    const vh = video.videoHeight;
+    let sw = vw;
+    let sh = vw / ratio;
+    if (sh > vh) {
+      sh = vh;
+      sw = vh * ratio;
     }
-    const sourceX = (video.videoWidth - sourceWidth) / 2;
-    const sourceY = (video.videoHeight - sourceHeight) / 2;
+    const sx = (vw - sw) / 2;
+    const sy = (vh - sh) / 2;
+    const { width, height } = boardDropFramePixelSize(sw, sh);
     const canvas = document.createElement("canvas");
-    canvas.width = Math.max(1, Math.round(sourceWidth));
-    canvas.height = Math.max(1, Math.round(sourceHeight));
+    canvas.width = width;
+    canvas.height = height;
     const context = canvas.getContext("2d");
     if (!context) return;
-    if (facingMode === "user") {
-      context.translate(canvas.width, 0);
-      context.scale(-1, 1);
-    }
-    context.drawImage(
-      video,
-      sourceX,
-      sourceY,
-      sourceWidth,
-      sourceHeight,
-      0,
-      0,
-      canvas.width,
-      canvas.height
-    );
-    canvas.toBlob((blob) => {
-      if (blob) setCaptured(blob);
-    }, "image/jpeg", 0.94);
+    context.imageSmoothingEnabled = true;
+    context.imageSmoothingQuality = "high";
+    context.drawImage(video, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
+    const blob = await canvasToJpegBlob(canvas);
+    if (blob) setCaptured(blob);
   }
 
   function startRecording() {
@@ -227,14 +218,23 @@ export default function CameraDropPortal({
     if (!capturedBlob) return;
     const type = capturedBlob.type || (mode === "photo" ? "image/jpeg" : "video/webm");
     const extension = mode === "photo" ? "jpg" : extensionForMime(type);
-    const file = new File([capturedBlob], `board-camera-${Date.now()}.${extension}`, { type });
+    let file = new File([capturedBlob], `board-camera-${Date.now()}.${extension}`, { type });
+    if (mode === "photo") {
+      file = await ensureImageFileMinResolution(file);
+    }
     await onCapture(file);
     onClose();
   }
 
   async function useUploadedFallback(file: File | undefined) {
     if (!file) return;
-    await onCapture(file);
+    const next =
+      file.type.startsWith("image/") &&
+      file.type !== "image/gif" &&
+      file.type !== "image/svg+xml"
+        ? await ensureImageFileMinResolution(file)
+        : file;
+    await onCapture(next);
     onClose();
   }
 

@@ -320,3 +320,36 @@ body {
     background: rgba(255, 255, 255, 0.14);
   }
 }
+
+/* Remove redundant media-type chips that overlay attachments */
+.media-attachment-chip,
+.activityMediaChip,
+.linkCoverHostChip {
+  display: none !important;
+}
+
+/* Board rich text — shared across feed cards, profile tiles, and editors. */
+.boardRichInline,
+.boardRichInlineHost {
+  font-weight: 600;
+  white-space: pre-wrap;
+}
+
+.boardRichInline b,
+.boardRichInline strong,
+.boardRichInlineHost b,
+.boardRichInlineHost strong {
+  font-weight: 900;
+}
+
+.boardRichInline i,
+.boardRichInline em,
+.boardRichInlineHost i,
+.boardRichInlineHost em {
+  font-style: italic;
+}
+
+.boardRichInline u,
+.boardRichInlineHost u {
+  text-decoration: underline;
+}

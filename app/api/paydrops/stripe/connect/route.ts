@@ -9,7 +9,9 @@
 // Requires: STRIPE_SECRET_KEY, a Connect-enabled platform, and NEXT_PUBLIC_APP_URL.
 
 import { NextRequest, NextResponse } from "next/server";
+import { supabaseServer } from "@/lib/supabase/server";
 import { getStripe } from "@/lib/stripe/server";
+import { enforceRateLimit, RATE_LIMITS } from "@/lib/rateLimit";
 
 export const runtime = "nodejs";
 
@@ -31,23 +33,78 @@ function notConfigured() {
   );
 }
 
+function notSignedIn() {
+  return NextResponse.json(
+    { ok: false, error: "Sign in to your Board account to set up Pay Drops." },
+    { status: 401 }
+  );
+}
+
+// Onboarding is creator-only: require a session and return the connected
+// account id already saved on the caller's profile (if any).
+async function requireUserWithAccount() {
+  const supabase = supabaseServer();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return null;
+
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("board_style")
+    .eq("id", user.id)
+    .maybeSingle();
+
+  const style =
+    profile?.board_style && typeof profile.board_style === "object"
+      ? (profile.board_style as Record<string, unknown>)
+      : {};
+  const savedAccountId =
+    typeof style.stripeAccountId === "string" ? style.stripeAccountId.trim() : "";
+
+  return { user, savedAccountId };
+}
+
+// Keep return/refresh redirects on our own origin.
+function safeReturnUrl(path: unknown, fallback: string, appUrl: string) {
+  const origin = new URL(appUrl).origin;
+  const raw = typeof path === "string" ? path.trim() : "";
+  if (raw.startsWith("/") && !raw.startsWith("//")) {
+    const resolved = new URL(raw, origin);
+    if (resolved.origin === origin) return resolved.toString();
+  }
+  return new URL(fallback, origin).toString();
+}
+
 export async function POST(req: NextRequest) {
+  const limited = await enforceRateLimit(req, RATE_LIMITS.connect);
+  if (limited) return limited;
+
   const stripe = getStripe();
   if (!stripe) return notConfigured();
+
+  const auth = await requireUserWithAccount();
+  if (!auth) return notSignedIn();
 
   const body = (await req.json().catch(() => ({}))) as PostBody;
   const appUrl =
     process.env.NEXT_PUBLIC_APP_URL?.trim() || req.nextUrl.origin;
-  const returnUrl = new URL(body.returnPath || "/board/options", appUrl).toString();
-  const refreshUrl = new URL(body.refreshPath || "/board/options", appUrl).toString();
+  const returnUrl = safeReturnUrl(body.returnPath, "/board/options", appUrl);
+  const refreshUrl = safeReturnUrl(body.refreshPath, "/board/options", appUrl);
 
   try {
-    let accountId = String(body.accountId ?? "").trim();
+    // Only reuse an account id that is actually saved on the caller's own
+    // profile — a client-supplied id for someone else's account is ignored.
+    let accountId =
+      auth.savedAccountId &&
+      auth.savedAccountId === String(body.accountId ?? "").trim()
+        ? auth.savedAccountId
+        : auth.savedAccountId || "";
 
     if (!accountId) {
       const account = await stripe.accounts.create({
         type: "express",
-        email: body.email?.trim() || undefined,
+        email: auth.user.email || body.email?.trim() || undefined,
         capabilities: {
           transfers: { requested: true },
           card_payments: { requested: true },
@@ -78,14 +135,28 @@ export async function POST(req: NextRequest) {
 }
 
 export async function GET(req: NextRequest) {
+  const limited = await enforceRateLimit(req, RATE_LIMITS.connect);
+  if (limited) return limited;
+
   const stripe = getStripe();
   if (!stripe) return notConfigured();
+
+  const auth = await requireUserWithAccount();
+  if (!auth) return notSignedIn();
 
   const accountId = req.nextUrl.searchParams.get("accountId")?.trim();
   if (!accountId) {
     return NextResponse.json(
       { ok: false, error: "accountId is required." },
       { status: 400 }
+    );
+  }
+
+  // Status lookups are limited to the caller's own connected account.
+  if (accountId !== auth.savedAccountId) {
+    return NextResponse.json(
+      { ok: false, error: "You can only check your own Pay Drops account." },
+      { status: 403 }
     );
   }
 

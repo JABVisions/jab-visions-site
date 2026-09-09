@@ -5,6 +5,11 @@ import { usePathname } from "next/navigation";
 import BoardDock from "@/app/components/board/BoardDock";
 import BoardUtilityHeader from "@/app/components/board/BoardUtilityHeader";
 import BoardDropEditModal from "@/app/components/board/BoardDropEditModal";
+import MusicDropMigration from "@/app/components/board/MusicDropMigration";
+import AnnouncementMediaRepair from "@/app/components/board/AnnouncementMediaRepair";
+import DropTaxonomyMigration from "@/app/components/board/DropTaxonomyMigration";
+import CloudSyncBridge from "@/app/components/board/CloudSyncBridge";
+import BucketBrainBridge from "@/app/components/board/BucketBrainBridge";
 
 export default function BoardLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -20,7 +25,6 @@ export default function BoardLayout({ children }: { children: React.ReactNode })
 
   const isAuthRoute =
     pathname === "/board/login" ||
-    pathname === "/board/forgot-password" ||
     pathname === "/board/signup" ||
     pathname === "/board/reset-password";
 
@@ -35,7 +39,18 @@ export default function BoardLayout({ children }: { children: React.ReactNode })
 
       {/* ✅ Keep the Board dock available on the Board gate/welcome page too. */}
       {!isAuthRoute ? <BoardDock /> : null}
+
+      {/* Board-wide drop editor — any Edit button opens this in place. */}
       {!isAuthRoute ? <BoardDropEditModal /> : null}
+      {!isAuthRoute ? (
+        <>
+          <MusicDropMigration />
+          <AnnouncementMediaRepair />
+          <DropTaxonomyMigration />
+        </>
+      ) : null}
+      {!isAuthRoute ? <CloudSyncBridge /> : null}
+      {!isAuthRoute ? <BucketBrainBridge /> : null}
 
       <style>{`
         .board-root {

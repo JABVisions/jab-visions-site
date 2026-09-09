@@ -38,8 +38,6 @@ export type DropCustomization = {
   stickers?: DropStudioSticker[];
   actionButton?: DropStudioActionButton | null;
   effects?: DropStudioEffects;
-  /** Transparent drawing layer used by the Art Palette over video media. */
-  artOverlayUrl?: string;
 };
 
 function clampPosition(value: unknown, fallback: number) {
@@ -163,24 +161,9 @@ export function normalizeDropCustomizations(
     filter || overlay || frame || rotation
       ? { filter, overlay, frame, rotation }
       : undefined;
-  const rawArtOverlay =
-    typeof source.artOverlayUrl === "string" ? source.artOverlayUrl.trim() : "";
-  const artOverlayUrl =
-    rawArtOverlay.length <= 2_000_000 &&
-    /^(data:image\/(?:png|webp);base64,|https?:\/\/)/i.test(rawArtOverlay)
-      ? rawArtOverlay
-      : undefined;
 
-  if (!textLabels.length && !stickers.length && !actionButton && !effects && !artOverlayUrl) {
-    return undefined;
-  }
-  return {
-    textLabels,
-    stickers,
-    actionButton,
-    ...(effects ? { effects } : {}),
-    ...(artOverlayUrl ? { artOverlayUrl } : {}),
-  };
+  if (!textLabels.length && !stickers.length && !actionButton && !effects) return undefined;
+  return { textLabels, stickers, actionButton, ...(effects ? { effects } : {}) };
 }
 
 export function compactDropCustomizations(

@@ -1,6 +1,8 @@
 import { cookies } from "next/headers";
 import { createServerClient } from "@supabase/ssr";
 import type { BoardActivity, BoardActivityKind } from "@/lib/board/activity";
+import { enforceRateLimit, RATE_LIMITS } from "@/lib/rateLimit";
+import { patchBrokenAnnouncementFeed } from "@/lib/board/announcementMediaOverrides";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -152,6 +154,7 @@ function normalizeProfileBoardDrop(row: any): BoardActivity[] {
       const id = String(drop.id ?? "");
       return id && !deletedIds.includes(id);
     })
+    .filter((drop: any) => String(drop.visibility ?? "public").toLowerCase() !== "private")
     .map((drop: any): BoardActivity | null => {
       const id = String(drop.id ?? "");
       const type = String(drop.type ?? "Link");
@@ -159,12 +162,21 @@ function normalizeProfileBoardDrop(row: any): BoardActivity[] {
       const createdAt = Number(drop.createdAt ?? Date.now());
       const created = new Date(Number.isFinite(createdAt) ? createdAt : Date.now()).toISOString();
       const title = String(drop.title ?? `${ownerLabel}'s Board Drop`).trim();
-      const description =
+      const thoughtText =
+        typeof drop.thoughtText === "string" && drop.thoughtText.trim()
+          ? drop.thoughtText.trim()
+          : "";
+      const dropDescription =
         typeof drop.description === "string" && drop.description.trim()
           ? drop.description.trim()
-          : typeof drop.body === "string" && drop.body.trim()
-            ? drop.body.trim()
-            : `New ${type.toLowerCase()} drop from ${ownerLabel}.`;
+          : "";
+      const description =
+        type === "Thought"
+          ? thoughtText || dropDescription
+          : dropDescription ||
+            (typeof drop.body === "string" && drop.body.trim() ? drop.body.trim() : "") ||
+            (thoughtText && type === "Doc" ? thoughtText : "") ||
+            `New ${type.toLowerCase()} drop from ${ownerLabel}.`;
       const previewImage =
         (typeof drop.previewImage === "string" && drop.previewImage.trim()) ||
         (type === "Media" && drop.mediaKind === "image" && typeof drop.url === "string"
@@ -193,6 +205,9 @@ function normalizeProfileBoardDrop(row: any): BoardActivity[] {
           cardStyle: isProjectDrop ? "project_drop" : null,
           dropId: id,
           dropType: type,
+          description: dropDescription || description,
+          thoughtText: thoughtText || null,
+          fromDescript: drop.fromDescript === true ? true : null,
           projectId: isProjectDrop ? id : null,
           hostLabel: drop.hostLabel ?? null,
           embedUrl: drop.embedUrl ?? null,
@@ -336,6 +351,9 @@ async function selectRows<T>(
 }
 
 export async function GET(req: Request) {
+  const limited = await enforceRateLimit(req, RATE_LIMITS.activity);
+  if (limited) return limited;
+
   const supabase = supabaseServer();
   const url = new URL(req.url);
   const limit = Math.max(1, Math.min(200, Number(url.searchParams.get("limit") || 80)));
@@ -403,7 +421,7 @@ export async function GET(req: Request) {
     ? items.filter((item) => kinds.includes(item.kind))
     : items;
 
-  return new Response(JSON.stringify({ ok: true, items: scoped.slice(0, limit) }), {
+  return new Response(JSON.stringify({ ok: true, items: patchBrokenAnnouncementFeed(scoped.slice(0, limit)) }), {
     status: 200,
     headers: { "content-type": "application/json" },
   });

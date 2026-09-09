@@ -1,478 +1,131 @@
 // File: app/components/board/ActivityCard.tsx
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
-import { Eye, EyeOff, SlidersHorizontal } from "lucide-react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import "./ActivityCard.css";
 import {
   appendLocalActivity,
   getLocalActivity,
   removeLocalActivity,
-  setLocalActivity,
+  activityMatchesDropId,
   type BoardActivity,
 } from "@/lib/board/activity";
-import { readBrain } from "@/lib/board/bucketBrain";
-import { removeDropFromBoardStore } from "@/lib/board/boardDropEditStore";
+import { readBrain, withdrawFromBrain } from "@/lib/board/bucketBrain";
 import { removeDrops as removeUniversalDrops } from "@/lib/board/drops/storage";
+import { rememberDeletedDropId } from "@/lib/board/dropItem";
 import { resolveLinkPreviewImage } from "@/lib/board/linkPreviewImages";
 import { fetchLinkPreview } from "@/lib/board/linkPreview";
 import { openHostedPayDropCheckout } from "@/lib/board/payCheckout";
-import { EVENTS as BOARD_STORE_EVENTS, removeDrops as removeFeedDrops } from "@/lib/boardStore";
+import { removeDrops as removeFeedDrops } from "@/lib/boardStore";
+import { normalizeDropCustomizations } from "@/lib/board/dropCustomizations";
 import {
-  normalizeDropCustomizations,
-  type DropCustomization,
-} from "@/lib/board/dropCustomizations";
+  dropMediaFrameClassName,
+  dropMediaRotationStyle,
+  tagDropMediaFrame,
+} from "@/lib/board/dropMediaFrameDisplay";
+import { isLinkStyleBoardDrop, isSocialMediaUrl, resolveBoardDropDisplayFrame } from "@/lib/board/mediaFormat";
+import {
+  findLocalDropByAnyId,
+  getDropSignedUrl,
+  loadDropMediaForFeed,
+  persistDropEdit,
+  removeDropFromBoardStore,
+} from "@/lib/board/boardDropEditStore";
+import { EyeToggle } from "./icons/EyeToggle";
+import { normalizeRichText, type RichTextValue } from "@/lib/board/richText";
+import { RichText } from "./RichTextField";
 import {
   DROP_COMMENTS_UPDATED_EVENT,
   getDropCommentCount,
+  syncDropCommentCounts,
 } from "@/lib/board/dropComments";
+import {
+  hasUploadedMusicStorage,
+  isAudioFileUrl,
+  isMusicDropType,
+  isStreamingMusicUrl,
+  resolveStoredAudioSrc,
+  resolveStoredMediaCoords,
+} from "@/lib/board/musicPlayback";
 import { supabaseBrowser } from "@/lib/supabase/browser";
 import DropCommentsDrawer from "./DropCommentsDrawer";
+import AudioDropPlayer from "./AudioDropPlayer";
+import FeedVideo from "./FeedVideo";
 import DropStudioOverlay from "./DropStudioOverlay";
 import RemovableDropBadge from "./RemovableDropBadge";
+import { PayOnBoardButton } from "./PayOnBoardButton";
+import {
+  isLikelyImageUrl as isBoardImageUrl,
+  normalizeBoardDropType,
+  resolveDropMediaKind,
+  resolveDropMediaKindFromMeta,
+  secondaryAttachmentLabelFromMeta,
+} from "@/lib/board/dropDisplay";
+import { parseBoardStorageFromUrl } from "@/lib/board/musicPlayback";
+import { ANNOUNCEMENT_JPEG_OVERRIDES } from "@/lib/board/announcementMediaOverrides";
+import type { DropItem } from "@/lib/board/dropItem";
 
-const EVT_DEPOSIT = "board:bucketBrain:deposit";
-const EVT_OPEN = "board:bucketBrain:open";
-const EVT_BUCKET_UPDATED = "board:bucketBrain:updated";
-const fallbackAuraColor = "#8ee7ff";
+import {
+  ANNOUNCEMENT_VIBES,
+  AURA_HEX,
+  DROP_KIND_DISPLAY_RENAMES,
+  EVT_BUCKET_UPDATED,
+  EVT_DEPOSIT,
+  activityOwnedByCurrentUser,
+  clsx,
+  colorFromAura,
+  computeEmbed,
+  createPushedDrop,
+  currentUserKey,
+  fallbackAuraColor,
+  formatAnnouncementVibe,
+  formatDropKindLabel,
+  formatDropTime,
+  formatHandle,
+  formatPriceFromCents,
+  getExt,
+  getInitials,
+  guessMediaKind,
+  hasUserAlreadyPushed,
+  isExternalHref,
+  isLikelyImageUrl,
+  metaString,
+  normalizeIdentityKey,
+  pushedRootId,
+  readLocalProfileIdentity,
+  resolveActivityEmbed,
+  resolveBoardDropFlavor,
+  resolveDescriptChipText,
+  shouldShowDescriptMediaChip,
+  storedUrl,
+  toAppleMusicEmbed,
+  toSoundCloudEmbed,
+  toSpotifyEmbed,
+  toYouTubeEmbed,
+  ytId,
+  type EmbedKind,
+} from "./activityCardShared";
 
-const AURA_HEX: Record<string, string> = {
-  sloth_pink: "#FF4FD8",
-  lust_blue: "#2D7CFF",
-  greed_black: "#111111",
-  pride_yellow: "#FFD12D",
-  envy_red: "#FF2D2D",
-  gluttony_orange: "#FF7A1A",
-  wrath_purple: "#7A44FF",
-  lilly_yellowgreen: "#B7FF2D",
-};
-
-const ANNOUNCEMENT_VIBES: Record<string, string> = {
-  hype: "🔥 Hype",
-  happy: "😊 Happy",
-  chill: "🌿 Chill",
-  bored: "😐 Bored",
-  serious: "🧠 Serious",
-  sad: "😔 Sad",
-  creepy: "👁️ Creepy",
-  funny: "😂 Funny",
-  nostalgic: "🕰️ Nostalgic",
-  chaos: "🧨 Chaos",
-  victory: "🏆 Victory",
-  locked_in: "🎧 Locked In",
-  romantic: "💞 Romantic",
-  plot_twist: "🌀 Plot Twist",
-  aesthetic: "🪩 Aesthetic",
-  sleepy: "🛌 Sleepy",
-  rage: "💥 Rage",
-  mystic: "🔮 Mystic",
-  tea: "🍵 Tea",
-};
-
-function clsx(...parts: Array<string | false | null | undefined>) {
-  return parts.filter(Boolean).join(" ");
-}
-
-// Some internal drop "kind" values use legacy/technical names that should
-// surface to users under friendlier labels (e.g. "media" -> "Vision").
-const DROP_KIND_DISPLAY_RENAMES: Record<string, string> = {
-  media: "vision",
-  image: "vision",
-  video: "vision",
-};
-
-function formatDropKindLabel(value: string) {
-  const clean = value.replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim();
-  if (!clean) return "";
-  const lower = clean.toLowerCase();
-  const renamed = DROP_KIND_DISPLAY_RENAMES[lower] ?? clean;
-  return /\bdrop\b/i.test(renamed) ? renamed.toUpperCase() : `${renamed.toUpperCase()} DROP`;
-}
-
-function metaString(...values: unknown[]) {
-  for (const value of values) {
-    if (typeof value === "string" && value.trim()) return value.trim();
-  }
-  return "";
-}
-
-function storedUrl(...values: unknown[]) {
-  const clean = metaString(...values);
-  return clean.startsWith("data:") ? "" : clean;
-}
-
-function colorFromAura(value: unknown) {
-  const key = typeof value === "string" ? value.trim() : "";
-  return (key && AURA_HEX[key]) || key || "";
-}
-
-function getInitials(value: string) {
-  const parts = value.trim().split(/\s+/).filter(Boolean);
-  const initials = parts
-    .slice(0, 2)
-    .map((part) => part.slice(0, 1).toUpperCase())
-    .join("");
-  return initials || "B";
-}
-
-function formatHandle(value: string) {
-  const clean = value.trim().replace(/^@+/, "");
-  return clean ? `@${clean}` : "";
-}
-
-function formatAnnouncementVibe(value: unknown) {
-  const key = typeof value === "string" ? value.trim() : "";
-  if (!key) return "";
-  return ANNOUNCEMENT_VIBES[key] || key.replace(/[_-]+/g, " ");
-}
-
-function readLocalProfileIdentity() {
-  try {
-    if (typeof window === "undefined") throw new Error("local profile is client-only");
-    const profileRaw = window.localStorage.getItem("jab_board_profile_v2");
-    const optionsRaw = window.localStorage.getItem("board.options.v1");
-    const profile = profileRaw ? JSON.parse(profileRaw) : null;
-    const options = optionsRaw ? JSON.parse(optionsRaw) : null;
-    const auraKey = typeof options?.auraColor === "string" ? options.auraColor : "";
-    const glowColor =
-      colorFromAura(auraKey) ||
-      metaString(profile?.glowColor, profile?.avatarGlow) ||
-      "#FF4FD8";
-
-    return {
-      username: metaString(options?.username, profile?.username),
-      displayName: metaString(options?.displayName, profile?.displayName, profile?.name),
-      avatarSrc: storedUrl(
-        profile?.avatarUrl,
-        profile?.avatarDataUrl,
-        options?.avatarUrl,
-        options?.avatarDataUrl
-      ),
-      glowColor,
-      auraIntensity:
-        typeof options?.auraIntensity === "number"
-          ? Math.max(0, Math.min(100, options.auraIntensity))
-          : 72,
-    };
-  } catch {
-    return {
-      username: "",
-      displayName: "",
-      avatarSrc: "",
-      glowColor: "#FF4FD8",
-      auraIntensity: 72,
-    };
-  }
-}
-
-function currentUserKey(identity: ReturnType<typeof readLocalProfileIdentity>) {
-  return (
-    metaString(identity.username, identity.displayName)
-      .toLowerCase()
-      .replace(/^@+/, "")
-      .replace(/[^a-z0-9_.-]+/g, "-")
-      .replace(/^-+|-+$/g, "") || "board-user"
-  );
-}
-
-function normalizeIdentityKey(value: unknown) {
-  return metaString(value)
-    .toLowerCase()
-    .replace(/^@+/, "")
-    .replace(/[^a-z0-9_.-]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-}
-
-function activityOwnedByCurrentUser(
-  item: BoardActivity,
-  meta: Record<string, any> | null,
-  currentIdentity: ReturnType<typeof readLocalProfileIdentity>
-) {
-  const currentKeys = [
-    currentUserKey(currentIdentity),
-    normalizeIdentityKey(currentIdentity.username),
-    normalizeIdentityKey(currentIdentity.displayName),
-  ].filter(Boolean);
-  const ownerKeys = [
-    (item as any)?.user_id,
-    meta?.authorId,
-    meta?.ownerUserId,
-    meta?.userId,
-    meta?.authorUsername,
-    meta?.ownerUsername,
-    meta?.username,
-    meta?.authorName,
-    meta?.displayName,
-  ]
-    .map(normalizeIdentityKey)
-    .filter(Boolean);
-
-  return ownerKeys.some((key) => currentKeys.includes(key));
-}
-
-function pushedRootId(item: BoardActivity, meta: Record<string, any> | null) {
-  return metaString(meta?.originalDropId, meta?.dropId, item.id);
-}
-
-function hasUserAlreadyPushed(
-  feedItems: BoardActivity[],
-  originalDropId: string,
-  userId: string
-) {
-  return feedItems.some((feedItem) => {
-    const meta = feedItem.meta && typeof feedItem.meta === "object" ? feedItem.meta : null;
-    return (
-      Boolean(meta?.isPushed) &&
-      String(meta?.originalDropId || "") === originalDropId &&
-      String(meta?.pushedByUserId || "") === userId
-    );
-  });
-}
-
-function createPushedDrop(
-  originalDrop: BoardActivity,
-  currentUser: ReturnType<typeof readLocalProfileIdentity>
-): BoardActivity {
-  const originalMeta =
-    originalDrop.meta && typeof originalDrop.meta === "object" ? originalDrop.meta : {};
-  const pushedAt = new Date().toISOString();
-  const pusherId = currentUserKey(currentUser);
-  const originalDropId = pushedRootId(originalDrop, originalMeta);
-
-  return {
-    ...originalDrop,
-    id: `push-${originalDropId}-${pusherId}-${Date.now()}`,
-    meta: {
-      ...originalMeta,
-      isPushed: true,
-      pushedByUserId: pusherId,
-      pushedByName:
-        metaString(currentUser.displayName, currentUser.username) || "Someone",
-      pushedAt,
-      originalDropId,
-      originalAuthorId:
-        metaString((originalMeta as any).originalAuthorId, originalDrop.user_id) || null,
-      reactionType: "push",
-    },
-  };
-}
-
-function formatPriceFromCents(cents?: number) {
-  if (!cents || cents <= 0) return "";
-  return `$${(cents / 100).toFixed(2)}`;
-}
-
-function formatDropTime(value?: string | null) {
-  if (!value) return "";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "";
-
-  const now = Date.now();
-  const diff = Math.max(0, now - date.getTime());
-  const minute = 60 * 1000;
-  const hour = 60 * minute;
-  const day = 24 * hour;
-
-  if (diff < minute) return "just now";
-  if (diff < hour) {
-    const count = Math.max(1, Math.floor(diff / minute));
-    return `${count}m ago`;
-  }
-  if (diff < day) {
-    const count = Math.max(1, Math.floor(diff / hour));
-    return `${count}h ago`;
-  }
-  if (diff < day * 7) {
-    const count = Math.max(1, Math.floor(diff / day));
-    return `${count}d ago`;
-  }
-
-  return new Intl.DateTimeFormat(undefined, {
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  }).format(date);
-}
-
-/* --------------------------- embed helpers --------------------------- */
-
-type EmbedKind =
-  | "youtube"
-  | "spotify"
-  | "apple_music"
-  | "soundcloud"
-  | "image"
-  | "video"
-  | "audio"
-  | "none";
-
-function isExternalHref(href: string) {
-  return /^https?:\/\//i.test(href);
-}
-
-function isLikelyImageUrl(href: string) {
-  const clean = href.toLowerCase();
-  return (
-    /\.(png|jpg|jpeg|gif|webp|avif|svg|bmp|tif|tiff|heic|heif)(\?|#|$)/i.test(clean) ||
-    /\/storage\/v1\/object\/public\/board-media\//i.test(clean)
-  );
-}
-
-function getExt(url: string) {
-  const clean = url.split("?")[0].split("#")[0];
-  const dot = clean.lastIndexOf(".");
-  if (dot === -1) return "";
-  return clean.slice(dot + 1).toLowerCase();
-}
-
-function guessMediaKind(url: string): EmbedKind {
-  const ext = getExt(url);
-
-  // Images
-  if (["png", "jpg", "jpeg", "webp", "gif", "avif", "svg", "bmp", "tif", "tiff", "heic", "heif"].includes(ext)) return "image";
-  if (isLikelyImageUrl(url)) return "image";
-
-  // Video
-  if (["mp4", "webm", "mov", "m4v"].includes(ext)) return "video";
-
-  // Audio
-  if (["mp3", "wav", "m4a", "aac", "ogg", "flac"].includes(ext)) return "audio";
-
-  return "none";
-}
-
-function ytId(url: string): string | null {
-  try {
-    const u = new URL(url);
-    if (u.hostname.includes("youtu.be")) {
-      return u.pathname.replace("/", "") || null;
-    }
-    if (u.hostname.includes("youtube.com")) {
-      return (
-        u.searchParams.get("v") ||
-        u.pathname.split("/").filter(Boolean).pop() ||
-        null
-      );
-    }
-  } catch {}
-  return null;
-}
-
-function toYouTubeEmbed(url: string, origin?: string): string | null {
-  const id = ytId(url);
-  if (!id) return null;
-
-  const params = new URLSearchParams({
-    modestbranding: "1",
-    rel: "0",
-    playsinline: "1",
-  });
-
-  if (origin) params.set("origin", origin);
-
-  return `https://www.youtube-nocookie.com/embed/${id}?${params.toString()}`;
-}
-
-function toSpotifyEmbed(url: string): string | null {
-  try {
-    const u = new URL(url);
-    if (!/open\.spotify\.com$/i.test(u.hostname)) return null;
-    return `https://open.spotify.com/embed${u.pathname}`;
-  } catch {
-    return null;
-  }
-}
-
-function toAppleMusicEmbed(url: string): string | null {
-  try {
-    const u = new URL(url);
-    const host = u.hostname.toLowerCase();
-    if (host === "embed.music.apple.com") return u.toString();
-    if (host !== "music.apple.com") return null;
-
-    const parts = u.pathname.split("/").filter(Boolean);
-    if (parts[0] === "embed") {
-      return `https://embed.music.apple.com/${parts.slice(1).join("/")}${u.search}`;
-    }
-    if (parts.length < 3) return null;
-
-    return `https://embed.music.apple.com${u.pathname}${u.search}`;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * ✅ FIX: only treat URLs as SoundCloud if they are actually SoundCloud domains.
- */
-function toSoundCloudEmbed(url: string): string | null {
-  try {
-    const u = new URL(url);
-    const host = u.hostname.toLowerCase();
-
-    const isSC =
-      host === "soundcloud.com" ||
-      host.endsWith(".soundcloud.com") ||
-      host === "snd.sc" ||
-      host.endsWith(".snd.sc") ||
-      host === "on.soundcloud.com" ||
-      host.endsWith(".on.soundcloud.com");
-
-    if (!isSC) return null;
-
-    return `https://w.soundcloud.com/player/?url=${encodeURIComponent(
-      url
-    )}&auto_play=false&visual=true`;
-  } catch {
-    return null;
-  }
-}
-
-function computeEmbed(href: string): { kind: EmbedKind; url: string } {
-  if (!href) return { kind: "none", url: "" };
-
-  const origin =
-    typeof window !== "undefined" ? window.location.origin : undefined;
-
-  // 1) YouTube
-  const yt = toYouTubeEmbed(href, origin);
-  if (yt) return { kind: "youtube", url: yt };
-
-  // 2) Spotify
-  const sp = toSpotifyEmbed(href);
-  if (sp) return { kind: "spotify", url: sp };
-
-  // 3) Apple Music
-  const am = toAppleMusicEmbed(href);
-  if (am) return { kind: "apple_music", url: am };
-
-  // 4) SoundCloud (ONLY if soundcloud hostname)
-  const sc = toSoundCloudEmbed(href);
-  if (sc) return { kind: "soundcloud", url: sc };
-
-  // 5) Vision/media files (image/video/audio)
-  const mk = guessMediaKind(href);
-  if (mk !== "none") return { kind: mk, url: href };
-
-  return { kind: "none", url: "" };
-}
 
 /* --------------------------- component --------------------------- */
 
 type Props = {
   item: BoardActivity;
   compact?: boolean;
-  openBucketOnSignal?: boolean; // feels “command-center-ish”
-  onRemove?: (dropId: string) => void;
+  onRemove?: (activityId: string, canonicalDropId?: string) => void;
 };
 
 export default function ActivityCard({
   item,
   compact,
-  openBucketOnSignal = false,
   onRemove,
 }: Props) {
   const [toast, setToast] = useState<string | null>(null);
+  const [toastVisible, setToastVisible] = useState(false);
+  const toastFadeTimerRef = useRef<number | null>(null);
+  const toastClearTimerRef = useRef<number | null>(null);
+  const lastMediaSignKeyRef = useRef("");
   const [embedFailed, setEmbedFailed] = useState(false);
   const [signedPreviewImage, setSignedPreviewImage] = useState<string>("");
   // Image fetched on the client for link drops whose stored record has no
@@ -480,14 +133,24 @@ export default function ActivityCard({
   const [hydratedImage, setHydratedImage] = useState<string>("");
   const [payCheckoutBusy, setPayCheckoutBusy] = useState(false);
   const [isRemovingDrop, setIsRemovingDrop] = useState(false);
-  const [dropHidden, setDropHidden] = useState(false);
-  const [selectedReaction, setSelectedReaction] = useState<"pass" | "pin" | "push" | null>(null);
+  const [selectedReactions, setSelectedReactions] = useState({
+    pass: false,
+    pin: false,
+    push: false,
+  });
   // Transient sonar burst when a drop's signal is amplified (Push).
+  const cardRef = useRef<HTMLDivElement>(null);
   const [amplifyBurst, setAmplifyBurst] = useState(false);
+  const [burstAnchor, setBurstAnchor] = useState<{
+    cx: number;
+    cy: number;
+    span: number;
+  } | null>(null);
   const [commentsOpen, setCommentsOpen] = useState(false);
   const [commentCount, setCommentCount] = useState(0);
   const [userAuraColor, setUserAuraColor] = useState(fallbackAuraColor);
   const [announcementImagePosition, setAnnouncementImagePosition] = useState({ x: 50, y: 50 });
+  const [announcementImageSrc, setAnnouncementImageSrc] = useState<string | null>(null);
   const [announcementDrag, setAnnouncementDrag] = useState<{
     clientX: number;
     clientY: number;
@@ -516,26 +179,90 @@ export default function ActivityCard({
   // id-based ownership check (drops store the author's user_id as a uuid).
   const [currentAuthUserId, setCurrentAuthUserId] = useState("");
 
-  const title = item?.title || "Drop";
-  const body = (item as any)?.body || (item as any)?.text || "";
+  // Live overrides so an in-place edit (via the board-wide editor) shows here
+  // immediately without a reload.
+  const [titleOverride, setTitleOverride] = useState<string | null>(null);
+  const [bodyOverride, setBodyOverride] = useState<string | null>(null);
+  // Media overrides: an edit can replace the image/video/audio (new storage path)
+  // and change the overlay. The feed item itself only carries a baked image URL,
+  // so without these the card would keep showing the pre-edit media.
+  const [mediaImageOverride, setMediaImageOverride] = useState<string | null>(null);
+  const [mediaKindOverride, setMediaKindOverride] = useState<string | null>(null);
+  const [customizationsOverride, setCustomizationsOverride] =
+    useState<ReturnType<typeof normalizeDropCustomizations> | null>(null);
+  const [titleRichOverride, setTitleRichOverride] = useState<RichTextValue | null>(null);
+  const [descRichOverride, setDescRichOverride] = useState<RichTextValue | null>(null);
+  // Bumped whenever this drop is edited, to re-resolve its canonical media.
+  const [mediaRefreshTick, setMediaRefreshTick] = useState(0);
+  const [visibilityOverride, setVisibilityOverride] = useState<"public" | "private" | null>(
+    null
+  );
+  // Supabase boardDrops hydration — desktop has this in localStorage; mobile does not.
+  const [musicHydrating, setMusicHydrating] = useState(false);
+
+  const title = titleOverride ?? (item?.title || "Drop");
+  const body = bodyOverride ?? ((item as any)?.body || (item as any)?.text || "");
   const id = String((item as any)?.id || "");
   const timeLabel = formatDropTime((item as any)?.created_at);
 
   // Be tolerant: href can be stored a few ways depending on older drops
-  const href =
-    (typeof (item as any)?.href === "string" && (item as any).href) ||
-    (typeof (item as any)?.url === "string" && (item as any).url) ||
-    (typeof (item as any)?.link === "string" && (item as any).link) ||
-    "";
   const rawMeta = (item as any)?.meta;
   const meta = rawMeta && typeof rawMeta === "object" ? rawMeta : null;
   const preview = meta?.preview ?? meta ?? null;
-  const storedDropCustomizations = normalizeDropCustomizations(
-    meta?.customizations ?? preview?.customizations
+  const href =
+    metaString(
+      (item as any)?.href,
+      (item as any)?.url,
+      (item as any)?.link,
+      preview?.url,
+      meta?.url
+    ) || "";
+  const bakedEmbedUrl = metaString(meta?.embedUrl, preview?.embedUrl);
+  const dropCustomizations =
+    customizationsOverride ??
+    normalizeDropCustomizations(meta?.customizations ?? preview?.customizations);
+  const boardDropFlavor = resolveBoardDropFlavor(meta, preview);
+  const feedDropType = boardDropFlavor || String(item?.kind ?? "").toLowerCase();
+  const isMusicDrop = isMusicDropType(boardDropFlavor || feedDropType);
+  const isLinkStyleDrop =
+    !isMusicDrop &&
+    (isLinkStyleBoardDrop(feedDropType) ||
+      isLinkStyleBoardDrop(boardDropFlavor) ||
+      (Boolean(href) && (isSocialMediaUrl(href) || computeEmbed(href).kind === "youtube")));
+  const feedMediaFrameClass = dropMediaFrameClassName(
+    resolveBoardDropDisplayFrame(dropCustomizations, { dropType: feedDropType, href })
   );
-  const [dropCustomizations, setDropCustomizations] = useState<DropCustomization | undefined>(
-    storedDropCustomizations
+  const feedMediaRotationStyle = dropMediaRotationStyle(dropCustomizations?.effects?.rotation ?? 0);
+  const mediaFrameTagOpts = useMemo(
+    () => ({ dropType: feedDropType, href }),
+    [feedDropType, href]
   );
+  const tagMediaFrame = (el: HTMLImageElement | HTMLVideoElement) => {
+    tagDropMediaFrame(el, dropCustomizations, mediaFrameTagOpts);
+  };
+
+  useEffect(() => {
+    const savedFrame = dropCustomizations?.effects?.frame;
+    if (savedFrame !== "landscape" && savedFrame !== "portrait") return;
+    const root = cardRef.current;
+    if (!root) return;
+    const isWide = savedFrame === "landscape";
+    for (const host of root.querySelectorAll<HTMLElement>(
+      ".activityImagePreview, .storedVideoFrame, .embed.image, .embed.video"
+    )) {
+      host.classList.toggle("is-wide", isWide);
+      host.classList.toggle("is-portrait-framed", !isWide);
+    }
+  }, [dropCustomizations?.effects?.frame]);
+  // Comments are keyed to the canonical drop id (not the feed activity row id),
+  // so they save and load consistently across the feed, grid, and profile.
+  const commentDropId = metaString(meta?.dropId, meta?.originalDropId, (item as any)?.id);
+
+  // Inline-formatted title/description (edit override → feed meta → none).
+  const titleRich =
+    titleRichOverride ?? normalizeRichText(meta?.titleRich ?? preview?.titleRich);
+  const descRich =
+    descRichOverride ?? normalizeRichText(meta?.descriptionRich ?? preview?.descriptionRich);
   const authorUserId = String((item as any)?.user_id || "");
   const authorName = metaString(
     meta?.authorName,
@@ -564,13 +291,472 @@ export default function ActivityCard({
     meta?.avatarDataUrl,
     meta?.recipientAvatar
   );
-  const isCurrentUserDrop =
-    item?.kind === "board_drop" &&
-    (Boolean(authorUserId) &&
+  const ownsActivity =
+    Boolean(authorUserId) &&
     Boolean(currentAuthUserId) &&
     authorUserId === currentAuthUserId
       ? true
-      : activityOwnedByCurrentUser(item, meta, viewerIdentity));
+      : activityOwnedByCurrentUser(item, meta, viewerIdentity);
+  const isCurrentUserDrop = item?.kind === "board_drop" && ownsActivity;
+  // Drops AND announcements the viewer owns can be managed (edit + remove).
+  const canManageDrop =
+    ownsActivity && (item?.kind === "board_drop" || item?.kind === "announcement");
+
+  // Stored-media coordinates can live on the feed item's `meta.preview` (the
+  // shape the card signs its image from) OR directly on `meta`. Resolve from
+  // both so detection matches what actually renders.
+  const mediaBucket = metaString(meta?.preview?.bucket, meta?.bucket);
+  const mediaStoragePath = metaString(meta?.preview?.storagePath, meta?.storagePath);
+  const metaDropId = metaString(meta?.dropId);
+  const metaOriginalDropId = metaString(meta?.originalDropId);
+  const metaEditedAt = typeof meta?.editedAt === "number" ? meta.editedAt : 0;
+  // The owner's authoritative drop record (board_style.boardDrops) is the source
+  // of truth the profile renders from. Prefer it over the activity meta, whose
+  // media fields can go stale (e.g. an edited image still carrying an old "audio"
+  // kind/path → a Voice player on an image). Falls back to meta for others' drops.
+  const canonicalBoardDrop = useMemo(
+    () => findLocalDropByAnyId(metaDropId, metaOriginalDropId, id),
+    [metaDropId, metaOriginalDropId, id, mediaRefreshTick]
+  );
+  const dropVisibility: "public" | "private" =
+    visibilityOverride ??
+    (canonicalBoardDrop?.visibility as "public" | "private" | undefined) ??
+    (meta?.visibility as "public" | "private" | undefined) ??
+    "public";
+  const canonicalMediaKind = canonicalBoardDrop
+    ? resolveDropMediaKind(canonicalBoardDrop) ?? ""
+    : "";
+  const feedMediaKind =
+    canonicalMediaKind ||
+    resolveDropMediaKindFromMeta(meta as Record<string, unknown>) ||
+    metaString(meta?.mediaKind, meta?.preview?.mediaKind);
+  const musicDropType = boardDropFlavor || feedDropType;
+  const dropMediaUrl = metaString(meta?.mediaUrl);
+  const storedMediaCoords = resolveStoredMediaCoords({
+    bucket: mediaBucket,
+    storagePath: mediaStoragePath,
+    mediaUrl: dropMediaUrl,
+    href,
+  });
+  const storedMediaBucket = storedMediaCoords?.bucket || mediaBucket;
+  const storedMediaPath = storedMediaCoords?.storagePath || mediaStoragePath;
+  const bakedFeedImage =
+    (typeof (item as any)?.image_url === "string" && (item as any).image_url) ||
+    metaString(meta?.preview?.image, meta?.preview?.previewImage) ||
+    "";
+
+  // Feed `board_drop` items don't carry bucket/storagePath — only a rendered
+  // media URL (meta.mediaUrl / meta.preview.image / image_url). Treat that URL
+  // as the media source, but ONLY for genuinely media-bearing drops so a link
+  // or news thumbnail never counts. Drop Studio loads from this URL when no
+  // storage path exists, then re-uploads on save.
+  const isMediaBearingDrop =
+    boardDropFlavor.includes("media") ||
+    boardDropFlavor.includes("pay") ||
+    boardDropFlavor.includes("music") ||
+    boardDropFlavor.includes("audio") ||
+    feedDropType.includes("music") ||
+    feedDropType.includes("audio") ||
+    Boolean(feedMediaKind);
+  const mediaUrl = isMediaBearingDrop
+    ? metaString(
+        meta?.mediaUrl,
+        feedMediaKind === "audio" ? "" : meta?.preview?.image,
+        feedMediaKind === "audio" ? "" : (item as any)?.image_url
+      )
+    : "";
+
+  function flashToast(message: string | null, duration = 1200) {
+    if (toastFadeTimerRef.current) window.clearTimeout(toastFadeTimerRef.current);
+    if (toastClearTimerRef.current) window.clearTimeout(toastClearTimerRef.current);
+    if (!message) {
+      setToastVisible(false);
+      setToast(null);
+      return;
+    }
+    setToast(message);
+    setToastVisible(true);
+    toastFadeTimerRef.current = window.setTimeout(
+      () => setToastVisible(false),
+      Math.max(180, duration - 280)
+    );
+    toastClearTimerRef.current = window.setTimeout(() => {
+      setToast(null);
+      setToastVisible(false);
+    }, duration);
+  }
+
+  function resolveEditableDropRecord(): DropItem | null {
+    if (canonicalBoardDrop) return canonicalBoardDrop;
+    if (item?.kind !== "board_drop") return null;
+    const { fallbackDrop } = buildEditableDrop();
+    return fallbackDrop as DropItem;
+  }
+
+  // Reconstruct a drop record from the feed item so it stays editable even when
+  // it isn't in the local cache or server list yet. Shared by the Edit and Drop
+  // Public/Private toggle parity with the profile board. Persists against the
+  // authoritative boardDrops record (so we never overwrite it with a partial
+  // feed payload); persistDropEdit fires board:drop:updated so this card refreshes.
+  async function toggleDropVisibility() {
+    const base = resolveEditableDropRecord();
+    if (!base) return;
+    const current = dropVisibility;
+    const next: "public" | "private" = current === "public" ? "private" : "public";
+    setVisibilityOverride(next);
+    try {
+      await persistDropEdit({ ...base, visibility: next, updatedAt: Date.now() });
+      flashToast(next === "private" ? "Drop is now private" : "Drop is now public", 1000);
+    } catch {
+      setVisibilityOverride(null);
+    }
+  }
+
+  // Studio buttons; the editor prefers the authoritative record and only uses
+  // this as a fallback.
+  function buildEditableDrop() {
+    if (item?.kind === "announcement") {
+      const activityId = id;
+      const annMedia =
+        announcementMediaUrl ||
+        resolvedPreviewImage ||
+        (typeof (item as any)?.image_url === "string" ? (item as any).image_url : "") ||
+        "";
+      const annKind =
+        announcementMediaType === "video"
+          ? "video"
+          : announcementMediaType === "image" || isLikelyImageUrl(annMedia)
+            ? "image"
+            : undefined;
+      const fallbackDrop = {
+        id: activityId,
+        title,
+        type: "Media" as const,
+        createdAt: Date.parse((item as any)?.created_at) || Date.now(),
+        description: body || undefined,
+        mediaUrl: annMedia || undefined,
+        mediaKind: annKind,
+        customizations: dropCustomizations,
+        editSource: "announcement" as const,
+        sourceActivityId: activityId,
+      };
+      return { dropId: activityId, fallbackDrop };
+    }
+
+    const dropId = metaString(meta?.dropId, meta?.originalDropId, id);
+    const dt = String(meta?.dropType ?? item?.kind ?? "").toLowerCase();
+    const mappedType =
+      dt.includes("thought") ? "Thought"
+      : dt.includes("pay") ? "Pay"
+      : dt.includes("music") || dt.includes("audio") ? "Music"
+      : dt.includes("youtube") ? "YouTube"
+      : dt.includes("news") ? "News"
+      : dt.includes("doc") ? "Doc"
+      : dt === "link" ? "Link"
+      : "Media";
+    const fallbackDrop = {
+      id: dropId,
+      title,
+      type: mappedType,
+      createdAt: Date.parse((item as any)?.created_at) || Date.now(),
+      description: metaString(meta?.description) || body || undefined,
+      thoughtText: metaString(meta?.thoughtText) || undefined,
+      url: metaString(meta?.url) || href || undefined,
+      linkUrl: metaString(meta?.linkUrl) || undefined,
+      bucket: mediaBucket || undefined,
+      storagePath: mediaStoragePath || undefined,
+      mediaUrl: mediaUrl || undefined,
+      mediaKind: (meta?.mediaKind ?? meta?.preview?.mediaKind) || undefined,
+      mime: metaString(meta?.mime, meta?.preview?.mime) || undefined,
+      fileName: metaString(meta?.fileName, meta?.preview?.fileName) || undefined,
+      priceCents: typeof meta?.priceCents === "number" ? meta.priceCents : undefined,
+      paymentLink: metaString(meta?.paymentLink) || undefined,
+      visibility: (meta?.visibility as any) || undefined,
+      customizations: dropCustomizations,
+      editSource: "board_drop" as const,
+    };
+    return { dropId, fallbackDrop };
+  }
+
+  function openDropStudioEditor() {
+    try {
+      const { dropId, fallbackDrop } = buildEditableDrop();
+      // Always land on the title/description edit screen first — never auto-launch
+      // capture. From there the user chooses "Drop Studio Editor" (capture) or
+      // "Open Descript". (Previously fired board:drop:studio, which jumped straight
+      // into the studio.)
+      window.dispatchEvent(
+        new CustomEvent("board:drop:edit", {
+          detail: { dropId, drop: fallbackDrop },
+        })
+      );
+    } catch {
+      // ignore
+    }
+  }
+
+  async function applyMediaFromDrop(drop: {
+    bucket?: string;
+    storagePath?: string;
+    mediaUrl?: string;
+    mediaKind?: string;
+    customizations?: unknown;
+  }) {
+    if (typeof drop.mediaKind === "string" && drop.mediaKind) {
+      setMediaKindOverride(drop.mediaKind);
+    }
+    if ("customizations" in drop) {
+      setCustomizationsOverride(normalizeDropCustomizations(drop.customizations as any) ?? null);
+    }
+    try {
+      if (drop.bucket && drop.storagePath) {
+        const url = await getDropSignedUrl(drop.bucket, drop.storagePath, 60 * 45);
+        if (url) {
+          setMediaImageOverride(url);
+          setSignedPreviewImage(url);
+        }
+      } else if (typeof drop.mediaUrl === "string" && drop.mediaUrl) {
+        setMediaImageOverride(drop.mediaUrl);
+        setSignedPreviewImage(drop.mediaUrl);
+      }
+    } catch {
+      // keep the existing feed image if we can't resolve edited media
+    }
+  }
+
+  // Reflect an in-place edit on this card without waiting for a feed reload.
+  useEffect(() => {
+    const myDropIds = new Set(
+      [meta?.dropId, meta?.originalDropId, id].filter(
+        (x): x is string => typeof x === "string" && x.length > 0
+      )
+    );
+    function matchesDropId(dropId: unknown) {
+      return typeof dropId === "string" && dropId.length > 0 && myDropIds.has(dropId);
+    }
+    function applyDropPatch(d: Record<string, unknown>) {
+      if (typeof d.title === "string") setTitleOverride(d.title);
+      const nextBody =
+        d.type === "Thought" ? d.thoughtText ?? d.description : d.description;
+      if (typeof nextBody === "string") setBodyOverride(nextBody);
+      // RichText prefers formatted html over plain — always refresh overrides
+      // or stale meta.titleRich keeps showing the pre-edit title on mobile cards.
+      if ("titleRich" in d) {
+        setTitleRichOverride(normalizeRichText(d.titleRich) ?? null);
+      }
+      if ("descriptionRich" in d) {
+        setDescRichOverride(normalizeRichText(d.descriptionRich) ?? null);
+      }
+      if (d.visibility === "public" || d.visibility === "private") {
+        setVisibilityOverride(d.visibility);
+      }
+      void applyMediaFromDrop({
+        bucket: typeof d.bucket === "string" ? d.bucket : undefined,
+        storagePath: typeof d.storagePath === "string" ? d.storagePath : undefined,
+        mediaUrl: typeof d.mediaUrl === "string" ? d.mediaUrl : undefined,
+        mediaKind: typeof d.mediaKind === "string" ? d.mediaKind : undefined,
+        customizations: d.customizations,
+      });
+      setMediaRefreshTick((t) => t + 1);
+    }
+    function onDropUpdated(e: Event) {
+      const detail = (e as CustomEvent).detail || {};
+      if (!matchesDropId(detail.dropId)) return;
+      applyDropPatch((detail.drop as Record<string, unknown>) || {});
+    }
+    function onActivityUpdated(e: Event) {
+      const updated = (e as CustomEvent<BoardActivity>).detail;
+      if (!updated || updated.id !== id) return;
+      if (typeof updated.title === "string") setTitleOverride(updated.title);
+      if (typeof updated.body === "string") setBodyOverride(updated.body);
+      const m = updated.meta;
+      if (m && typeof m === "object") {
+        if ("titleRich" in m) {
+          setTitleRichOverride(normalizeRichText(m.titleRich) ?? null);
+        }
+        if ("descriptionRich" in m) {
+          setDescRichOverride(normalizeRichText(m.descriptionRich) ?? null);
+        }
+        const preview =
+          m.preview && typeof m.preview === "object" ? (m.preview as Record<string, unknown>) : null;
+        void applyMediaFromDrop({
+          bucket: typeof m.bucket === "string" ? m.bucket : (preview?.bucket as string | undefined),
+          storagePath:
+            typeof m.storagePath === "string"
+              ? m.storagePath
+              : (preview?.storagePath as string | undefined),
+          mediaUrl:
+            (typeof updated.image_url === "string" && updated.image_url) ||
+            (typeof updated.href === "string" && updated.href) ||
+            (typeof m.mediaUrl === "string" ? m.mediaUrl : undefined) ||
+            (typeof preview?.image === "string" ? preview.image : undefined),
+          mediaKind:
+            (typeof m.mediaKind === "string" ? m.mediaKind : undefined) ||
+            (typeof preview?.mediaKind === "string" ? preview.mediaKind : undefined),
+          customizations: m.customizations,
+        });
+      }
+      setMediaRefreshTick((t) => t + 1);
+    }
+    window.addEventListener("board:drop:updated", onDropUpdated as EventListener);
+    window.addEventListener("board:activity:updated", onActivityUpdated as EventListener);
+    return () => {
+      window.removeEventListener("board:drop:updated", onDropUpdated as EventListener);
+      window.removeEventListener("board:activity:updated", onActivityUpdated as EventListener);
+    };
+  }, [metaDropId, metaOriginalDropId, id]);
+
+  // Feed activity items bake the media URL at creation time, so an edit (new
+  // storage path / new overlay) never shows through the stale feed payload.
+  // Resolve the drop's CURRENT media from the canonical local boardDrops by id
+  // and sign a fresh URL — on mount and whenever this drop is edited. Mobile
+  // devices often lack local cache; always fall back to server meta + signing.
+  useEffect(() => {
+    let cancelled = false;
+    if (isLinkStyleDrop) return;
+
+    const isMusic = isMusicDropType(musicDropType);
+    const treatsAsAudio = isMusic || feedMediaKind === "audio";
+
+    async function applyPlayableUrl(url: string, kind?: string | null) {
+      if (cancelled || !url) return;
+      setSignedPreviewImage(url);
+      setMediaImageOverride(url);
+
+      let resolved = kind || null;
+      if (resolved !== "image" && resolved !== "video" && resolved !== "audio") {
+        const guessed = guessMediaKind(url);
+        if (guessed === "image" || guessed === "video" || guessed === "audio") {
+          resolved = guessed;
+        }
+      }
+      if (
+        resolved !== "image" &&
+        resolved !== "video" &&
+        resolved !== "audio" &&
+        storedMediaPath
+      ) {
+        const path = storedMediaPath.toLowerCase();
+        if (/\.(jpe?g|png|gif|webp|heic|bmp|svg)(\?|#|$)/.test(path)) resolved = "image";
+        else if (/\.(mp4|webm|mov|m4v)(\?|#|$)/.test(path)) resolved = "video";
+        else if (/\.(mp3|m4a|wav|aac|ogg|flac|weba)(\?|#|$)/.test(path)) resolved = "audio";
+        else if (storedMediaBucket) resolved = "image";
+      }
+
+      if (resolved === "image" || resolved === "video") {
+        setMediaKindOverride(resolved);
+        return;
+      }
+      if (
+        resolved === "audio" ||
+        (treatsAsAudio && isAudioFileUrl(url) && !isStreamingMusicUrl(url))
+      ) {
+        setMediaKindOverride("audio");
+        return;
+      }
+      if (feedMediaKind === "image" || feedMediaKind === "video") {
+        setMediaKindOverride(feedMediaKind);
+      }
+    }
+
+    async function signFromServerMeta() {
+      if (storedMediaBucket && storedMediaPath) {
+        const url = await getDropSignedUrl(storedMediaBucket, storedMediaPath, 60 * 45);
+        if (url) {
+          const kind =
+            feedMediaKind ||
+            resolveDropMediaKindFromMeta(meta as Record<string, unknown>) ||
+            null;
+          await applyPlayableUrl(url, kind);
+          return;
+        }
+      }
+      if (bakedFeedImage) {
+        const kind = feedMediaKind || guessMediaKind(bakedFeedImage) || null;
+        await applyPlayableUrl(bakedFeedImage, kind);
+        return;
+      }
+      const direct = [dropMediaUrl, href].find(
+        (url) => url && isAudioFileUrl(url) && !isStreamingMusicUrl(url)
+      );
+      if (direct && treatsAsAudio) await applyPlayableUrl(direct, "audio");
+    }
+
+    const canonical = findLocalDropByAnyId(metaDropId, metaOriginalDropId, id);
+
+    if (!canonical) {
+      void signFromServerMeta();
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    const serverEditedAt = metaEditedAt;
+    const localEditedAt =
+      typeof (canonical as { updatedAt?: number }).updatedAt === "number"
+        ? (canonical as { updatedAt?: number }).updatedAt!
+        : 0;
+    const localIsStale = Boolean(serverEditedAt && serverEditedAt > localEditedAt);
+
+    // Media (kind + file) comes from the authoritative boardDrops record
+    // regardless of the text-freshness guard — so an edited image never falls
+    // back to a stale audio kind/path. The guard still protects the text fields.
+    if (canonical.mediaKind) setMediaKindOverride(canonical.mediaKind);
+    const canonicalCustomizations = normalizeDropCustomizations(
+      (canonical as { customizations?: unknown }).customizations
+    );
+    // Frame/rotation/stickers always follow the authoritative boardDrops record.
+    if (canonicalCustomizations) {
+      setCustomizationsOverride(canonicalCustomizations);
+    }
+    if (!localIsStale && "titleRich" in canonical) {
+      setTitleRichOverride(normalizeRichText(canonical.titleRich) ?? null);
+    }
+    if (!localIsStale && "descriptionRich" in canonical) {
+      setDescRichOverride(normalizeRichText(canonical.descriptionRich) ?? null);
+    }
+
+    void (async () => {
+      try {
+        if (canonical.bucket && canonical.storagePath) {
+          const url = await getDropSignedUrl(canonical.bucket, canonical.storagePath, 60 * 45);
+          if (url) await applyPlayableUrl(url, canonical.mediaKind ?? null);
+          else await signFromServerMeta();
+        } else {
+          await signFromServerMeta();
+        }
+        if (
+          !cancelled &&
+          !storedMediaBucket &&
+          !storedMediaPath &&
+          canonical.mediaUrl
+        ) {
+          await applyPlayableUrl(canonical.mediaUrl, canonical.mediaKind ?? null);
+        }
+      } catch {
+        // keep the existing feed image if we can't resolve the canonical media
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    metaDropId,
+    metaOriginalDropId,
+    metaEditedAt,
+    id,
+    mediaRefreshTick,
+    storedMediaBucket,
+    storedMediaPath,
+    musicDropType,
+    feedMediaKind,
+    dropMediaUrl,
+    href,
+    bakedFeedImage,
+    isLinkStyleDrop,
+  ]);
+
   const authorGlow =
     colorFromAura(meta?.authorAuraColor) ||
     colorFromAura(meta?.auraColor) ||
@@ -582,6 +768,9 @@ export default function ActivityCard({
       : Math.max(0.22, Math.min(1, authorProfile.auraIntensity / 100));
   const isPushed = Boolean(meta?.isPushed);
   const pushedByName = metaString(meta?.pushedByName, meta?.pushedByUsername, "Someone");
+  const displayAuraPower = isPushed
+    ? Math.min(1, authorAuraPower + 0.18)
+    : authorAuraPower;
   const announcementVibeLabel =
     item?.kind === "announcement" ? formatAnnouncementVibe(meta?.announcement_vibe) : "";
   const previewImage =
@@ -597,11 +786,14 @@ export default function ActivityCard({
     (typeof preview?.description === "string" && preview.description) ||
     (typeof preview?.previewDescription === "string" && preview.previewDescription) ||
     "";
-  const previewBucket =
-    typeof preview?.bucket === "string" && preview.bucket ? preview.bucket : "";
-  const previewStoragePath =
-    typeof preview?.storagePath === "string" && preview.storagePath ? preview.storagePath : "";
-  const mediaKind = metaString(meta?.mediaKind, preview?.mediaKind);
+  // Prefer a fresh edit override, then the RESOLVED kind (concrete image file/
+  // mime beats a stale stored "audio" kind), then the raw meta value. Fixes a
+  // drawn-image Pay/Vision drop rendering as a Voice player in the feed.
+  const mediaKind =
+    mediaKindOverride ||
+    canonicalMediaKind ||
+    resolveDropMediaKindFromMeta(meta) ||
+    metaString(meta?.mediaKind, preview?.mediaKind);
   const announcementMediaUrl = metaString(meta?.announcement_media_url);
   const announcementMediaType = metaString(meta?.announcement_media_type);
   const announcementImageUrl =
@@ -609,26 +801,134 @@ export default function ActivityCard({
       ? announcementMediaUrl
       : "";
   const resolvedPreviewImage =
+    mediaImageOverride ||
     signedPreviewImage ||
     resolveLinkPreviewImage(href, previewImage || announcementImageUrl) ||
     hydratedImage ||
     "";
-  const isStoredVideoDrop = mediaKind === "video" && !!signedPreviewImage;
-  const isStoredAudioDrop = mediaKind === "audio" && !!signedPreviewImage;
+  const storedVideoSrc = mediaImageOverride || signedPreviewImage;
+  const isStoredVideoDrop = mediaKind === "video" && !!storedVideoSrc;
+  const hasStoredAudioPath = !!(storedMediaBucket && storedMediaPath);
+  const isUploadedMusicDrop = hasUploadedMusicStorage({
+    mediaKind,
+    dropType: musicDropType,
+    bucket: storedMediaBucket,
+    storagePath: storedMediaPath,
+    mediaUrl: dropMediaUrl,
+    href,
+  });
+  const storedAudioSrc = resolveStoredAudioSrc({
+    mediaKind,
+    dropType: musicDropType,
+    signedUrl: mediaImageOverride || signedPreviewImage,
+    mediaUrl: dropMediaUrl,
+    href:
+      href && isAudioFileUrl(href) && !isStreamingMusicUrl(href) ? href : "",
+    hasStoragePath: hasStoredAudioPath,
+  });
+  const isStoredAudioDrop = !!storedAudioSrc;
+  const showFullSongPlayer =
+    !!storedAudioSrc ||
+    (isUploadedMusicDrop && (musicHydrating || hasStoredAudioPath));
   const showAnnouncementImage =
     item?.kind === "announcement" &&
     !!resolvedPreviewImage &&
     !isStoredVideoDrop &&
-    !isStoredAudioDrop;
+    !showFullSongPlayer;
+
+  // Hydrate uploaded music from authoritative boardDrops (same path Drop Studio uses).
+  // Feed meta often only has the Spotify href; the file lives on boardDrops.
   useEffect(() => {
-    setDropCustomizations(storedDropCustomizations);
-    setDropHidden(false);
-  }, [id]);
+    setMusicHydrating(false);
+
+    if (!isMusicDropType(musicDropType)) return;
+
+    if (
+      hasUploadedMusicStorage({
+        mediaKind,
+        dropType: musicDropType,
+        bucket: storedMediaBucket,
+        storagePath: storedMediaPath,
+        mediaUrl: dropMediaUrl,
+        href,
+      })
+    ) {
+      return;
+    }
+
+    const dropId = metaString(metaDropId, metaOriginalDropId);
+    if (!dropId) return;
+
+    setMusicHydrating(true);
+    const ownerUserId = metaString(authorUserId, meta?.authorId);
+    let cancelled = false;
+
+    void (async () => {
+      try {
+        const drop = await loadDropMediaForFeed(dropId, ownerUserId);
+        if (cancelled || !drop) return;
+
+        const coords = resolveStoredMediaCoords({
+          bucket: drop.bucket,
+          storagePath: drop.storagePath,
+          mediaUrl: drop.mediaUrl || drop.url || drop.linkUrl,
+          href: drop.url || drop.linkUrl,
+        });
+        const directAudio = [drop.mediaUrl, drop.url, drop.linkUrl].find(
+          (url) =>
+            typeof url === "string" &&
+            url &&
+            isAudioFileUrl(url) &&
+            !isStreamingMusicUrl(url)
+        );
+
+        if (!coords && !directAudio) return;
+
+        setMediaKindOverride("audio");
+
+        if (coords) {
+          const url = await getDropSignedUrl(coords.bucket, coords.storagePath, 60 * 45);
+          if (!cancelled && url) {
+            setSignedPreviewImage(url);
+            setMediaImageOverride(url);
+          }
+        } else if (directAudio && !cancelled) {
+          setSignedPreviewImage(directAudio);
+          setMediaImageOverride(directAudio);
+        }
+      } finally {
+        if (!cancelled) setMusicHydrating(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      setMusicHydrating(false);
+    };
+  }, [
+    id,
+    musicDropType,
+    mediaKind,
+    storedMediaBucket,
+    storedMediaPath,
+    dropMediaUrl,
+    href,
+    authorUserId,
+    metaDropId,
+    metaOriginalDropId,
+    mediaRefreshTick,
+  ]);
 
   useEffect(() => {
     setAnnouncementImagePosition({ x: 50, y: 50 });
     setAnnouncementDrag(null);
+    setAnnouncementImageSrc(null);
   }, [id, resolvedPreviewImage]);
+
+  const announcementDisplayImage =
+    announcementImageSrc ||
+    ANNOUNCEMENT_JPEG_OVERRIDES[id] ||
+    resolvedPreviewImage;
 
   useEffect(() => {
     const identity = readLocalProfileIdentity();
@@ -659,14 +959,15 @@ export default function ActivityCard({
       const identity = readLocalProfileIdentity();
       setUserAuraColor(identity.glowColor || fallbackAuraColor);
       if (!id) {
-        setSelectedReaction(null);
+        setSelectedReactions({ pass: false, pin: false, push: false });
         return;
       }
       const brain = readBrain();
-      const selected = (["pass", "pin", "push"] as const).find((folder) =>
-        (brain[folder] ?? []).some((entry) => String(entry.activityId) === id)
-      );
-      setSelectedReaction(selected ?? null);
+      setSelectedReactions({
+        pass: (brain.pass ?? []).some((entry) => String(entry.activityId) === id),
+        pin: (brain.pin ?? []).some((entry) => String(entry.activityId) === id),
+        push: (brain.push ?? []).some((entry) => String(entry.activityId) === id),
+      });
     };
 
     syncReactionState();
@@ -679,34 +980,57 @@ export default function ActivityCard({
   }, [id]);
 
   useEffect(() => {
-    const syncCommentCount = () => setCommentCount(getDropCommentCount(id));
+    const syncCommentCount = () => setCommentCount(getDropCommentCount(commentDropId));
     syncCommentCount();
+    // Pull the authoritative count from Supabase so the feed shows it without
+    // opening the drawer.
+    void syncDropCommentCounts([commentDropId]).then(syncCommentCount).catch(() => {});
     window.addEventListener(DROP_COMMENTS_UPDATED_EVENT, syncCommentCount as EventListener);
     window.addEventListener("storage", syncCommentCount as EventListener);
     return () => {
       window.removeEventListener(DROP_COMMENTS_UPDATED_EVENT, syncCommentCount as EventListener);
       window.removeEventListener("storage", syncCommentCount as EventListener);
     };
-  }, [id]);
+  }, [commentDropId]);
 
   useEffect(() => {
     let cancelled = false;
-    setSignedPreviewImage("");
 
-    if (!previewBucket || !previewStoragePath) return;
+    if (isLinkStyleDrop) return;
+    if (!storedMediaBucket || !storedMediaPath) return;
+
+    const local = findLocalDropByAnyId(metaDropId, metaOriginalDropId, id);
+    if (local?.bucket && local?.storagePath) return;
+
+    const signKey = `${storedMediaBucket}:${storedMediaPath}`;
+    if (lastMediaSignKeyRef.current !== signKey) {
+      lastMediaSignKeyRef.current = signKey;
+      setSignedPreviewImage("");
+    }
 
     async function signPreviewImage() {
       try {
-        const supabase = supabaseBrowser();
-        const { data, error } = await supabase.storage
-          .from(previewBucket)
-          .createSignedUrl(previewStoragePath, 60 * 45);
-
-        if (!cancelled && !error && data?.signedUrl) {
-          setSignedPreviewImage(data.signedUrl);
+        const url = await getDropSignedUrl(storedMediaBucket, storedMediaPath, 60 * 45);
+        if (!cancelled && url) {
+          setSignedPreviewImage(url);
+          if (isMusicDropType(musicDropType) || feedMediaKind === "audio") {
+            setMediaImageOverride(url);
+            setMediaKindOverride("audio");
+          } else {
+            const kind =
+              feedMediaKind ||
+              resolveDropMediaKindFromMeta(meta as Record<string, unknown>) ||
+              guessMediaKind(url);
+            if (kind === "image" || kind === "video" || kind === "audio") {
+              setMediaImageOverride(url);
+              setMediaKindOverride(kind);
+            }
+          }
+        } else if (!cancelled && bakedFeedImage) {
+          setSignedPreviewImage(bakedFeedImage);
         }
       } catch {
-        // Fall back to image_url/previewImage if storage signing fails.
+        if (!cancelled && bakedFeedImage) setSignedPreviewImage(bakedFeedImage);
       }
     }
 
@@ -715,7 +1039,47 @@ export default function ActivityCard({
     return () => {
       cancelled = true;
     };
-  }, [previewBucket, previewStoragePath]);
+  }, [
+    storedMediaBucket,
+    storedMediaPath,
+    musicDropType,
+    feedMediaKind,
+    metaDropId,
+    metaOriginalDropId,
+    id,
+    mediaRefreshTick,
+    bakedFeedImage,
+    isLinkStyleDrop,
+  ]);
+  // Recover a working image when only a stored Supabase URL is available with no
+  // re-signable path. Older announcements saved a PUBLIC url against a PRIVATE
+  // bucket, so the link 403s and the image never renders. Parse the bucket/path
+  // back out of the URL and sign it. (The effect above owns the case where a
+  // path is already present.)
+  useEffect(() => {
+    if (isLinkStyleDrop) return;
+    if (storedMediaBucket && storedMediaPath) return;
+    const candidate = announcementMediaUrl || previewImage || "";
+    const m = candidate.match(
+      /\/storage\/v1\/object\/(?:public|sign|authenticated)\/([^/]+)\/([^?]+)/
+    );
+    if (!m) return;
+    const bucket = decodeURIComponent(m[1]);
+    const path = decodeURIComponent(m[2]);
+    let cancelled = false;
+    void (async () => {
+      try {
+        const url = await getDropSignedUrl(bucket, path, 60 * 45);
+        if (!cancelled && url) setSignedPreviewImage(url);
+        else if (!cancelled && candidate) setSignedPreviewImage(candidate);
+      } catch {
+        if (!cancelled && candidate) setSignedPreviewImage(candidate);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [announcementMediaUrl, previewImage, storedMediaBucket, storedMediaPath, isLinkStyleDrop]);
 
   useEffect(() => {
     let cancelled = false;
@@ -788,12 +1152,37 @@ export default function ActivityCard({
       preview?.type
     );
 
-    if (explicitDropKind) return formatDropKindLabel(explicitDropKind);
+    const normalized = normalizeBoardDropType(explicitDropKind);
+    if (normalized) return formatDropKindLabel(normalized);
+
+    const priceHint =
+      typeof meta?.priceCents === "number"
+        ? meta.priceCents
+        : typeof preview?.priceCents === "number"
+          ? preview.priceCents
+          : 0;
+    if (priceHint > 0) return formatDropKindLabel("Pay");
 
     const k = String((item as any)?.kind || (item as any)?.type || "drop");
     return formatDropKindLabel(k);
   }, [item, meta, preview]);
   const badgeLabel = metaString(meta?.badgeLabel, preview?.badgeLabel);
+  const secondaryMetaLabel = useMemo(() => secondaryAttachmentLabelFromMeta(meta), [meta]);
+  const previewKindLabel = secondaryMetaLabel || kindLabel;
+  const activityMediaKind = useMemo(() => resolveDropMediaKindFromMeta(meta), [meta]);
+  const normalizedDropType = useMemo(
+    () => normalizeBoardDropType(metaString(meta?.dropType, meta?.drop_flavor, preview?.dropType)),
+    [meta, preview]
+  );
+  const isThoughtDrop =
+    feedDropType.includes("thought") || normalizedDropType === "Thought";
+  const isBoardVisionDrop =
+    feedDropType.includes("media") ||
+    feedDropType.includes("vision") ||
+    normalizedDropType === "Media";
+  const isBoardStorageMedia =
+    !!(storedMediaBucket && storedMediaPath) ||
+    !!(href && parseBoardStorageFromUrl(href));
 
   const payDropId = metaString(meta?.dropId, preview?.dropId, id);
   const payProvider = metaString(meta?.payProvider, preview?.payProvider);
@@ -808,15 +1197,53 @@ export default function ActivityCard({
     payProvider === "authorize_net_accept_hosted" ||
     payProvider === "payment_link" ||
     priceCents > 0;
+  const preferNativeAudioPreview =
+    !showFullSongPlayer &&
+    mediaKind === "audio" &&
+    (isThoughtDrop || isPayDrop || isBoardStorageMedia || isStoredAudioDrop);
+  const preferNativeImagePreview =
+    !isLinkStyleDrop &&
+    !isMusicDrop &&
+    !!resolvedPreviewImage &&
+    !isStoredVideoDrop &&
+    !showFullSongPlayer &&
+    !preferNativeAudioPreview &&
+    (activityMediaKind === "image" ||
+      isThoughtDrop ||
+      isBoardVisionDrop ||
+      (isPayDrop && activityMediaKind !== "video" && activityMediaKind !== "audio") ||
+      (isBoardStorageMedia &&
+        isBoardImageUrl(resolvedPreviewImage || href || dropMediaUrl || "")));
+  const showCapturedOnMediaOverlay =
+    Boolean(badgeLabel) && preferNativeImagePreview && Boolean(resolvedPreviewImage);
+  const preferNativeBoardMedia = preferNativeImagePreview || preferNativeAudioPreview;
   const priceLabel = formatPriceFromCents(priceCents);
 
-  const embed = useMemo(() => computeEmbed(href), [href]);
-  const studioMediaUrl =
-    resolvedPreviewImage ||
-    (embed.kind === "image" || embed.kind === "video" ? embed.url : "");
-  const studioMediaKind: "image" | "video" =
-    isStoredVideoDrop || embed.kind === "video" ? "video" : "image";
-  const canOpenStudio = isCurrentUserDrop && Boolean(studioMediaUrl);
+  // The feed item's `href` (and thus the embedded media URL) is baked when the
+  // drop is created, so an edit never reaches it. When we've resolved the drop's
+  // CURRENT media from the canonical store (mediaImageOverride), use that as the
+  // embedded media so edits — drawings, replaced photo/video — show in the feed.
+  const embed = useMemo(
+    () =>
+      resolveActivityEmbed({
+        streamHref: href,
+        bakedEmbedUrl,
+        mediaImageOverride,
+        mediaKindOverride,
+        isMusicDrop,
+        isUploadedMusic: isUploadedMusicDrop,
+        allowMediaOverride: !isLinkStyleDrop && !isMusicDrop,
+      }),
+    [
+      href,
+      bakedEmbedUrl,
+      mediaImageOverride,
+      mediaKindOverride,
+      isMusicDrop,
+      isUploadedMusicDrop,
+      isLinkStyleDrop,
+    ]
+  );
   const external = href ? isExternalHref(href) : false;
 
   // Host + favicon for the universal link-drop cover (shown when a link has no
@@ -870,20 +1297,97 @@ export default function ActivityCard({
     isPayDrop,
     mediaKind,
   ]);
-  const attachmentLabel =
-    embed.kind === "spotify"
-      ? "Play full track in Spotify"
-      : embed.kind === "apple_music"
-        ? "Open in Apple Music"
-        : "Open attachment";
-  const compactSpotify = !!compact && embed.kind === "spotify";
+  // Show embed unless user forces fallback or embed fails. Uploaded music uses
+  // the full-song player — never a streaming preview embed (Spotify, etc.).
+  const showEmbed =
+    !!embed.url &&
+    !embedFailed &&
+    embed.kind !== "none" &&
+    !showFullSongPlayer &&
+    !(isMusicDropType(musicDropType) && musicHydrating);
 
-  // Show embed unless user forces fallback or embed fails
-  const showEmbed = !!embed.url && !embedFailed && embed.kind !== "none";
+  const fromDescript =
+    meta?.fromDescript === true || canonicalBoardDrop?.fromDescript === true;
+  const descriptMeta = useMemo(
+    () => ({
+      ...(meta ?? {}),
+      dropType:
+        meta?.dropType ??
+        meta?.drop_flavor ??
+        (canonicalBoardDrop?.type ? String(canonicalBoardDrop.type) : undefined),
+      thoughtText: metaString(meta?.thoughtText, canonicalBoardDrop?.thoughtText),
+      description: metaString(meta?.description, canonicalBoardDrop?.description),
+      fromDescript: fromDescript ? true : undefined,
+    }),
+    [meta, canonicalBoardDrop, fromDescript]
+  );
+  const descriptMediaChip = useMemo(
+    () =>
+      shouldShowDescriptMediaChip({
+        meta: descriptMeta,
+        body,
+        fromDescript,
+        hasVisualMedia: Boolean(
+          showEmbed ||
+            resolvedPreviewImage ||
+            isStoredVideoDrop ||
+            showFullSongPlayer ||
+            preferNativeAudioPreview
+        ),
+      }),
+    [
+      descriptMeta,
+      body,
+      fromDescript,
+      showEmbed,
+      resolvedPreviewImage,
+      isStoredVideoDrop,
+      showFullSongPlayer,
+      preferNativeAudioPreview,
+    ]
+  );
+  const showDescriptMediaChip = descriptMediaChip.show;
+  const descriptChipText = descriptMediaChip.text;
+  const resolvedDescriptionText = useMemo(
+    () => resolveDescriptChipText(descriptMeta, body),
+    [descriptMeta, body]
+  );
+  const showBodyText = Boolean(
+    resolvedDescriptionText &&
+      (!showDescriptMediaChip ||
+        resolvedDescriptionText.trim() !== descriptChipText.trim())
+  );
+  const bodyPlain = showBodyText ? resolvedDescriptionText : "";
 
   function signal(folder: "pass" | "pin" | "push") {
     if (!id) return;
     const currentUser = readLocalProfileIdentity();
+    const alreadySelected = (readBrain()[folder] ?? []).some(
+      (entry) => String(entry.activityId) === id
+    );
+
+    if (alreadySelected) {
+      withdrawFromBrain(folder, id);
+      setSelectedReactions((prev) => ({ ...prev, [folder]: false }));
+
+      if (folder === "push") {
+        const userId = currentUserKey(currentUser);
+        const originalDropId = pushedRootId(item, meta);
+        removeLocalActivity((activity) => {
+          const activityMeta =
+            activity.meta && typeof activity.meta === "object" ? activity.meta : null;
+          return (
+            Boolean(activityMeta?.isPushed) &&
+            String(activityMeta?.originalDropId || "") === originalDropId &&
+            String(activityMeta?.pushedByUserId || "") === userId
+          );
+        });
+      }
+
+      const word = folder === "pass" ? "PASS" : folder === "pin" ? "PIN" : "PUSH";
+      flashToast(`${word} retracted`, 900);
+      return;
+    }
 
     window.dispatchEvent(
       new CustomEvent(EVT_DEPOSIT, {
@@ -891,13 +1395,26 @@ export default function ActivityCard({
       })
     );
 
-    setSelectedReaction(folder);
+    setSelectedReactions((prev) => ({ ...prev, [folder]: true }));
 
     if (folder === "push") {
       // Amplify the signal: fire the sonar burst regardless of dedupe so the
-      // gesture always feels alive.
+      // gesture always feels alive. Portal to document.body so rings escape
+      // column dividers and stack above the whole board.
+      const rect = cardRef.current?.getBoundingClientRect();
+      if (rect) {
+        const span = Math.max(rect.width, rect.height, 220);
+        setBurstAnchor({
+          cx: rect.left + rect.width / 2,
+          cy: rect.top + rect.height / 2,
+          span,
+        });
+      }
       setAmplifyBurst(true);
-      window.setTimeout(() => setAmplifyBurst(false), 1100);
+      window.setTimeout(() => {
+        setAmplifyBurst(false);
+        setBurstAnchor(null);
+      }, 1200);
 
       const userId = currentUserKey(currentUser);
       const originalDropId = pushedRootId(item, meta);
@@ -924,13 +1441,8 @@ export default function ActivityCard({
       }
     }
 
-    if (openBucketOnSignal) {
-      window.dispatchEvent(new CustomEvent(EVT_OPEN, { detail: { folder } }));
-    }
-
     const word = folder === "pass" ? "PASS" : folder === "pin" ? "PIN" : "PUSH";
-    setToast(folder === "push" ? "Signal amplified" : `${word} saved to Bucket`);
-    window.setTimeout(() => setToast(null), 1200);
+    flashToast(folder === "push" ? "Signal amplified" : `${word} saved to Bucket`, 1200);
   }
 
   async function openPayCheckout() {
@@ -968,7 +1480,7 @@ export default function ActivityCard({
   }
 
   async function removeDropFromBoard() {
-    if (!id || !isCurrentUserDrop) return;
+    if (!id || !canManageDrop) return;
     if (isRemovingDrop) return;
     if (!window.confirm("Remove this drop from your Board?")) return;
 
@@ -977,9 +1489,8 @@ export default function ActivityCard({
       await performDropRemoval();
     } catch (error) {
       console.error("Failed to remove drop from Board:", error);
-      if (typeof setToast === "function") {
-        setToast("Couldn't remove this drop. Try again.");
-        window.setTimeout(() => setToast(null), 1800);
+      if (typeof flashToast === "function") {
+        flashToast("Couldn't remove this drop. Try again.", 1800);
       }
     } finally {
       setIsRemovingDrop(false);
@@ -989,66 +1500,54 @@ export default function ActivityCard({
   async function performDropRemoval() {
     if (!id) return;
     const dropId = metaString(meta?.dropId, meta?.originalDropId, id);
-    let authUserId = currentAuthUserId || null;
+    const purgeIds = Array.from(new Set([id, dropId].filter(Boolean)));
+    const ownerId = authorUserId || currentAuthUserId;
 
-    if (!authUserId) {
-      try {
-        const sb = supabaseBrowser();
-        const { data: auth } = await sb.auth.getUser();
-        authUserId = auth?.user?.id ?? null;
-      } catch {}
+    for (const purgeId of purgeIds) {
+      rememberDeletedDropId(purgeId, ownerId);
     }
 
-    await removeDropFromBoardStore(dropId, [id], authUserId);
-    removeLocalActivity((activity) => {
-      const activityMeta =
-        activity.meta && typeof activity.meta === "object"
-          ? (activity.meta as Record<string, any>)
-          : null;
-      return (
-        activity.id === id ||
-        activity.id === dropId ||
-        metaString(activityMeta?.dropId, activityMeta?.originalDropId) === dropId
-      );
-    });
-    removeUniversalDrops(
-      (drop) =>
-        drop.id === id ||
-        drop.id === dropId ||
-        metaString(drop.meta?.activityId, drop.meta?.dropId) === id ||
-        metaString(drop.meta?.activityId, drop.meta?.dropId) === dropId
+    removeLocalActivity(
+      (activity) =>
+        purgeIds.includes(activity.id) || activityMatchesDropId(activity, dropId)
     );
+    removeUniversalDrops((drop) => purgeIds.includes(drop.id));
     removeFeedDrops((drop) => {
       const feedMeta = drop.meta && typeof drop.meta === "object" ? drop.meta : null;
       return (
-        drop.id === id ||
-        drop.id === dropId ||
-        metaString(feedMeta?.activityId, feedMeta?.dropId) === id ||
-        metaString(feedMeta?.activityId, feedMeta?.dropId) === dropId
+        purgeIds.includes(drop.id) ||
+        purgeIds.includes(metaString(feedMeta?.activityId, feedMeta?.dropId))
       );
     });
 
+    onRemove?.(id, dropId);
+    window.dispatchEvent(
+      new CustomEvent("board:drop:removed", { detail: { id, dropId, purgeIds } })
+    );
+    flashToast("Drop removed", 1200);
+
+    void removeDropFromBoardStore(dropId, purgeIds, ownerId);
+    void purgeRemoteActivityRows(purgeIds);
+  }
+
+  async function purgeRemoteActivityRows(purgeIds: string[]) {
     try {
       const sb = supabaseBrowser();
-      if (authUserId && authorUserId === authUserId) {
-        await Promise.all([
-          sb.from("board_activity").delete().eq("id", id).eq("user_id", authUserId),
-          sb
-            .from("board_activity")
-            .delete()
-            .eq("user_id", authUserId)
-            .eq("meta->>dropId", dropId),
-        ]);
+      const authResult = await Promise.race([
+        sb.auth.getUser(),
+        new Promise<{ data: { user: null } }>((resolve) =>
+          window.setTimeout(() => resolve({ data: { user: null } }), 4000)
+        ),
+      ]);
+      const authUserId = authResult?.data?.user?.id;
+      if (!authUserId || authorUserId !== authUserId) return;
+
+      for (const rowId of purgeIds) {
+        await sb.from("board_activity").delete().eq("id", rowId).eq("user_id", authUserId);
       }
     } catch {
-      // Board remains local-first; remote deletion can retry later when Supabase is reachable.
+      // Local-first: deleted ids are remembered; remote rows can be retried later.
     }
-
-    window.dispatchEvent(new CustomEvent("board:drop:removed", { detail: { id, dropId } }));
-    window.dispatchEvent(new CustomEvent(BOARD_STORE_EVENTS.feedUpdated));
-    onRemove?.(id);
-    setToast("Drop removed");
-    window.setTimeout(() => setToast(null), 1200);
   }
 
   function clampPan(value: number) {
@@ -1083,48 +1582,97 @@ export default function ActivityCard({
     }
   }
 
+  const reactionAura = userAuraColor || fallbackAuraColor;
+  const amplifyPortal =
+    amplifyBurst &&
+    burstAnchor &&
+    typeof document !== "undefined"
+      ? createPortal(
+          <div
+            className="amplifyRingsPortal"
+            style={{
+              left: burstAnchor.cx - (burstAnchor.span * 2.2) / 2,
+              top: burstAnchor.cy - (burstAnchor.span * 2.2) / 2,
+              width: burstAnchor.span * 2.2,
+              height: burstAnchor.span * 2.2,
+            }}
+            aria-hidden
+          >
+            <div
+              className="amplifyRings"
+              style={
+                {
+                  "--reaction-aura": reactionAura,
+                } as React.CSSProperties
+              }
+            >
+              <span />
+              <span />
+              <span />
+            </div>
+          </div>,
+          document.body
+        )
+      : null;
+
   return (
+    <>
     <div
+      ref={cardRef}
       className={clsx(
         "card",
         compact && "compact",
-        compactSpotify && "compactSpotify",
         item?.kind === "announcement" && "announcementDrop",
         isPushed && "pushedDrop",
-        dropHidden && "dropHidden"
+        isPayDrop && "payDropCard",
+        dropVisibility === "private" && item?.kind === "board_drop" && "privateDropCard",
+        amplifyBurst && "cardAmplifying"
       )}
       style={
         {
           "--author-glow": authorGlow,
-          "--author-aura-power": String(authorAuraPower),
-          "--reaction-aura": userAuraColor || fallbackAuraColor,
+          "--author-aura-power": String(displayAuraPower),
+          "--reaction-aura": reactionAura,
         } as React.CSSProperties
       }
     >
-      {amplifyBurst ? (
-        <div className="amplifyRings" aria-hidden>
-          <span />
-          <span />
-        </div>
-      ) : null}
       {isPushed ? <div className="pushedByLabel">⚡ Amplified by {pushedByName}</div> : null}
       <div className="head">
         <div className="headCopy">
+          {/* Row 1: drop-type badge on the left, secondary media label across on the right. */}
           <div className="metaRow">
             <RemovableDropBadge
               label={kindLabel}
-              canRemove={isCurrentUserDrop}
+              canRemove={canManageDrop}
               onRemove={removeDropFromBoard}
               isRemoving={isRemovingDrop}
             />
             {announcementVibeLabel ? (
               <span className="metaBadge vibeBadge">{announcementVibeLabel}</span>
             ) : null}
-            {badgeLabel ? <span className="metaBadge">{badgeLabel}</span> : null}
+            {badgeLabel && !showCapturedOnMediaOverlay ? (
+              <span className="metaBadge">{badgeLabel}</span>
+            ) : null}
             {isPayDrop && priceLabel ? <span className="metaBadge">{priceLabel}</span> : null}
-            {timeLabel ? <span className="metaBadge timeBadge">{timeLabel}</span> : null}
+            {canonicalBoardDrop?.draftCount ? (
+              <span className="metaBadge draftBadge" title="Drafts saved in Drop Studio">
+                🗂 {canonicalBoardDrop.draftCount}
+              </span>
+            ) : null}
+            {secondaryMetaLabel ? (
+              <span className="metaBadge studioSubBadge metaSecondary">{secondaryMetaLabel}</span>
+            ) : null}
           </div>
-          <div className="title">{title}</div>
+
+          {timeLabel ? (
+            <div className="metaRow2">
+              <span className="metaBadge timeBadge">{timeLabel}</span>
+            </div>
+          ) : null}
+
+          <div className="title">
+            <RichText as="span" value={titleRich} plain={title} />
+          </div>
         </div>
 
         <div className="authorMark" aria-label={`Drop by ${authorHandle || authorName}`}>
@@ -1148,104 +1696,17 @@ export default function ActivityCard({
         </div>
       </div>
 
-      {body ? <div className="body">{body}</div> : null}
-
-      {isCurrentUserDrop ? (
-        <div className="ownerTools" aria-label="Drop owner controls">
-          {canOpenStudio ? (
-            <button
-              type="button"
-              className="ownerToolBtn studioBtn"
-              onClick={() => {
-                const rawType = String(
-                  meta?.drop_flavor ?? meta?.dropFlavor ?? meta?.dropType ?? "media"
-                ).toLowerCase();
-                const type = rawType.includes("thought")
-                  ? "Thought"
-                  : rawType.includes("pay")
-                    ? "Pay"
-                    : rawType.includes("music") || rawType.includes("audio")
-                      ? "Music"
-                      : rawType.includes("doc")
-                        ? "Doc"
-                        : rawType.includes("youtube")
-                          ? "YouTube"
-                          : rawType.includes("news")
-                            ? "News"
-                            : rawType.includes("link")
-                              ? "Link"
-                              : "Media";
-                const dropId = metaString(meta?.dropId, meta?.originalDropId, id);
-                window.dispatchEvent(
-                  new CustomEvent("board:drop:studio", {
-                    detail: {
-                      dropId,
-                      drop: {
-                        id: dropId,
-                        title,
-                        type,
-                        createdAt: Date.parse(item?.created_at ?? "") || Date.now(),
-                        description: body || undefined,
-                        mediaUrl: studioMediaUrl || undefined,
-                        mediaKind: studioMediaKind,
-                        bucket: metaString(meta?.bucket, preview?.bucket) || undefined,
-                        storagePath:
-                          metaString(meta?.storagePath, preview?.storagePath) || undefined,
-                        fileName: metaString(meta?.fileName, preview?.fileName) || undefined,
-                        mime: metaString(meta?.mime, preview?.mime) || undefined,
-                        customizations: dropCustomizations,
-                        editSource: item?.kind === "announcement" ? "announcement" : "board_drop",
-                      },
-                    },
-                  })
-                );
-              }}
-            >
-              <SlidersHorizontal size={16} strokeWidth={2.5} aria-hidden />
-              Drop Studio Editor
-            </button>
-          ) : null}
-          <button
-            type="button"
-            className={clsx("ownerToolBtn visibilityBtn", dropHidden && "active")}
-            onClick={() => setDropHidden((hidden) => !hidden)}
-            aria-pressed={dropHidden}
-            aria-label={dropHidden ? "Show entire drop" : "Hide entire drop"}
-            title={dropHidden ? "Show Drop" : "Hide Drop"}
-          >
-            {dropHidden ? (
-              <EyeOff size={18} strokeWidth={2.5} aria-hidden />
-            ) : (
-              <Eye size={18} strokeWidth={2.5} aria-hidden />
-            )}
-            <span className="srOnly">{dropHidden ? "Show Drop" : "Hide Drop"}</span>
-          </button>
-        </div>
-      ) : null}
-
-      {isPayDrop ? (
-        <div className="dropActions" aria-label="Pay Drop actions">
-          <button
-            type="button"
-            className="checkoutBtn"
-            onClick={openPayCheckout}
-            disabled={payCheckoutBusy}
-          >
-            {payCheckoutBusy ? "Opening..." : "Checkout ->"}
-          </button>
-        </div>
-      ) : null}
-
       {/* ✅ EMBED (now media-aware) */}
       {showEmbed ? (
-        <div className={clsx("embed", embed.kind)}>
+        <div className={clsx("embed", embed.kind, feedMediaFrameClass)}>
           {embed.kind === "image" && (
-            <div className="mediaFrame imageMediaFrame">
+            <div className="mediaFrame">
               <img
                 src={embed.url}
                 alt={title || "Vision drop"}
                 className="img"
                 loading="lazy"
+                onLoad={(e) => tagMediaFrame(e.currentTarget)}
                 onError={() => setEmbedFailed(true)}
               />
               <DropStudioOverlay customizations={dropCustomizations} />
@@ -1254,11 +1715,11 @@ export default function ActivityCard({
 
           {embed.kind === "video" && (
             <div className="mediaFrame">
-              <video
+              <FeedVideo
                 className="vid"
                 src={embed.url}
-                controls
-                playsInline
+                style={feedMediaRotationStyle}
+                onLoadedMetadata={(e) => tagMediaFrame(e.currentTarget)}
                 onError={() => setEmbedFailed(true)}
               />
               <DropStudioOverlay customizations={dropCustomizations} />
@@ -1291,35 +1752,9 @@ export default function ActivityCard({
             />
           )}
 
-          <div className="embedFoot">
-            {href ? (
-              <a
-                className="embedLink"
-                href={href}
-                target={external ? "_blank" : undefined}
-                rel={external ? "noreferrer" : undefined}
-              >
-                {attachmentLabel}
-              </a>
-            ) : (
-              <span className="embedLink dim">No attachment</span>
-            )}
-
-            {href ? (
-              <button
-                type="button"
-                className="embedFallback"
-                onClick={() => setEmbedFailed(true)}
-                title="If the embed is blocked, switch to link view"
-              >
-                Embed blocked? Show link
-              </button>
-            ) : null}
-          </div>
-
           {embed.kind === "spotify" ? (
             <div className="embedNote">
-              Spotify’s web embed may play a preview clip in some browser sessions. Use the link above for full playback in Spotify.
+              Streaming embeds may play a preview clip. Upload the audio file as a Music Drop for full in-Board playback.
             </div>
           ) : null}
         </div>
@@ -1330,7 +1765,7 @@ export default function ActivityCard({
           className={clsx("activityImagePreview announcementMedia", announcementDrag && "dragging")}
           style={
             {
-              "--announcement-image": `url("${resolvedPreviewImage.replace(/"/g, '\\"')}")`,
+              "--announcement-image": `url("${announcementDisplayImage.replace(/"/g, '\\"')}")`,
             } as React.CSSProperties
           }
           onPointerDown={startAnnouncementDrag}
@@ -1342,10 +1777,16 @@ export default function ActivityCard({
         >
           <img
             className="activityImage"
-            src={resolvedPreviewImage}
+            src={announcementDisplayImage}
             alt={title || "Announcement image"}
             loading="lazy"
             draggable={false}
+            onError={() => {
+              const override = ANNOUNCEMENT_JPEG_OVERRIDES[id];
+              if (override && announcementImageSrc !== override) {
+                setAnnouncementImageSrc(override);
+              }
+            }}
             style={{
               objectPosition: `${announcementImagePosition.x}% ${announcementImagePosition.y}%`,
             }}
@@ -1359,18 +1800,24 @@ export default function ActivityCard({
       resolvedPreviewImage &&
       !isPayDrop &&
       !isStoredVideoDrop &&
-      !isStoredAudioDrop ? (
+      !showFullSongPlayer &&
+      !preferNativeBoardMedia ? (
         <a
-          className="linkPreview"
+          className={clsx("linkPreview", feedMediaFrameClass)}
           href={href}
           target={external ? "_blank" : undefined}
           rel={external ? "noreferrer" : undefined}
         >
           <div className="linkPreviewArt">
+            {secondaryMetaLabel ? (
+              <div className="linkCoverHostChip">
+                <span>{secondaryMetaLabel}</span>
+              </div>
+            ) : null}
             <img className="linkPreviewImg" src={resolvedPreviewImage} alt="" loading="lazy" />
             <div className="linkPreviewShade" />
             <div className="linkPreviewCopy">
-              <div className="linkPreviewLabel">{kindLabel}</div>
+              <div className="linkPreviewLabel">{previewKindLabel}</div>
               <div className="linkPreviewTitle">{previewTitle}</div>
               {previewDescription ? (
                 <div className="linkPreviewDesc">{previewDescription}</div>
@@ -1381,44 +1828,66 @@ export default function ActivityCard({
       ) : null}
 
       {!showEmbed && isStoredVideoDrop ? (
-        <div className="mediaFrame storedVideoFrame">
-          <video
+        <div className={clsx("mediaFrame storedVideoFrame", feedMediaFrameClass)}>
+          <FeedVideo
             className="vid"
-            src={signedPreviewImage}
-            controls
-            playsInline
-            preload="metadata"
+            src={storedVideoSrc}
+            style={feedMediaRotationStyle}
+            onLoadedMetadata={(e) => tagMediaFrame(e.currentTarget)}
             onError={() => setEmbedFailed(true)}
           />
           <DropStudioOverlay customizations={dropCustomizations} />
         </div>
       ) : null}
 
-      {!showEmbed && isStoredAudioDrop ? (
+      {!showEmbed &&
+      preferNativeAudioPreview &&
+      !showFullSongPlayer &&
+      storedAudioSrc ? (
         <div className="mediaFrame storedAudioFrame">
-          <div className="audioLabel">Full song</div>
-          <audio
-            className="aud"
-            src={signedPreviewImage}
-            controls
-            preload="metadata"
-            onError={() => setEmbedFailed(true)}
-          />
+          <div className="audioLabel">
+            {secondaryMetaLabel?.toUpperCase() || (isThoughtDrop ? "Vocal" : isPayDrop ? "Audio" : "Full song")}
+          </div>
+          <AudioDropPlayer src={storedAudioSrc} onError={() => setEmbedFailed(true)} />
+        </div>
+      ) : null}
+
+      {!showEmbed && showFullSongPlayer ? (
+        <div className="mediaFrame storedAudioFrame">
+          <div className="audioLabel">
+            {secondaryMetaLabel?.toUpperCase() || (isPayDrop ? "Audio" : "Full song")}
+          </div>
+          {storedAudioSrc ? (
+            <AudioDropPlayer src={storedAudioSrc} onError={() => setEmbedFailed(true)} />
+          ) : (
+            <div className="audioLoading">Loading full song…</div>
+          )}
         </div>
       ) : null}
 
       {!showEmbed &&
       resolvedPreviewImage &&
       !showAnnouncementImage &&
-      (!href || isPayDrop) &&
       !isStoredVideoDrop &&
-      !isStoredAudioDrop ? (
-        <div className="activityImagePreview">
+      !showFullSongPlayer &&
+      preferNativeImagePreview ? (
+        <div className={clsx("activityImagePreview", feedMediaFrameClass)}>
+          {secondaryMetaLabel || showCapturedOnMediaOverlay ? (
+            <div className="media-overlay-badges">
+              {secondaryMetaLabel ? (
+                <span className="activityMediaChip">{secondaryMetaLabel}</span>
+              ) : null}
+              {showCapturedOnMediaOverlay ? (
+                <span className="media-captured-badge">{badgeLabel}</span>
+              ) : null}
+            </div>
+          ) : null}
           <img
             className="activityImage"
             src={resolvedPreviewImage}
             alt={title || "Board drop image"}
             loading="lazy"
+            onLoad={(e) => tagMediaFrame(e.currentTarget)}
           />
           <DropStudioOverlay customizations={dropCustomizations} />
         </div>
@@ -1432,9 +1901,9 @@ export default function ActivityCard({
       !resolvedPreviewImage &&
       !isPayDrop &&
       !isStoredVideoDrop &&
-      !isStoredAudioDrop ? (
+      !showFullSongPlayer ? (
         <a
-          className="linkPreview linkCoverFallback"
+          className={clsx("linkPreview linkCoverFallback", feedMediaFrameClass)}
           href={href}
           target="_blank"
           rel="noreferrer"
@@ -1452,22 +1921,13 @@ export default function ActivityCard({
               />
             ) : null}
             <div className="linkPreviewShade" />
-            <div className="linkCoverHostChip">
-              {coverFavicon ? (
-                <img
-                  className="linkCoverFav"
-                  src={coverFavicon}
-                  alt=""
-                  loading="lazy"
-                  onError={(e) => {
-                    (e.currentTarget as HTMLImageElement).style.display = "none";
-                  }}
-                />
-              ) : null}
-              <span>{coverHost || "LINK"}</span>
-            </div>
+            {secondaryMetaLabel ? (
+              <div className="linkCoverHostChip">
+                <span>{secondaryMetaLabel}</span>
+              </div>
+            ) : null}
             <div className="linkPreviewCopy">
-              <div className="linkPreviewLabel">{kindLabel}</div>
+              <div className="linkPreviewLabel">{previewKindLabel}</div>
               <div className="linkPreviewTitle">{previewTitle}</div>
               {previewDescription ? (
                 <div className="linkPreviewDesc">{previewDescription}</div>
@@ -1486,974 +1946,149 @@ export default function ActivityCard({
         </a>
       ) : null}
 
-      {/* ✅ Reaction rail stays in card */}
+      {!showEmbed && showDescriptMediaChip ? (
+        <div className="activityDescriptChip" aria-label="Descript document preview">
+          {title ? <div className="activityDescriptChipTitle">{title}</div> : null}
+          <div className="activityDescriptChipBody">{descriptChipText}</div>
+        </div>
+      ) : null}
+
+      {/* Description sits directly under the media attachment. */}
+      {showBodyText ? (
+        <div className="body">
+          <RichText as="span" value={descRich} plain={bodyPlain} />
+        </div>
+      ) : null}
+
+      {isPayDrop ? (
+        <PayOnBoardButton busy={payCheckoutBusy} onClick={() => void openPayCheckout()} />
+      ) : null}
+
+      {/* Reaction rail: PASS · PIN · PUSH, then Drop Studio tools (matches Board Drop Collection) */}
       <div className="rail" aria-label="Reaction rail">
-        <button
-          type="button"
-          className={clsx("rbtn pass", selectedReaction === "pass" && "selected")}
-          onClick={() => signal("pass")}
-          title="PASS (acknowledge)"
-        >
-          <span className="glyph" aria-hidden>
-            <PassGlyph />
-          </span>
-          <span className="lbl">PASS</span>
-        </button>
+        <div className="railRow railRowTop">
+          <div className="railCluster" aria-label="Drop reactions">
+            <button
+              type="button"
+              className={clsx("rbtn pass", selectedReactions.pass && "selected")}
+              onClick={(event) => {
+                event.stopPropagation();
+                signal("pass");
+              }}
+              title="PASS (acknowledge)"
+              aria-label="Pass"
+            >
+              <span className="glyph" aria-hidden>
+                <PassGlyph />
+              </span>
+            </button>
 
-        <button
-          type="button"
-          className={clsx("rbtn pin", selectedReaction === "pin" && "selected")}
-          onClick={() => signal("pin")}
-          title="PIN (save)"
-        >
-          <span className="glyph" aria-hidden>
-            <StarGlyph />
-          </span>
-          <span className="lbl">PIN</span>
-        </button>
+            <button
+              type="button"
+              className={clsx("rbtn pin", selectedReactions.pin && "selected")}
+              onClick={(event) => {
+                event.stopPropagation();
+                signal("pin");
+              }}
+              title="PIN (save)"
+              aria-label="Pin"
+            >
+              <span className="glyph" aria-hidden>
+                <StarGlyph />
+              </span>
+            </button>
 
-        <button
-          type="button"
-          className={clsx("rbtn push", selectedReaction === "push" && "selected")}
-          onClick={() => signal("push")}
-          title="PUSH (boost)"
-        >
-          <span className="glyph" aria-hidden>
-            <ArrowGlyph />
-          </span>
-          <span className="lbl">PUSH</span>
-        </button>
+            <button
+              type="button"
+              className={clsx("rbtn push", selectedReactions.push && "selected")}
+              onClick={(event) => {
+                event.stopPropagation();
+                signal("push");
+              }}
+              title="PUSH (boost)"
+              aria-label="Push"
+            >
+              <span className="glyph" aria-hidden>
+                <ArrowGlyph />
+              </span>
+            </button>
+          </div>
+        </div>
 
-        <button
-          type="button"
-          className="rbtn comments"
-          onClick={() => setCommentsOpen(true)}
-          title="Comment"
-        >
-          <span className="glyph" aria-hidden>
-            <CommentGlyph />
-          </span>
-          <span className="lbl">Comment{commentCount ? ` ${commentCount}` : ""}</span>
-        </button>
+        <div className="activityDropActionStack">
+          <button
+            type="button"
+            className="rbtn activityDropComment"
+            onClick={() => setCommentsOpen(true)}
+            title="Comment"
+          >
+            <span className="lbl">
+              Comment{commentCount ? ` ${commentCount}` : ""}
+            </span>
+          </button>
 
+          {canManageDrop ? (
+            <div className="activityDropToolsSlot">
+              {item?.kind === "board_drop" ? (
+                <button
+                  type="button"
+                  className={`visEye activityDropEye vis-${dropVisibility}`}
+                  onClick={() => void toggleDropVisibility()}
+                  aria-pressed={dropVisibility === "private"}
+                  aria-label={`${
+                    dropVisibility === "public" ? "Public" : "Private"
+                  } drop — tap to toggle`}
+                  title={`${
+                    dropVisibility === "public" ? "Public" : "Private"
+                  } — tap to toggle`}
+                >
+                  <EyeToggle open={dropVisibility === "public"} />
+                </button>
+              ) : null}
+
+              <button
+                type="button"
+                className="drop-studio-editor-btn activityDropStudio"
+                onClick={openDropStudioEditor}
+                title="Edit this drop in Drop Studio Editor"
+              >
+                <span className="drop-studio-editor-glyph" aria-hidden>
+                  🎬
+                </span>
+                <span className="drop-studio-editor-lbl">
+                  Drop Studio<span className="dse-word-editor">&nbsp;Editor</span>
+                </span>
+              </button>
+            </div>
+          ) : null}
+        </div>
       </div>
 
       <DropCommentsDrawer
         open={commentsOpen}
         onClose={() => setCommentsOpen(false)}
-        dropId={id}
+        dropId={commentDropId}
         dropTitle={title}
       />
 
-      {toast ? <div className="toast">{toast}</div> : null}
+      {toast ? (
+        <div className={clsx("toast", !toastVisible && "toastOut")}>{toast}</div>
+      ) : null}
 
+      {/* Dynamic, compact-dependent values; static rules live in ActivityCard.css */}
       <style>{`
-        .card {
-          position: relative;
-          border-radius: 22px;
-          border: 1px solid rgba(0, 0, 0, 0.1);
-          background: rgba(255, 255, 255, 0.78);
-          box-shadow: 0 16px 40px rgba(0, 0, 0, 0.1);
-          padding: 12px;
-          overflow: hidden;
-          transition: background 180ms ease, border-color 180ms ease, box-shadow 180ms ease;
-        }
-
-        .card.dropHidden {
-          min-height: 104px;
-          display: flex;
-          flex-direction: column;
-          justify-content: space-between;
-          background:
-            radial-gradient(circle at 82% 18%, rgba(139, 92, 255, 0.14), transparent 34%),
-            linear-gradient(145deg, #11131a, #050609);
-          border-color: rgba(139, 92, 255, 0.34);
-          box-shadow:
-            inset 0 1px 0 rgba(255, 255, 255, 0.05),
-            0 16px 40px rgba(0, 0, 0, 0.3);
-        }
-
-        .card.dropHidden::before {
-          content: "Hidden Drop";
-          display: block;
-          color: rgba(220, 211, 255, 0.76);
-          font-size: 11px;
-          font-weight: 950;
-          letter-spacing: 0.18em;
-          text-transform: uppercase;
-        }
-
-        .card.dropHidden > :not(.ownerTools):not(.toast):not(style) {
-          display: none !important;
-        }
-
-        .card.dropHidden .ownerTools {
-          margin: 0;
-          justify-content: flex-end;
-        }
-
-        .announcementDrop {
-          padding-bottom: 0;
-        }
-
-        .announcementDrop .rail {
-          margin: 12px 0 12px;
-        }
-
-        .pushedDrop {
-          border: 1.5px solid rgba(255, 221, 87, 0.9);
-          box-shadow:
-            0 0 18px rgba(255, 221, 87, 0.22),
-            inset 0 0 18px rgba(255, 221, 87, 0.08),
-            0 16px 40px rgba(0, 0, 0, 0.1);
-        }
-
-        /* Signal amplification: a brief sonar burst in the user's aura when a
-           drop is Pushed — amplifying the signal rather than reposting it. */
-        .amplifyRings {
-          position: absolute;
-          inset: 0;
-          z-index: 4;
-          display: grid;
-          place-items: center;
-          pointer-events: none;
-        }
-        .amplifyRings span {
-          position: absolute;
-          width: 46px;
-          height: 46px;
-          border-radius: 999px;
-          border: 2px solid var(--reaction-aura, ${fallbackAuraColor});
-          opacity: 0;
-          animation: amplifyRing 1000ms cubic-bezier(0.22, 0.61, 0.36, 1) forwards;
-        }
-        .amplifyRings span:nth-child(2) {
-          animation-delay: 150ms;
-        }
-        @keyframes amplifyRing {
-          0% {
-            transform: scale(0.55);
-            opacity: 0.5;
-          }
-          100% {
-            transform: scale(9);
-            opacity: 0;
-          }
-        }
-        @media (prefers-reduced-motion: reduce) {
-          .amplifyRings span {
-            animation-duration: 1ms;
-          }
-        }
-
-        .pushedByLabel {
-          display: inline-flex;
-          width: fit-content;
-          margin-bottom: 0.55rem;
-          padding: 0.28rem 0.55rem;
-          border-radius: 999px;
-          font-size: 0.72rem;
-          font-weight: 950;
-          letter-spacing: 0.04em;
-          text-transform: uppercase;
-          color: rgba(255, 234, 146, 0.95);
-          background: rgba(255, 221, 87, 0.12);
-          border: 1px solid rgba(255, 221, 87, 0.32);
-          text-shadow: 0 0 10px rgba(255, 221, 87, 0.24);
-        }
-
-        .head {
-          display: flex;
-          align-items: flex-start;
-          justify-content: space-between;
-          gap: 14px;
-        }
-
-        .headCopy {
-          min-width: 0;
-          display: grid;
-          gap: 6px;
-          flex: 1 1 auto;
-        }
-
-        .metaRow {
-          display: flex;
-          align-items: center;
-          justify-content: flex-start;
-          gap: 8px;
-          flex-wrap: wrap;
-        }
-
-        .kind,
-        .metaBadge {
-          display: inline-flex;
-          align-items: center;
-          min-height: 24px;
-          border-radius: 999px;
-          border: 1px solid rgba(0, 0, 0, 0.1);
-          background: rgba(255, 255, 255, 0.74);
-          padding: 5px 9px;
-          font-size: 10px;
-          font-weight: 950;
-          letter-spacing: 0.14em;
-          text-transform: uppercase;
-          color: rgba(0, 140, 135, 0.95);
-        }
-
-        .metaBadge {
-          color: rgba(0, 0, 0, 0.58);
-          background: rgba(255, 255, 255, 0.64);
-          letter-spacing: 0.08em;
-        }
-
-        .timeBadge {
-          color: rgba(0, 0, 0, 0.52);
-        }
-
-        .vibeBadge {
-          color: rgba(48, 36, 10, 0.78);
-          background: rgba(255, 231, 128, 0.46);
-          border-color: rgba(255, 198, 64, 0.38);
-          letter-spacing: 0.06em;
-        }
-
-        .title {
-          font-size: 14px;
-          font-weight: 950;
-          color: rgba(0, 0, 0, 0.76);
-          letter-spacing: 0.02em;
-          overflow-wrap: anywhere;
-        }
-
-        .authorMark {
-          flex: 0 0 auto;
-          display: inline-flex;
-          align-items: center;
-          justify-content: flex-end;
-          gap: 9px;
-          max-width: 48%;
-          padding-top: 1px;
-        }
-
-        .authorHandle {
-          min-width: 0;
-          max-width: 126px;
-          overflow: hidden;
-          text-overflow: ellipsis;
-          white-space: nowrap;
-          border-radius: 999px;
-          padding: 6px 9px;
-          border: 1px solid color-mix(in srgb, var(--author-glow) 32%, rgba(0, 0, 0, 0.1));
-          background: rgba(255, 255, 255, 0.68);
-          color: rgba(0, 0, 0, 0.66);
-          font-size: 10px;
-          font-weight: 950;
-          letter-spacing: 0.04em;
-          box-shadow:
-            0 0 calc(10px + 12px * var(--author-aura-power)) color-mix(in srgb, var(--author-glow) 24%, transparent),
-            inset 0 1px 0 rgba(255, 255, 255, 0.72);
-        }
-
         .authorAvatarFrame {
           --avatar-size: ${compact ? "42px" : "50px"};
-          width: var(--avatar-size);
-          height: var(--avatar-size);
-          border-radius: 999px;
-          padding: 3px;
-          background:
-            radial-gradient(circle at 30% 18%, rgba(255, 255, 255, 0.9), transparent 28%),
-            color-mix(in srgb, var(--author-glow) 72%, rgba(255, 255, 255, 0.86));
-          border: 1px solid color-mix(in srgb, var(--author-glow) 45%, rgba(255, 255, 255, 0.76));
-          box-shadow:
-            0 0 calc(14px + 30px * var(--author-aura-power)) calc(1px + 5px * var(--author-aura-power)) color-mix(in srgb, var(--author-glow) 42%, transparent),
-            0 10px 22px rgba(0, 0, 0, 0.16),
-            inset 0 1px 0 rgba(255, 255, 255, 0.76);
         }
-
-        .authorAvatarInner {
-          width: 100%;
-          height: 100%;
-          border-radius: inherit;
-          overflow: hidden;
-          display: grid;
-          place-items: center;
-          background:
-            radial-gradient(circle at 40% 30%, rgba(255, 255, 255, 0.28), transparent 34%),
-            rgba(0, 0, 0, 0.84);
-          border: 1px solid rgba(255, 255, 255, 0.72);
-        }
-
-        .authorAvatarImg {
-          width: 100%;
-          height: 100%;
-          object-fit: cover;
-          display: block;
-        }
-
-        .authorAvatarFallback {
-          color: #fff;
-          font-size: 13px;
-          font-weight: 950;
-          letter-spacing: 0.08em;
-          text-shadow: 0 0 12px color-mix(in srgb, var(--author-glow) 72%, transparent);
-        }
-
-        .body {
-          margin-top: 8px;
-          font-size: 12px;
-          font-weight: 800;
-          color: rgba(0, 0, 0, 0.58);
-          white-space: pre-wrap;
-          line-height: 1.45;
-        }
-
-        .dropActions {
-          margin-top: 12px;
-          display: flex;
-          justify-content: flex-start;
-          align-items: center;
-          gap: 10px;
-          flex-wrap: wrap;
-        }
-
-        .ownerTools {
-          margin-top: 10px;
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          flex-wrap: nowrap;
-          max-width: 100%;
-        }
-
-        .ownerToolBtn {
-          min-height: 34px;
-          border-radius: 999px;
-          padding: 8px 12px;
-          border: 1px solid rgba(0, 0, 0, 0.11);
-          background: rgba(255, 255, 255, 0.78);
-          color: rgba(0, 0, 0, 0.68);
-          font-size: 10px;
-          font-weight: 950;
-          letter-spacing: 0.1em;
-          text-transform: uppercase;
-          cursor: pointer;
-          display: inline-flex;
-          align-items: center;
-          justify-content: center;
-          gap: 7px;
-        }
-
-        .studioBtn {
-          border-color: rgba(0, 166, 160, 0.3);
-          color: rgba(0, 124, 120, 0.95);
-          min-width: 0;
-          white-space: normal;
-        }
-
-        .visibilityBtn {
-          width: 38px;
-          min-width: 38px;
-          padding: 0;
-          color: rgba(0, 0, 0, 0.56);
-          transition: color 150ms ease, border-color 150ms ease, background 150ms ease, box-shadow 150ms ease;
-        }
-
-        .visibilityBtn:hover,
-        .visibilityBtn.active {
-          color: #8b5cff;
-          border-color: rgba(139, 92, 255, 0.62);
-          background: rgba(139, 92, 255, 0.14);
-          box-shadow: 0 0 18px rgba(139, 92, 255, 0.34);
-        }
-
-        .srOnly {
-          position: absolute;
-          width: 1px;
-          height: 1px;
-          padding: 0;
-          margin: -1px;
-          overflow: hidden;
-          clip: rect(0, 0, 0, 0);
-          white-space: nowrap;
-          border: 0;
-        }
-
-        .checkoutBtn {
-          min-height: 36px;
-          border-radius: 999px;
-          padding: 9px 14px;
-          border: 1px solid rgba(0, 0, 0, 0.1);
-          background: rgba(255, 255, 255, 0.88);
-          color: rgba(0, 0, 0, 0.68);
-          font-size: 11px;
-          font-weight: 950;
-          letter-spacing: 0.02em;
-          cursor: pointer;
-          box-shadow: 0 10px 24px rgba(0, 0, 0, 0.08);
-          transition: transform 140ms ease, filter 140ms ease;
-        }
-
-        .checkoutBtn:hover:not(:disabled) {
-          transform: translateY(-1px);
-          filter: brightness(1.02);
-        }
-
-        .checkoutBtn:disabled {
-          cursor: wait;
-          opacity: 0.68;
-        }
-
-        /* embed */
-        .embed {
-          margin-top: 12px;
-          border-radius: 18px;
-          overflow: hidden;
-          border: 1px solid rgba(0, 0, 0, 0.1);
-          background: rgba(0, 0, 0, 0.04);
-        }
-
-        iframe {
-          width: 100%;
-          height: 240px;
-          border: none;
-          display: block;
-          background: rgba(255, 255, 255, 0.06);
-        }
-
-        .embed.spotify iframe {
-          height: 160px;
-        }
-
-        .embed.apple_music iframe {
-          height: 175px;
-        }
-
-        .embed.image,
-        .embed.video,
-        .embed.audio {
-          width: fit-content;
-          max-width: 100%;
-          border: 0;
-          background: transparent;
-        }
-
-        .embed.audio {
-          width: 100%;
-        }
-
-        .linkPreview {
-          display: block;
-          margin-top: 12px;
-          overflow: hidden;
-          border-radius: 18px;
-          border: 1px solid rgba(0, 0, 0, 0.1);
-          background: rgba(0, 0, 0, 0.06);
-          text-decoration: none;
-        }
-
-        .linkPreviewArt {
-          position: relative;
-          min-height: ${compact ? "170px" : "230px"};
-          overflow: hidden;
-          background:
-            radial-gradient(circle at 18% 20%, rgba(255, 0, 190, 0.16), transparent 34%),
-            radial-gradient(circle at 80% 22%, rgba(0, 180, 255, 0.14), transparent 34%),
-            linear-gradient(135deg, rgba(24, 21, 15, 0.92), rgba(76, 66, 43, 0.9));
-        }
-
-        .linkPreviewImg {
-          position: absolute;
-          inset: 0;
-          width: 100%;
-          height: 100%;
-          object-fit: cover;
-          display: block;
-        }
-
-        .linkPreviewShade {
-          position: absolute;
-          inset: 0;
-          background: linear-gradient(180deg, rgba(0, 0, 0, 0.08), rgba(0, 0, 0, 0.78));
-        }
-
-        .linkPreviewCopy {
-          position: absolute;
-          left: 14px;
-          right: 14px;
-          bottom: 14px;
-          color: #fff;
-        }
-
-        .linkPreviewLabel {
-          font-size: 10px;
-          font-weight: 950;
-          letter-spacing: 0.18em;
-          text-transform: uppercase;
-          color: rgba(200, 255, 230, 0.9);
-        }
-
-        .linkPreviewTitle {
-          margin-top: 6px;
-          font-size: ${compact ? "16px" : "20px"};
-          line-height: 1.1;
-          font-weight: 950;
-          letter-spacing: -0.02em;
-          text-shadow: 0 2px 12px rgba(0, 0, 0, 0.42);
-          display: -webkit-box;
-          -webkit-line-clamp: 2;
-          -webkit-box-orient: vertical;
-          overflow: hidden;
-        }
-
-        .linkPreviewDesc {
-          margin-top: 7px;
-          font-size: 12px;
-          line-height: 1.45;
-          color: rgba(255, 255, 255, 0.78);
-          display: -webkit-box;
-          -webkit-line-clamp: 2;
-          -webkit-box-orient: vertical;
-          overflow: hidden;
-        }
-
-        .linkCoverWatermark {
-          position: absolute;
-          right: -28px;
-          top: 50%;
-          width: 240px;
-          height: 240px;
-          transform: translateY(-50%);
-          object-fit: contain;
-          opacity: 0.16;
-          pointer-events: none;
-        }
-
-        .linkCoverHostChip {
-          position: absolute;
-          top: 14px;
-          left: 14px;
-          display: inline-flex;
-          align-items: center;
-          gap: 8px;
-          padding: 6px 10px;
-          border-radius: 999px;
-          background: rgba(0, 0, 0, 0.42);
-          border: 1px solid rgba(255, 255, 255, 0.18);
-          color: rgba(255, 255, 255, 0.92);
-          font-size: 10px;
-          font-weight: 950;
-          letter-spacing: 0.14em;
-          text-transform: uppercase;
-          backdrop-filter: blur(4px);
-        }
-
-        .linkCoverFav {
-          width: 16px;
-          height: 16px;
-          border-radius: 4px;
-          display: block;
-        }
-
-        .activityImagePreview {
-          position: relative;
-          margin-top: 12px;
-          overflow: hidden;
-          border-radius: 18px;
-          border: 1px solid rgba(0, 0, 0, 0.1);
-          background:
-            radial-gradient(circle at 18% 18%, rgba(255, 0, 190, 0.08), transparent 34%),
-            radial-gradient(circle at 80% 22%, rgba(0, 180, 255, 0.08), transparent 34%),
-            rgba(0, 0, 0, 0.055);
-          width: 100%;
-          display: block;
-        }
-
-        .activityImage {
-          width: 100%;
-          height: auto;
-          max-width: 100%;
-          max-height: none;
-          margin: 0;
-          display: block;
-          object-fit: contain;
-        }
-
-        .announcementMedia {
-          display: block;
-          width: calc(100% + 24px);
-          max-width: none;
-          min-height: ${compact ? "380px" : "560px"};
-          margin: 14px -12px 0;
-          border-radius: 0;
-          border-left: 0;
-          border-right: 0;
-          background:
-            var(--announcement-image) center / cover no-repeat,
-            rgba(255, 255, 255, 0.58);
-          cursor: grab;
-          touch-action: none;
-          user-select: none;
-          box-shadow:
-            inset 0 1px 0 rgba(255, 255, 255, 0.62),
-            inset 0 -1px 0 rgba(0, 0, 0, 0.08);
-        }
-
-        .announcementMedia.dragging {
-          cursor: grabbing;
-        }
-
-        .announcementMedia .activityImage {
-          width: 100%;
-          height: 100%;
-          max-height: none;
-          object-fit: cover;
-          display: block;
-          pointer-events: none;
-        }
-
-        .mediaFrame {
-          position: relative;
-          width: 100%;
-          max-width: 100%;
-          aspect-ratio: 4 / 3;
-          display: grid;
-          place-items: center;
-          overflow: hidden;
-          border-radius: 16px;
-          background: rgba(0, 0, 0, 0.06);
-        }
-
-        .imageMediaFrame {
-          aspect-ratio: auto;
-          display: block;
-        }
-
-        .imageMediaFrame .img {
-          height: auto;
-          max-height: none;
-        }
-
-        .storedVideoFrame {
-          margin-top: 12px;
-        }
-
-        .storedAudioFrame {
-          width: 100%;
-          margin-top: 12px;
-          padding: 12px;
-          border: 1px solid rgba(0, 0, 0, 0.08);
-          background:
-            radial-gradient(circle at 18% 20%, rgba(255, 0, 190, 0.1), transparent 32%),
-            radial-gradient(circle at 84% 12%, rgba(0, 180, 255, 0.1), transparent 34%),
-            rgba(255, 255, 255, 0.64);
-        }
-
-        .audioLabel {
-          margin: 0 0 8px;
-          font-size: 10px;
-          font-weight: 950;
-          letter-spacing: 0.16em;
-          text-transform: uppercase;
-          color: rgba(0, 0, 0, 0.58);
-        }
-
-        .img {
-          width: 100%;
-          max-width: 100%;
-          height: 100%;
-          max-height: 100%;
-          object-fit: contain;
-          display: block;
-        }
-
-        .vid {
-          width: 100%;
-          max-width: 100%;
-          height: 100%;
-          object-fit: contain;
-          display: block;
-          background: #000;
-          max-height: 100%;
-        }
-
-        .storedAudioFrame {
-          aspect-ratio: auto;
-          display: block;
-        }
-
-        .studioModal {
-          position: fixed;
-          inset: 0;
-          z-index: 90;
-          display: grid;
-          place-items: center;
-          padding: 18px;
-        }
-
-        .studioBackdrop {
-          position: absolute;
-          inset: 0;
-          border: 0;
-          background: rgba(0, 0, 0, 0.7);
-          backdrop-filter: blur(8px);
-          cursor: pointer;
-        }
-
-        .studioPanel {
-          position: relative;
-          width: min(760px, 100%);
-          max-height: calc(100vh - 36px);
-          overflow: auto;
-          border-radius: 26px;
-          padding: 14px;
-          background: rgba(8, 13, 18, 0.98);
-          box-shadow: 0 28px 90px rgba(0, 0, 0, 0.48);
-        }
-
-        .studioModalHead {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          gap: 12px;
-          padding: 2px 4px 12px;
-          color: #fff;
-        }
-
-        .studioModalHead button,
-        .studioSaveBtn {
-          border-radius: 999px;
-          border: 1px solid rgba(255, 255, 255, 0.2);
-          padding: 9px 14px;
-          background: rgba(255, 255, 255, 0.12);
-          color: #fff;
-          font-weight: 900;
-          cursor: pointer;
-        }
-
-        .studioSaveBtn {
-          width: 100%;
-          margin-top: 12px;
-          background: #fff;
-          color: #07110f;
-        }
-
-        .aud {
-          width: 100%;
-          display: block;
-          padding: 10px;
-        }
-
-        .embedFoot {
-          display: flex;
-          gap: 10px;
-          align-items: center;
-          justify-content: space-between;
-          padding: 10px 12px;
-          background: rgba(255, 255, 255, 0.55);
-          border-top: 1px solid rgba(0, 0, 0, 0.08);
-        }
-
-        .embedLink {
-          font-size: 10px;
-          font-weight: 950;
-          letter-spacing: 0.14em;
-          text-transform: uppercase;
-          color: rgba(255, 0, 190, 0.85);
-          text-decoration: underline;
-          text-underline-offset: 4px;
-        }
-
-        .embedLink.dim {
-          color: rgba(0, 0, 0, 0.45);
-          text-decoration: none;
-        }
-
-        .embedFallback {
-          border-radius: 999px;
-          padding: 8px 10px;
-          border: 1px solid rgba(0, 0, 0, 0.1);
-          background: rgba(255, 255, 255, 0.82);
-          color: rgba(0, 0, 0, 0.7);
-          font-size: 10px;
-          font-weight: 950;
-          letter-spacing: 0.14em;
-          text-transform: uppercase;
-          cursor: pointer;
-        }
-
-        .embedNote {
-          padding: 10px 12px 12px;
-          border-top: 1px solid rgba(0, 0, 0, 0.06);
-          font-size: 11px;
-          font-weight: 800;
-          color: rgba(0, 0, 0, 0.52);
-          background: rgba(255, 255, 255, 0.45);
-        }
-
-        .href {
-          display: inline-block;
-          margin-top: 10px;
-          font-size: 11px;
-          font-weight: 900;
-          color: rgba(255, 0, 190, 0.85);
-          text-decoration: underline;
-          text-underline-offset: 4px;
-          word-break: break-word;
-        }
-
-        .rail {
-          margin-top: 12px;
-          display: flex;
-          gap: 10px;
-          flex-wrap: wrap;
-        }
-
-        .rbtn {
-          display: inline-flex;
-          align-items: center;
-          gap: 10px;
-          border-radius: 999px;
-          padding: 10px 12px;
-          border: 1px solid rgba(0, 0, 0, 0.1);
-          background: rgba(255, 255, 255, 0.82);
-          cursor: pointer;
-          color: rgba(0, 0, 0, 0.62);
-          transition: transform 140ms ease, filter 140ms ease, border-color 140ms ease, box-shadow 140ms ease;
-        }
-
-        .rbtn:hover {
-          transform: translateY(-1px);
-          filter: brightness(1.02);
-          border-color: color-mix(in srgb, var(--reaction-aura, ${fallbackAuraColor}) 50%, rgba(0, 0, 0, 0.1));
-          box-shadow: 0 0 0 6px color-mix(in srgb, var(--reaction-aura, ${fallbackAuraColor}) 12%, transparent);
-        }
-
-        /* Aura identity stays visible across every action, including Comment. */
-        .rbtn:hover .lbl,
-        .rbtn:hover .glyph {
-          color: var(--reaction-aura, ${fallbackAuraColor});
-        }
-
-        .glyph {
-          width: 18px;
-          height: 18px;
-          display: grid;
-          place-items: center;
-        }
-
-        .lbl {
-          font-size: 10px;
-          font-weight: 950;
-          letter-spacing: 0.18em;
-          text-transform: uppercase;
-          color: rgba(0, 0, 0, 0.62);
-        }
-
-        .rbtn.selected {
-          color: var(--reaction-aura, ${fallbackAuraColor});
-          border-color: var(--reaction-aura, ${fallbackAuraColor});
-          box-shadow: 0 0 18px color-mix(in srgb, var(--reaction-aura, ${fallbackAuraColor}) 27%, transparent);
-          text-shadow: 0 0 12px var(--reaction-aura, ${fallbackAuraColor});
-        }
-
-        .rbtn.selected .lbl {
-          color: var(--reaction-aura, ${fallbackAuraColor});
-          text-shadow: 0 0 12px var(--reaction-aura, ${fallbackAuraColor});
-        }
-
-        /* Per-action hovers now unified under .rbtn:hover so the active aura
-           tints Pass/Pin/Push/Comment identically. */
-
-        .remove:hover {
-          border-color: rgba(0, 0, 0, 0.18);
-          box-shadow: 0 0 0 6px rgba(0, 0, 0, 0.055);
-        }
-
-        .toast {
-          position: absolute;
-          right: 12px;
-          bottom: 12px;
-          border-radius: 999px;
-          padding: 9px 12px;
-          font-size: 11px;
-          font-weight: 950;
-          letter-spacing: 0.06em;
-          border: 1px solid rgba(0, 0, 0, 0.1);
-          background: rgba(255, 255, 255, 0.9);
-          box-shadow: 0 12px 30px rgba(0, 0, 0, 0.12);
-          color: rgba(0, 0, 0, 0.72);
-        }
-
-        .compact .body {
-          display: -webkit-box;
-          -webkit-line-clamp: 3;
-          -webkit-box-orient: vertical;
-          overflow: hidden;
-        }
-
-        .compactSpotify {
-          padding: 10px;
-        }
-
-        .compactSpotify .head {
-          gap: 8px;
-        }
-
-        .compactSpotify .authorHandle {
-          display: none;
-        }
-
-        .compactSpotify .authorAvatarFrame {
-          --avatar-size: 34px;
-        }
-
-        .compactSpotify .title {
-          font-size: 12px;
-          line-height: 1.2;
-        }
-
-        .compactSpotify .body {
-          display: none;
-        }
-
-        .compactSpotify .embed {
-          margin-top: 8px;
-          border: none;
-          background: transparent;
-        }
-
-        .compactSpotify iframe {
-          height: 152px;
-        }
-
-        .compactSpotify .embedFoot,
-        .compactSpotify .embedNote {
-          display: none;
-        }
-
         @media (max-width: 620px) {
-          .head {
-            align-items: flex-start;
-            gap: 10px;
-          }
-
-          .authorMark {
-            max-width: 54%;
-            gap: 7px;
-          }
-
-          .authorHandle {
-            max-width: 96px;
-            font-size: 9px;
-            padding-inline: 7px;
-          }
-
           .authorAvatarFrame {
             --avatar-size: 40px;
           }
         }
       `}</style>
     </div>
+    {amplifyPortal}
+    </>
   );
 }
 
@@ -2519,20 +2154,6 @@ function ArrowGlyph() {
         strokeWidth="2.2"
         strokeLinejoin="round"
         strokeLinecap="round"
-      />
-    </svg>
-  );
-}
-
-function CommentGlyph() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">
-      <path
-        d="M4.5 6.8c0-1.25 1.02-2.3 2.3-2.3h10.4c1.28 0 2.3 1.05 2.3 2.3v6.6c0 1.25-1.02 2.3-2.3 2.3h-5.4L7.2 19v-3.3h-.4c-1.28 0-2.3-1.05-2.3-2.3V6.8z"
-        fill="transparent"
-        stroke="currentColor"
-        strokeWidth="2.1"
-        strokeLinejoin="round"
       />
     </svg>
   );

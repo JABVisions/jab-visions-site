@@ -1,11 +1,14 @@
 "use client";
 
+import "./DropsBucket.css";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import type { BoardActivity } from "@/lib/board/activity";
 import { getLocalActivity } from "@/lib/board/activity";
 import { mergeActivityWithFeed } from "@/lib/board/feedActivity";
 import { EVENTS, readFeed } from "@/lib/boardStore";
+import { resolveStoredAudioSrc } from "@/lib/board/musicPlayback";
 import { supabaseBrowser } from "@/lib/supabase/browser";
+import AudioDropPlayer from "./AudioDropPlayer";
 
 import {
   type BucketFolder,
@@ -20,7 +23,6 @@ import {
   waveBucketDrop,
   BUCKET_BRAIN_KEY,
   EVT_UPDATED,
-  EVT_OPEN,
 } from "@/lib/board/bucketBrain";
 
 function clsx(...parts: Array<string | false | null | undefined>) {
@@ -324,20 +326,6 @@ export default function DropsBucket({
       window.removeEventListener(EVT_UPDATED, onUpdated as EventListener);
       window.removeEventListener("storage", onUpdated as EventListener);
     };
-  }, []);
-
-  useEffect(() => {
-    const onOpenBucket = (event: Event) => {
-      const detail = ((event as CustomEvent).detail ?? {}) as { folder?: BucketFolder };
-      if (detail.folder && FOLDERS.some((folder) => folder.key === detail.folder)) {
-        setActive(detail.folder);
-      }
-      setBrain(readBrain());
-      setOpen(true);
-    };
-
-    window.addEventListener(EVT_OPEN, onOpenBucket as EventListener);
-    return () => window.removeEventListener(EVT_OPEN, onOpenBucket as EventListener);
   }, []);
 
   useEffect(() => {
@@ -942,631 +930,6 @@ export default function DropsBucket({
       )}
 
       {/* styles */}
-      <style>{`
-        .bucket { width: 100%; }
-
-        .shell {
-          border-radius: 26px;
-          border: 1px solid rgba(0, 0, 0, 0.08);
-          overflow: hidden;
-          background:
-            radial-gradient(circle at 18% 20%, rgba(120, 255, 240, 0.38), rgba(255, 255, 255, 0) 55%),
-            radial-gradient(circle at 85% 70%, rgba(160, 220, 255, 0.34), rgba(255, 255, 255, 0) 60%),
-            linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(246, 248, 255, 0.92));
-          box-shadow: 0 18px 44px rgba(0, 0, 0, 0.14);
-          padding: 14px;
-          position: relative;
-        }
-
-        .topRow {
-          display: flex;
-          justify-content: space-between;
-          gap: 12px;
-          align-items: flex-start;
-        }
-
-        .kicker {
-          font-size: 10px;
-          font-weight: 950;
-          letter-spacing: 0.22em;
-          text-transform: uppercase;
-          color: rgba(0, 140, 135, 1);
-        }
-
-        .title {
-          margin-top: 6px;
-          font-size: 16px;
-          font-weight: 950;
-          color: rgba(0, 0, 0, 0.72);
-        }
-
-        .sub {
-          margin-top: 6px;
-          font-size: 12px;
-          font-weight: 800;
-          color: rgba(0, 0, 0, 0.52);
-          max-width: 620px;
-        }
-
-        .openBtn {
-          border-radius: 999px;
-          padding: 10px 12px;
-          font-size: 10px;
-          font-weight: 950;
-          letter-spacing: 0.18em;
-          text-transform: uppercase;
-          border: 1px solid rgba(0, 0, 0, 0.10);
-          background: rgba(0, 0, 0, 0.84);
-          color: rgba(255, 255, 255, 0.92);
-          cursor: pointer;
-        }
-
-        .openBtn.on {
-          background: rgba(0, 140, 135, 0.92);
-          border-color: rgba(0, 140, 135, 0.25);
-          box-shadow: 0 0 18px rgba(0, 140, 135, 0.22);
-        }
-
-        /* WAVE BAR */
-        .waveBar {
-          margin-top: 12px;
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          gap: 10px;
-        }
-
-        .waveBtn {
-          display: inline-flex;
-          align-items: center;
-          gap: 10px;
-          border-radius: 999px;
-          padding: 10px 12px;
-          border: 1px solid rgba(0, 0, 0, 0.10);
-          background: rgba(255, 255, 255, 0.78);
-          cursor: pointer;
-          transition: transform 140ms ease, filter 140ms ease;
-        }
-
-        .waveBtn:hover { transform: translateY(-1px); filter: brightness(1.02); }
-        .waveBtn.on {
-          background: rgba(0, 0, 0, 0.84);
-          border-color: rgba(0, 0, 0, 0.14);
-        }
-
-        .waveGlyph { width: 18px; height: 18px; display: grid; place-items: center; }
-        .waveText { display: inline-flex; gap: 10px; align-items: baseline; }
-        .waveLabel {
-          font-size: 10px;
-          font-weight: 950;
-          letter-spacing: 0.18em;
-          text-transform: uppercase;
-          color: rgba(0, 0, 0, 0.60);
-        }
-        .waveBtn.on .waveLabel { color: rgba(255,255,255,0.92); }
-
-        .waveCount {
-          font-size: 10px;
-          font-weight: 950;
-          letter-spacing: 0.12em;
-          color: rgba(255, 0, 190, 0.85);
-        }
-
-        .waveMeta {
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          color: rgba(0, 0, 0, 0.55);
-          font-weight: 900;
-          letter-spacing: 0.10em;
-          text-transform: uppercase;
-          font-size: 10px;
-        }
-        .metaDot {
-          width: 8px;
-          height: 8px;
-          border-radius: 999px;
-          background: rgba(0, 140, 135, 0.85);
-          box-shadow: 0 0 14px rgba(0, 140, 135, 0.18);
-        }
-        .metaSep { opacity: 0.6; margin: 0 2px; }
-
-        .wavePanel {
-          margin-top: 10px;
-          border-radius: 22px;
-          border: 1px solid rgba(0, 0, 0, 0.10);
-          background: rgba(0, 0, 0, 0.04);
-          padding: 12px;
-        }
-
-        .waveRow {
-          display: flex;
-          gap: 10px;
-          flex-wrap: wrap;
-          align-items: flex-end;
-        }
-
-        .waveInputWrap { flex: 1; min-width: 220px; }
-        .waveHint {
-          font-size: 10px;
-          font-weight: 950;
-          letter-spacing: 0.18em;
-          text-transform: uppercase;
-          opacity: 0.6;
-        }
-
-        .waveInput {
-          width: 100%;
-          margin-top: 6px;
-          border-radius: 14px;
-          padding: 10px 12px;
-          border: 1px solid rgba(0,0,0,0.12);
-          background: rgba(255,255,255,0.78);
-          font-weight: 900;
-          letter-spacing: 0.02em;
-          outline: none;
-        }
-
-        .waveSend {
-          border-radius: 999px;
-          padding: 10px 12px;
-          font-size: 10px;
-          font-weight: 950;
-          letter-spacing: 0.18em;
-          text-transform: uppercase;
-          border: 1px solid rgba(0, 0, 0, 0.10);
-          background: rgba(0, 0, 0, 0.84);
-          color: rgba(255, 255, 255, 0.92);
-          cursor: pointer;
-        }
-
-        .waveSim {
-          border-radius: 999px;
-          padding: 10px 12px;
-          font-size: 10px;
-          font-weight: 950;
-          letter-spacing: 0.18em;
-          text-transform: uppercase;
-          border: 1px solid rgba(255, 0, 190, 0.22);
-          background: rgba(255, 0, 190, 0.10);
-          color: rgba(120, 0, 90, 0.92);
-          cursor: pointer;
-        }
-
-        .waveGrid {
-          margin-top: 12px;
-          display: grid;
-          grid-template-columns: repeat(3, minmax(0, 1fr));
-          gap: 10px;
-        }
-
-        .waveSummaryOnly {
-          margin-top: 12px;
-          display: grid;
-          grid-template-columns: repeat(5, minmax(0, 1fr));
-          gap: 10px;
-        }
-
-        .waveSummaryCard {
-          border-radius: 18px;
-          border: 1px solid rgba(0,0,0,0.10);
-          background: rgba(255,255,255,0.65);
-          padding: 12px;
-          text-align: center;
-        }
-
-        .waveSummaryValue {
-          margin-top: 8px;
-          font-size: 20px;
-          font-weight: 950;
-          color: rgba(0,0,0,0.78);
-        }
-
-        @media (max-width: 900px) {
-          .waveGrid { grid-template-columns: 1fr; }
-          .waveSummaryOnly { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-        }
-
-        .waveCol {
-          border-radius: 18px;
-          border: 1px solid rgba(0,0,0,0.10);
-          background: rgba(255,255,255,0.65);
-          padding: 10px;
-        }
-
-        .waveColTitle {
-          font-size: 10px;
-          font-weight: 950;
-          letter-spacing: 0.18em;
-          text-transform: uppercase;
-          opacity: 0.65;
-        }
-
-        .waveEmpty {
-          margin-top: 10px;
-          font-size: 12px;
-          font-weight: 900;
-          opacity: 0.55;
-        }
-
-        .waveItem {
-          margin-top: 10px;
-          padding: 12px;
-          border-radius: 16px;
-          border: 1px solid rgba(0,0,0,0.08);
-          background: rgba(255,255,255,0.72);
-          display: flex;
-          align-items: flex-end;
-          justify-content: flex-end;
-          gap: 10px;
-          min-height: 86px;
-          position: relative;
-        }
-
-        .waveStampCol {
-          display: flex;
-          flex-direction: column;
-          align-items: flex-end;
-          gap: 6px;
-        }
-
-        .waveBubble {
-          width: 58px;
-          height: 58px;
-          border-radius: 999px;
-          display: grid;
-          place-items: center;
-          overflow: hidden;
-          border: 1px solid rgba(255,255,255,0.58);
-          background:
-            radial-gradient(circle at 30% 25%, rgba(255,255,255,0.9), rgba(255,255,255,0.12) 34%, rgba(255,255,255,0.03) 58%),
-            linear-gradient(145deg, rgba(255,255,255,0.45), rgba(170,245,255,0.18) 48%, rgba(255,186,245,0.14));
-          box-shadow:
-            inset 0 1px 0 rgba(255,255,255,0.78),
-            0 0 22px rgba(255,255,255,0.18),
-            0 0 34px rgba(165,240,255,0.14);
-          backdrop-filter: blur(10px);
-        }
-
-        .waveBubble.mutual {
-          box-shadow:
-            inset 0 1px 0 rgba(255,255,255,0.78),
-            0 0 22px rgba(0,140,135,0.16),
-            0 0 34px rgba(255,0,190,0.12);
-        }
-
-        .waveAvatarImg {
-          width: 44px;
-          height: 44px;
-          object-fit: cover;
-          border-radius: 999px;
-          border: 1px solid rgba(255,255,255,0.45);
-          display: block;
-        }
-
-        .waveAvatarFallback {
-          font-size: 18px;
-          font-weight: 950;
-          color: rgba(0,0,0,0.58);
-        }
-
-        .waveTime {
-          font-weight: 900;
-          opacity: 0.48;
-          font-size: 10px;
-          line-height: 1;
-          text-align: right;
-        }
-
-        .mutualItem {
-          margin-top: 10px;
-          padding: 12px;
-          border-radius: 16px;
-          border: 1px solid rgba(0, 140, 135, 0.18);
-          background: rgba(0, 140, 135, 0.08);
-          display: flex;
-          align-items: flex-end;
-          justify-content: flex-end;
-          gap: 10px;
-          min-height: 86px;
-        }
-
-        /* folders */
-        .folderRow { margin-top: 12px; display: flex; flex-wrap: wrap; gap: 10px; }
-
-        .folder {
-          display: inline-flex;
-          align-items: center;
-          gap: 10px;
-          border-radius: 999px;
-          padding: 10px 12px;
-          border: 1px solid rgba(0, 0, 0, 0.10);
-          background: rgba(255, 255, 255, 0.78);
-          cursor: pointer;
-          transition: transform 140ms ease, filter 140ms ease;
-        }
-        .folder:hover { transform: translateY(-1px); filter: brightness(1.02); }
-        .folder.on { background: rgba(0, 0, 0, 0.84); border-color: rgba(0, 0, 0, 0.14); }
-
-        .emblem { width: 18px; height: 18px; display: grid; place-items: center; }
-
-        .folderText { display: inline-flex; align-items: baseline; gap: 10px; }
-        .folderLabel {
-          font-size: 10px; font-weight: 950; letter-spacing: 0.18em; text-transform: uppercase;
-          color: rgba(0, 0, 0, 0.60);
-        }
-        .folder.on .folderLabel { color: rgba(255, 255, 255, 0.92); }
-
-        .folderCount {
-          font-size: 10px; font-weight: 950; letter-spacing: 0.12em;
-          color: rgba(0, 140, 135, 1);
-        }
-        .folder.on .folderCount { color: rgba(120, 255, 240, 0.95); }
-
-        /* mini viewport */
-        .miniViewport {
-          margin-top: 12px;
-          border-radius: 22px;
-          border: 1px solid rgba(0, 0, 0, 0.10);
-          background: rgba(0, 0, 0, 0.04);
-          padding: 12px;
-        }
-
-        .miniTop { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-
-        .miniHint {
-          font-size: 10px; font-weight: 950; letter-spacing: 0.18em; text-transform: uppercase;
-          color: rgba(0, 0, 0, 0.55);
-        }
-        .miniHint2 { opacity: 0.62; }
-
-        .miniOpen {
-          border-radius: 999px; padding: 8px 10px;
-          border: 1px solid rgba(0, 0, 0, 0.10);
-          background: rgba(255, 255, 255, 0.72);
-          cursor: pointer;
-          font-size: 10px; font-weight: 950; letter-spacing: 0.18em; text-transform: uppercase;
-          color: rgba(255, 0, 190, 0.85);
-        }
-
-        .miniList { margin-top: 10px; display: grid; gap: 8px; }
-
-        .miniItem {
-          border-radius: 16px;
-          border: 1px solid rgba(0, 0, 0, 0.08);
-          background: rgba(255, 255, 255, 0.76);
-          padding: 10px 12px;
-        }
-
-        .miniTitle { font-weight: 950; color: rgba(0, 0, 0, 0.72); font-size: 12px; }
-        .miniMeta { margin-top: 6px; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-        .miniKind { font-size: 10px; font-weight: 950; letter-spacing: 0.18em; color: rgba(0, 140, 135, 1); }
-        .miniTime { font-size: 10px; font-weight: 900; letter-spacing: 0.10em; opacity: 0.55; }
-
-        .empty { font-weight: 900; letter-spacing: 0.10em; opacity: 0.55; font-size: 11px; }
-
-        /* toast */
-        .toast {
-          position: absolute;
-          right: 14px;
-          bottom: 14px;
-          border-radius: 999px;
-          padding: 10px 12px;
-          font-size: 11px;
-          font-weight: 950;
-          letter-spacing: 0.06em;
-          border: 1px solid rgba(0,0,0,0.10);
-          background: rgba(255,255,255,0.85);
-          box-shadow: 0 12px 30px rgba(0,0,0,0.12);
-        }
-
-        /* Overlay + Dome (same as your sonar styling, trimmed) */
-        .overlay {
-          position: fixed;
-          inset: 0;
-          z-index: 9999;
-          background: rgba(0, 0, 0, 0.56);
-          backdrop-filter: blur(12px);
-          display: grid;
-          place-items: center;
-          padding: 18px;
-        }
-
-        .dome {
-          width: min(1160px, 100%);
-          max-height: min(86vh, 920px);
-          overflow: hidden;
-          border-radius: 30px;
-          border: 1px solid rgba(120, 255, 240, 0.22);
-          background: rgba(0, 10, 14, 0.92);
-          box-shadow: 0 30px 95px rgba(0, 0, 0, 0.55);
-          position: relative;
-          padding: 16px;
-          display: grid;
-          grid-template-rows: auto auto 1fr;
-          gap: 12px;
-        }
-
-        .sonar { position: absolute; inset: 0; z-index: 0; pointer-events: none; opacity: 0.95; }
-        .sonarRings {
-          position: absolute;
-          inset: -40%;
-          background:
-            radial-gradient(circle at center, rgba(120,255,240,0.0) 0%, rgba(120,255,240,0.10) 22%, rgba(0,0,0,0) 23%),
-            radial-gradient(circle at center, rgba(0,0,0,0) 0%, rgba(120,255,240,0.08) 40%, rgba(0,0,0,0) 41%),
-            radial-gradient(circle at center, rgba(0,0,0,0) 0%, rgba(120,255,240,0.06) 60%, rgba(0,0,0,0) 61%),
-            radial-gradient(circle at center, rgba(0,0,0,0) 0%, rgba(120,255,240,0.05) 78%, rgba(0,0,0,0) 79%);
-        }
-        .sonarSweep {
-          position: absolute;
-          left: 50%;
-          top: 50%;
-          width: 1100px;
-          height: 1100px;
-          transform: translate(-50%, -50%);
-          background: conic-gradient(from 0deg, rgba(0,0,0,0) 0deg, rgba(0,0,0,0) 300deg, rgba(120,255,240,0.08) 330deg, rgba(120,255,240,0.22) 348deg, rgba(120,255,240,0.0) 360deg);
-          mask-image: radial-gradient(circle at center, rgba(0,0,0,1) 0%, rgba(0,0,0,0) 68%);
-          animation: sweep 2200ms linear infinite;
-          opacity: 0.85;
-        }
-        @keyframes sweep { 0% { transform: translate(-50%, -50%) rotate(0deg); } 100% { transform: translate(-50%, -50%) rotate(360deg); } }
-        .sonarBlips {
-          position: absolute;
-          inset: 0;
-          background:
-            radial-gradient(circle at 18% 32%, rgba(255,0,190,0.45) 0 2px, rgba(0,0,0,0) 3px),
-            radial-gradient(circle at 74% 42%, rgba(120,255,240,0.52) 0 2px, rgba(0,0,0,0) 3px),
-            radial-gradient(circle at 62% 71%, rgba(120,255,240,0.35) 0 2px, rgba(0,0,0,0) 3px),
-            radial-gradient(circle at 30% 78%, rgba(255,0,190,0.28) 0 2px, rgba(0,0,0,0) 3px);
-          animation: blip 1800ms ease-in-out infinite;
-          opacity: 0.9;
-        }
-        @keyframes blip { 0%, 100% { filter: brightness(0.85); opacity: 0.65; } 50% { filter: brightness(1.15); opacity: 0.95; } }
-        .sonarNoise {
-          position: absolute; inset: 0;
-          background-image:
-            linear-gradient(rgba(120,255,240,0.04) 1px, transparent 1px),
-            linear-gradient(90deg, rgba(120,255,240,0.04) 1px, transparent 1px);
-          background-size: 28px 28px;
-          opacity: 0.20;
-          mix-blend-mode: screen;
-        }
-
-        .domeTop, .compass, .domeBody { position: relative; z-index: 1; }
-        .domeTop { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; padding: 10px 10px 2px; }
-        .domeKicker { font-size: 10px; font-weight: 950; letter-spacing: 0.24em; text-transform: uppercase; color: rgba(120, 255, 240, 0.85); }
-        .domeTitle { margin-top: 6px; font-size: 18px; font-weight: 950; letter-spacing: 0.06em; color: rgba(220, 255, 250, 0.92); }
-        .domeSub { margin-top: 6px; font-size: 12px; font-weight: 800; color: rgba(120, 255, 240, 0.68); max-width: 820px; }
-
-        .domeRight { display: inline-flex; gap: 10px; align-items: center; }
-        .clearBtn {
-          border-radius: 999px; padding: 10px 12px; font-size: 10px; font-weight: 950;
-          letter-spacing: 0.16em; text-transform: uppercase;
-          border: 1px solid rgba(255, 0, 190, 0.22);
-          background: rgba(255, 0, 190, 0.10);
-          color: rgba(255, 215, 245, 0.92);
-          cursor: pointer;
-        }
-        .closeBtn {
-          width: 42px; height: 42px; border-radius: 999px;
-          border: 1px solid rgba(120, 255, 240, 0.24);
-          background: rgba(120, 255, 240, 0.10);
-          color: rgba(220, 255, 250, 0.95);
-          font-size: 18px; font-weight: 900;
-          cursor: pointer;
-        }
-
-        .compass {
-          display: grid; gap: 10px; padding: 10px;
-          border-radius: 22px;
-          border: 1px solid rgba(120, 255, 240, 0.14);
-          background: rgba(0, 0, 0, 0.26);
-        }
-        .compassMeta {
-          display: flex; align-items: center; gap: 8px;
-          color: rgba(120, 255, 240, 0.62);
-          font-weight: 900; letter-spacing: 0.10em; text-transform: uppercase; font-size: 10px;
-          opacity: 0.95;
-        }
-        .compassChip {
-          display: flex; align-items: center; justify-content: space-between; gap: 12px;
-          border-radius: 999px; padding: 10px 12px;
-          border: 1px solid rgba(120, 255, 240, 0.14);
-          background: rgba(0, 0, 0, 0.20);
-          cursor: pointer;
-        }
-        .compassChip.on {
-          border-color: rgba(120, 255, 240, 0.28);
-          background: rgba(120, 255, 240, 0.10);
-          box-shadow: 0 0 18px rgba(120, 255, 240, 0.10);
-        }
-        .chipEmblem { width: 18px; height: 18px; display: grid; place-items: center; }
-        .chipLabel {
-          display: inline-flex; gap: 10px; align-items: baseline; flex: 1; justify-content: flex-start;
-          color: rgba(220, 255, 250, 0.90);
-          font-size: 11px; font-weight: 950; letter-spacing: 0.16em; text-transform: uppercase;
-        }
-        .chipSub { color: rgba(120, 255, 240, 0.65); font-weight: 900; letter-spacing: 0.10em; font-size: 10px; }
-        .chipCount { color: rgba(255, 0, 190, 0.85); font-weight: 950; letter-spacing: 0.12em; font-size: 11px; }
-
-        .domeBody { overflow: auto; padding: 10px; }
-        .panelTitle {
-          color: rgba(220, 255, 250, 0.92);
-          font-weight: 950; letter-spacing: 0.14em; text-transform: uppercase; font-size: 12px;
-          display: flex; align-items: baseline; gap: 10px; margin-bottom: 10px;
-        }
-        .panelSub { color: rgba(120, 255, 240, 0.62); font-weight: 900; letter-spacing: 0.08em; font-size: 10px; opacity: 0.95; }
-        .domeTiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
-        .domeEmpty {
-          padding: 18px; border-radius: 18px;
-          border: 1px solid rgba(120, 255, 240, 0.16);
-          background: rgba(0, 0, 0, 0.22);
-          color: rgba(120, 255, 240, 0.80);
-          font-weight: 900; letter-spacing: 0.10em;
-        }
-        .domeEmptyHint { margin-top: 10px; font-size: 12px; font-weight: 800; color: rgba(220, 255, 250, 0.72); letter-spacing: 0.04em; text-transform: none; opacity: 0.9; }
-        .memoryViewer {
-          position: absolute;
-          inset: 0;
-          z-index: 4;
-          display: grid;
-          place-items: center;
-          padding: 18px;
-        }
-        .memoryViewerBackdrop {
-          position: absolute;
-          inset: 0;
-          background: rgba(0, 0, 0, 0.58);
-          backdrop-filter: blur(8px);
-        }
-        .memoryViewerPanel {
-          position: relative;
-          z-index: 1;
-          width: min(760px, 100%);
-          max-height: min(78vh, 780px);
-          overflow: auto;
-          border-radius: 26px;
-          border: 1px solid rgba(120, 255, 240, 0.24);
-          background: rgba(0, 10, 14, 0.94);
-          box-shadow: 0 30px 90px rgba(0, 0, 0, 0.58);
-          padding: 14px;
-        }
-        .memoryViewerTop {
-          display: flex;
-          align-items: flex-start;
-          justify-content: space-between;
-          gap: 14px;
-          margin-bottom: 12px;
-          padding: 4px 2px 0;
-        }
-        .memoryViewerKicker {
-          color: rgba(120, 255, 240, 0.70);
-          font-size: 10px;
-          font-weight: 950;
-          letter-spacing: 0.18em;
-          text-transform: uppercase;
-        }
-        .memoryViewerTitle {
-          margin-top: 5px;
-          color: rgba(220, 255, 250, 0.94);
-          font-size: 16px;
-          font-weight: 950;
-          letter-spacing: 0.04em;
-        }
-        .memoryViewerClose {
-          border-radius: 999px;
-          border: 1px solid rgba(120, 255, 240, 0.24);
-          background: rgba(120, 255, 240, 0.10);
-          color: rgba(220, 255, 250, 0.94);
-          cursor: pointer;
-          padding: 9px 12px;
-          font-size: 10px;
-          font-weight: 950;
-          letter-spacing: 0.14em;
-          text-transform: uppercase;
-        }
-        @media (max-width: 900px) { .domeTiles { grid-template-columns: 1fr; } }
-      `}</style>
     </div>
   );
 }
@@ -1609,13 +972,25 @@ function BucketDropCard({
 
   const [embedFailed, setEmbedFailed] = useState(false);
   const embed = useMemo(() => computeEmbed(href), [href]);
-  const showEmbed = !!embed.url && !embedFailed && embed.kind !== "none";
-  const attachmentLabel =
-    embed.kind === "spotify"
-      ? "Play full track in Spotify"
-      : embed.kind === "apple_music"
-        ? "Open in Apple Music"
-        : "Open attachment";
+  const mediaKind =
+    typeof rawMeta?.mediaKind === "string"
+      ? rawMeta.mediaKind
+      : typeof preview?.mediaKind === "string"
+        ? preview.mediaKind
+        : "";
+  const storedAudioSrc = resolveStoredAudioSrc({
+    mediaKind,
+    dropType: String(rawMeta?.dropType ?? rawMeta?.drop_flavor ?? preview?.dropType ?? ""),
+    signedUrl: signedPreviewUrl,
+    mediaUrl: typeof rawMeta?.mediaUrl === "string" ? rawMeta.mediaUrl : null,
+    href: previewHref && /\.(mp3|wav|m4a|aac|ogg|flac|weba)(\?|#|$)/i.test(previewHref)
+      ? previewHref
+      : "",
+    hasStoragePath: !!(previewBucket && previewStoragePath),
+  });
+  const showFullSongPlayer = !!storedAudioSrc;
+  const showEmbed =
+    !!embed.url && !embedFailed && embed.kind !== "none" && !showFullSongPlayer;
   const waveCount = entry.waveCount ?? 0;
   const lastWavedLabel = entry.lastWavedAt ? formatLastWaved(entry.lastWavedAt) : "";
 
@@ -1682,6 +1057,13 @@ function BucketDropCard({
         </div>
       ) : null}
 
+      {showFullSongPlayer ? (
+        <div className="storedAudioFrame">
+          <div className="audioLabel">Full song</div>
+          <AudioDropPlayer src={storedAudioSrc} onError={() => setEmbedFailed(true)} />
+        </div>
+      ) : null}
+
       {showEmbed && (
         <div className={clsx("embed", embed.kind)}>
           {embed.kind === "image" && (
@@ -1733,25 +1115,10 @@ function BucketDropCard({
               onError={() => setEmbedFailed(true)}
             />
           )}
-          <div className="embedFoot">
-            {href ? (
-              <a className="embedLink" href={href} target={external ? "_blank" : undefined} rel={external ? "noreferrer" : undefined}>
-                {attachmentLabel}
-              </a>
-            ) : (
-              <span className="embedLink dim">No attachment</span>
-            )}
-
-            {href && (
-              <button type="button" className="embedFallback" onClick={() => setEmbedFailed(true)}>
-                Embed blocked? Show link
-              </button>
-            )}
-          </div>
 
           {embed.kind === "spotify" ? (
             <div className="embedNote">
-              Spotify’s embed can fall back to a preview clip in some browser sessions. Use the link above for full playback in Spotify.
+              Spotify’s embed can fall back to a preview clip in some browser sessions.
             </div>
           ) : null}
         </div>
@@ -1865,8 +1232,21 @@ function BucketDropCard({
         .memoryMissing { margin-top: 10px; border-radius: 14px; border: 1px solid rgba(255, 0, 190, 0.18); background: rgba(255, 0, 190, 0.08); color: rgba(255, 210, 246, 0.86); padding: 10px; font-size: 11px; font-weight: 800; line-height: 1.45; }
 
         .embed { margin-top: 12px; border-radius: 18px; overflow: hidden; border: 1px solid rgba(120, 255, 240, 0.14); background: rgba(0, 0, 0, 0.22); }
+        .embed.spotify {
+          overflow-x: auto;
+          overflow-y: hidden;
+          direction: rtl;
+          scrollbar-width: none;
+          -ms-overflow-style: none;
+        }
+        .embed.spotify::-webkit-scrollbar { display: none; }
         iframe { width: 100%; height: 240px; border: none; display: block; background: rgba(255, 255, 255, 0.05); }
-        .embed.spotify iframe { height: 160px; }
+        .embed.spotify iframe {
+          height: 160px;
+          width: min(100%, 460px);
+          min-width: 460px;
+          max-width: none;
+        }
         .embed.apple_music iframe { height: 175px; }
         .mediaFrame { background: rgba(255, 255, 255, 0.04); }
         .img { width: 100%; height: auto; display: block; }
@@ -1877,6 +1257,21 @@ function BucketDropCard({
         .embedLink { font-size: 10px; font-weight: 950; letter-spacing: 0.14em; text-transform: uppercase; color: rgba(255, 0, 190, 0.85); text-decoration: underline; text-underline-offset: 4px; }
         .embedLink.dim { color: rgba(120, 255, 240, 0.55); text-decoration: none; }
         .embedNote { padding: 10px 12px 12px; border-top: 1px solid rgba(120, 255, 240, 0.10); font-size: 11px; font-weight: 800; color: rgba(180, 245, 238, 0.76); background: rgba(255, 255, 255, 0.04); }
+        .storedAudioFrame {
+          margin-top: 12px;
+          padding: 12px;
+          border-radius: 18px;
+          border: 1px solid rgba(120, 255, 240, 0.14);
+          background: rgba(255, 255, 255, 0.05);
+        }
+        .audioLabel {
+          margin: 0 0 8px;
+          font-size: 10px;
+          font-weight: 950;
+          letter-spacing: 0.16em;
+          text-transform: uppercase;
+          color: rgba(180, 245, 238, 0.82);
+        }
 
         .embedFallback {
           border-radius: 999px; padding: 8px 10px;

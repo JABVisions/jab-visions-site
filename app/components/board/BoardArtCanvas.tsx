@@ -34,8 +34,6 @@ const PAPER_BG = "#fdfaf2";
 export default function BoardArtCanvas({
   onSave,
   backgroundImageUrl,
-  backgroundVideoUrl,
-  exportMode = "composite",
   saveLabel = "Use art →",
   operatingTable = false,
   layout = "side",
@@ -43,8 +41,6 @@ export default function BoardArtCanvas({
   onSave: (file: File) => void;
   /** When set, strokes draw on top of this image (draw-on-photo for Vision). */
   backgroundImageUrl?: string;
-  backgroundVideoUrl?: string;
-  exportMode?: "composite" | "overlay";
   saveLabel?: string;
   /** Uniform 4:5 monitor + Palette overlay (Drop Studio stage). */
   operatingTable?: boolean;
@@ -75,7 +71,7 @@ export default function BoardArtCanvas({
   const [light, setLight] = useState(65);
   const [wheelHue, setWheelHue] = useState(318);
   const [wheelSat, setWheelSat] = useState(100);
-  const onPhoto = !!backgroundImageUrl || !!backgroundVideoUrl;
+  const onPhoto = !!backgroundImageUrl;
 
   function pickFromWheel(clientX: number, clientY: number, nextLight = light) {
     const el = wheelRef.current;
@@ -410,9 +406,7 @@ export default function BoardArtCanvas({
     if (!ctx) return;
 
     // Paint the background first…
-    if (exportMode === "overlay") {
-      ctx.clearRect(0, 0, out.width, out.height);
-    } else if (onPhoto && bgImgRef.current && bgImgRef.current.naturalWidth) {
+    if (onPhoto && bgImgRef.current && bgImgRef.current.naturalWidth) {
       // cover-fit the photo into the output frame
       const img = bgImgRef.current;
       const iw = img.naturalWidth;
@@ -445,17 +439,7 @@ export default function BoardArtCanvas({
         .filter(Boolean)
         .join(" ")}
     >
-      {backgroundVideoUrl ? (
-        <video
-          src={backgroundVideoUrl}
-          className={styles.bg}
-          autoPlay
-          loop
-          muted
-          playsInline
-          aria-label="Video preview behind Art Palette"
-        />
-      ) : backgroundImageUrl ? (
+      {onPhoto ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img
           ref={bgImgRef}

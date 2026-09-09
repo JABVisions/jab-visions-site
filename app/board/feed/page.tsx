@@ -1,38 +1,32 @@
 "use client";
 
+import "./feed.css";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { supabaseBrowser } from "@/lib/supabase/browser";
 
 import DropConsole from "@/app/components/board/DropConsole";
 import DropsBucket from "@/app/components/board/DropsBucket";
 import ActivityCard from "@/app/components/board/ActivityCard";
-import BoardWhispers from "@/app/components/board/BoardWhispers";
-import { createBoardWhisper, type BoardWhisperEventType } from "@/lib/board/whispers";
-
-// Ambient whispers woven into the Activity Channel cadence — surfaced quietly
-// between drops, never as alerts.
-const FEED_WHISPER_CADENCE: BoardWhisperEventType[] = [
-  "drop_view",
-  "profile_view",
-  "drop_pin",
-  "quiet_day",
-  "work_update",
-];
-const FEED_WHISPER_EVERY = 5;
 
 import {
   getLocalActivity,
   type BoardActivity,
   type BoardActivityKind,
 } from "@/lib/board/activity";
-import { mergeActivityWithFeed } from "@/lib/board/feedActivity";
+import {
+  dedupeActivity,
+  filterDeletedFeedItems,
+  mergeActivityWithFeed,
+  mergeFeedWithLocalOverlay,
+  pruneLocalActivityCacheFromServer,
+} from "@/lib/board/feedActivity";
+import { patchBrokenAnnouncementFeed } from "@/lib/board/announcementMediaOverrides";
 import {
   BOARD_PROJECTS_UPDATED_EVENT,
   syncResolvedProjectsToStorage,
 } from "@/lib/board/projects";
 import { EVENTS, readFeed, seedForumsIfEmpty } from "@/lib/boardStore";
 
-import { installBucketBrainBridge } from "@/lib/board/bucketBrain";
 
 function clsx(...parts: Array<string | false | null | undefined>) {
   return parts.filter(Boolean).join(" ");
@@ -52,7 +46,7 @@ function demoFeedItems(): BoardActivity[] {
       kind: "announcement",
       title: "Board is waking back up",
       body:
-        "Community Feed is live again. Board Drops, Pay Drops, Project Drops, and announcements all land here as the shared activity stream.",
+        "Activity Channel is live again. Board Drops, Pay Drops, Project Drops, and announcements all land here as the shared activity stream.",
       href: "/board/feed",
       image_url: "/assets/board-logo-signup.jpg",
       meta: {
@@ -190,9 +184,11 @@ export default function HomeBoardFeedPage() {
   const sentinelRef = useRef<HTMLDivElement | null>(null);
 
   const [tab, setTab] = useState<"all" | "announcements">("all");
-  const [items, setItems] = useState<BoardActivity[]>(() =>
-    demoFeedItems().slice(0, PAGE_SIZE)
-  );
+  // Start empty so the server-rendered HTML and the first client render match.
+  // demoFeedItems() derives timestamps/ids from Date.now(), so seeding it in the
+  // useState initializer made SSR and hydration disagree (React hydration error).
+  // The mount effects below (syncFromLocal / Supabase fetch) fill this in.
+  const [items, setItems] = useState<BoardActivity[]>([]);
   const [loading, setLoading] = useState(false);
 
   const [offset, setOffset] = useState(0);
@@ -210,25 +206,49 @@ export default function HomeBoardFeedPage() {
   }, [kinds]);
 
   const safeItems = useMemo(
-    () => (Array.isArray(items) ? items : []).filter(Boolean),
+    () => patchBrokenAnnouncementFeed((Array.isArray(items) ? items : []).filter(Boolean)),
     [items]
   );
 
-  function removeItemFromFeed(removedId: string) {
+  function removeDropFromFeed(activityId: string, canonicalDropId?: string, purgeIds?: string[]) {
+    const purge = new Set(
+      [activityId, canonicalDropId, ...(purgeIds ?? [])].filter(
+        (value): value is string => Boolean(value)
+      )
+    );
+    if (!purge.size) return;
+
     setItems((current) =>
       current.filter((item) => {
         const meta = item.meta && typeof item.meta === "object" ? item.meta : null;
-        return (
-          item.id !== removedId &&
-          String(meta?.dropId || "") !== removedId &&
-          String(meta?.originalDropId || "") !== removedId
-        );
+        const dropId = String(meta?.dropId || "");
+        const originalDropId = String(meta?.originalDropId || "");
+        if (purge.has(item.id)) return false;
+        if (dropId && purge.has(dropId)) return false;
+        if (originalDropId && purge.has(originalDropId)) return false;
+        return true;
       })
     );
   }
 
+  function applyLocalFeedOverlay() {
+    const localActivity = getLocalActivity();
+    const sharedFeed = readFeed();
+    const merged = mergeActivityWithFeed(localActivity, sharedFeed, {
+      includeStorageMirrors: true,
+    });
+    setItems((prev) => {
+      const next = mergeFeedWithLocalOverlay(prev, merged, { kinds });
+      if (next.length) return next.slice(0, PAGE_SIZE);
+      if (prev.length) return prev;
+      return visibleFallbackItems.slice(0, PAGE_SIZE);
+    });
+    setHasMore(false);
+    setOffset(PAGE_SIZE);
+    setLoading(false);
+  }
+
   useEffect(() => {
-    installBucketBrainBridge();
     seedForumsIfEmpty();
     syncResolvedProjectsToStorage();
   }, []);
@@ -236,38 +256,7 @@ export default function HomeBoardFeedPage() {
   useEffect(() => {
     let alive = true;
 
-    function syncFromLocal() {
-      try {
-        const localActivity = getLocalActivity();
-        const sharedFeed = readFeed();
-        if (!alive) return;
-        const merged = mergeActivityWithFeed(localActivity, sharedFeed);
-        const scoped = (kinds?.length
-          ? merged.filter((item) => kinds.includes(item.kind))
-          : merged
-        ).filter((item) => !isPrivateDropActivity(item));
-        setItems(
-          (scoped.length ? scoped : visibleFallbackItems).slice(0, PAGE_SIZE)
-        );
-        setHasMore(false);
-        setOffset(PAGE_SIZE);
-      } catch {
-        if (alive) {
-          setItems(visibleFallbackItems.slice(0, PAGE_SIZE));
-          setHasMore(false);
-          setOffset(PAGE_SIZE);
-        }
-      } finally {
-        if (alive) setLoading(false);
-      }
-    }
-
-    async function run() {
-      setLoading(false);
-      setOffset(0);
-      setHasMore(true);
-      syncFromLocal();
-
+    async function refetchFromServer() {
       try {
         const data = await Promise.race([
           fetchSupabaseActivity({ limit: PAGE_SIZE, offset: 0, kinds }),
@@ -275,35 +264,58 @@ export default function HomeBoardFeedPage() {
             window.setTimeout(() => reject(new Error("Feed request timed out")), FEED_TIMEOUT_MS)
           ),
         ]);
-
         if (!alive) return;
 
         const cleaned = Array.isArray(data) ? data : [];
+        const publicServer = cleaned.filter((item) => !isPrivateDropActivity(item));
+        pruneLocalActivityCacheFromServer(publicServer);
+
         const localActivity = getLocalActivity();
         const sharedFeed = readFeed();
-        const merged = mergeActivityWithFeed([...cleaned, ...localActivity], sharedFeed);
-        const nextItems = (merged.length ? merged : visibleFallbackItems).filter(
-          (item) => !isPrivateDropActivity(item)
-        );
+        const merged = mergeActivityWithFeed(localActivity, sharedFeed, {
+          includeStorageMirrors: false,
+        });
+        const nextItems = mergeFeedWithLocalOverlay(publicServer, merged, { kinds });
 
-        setItems(nextItems);
+        setItems(
+          nextItems.length
+            ? nextItems
+            : visibleFallbackItems.filter((item) => !isPrivateDropActivity(item))
+        );
         setHasMore(cleaned.length === PAGE_SIZE);
         setOffset(cleaned.length);
       } catch {
-        syncFromLocal();
+        if (!alive) return;
+        applyLocalFeedOverlay();
       } finally {
         if (alive) setLoading(false);
       }
     }
 
+    async function run() {
+      setLoading(true);
+      setOffset(0);
+      setHasMore(true);
+      await refetchFromServer();
+    }
+
     run();
-    const onFeedUpdated = () => syncFromLocal();
+    const onFeedUpdated = () => {
+      void refetchFromServer();
+    };
+    const onDropRemoved = (event: Event) => {
+      const detail = (event as CustomEvent<{ id?: string; dropId?: string; purgeIds?: string[] }>)
+        .detail;
+      removeDropFromFeed(detail?.id || "", detail?.dropId, detail?.purgeIds);
+    };
     window.addEventListener(EVENTS.feedUpdated, onFeedUpdated as EventListener);
+    window.addEventListener("board:drop:removed", onDropRemoved as EventListener);
     window.addEventListener(BOARD_PROJECTS_UPDATED_EVENT, onFeedUpdated as EventListener);
     window.addEventListener(PROJECT_DROPS_UPDATED_EVENT, onFeedUpdated as EventListener);
     return () => {
       alive = false;
       window.removeEventListener(EVENTS.feedUpdated, onFeedUpdated as EventListener);
+      window.removeEventListener("board:drop:removed", onDropRemoved as EventListener);
       window.removeEventListener(
         BOARD_PROJECTS_UPDATED_EVENT,
         onFeedUpdated as EventListener
@@ -313,7 +325,7 @@ export default function HomeBoardFeedPage() {
         onFeedUpdated as EventListener
       );
     };
-  }, [sb, tab, kinds]);
+  }, [sb, tab, kinds, visibleFallbackItems]);
 
   useEffect(() => {
     const onNew = (e: any) => {
@@ -351,8 +363,11 @@ export default function HomeBoardFeedPage() {
           });
 
           const cleaned = Array.isArray(next) ? next : [];
+          const publicPage = cleaned.filter((item) => !isPrivateDropActivity(item));
 
-          setItems((prev) => [...prev, ...cleaned]);
+          setItems((prev) =>
+            filterDeletedFeedItems(dedupeActivity([...prev, ...publicPage]))
+          );
           setHasMore(cleaned.length === PAGE_SIZE);
           setOffset((p) => p + cleaned.length);
         } finally {
@@ -367,214 +382,56 @@ export default function HomeBoardFeedPage() {
   }, [sb, offset, hasMore, loading, tab, kinds]);
 
   return (
-    <div className="page">
-      <div className="bg" />
+    <div className="feed-page">
+      <div className="feed-shell">
+        <div className="feed-layout">
+          <section className="feed-main">
+            <div className="feed-controls">
+              <div className="feed-leftControls">
+                <div className="feed-sectionTitle">Activity Channel</div>
 
-      <div className="shell">
-        <div className="controls">
-          <div className="leftControls">
-            <div className="sectionTitle">Activity Channel</div>
+                <div className="feed-tabs">
+                  <button
+                    className={clsx("feed-tab", tab === "all" && "on")}
+                    onClick={() => setTab("all")}
+                  >
+                    All Drops
+                  </button>
+                  <button
+                    className={clsx("feed-tab", tab === "announcements" && "on")}
+                    onClick={() => setTab("announcements")}
+                  >
+                    Announcements
+                  </button>
+                </div>
+              </div>
 
-            <div className="tabs">
-              <button
-                className={clsx("tab", tab === "all" && "on")}
-                onClick={() => setTab("all")}
-              >
-                All Drops
-              </button>
-              <button
-                className={clsx("tab", tab === "announcements" && "on")}
-                onClick={() => setTab("announcements")}
-              >
-                Announcements
-              </button>
-            </div>
-          </div>
-
-          <div className="miniNote">
-            {loading ? "Loading…" : "Activity Channel"}
-          </div>
-        </div>
-
-        <div className="layout">
-          <section className="feed">
-            <div className="cards">
-              {safeItems.flatMap((a, i) => {
-                const nodes = [
-                  <ActivityCard key={a.id} item={a} onRemove={removeItemFromFeed} />,
-                ];
-                if ((i + 1) % FEED_WHISPER_EVERY === 0) {
-                  const eventType =
-                    FEED_WHISPER_CADENCE[
-                      Math.floor(i / FEED_WHISPER_EVERY) % FEED_WHISPER_CADENCE.length
-                    ];
-                  nodes.push(
-                    <BoardWhispers
-                      key={`feed-whisper-${i}`}
-                      whisper={createBoardWhisper({ id: `feed-whisper-${a.id}`, eventType })}
-                    />
-                  );
-                }
-                return nodes;
-              })}
+              <div className="feed-miniNote">
+                {loading ? "Loading…" : "Activity Channel"}
+              </div>
             </div>
 
-            <div ref={sentinelRef} className="sentinel">
+            <div className="feed-cards">
+              {safeItems.map((a) => (
+                <ActivityCard key={a.id} item={a} onRemove={removeDropFromFeed} />
+              ))}
+            </div>
+
+            <div ref={sentinelRef} className="feed-sentinel">
               {loading ? "Loading…" : hasMore ? "" : "End of feed"}
             </div>
           </section>
 
-          <aside className="rightRail">
-            <div className="dropConsoleSlot">
+          <aside className="feed-rightRail">
+            <div className="feed-dropConsoleSlot">
               <DropConsole />
             </div>
-            <div className="bucketSlot">
+            <div className="feed-bucketSlot">
               <DropsBucket />
             </div>
           </aside>
         </div>
       </div>
-
-      <style jsx>{`
-        .page {
-          position: relative;
-          min-height: 100vh;
-          padding-bottom: 120px;
-        }
-
-        .bg {
-          position: fixed;
-          inset: 0;
-          background: linear-gradient(
-              180deg,
-              rgba(255, 250, 210, 0.95),
-              rgba(255, 244, 180, 0.85)
-            ),
-            radial-gradient(
-              circle at 30% 0%,
-              rgba(255, 235, 190, 0.55),
-              transparent 60%
-            );
-          z-index: -1;
-        }
-
-        .shell {
-          max-width: 1200px;
-          margin: 0 auto;
-          padding: 16px;
-          display: grid;
-          gap: 14px;
-        }
-
-        .controls {
-          display: flex;
-          justify-content: space-between;
-          align-items: flex-end;
-        }
-
-        .leftControls {
-          display: grid;
-          gap: 10px;
-        }
-
-        .sectionTitle {
-          font-family: Georgia, "Times New Roman", serif;
-          font-size: 18px;
-          font-weight: 900;
-          letter-spacing: 0.12em;
-          text-transform: uppercase;
-          color: rgba(255, 255, 255, 0.92);
-          -webkit-text-stroke: 1.1px rgba(0, 0, 0, 0.95);
-          text-shadow:
-            1px 1px 0 rgba(0, 0, 0, 0.95),
-            -1px 1px 0 rgba(0, 0, 0, 0.95),
-            1px -1px 0 rgba(0, 0, 0, 0.95),
-            -1px -1px 0 rgba(0, 0, 0, 0.95);
-        }
-
-        .tabs {
-          display: flex;
-          gap: 10px;
-        }
-
-        .tab {
-          padding: 10px 16px;
-          border-radius: 999px;
-          background: rgba(255, 255, 255, 0.9);
-          border: 1px solid rgba(0, 0, 0, 0.1);
-          color: rgba(35, 30, 18, 0.88);
-          font-weight: 900;
-          text-transform: uppercase;
-          font-size: 12px;
-          cursor: pointer;
-        }
-
-        .tab.on {
-          color: rgb(0, 160, 80);
-          box-shadow: 0 0 0 2px rgba(0, 160, 80, 0.15);
-        }
-
-        .miniNote {
-          font-size: 11px;
-          font-weight: 900;
-          letter-spacing: 0.16em;
-          opacity: 0.5;
-          text-transform: uppercase;
-        }
-
-        .layout {
-          display: grid;
-          grid-template-columns: minmax(0, 1fr) 420px;
-          gap: 16px;
-          align-items: start;
-        }
-
-        .feed {
-          min-width: 0;
-        }
-
-        .cards {
-          display: grid;
-          gap: 14px;
-        }
-
-        .rightRail {
-          position: sticky;
-          top: 16px;
-          display: grid;
-          gap: 14px;
-        }
-
-        .sentinel {
-          padding: 16px;
-          text-align: center;
-          font-size: 11px;
-          font-weight: 900;
-          opacity: 0.4;
-          letter-spacing: 0.14em;
-          text-transform: uppercase;
-        }
-
-        @media (max-width: 980px) {
-          .layout {
-            display: flex;
-            flex-direction: column;
-          }
-          .dropConsoleSlot {
-            order: 1;
-          }
-          .feed {
-            order: 2;
-          }
-          .rightRail {
-            display: contents;
-            position: static;
-          }
-          .bucketSlot {
-            order: 3;
-          }
-        }
-      `}</style>
     </div>
   );
 }

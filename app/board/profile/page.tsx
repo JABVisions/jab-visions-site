@@ -1,5 +1,6 @@
 "use client";
 
+import "./profile.css";
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import ActivityCard from "@/app/components/board/ActivityCard";
@@ -15,6 +16,7 @@ import { EVENTS, readFeed } from "@/lib/boardStore";
 import { openHostedPayDropCheckout } from "@/lib/board/payCheckout";
 import { readPayDrops, type PayDrop } from "@/lib/board/paydrops";
 import { EVT_UPDATED, readBrain, sendWave } from "@/lib/board/bucketBrain";
+import { STICKER_PACKS } from "@/lib/board/stickerPacks";
 import { resolveLinkPreviewImage } from "@/lib/board/linkPreviewImages";
 import {
   normalizeDropCustomizations,
@@ -25,11 +27,16 @@ import {
   readBoardVisitWhispers,
 } from "@/lib/board/visitWhispers";
 import {
-  getBoardWhisper,
   createBoardWhisper,
+  deriveActivityWhispers,
+  getBoardWhisper,
   type BoardWhisper as ProfileWhisper,
-  type BoardWhisperEventType,
 } from "@/lib/board/whispers";
+import {
+  PROFILE_ACTIVITY_CHANNEL_FETCH_LIMIT,
+  PROFILE_ACTIVITY_CHANNEL_LIMIT,
+  resolveProfileActivityDrops,
+} from "@/lib/board/profileActivityChannel";
 import {
   STORE_DROP_BOOKMARKS_STORAGE_KEY,
   STORE_DROP_COLLECTION_STORAGE_KEY,
@@ -45,13 +52,13 @@ import {
   writeLightweightLocalStorage,
 } from "@/lib/board/profileStorage";
 import { supabaseBrowser } from "@/lib/supabase/browser";
+import { ensureImageFileMinResolution } from "@/lib/board/imageQuality";
 
 const PROFILE_STORAGE_KEY = BOARD_PROFILE_STORAGE_KEY;
 const OPTIONS_STORAGE_KEY = "board.options.v1";
 const PROFILE_UPDATED_EVENT = "board:profile:updated";
 const DROP_STORAGE_KEY = "jab_board_drops_v2";
 const DROP_DELETED_STORAGE_KEY = "jab_board_drops_deleted_v1";
-const ACTIVITY_CHANNEL_LIMIT = 80;
 
 function activityBelongsToUser(item: BoardActivity, userId: string) {
   const meta = item.meta && typeof item.meta === "object" ? item.meta : null;
@@ -98,8 +105,6 @@ type ProfilePayload = {
   displayName?: string;
   bio?: string;
   glowColor?: string;
-  auraColor?: keyof typeof AURA_HEX | null;
-  energyLevel?: number;
   avatarDataUrl?: string | null;
   avatarUrl?: string | null;
   avatarPath?: string | null;
@@ -142,7 +147,7 @@ type RemoteBoardStyle = {
   displayName?: string;
   bio?: string;
   glowColor?: string;
-  auraColor?: keyof typeof AURA_HEX | null;
+  auraColor?: keyof typeof AURA_HEX;
   avatarDataUrl?: string | null;
   avatarPath?: string | null;
   coverDataUrl?: string | null;
@@ -242,6 +247,7 @@ type DropItem = {
   fileSize?: number;
   mime?: string;
   mediaKind?: MediaKind;
+  mediaUrl?: string;
   priceCents?: number;
   description?: string;
   linkUrl?: string;
@@ -265,44 +271,6 @@ function BoardWhisper({ whisper }: { whisper: ProfileWhisper }) {
     <p className={`board-whisper ${whisper.tone ?? "system"}`} aria-label="Board Whisper">
       {whisper.text}
     </p>
-  );
-}
-
-// Bucket Brain: turn a real activity item into a short, ambient observation,
-// keyed off the action that actually happened (drop, push, pay/store, energy,
-// profile). No invented activity types — we read existing meta.
-function deriveActivityWhisper(
-  item: { id: string; kind?: string | null; meta?: Record<string, any> | null },
-  seed: string
-): ProfileWhisper {
-  const meta = (item.meta ?? {}) as Record<string, any>;
-  const flavor = String(meta.signalType ?? meta.dropType ?? item.kind ?? "");
-
-  let eventType: BoardWhisperEventType = "drop_view";
-  if (meta.isPushed) eventType = "drop_push";
-  else if (flavor === "energy_change") eventType = "drop_pin";
-  else if (flavor === "profile_update") eventType = "profile_view";
-  else if (/store/i.test(flavor)) eventType = "drop_view";
-  else if (flavor === "Pay") eventType = "drop_view";
-
-  const w = getBoardWhisper(eventType, `${item.id}:${seed}`);
-  return { id: `aw-${item.id}`, type: "whisper", tone: w.tone, text: w.text, eventType };
-}
-
-function BoardBookmark({
-  href,
-  title,
-  sub,
-}: {
-  href: string;
-  title: string;
-  sub: string;
-}) {
-  return (
-    <Link href={href} className="bookmark-link">
-      <span className="bookmark-title">{title}</span>
-      <span className="bookmark-sub">{sub}</span>
-    </Link>
   );
 }
 
@@ -341,6 +309,93 @@ function StoreDropCollectionSlot({ drop, index }: { drop: BoardStoreDrop | null;
   );
 }
 
+function StoreCollectionPanel({
+  slots,
+  className = "",
+}: {
+  slots: Array<BoardStoreDrop | null>;
+  className?: string;
+}) {
+  return (
+    <section className={`inner-tile store-collection-card ${className}`.trim()}>
+      <div className="tile-head">
+        <div>
+          <div className="tile-title">Store Drops Collection</div>
+          <div className="tile-sub">Collected artifacts and saved Store Drops from Explore.</div>
+        </div>
+      </div>
+      <div className="store-collection-grid">
+        {slots.map((drop, index) => (
+          <StoreDropCollectionSlot
+            key={drop?.id ?? `empty-store-slot-${index}`}
+            drop={drop}
+            index={index}
+          />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function CoverPosterPanel({
+  coverDataUrl,
+  coverInputRef,
+  onExpand,
+  className = "",
+}: {
+  coverDataUrl: string | null;
+  coverInputRef: React.RefObject<HTMLInputElement | null>;
+  onExpand: (src: string) => void;
+  className?: string;
+}) {
+  return (
+    <section className={`inner-tile cover profile-panel-cover ${className}`.trim()}>
+      <div className="tile-head">
+        <div>
+          <div className="tile-title">Cover Poster</div>
+          <div className="tile-sub">A vertical cover that frames your whole board vibe.</div>
+        </div>
+      </div>
+
+      <div className="cover-shell">
+        {coverDataUrl ? (
+          <button
+            type="button"
+            className="cover-button"
+            onClick={() => onExpand(coverDataUrl)}
+            aria-label="Expand cover poster"
+          >
+            <img className="cover-img" src={coverDataUrl} alt="Cover poster" />
+            <span className="cover-expand-hint">Expand poster</span>
+          </button>
+        ) : (
+          <button
+            type="button"
+            className="cover-empty"
+            onClick={() => coverInputRef.current?.click()}
+          >
+            <div className="plus">+</div>
+            <div className="label">UPLOAD COVER</div>
+          </button>
+        )}
+      </div>
+
+      <p className="cover-hint">
+        Think: magazine cover, film poster, or banner. Tap the poster to expand it, or use Update Cover to swap.
+      </p>
+      <div className="vision-cta-row">
+        <button
+          type="button"
+          className="tiny-cta"
+          onClick={() => coverInputRef.current?.click()}
+        >
+          Update cover →
+        </button>
+      </div>
+    </section>
+  );
+}
+
 const AURA_HEX = {
   sloth_pink: "#FF4FD8",
   lust_blue: "#2D7CFF",
@@ -360,7 +415,7 @@ function signalLabelFromColor(hex: string) {
     "#111111": "Selfish Black",
     "#ffd12d": "Pride Yellow",
     "#ff2d2d": "Really Red",
-    "#ff7a1a": "Juicy Orange",
+    "#ff7a1a": "Cautious Orange",
     "#7a44ff": "Royal Purple",
     "#b7ff2d": "Nature Green",
   };
@@ -398,6 +453,17 @@ function isDropTileActivity(item: BoardActivity) {
     source === "profiles.board_style.boardDrops" ||
     source === "board_drops" ||
     source.includes("board_drop")
+  );
+}
+
+function isPrivateThoughtActivity(item: BoardActivity) {
+  const meta = item.meta && typeof item.meta === "object" ? (item.meta as any) : null;
+  const isThought =
+    String(meta?.dropType ?? "").toLowerCase() === "thought" ||
+    String(meta?.drop_flavor ?? "").toLowerCase() === "thought";
+  return (
+    String(meta?.visibility ?? "").toLowerCase() === "private" &&
+    (isThought || String(item.id || "").startsWith("private_thought_"))
   );
 }
 
@@ -448,6 +514,10 @@ function filterCurrentDropTileActivity(items: BoardActivity[], extraDropIds: str
   const hasKnownDropIds = currentDropIds.size > 0;
 
   return items.filter((item) => {
+    // Private thoughts are owner-only and live solely in local storage — they're
+    // never synced to the server boardDrops set, so they'd otherwise be filtered
+    // out by the known-drop-id check below. Always keep them on the owner's feed.
+    if (isPrivateThoughtActivity(item)) return true;
     if (item.kind === "board_drop" && !String(item.title || "").startsWith("Project Drop:")) {
       if (!isDropTileActivity(item)) return false;
     }
@@ -653,6 +723,13 @@ export default function BoardProfileHubPage() {
   const [payCheckoutBusyId, setPayCheckoutBusyId] = useState<string | null>(null);
   const [orbitState, setOrbitState] = useState<"idle" | "requested" | "connected">("idle");
   const [bucketStats, setBucketStats] = useState<BucketStats | null>(null);
+  const [stickerBinOpen, setStickerBinOpen] = useState(false);
+  const passCount = useMemo(
+    () =>
+      bucketStats?.pass ??
+      (typeof window !== "undefined" ? readBrain().pass.length : 0),
+    [bucketStats]
+  );
   const [remoteUserId, setRemoteUserId] = useState<string | null>(null);
   const [selfUser, setSelfUser] = useState("");
   const [visitWhispers, setVisitWhispers] = useState<ProfileWhisper[]>([]);
@@ -872,10 +949,6 @@ export default function BoardProfileHubPage() {
         bio: stored?.bio?.trim() || base.bio,
         glowColor,
         auraMood: stored?.auraMood ?? base.auraMood,
-        energyLevel:
-          typeof stored?.energyLevel === "number"
-            ? clamp(stored.energyLevel, 0, 100)
-            : base.energyLevel ?? 60,
         avatarDataUrl: stored?.avatarPath
           ? null
           : stored?.avatarDataUrl !== undefined
@@ -1126,7 +1199,7 @@ export default function BoardProfileHubPage() {
           .eq("id", userId)
           .maybeSingle();
         const response = await fetch(
-          `/api/board/activity?limit=${ACTIVITY_CHANNEL_LIMIT}`,
+          `/api/board/activity?limit=${PROFILE_ACTIVITY_CHANNEL_FETCH_LIMIT}`,
           { cache: "no-store" }
         );
         if (!response.ok) throw new Error("Could not load Board activity.");
@@ -1155,7 +1228,9 @@ export default function BoardProfileHubPage() {
             ? filterCurrentDropTileActivity(items, remoteDropIds)
             : filterDeletedActivity(items, deletedIds);
 
-        setRecentDrops(dedupeActivity(visibleItems));
+        setRecentDrops(
+          dedupeActivity(visibleItems).slice(0, PROFILE_ACTIVITY_CHANNEL_LIMIT)
+        );
         setRecentDropsLoading(false);
       } catch {
         if (cancelled) return;
@@ -1167,7 +1242,7 @@ export default function BoardProfileHubPage() {
               activityBelongsToProfile(item, userId, routeKey)
             ),
             readLocalDeletedDropIds()
-          ).slice(0, ACTIVITY_CHANNEL_LIMIT)
+          ).slice(0, PROFILE_ACTIVITY_CHANNEL_LIMIT)
         );
         setRecentDropsLoading(false);
       }
@@ -1177,6 +1252,44 @@ export default function BoardProfileHubPage() {
 
     return () => {
       cancelled = true;
+    };
+  }, [remoteUserId, routeKey]);
+
+  // Private thoughts are owner-local and never come back from the server, so the
+  // remote load path above can't surface a freshly-saved one. Listen for them
+  // directly (event + local storage) and merge into the Activity Channel live.
+  useEffect(() => {
+    function mergePrivateThought(detail: BoardActivity | null) {
+      if (!detail || !isPrivateThoughtActivity(detail)) return;
+      if (!activityBelongsToProfile(detail, remoteUserId, routeKey)) return;
+      const dropId = activityDropId(detail);
+      if (dropId && readLocalDeletedDropIds().includes(dropId)) return;
+      setRecentDrops((prev) => dedupeActivity([detail, ...prev]).slice(0, PROFILE_ACTIVITY_CHANNEL_LIMIT));
+      setRecentDropsLoading(false);
+    }
+
+    function onActivityNew(event: Event) {
+      mergePrivateThought((event as CustomEvent<BoardActivity>).detail ?? null);
+    }
+
+    function onActivityStorage(event: StorageEvent) {
+      if (event.key !== null && event.key !== "jab_board_activity_v1") return;
+      const deleted = readLocalDeletedDropIds();
+      const privates = getLocalActivity().filter(
+        (item) =>
+          isPrivateThoughtActivity(item) &&
+          activityBelongsToProfile(item, remoteUserId, routeKey) &&
+          !(activityDropId(item) && deleted.includes(activityDropId(item)!))
+      );
+      if (!privates.length) return;
+      setRecentDrops((prev) => dedupeActivity([...privates, ...prev]).slice(0, PROFILE_ACTIVITY_CHANNEL_LIMIT));
+    }
+
+    window.addEventListener("board:activity:new", onActivityNew as EventListener);
+    window.addEventListener("storage", onActivityStorage as EventListener);
+    return () => {
+      window.removeEventListener("board:activity:new", onActivityNew as EventListener);
+      window.removeEventListener("storage", onActivityStorage as EventListener);
     };
   }, [remoteUserId, routeKey]);
 
@@ -1196,7 +1309,7 @@ export default function BoardProfileHubPage() {
             )
           ),
           readLocalDeletedDropIds()
-        ).slice(0, ACTIVITY_CHANNEL_LIMIT)
+        ).slice(0, PROFILE_ACTIVITY_CHANNEL_LIMIT)
       );
       setRecentDropsLoading(false);
     }
@@ -1222,8 +1335,13 @@ export default function BoardProfileHubPage() {
       if (!detail) return;
       const dropId = activityDropId(detail);
       if (dropId && readLocalDeletedDropIds().includes(dropId)) return;
-      if (isDropTileActivity(detail) && (!dropId || !readLocalDropIds().includes(dropId))) return;
-      setRecentDrops((prev) => dedupeActivity([detail, ...prev]).slice(0, ACTIVITY_CHANNEL_LIMIT));
+      if (
+        !isPrivateThoughtActivity(detail) &&
+        isDropTileActivity(detail) &&
+        (!dropId || !readLocalDropIds().includes(dropId))
+      )
+        return;
+      setRecentDrops((prev) => dedupeActivity([detail, ...prev]).slice(0, PROFILE_ACTIVITY_CHANNEL_LIMIT));
       setRecentDropsLoading(false);
     }
 
@@ -1398,6 +1516,7 @@ export default function BoardProfileHubPage() {
           meta?.mediaKind === "image" || meta?.mediaKind === "video" || meta?.mediaKind === "audio"
             ? meta.mediaKind
             : undefined,
+        mediaUrl: typeof meta?.mediaUrl === "string" ? meta.mediaUrl : undefined,
         priceCents: typeof meta?.priceCents === "number" ? meta.priceCents : undefined,
         description: typeof item.body === "string" ? item.body : undefined,
         linkUrl: safeType === "Pay" && href ? href : undefined,
@@ -1548,6 +1667,21 @@ export default function BoardProfileHubPage() {
   }, [routeKey]);
 
   useEffect(() => {
+    function onDropUpdated(e: Event) {
+      const detail = (e as CustomEvent).detail || {};
+      const dropId = typeof detail.dropId === "string" ? detail.dropId : "";
+      const drop = detail.drop;
+      if (!dropId || !drop || typeof drop !== "object") return;
+      setBoardDrops((prev) =>
+        prev.map((d) => (d.id === dropId ? { ...d, ...(drop as DropItem) } : d))
+      );
+    }
+    window.addEventListener("board:drop:updated", onDropUpdated as EventListener);
+    return () =>
+      window.removeEventListener("board:drop:updated", onDropUpdated as EventListener);
+  }, []);
+
+  useEffect(() => {
     if (!boardDrops.length) return;
     let cancelled = false;
 
@@ -1642,7 +1776,6 @@ export default function BoardProfileHubPage() {
       glow: hexToRgba(profile.glowColor, 0.18 + intensity * 0.18),
     };
   }, [profile.glowColor, auraIntensity]);
-  const energyLevel = clamp(profile.energyLevel ?? 60, 0, 100);
 
   const mood = AURA_MOODS[profile.auraMood] ?? AURA_MOODS.locked_in;
   const signalLabel = signalLabelFromColor(profile.glowColor);
@@ -1656,15 +1789,28 @@ export default function BoardProfileHubPage() {
     [recentDrops]
   );
 
+  const profileActivityChannelDrops = useMemo(
+    () =>
+      resolveProfileActivityDrops(recentDrops, boardDrops, {
+        userId: remoteUserId,
+        username: routeKey,
+        displayName: profile.displayName,
+      }, { viewerIsOwner: true }),
+    [recentDrops, boardDrops, remoteUserId, routeKey, profile.displayName]
+  );
+
   async function openPayCheckout(drop: DropItem) {
-    if (drop.linkUrl) {
-      window.open(drop.linkUrl, "_blank", "noopener,noreferrer");
+    const explicitPaymentLink = drop.payProvider === "payment_link" && drop.linkUrl;
+
+    if (explicitPaymentLink) {
+      window.open(explicitPaymentLink, "_blank", "noopener,noreferrer");
       return;
     }
 
     const shouldUseHostedCheckout =
+      drop.payProvider === "stripe_connect" ||
       drop.payProvider === "authorize_net_accept_hosted" ||
-      (drop.type === "Pay" && !drop.linkUrl && !!drop.priceCents);
+      (drop.type === "Pay" && !!drop.priceCents);
 
     if (!shouldUseHostedCheckout) {
       return;
@@ -1720,12 +1866,9 @@ export default function BoardProfileHubPage() {
       if ("coverPath" in patch) optionPatch.coverPath = patch.coverPath ?? null;
       if ("visionSlots" in patch) optionPatch.visionSlots = patch.visionSlots;
       if ("visionSlotPaths" in patch) optionPatch.visionSlotPaths = patch.visionSlotPaths;
-      const nextOptions: Record<string, unknown> = { ...options, ...optionPatch };
-      if ("auraColor" in patch) nextOptions.auraColor = patch.auraColor;
-      else if ("glowColor" in patch) nextOptions.auraColor = null;
       writeLightweightLocalStorage(
         OPTIONS_STORAGE_KEY,
-        sanitizeBoardOptionsForStorage(nextOptions)
+        sanitizeBoardOptionsForStorage({ ...options, ...optionPatch })
       );
 
       window.dispatchEvent(new Event("storage"));
@@ -1747,13 +1890,6 @@ export default function BoardProfileHubPage() {
         ...prev,
       ].slice(0, 6)
     );
-  }
-
-  function changeAuraColor(auraColor: keyof typeof AURA_HEX) {
-    const color = AURA_HEX[auraColor];
-    setProfile((prev) => ({ ...prev, glowColor: color }));
-    writeLocalProfilePatch({ glowColor: color, auraColor });
-    void persistBoardStylePatch({ glowColor: color, auraColor });
   }
 
   async function persistBoardStylePatch(patch: Partial<RemoteBoardStyle>) {
@@ -1821,10 +1957,11 @@ export default function BoardProfileHubPage() {
 
   async function handleAvatarFile(file: File | null) {
     if (!file || !file.type.startsWith("image/")) return;
-    const dataUrl = await readFileAsDataUrl(file);
+    const processed = await ensureImageFileMinResolution(file);
+    const dataUrl = await readFileAsDataUrl(processed);
     setProfile((prev) => ({ ...prev, avatarDataUrl: dataUrl }));
 
-    const path = await uploadProfileImagePath(file, "board-avatars", "avatar");
+    const path = await uploadProfileImagePath(processed, "board-avatars", "avatar");
     if (path) {
       setProfile((prev) => ({ ...prev, avatarPath: path }));
       writeLocalProfilePatch({ avatarDataUrl: null, avatarPath: path });
@@ -1837,10 +1974,11 @@ export default function BoardProfileHubPage() {
 
   async function handleCoverFile(file: File | null) {
     if (!file || !file.type.startsWith("image/")) return;
-    const dataUrl = await readFileAsDataUrl(file);
+    const processed = await ensureImageFileMinResolution(file);
+    const dataUrl = await readFileAsDataUrl(processed);
     setProfile((prev) => ({ ...prev, coverDataUrl: dataUrl }));
 
-    const path = await uploadProfileImagePath(file, "board-images", "cover");
+    const path = await uploadProfileImagePath(processed, "board-images", "cover");
     if (path) {
       setProfile((prev) => ({ ...prev, coverPath: path }));
       writeLocalProfilePatch({ coverDataUrl: null, coverPath: path });
@@ -1854,7 +1992,8 @@ export default function BoardProfileHubPage() {
   async function handleVisionFile(file: File | null, slotIndex: number) {
     if (!file || !file.type.startsWith("image/")) return;
     const index = Math.max(0, Math.min(5, slotIndex));
-    const dataUrl = await readFileAsDataUrl(file);
+    const processed = await ensureImageFileMinResolution(file);
+    const dataUrl = await readFileAsDataUrl(processed);
     const nextSlots = [...profile.visionSlots];
     nextSlots[index] = dataUrl;
     const nextPaths =
@@ -1864,7 +2003,7 @@ export default function BoardProfileHubPage() {
 
     setProfile((prev) => ({ ...prev, visionSlots: nextSlots }));
 
-    const path = await uploadProfileImagePath(file, "board-images", `vision-${index + 1}`);
+    const path = await uploadProfileImagePath(processed, "board-images", `vision-${index + 1}`);
     if (path) {
       nextPaths[index] = path;
       setProfile((prev) => ({ ...prev, visionSlotPaths: nextPaths }));
@@ -1916,7 +2055,7 @@ export default function BoardProfileHubPage() {
           event.currentTarget.value = "";
         }}
       />
-      <section className="mx-auto max-w-[1500px] px-4 pb-24 pt-14 sm:px-6 lg:px-8">
+      <section className="profile-board-section mx-auto max-w-[1500px] pb-24 pt-14">
         <div className="poster-board" style={{ boxShadow: aura.ring, borderColor: aura.border }}>
           <div className="board-top">
             <div>
@@ -1943,7 +2082,8 @@ export default function BoardProfileHubPage() {
 
           <div className="profile-grid">
             <div className="left-column">
-              <section className="inner-tile profile-vision">
+              <div className="profile-left-stack">
+              <section className="inner-tile profile-panel-vision">
                 <div className="tile-head">
                   <div>
                     <div className="tile-title">Vision Wall</div>
@@ -2014,14 +2154,26 @@ export default function BoardProfileHubPage() {
                 </div>
               </section>
 
-              <div className="profile-board-drop">
+              <div className="profile-panel-drops">
                 <DropTile />
+              </div>
+
+              <StoreCollectionPanel
+                slots={storeDropSlots}
+                className="profile-store-drops-bottom"
+              />
               </div>
             </div>
 
             <div className="center-column">
-              <section className="inner-tile identity profile-identity">
-                <h1 className="name profile-name">{profile.displayName}</h1>
+              <div className="profile-right-stack">
+              <CoverPosterPanel
+                coverDataUrl={profile.coverDataUrl}
+                coverInputRef={coverInputRef}
+                onExpand={(src) => setExpandedPhoto({ src, label: "Cover poster" })}
+                className=""
+              />
+              <section className="inner-tile identity profile-panel-identity">
                 <div className="identity-row">
                   <button
                     type="button"
@@ -2046,10 +2198,11 @@ export default function BoardProfileHubPage() {
                   </button>
 
                   <div className="identity-meta">
+                    <h1 className="name">{profile.displayName}</h1>
                     <div className="status-pill aura-active">Aura active</div>
                     <p className="bio">{profile.bio}</p>
                     <div className="profile-pills">
-                      <span>Posts: <b>{boardDropsLoading ? "..." : boardDrops.length}</b></span>
+                      <span>Drops: <b>{boardDropsLoading ? "..." : boardDrops.length}</b></span>
                       <span>Glow: <b>{signalLabel}</b></span>
                       <span>Mode: <b>Public</b></span>
                     </div>
@@ -2059,13 +2212,13 @@ export default function BoardProfileHubPage() {
                       style={
                         {
                           "--board-glow": profile.glowColor,
-                          "--energy": `${energyLevel}%`,
+                          "--energy": `${profile.energyLevel ?? 60}%`,
                         } as React.CSSProperties
                       }
                     >
                       <div className="energy-head">
                         <span className="energy-label">Energy</span>
-                        <span className="energy-value">{energyLevel}</span>
+                        <span className="energy-value">{profile.energyLevel ?? 60}</span>
                       </div>
                       <input
                         className="energy-slider"
@@ -2073,24 +2226,35 @@ export default function BoardProfileHubPage() {
                         min={0}
                         max={100}
                         step={1}
-                        value={energyLevel}
-                        onChange={(e) => {
-                          const level = clamp(Number(e.target.value), 0, 100);
-                          setProfile((p) => ({ ...p, energyLevel: level }));
-                          writeLocalProfilePatch({ energyLevel: level });
-                        }}
+                        value={profile.energyLevel ?? 60}
+                        onChange={(e) =>
+                          setProfile((p) => ({ ...p, energyLevel: Number(e.target.value) }))
+                        }
                         onPointerUp={() => {
-                          void persistBoardStylePatch({ energyLevel });
-                          notifyEnergyChange(energyLevel);
+                          const level = profile.energyLevel ?? 60;
+                          void persistBoardStylePatch({ energyLevel: level });
+                          notifyEnergyChange(level);
                         }}
-                        onKeyUp={() => void persistBoardStylePatch({ energyLevel })}
                         aria-label="Energy level"
                       />
                     </div>
                     <div className="micro-row">
-                      <span>Pinned goals coming next</span>
-                      <span>Saved threads coming next</span>
-                      <span>Collabs &amp; calls coming next</span>
+                      <div className="micro-tile">
+                        <span className="micro-num">{passCount}</span>
+                        <span className="micro-cap">Passes</span>
+                      </div>
+                      <Link href="/board/work" className="micro-tile micro-link">
+                        <span className="micro-ico" aria-hidden>🗂️</span>
+                        <span className="micro-cap">Work Board</span>
+                      </Link>
+                      <button
+                        type="button"
+                        className="micro-tile micro-link"
+                        onClick={() => setStickerBinOpen(true)}
+                      >
+                        <span className="micro-ico" aria-hidden>🩷</span>
+                        <span className="micro-cap">Sticker Bin</span>
+                      </button>
                     </div>
                     <div className="avatar-actions">
                       <button
@@ -2112,43 +2276,21 @@ export default function BoardProfileHubPage() {
                 </div>
               </section>
 
-              <section className="inner-tile profile-aura">
+              <section className="inner-tile profile-panel-aura">
                 <div className="tile-head">
                   <div>
                     <div className="tile-title">Aura Snapshot</div>
                     <div className="tile-sub">Shape the pulse of your board right here from Profile.</div>
                   </div>
-                  <div className="aura-color-picker" role="group" aria-label="Choose profile aura color">
-                    <div className="aura-palette">
-                      {(Object.entries(AURA_HEX) as Array<[keyof typeof AURA_HEX, string]>).map(
-                        ([auraColor, color]) => {
-                          const active = profile.glowColor.toLowerCase() === color.toLowerCase();
-                          const label = signalLabelFromColor(color);
-                          return (
-                            <button
-                              key={auraColor}
-                              type="button"
-                              className={`aura-color-option ${active ? "active" : ""}`}
-                              style={{ background: color, boxShadow: active ? `0 0 20px ${color}` : undefined }}
-                              onClick={() => changeAuraColor(auraColor)}
-                              aria-label={`Use ${label} aura`}
-                              aria-pressed={active}
-                              title={label}
-                            />
-                          );
-                        }
-                      )}
-                    </div>
-                    <span className="aura-color-label">{signalLabel}</span>
-                  </div>
+                  <span className="aura-swatch" style={{ background: profile.glowColor, boxShadow: `0 0 24px ${aura.glow}` }} />
                 </div>
 
                 <div className="snap-grid">
                   <div className="snap-card">
                     <div className="snap-label">Energy</div>
-                    <div className="snap-value">{energyLevel}%</div>
+                    <div className="snap-value">{auraIntensity}%</div>
                     <div className="energy-bar">
-                      <div className="energy-fill" style={{ width: `${energyLevel}%`, background: profile.glowColor }} />
+                      <div className="energy-fill" style={{ width: `${auraIntensity}%`, background: profile.glowColor }} />
                     </div>
                   </div>
 
@@ -2174,7 +2316,7 @@ export default function BoardProfileHubPage() {
                 </div>
               </section>
 
-              <section className="inner-tile profile-activity">
+              <section className="inner-tile profile-panel-activity">
                 <div className="tile-head">
                   <div>
                     <div className="tile-title">Activity Channel</div>
@@ -2190,21 +2332,21 @@ export default function BoardProfileHubPage() {
                       Pulling live board activity into this profile preview.
                     </div>
                   </div>
-                ) : recentDrops.length > 0 ? (
+                ) : profileActivityChannelDrops.length > 0 ? (
                   <div className="recent-drops-stack activity-feed-stack">
                     {visitWhispers.map((whisper) => (
                       <BoardWhisper key={whisper.id} whisper={whisper} />
                     ))}
 
-                    {recentDrops.map((item, index) => {
-                      // Whisper derived from this drop's real activity, not a canned list.
-                      const whisper =
-                        index % 2 === 0 ? deriveActivityWhisper(item, String(index)) : null;
+                    {profileActivityChannelDrops.map((item, index) => {
+                      const whispers = deriveActivityWhispers(item, index);
 
                       return (
                         <div key={item.id} className="activity-feed-entry">
                           <ActivityCard item={item} compact />
-                          {whisper ? <BoardWhisper whisper={whisper} /> : null}
+                          {whispers.map((whisper) => (
+                            <BoardWhisper key={whisper.id} whisper={whisper} />
+                          ))}
                         </div>
                       );
                     })}
@@ -2224,92 +2366,9 @@ export default function BoardProfileHubPage() {
                   </div>
                 )}
               </section>
+              </div>
             </div>
 
-            <div className="right-column">
-              <section className="inner-tile cover profile-cover">
-                <div className="tile-head">
-                  <div>
-                    <div className="tile-title">Cover Poster</div>
-                    <div className="tile-sub">A vertical cover that frames your whole board vibe.</div>
-                  </div>
-                </div>
-
-                <div className="cover-shell">
-                  {profile.coverDataUrl ? (
-                    <button
-                      type="button"
-                      className="cover-button"
-                      onClick={() =>
-                        setExpandedPhoto({ src: profile.coverDataUrl ?? "", label: "Cover poster" })
-                      }
-                      aria-label="Expand cover poster"
-                    >
-                      <img className="cover-img" src={profile.coverDataUrl} alt="Cover poster" />
-                      <span className="cover-expand-hint">Expand poster</span>
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      className="cover-empty"
-                      onClick={() => coverInputRef.current?.click()}
-                    >
-                      <div className="plus">+</div>
-                      <div className="label">UPLOAD COVER</div>
-                    </button>
-                  )}
-                </div>
-
-                <p className="cover-hint">
-                  Think: magazine cover, film poster, or banner. Tap the poster to expand it, or use Update Cover to swap.
-                </p>
-                <div className="vision-cta-row">
-                  <button
-                    type="button"
-                    className="tiny-cta"
-                    onClick={() => coverInputRef.current?.click()}
-                  >
-                    Update cover →
-                  </button>
-                </div>
-              </section>
-
-              <section className="inner-tile bookmarks-card profile-bookmarks">
-                <div className="tile-head">
-                  <div>
-                    <div className="tile-title">Board Bookmarks</div>
-                    <div className="tile-sub">Fast jumps that feel like tabs in your brain.</div>
-                  </div>
-                </div>
-
-                <div className="bookmark-stack">
-                  <BoardBookmark href="/board/forums" title="Forums Hub" sub="threads, topics, announcements" />
-                  <BoardBookmark href="/board/work" title="Work Board" sub="tasks, roles, collabs" />
-                  <BoardBookmark href="/board/feed" title="Community Feed" sub="status, boards, thread links" />
-                  <BoardBookmark href="/board/options" title="Options" sub="privacy, aura, Friend Zone, settings" />
-                  <BoardBookmark href="/board/options" title="Edit Profile" sub="avatar, bio, glow, vision" />
-                </div>
-              </section>
-
-              <section className="inner-tile store-collection-card profile-store">
-                <div className="tile-head">
-                  <div>
-                    <div className="tile-title">Store Drops Collection</div>
-                    <div className="tile-sub">Collected artifacts and saved Store Drops from Explore.</div>
-                  </div>
-                </div>
-
-                <div className="store-collection-grid">
-                  {storeDropSlots.map((drop, index) => (
-                    <StoreDropCollectionSlot
-                      key={drop?.id ?? `empty-store-slot-${index}`}
-                      drop={drop}
-                      index={index}
-                    />
-                  ))}
-                </div>
-              </section>
-            </div>
           </div>
         </div>
       </section>
@@ -2338,1473 +2397,59 @@ export default function BoardProfileHubPage() {
         </div>
       ) : null}
 
-      <style jsx global>{`
-        .board-bg {
-          background:
-            radial-gradient(1100px 700px at 20% 12%, rgba(0, 255, 150, 0.1), transparent 60%),
-            radial-gradient(900px 600px at 85% 28%, rgba(255, 0, 190, 0.1), transparent 55%),
-            linear-gradient(180deg, #fff7c9, #fff3b0);
-        }
 
-        .sr-only-file {
-          position: fixed;
-          width: 1px;
-          height: 1px;
-          opacity: 0;
-          pointer-events: none;
-        }
-
-        .poster-board {
-          position: relative;
-          width: min(1180px, calc(100vw - 48px));
-          max-width: 1180px;
-          margin: 0 auto;
-          border-radius: 34px;
-          border: 2px solid rgba(0, 0, 0, 0.12);
-          overflow: visible;
-          background:
-            linear-gradient(180deg, rgba(255, 255, 255, 0.7), rgba(255, 255, 255, 0.55)),
-            repeating-linear-gradient(
-              0deg,
-              rgba(0, 0, 0, 0.03) 0px,
-              rgba(0, 0, 0, 0.03) 1px,
-              transparent 1px,
-              transparent 10px
-            ),
-            repeating-linear-gradient(
-              90deg,
-              rgba(0, 0, 0, 0.02) 0px,
-              rgba(0, 0, 0, 0.02) 1px,
-              transparent 1px,
-              transparent 12px
-            );
-          backdrop-filter: blur(10px);
-          padding: 18px;
-        }
-
-        .board-top {
-          display: flex;
-          justify-content: space-between;
-          gap: 16px;
-          align-items: flex-start;
-          margin-bottom: 18px;
-        }
-
-        .board-title {
-          font-size: 30px;
-          font-weight: 900;
-          letter-spacing: -0.04em;
-          color: #1c1a13;
-        }
-
-        .board-subtitle {
-          margin-top: 4px;
-          color: rgba(0, 0, 0, 0.6);
-        }
-
-        .board-top-right {
-          display: flex;
-          gap: 10px;
-          flex-wrap: wrap;
-        }
-
-        .board-pill-link,
-        .board-pill-cta {
-          display: inline-flex;
-          align-items: center;
-          justify-content: center;
-          border-radius: 999px;
-          padding: 10px 14px;
-          font-size: 12px;
-          font-weight: 800;
-          text-transform: uppercase;
-          letter-spacing: 0.16em;
-          text-decoration: none;
-          white-space: nowrap;
-          cursor: pointer;
-          font-family: inherit;
-        }
-
-        .board-pill-link {
-          background: rgba(255, 255, 255, 0.75);
-          border: 1px solid rgba(0, 0, 0, 0.1);
-          color: #18150f;
-        }
-
-        .board-pill-cta {
-          background: rgba(27, 24, 15, 0.95);
-          color: #fff4c0;
-        }
-
-        .profile-grid {
-          display: grid;
-          grid-template-columns: repeat(2, minmax(0, 1fr));
-          grid-template-areas:
-            "identity aura"
-            "vision cover"
-            "board activity"
-            "bookmarks store";
-          gap: 16px;
-          min-width: 0;
-        }
-
-        .left-column,
-        .center-column,
-        .right-column {
-          display: contents;
-        }
-
-        .profile-vision {
-          grid-area: vision;
-        }
-
-        .profile-cover {
-          grid-area: cover;
-        }
-
-        .profile-identity {
-          grid-area: identity;
-        }
-
-        .profile-board-drop {
-          grid-area: board;
-          min-width: 0;
-          max-width: 100%;
-        }
-
-        .profile-activity {
-          grid-area: activity;
-        }
-
-        .profile-aura {
-          grid-area: aura;
-        }
-
-        .profile-bookmarks {
-          grid-area: bookmarks;
-        }
-
-        .profile-store {
-          grid-area: store;
-        }
-
-        .inner-tile {
-          min-width: 0;
-          max-width: 100%;
-          border-radius: 28px;
-          border: 1px solid rgba(108, 255, 239, 0.34);
-          background: rgba(255, 255, 255, 0.78);
-          padding: 16px;
-          box-shadow:
-            0 0 0 1px rgba(255, 255, 255, 0.4),
-            inset 0 1px 0 rgba(255, 255, 255, 0.8);
-        }
-
-        .left-column :global(.drop-tile) {
-          width: 100%;
-          max-width: 100%;
-          min-width: 0;
-          overflow: hidden;
-        }
-
-        .tile-head {
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          justify-content: center;
-          gap: 12px;
-          margin-bottom: 14px;
-          min-width: 0;
-          text-align: center;
-        }
-
-        .tile-title {
-          font-size: 18px;
-          font-weight: 900;
-          color: #35a24b;
-        }
-
-        .tile-sub {
-          margin-top: 4px;
-          font-size: 12px;
-          color: rgba(0, 0, 0, 0.55);
-        }
-
-        .tile-mini {
-          margin-top: 8px;
-          font-size: 12px;
-          color: rgba(0, 0, 0, 0.52);
-        }
-
-        .vision-hint,
-        .cover-hint {
-          margin-top: 12px;
-          font-size: 12px;
-          line-height: 1.45;
-          color: rgba(0, 0, 0, 0.56);
-        }
-
-        .vision-cta-row {
-          margin-top: 10px;
-          display: flex;
-          justify-content: flex-end;
-        }
-
-        .tiny-cta {
-          display: inline-flex;
-          align-items: center;
-          justify-content: center;
-          border: 0;
-          background: transparent;
-          color: #ff28c9;
-          font-size: 11px;
-          font-weight: 900;
-          letter-spacing: 0.16em;
-          text-transform: uppercase;
-          text-decoration: underline;
-          text-underline-offset: 4px;
-          white-space: nowrap;
-          cursor: pointer;
-          font-family: inherit;
-        }
-
-        .drop-tile-panel {
-          overflow: visible;
-        }
-
-        .drop-tile-panel :global(.drop-tile) {
-          margin: 0;
-          width: 100%;
-          max-width: 100%;
-        }
-
-        .vision-grid {
-          display: grid;
-          grid-template-columns: repeat(3, minmax(0, 1fr));
-          gap: 10px;
-        }
-
-        .vision-slot,
-        .cover-shell {
-          border-radius: 20px;
-          border: 1px solid rgba(0, 0, 0, 0.1);
-          overflow: hidden;
-          background: rgba(0, 0, 0, 0.06);
-        }
-
-        .vision-slot {
-          aspect-ratio: 1 / 1;
-          display: block;
-          width: 100%;
-          padding: 0;
-          font-family: inherit;
-          position: relative;
-        }
-
-        .vision-image-button,
-        .cover-button {
-          width: 100%;
-          height: 100%;
-          display: block;
-          border: 0;
-          padding: 0;
-          background: transparent;
-          cursor: zoom-in;
-          font-family: inherit;
-          position: relative;
-        }
-
-        .vision-img,
-        .cover-img {
-          width: 100%;
-          height: 100%;
-          object-fit: cover;
-          display: block;
-        }
-
-        .vision-empty,
-        .cover-empty {
-          width: 100%;
-          height: 100%;
-          display: grid;
-          place-items: center;
-          color: rgba(0, 0, 0, 0.4);
-          text-align: center;
-          padding: 14px;
-          text-decoration: none;
-          cursor: pointer;
-          border: 0;
-          background: transparent;
-          font-family: inherit;
-        }
-
-        .vision-expand-hint,
-        .cover-expand-hint {
-          position: absolute;
-          right: 8px;
-          bottom: 8px;
-          border-radius: 999px;
-          border: 1px solid rgba(255, 255, 255, 0.72);
-          background: rgba(0, 0, 0, 0.46);
-          color: rgba(255, 255, 255, 0.94);
-          font-size: 9px;
-          font-weight: 900;
-          letter-spacing: 0.14em;
-          text-transform: uppercase;
-          padding: 4px 7px;
-          opacity: 0;
-          transition: opacity 160ms ease;
-        }
-
-        .vision-image-button:hover .vision-expand-hint,
-        .cover-button:hover .cover-expand-hint {
-          opacity: 1;
-        }
-
-        .vision-replace-btn {
-          position: absolute;
-          left: 7px;
-          bottom: 7px;
-          border: 1px solid rgba(255, 40, 201, 0.5);
-          border-radius: 999px;
-          background: rgba(255, 255, 255, 0.86);
-          color: #ff28c9;
-          font-size: 9px;
-          font-weight: 900;
-          letter-spacing: 0.12em;
-          text-transform: uppercase;
-          padding: 4px 7px;
-          cursor: pointer;
-          font-family: inherit;
-          box-shadow: 0 0 14px rgba(255, 40, 201, 0.18);
-        }
-
-        .plus {
-          font-size: 28px;
-          font-weight: 900;
-          line-height: 1;
-        }
-
-        .label {
-          margin-top: 4px;
-          font-size: 10px;
-          font-weight: 800;
-          letter-spacing: 0.18em;
-          text-transform: uppercase;
-        }
-
-        .snap-grid {
-          display: grid;
-          grid-template-columns: repeat(2, minmax(0, 1fr));
-          gap: 10px;
-        }
-
-        .snap-card {
-          border-radius: 20px;
-          border: 1px solid rgba(0, 0, 0, 0.1);
-          background: rgba(255, 251, 221, 0.7);
-          padding: 14px;
-        }
-
-        .snap-label {
-          font-size: 11px;
-          font-weight: 800;
-          letter-spacing: 0.16em;
-          text-transform: uppercase;
-          color: rgba(0, 0, 0, 0.45);
-        }
-
-        .snap-value {
-          margin-top: 8px;
-          font-weight: 800;
-          color: #1a1711;
-        }
-
-        .energy-bar {
-          margin-top: 10px;
-          height: 8px;
-          border-radius: 999px;
-          background: rgba(0, 0, 0, 0.08);
-          overflow: hidden;
-        }
-
-        .energy-fill {
-          height: 100%;
-          border-radius: 999px;
-        }
-
-        .signal-row {
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          margin-top: 8px;
-        }
-
-        .signal-dot {
-          width: 12px;
-          height: 12px;
-          border-radius: 999px;
-          display: inline-block;
-        }
-
-        .identity-row {
-          display: flex;
-          flex-direction: column;
-          gap: 16px;
-          align-items: center;
-          text-align: center;
-        }
-
-        .avatar-shell {
-          width: 120px;
-          height: 120px;
-          flex-shrink: 0;
-          border-radius: 999px;
-          border: 2px solid rgba(0, 0, 0, 0.1);
-          display: grid;
-          place-items: center;
-          background: rgba(255, 255, 255, 0.4);
-        }
-
-        .avatar-shell-button {
-          padding: 0;
-          cursor: zoom-in;
-          font-family: inherit;
-        }
-
-        .avatar-inner {
-          width: 98px;
-          height: 98px;
-          border-radius: 999px;
-          overflow: hidden;
-          border: 1px solid rgba(255, 255, 255, 0.45);
-          background: rgba(0, 0, 0, 0.08);
-        }
-
-        .avatar-img {
-          width: 100%;
-          height: 100%;
-          object-fit: cover;
-          display: block;
-        }
-
-        .avatar-placeholder {
-          width: 100%;
-          height: 100%;
-          display: grid;
-          place-items: center;
-          font-size: 34px;
-          font-weight: 900;
-          color: rgba(0, 0, 0, 0.55);
-        }
-
-        .photo-lightbox {
-          position: fixed;
-          inset: 0;
-          z-index: 250;
-          display: grid;
-          place-items: center;
-          padding: 36px;
-          background:
-            radial-gradient(circle at 50% 24%, rgba(255, 40, 201, 0.16), transparent 42%),
-            rgba(8, 8, 8, 0.82);
-          backdrop-filter: blur(18px);
-        }
-
-        .photo-lightbox-img {
-          max-width: min(92vw, 1180px);
-          max-height: 84vh;
-          object-fit: contain;
-          border-radius: 24px;
-          border: 1px solid rgba(255, 255, 255, 0.38);
-          box-shadow:
-            0 0 42px rgba(255, 40, 201, 0.26),
-            0 28px 90px rgba(0, 0, 0, 0.45);
-        }
-
-        .photo-lightbox-close {
-          position: fixed;
-          top: 28px;
-          right: 32px;
-          border: 1px solid rgba(255, 255, 255, 0.42);
-          border-radius: 999px;
-          background: rgba(255, 255, 255, 0.9);
-          color: #171713;
-          font-size: 11px;
-          font-weight: 900;
-          letter-spacing: 0.14em;
-          text-transform: uppercase;
-          padding: 10px 14px;
-          cursor: pointer;
-          font-family: inherit;
-        }
-
-        .name {
-          font-size: clamp(18px, 4vw, 34px);
-          line-height: 1;
-          font-weight: 900;
-          letter-spacing: -0.04em;
-          color: #35a24b;
-          overflow-wrap: anywhere;
-        }
-
-        .profile-name {
-          margin: 0 0 16px;
-          text-align: center;
-        }
-
-        .handle {
-          margin-top: 6px;
-          font-size: 13px;
-          color: rgba(0, 0, 0, 0.48);
-        }
-
-        .bio {
-          margin-top: 10px;
-          line-height: 1.6;
-          color: rgba(0, 0, 0, 0.62);
-        }
-
-        .identity-meta {
-          min-width: 0;
-          width: 100%;
-        }
-
-        .status-pill {
-          display: inline-flex;
-          border-radius: 999px;
-          border: 1px solid rgba(0, 0, 0, 0.1);
-          background: rgba(255, 255, 255, 0.5);
-          padding: 8px 12px;
-          font-size: 10px;
-          font-weight: 800;
-          letter-spacing: 0.18em;
-          text-transform: uppercase;
-          color: rgba(0, 0, 0, 0.58);
-        }
-
-        .aura-active {
-          margin-top: 12px;
-        }
-
-        .profile-pills {
-          margin-top: 14px;
-          display: flex;
-          flex-direction: column;
-          align-items: flex-start;
-          gap: 8px;
-        }
-
-        .profile-pills span {
-          display: inline-flex;
-          align-items: center;
-          gap: 6px;
-          min-height: 30px;
-          border-radius: 999px;
-          border: 1px solid rgba(0, 0, 0, 0.08);
-          background: rgba(255, 255, 255, 0.7);
-          padding: 6px 12px;
-          color: rgba(0, 0, 0, 0.58);
-        }
-
-        .profile-pills b {
-          color: #35a24b;
-        }
-
-        /* Energy level — liquid-glass slider, aura-glowing, not a generic input. */
-        .energy-row {
-          margin-top: 14px;
-          display: grid;
-          gap: 7px;
-          max-width: 320px;
-        }
-        .energy-head {
-          display: flex;
-          align-items: baseline;
-          justify-content: space-between;
-        }
-        .energy-label {
-          font-size: 10px;
-          font-weight: 950;
-          letter-spacing: 0.2em;
-          text-transform: uppercase;
-          color: rgba(0, 0, 0, 0.5);
-        }
-        .energy-value {
-          font-size: 14px;
-          font-weight: 950;
-          color: var(--board-glow, #ff4fd8);
-          text-shadow: 0 0 12px
-            color-mix(in srgb, var(--board-glow, #ff4fd8) 50%, transparent);
-        }
-        .energy-slider {
-          -webkit-appearance: none;
-          appearance: none;
-          width: 100%;
-          height: 10px;
-          border-radius: 999px;
-          background: linear-gradient(
-            90deg,
-            var(--board-glow, #ff4fd8) var(--energy, 60%),
-            rgba(0, 0, 0, 0.08) var(--energy, 60%)
-          );
-          box-shadow:
-            inset 0 0 10px rgba(255, 255, 255, 0.45),
-            0 0 18px color-mix(in srgb, var(--board-glow, #ff4fd8) 28%, transparent);
-          outline: none;
-          cursor: pointer;
-        }
-        .energy-slider::-webkit-slider-thumb {
-          -webkit-appearance: none;
-          width: 20px;
-          height: 20px;
-          border-radius: 999px;
-          background: radial-gradient(circle at 35% 30%, #fff, var(--board-glow, #ff4fd8));
-          border: 1px solid rgba(255, 255, 255, 0.75);
-          box-shadow: 0 0 14px
-            color-mix(in srgb, var(--board-glow, #ff4fd8) 65%, transparent);
-          cursor: pointer;
-        }
-        .energy-slider::-moz-range-thumb {
-          width: 20px;
-          height: 20px;
-          border: none;
-          border-radius: 999px;
-          background: radial-gradient(circle at 35% 30%, #fff, var(--board-glow, #ff4fd8));
-          box-shadow: 0 0 14px var(--board-glow, #ff4fd8);
-          cursor: pointer;
-        }
-
-        .micro-row {
-          margin-top: 14px;
-          display: grid;
-          grid-template-columns: repeat(3, minmax(0, 1fr));
-          gap: 8px;
-        }
-
-        .micro-row span {
-          min-height: 96px;
-          border-radius: 18px;
-          border: 1px solid rgba(255, 0, 190, 0.13);
-          background: rgba(255, 255, 255, 0.58);
-          padding: 12px;
-          color: rgba(0, 0, 0, 0.58);
-          font-size: 13px;
-          line-height: 1.35;
-        }
-
-        .avatar-actions {
-          margin-top: 14px;
-          display: flex;
-          flex-wrap: wrap;
-          gap: 8px;
-        }
-
-        .aura-color-picker {
-          display: inline-flex;
-          flex-direction: column;
-          align-items: center;
-          gap: 7px;
-          width: min(100%, 180px);
-        }
-
-        .aura-palette {
-          display: grid;
-          grid-template-columns: repeat(4, minmax(0, 1fr));
-          gap: 7px;
-          width: 100%;
-        }
-
-        .aura-color-option {
-          width: 100%;
-          aspect-ratio: 1;
-          min-width: 0;
-          border-radius: 10px;
-          border: 2px solid rgba(255, 255, 255, 0.72);
-          cursor: pointer;
-          transition: transform 150ms ease, border-color 150ms ease, box-shadow 150ms ease;
-        }
-
-        .aura-color-option:hover,
-        .aura-color-option.active {
-          transform: scale(1.08);
-          border-color: rgba(0, 0, 0, 0.72);
-        }
-
-        .aura-color-label {
-          color: rgba(0, 0, 0, 0.58);
-          font-size: 10px;
-          font-weight: 900;
-          letter-spacing: 0.1em;
-          text-transform: uppercase;
-        }
-
-        .note-card {
-          border-radius: 22px;
-          border: 1px solid rgba(0, 0, 0, 0.1);
-          background: rgba(255, 251, 221, 0.78);
-          padding: 16px;
-        }
-
-        .board-drop-stack {
-          display: grid;
-          gap: 12px;
-        }
-
-        .board-drop-item {
-          border-radius: 20px;
-          border: 1px solid rgba(0, 0, 0, 0.1);
-          background: rgba(255, 255, 255, 0.66);
-          padding: 14px;
-          display: grid;
-          gap: 10px;
-        }
-
-        .board-drop-top {
-          display: flex;
-          gap: 10px;
-          justify-content: space-between;
-          align-items: flex-start;
-        }
-
-        .board-drop-title {
-          font-weight: 800;
-          color: #18150f;
-        }
-
-        .board-drop-badges {
-          display: flex;
-          gap: 6px;
-          flex-wrap: wrap;
-          justify-content: flex-end;
-        }
-
-        .board-drop-badge {
-          border-radius: 999px;
-          padding: 6px 8px;
-          font-size: 10px;
-          font-weight: 800;
-          letter-spacing: 0.12em;
-          text-transform: uppercase;
-          background: rgba(0, 160, 80, 0.12);
-          color: rgba(0, 160, 80, 0.92);
-        }
-
-        .board-drop-badge.ghost {
-          background: rgba(0, 0, 0, 0.06);
-          color: rgba(0, 0, 0, 0.56);
-        }
-
-        .board-drop-media-frame {
-          position: relative;
-          display: flex;
-          justify-content: center;
-          width: 100%;
-          max-width: 100%;
-          margin: 0 auto;
-          border-radius: 16px;
-          overflow: hidden;
-        }
-
-        .board-drop-media-frame.video {
-          width: 100%;
-        }
-
-        .board-drop-media {
-          width: auto;
-          height: auto;
-          max-width: 100%;
-          max-height: min(520px, 72vh);
-          border-radius: 16px;
-          border: 1px solid rgba(0, 0, 0, 0.1);
-          object-fit: contain;
-          display: block;
-          background:
-            radial-gradient(circle at 18% 18%, rgba(255, 0, 190, 0.08), transparent 34%),
-            radial-gradient(circle at 80% 22%, rgba(0, 180, 255, 0.08), transparent 34%),
-            rgba(0, 0, 0, 0.055);
-        }
-
-        .board-drop-media-frame.video .board-drop-media {
-          width: 100%;
-          height: auto;
-          background: #000;
-        }
-
-        .board-drop-embed {
-          border-radius: 16px;
-          overflow: visible;
-          border: 1px solid rgba(0, 0, 0, 0.1);
-          background: rgba(23, 23, 23, 0.92);
-          height: 220px;
-          width: 100%;
-          max-width: 100%;
-          position: relative;
-        }
-
-        .board-drop-embed iframe {
-          width: 100%;
-          height: 100%;
-          max-width: 100%;
-          border: 0;
-          display: block;
-          overflow: hidden;
-        }
-
-        .board-drop-embed.spotify {
-          min-width: 0;
-          background: #282828;
-          border-radius: 18px;
-          overflow: visible;
-        }
-
-        .board-drop-embed.spotify iframe.spotify-frame {
-          display: block;
-          width: 100%;
-          height: 80px;
-          border: 0;
-          border-radius: 18px;
-        }
-
-        .board-drop-embed.spotify iframe {
-          min-width: 0;
-          width: 1px;
-          min-width: 100%;
-        }
-
-        .board-drop-description {
-          font-size: 13px;
-          line-height: 1.6;
-          color: rgba(0, 0, 0, 0.62);
-        }
-
-        .board-drop-links {
-          display: flex;
-          flex-wrap: wrap;
-          gap: 8px;
-        }
-
-        .board-link-preview {
-          display: block;
-          overflow: hidden;
-          border-radius: 18px;
-          border: 1px solid rgba(0, 0, 0, 0.1);
-          background: rgba(255, 255, 255, 0.68);
-          color: inherit;
-          text-decoration: none;
-        }
-
-        .board-link-art {
-          position: relative;
-          min-height: 220px;
-          overflow: hidden;
-          background:
-            radial-gradient(circle at 18% 20%, rgba(255, 0, 190, 0.16), transparent 34%),
-            radial-gradient(circle at 80% 22%, rgba(0, 180, 255, 0.14), transparent 34%),
-            linear-gradient(135deg, rgba(24, 21, 15, 0.92), rgba(76, 66, 43, 0.9));
-        }
-
-        .board-link-img {
-          position: absolute;
-          inset: 0;
-          width: 100%;
-          height: 100%;
-          object-fit: cover;
-          display: block;
-        }
-
-        .board-link-shade {
-          position: absolute;
-          inset: 0;
-          background:
-            linear-gradient(180deg, rgba(0, 0, 0, 0.08), rgba(0, 0, 0, 0.78)),
-            radial-gradient(circle at 75% 10%, rgba(255, 255, 255, 0.2), transparent 34%);
-        }
-
-        .board-link-host {
-          position: absolute;
-          left: 14px;
-          top: 14px;
-          max-width: calc(100% - 28px);
-          overflow: hidden;
-          text-overflow: ellipsis;
-          white-space: nowrap;
-          border-radius: 999px;
-          border: 1px solid rgba(255, 255, 255, 0.32);
-          background: rgba(0, 0, 0, 0.48);
-          padding: 7px 10px;
-          color: rgba(255, 255, 255, 0.92);
-          font-size: 10px;
-          font-weight: 950;
-          letter-spacing: 0.14em;
-          text-transform: uppercase;
-          backdrop-filter: blur(10px);
-        }
-
-        .board-link-copy {
-          position: absolute;
-          left: 14px;
-          right: 14px;
-          bottom: 14px;
-          color: #fff;
-        }
-
-        .board-link-label {
-          font-size: 10px;
-          font-weight: 950;
-          letter-spacing: 0.18em;
-          text-transform: uppercase;
-          color: rgba(200, 255, 230, 0.9);
-        }
-
-        .board-link-title {
-          margin-top: 6px;
-          font-size: 20px;
-          line-height: 1.1;
-          font-weight: 950;
-          letter-spacing: -0.02em;
-          text-shadow: 0 2px 12px rgba(0, 0, 0, 0.42);
-          display: -webkit-box;
-          -webkit-line-clamp: 2;
-          -webkit-box-orient: vertical;
-          overflow: hidden;
-        }
-
-        .board-link-desc {
-          margin-top: 7px;
-          font-size: 12px;
-          line-height: 1.45;
-          color: rgba(255, 255, 255, 0.78);
-          display: -webkit-box;
-          -webkit-line-clamp: 2;
-          -webkit-box-orient: vertical;
-          overflow: hidden;
-        }
-
-        .board-link-url {
-          padding: 12px 14px;
-          font-size: 12px;
-          color: rgba(0, 0, 0, 0.58);
-          overflow-wrap: anywhere;
-        }
-
-        .board-drop-rail {
-          margin-top: 2px;
-        }
-
-        .board-drop-link {
-          border-radius: 999px;
-          border: 1px solid rgba(0, 0, 0, 0.1);
-          background: rgba(255, 255, 255, 0.78);
-          padding: 8px 12px;
-          font-size: 11px;
-          font-weight: 800;
-          letter-spacing: 0.12em;
-          text-transform: uppercase;
-          color: rgba(255, 0, 190, 0.82);
-          text-decoration: none;
-          cursor: pointer;
-        }
-        .board-drop-link:disabled {
-          opacity: 0.58;
-          cursor: wait;
-        }
-
-        .recent-drops-stack {
-          display: grid;
-          gap: 12px;
-        }
-
-        .activity-feed-stack {
-          gap: 10px;
-        }
-
-        .activity-feed-entry {
-          display: grid;
-          gap: 10px;
-        }
-
-        .board-whisper {
-          margin: 4px 8px 8px;
-          text-align: center;
-          font-size: 12px;
-          line-height: 1.5;
-          font-weight: 750;
-          font-style: italic;
-          letter-spacing: 0.02em;
-          opacity: 0.9;
-          pointer-events: none;
-          text-wrap: balance;
-          animation: boardWhisperFloatIn 520ms ease both;
-        }
-
-        .board-whisper.profile {
-          color: rgba(142, 199, 255, 0.9);
-          text-shadow: 0 0 10px rgba(96, 165, 250, 0.22), 0 0 26px rgba(190, 220, 255, 0.14);
-        }
-
-        .board-whisper.signal {
-          color: rgba(116, 231, 199, 0.9);
-          text-shadow: 0 0 10px rgba(110, 231, 183, 0.22), 0 0 26px rgba(170, 255, 230, 0.14);
-        }
-
-        .board-whisper.memory {
-          color: rgba(178, 132, 224, 0.88);
-          text-shadow: 0 0 10px rgba(216, 180, 254, 0.24), 0 0 26px rgba(220, 190, 255, 0.16);
-        }
-
-        .board-whisper.friendZone {
-          color: rgba(247, 197, 122, 0.9);
-          text-shadow: 0 0 10px rgba(253, 224, 171, 0.24), 0 0 26px rgba(255, 232, 190, 0.14);
-        }
-
-        .board-whisper.system {
-          color: rgba(180, 194, 222, 0.86);
-          text-shadow: 0 0 10px rgba(200, 220, 255, 0.16), 0 0 26px rgba(200, 220, 255, 0.12);
-        }
-
-        .board-whisper.quiet {
-          color: rgba(202, 184, 218, 0.78);
-          text-shadow: 0 0 10px rgba(220, 210, 240, 0.14), 0 0 26px rgba(220, 210, 240, 0.1);
-        }
-
-        @keyframes boardWhisperFloatIn {
-          from {
-            opacity: 0;
-            transform: translateY(5px);
-            filter: blur(2px);
-          }
-
-          to {
-            opacity: 0.9;
-            transform: translateY(0);
-            filter: blur(0);
-          }
-        }
-
-        .note-title {
-          font-weight: 900;
-          color: #18150f;
-        }
-
-        .note-text {
-          margin-top: 6px;
-          font-size: 14px;
-          line-height: 1.6;
-          color: rgba(0, 0, 0, 0.62);
-        }
-
-        .cover-shell {
-          height: 420px;
-        }
-
-        .bookmarks-card {
-          background: rgba(255, 255, 255, 0.82);
-        }
-
-        .bookmark-stack {
-          display: grid;
-          gap: 10px;
-        }
-
-        .bookmark-link {
-          display: grid;
-          gap: 4px;
-          border-radius: 20px;
-          border: 1px solid rgba(0, 0, 0, 0.09);
-          background: rgba(255, 255, 255, 0.72);
-          padding: 14px 16px;
-          color: inherit;
-          text-decoration: none;
-          transition: transform 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
-        }
-
-        .bookmark-link:hover {
-          transform: translateY(-1px);
-          border-color: rgba(255, 0, 190, 0.18);
-          box-shadow: 0 10px 26px rgba(255, 0, 190, 0.08);
-        }
-
-        .bookmark-title {
-          font-size: 17px;
-          font-weight: 900;
-          color: #35a24b;
-        }
-
-        .bookmark-sub {
-          font-size: 12px;
-          color: rgba(0, 0, 0, 0.55);
-        }
-
-        .store-collection-card {
-          background:
-            radial-gradient(circle at 14% 16%, rgba(255, 209, 45, 0.16), transparent 36%),
-            radial-gradient(circle at 90% 10%, rgba(255, 0, 190, 0.1), transparent 34%),
-            rgba(255, 255, 255, 0.82);
-        }
-
-        .store-collection-grid {
-          display: grid;
-          grid-template-columns: repeat(2, minmax(0, 1fr));
-          gap: 10px;
-        }
-
-        .store-slot {
-          position: relative;
-          min-height: 166px;
-          border-radius: 18px;
-          overflow: hidden;
-          border: 1px solid rgba(0, 0, 0, 0.1);
-          text-decoration: none;
-          color: inherit;
-        }
-
-        .store-slot.filled {
-          display: block;
-          background: rgba(0, 0, 0, 0.8);
-          box-shadow: 0 12px 28px rgba(0, 0, 0, 0.1);
-          transition: transform 160ms ease, box-shadow 160ms ease;
-        }
-
-        .store-slot.filled:hover {
-          transform: translateY(-1px);
-          box-shadow: 0 16px 34px rgba(0, 0, 0, 0.14);
-        }
-
-        .store-slot.collected {
-          border-color: rgba(0, 160, 80, 0.28);
-          box-shadow:
-            0 0 0 1px rgba(0, 160, 80, 0.08),
-            0 16px 34px rgba(0, 160, 80, 0.12);
-        }
-
-        .store-slot.bookmarked {
-          border-color: rgba(255, 209, 45, 0.45);
-        }
-
-        .store-slot-img {
-          width: 100%;
-          height: 100%;
-          min-height: 166px;
-          object-fit: cover;
-          display: block;
-        }
-
-        .store-slot-shade {
-          position: absolute;
-          inset: 0;
-          background:
-            linear-gradient(180deg, rgba(0, 0, 0, 0.04), rgba(0, 0, 0, 0.76)),
-            radial-gradient(circle at 80% 16%, rgba(255, 209, 45, 0.2), transparent 32%);
-        }
-
-        .store-star {
-          position: absolute;
-          right: 10px;
-          top: 9px;
-          z-index: 2;
-          width: 28px;
-          height: 28px;
-          display: grid;
-          place-items: center;
-          border-radius: 999px;
-          border: 1px solid rgba(255, 232, 120, 0.72);
-          background: rgba(20, 16, 0, 0.72);
-          color: #ffd12d;
-          font-size: 16px;
-          line-height: 1;
-          text-shadow: 0 0 12px rgba(255, 209, 45, 0.9);
-          box-shadow: 0 0 24px rgba(255, 209, 45, 0.35);
-        }
-
-        .store-slot-copy {
-          position: absolute;
-          left: 10px;
-          right: 10px;
-          bottom: 10px;
-          z-index: 1;
-          color: #fff;
-        }
-
-        .store-artifact {
-          font-size: 9px;
-          font-weight: 950;
-          letter-spacing: 0.18em;
-          text-transform: uppercase;
-          color: rgba(210, 255, 180, 0.88);
-        }
-
-        .store-title {
-          margin-top: 4px;
-          font-size: 12px;
-          line-height: 1.15;
-          font-weight: 950;
-          text-shadow: 0 2px 12px rgba(0, 0, 0, 0.48);
-          display: -webkit-box;
-          -webkit-line-clamp: 2;
-          -webkit-box-orient: vertical;
-          overflow: hidden;
-        }
-
-        .store-badge {
-          width: fit-content;
-          margin-top: 8px;
-          border-radius: 999px;
-          padding: 5px 8px;
-          border: 1px solid rgba(255, 255, 255, 0.24);
-          background: rgba(255, 255, 255, 0.16);
-          font-size: 8px;
-          font-weight: 950;
-          letter-spacing: 0.14em;
-          text-transform: uppercase;
-          color: rgba(255, 255, 255, 0.86);
-          backdrop-filter: blur(10px);
-        }
-
-        .store-badge.collected {
-          border-color: rgba(150, 255, 190, 0.42);
-          background: rgba(0, 160, 80, 0.22);
-          color: rgba(215, 255, 228, 0.94);
-        }
-
-        .store-badge.bookmarked {
-          border-color: rgba(255, 232, 120, 0.5);
-          background: rgba(255, 209, 45, 0.18);
-          color: rgba(255, 244, 188, 0.95);
-        }
-
-        .store-slot.empty {
-          display: grid;
-          place-items: center;
-          align-content: center;
-          gap: 7px;
-          padding: 16px 12px;
-          text-align: center;
-          background:
-            radial-gradient(circle at 24% 16%, rgba(255, 255, 255, 0.78), transparent 26%),
-            radial-gradient(circle at 80% 22%, rgba(120, 255, 240, 0.16), transparent 34%),
-            radial-gradient(circle at 20% 88%, rgba(255, 0, 190, 0.1), transparent 34%),
-            rgba(255, 255, 255, 0.56);
-          border-style: dashed;
-        }
-
-        .store-empty-orb {
-          width: 34px;
-          height: 34px;
-          border-radius: 999px;
-          background:
-            radial-gradient(circle at 35% 25%, rgba(255, 255, 255, 0.96), transparent 28%),
-            linear-gradient(135deg, rgba(255, 209, 45, 0.36), rgba(120, 255, 240, 0.22));
-          box-shadow: 0 0 24px rgba(255, 209, 45, 0.18);
-        }
-
-        .store-empty-title {
-          font-size: 13px;
-          font-weight: 950;
-          color: rgba(0, 0, 0, 0.58);
-        }
-
-        .store-empty-sub {
-          max-width: 150px;
-          font-size: 10px;
-          line-height: 1.35;
-          color: rgba(0, 0, 0, 0.42);
-        }
-
-        .friend-zone-card {
-          display: grid;
-          gap: 12px;
-          border-radius: 20px;
-          border: 1px solid rgba(0, 0, 0, 0.1);
-          background: rgba(255, 251, 221, 0.78);
-          padding: 14px;
-        }
-
-        .friend-zone-status {
-          border-radius: 16px;
-          border: 1px solid rgba(0, 0, 0, 0.08);
-          background: rgba(255, 255, 255, 0.62);
-          padding: 12px;
-        }
-
-        .friend-zone-label {
-          font-size: 11px;
-          font-weight: 800;
-          letter-spacing: 0.16em;
-          text-transform: uppercase;
-          color: rgba(0, 0, 0, 0.45);
-        }
-
-        .friend-zone-value {
-          margin-top: 6px;
-          font-size: 16px;
-          font-weight: 800;
-          color: rgba(0, 160, 80, 1);
-        }
-
-        .friend-zone-actions {
-          display: grid;
-          grid-template-columns: repeat(2, minmax(0, 1fr));
-          gap: 10px;
-        }
-
-        .friend-zone-btn {
-          border-radius: 999px;
-          border: 1px solid rgba(0, 0, 0, 0.1);
-          background: rgba(255, 255, 255, 0.78);
-          padding: 10px 12px;
-          font-size: 11px;
-          font-weight: 800;
-          letter-spacing: 0.14em;
-          text-transform: uppercase;
-          color: rgba(255, 0, 190, 0.82);
-          transition: transform 160ms ease, filter 160ms ease;
-        }
-
-        .friend-zone-btn.on {
-          background: rgba(0, 160, 80, 0.14);
-          color: rgba(0, 160, 80, 1);
-          border-color: rgba(0, 160, 80, 0.2);
-        }
-
-        .friend-zone-notice {
-          border-radius: 999px;
-          border: 1px solid rgba(0, 160, 80, 0.18);
-          background: rgba(255, 255, 255, 0.7);
-          padding: 8px 12px;
-          font-size: 10px;
-          font-weight: 900;
-          letter-spacing: 0.12em;
-          text-transform: uppercase;
-          color: rgba(0, 115, 62, 0.9);
-        }
-
-        .friend-zone-links {
-          display: flex;
-          flex-wrap: wrap;
-          gap: 8px;
-        }
-
-        .friend-zone-link {
-          border-radius: 999px;
-          border: 1px solid rgba(0, 0, 0, 0.1);
-          background: rgba(255, 255, 255, 0.78);
-          padding: 8px 12px;
-          font-size: 11px;
-          font-weight: 800;
-          letter-spacing: 0.12em;
-          text-transform: uppercase;
-          color: rgba(0, 0, 0, 0.6);
-          text-decoration: none;
-        }
-
-        .bucket-panel {
-          overflow: visible;
-        }
-
-        .bucket-wrap {
-          margin-top: 4px;
-          min-width: 0;
-          max-width: 100%;
-        }
-
-        .bucket-wrap :global(.bucket) {
-          min-width: 0;
-          max-width: 100%;
-        }
-
-        .bucket-wrap :global(.bucket *) {
-          box-sizing: border-box;
-        }
-
-        .bucket-wrap :global(.bucket .shell) {
-          min-width: 0;
-          max-width: 100%;
-          background: rgba(255, 251, 221, 0.78);
-          border: 1px solid rgba(0, 0, 0, 0.1);
-          box-shadow: none;
-        }
-
-        .bucket-wrap :global(.bucket .topRow) {
-          display: none;
-        }
-
-        .bucket-wrap :global(.bucket .openBtn) {
-          width: 100%;
-          white-space: normal;
-        }
-
-        .bucket-wrap :global(.bucket .right) {
-          width: 100%;
-          min-width: 0;
-        }
-
-        .bucket-wrap :global(.bucket .waveBar) {
-          align-items: stretch;
-          flex-wrap: wrap;
-        }
-
-        .bucket-wrap :global(.bucket .waveBtn) {
-          flex: 1 1 112px;
-          justify-content: center;
-          min-width: 0;
-        }
-
-        .bucket-wrap :global(.bucket .waveText),
-        .bucket-wrap :global(.bucket .folderText) {
-          min-width: 0;
-          flex-wrap: wrap;
-          justify-content: center;
-        }
-
-        .bucket-wrap :global(.bucket .waveMeta) {
-          flex: 1 1 100%;
-          min-width: 0;
-          flex-wrap: wrap;
-          justify-content: center;
-          text-align: center;
-        }
-
-        .bucket-wrap :global(.bucket .folderRow) {
-          display: grid;
-          grid-template-columns: repeat(3, minmax(0, 1fr));
-        }
-
-        .bucket-wrap :global(.bucket .folder) {
-          justify-content: center;
-          min-width: 0;
-          padding-inline: 8px;
-        }
-
-        @media (max-width: 1180px) {
-          .profile-grid {
-            grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-            grid-template-areas:
-              "identity aura"
-              "vision cover"
-              "board activity"
-              "bookmarks store";
-          }
-        }
-
-        @media (max-width: 720px) {
-          .profile-grid {
-            gap: 8px;
-          }
-
-          .identity-row {
-            align-items: center;
-          }
-
-          .cover-shell {
-            min-height: 320px;
-          }
-
-          .friend-zone-actions {
-            grid-template-columns: 1fr;
-          }
-        }
-      `}</style>
+      {stickerBinOpen ? (
+        <div
+          className="sticker-bin-overlay"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Sticker collection bin"
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget) setStickerBinOpen(false);
+          }}
+        >
+          <div className="sticker-bin">
+            <div className="sticker-bin-head">
+              <div>
+                <div className="sticker-bin-eyebrow">Collection</div>
+                <h3 className="sticker-bin-title">Sticker Bin</h3>
+              </div>
+              <button
+                type="button"
+                className="sticker-bin-close"
+                onClick={() => setStickerBinOpen(false)}
+                aria-label="Close sticker bin"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="sticker-bin-body">
+              {STICKER_PACKS.map((pack) => (
+                <div className="sticker-pack" key={pack.id}>
+                  <div className="sticker-pack-name">{pack.name}</div>
+                  <div className="sticker-bin-grid">
+                    {pack.items.map((item) => (
+                      <div
+                        className="sticker-cell"
+                        key={`${pack.id}-${item.value}`}
+                        title={item.label}
+                      >
+                        {item.src ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img src={item.src} alt={item.label} />
+                        ) : (
+                          <span>{item.value}</span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+        </div>
+      ) : null}
     </main>
   );
 }

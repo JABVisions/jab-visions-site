@@ -1,4 +1,4 @@
-/* Drop Studio — full 4:5 chip with a right-side Palette workbench. */
+/* Drop Studio — full 4:5 chip; Palette overlays on toggle (chip never shrinks). */
 
 .root {
   --drop-chip-max-w: 560px;
@@ -11,7 +11,6 @@
 
 .chipOnlyRoot,
 .workbench {
-  --drop-chip-max-w: 900px;
   height: 100%;
   min-height: 0;
   min-width: 0;
@@ -42,30 +41,16 @@
   align-items: center;
   justify-content: center;
   overflow: visible;
-  container-type: size;
 }
 
 /* Monitor + right-side tool dock gutter — Palette toggle stays put when open. */
 .chipAssembly {
   position: relative;
   flex: 0 0 auto;
-  box-sizing: border-box;
   width: min(var(--drop-chip-max-w), 100%);
   max-width: 100%;
   max-height: 100%;
   padding-right: var(--palette-gutter);
-}
-
-.paletteOpen .chipAssembly {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) var(--palette-panel-w);
-  align-items: center;
-  gap: 12px;
-  padding-right: 0;
-}
-
-.paletteOpen .chipFrame {
-  align-self: center;
 }
 
 .chipFrame {
@@ -80,56 +65,6 @@
 
 .chipFrame[data-frame="landscape"] {
   --drop-chip-aspect: 16 / 9;
-}
-
-/* Capture frames must preserve their declared aspect ratio even when height is
-   the limiting dimension. This keeps the live camera crop identical to output. */
-@supports (width: 1cqh) {
-  .chipOnlyRoot .chipFrame {
-    width: min(100cqw, 80cqh);
-    max-height: none;
-  }
-
-  .chipOnlyRoot .chipFrame[data-frame="landscape"] {
-    width: min(100cqw, 177.7778cqh);
-  }
-
-  .workbench .chipAssembly {
-    width: min(
-      var(--drop-chip-max-w),
-      100cqw,
-      calc(80cqh + var(--palette-gutter))
-    );
-    max-height: none;
-  }
-
-  .workbench .chipAssembly:has(.chipFrame[data-frame="landscape"]) {
-    width: min(
-      var(--drop-chip-max-w),
-      100cqw,
-      calc(177.7778cqh + var(--palette-gutter))
-    );
-  }
-
-  .workbench .chipFrame {
-    max-height: none;
-  }
-
-  .workbench.paletteOpen .chipAssembly {
-    width: min(
-      var(--drop-chip-max-w),
-      100cqw,
-      calc(80cqh + var(--palette-panel-w) + 12px)
-    );
-  }
-
-  .workbench.paletteOpen .chipAssembly:has(.chipFrame[data-frame="landscape"]) {
-    width: min(
-      var(--drop-chip-max-w),
-      100cqw,
-      calc(177.7778cqh + var(--palette-panel-w) + 12px)
-    );
-  }
 }
 
 .dropChipMonitor {
@@ -241,6 +176,18 @@
   transform: none;
 }
 
+/* Tap the canvas area to close Palette and bring the dock button back. */
+.paletteDismiss {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: crosshair;
+}
+
 .palettePanel {
   position: absolute;
   top: 0;
@@ -273,36 +220,9 @@
 }
 
 .paletteOpen .palettePanel {
-  position: relative;
-  inset: auto;
-  grid-column: 2;
-  width: 100%;
-  height: 100%;
-  max-height: 100%;
   pointer-events: auto;
   opacity: 1;
   transform: translateX(0);
-  border-right: 1px solid rgba(132, 244, 231, 0.34);
-  border-radius: 18px 22px 22px 18px;
-}
-
-.paletteClose {
-  position: absolute;
-  top: 5px;
-  right: 7px;
-  z-index: 3;
-  width: 25px;
-  height: 25px;
-  display: grid;
-  place-items: center;
-  padding: 0;
-  border-radius: 999px;
-  border: 1px solid rgba(132, 244, 231, 0.3);
-  background: rgba(4, 14, 22, 0.82);
-  color: rgba(220, 255, 248, 0.9);
-  font-size: 18px;
-  line-height: 1;
-  cursor: pointer;
 }
 
 /* Art mode — slightly wider drawer for brush tools under object buttons. */
@@ -327,10 +247,10 @@
 
 @media (max-width: 720px) {
   .root {
-    --palette-panel-w: min(272px, 44vw);
+    --palette-panel-w: min(272px, 78%);
   }
 
   .workbench:has([data-art-operating-host]) {
-    --palette-panel-w: min(300px, 46vw);
+    --palette-panel-w: min(300px, 84%);
   }
 }

@@ -176,8 +176,51 @@ export function readBrain(): BucketBrainState {
 
 export function writeBrain(next: BucketBrainState) {
   if (typeof window === "undefined") return;
-  window.localStorage.setItem(BUCKET_BRAIN_KEY, JSON.stringify(next));
+  try {
+    window.localStorage.setItem(BUCKET_BRAIN_KEY, JSON.stringify(next));
+  } catch {
+    // localStorage can throw (quota exceeded, private mode, etc.). The bucket
+    // brain is a best-effort memory cache, so a failed write must never break
+    // the caller (e.g. posting a drop comment). Retry once with a trimmed
+    // payload, then give up quietly instead of bubbling the error up.
+    try {
+      const trimmed: BucketBrainState = {
+        ...next,
+        pass: (next.pass ?? []).slice(0, 60),
+        pin: (next.pin ?? []).slice(0, 60),
+        push: (next.push ?? []).slice(0, 60),
+      };
+      window.localStorage.setItem(BUCKET_BRAIN_KEY, JSON.stringify(trimmed));
+    } catch {
+      return;
+    }
+  }
   window.dispatchEvent(new Event(EVT_UPDATED));
+}
+
+export function isInBrain(folder: BucketFolder, activityId: string) {
+  const id = String(activityId || "");
+  if (!id) return false;
+  const brain = readBrain();
+  return (brain[folder] ?? []).some((entry) => String(entry.activityId) === id);
+}
+
+export function withdrawFromBrain(folder: BucketFolder, activityId: string) {
+  const id = String(activityId || "");
+  if (!id) return false;
+
+  const prev = readBrain();
+  const list = prev[folder] ?? [];
+  const nextList = list.filter((entry) => String(entry.activityId) !== id);
+  if (nextList.length === list.length) return false;
+
+  writeBrain({
+    ...prev,
+    [folder]: nextList,
+    updatedAt: now(),
+  } as BucketBrainState);
+
+  return true;
 }
 
 export function depositToBrain(
@@ -204,10 +247,6 @@ export function depositToBrain(
   } as BucketBrainState;
 
   writeBrain(next);
-
-  if (typeof window !== "undefined") {
-    window.dispatchEvent(new CustomEvent(EVT_OPEN, { detail: { folder } }));
-  }
 }
 
 export function waveBucketDrop(

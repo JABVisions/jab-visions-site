@@ -46,7 +46,7 @@ function pageLabelFor(pathname: string) {
   if (pathname.startsWith("/board/work")) return "Work";
   if (pathname.startsWith("/board/explore")) return "Explore";
   if (pathname.startsWith("/board/options")) return "Options";
-  if (pathname.startsWith("/board/friend-zone") || pathname.startsWith("/board/friendzone")) return "Friend Zone";
+  if (pathname.startsWith("/board/friend-zone")) return "Friend Zone";
   return "Board";
 }
 

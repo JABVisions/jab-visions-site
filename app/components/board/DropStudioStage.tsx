@@ -396,12 +396,7 @@ export default function DropStudioStage({
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
           audio: mode === "video",
-          video: {
-            facingMode: { ideal: nextFacing },
-            width: { ideal: 1080 },
-            height: { ideal: 1350 },
-            aspectRatio: { ideal: 4 / 5 },
-          },
+          video: { facingMode: { ideal: nextFacing }, width: { ideal: 1920 }, height: { ideal: 1080 } },
         });
         streamRef.current = stream;
         if (videoRef.current) {
@@ -444,7 +439,6 @@ export default function DropStudioStage({
     setIsDropbookMode(false);
     setDropbookCreating(false);
     setDropbookIntroPhase(null);
-    setDropbookIntroKey(0);
     setDropbookEditingCover(false);
     setDropbookCoverMode("choose");
     dropbookPageSeqRef.current = 0;
@@ -749,24 +743,13 @@ export default function DropStudioStage({
     return () => window.clearTimeout(timer);
   }, [isDropbookMode, dropbookIntroPhase, dropbookIntroKey]);
 
-  const returnToDropbookShelf = useCallback(() => {
-    editingDropbookPageIdRef.current = null;
-    setDropbookEditingDescriptDoc(null);
-    resetCreationSurface();
-    setDropbookCreating(false);
-  }, [resetCreationSurface]);
-
   const startDropbookSession = useCallback(() => {
-    // Always play the intro — never nest these side effects inside a setState updater
-    // (Strict Mode can double-invoke updaters and skip/clear the splash).
     setDropbookCover((prev) => {
       if (prev?.previewUrl?.startsWith("blob:")) URL.revokeObjectURL(prev.previewUrl);
       return createEmptyDropbookCover();
     });
     setDropbookPages((prev) => {
-      prev.forEach((chip) => {
-        if (chip.previewUrl?.startsWith("blob:")) URL.revokeObjectURL(chip.previewUrl);
-      });
+      prev.forEach((chip) => { if (chip.previewUrl?.startsWith("blob:")) URL.revokeObjectURL(chip.previewUrl); });
       return [];
     });
     dropbookPageFilesRef.current.clear();
@@ -779,7 +762,7 @@ export default function DropStudioStage({
     setDropbookCoverMode("choose");
     setDropbookCoverBlankColor("#000000");
     resetCreationSurface();
-    setDropbookIntroKey((key) => key + 1);
+    setDropbookIntroKey((k) => k + 1);
     setDropbookIntroPhase("splash");
     setIsDropbookMode(true);
   }, [resetCreationSurface]);
@@ -791,6 +774,13 @@ export default function DropStudioStage({
     setDropbookEditingCover(false);
     setDropbookCoverMode("choose");
   }, []);
+
+  const returnToDropbookShelf = useCallback(() => {
+    editingDropbookPageIdRef.current = null;
+    setDropbookEditingDescriptDoc(null);
+    resetCreationSurface();
+    setDropbookCreating(false);
+  }, [resetCreationSurface]);
 
   const goDropbookHome = useCallback(() => {
     editingDropbookPageIdRef.current = null;
@@ -903,12 +893,7 @@ export default function DropStudioStage({
     if (!v || !v.videoWidth || !v.videoHeight) return;
     // Cover-crop the live frame to the standard Board Drop ratio so the saved
     // photo matches exactly what's framed in the viewport (WYSIWYG).
-    const displayedRatio = v.clientWidth > 0 && v.clientHeight > 0
-      ? v.clientWidth / v.clientHeight
-      : 0;
-    const ratio = Number.isFinite(displayedRatio) && displayedRatio > 0
-      ? displayedRatio
-      : dropFrameAspectRatio(captureMediaFrame);
+    const ratio = dropFrameAspectRatio(captureMediaFrame);
     const vw = v.videoWidth;
     const vh = v.videoHeight;
     let sw = vw;
@@ -1387,10 +1372,7 @@ export default function DropStudioStage({
                   type="button"
                   className={`dropbookEntry ${isDropbookMode ? "dropbookEntryActive" : ""}`}
                   onClick={() => {
-                    if (isDropbookMode) {
-                      exitDropbookSession();
-                      return;
-                    }
+                    if (isDropbookMode) { exitDropbookSession(); return; }
                     startDropbookSession();
                   }}
                   aria-pressed={isDropbookMode}
@@ -1870,25 +1852,10 @@ export default function DropStudioStage({
                     <div className="capMonitorHost">
                       <BoardArtCanvas
                         operatingTable
-                        backgroundImageUrl={mediaKind === "image" ? mediaUrl : undefined}
-                        backgroundVideoUrl={mediaKind === "video" ? mediaUrl : undefined}
-                        exportMode={mediaKind === "video" ? "overlay" : "composite"}
+                        backgroundImageUrl={mediaUrl}
                         saveLabel="Apply drawing →"
                         onSave={(f) => {
-                          if (mediaKind === "video") {
-                            const reader = new FileReader();
-                            reader.onload = () => {
-                              const artOverlayUrl =
-                                typeof reader.result === "string" ? reader.result : "";
-                              if (artOverlayUrl) {
-                                handleStudioChange({ ...studioValue, artOverlayUrl });
-                                flashSaveNote("Video Art Palette layer applied");
-                              }
-                            };
-                            reader.readAsDataURL(f);
-                          } else {
-                            commitBlob(f, "image", source);
-                          }
+                          commitBlob(f, "image", source);
                           setDrawOpen(false);
                         }}
                       />
@@ -1908,6 +1875,11 @@ export default function DropStudioStage({
                       </div>
                       <div className="editActions">
                         {saveNote ? <span className="saveNote">{saveNote}</span> : null}
+                        {mediaKind === "image" ? (
+                          <button type="button" className="studioGhost" onClick={() => setDrawOpen(true)}>
+                            🎨 Draw on photo
+                          </button>
+                        ) : null}
                         <button type="button" className="studioGhost" onClick={saveToDevice}>
                           ⬇ Save
                         </button>
@@ -1915,7 +1887,7 @@ export default function DropStudioStage({
                           🗂 Drafts
                         </button>
                         <button type="button" className="studioDone" onClick={done}>
-                          Add {mediaKind === "video" ? "Video" : "Vision"} to Drop →
+                          Use this {mediaKind === "video" ? "Video" : "Vision"} →
                         </button>
                       </div>
                     </>

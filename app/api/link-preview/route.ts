@@ -1,7 +1,122 @@
 import { NextResponse } from "next/server";
+import { lookup } from "node:dns/promises";
+import { isIP } from "node:net";
 import { resolveLinkPreviewImage } from "@/lib/board/linkPreviewImages";
+import { enforceRateLimit, RATE_LIMITS } from "@/lib/rateLimit";
 
 export const runtime = "nodejs";
+
+// ---- SSRF guard --------------------------------------------------------------
+// This endpoint fetches user-supplied URLs server-side, so it must never be
+// allowed to reach internal/private network addresses (cloud metadata
+// endpoints, localhost services, etc).
+
+const MAX_URL_LENGTH = 2048;
+const MAX_REDIRECTS = 3;
+const FETCH_TIMEOUT_MS = 6000;
+const MAX_HTML_BYTES = 1024 * 1024; // 1 MB is plenty for <head> metadata
+
+function ipv4ToParts(ip: string): number[] | null {
+  const parts = ip.split(".").map(Number);
+  return parts.length === 4 && parts.every((n) => Number.isInteger(n) && n >= 0 && n <= 255)
+    ? parts
+    : null;
+}
+
+function isPrivateIpv4(ip: string) {
+  const p = ipv4ToParts(ip);
+  if (!p) return true; // unparseable -> refuse
+  const [a, b] = p;
+  return (
+    a === 0 || // "this network"
+    a === 10 ||
+    a === 127 || // loopback
+    (a === 100 && b >= 64 && b <= 127) || // CGNAT
+    (a === 169 && b === 254) || // link-local / cloud metadata
+    (a === 172 && b >= 16 && b <= 31) ||
+    (a === 192 && b === 0) || // 192.0.0.0/24 special-purpose
+    (a === 192 && b === 168) ||
+    (a === 198 && (b === 18 || b === 19)) || // benchmarking
+    a >= 224 // multicast + reserved
+  );
+}
+
+function isPrivateIp(ip: string): boolean {
+  const version = isIP(ip);
+  if (version === 4) return isPrivateIpv4(ip);
+  if (version !== 6) return true;
+
+  const lower = ip.toLowerCase();
+  // IPv4-mapped (::ffff:1.2.3.4) — check the embedded IPv4.
+  const mapped = lower.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
+  if (mapped) return isPrivateIpv4(mapped[1]);
+
+  return (
+    lower === "::" ||
+    lower === "::1" || // loopback
+    lower.startsWith("fc") || // unique local fc00::/7
+    lower.startsWith("fd") ||
+    lower.startsWith("fe8") || // link-local fe80::/10
+    lower.startsWith("fe9") ||
+    lower.startsWith("fea") ||
+    lower.startsWith("feb") ||
+    lower.startsWith("ff") // multicast
+  );
+}
+
+// Throws if the URL is not a safe, public http(s) address.
+async function assertPublicUrl(raw: string): Promise<URL> {
+  if (raw.length > MAX_URL_LENGTH) throw new Error("URL too long");
+
+  const url = new URL(raw); // throws on garbage
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw new Error("Only http/https URLs are allowed");
+  }
+
+  const hostname = url.hostname.replace(/^\[|\]$/g, ""); // strip IPv6 brackets
+  if (!hostname) throw new Error("Missing host");
+
+  if (isIP(hostname)) {
+    if (isPrivateIp(hostname)) throw new Error("Private address blocked");
+    return url;
+  }
+
+  const lowerHost = hostname.toLowerCase();
+  if (
+    lowerHost === "localhost" ||
+    lowerHost.endsWith(".localhost") ||
+    lowerHost.endsWith(".local") ||
+    lowerHost.endsWith(".internal")
+  ) {
+    throw new Error("Internal host blocked");
+  }
+
+  const addresses = await lookup(lowerHost, { all: true });
+  if (!addresses.length || addresses.some((a) => isPrivateIp(a.address))) {
+    throw new Error("Host resolves to a private address");
+  }
+
+  return url;
+}
+
+// Read at most MAX_HTML_BYTES from the response body.
+async function readCapped(res: Response): Promise<string> {
+  const reader = res.body?.getReader();
+  if (!reader) return "";
+
+  const decoder = new TextDecoder();
+  let out = "";
+  let bytes = 0;
+
+  while (bytes < MAX_HTML_BYTES) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    bytes += value.byteLength;
+    out += decoder.decode(value, { stream: true });
+  }
+  void reader.cancel().catch(() => {});
+  return out;
+}
 
 type Preview = {
   url: string;
@@ -88,19 +203,46 @@ const UNFURL_UAS = [
 
 async function fetchHtmlWith(url: string, userAgent: string) {
   try {
-    const res = await fetch(url, {
-      headers: {
-        "user-agent": userAgent,
-        accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "accept-language": "en-US,en;q=0.9",
-      },
-      redirect: "follow",
-      cache: "no-store",
-    });
+    // Follow redirects manually so every hop is re-validated against the
+    // SSRF guard (a public URL must not be able to bounce us to a private one).
+    let current = (await assertPublicUrl(url)).toString();
 
-    const ct = res.headers.get("content-type") || "";
-    if (!ct.includes("text/html") && !ct.includes("application/xhtml")) return null;
-    return await res.text();
+    for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+
+      let res: Response;
+      try {
+        res = await fetch(current, {
+          headers: {
+            "user-agent": userAgent,
+            accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "accept-language": "en-US,en;q=0.9",
+          },
+          redirect: "manual",
+          cache: "no-store",
+          signal: controller.signal,
+        });
+      } finally {
+        clearTimeout(timer);
+      }
+
+      if (res.status >= 300 && res.status < 400) {
+        const location = res.headers.get("location");
+        if (!location) return null;
+        const next = new URL(location, current).toString();
+        current = (await assertPublicUrl(next)).toString();
+        continue;
+      }
+
+      if (!res.ok) return null;
+
+      const ct = res.headers.get("content-type") || "";
+      if (!ct.includes("text/html") && !ct.includes("application/xhtml")) return null;
+      return await readCapped(res);
+    }
+
+    return null; // too many redirects
   } catch {
     return null;
   }
@@ -254,10 +396,13 @@ async function instagramPreview(raw: string): Promise<Preview | null> {
 }
 
 export async function GET(req: Request) {
+  const limited = await enforceRateLimit(req, RATE_LIMITS.linkPreview);
+  if (limited) return limited;
+
   const { searchParams } = new URL(req.url);
   const raw = (searchParams.get("url") || "").trim();
 
-  if (!raw) {
+  if (!raw || raw.length > MAX_URL_LENGTH) {
     const out: Preview = {
       url: "",
       provider: null,

@@ -33,6 +33,9 @@ export type UniversalDrop = {
   imageUrl?: string;
   mediaUrl?: string;
   mediaKind?: "image" | "video" | "audio";
+  bucket?: string;
+  storagePath?: string;
+  fileName?: string;
   visibility?: "public" | "private";
   thoughtFormat?: "text" | "voice" | "doodle";
   thoughtText?: string;
@@ -130,6 +133,12 @@ export function writeDrops(drops: UniversalDrop[]) {
       // swallow
     }
   }
+
+  // Mirror to Supabase in the background so drops follow the user across
+  // devices (dynamic import avoids a circular dependency at module load).
+  void import("@/lib/board/cloudSync")
+    .then((sync) => sync.scheduleUniversalDropsSync())
+    .catch(() => {});
 }
 
 export function pushDrop(drop: UniversalDrop) {

@@ -5,6 +5,13 @@ import ProjectDropMenu, {
   type ProjectDrop,
 } from "@/app/components/board/projects/ProjectDropMenu";
 import DropCommentsDrawer from "@/app/components/board/DropCommentsDrawer";
+import LazyDropStudioStage from "@/app/components/board/LazyDropStudioStage";
+import { compactDropCustomizations, type DropCustomization } from "@/lib/board/dropCustomizations";
+import {
+  addDropPadAsset,
+  upsertDropPadAssetRemote,
+  type DropPadAsset,
+} from "@/lib/board/dropPadAssets";
 import { supabaseBrowser } from "@/lib/supabase/browser";
 import {
   appendLocalActivity,
@@ -17,6 +24,7 @@ import {
   BOARD_PROJECTS_UPDATED_EVENT,
   configureBoardProjectsStorage,
   createBoardProject,
+  pruneCorruptProjects,
   readBoardProjects,
   resolveBoardProjects,
   syncRemoteProjectActivitiesToStorage,
@@ -30,9 +38,26 @@ import {
 import { pushDrop, readDrops, writeDrops } from "@/lib/board/drops/storage";
 import { readCurrentBoardIdentity } from "@/lib/board/currentProfile";
 import { emitBoardDropSignal } from "@/lib/board/dropSignals";
+import {
+  DESCRIPT_SHARE_EVENT,
+  descriptPlainText,
+  type DescriptDoc,
+} from "@/lib/board/descriptDocs";
 
 function clsx(...parts: Array<string | false | null | undefined>) {
   return parts.filter(Boolean).join(" ");
+}
+
+type StudioCaptureMode = "photo" | "video" | "audio" | "art" | "descript";
+const WORK_THOUGHT_BUCKET = "board-media";
+
+function sanitizeStudioFileName(name: string) {
+  return name.replace(/[^a-z0-9._-]+/gi, "_").slice(0, 120) || "thought-media";
+}
+
+function isAudioThoughtFile(file: File | null) {
+  if (!file) return false;
+  return file.type.startsWith("audio/") || /\.(mp3|wav|m4a|aac|ogg|flac|weba)$/i.test(file.name);
 }
 
 const PROJECT_DROPS_STORAGE_KEY = "jab_drop_pad_project_drops_v1";
@@ -341,11 +366,68 @@ export default function ProjectCenter() {
   const [thoughtText, setThoughtText] = useState("");
   const [thoughtVisibility, setThoughtVisibility] = useState<"public" | "private">("public");
   const [thoughtMessage, setThoughtMessage] = useState<string | null>(null);
+  // Work thought capture — mirrors Drop Studio's Thought Drop settings (voice + art).
+  const [thoughtStudioMode, setThoughtStudioMode] = useState<StudioCaptureMode | null>(null);
+  const [thoughtFile, setThoughtFile] = useState<File | null>(null);
+  const [thoughtMediaSource, setThoughtMediaSource] = useState<"upload" | "capture" | null>(null);
+  const [thoughtMediaPreview, setThoughtMediaPreview] = useState("");
+  const [thoughtCustomizations, setThoughtCustomizations] = useState<DropCustomization>({});
+
+  useEffect(() => {
+    if (!thoughtFile) {
+      setThoughtMediaPreview("");
+      return;
+    }
+    const url = URL.createObjectURL(thoughtFile);
+    setThoughtMediaPreview(url);
+    return () => URL.revokeObjectURL(url);
+  }, [thoughtFile]);
+
+  function clearThoughtMedia() {
+    setThoughtFile(null);
+    setThoughtMediaSource(null);
+    setThoughtCustomizations({});
+  }
+
+  useEffect(() => {
+    function onDescriptShare(event: Event) {
+      const doc = (event as CustomEvent<DescriptDoc>).detail;
+      if (!doc || (doc.destination && doc.destination !== "work")) return;
+      const plain = doc.plainText?.trim() || descriptPlainText(doc.html);
+      if (doc.title?.trim()) setThoughtTitle(doc.title.trim());
+      if (plain) setThoughtText(plain);
+      setThoughtStudioMode(null);
+      setThoughtMessage("Descript loaded into Work Drop Station.");
+      window.setTimeout(() => setThoughtMessage(null), 1800);
+    }
+    window.addEventListener(DESCRIPT_SHARE_EVENT, onDescriptShare as EventListener);
+    return () => window.removeEventListener(DESCRIPT_SHARE_EVENT, onDescriptShare as EventListener);
+  }, []);
+
+  async function uploadThoughtMedia(file: File, dropId: string) {
+    try {
+      const sb = supabaseBrowser();
+      const { data: auth } = await sb.auth.getUser();
+      const userId = auth.user?.id;
+      if (!userId) return null;
+      const storagePath = `${userId}/${dropId}/${Date.now()}-${sanitizeStudioFileName(file.name)}`;
+      const { error } = await sb.storage.from(WORK_THOUGHT_BUCKET).upload(storagePath, file, {
+        upsert: true,
+        contentType: file.type || "application/octet-stream",
+        cacheControl: "3600",
+      });
+      if (error) return null;
+      return { bucket: WORK_THOUGHT_BUCKET, storagePath };
+    } catch {
+      return null;
+    }
+  }
 
   function loadProjects() {
     if (typeof window === "undefined") return;
     const localProjectDrops = readDropPadProjectDrops();
     const resolved = syncResolvedProjectsToStorage();
+    const resolvedIds = new Set(resolved.map((project) => project.id));
     const merged = new Map(resolved.map((project) => [project.id, project]));
 
     for (const drop of localProjectDrops) {
@@ -355,7 +437,12 @@ export default function ProjectCenter() {
     }
 
     const next = Array.from(merged.values()).sort((a, b) => b.updatedAt - a.updatedAt);
-    if (localProjectDrops.length > 0) writeBoardProjects(next);
+    // Only persist when the drop-pad merge actually introduced NEW projects.
+    // Writing on every load re-fires the projects/storage events this component
+    // listens to, which re-enters loadProjects and writes again — an endless
+    // loop that was multiplying the notebook with repetitive project drops.
+    const hasNewProjects = next.some((project) => !resolvedIds.has(project.id));
+    if (hasNewProjects) writeBoardProjects(next);
     setProjects(next);
     setDropPadProjectDrops(localProjectDrops);
   }
@@ -441,6 +528,8 @@ export default function ProjectCenter() {
 
   useEffect(() => {
     if (!storageReady) return;
+    // Purge the corrupt, auto-ingested project drops from storage before loading.
+    pruneCorruptProjects();
     loadProjects();
     void loadRemoteProjects();
 
@@ -701,12 +790,12 @@ export default function ProjectCenter() {
     setCreateOpen(false);
   };
 
-  const createWorkThoughtDrop = () => {
+  const createWorkThoughtDrop = async () => {
     const cleanTitle = thoughtTitle.trim();
     const cleanThought = thoughtText.trim();
 
-    if (!cleanTitle && !cleanThought) {
-      setThoughtMessage("Add a quick thought first.");
+    if (!cleanTitle && !cleanThought && !thoughtFile) {
+      setThoughtMessage("Add a note or capture a Work Drop first.");
       window.setTimeout(() => setThoughtMessage(null), 1800);
       return;
     }
@@ -716,6 +805,39 @@ export default function ProjectCenter() {
     const createdAt = Date.now();
     const title = cleanTitle || "Work Thought";
     const body = cleanThought || "A work thought landed on Board.";
+
+    const isAudio = isAudioThoughtFile(thoughtFile);
+    const isVideo = !!thoughtFile && thoughtFile.type.startsWith("video/");
+    const mediaKind: "audio" | "video" | "image" | null = thoughtFile
+      ? isAudio
+        ? "audio"
+        : isVideo
+          ? "video"
+          : "image"
+      : null;
+    const thoughtFormat = thoughtFile ? (isAudio ? "voice" : "doodle") : "text";
+
+    let uploaded: { bucket: string; storagePath: string } | null = null;
+    if (thoughtFile) {
+      uploaded = await uploadThoughtMedia(thoughtFile, dropId);
+      if (!uploaded) {
+        setThoughtMessage("Couldn't upload that capture — saving the text only.");
+        window.setTimeout(() => setThoughtMessage(null), 2200);
+      }
+    }
+
+    const mediaMeta = uploaded
+      ? {
+          mediaKind,
+          bucket: uploaded.bucket,
+          storagePath: uploaded.storagePath,
+          fileName: thoughtFile?.name ?? null,
+          mediaSource: thoughtMediaSource ?? "upload",
+          badgeLabel: thoughtMediaSource === "capture" ? "Captured on Board" : null,
+          customizations: compactDropCustomizations(thoughtCustomizations) ?? null,
+        }
+      : {};
+
     const activity: BoardActivity = {
       id: `work_thought_${dropId}`,
       created_at: new Date(createdAt).toISOString(),
@@ -732,7 +854,7 @@ export default function ProjectCenter() {
         dropType: "thought",
         drop_flavor: "thought",
         visibility: thoughtVisibility,
-        thoughtFormat: "text",
+        thoughtFormat,
         thoughtText: cleanThought || null,
         description: cleanThought || null,
         authorId: currentUserId || identity.id,
@@ -741,6 +863,7 @@ export default function ProjectCenter() {
         authorAvatar: identity.avatar || null,
         authorGlow: identity.glow,
         authorAuraIntensity: identity.auraIntensity,
+        ...mediaMeta,
         signalSeed: {
           type: "thought_drop_created",
           dropId,
@@ -758,7 +881,7 @@ export default function ProjectCenter() {
         url: "/board/work",
         description: cleanThought || undefined,
         visibility: "public",
-        thoughtFormat: "text",
+        thoughtFormat,
         thoughtText: cleanThought || body,
         authorId: currentUserId || identity.id,
         authorName: identity.displayName,
@@ -768,6 +891,14 @@ export default function ProjectCenter() {
         authorAuraIntensity: identity.auraIntensity,
         source: "work_board",
         origin: "work_board",
+        ...(uploaded
+          ? {
+              bucket: uploaded.bucket,
+              storagePath: uploaded.storagePath,
+              mediaKind: mediaKind ?? undefined,
+              mediaSource: thoughtMediaSource ?? "upload",
+            }
+          : {}),
         meta: {
           activityId: activity.id,
           signalSeed: {
@@ -791,10 +922,48 @@ export default function ProjectCenter() {
       },
     });
 
+    // Every Work Drop also lands in the Drop Pad Assets bin.
+    try {
+      const assetId = `wd_${dropId}`;
+      let asset: DropPadAsset;
+      if (uploaded) {
+        const sb = supabaseBrowser();
+        const publicUrl =
+          sb.storage.from(uploaded.bucket).getPublicUrl(uploaded.storagePath).data.publicUrl || "";
+        asset = {
+          id: assetId,
+          kind: "media",
+          title,
+          description: cleanThought || undefined,
+          createdAt,
+          payload:
+            mediaKind === "image"
+              ? { mediaType: "image", mediaUrl: publicUrl }
+              : { mediaUrl: publicUrl },
+        };
+      } else {
+        asset = {
+          id: assetId,
+          kind: "note",
+          title,
+          description: cleanThought || undefined,
+          createdAt,
+          payload: { text: cleanThought || body },
+        };
+      }
+      addDropPadAsset(asset);
+      if (currentUserId) {
+        void upsertDropPadAssetRemote(supabaseBrowser(), currentUserId, asset);
+      }
+    } catch {
+      // Best-effort mirror — the Work Drop still posts even if the Assets write fails.
+    }
+
     setThoughtTitle("");
     setThoughtText("");
     setThoughtVisibility("public");
-    setThoughtMessage(thoughtVisibility === "private" ? "Private work thought saved." : "Work thought dropped.");
+    clearThoughtMedia();
+    setThoughtMessage(thoughtVisibility === "private" ? "Private Work Drop saved → Assets." : "Work Drop dropped → Assets.");
     window.setTimeout(() => setThoughtMessage(null), 1800);
   };
 
@@ -917,17 +1086,19 @@ export default function ProjectCenter() {
       <div className="w-full">
         <TileFrame className="mb-5">
           <SectionHeader
-            eyebrow="THOUGHT DROP"
-            title="Quick Work Thought"
-            subtitle="Capture a loose idea, note, or production spark without opening a full project room."
+            eyebrow="WORK DROP"
+            title="Work Drop Station"
+            subtitle="Write a Work Drop in Descript — scripts, notes, and production docs."
           />
           <div className="grid gap-4 p-5">
             <div className="grid gap-3 md:grid-cols-[0.8fr_1.2fr]">
-              <input
+              <textarea
                 value={thoughtTitle}
                 onChange={(event) => setThoughtTitle(event.target.value)}
                 placeholder="Optional title"
-                className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white/85 placeholder:text-white/35 focus:outline-none focus:ring-2 focus:ring-lime-200/15"
+                rows={2}
+                aria-label="Optional title"
+                className="w-full resize-y rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm leading-snug text-white/85 placeholder:text-white/35 focus:outline-none focus:ring-2 focus:ring-lime-200/15"
               />
               <div className="flex flex-wrap gap-2">
                 {(["public", "private"] as const).map((visibility) => (
@@ -956,16 +1127,67 @@ export default function ProjectCenter() {
               className="min-h-[116px] w-full rounded-3xl border border-white/10 bg-black/30 px-4 py-4 text-sm leading-6 text-white/85 placeholder:text-white/35 focus:outline-none focus:ring-2 focus:ring-lime-200/15"
             />
 
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setThoughtStudioMode("descript")}
+                className="rounded-full border border-slate-200/25 bg-slate-300/12 px-4 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-slate-50/88 transition hover:bg-slate-300/20"
+              >
+                ✍️ Open Descript
+              </button>
+              <span className="text-xs text-white/40">
+                Write your Work Drop in Descript — scripts, notes, and production docs.
+              </span>
+            </div>
+
+            {thoughtMediaPreview ? (
+              <div className="relative overflow-hidden rounded-2xl border border-white/10 bg-black/30 p-3">
+                <button
+                  type="button"
+                  onClick={clearThoughtMedia}
+                  aria-label="Remove capture"
+                  className="absolute right-3 top-3 z-10 rounded-full border border-pink-300/40 bg-pink-500/20 px-3 py-1 text-[11px] font-bold uppercase tracking-[0.12em] text-pink-50 transition hover:bg-pink-500/30"
+                >
+                  ✕ Remove
+                </button>
+                {isAudioThoughtFile(thoughtFile) ? (
+                  <audio src={thoughtMediaPreview} controls preload="metadata" className="w-full" />
+                ) : thoughtFile?.type.startsWith("video/") ? (
+                  <video
+                    src={thoughtMediaPreview}
+                    controls
+                    playsInline
+                    className="mx-auto max-h-64 w-auto rounded-xl"
+                  />
+                ) : (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={thoughtMediaPreview}
+                    alt="Work Drop capture"
+                    className="mx-auto max-h-64 w-auto rounded-xl object-contain"
+                  />
+                )}
+                <div className="mt-2 text-[11px] uppercase tracking-[0.16em] text-white/45">
+                  {isAudioThoughtFile(thoughtFile)
+                    ? "Voice memo"
+                    : thoughtFile?.type.startsWith("video/")
+                      ? "Video"
+                      : "Photo / art"}
+                  {thoughtMediaSource === "capture" ? " · Captured on Board" : ""}
+                </div>
+              </div>
+            ) : null}
+
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="text-xs text-white/45">
-                Public thoughts can enter the Activity Channel. Private thoughts stay on your board.
+                Public Work Drops can enter the Feed. Private Work Drops stay in your Activity Channel.
               </div>
               <button
                 type="button"
                 onClick={createWorkThoughtDrop}
                 className="rounded-2xl border border-cyan-200/20 bg-cyan-400/15 px-4 py-3 text-sm text-cyan-50/90 transition hover:bg-cyan-400/22"
               >
-                Save Thought Drop
+                Save Work Drop
               </button>
             </div>
             {thoughtMessage ? (
@@ -1152,6 +1374,20 @@ export default function ProjectCenter() {
           onClose={() => setCommentsProject(null)}
           dropId={commentsProject ? projectCommentDropId(commentsProject.id) : ""}
           dropTitle={commentsProject?.title}
+        />
+        <LazyDropStudioStage
+          open={thoughtStudioMode !== null}
+          initialFile={null}
+          initialMode={thoughtStudioMode ?? "photo"}
+          allowedModes={["photo", "video", "audio", "art", "descript"]}
+          descriptDestination="work"
+          value={thoughtCustomizations}
+          onChange={setThoughtCustomizations}
+          onClose={() => setThoughtStudioMode(null)}
+          onComplete={(file, source) => {
+            setThoughtFile(file);
+            setThoughtMediaSource(source);
+          }}
         />
       </div>
     );

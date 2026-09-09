@@ -14,7 +14,6 @@ import {
 } from "@/lib/board/mediaFormat";
 import { dropMediaRotationStyle } from "@/lib/board/dropMediaFrameDisplay";
 import DropChipWorkbench from "./DropChipWorkbench";
-import DropStudioArtPalette from "./DropStudioArtPalette";
 import DropStudioOverlay from "./DropStudioOverlay";
 import DropStudioPaletteDeck, { type ObjectTool } from "./DropStudioPaletteDeck";
 import {
@@ -284,11 +283,7 @@ function DropStudio({
         </div>
       ) : null}
       <DropStudioOverlay
-        customizations={
-          operatingTable && normalized.artOverlayUrl
-            ? { ...normalized, artOverlayUrl: undefined }
-            : normalized
-        }
+        customizations={normalized}
         editable
         onMove={(kind, id, event) => {
           event.currentTarget.setPointerCapture(event.pointerId);
@@ -531,27 +526,12 @@ function DropStudio({
 
   const drawerEl = <div className={drawerClassName}>{drawerPanelsEl}</div>;
 
-  const inlineArtTools = operatingTable ? (
-    <>
-      <DropStudioArtPalette
-        hostRef={previewRef}
-        initialOverlayUrl={normalized.artOverlayUrl}
-        onOverlayChange={(artOverlayUrl) =>
-          update({ ...normalized, artOverlayUrl })
-        }
-      />
-      {artTools}
-    </>
-  ) : (
-    artTools
-  );
-
   const deckPanelEl = (
     <DropStudioPaletteDeck
       tool={tool}
       onToolChange={setTool}
       drawer={drawerPanelsEl}
-      artTools={inlineArtTools}
+      artTools={artTools}
     />
   );
 

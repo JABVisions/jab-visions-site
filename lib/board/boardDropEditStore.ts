@@ -369,7 +369,7 @@ export async function removeDropFromBoardStore(
 
   try {
     if (!userId) return;
-    await syncRemoveDropFromProfile(userId, purge);
+    void syncRemoveDropFromProfile(userId, purge);
   } catch {
     // Local removal still stands.
   }

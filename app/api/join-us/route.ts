@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { enforceRateLimit, RATE_LIMITS } from "@/lib/rateLimit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -165,6 +166,9 @@ function normalizeSubmission(body: Record<string, unknown>) {
 }
 
 export async function POST(req: NextRequest) {
+  const limited = await enforceRateLimit(req, RATE_LIMITS.joinUs);
+  if (limited) return limited;
+
   const scriptUrl = FALLBACK_SCRIPT_URL;
   const requestContentType = req.headers.get("content-type") || "";
 
