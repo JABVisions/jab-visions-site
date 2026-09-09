@@ -1745,7 +1745,9 @@ export default function DropStudioStage({
                     </span>
                   </button>
                 ) : null}
+                {/* Only offered where a host can actually receive the finished book. */}
                 {isDropbookMode &&
+                onCompleteDropbook &&
                 dropbookCover?.complete &&
                 dropbookPages.length > 0 &&
                 !dropbookCreating ? (
