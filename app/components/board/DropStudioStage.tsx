@@ -262,6 +262,8 @@ export default function DropStudioStage({
   const [dropbookIntroPhase, setDropbookIntroPhase] = useState<"splash" | "workspace" | null>(
     null
   );
+  /** Bumps on every Start so the intro CSS animation always remounts/replays. */
+  const [dropbookIntroKey, setDropbookIntroKey] = useState(0);
   const [dropbookCover, setDropbookCover] = useState<DropbookCover | null>(null);
   const [dropbookPages, setDropbookPages] = useState<DropbookChip[]>([]);
   const [dropbookEditingCover, setDropbookEditingCover] = useState(false);
@@ -442,6 +444,7 @@ export default function DropStudioStage({
     setIsDropbookMode(false);
     setDropbookCreating(false);
     setDropbookIntroPhase(null);
+    setDropbookIntroKey(0);
     setDropbookEditingCover(false);
     setDropbookCoverMode("choose");
     dropbookPageSeqRef.current = 0;
@@ -744,7 +747,7 @@ export default function DropStudioStage({
       setDropbookCoverMode("choose");
     }, DROPBOOK_INTRO_MS);
     return () => window.clearTimeout(timer);
-  }, [isDropbookMode, dropbookIntroPhase]);
+  }, [isDropbookMode, dropbookIntroPhase, dropbookIntroKey]);
 
   const returnToDropbookShelf = useCallback(() => {
     editingDropbookPageIdRef.current = null;
@@ -752,6 +755,42 @@ export default function DropStudioStage({
     resetCreationSurface();
     setDropbookCreating(false);
   }, [resetCreationSurface]);
+
+  const startDropbookSession = useCallback(() => {
+    // Always play the intro — never nest these side effects inside a setState updater
+    // (Strict Mode can double-invoke updaters and skip/clear the splash).
+    setDropbookCover((prev) => {
+      if (prev?.previewUrl?.startsWith("blob:")) URL.revokeObjectURL(prev.previewUrl);
+      return createEmptyDropbookCover();
+    });
+    setDropbookPages((prev) => {
+      prev.forEach((chip) => {
+        if (chip.previewUrl?.startsWith("blob:")) URL.revokeObjectURL(chip.previewUrl);
+      });
+      return [];
+    });
+    dropbookPageFilesRef.current.clear();
+    dropbookPageDocsRef.current.clear();
+    editingDropbookPageIdRef.current = null;
+    setDropbookEditingDescriptDoc(null);
+    dropbookPageSeqRef.current = 0;
+    setDropbookCreating(false);
+    setDropbookEditingCover(false);
+    setDropbookCoverMode("choose");
+    setDropbookCoverBlankColor("#000000");
+    resetCreationSurface();
+    setDropbookIntroKey((key) => key + 1);
+    setDropbookIntroPhase("splash");
+    setIsDropbookMode(true);
+  }, [resetCreationSurface]);
+
+  const exitDropbookSession = useCallback(() => {
+    setIsDropbookMode(false);
+    setDropbookCreating(false);
+    setDropbookIntroPhase(null);
+    setDropbookEditingCover(false);
+    setDropbookCoverMode("choose");
+  }, []);
 
   const goDropbookHome = useCallback(() => {
     editingDropbookPageIdRef.current = null;
@@ -1348,30 +1387,11 @@ export default function DropStudioStage({
                   type="button"
                   className={`dropbookEntry ${isDropbookMode ? "dropbookEntryActive" : ""}`}
                   onClick={() => {
-                    setIsDropbookMode((active) => {
-                      const next = !active;
-                      if (next) {
-                        setDropbookCreating(false);
-                        resetCreationSurface();
-                        setDropbookCover(createEmptyDropbookCover());
-                        setDropbookPages([]);
-                        dropbookPageFilesRef.current.clear();
-                        dropbookPageDocsRef.current.clear();
-                        editingDropbookPageIdRef.current = null;
-                        setDropbookEditingDescriptDoc(null);
-                        dropbookPageSeqRef.current = 0;
-                        setDropbookIntroPhase("splash");
-                        setDropbookEditingCover(false);
-                        setDropbookCoverMode("choose");
-                        setDropbookCoverBlankColor("#000000");
-                      } else {
-                        setDropbookCreating(false);
-                        setDropbookIntroPhase(null);
-                        setDropbookEditingCover(false);
-                        setDropbookCoverMode("choose");
-                      }
-                      return next;
-                    });
+                    if (isDropbookMode) {
+                      exitDropbookSession();
+                      return;
+                    }
+                    startDropbookSession();
                   }}
                   aria-pressed={isDropbookMode}
                 >
@@ -1507,7 +1527,11 @@ export default function DropStudioStage({
 
               <div className="capMainBody">
               {isDropbookMode && dropbookIntroPhase === "splash" ? (
-                <div className="dropbookIntroSplash" aria-label="Dropbook intro">
+                <div
+                  key={`dropbook-intro-${dropbookIntroKey}`}
+                  className="dropbookIntroSplash"
+                  aria-label="Dropbook intro"
+                >
                   <h1 className="dropbookWordmark dropbookTitleHeroSplash">Dropbook</h1>
                 </div>
               ) : isDropbookMode &&

@@ -575,7 +575,11 @@
     radial-gradient(circle at 50% 46%, rgba(255, 209, 45, 0.14), transparent 52%),
     radial-gradient(circle at 50% 54%, rgba(126, 226, 255, 0.08), transparent 58%),
     rgba(0, 0, 0, 0.72);
-  animation: dropbookIntroBg 1.8s ease forwards;
+  animation-name: dropbookIntroBg;
+  animation-duration: 1.8s;
+  animation-timing-function: ease;
+  animation-fill-mode: forwards;
+  animation-iteration-count: 1;
 }
 .dropbookTitleHeroSplash {
   margin: 0;
@@ -585,7 +589,11 @@
   letter-spacing: 0.22em;
   color: rgb(255, 209, 45);
   text-align: center;
-  animation: dropbookIntroTitle 1.8s ease forwards;
+  animation-name: dropbookIntroTitle;
+  animation-duration: 1.8s;
+  animation-timing-function: ease;
+  animation-fill-mode: forwards;
+  animation-iteration-count: 1;
   text-shadow:
     0 0 18px rgba(255, 209, 45, 0.55),
     0 0 36px rgba(255, 209, 45, 0.28),
