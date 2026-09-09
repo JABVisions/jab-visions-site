@@ -29,6 +29,7 @@ import DropPadBucketBrain from "@/app/components/board/DropPadBucketBrain";
 import {
   ASSETS_STORAGE_KEY,
   CROWN_SRC,
+  ORBIT_MODE,
   PORTFOLIO_DROPS_STORAGE_KEY,
   PROJECT_DROPS_STORAGE_KEY,
   PROJECT_DROPS_UPDATED_EVENT,
@@ -547,15 +548,112 @@ export default function DropPadOS({
   const [activityItems, setActivityItems] = useState<ActivityChannelItem[]>([]);
   const [signals, setSignals] = useState<BoardSignal[]>([]);
   const activityScrollRef = useRef<HTMLDivElement | null>(null);
+  const horizontalPagerRef = useRef<HTMLDivElement | null>(null);
 
-  // Right workspace pane — Assets + Portfolio live here on the spatial home.
+  // Spatial home: Orb center, swipe ↑ Activity · ← Free · → Work · ↓ Bucket Brain
+  type SpatialSpace = "home" | "activity" | "free" | "work" | "bucketBrain";
+  const [spatialSpace, setSpatialSpace] = useState<SpatialSpace>("home");
+  const spaceCooldownRef = useRef(0);
+  const menuTouchRef = useRef<{ x: number; y: number } | null>(null);
   const [workspaceTab, setWorkspaceTab] = useState<"assets" | "portfolio">("assets");
 
-  // Free-space bubbles (left): everything except Assets/Portfolio, which own the right workspace.
-  const FREE_SPACE_ROUTES = useMemo(
-    () => new Set<DropRoute>(["board", "projects", "workcalls", "profiledrops", "storedrops"]),
-    []
-  );
+  function navSpace(space: SpatialSpace) {
+    const now = Date.now();
+    if (now - spaceCooldownRef.current < 420) return;
+    spaceCooldownRef.current = now;
+    setSpatialSpace(space);
+
+    // Keep the horizontal pager synced for free / home / work.
+    const pager = horizontalPagerRef.current;
+    if (!pager) return;
+    const pageWidth = pager.clientWidth || 1;
+    const pageIndex = space === "free" ? 0 : space === "work" ? 2 : 1;
+    if (space === "free" || space === "home" || space === "work") {
+      pager.scrollTo({ left: pageIndex * pageWidth, behavior: "smooth" });
+    }
+  }
+
+  function activityAtBottom() {
+    const el = activityScrollRef.current;
+    if (!el) return true;
+    return el.scrollTop + el.clientHeight >= el.scrollHeight - 4;
+  }
+  function activityScrollable() {
+    const el = activityScrollRef.current;
+    return el ? el.scrollHeight - el.clientHeight > 4 : false;
+  }
+
+  function onMenuWheel(e: React.WheelEvent) {
+    if (Math.abs(e.deltaY) < 20 && Math.abs(e.deltaX) < 20) return;
+    const verticalDominant = Math.abs(e.deltaY) >= Math.abs(e.deltaX);
+    if (verticalDominant) {
+      const up = e.deltaY < 0;
+      if (spatialSpace === "home") {
+        navSpace(up ? "activity" : "bucketBrain");
+      } else if (spatialSpace === "activity") {
+        if ((!up && activityAtBottom()) || !activityScrollable()) navSpace("home");
+      } else if (spatialSpace === "bucketBrain") {
+        if (up) navSpace("home");
+      }
+      return;
+    }
+    const left = e.deltaX < 0;
+    if (spatialSpace === "home") {
+      navSpace(left ? "free" : "work");
+    } else if (spatialSpace === "free" && !left) {
+      navSpace("home");
+    } else if (spatialSpace === "work" && left) {
+      navSpace("home");
+    }
+  }
+
+  function onMenuTouchStart(e: React.TouchEvent) {
+    const t = e.touches[0];
+    menuTouchRef.current = { x: t.clientX, y: t.clientY };
+  }
+
+  function onMenuTouchEnd(e: React.TouchEvent) {
+    const s = menuTouchRef.current;
+    menuTouchRef.current = null;
+    if (!s) return;
+    const t = e.changedTouches[0];
+    const dx = t.clientX - s.x;
+    const dy = t.clientY - s.y;
+    const absX = Math.abs(dx);
+    const absY = Math.abs(dy);
+    if (absX < 48 && absY < 48) return;
+
+    if (absY > absX) {
+      const swipeUp = dy < 0;
+      if (spatialSpace === "home") {
+        navSpace(swipeUp ? "activity" : "bucketBrain");
+      } else if (spatialSpace === "activity") {
+        if ((!swipeUp && activityAtBottom()) || !activityScrollable()) navSpace("home");
+      } else if (spatialSpace === "bucketBrain") {
+        if (swipeUp) navSpace("home");
+      }
+      return;
+    }
+
+    const swipeLeft = dx < 0; // finger moves left → reveal right space
+    if (spatialSpace === "home") {
+      navSpace(swipeLeft ? "work" : "free");
+    } else if (spatialSpace === "free" && swipeLeft) {
+      navSpace("home");
+    } else if (spatialSpace === "work" && !swipeLeft) {
+      navSpace("home");
+    }
+  }
+
+  function onHorizontalScroll() {
+    if (spatialSpace === "activity" || spatialSpace === "bucketBrain") return;
+    const pager = horizontalPagerRef.current;
+    if (!pager) return;
+    const pageWidth = pager.clientWidth || 1;
+    const index = Math.round(pager.scrollLeft / pageWidth);
+    const next: SpatialSpace = index <= 0 ? "free" : index >= 2 ? "work" : "home";
+    if (next !== spatialSpace) setSpatialSpace(next);
+  }
 
   // ✅ Work Calls
   const [workCalls, setWorkCalls] = useState<WorkCallItem[]>([]);
@@ -655,10 +753,38 @@ export default function DropPadOS({
   );
 
   const menuDrops = drops?.length ? drops : DEFAULT_DROPS;
-  const freeSpaceDrops = useMemo(
-    () => menuDrops.filter((drop) => FREE_SPACE_ROUTES.has(drop.route)),
-    [menuDrops, FREE_SPACE_ROUTES]
-  );
+
+  // Orbit positions around the crown (Orb Home center).
+  const getOrbitPos = (i: number, total: number) => {
+    const cx = 50;
+    const cy = 52;
+    const rx = 30;
+    const ry = 24;
+
+    if (total <= 1) return { x: cx, y: cy - ry };
+
+    if (ORBIT_MODE === "arch") {
+      const start = Math.PI * 1.15;
+      const end = Math.PI * -0.15;
+      const t = total === 1 ? 0.5 : i / (total - 1);
+      const a = start + (end - start) * t;
+      return { x: cx + Math.cos(a) * rx, y: cy + Math.sin(a) * ry };
+    }
+
+    const a = (i / total) * Math.PI * 2 - Math.PI / 2;
+    return { x: cx + Math.cos(a) * rx, y: cy + Math.sin(a) * ry };
+  };
+
+  // Reset to Orb Home whenever Drop Pad powers on / finishes boot.
+  useEffect(() => {
+    if (!osOn || bootPhase !== "ready") return;
+    setSpatialSpace("home");
+    requestAnimationFrame(() => {
+      const pager = horizontalPagerRef.current;
+      if (!pager) return;
+      pager.scrollTo({ left: pager.clientWidth, behavior: "auto" });
+    });
+  }, [osOn, bootPhase]);
 
   // local cache first
   useEffect(() => {
@@ -890,6 +1016,20 @@ export default function DropPadOS({
 
     // local view update (screen)
     setMode("screen");
+  };
+
+  const openOrbBubble = (route: DropRoute) => {
+    if (route === "assets") {
+      setWorkspaceTab("assets");
+      navSpace("work");
+      return;
+    }
+    if (route === "portfolio") {
+      setWorkspaceTab("portfolio");
+      navSpace("work");
+      return;
+    }
+    openRoute(route);
   };
 
   const jumpToAssets = () => {
@@ -1486,7 +1626,7 @@ export default function DropPadOS({
           </div>
 
           <div className="text-xs text-white/45">
-            {osOn ? (mode === "menu" ? "Spatial Home" : `Embedded: ${assets.length}`) : "Offline"}
+            {osOn ? (mode === "menu" ? "Orb Home" : `Embedded: ${assets.length}`) : "Standby"}
           </div>
         </div>
       </div>
@@ -1523,7 +1663,7 @@ export default function DropPadOS({
                   <div className="text-white/60 text-sm tracking-widest">DROP PAD</div>
                   <div className="mt-2 text-2xl font-semibold text-white/85">Standby</div>
                   <div className="mt-2 text-sm text-white/50 max-w-[46ch] mx-auto">
-                    Power on to open the holographic Drops menu.
+                    Power on to open Orb Home — crown center with drop orbs.
                   </div>
 
                   <div className="flex flex-wrap items-center justify-center gap-3 mt-6">
@@ -1588,7 +1728,7 @@ export default function DropPadOS({
                       ← Back to Drops
                     </button>
                   ) : (
-                    <div className="text-sm text-white/65">Spatial Home</div>
+                    <div className="text-sm text-white/65">Orb Home</div>
                   )}
 
                   <div className="flex items-center gap-3">
@@ -1608,62 +1748,125 @@ export default function DropPadOS({
                 </div>
               </div>
 
-              {/* MENU — spatial home: Activity (top) · Free Space (left) · Workspace (right) · Bucket Brain (bottom) */}
+              {/* MENU — Orb Home center; swipe ↑ Activity · ← Free · → Work · ↓ Bucket Brain */}
               {mode === "menu" && (
-                <div className="osMenuRoot" aria-label="Drop Pad OS spatial home">
-                  <div className="osSpatialHome">
-                    <section className="osZone osZoneActivity" aria-label="Activity Channel">
-                      <DropPadActivityChannel
-                        active
-                        layout="zone"
-                        items={activityItems}
-                        scrollRef={activityScrollRef}
-                      />
+                <div
+                  className="osMenuRoot"
+                  aria-label="Drop Pad OS spatial home"
+                  onWheel={onMenuWheel}
+                  onTouchStart={onMenuTouchStart}
+                  onTouchEnd={onMenuTouchEnd}
+                >
+                  <div
+                    className={clsx(
+                      "osPager",
+                      (spatialSpace === "activity" || spatialSpace === "bucketBrain") && "osPagerLocked"
+                    )}
+                    ref={horizontalPagerRef}
+                    onScroll={onHorizontalScroll}
+                    aria-label="Swipe between Free Space, Orb Home, and Work Space"
+                  >
+                    {/* LEFT — Free Space */}
+                    <section className="osPage osFreePage" aria-label="Free Space">
+                      <div className="osFreePanel">
+                        <div className="osFreeHead">
+                          <div className="osFreeEyebrow">Left Space</div>
+                          <div className="osFreeTitle">Free Space</div>
+                          <div className="osFreeStatus">
+                            <span
+                              className={clsx(
+                                "osFreeDot",
+                                profileStats.status === "working" && "working",
+                                profileStats.status === "on_vacation" && "vacation"
+                              )}
+                            />
+                            <span>
+                              {profileStats.status === "working"
+                                ? "Working"
+                                : profileStats.status === "on_vacation"
+                                  ? "On Vacation"
+                                  : "Open to Work"}
+                              {profileStats.job ? ` · ${profileStats.job}` : ""}
+                            </span>
+                          </div>
+                        </div>
+                        <div className="osFreeBody">
+                          <p className="osFreeCopy">
+                            Open creative room. Capture, sketch ideas, and park loose drops before they enter Work.
+                          </p>
+                          <div className="osFreeActions">
+                            <button
+                              type="button"
+                              className="osFreeAction"
+                              onClick={() => {
+                                setStudioInitialMode("photo");
+                                setStudioOpen(true);
+                              }}
+                            >
+                              🎬 Drop Studio
+                            </button>
+                            <button
+                              type="button"
+                              className="osFreeAction"
+                              onClick={() => {
+                                setStudioInitialMode("descript");
+                                setStudioOpen(true);
+                              }}
+                            >
+                              📝 Descript
+                            </button>
+                            <button
+                              type="button"
+                              className="osFreeAction"
+                              onClick={() => navSpace("home")}
+                            >
+                              → Orb Home
+                            </button>
+                          </div>
+                        </div>
+                        <div className="osSpaceHint">swipe right to Orb Home</div>
+                      </div>
                     </section>
 
-                    <section className="osZone osZoneFree" aria-label="Free space">
-                      <div className="osFreeHead">
-                        <div className="osFreeEyebrow">Left Space</div>
-                        <div className="osFreeTitle">Free Space</div>
-                        <div className="osFreeStatus">
-                          <span
-                            className={clsx(
-                              "osFreeDot",
-                              profileStats.status === "working" && "working",
-                              profileStats.status === "on_vacation" && "vacation"
-                            )}
-                          />
-                          <span>
-                            {profileStats.status === "working"
-                              ? "Working"
-                              : profileStats.status === "on_vacation"
-                                ? "On Vacation"
-                                : "Open to Work"}
-                            {profileStats.job ? ` · ${profileStats.job}` : ""}
-                          </span>
-                        </div>
-                      </div>
-                      <div className="osFreeStage">
-                        <div className="osFreeCrown" aria-hidden>
-                          <div className="osFreeCrownGlow" />
-                          <Image
-                            src={CROWN_SRC}
-                            alt=""
-                            width={112}
-                            height={112}
-                            priority
-                            className="osFreeCrownImg"
-                          />
+                    {/* CENTER — Orb Home */}
+                    <section className="osPage" aria-label="Orb Home">
+                      <div className="relative h-full min-h-[560px] sm:min-h-[620px]">
+                        <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none">
+                          <div className="relative grid place-items-center">
+                            <div className="absolute inset-0 rounded-full blur-3xl opacity-25 bg-lime-400" />
+                            <Image
+                              src={CROWN_SRC}
+                              alt="JAB Visions Crown"
+                              width={190}
+                              height={190}
+                              priority
+                              className="relative z-10 select-none drop-shadow-[0_0_34px_rgba(163,230,53,0.45)]"
+                            />
+                          </div>
                         </div>
 
-                        <div className="osFreeBubbles">
-                          {freeSpaceDrops.map((drop, i) => (
+                        {menuDrops.map((drop, i) => {
+                          const pos = getOrbitPos(i, menuDrops.length);
+                          const size = 112;
+                          return (
                             <button
                               key={drop.id}
                               type="button"
-                              onClick={() => openRoute(drop.route)}
-                              className="osFreeBubble"
+                              onClick={() => openOrbBubble(drop.route)}
+                              className={clsx(
+                                "absolute rounded-full",
+                                "border border-white/15",
+                                "backdrop-blur-md",
+                                "shadow-[0_10px_40px_rgba(0,0,0,0.35)]",
+                                "transition active:scale-[0.98] focus:outline-none focus:ring-2 focus:ring-lime-300/40",
+                                "hover:ring-2 hover:ring-white/10"
+                              )}
                               style={{
+                                left: `${pos.x}%`,
+                                top: `${pos.y}%`,
+                                width: `${size}px`,
+                                height: `${size}px`,
+                                transform: "translate(-50%, -50%)",
                                 animation: reducedMotion
                                   ? undefined
                                   : `floaty ${5.2 + (i % 4) * 0.8}s ease-in-out ${i * 0.12}s infinite`,
@@ -1671,48 +1874,76 @@ export default function DropPadOS({
                               aria-label={`Open ${drop.label}`}
                               title={drop.label}
                             >
-                              <span className="osFreeBubbleEmoji">{drop.emoji ?? "🫧"}</span>
-                              <span className="osFreeBubbleLabel">{drop.label}</span>
+                              <span
+                                className="absolute inset-0 rounded-full"
+                                style={{
+                                  background:
+                                    "radial-gradient(circle at 30% 28%, rgba(255,255,255,0.30), rgba(255,255,255,0.07) 42%, rgba(163,230,53,0.10) 64%, rgba(34,211,238,0.08) 78%, rgba(217,70,239,0.06) 100%)",
+                                }}
+                              />
+                              <span className="absolute left-[18%] top-[16%] h-[26%] w-[26%] rounded-full bg-white/20 blur-sm" />
+                              <span className="absolute right-[14%] bottom-[12%] h-[18%] w-[18%] rounded-full bg-lime-300/15 blur-md" />
+                              <span className="relative z-10 grid h-full w-full place-items-center px-3 text-center">
+                                <span className="text-[18px] leading-none">{drop.emoji ?? "🫧"}</span>
+                                <span className="mt-2 text-[11px] font-medium text-white/85 leading-tight">
+                                  {drop.label}
+                                </span>
+                              </span>
                             </button>
-                          ))}
+                          );
+                        })}
+
+                        <div className="absolute bottom-5 left-6 right-6 text-center text-xs text-white/40">
+                          Tap a bubble · swipe ↑ Activity · ← Free · → Work · ↓ Bucket Brain
                         </div>
                       </div>
                     </section>
 
-                    <section className="osZone osZoneWork" aria-label="Work space">
-                      <div className="osWorkHead">
-                        <div>
-                          <div className="osWorkEyebrow">Right Space</div>
-                          <div className="osWorkTitle">Work Space</div>
-                        </div>
-                        <div className="osWorkTabs" role="tablist" aria-label="Work space views">
+                    {/* RIGHT — Work Space (Assets + Portfolio folders) */}
+                    <section className="osPage osWorkPage" aria-label="Work Space">
+                      <div className="osWorkPanel">
+                        <div className="osWorkHead">
+                          <div>
+                            <div className="osWorkEyebrow">Right Space</div>
+                            <div className="osWorkTitle">Work Space</div>
+                          </div>
                           <button
                             type="button"
-                            role="tab"
-                            className={clsx("osWorkTab", workspaceTab === "assets" && "on")}
-                            aria-selected={workspaceTab === "assets"}
+                            className="osWorkBack"
+                            onClick={() => navSpace("home")}
+                          >
+                            ← Orb Home
+                          </button>
+                        </div>
+
+                        <div className="osWorkFolders">
+                          <button
+                            type="button"
+                            className={clsx("osWorkFolder", workspaceTab === "assets" && "on")}
                             onClick={() => setWorkspaceTab("assets")}
                           >
-                            Assets
+                            <span className="osWorkFolderIcon" aria-hidden>
+                              🗂️
+                            </span>
+                            <span className="osWorkFolderName">Assets</span>
+                            <span className="osWorkFolderCount">{assets.length}</span>
                           </button>
                           <button
                             type="button"
-                            role="tab"
-                            className={clsx("osWorkTab", workspaceTab === "portfolio" && "on")}
-                            aria-selected={workspaceTab === "portfolio"}
+                            className={clsx("osWorkFolder", workspaceTab === "portfolio" && "on")}
                             onClick={() => setWorkspaceTab("portfolio")}
                           >
-                            Portfolio
+                            <span className="osWorkFolderIcon" aria-hidden>
+                              🎞️
+                            </span>
+                            <span className="osWorkFolderName">Portfolio</span>
+                            <span className="osWorkFolderCount">{portfolioDrops.length}</span>
                           </button>
                         </div>
-                      </div>
 
-                      <div className="osWorkBody">
                         <div className="osWorkMeta">
                           <span>
-                            {workspaceTab === "assets"
-                              ? `${assets.length} asset${assets.length === 1 ? "" : "s"}`
-                              : `${portfolioDrops.length} piece${portfolioDrops.length === 1 ? "" : "s"}`}
+                            {workspaceTab === "assets" ? "Assets folder" : "Portfolio folder"}
                           </span>
                           {syncing ? <span className="osWorkSync">Syncing…</span> : null}
                           <button
@@ -1736,7 +1967,7 @@ export default function DropPadOS({
                               assets
                                 .slice()
                                 .sort((a, b) => b.createdAt - a.createdAt)
-                                .slice(0, 6)
+                                .slice(0, 8)
                                 .map((a) => <EmbeddedAssetTile key={a.id} a={a} />)
                             )
                           ) : portfolioDrops.length === 0 ? (
@@ -1747,16 +1978,39 @@ export default function DropPadOS({
                             portfolioDrops
                               .slice()
                               .sort((a, b) => b.createdAt - a.createdAt)
-                              .slice(0, 6)
+                              .slice(0, 8)
                               .map((a) => <EmbeddedAssetTile key={a.id} a={a} />)
                           )}
                         </div>
+                        <div className="osSpaceHint">swipe left to Orb Home</div>
                       </div>
                     </section>
+                  </div>
 
-                    <section className="osZone osZoneBrain" aria-label="Bucket Brain">
-                      <DropPadBucketBrain layout="zone" signals={signals} />
-                    </section>
+                  {/* TOP — Activity Channel */}
+                  <div
+                    className={clsx("osActivityLayer", spatialSpace === "activity" && "open")}
+                    aria-hidden={spatialSpace !== "activity"}
+                  >
+                    <DropPadActivityChannel
+                      active={spatialSpace === "activity"}
+                      layout="overlay"
+                      items={activityItems}
+                      onReturn={() => navSpace("home")}
+                      scrollRef={activityScrollRef}
+                    />
+                  </div>
+
+                  {/* BOTTOM — Bucket Brain */}
+                  <div
+                    className={clsx("osBucketLayer", spatialSpace === "bucketBrain" && "open")}
+                    aria-hidden={spatialSpace !== "bucketBrain"}
+                  >
+                    <DropPadBucketBrain
+                      layout="overlay"
+                      signals={signals}
+                      onReturn={() => navSpace("home")}
+                    />
                   </div>
                 </div>
               )}
@@ -2166,93 +2420,137 @@ export default function DropPadOS({
         .osMenuRoot {
           position: relative;
           overflow: hidden;
-          padding: 8px 8px 0;
         }
 
-        /* Drop Pad OS spatial home —
-           TOP Activity Channel · BOTTOM Bucket Brain · LEFT Free Space · RIGHT Work Space */
-        .osSpatialHome {
-          display: grid;
-          grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-          grid-template-rows: minmax(132px, 0.9fr) minmax(220px, 1.35fr) minmax(168px, 1fr);
-          grid-template-areas:
-            "activity activity"
-            "free work"
-            "brain brain";
-          gap: 8px;
-          height: min(720px, calc(100vh - 220px));
-          min-height: 560px;
+        /* Horizontal spatial pager: Free ← Orb Home → Work */
+        .osPager {
+          display: flex;
+          height: 560px;
+          overflow-x: auto;
+          overflow-y: hidden;
+          scroll-snap-type: x mandatory;
+          -webkit-overflow-scrolling: touch;
+          scrollbar-width: none;
         }
-        .osZone {
-          min-width: 0;
-          min-height: 0;
+        .osPager::-webkit-scrollbar {
+          display: none;
+        }
+        .osPagerLocked {
+          overflow-x: hidden;
+          pointer-events: none;
+        }
+        @media (min-width: 640px) {
+          .osPager {
+            height: 620px;
+          }
+        }
+        .osPage {
+          position: relative;
+          flex: 0 0 100%;
+          width: 100%;
+          height: 100%;
+          scroll-snap-align: start;
           overflow: hidden;
-          border-radius: 18px;
-          border: 1px solid rgba(255, 255, 255, 0.12);
-          background:
-            radial-gradient(circle at 14% 0%, rgba(255, 255, 255, 0.06), transparent 46%),
-            linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.02));
-          box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1);
         }
-        .osZoneActivity {
-          grid-area: activity;
-          background:
-            radial-gradient(circle at 18% 0%, rgba(126, 226, 255, 0.16), transparent 44%),
-            radial-gradient(circle at 88% 10%, rgba(217, 70, 239, 0.1), transparent 40%),
-            linear-gradient(180deg, rgba(6, 12, 22, 0.88), rgba(4, 8, 16, 0.94));
+        .osFreePage,
+        .osWorkPage {
+          overflow-y: auto;
+          scrollbar-width: none;
         }
-        .osZoneFree {
-          grid-area: free;
-          display: flex;
-          flex-direction: column;
-          background:
-            radial-gradient(circle at 50% 35%, rgba(163, 230, 53, 0.14), transparent 48%),
-            linear-gradient(180deg, rgba(8, 14, 20, 0.9), rgba(4, 8, 14, 0.96));
-        }
-        .osZoneWork {
-          grid-area: work;
-          display: flex;
-          flex-direction: column;
-          background:
-            radial-gradient(circle at 80% 0%, rgba(34, 211, 238, 0.14), transparent 42%),
-            linear-gradient(180deg, rgba(8, 12, 20, 0.92), rgba(4, 8, 14, 0.96));
-        }
-        .osZoneBrain {
-          grid-area: brain;
-          border: none;
-          background: transparent;
-          box-shadow: none;
+        .osFreePage::-webkit-scrollbar,
+        .osWorkPage::-webkit-scrollbar {
+          display: none;
         }
 
+        /* Activity Channel — swipe/scroll up from Orb Home */
+        .osActivityLayer {
+          position: absolute;
+          inset: 0;
+          z-index: 26;
+          transform: translateY(-100%);
+          transition: transform 460ms cubic-bezier(0.22, 0.61, 0.36, 1);
+          pointer-events: none;
+          display: flex;
+          flex-direction: column;
+          background:
+            radial-gradient(circle at 20% 0%, rgba(126, 226, 255, 0.18), transparent 42%),
+            radial-gradient(circle at 86% 8%, rgba(217, 70, 239, 0.14), transparent 40%),
+            linear-gradient(180deg, rgba(6, 12, 22, 0.92), rgba(4, 8, 16, 0.97));
+          backdrop-filter: blur(16px) saturate(1.1);
+          -webkit-backdrop-filter: blur(16px) saturate(1.1);
+          box-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.06);
+        }
+        .osActivityLayer.open {
+          transform: translateY(0);
+          pointer-events: auto;
+        }
+
+        /* Bucket Brain — swipe/scroll down from Orb Home */
+        .osBucketLayer {
+          position: absolute;
+          inset: 0;
+          z-index: 26;
+          transform: translateY(100%);
+          transition: transform 460ms cubic-bezier(0.22, 0.61, 0.36, 1);
+          pointer-events: none;
+          overflow: hidden;
+          background:
+            radial-gradient(circle at 20% 100%, rgba(163, 230, 53, 0.16), transparent 44%),
+            linear-gradient(180deg, rgba(4, 8, 16, 0.97), rgba(6, 12, 22, 0.94));
+          backdrop-filter: blur(16px) saturate(1.1);
+          -webkit-backdrop-filter: blur(16px) saturate(1.1);
+        }
+        .osBucketLayer.open {
+          transform: translateY(0);
+          pointer-events: auto;
+        }
+
+        .osFreePanel,
+        .osWorkPanel {
+          display: flex;
+          flex-direction: column;
+          gap: 12px;
+          height: 100%;
+          padding: 18px 16px 22px;
+          background:
+            radial-gradient(circle at 16% 0%, rgba(163, 230, 53, 0.12), transparent 44%),
+            linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.02));
+        }
+        .osWorkPanel {
+          background:
+            radial-gradient(circle at 84% 0%, rgba(34, 211, 238, 0.14), transparent 42%),
+            linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.02));
+        }
         .osFreeHead,
         .osWorkHead {
-          flex: 0 0 auto;
-          padding: 10px 12px 8px;
-          border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+          display: flex;
+          align-items: flex-start;
+          justify-content: space-between;
+          gap: 10px;
         }
         .osFreeEyebrow,
         .osWorkEyebrow {
-          font-size: 9px;
-          letter-spacing: 0.28em;
+          font-size: 10px;
+          letter-spacing: 0.3em;
           text-transform: uppercase;
           color: rgba(163, 230, 53, 0.75);
         }
         .osWorkEyebrow {
-          color: rgba(34, 211, 238, 0.78);
+          color: rgba(34, 211, 238, 0.8);
         }
         .osFreeTitle,
         .osWorkTitle {
-          margin-top: 2px;
-          font-size: 1.05rem;
+          margin-top: 4px;
+          font-size: 1.45rem;
           font-weight: 900;
           color: #fff;
         }
         .osFreeStatus {
           display: flex;
           align-items: center;
-          gap: 7px;
-          margin-top: 6px;
-          font-size: 11px;
+          gap: 8px;
+          margin-top: 8px;
+          font-size: 12px;
           color: rgba(236, 255, 251, 0.62);
         }
         .osFreeDot {
@@ -2269,117 +2567,87 @@ export default function DropPadOS({
           background: #ffcf4d;
           box-shadow: 0 0 10px rgba(255, 207, 77, 0.45);
         }
-        .osFreeStage {
-          position: relative;
-          flex: 1 1 auto;
-          min-height: 0;
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          justify-content: center;
-          gap: 12px;
-          padding: 10px;
-          overflow: auto;
-        }
-        .osFreeCrown {
-          position: relative;
-          width: 112px;
-          height: 112px;
+        .osFreeBody {
           display: grid;
-          place-items: center;
+          gap: 14px;
+          flex: 1 1 auto;
+          align-content: start;
         }
-        .osFreeCrownGlow {
-          position: absolute;
-          inset: -8px;
-          border-radius: 999px;
-          background: rgba(163, 230, 53, 0.22);
-          filter: blur(18px);
+        .osFreeCopy {
+          margin: 0;
+          max-width: 36ch;
+          font-size: 14px;
+          line-height: 1.5;
+          color: rgba(236, 255, 251, 0.68);
         }
-        .osFreeCrownImg {
-          position: relative;
-          z-index: 1;
-          width: 112px;
-          height: 112px;
-          object-fit: contain;
-          filter: drop-shadow(0 0 24px rgba(163, 230, 53, 0.4));
-        }
-        .osFreeBubbles {
+        .osFreeActions {
           display: flex;
           flex-wrap: wrap;
-          justify-content: center;
           gap: 8px;
-          width: 100%;
         }
-        .osFreeBubble {
-          display: grid;
-          justify-items: center;
-          gap: 4px;
-          width: 76px;
-          padding: 10px 6px;
-          border-radius: 18px;
+        .osFreeAction,
+        .osWorkBack {
+          border-radius: 999px;
           border: 1px solid rgba(255, 255, 255, 0.14);
-          background:
-            radial-gradient(circle at 30% 25%, rgba(255, 255, 255, 0.22), rgba(255, 255, 255, 0.05) 48%),
-            rgba(0, 0, 0, 0.28);
-          color: rgba(255, 255, 255, 0.9);
-          backdrop-filter: blur(8px);
-          cursor: pointer;
-          transition: transform 140ms ease, border-color 140ms ease;
-        }
-        .osFreeBubble:hover {
-          transform: translateY(-2px);
-          border-color: rgba(163, 230, 53, 0.4);
-        }
-        .osFreeBubbleEmoji {
-          font-size: 16px;
-          line-height: 1;
-        }
-        .osFreeBubbleLabel {
-          font-size: 10px;
+          background: rgba(255, 255, 255, 0.06);
+          color: rgba(236, 255, 251, 0.88);
+          padding: 8px 12px;
+          font-size: 12px;
           font-weight: 700;
+          cursor: pointer;
+        }
+        .osFreeAction:hover,
+        .osWorkBack:hover {
+          border-color: rgba(163, 230, 53, 0.4);
+          background: rgba(163, 230, 53, 0.1);
+        }
+        .osSpaceHint {
+          margin-top: auto;
           text-align: center;
-          line-height: 1.15;
-          color: rgba(255, 255, 255, 0.82);
+          font-size: 11px;
+          color: rgba(255, 255, 255, 0.38);
         }
 
-        .osWorkHead {
-          display: flex;
-          align-items: flex-start;
-          justify-content: space-between;
-          gap: 8px;
+        .osWorkFolders {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 10px;
         }
-        .osWorkTabs {
-          display: inline-flex;
-          gap: 4px;
-          padding: 3px;
-          border-radius: 999px;
+        .osWorkFolder {
+          display: grid;
+          gap: 6px;
+          justify-items: start;
+          text-align: left;
+          border-radius: 18px;
           border: 1px solid rgba(255, 255, 255, 0.12);
           background: rgba(0, 0, 0, 0.28);
-        }
-        .osWorkTab {
-          border: 0;
-          border-radius: 999px;
-          padding: 6px 10px;
-          font-size: 10px;
-          font-weight: 800;
-          letter-spacing: 0.04em;
-          text-transform: uppercase;
-          color: rgba(255, 255, 255, 0.62);
-          background: transparent;
+          padding: 14px;
+          color: rgba(255, 255, 255, 0.88);
           cursor: pointer;
+          transition: border-color 140ms ease, background 140ms ease, transform 140ms ease;
         }
-        .osWorkTab.on {
-          color: #06121a;
-          background: radial-gradient(circle at 30% 20%, #fff, #7ee2ff);
+        .osWorkFolder:hover {
+          transform: translateY(-1px);
+          border-color: rgba(34, 211, 238, 0.4);
         }
-        .osWorkBody {
-          flex: 1 1 auto;
-          min-height: 0;
-          display: flex;
-          flex-direction: column;
-          gap: 8px;
-          padding: 8px 10px 10px;
-          overflow: hidden;
+        .osWorkFolder.on {
+          border-color: rgba(126, 226, 255, 0.55);
+          background:
+            radial-gradient(circle at 20% 0%, rgba(126, 226, 255, 0.18), transparent 55%),
+            rgba(0, 0, 0, 0.35);
+          box-shadow: 0 0 18px rgba(126, 226, 255, 0.16);
+        }
+        .osWorkFolderIcon {
+          font-size: 22px;
+          line-height: 1;
+        }
+        .osWorkFolderName {
+          font-size: 14px;
+          font-weight: 800;
+        }
+        .osWorkFolderCount {
+          font-size: 11px;
+          color: rgba(236, 255, 251, 0.55);
         }
         .osWorkMeta {
           display: flex;
@@ -2422,39 +2690,15 @@ export default function DropPadOS({
           line-height: 1.45;
         }
 
-        @media (max-width: 720px) {
-          .osSpatialHome {
-            grid-template-columns: 1fr;
-            grid-template-rows: minmax(120px, auto) minmax(200px, auto) minmax(220px, auto) minmax(180px, auto);
-            grid-template-areas:
-              "activity"
-              "free"
-              "work"
-              "brain";
-            height: auto;
-            min-height: 0;
-          }
-          .osZoneActivity {
-            height: 160px;
-          }
-          .osZoneFree,
-          .osZoneWork {
-            min-height: 220px;
-          }
-          .osZoneBrain {
-            min-height: 220px;
-          }
-        }
-
         @keyframes floaty {
           0% {
-            transform: translateY(0px);
+            transform: translate(-50%, -50%) translateY(0px);
           }
           50% {
-            transform: translateY(-8px);
+            transform: translate(-50%, -50%) translateY(-14px);
           }
           100% {
-            transform: translateY(0px);
+            transform: translate(-50%, -50%) translateY(0px);
           }
         }
       `}</style>
