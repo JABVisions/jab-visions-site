@@ -779,12 +779,15 @@ export default function DropPadOS({
   useEffect(() => {
     if (!osOn || bootPhase !== "ready") return;
     setSpatialSpace("home");
-    requestAnimationFrame(() => {
+    const snapHome = () => {
       const pager = horizontalPagerRef.current;
       if (!pager) return;
       pager.scrollTo({ left: pager.clientWidth, behavior: "auto" });
-    });
-  }, [osOn, bootPhase]);
+    };
+    requestAnimationFrame(snapHome);
+    const t = window.setTimeout(snapHome, 50);
+    return () => window.clearTimeout(t);
+  }, [osOn, bootPhase, mode]);
 
   // local cache first
   useEffect(() => {
