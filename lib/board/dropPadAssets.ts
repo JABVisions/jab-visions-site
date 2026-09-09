@@ -4,6 +4,8 @@
 // localStorage key, so writing here (and dispatching the update event) makes a
 // Work Drop appear in the bin no matter which surface created it.
 
+import type { DropLifecycleStage } from "@/lib/board/dropLifecycle";
+
 export const DROP_PAD_ASSETS_STORAGE_KEY = "jab_drop_pad_assets_v4";
 export const DROP_PAD_ASSETS_UPDATED_EVENT = "board:droppad:assets:updated";
 
@@ -37,6 +39,8 @@ export type DropPadAsset = {
       }>;
     };
   };
+  /** Framed → Sent → Asset Drop / Portfolio Drop. */
+  stage?: DropLifecycleStage;
 };
 
 function canUseStorage() {
@@ -111,6 +115,7 @@ export function placeDropbookInDropPadAssets(book: DropbookPlacement): DropPadAs
     kind: "dropbook",
     title: book.title,
     createdAt: Date.now(),
+    stage: "asset",
     payload: {
       dropbook: {
         bookColor: book.bookColor,
@@ -140,7 +145,9 @@ export async function upsertDropPadAssetRemote(sb: any, userId: string, asset: D
       kind: asset.kind,
       title: asset.title,
       description: asset.description ?? null,
-      payload: asset.payload ?? null,
+      payload: asset.stage
+        ? { ...(asset.payload ?? {}), stage: asset.stage }
+        : asset.payload ?? null,
       created_at: new Date(asset.createdAt).toISOString(),
     };
     const { error } = await sb.from("board_assets").upsert(row, { onConflict: "id" });

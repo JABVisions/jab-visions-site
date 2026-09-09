@@ -8,6 +8,7 @@ import {
   placeDropbookInDropPadAssets,
   upsertDropPadAssetRemote,
 } from "@/lib/board/dropPadAssets";
+import type { DropLifecycleStage } from "@/lib/board/dropLifecycle";
 
 import { createActivity, type BoardActivityKind } from "@/lib/board/activity";
 import { readCurrentBoardIdentity } from "@/lib/board/currentProfile";
@@ -178,6 +179,8 @@ function uploadLabelForFlavor(flavor: DropFlavor) {
 }
 
 /** Broadcast to CommunityFeed so it can prepend immediately (no refresh). */
+const SENT_STAGE: DropLifecycleStage = "sent";
+
 function emitNewActivity(payload: any) {
   try {
     window.dispatchEvent(
@@ -492,6 +495,8 @@ export default function DropConsole({
                 drop_flavor: dropFlavor,
                 dropType: dropFlavor,
                 dropId: boardDropId,
+                // Framed in Drop Studio, sent here; Drop Pad can promote it later.
+                stage: SENT_STAGE,
                 fileName: uploadedFileName || null,
                 mediaKind:
                   dropFlavor === "music"
@@ -584,6 +589,8 @@ export default function DropConsole({
                 drop_flavor: dropFlavor,
                 dropType: dropFlavor,
                 dropId: boardDropId,
+                // Framed in Drop Studio, sent here; Drop Pad can promote it later.
+                stage: SENT_STAGE,
                 fileName: uploadedFileName || null,
                 mediaKind:
                   dropFlavor === "music"

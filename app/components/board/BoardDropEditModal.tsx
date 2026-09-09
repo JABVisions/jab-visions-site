@@ -21,6 +21,8 @@ import {
   BOARD_MEDIA_BUCKET,
 } from "@/lib/board/boardDropEditStore";
 import { persistActivityEdit } from "@/lib/board/activity";
+import { withDraftCount } from "@/lib/board/draftCount";
+import { advanceDropStage } from "@/lib/board/dropLifecycle";
 import { supabaseBrowser } from "@/lib/supabase/browser";
 import {
   normalizeRichText,
@@ -476,10 +478,11 @@ export default function BoardDropEditModal() {
         paymentLink: drop.type === "Pay" ? cleanLink ?? undefined : drop.paymentLink,
         linkUrl: drop.type === "Pay" ? cleanLink ?? drop.linkUrl : drop.linkUrl,
         customizations: customizationsForSave() ?? drop.customizations,
+        stage: advanceDropStage(drop.stage, "sent"),
         ...media,
       };
 
-      await persistDropEdit(updated);
+      await persistDropEdit(withDraftCount(drop, updated));
 
       if (updated.type === "Pay") {
         upsertPayDrop(

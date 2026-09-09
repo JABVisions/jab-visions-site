@@ -2369,6 +2369,18 @@ export default function DropStudioStage({
                       </div>
                       <div className="editActions">
                         {saveNote ? <span className="saveNote">{saveNote}</span> : null}
+                        <button
+                          type="button"
+                          className="studioGhost"
+                          onClick={() => setDrawOpen(true)}
+                          title={
+                            mediaKind === "video"
+                              ? "Paint an Art Palette layer over this video"
+                              : "Draw on this photo"
+                          }
+                        >
+                          🎨 Draw
+                        </button>
                         <button type="button" className="studioGhost" onClick={saveToDevice}>
                           ⬇ Save
                         </button>

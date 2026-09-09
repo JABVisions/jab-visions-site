@@ -6,6 +6,41 @@ import { supabaseBrowser } from "@/lib/supabase/browser";
 import WorkCallsList, { type WorkCallItem } from "@/app/components/board/WorkCallsList";
 import ProjectCenter from "@/app/components/board/ProjectCenter";
 import StoreDropTile, { type StoreDrop } from "@/app/components/board/StoreDropTile";
+import DropPadActivityChannel from "@/app/components/board/DropPadActivityChannel";
+import DropPadBucketBrain from "@/app/components/board/DropPadBucketBrain";
+import {
+  buildActivityChannelItems,
+  fetchActivityChannelItems,
+  type ActivityChannelItem,
+} from "@/lib/board/activityChannel";
+import { deriveBoardSignals, type BoardSignal } from "@/lib/board/boardSignals";
+import {
+  advanceDropStage,
+  coerceDropStage,
+  dropStageGlyph,
+  dropStageLabel,
+  stageForDestination,
+  type DropLifecycleStage,
+} from "@/lib/board/dropLifecycle";
+
+/** Places inside the Drop Pad environment, reached by swiping off the orb home. */
+type SpatialSpace = "home" | "activity" | "bucketBrain" | "free" | "work";
+
+const SPACE_OFFSET: Record<SpatialSpace, { x: number; y: number }> = {
+  home: { x: 0, y: 0 },
+  activity: { x: 0, y: -1 },
+  bucketBrain: { x: 0, y: 1 },
+  free: { x: -1, y: 0 },
+  work: { x: 1, y: 0 },
+};
+
+const SPACE_LABEL: Record<SpatialSpace, string> = {
+  home: "Orb Home",
+  activity: "Activity Channel",
+  bucketBrain: "Bucket Brain",
+  free: "Free Space",
+  work: "Work Space",
+};
 
 type DropRoute =
   | "board"
@@ -75,6 +110,9 @@ type AssetItem = {
       }>;
     };
   };
+
+  /** Framed → Sent → Asset Drop / Portfolio Drop. */
+  stage?: DropLifecycleStage;
 };
 
 type WorkCallType = "casting" | "crew" | "gigs" | "collaborations";
@@ -208,6 +246,7 @@ function readDropItemsFromStorage(key: string): AssetItem[] {
         description: x?.description ? String(x.description) : undefined,
         createdAt: Number(x?.createdAt ?? Date.now()),
         payload: typeof x?.payload === "object" ? x.payload : undefined,
+        stage: coerceDropStage(x?.stage),
       }))
       .filter((x) => x.id && x.kind && x.title);
   } catch {
@@ -417,6 +456,7 @@ async function fetchAssetsFromSupabase(sb: ReturnType<typeof supabaseBrowser>, u
       description: r.description ? String(r.description) : undefined,
       createdAt: new Date(r.created_at).getTime(),
       payload: (r.payload ?? undefined) as any,
+      stage: coerceDropStage(r.payload?.stage),
     })) ?? [];
 
   return { ok: true as const, items };
@@ -433,7 +473,8 @@ async function upsertAssetToSupabase(
     kind: asset.kind,
     title: asset.title,
     description: asset.description ?? null,
-    payload: asset.payload ?? null,
+    // The lifecycle stage rides inside payload — board_assets has no column for it.
+    payload: asset.stage ? { ...(asset.payload ?? {}), stage: asset.stage } : asset.payload ?? null,
     created_at: new Date(asset.createdAt).toISOString(),
   };
 
@@ -750,6 +791,218 @@ function DropbookDropTile({ a }: { a: AssetItem }) {
         </div>
       </div>
     </TileFrame>
+  );
+}
+
+/** Edge affordances so the spaces are reachable without knowing the swipe. */
+function SpaceEdges({
+  space,
+  onGo,
+}: {
+  space: SpatialSpace;
+  onGo: (next: SpatialSpace) => void;
+}) {
+  if (space !== "home") {
+    return (
+      <button
+        type="button"
+        onClick={() => onGo("home")}
+        className="absolute left-1/2 top-3 z-20 -translate-x-1/2 rounded-full border border-white/15 bg-black/45 px-4 py-1.5 text-xs text-white/70 backdrop-blur-sm transition hover:text-white"
+      >
+        ⌂ Orb Home
+      </button>
+    );
+  }
+
+  const edge =
+    "absolute z-20 rounded-full border border-white/12 bg-black/35 px-3 py-1.5 text-[11px] text-white/55 backdrop-blur-sm transition hover:text-white/90";
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => onGo("activity")}
+        className={`${edge} left-1/2 top-3 -translate-x-1/2`}
+      >
+        ↑ Activity Channel
+      </button>
+      <button
+        type="button"
+        onClick={() => onGo("bucketBrain")}
+        className={`${edge} bottom-14 left-1/2 -translate-x-1/2`}
+      >
+        ↓ Bucket Brain
+      </button>
+      <button
+        type="button"
+        onClick={() => onGo("free")}
+        className={`${edge} left-3 top-1/2 -translate-y-1/2`}
+      >
+        ← Free
+      </button>
+      <button
+        type="button"
+        onClick={() => onGo("work")}
+        className={`${edge} right-3 top-1/2 -translate-y-1/2`}
+      >
+        Work →
+      </button>
+    </>
+  );
+}
+
+function SpacePane({
+  title,
+  hint,
+  onReturn,
+  children,
+}: {
+  title: string;
+  hint?: string;
+  onReturn: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="flex h-full flex-col overflow-hidden rounded-3xl border border-white/10 bg-black/35 backdrop-blur-sm">
+      <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-3">
+        <div className="min-w-0">
+          <div className="text-xs tracking-[0.3em] text-lime-200/70">{title}</div>
+          {hint ? <div className="mt-1 truncate text-xs text-white/45">{hint}</div> : null}
+        </div>
+        <button
+          type="button"
+          onClick={onReturn}
+          className="shrink-0 rounded-2xl border border-white/10 bg-black/30 px-3 py-1.5 text-xs text-white/70 transition hover:bg-black/45"
+        >
+          ⌂ Home
+        </button>
+      </div>
+      <div className="min-h-0 flex-1 overflow-auto p-4">{children}</div>
+    </div>
+  );
+}
+
+/** The lock-screen side of the environment: a glance, not another dashboard. */
+function FreeSpacePane({
+  assetCount,
+  portfolioCount,
+  projectCount,
+  workCallCount,
+  onReturn,
+}: {
+  assetCount: number;
+  portfolioCount: number;
+  projectCount: number;
+  workCallCount: number;
+  onReturn: () => void;
+}) {
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(new Date()), 30000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const glance: Array<[string, number]> = [
+    ["Assets", assetCount],
+    ["Portfolio", portfolioCount],
+    ["Projects", projectCount],
+    ["Work calls", workCallCount],
+  ];
+
+  return (
+    <SpacePane title="FREE SPACE" hint="Idle glance" onReturn={onReturn}>
+      <div className="grid h-full place-items-center text-center">
+        <div>
+          <div className="text-5xl font-semibold tabular-nums text-white/85">
+            {now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+          </div>
+          <div className="mt-1 text-sm text-white/45">
+            {now.toLocaleDateString([], { weekday: "long", month: "short", day: "numeric" })}
+          </div>
+
+          <div className="mt-8 grid grid-cols-2 gap-3">
+            {glance.map(([label, count]) => (
+              <div
+                key={label}
+                className="rounded-2xl border border-white/10 bg-white/5 px-5 py-3 text-left"
+              >
+                <div className="text-2xl font-semibold text-white/85">{count}</div>
+                <div className="text-xs text-white/45">{label}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </SpacePane>
+  );
+}
+
+/** Work Space keeps the underlying Work data reachable without legacy clutter. */
+function WorkSpacePane({
+  tab,
+  onTab,
+  assets,
+  portfolioDrops,
+  onOpenFull,
+  onReturn,
+}: {
+  tab: "assets" | "portfolio";
+  onTab: (next: "assets" | "portfolio") => void;
+  assets: AssetItem[];
+  portfolioDrops: AssetItem[];
+  onOpenFull: (route: DropRoute) => void;
+  onReturn: () => void;
+}) {
+  const items = tab === "assets" ? assets : portfolioDrops;
+  const preview = items.slice(0, 6);
+
+  return (
+    <SpacePane title="WORK SPACE" hint="Asset Drops and Portfolio Drops" onReturn={onReturn}>
+      <div className="flex flex-wrap items-center gap-2">
+        {(["assets", "portfolio"] as const).map((key) => (
+          <button
+            key={key}
+            type="button"
+            onClick={() => onTab(key)}
+            className={clsx(
+              "rounded-full border px-4 py-1.5 text-xs transition",
+              tab === key
+                ? "border-lime-300/40 bg-lime-300/15 text-lime-100"
+                : "border-white/12 bg-white/5 text-white/60 hover:text-white/85"
+            )}
+          >
+            {key === "assets" ? "Assets" : "Portfolio"} · {key === "assets" ? assets.length : portfolioDrops.length}
+          </button>
+        ))}
+        <button
+          type="button"
+          onClick={() => onOpenFull(tab === "assets" ? "assets" : "portfolio")}
+          className="ml-auto rounded-full border border-white/12 bg-white/5 px-4 py-1.5 text-xs text-white/60 transition hover:text-white/90"
+        >
+          Open full →
+        </button>
+      </div>
+
+      {preview.length ? (
+        <div className="mt-4 grid gap-3">
+          {preview.map((a) => (
+            <div key={a.id}>
+              {a.stage ? (
+                <div className="mb-1 text-[11px] tracking-[0.2em] text-white/40">
+                  {dropStageGlyph(a.stage)} {dropStageLabel(a.stage).toUpperCase()}
+                </div>
+              ) : null}
+              <EmbeddedAssetTile a={a} />
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="mt-6 text-sm text-white/45">
+          Nothing here yet. Drops you frame in Drop Studio land here once you send them to{" "}
+          {tab === "assets" ? "Assets" : "Portfolio"}.
+        </p>
+      )}
+    </SpacePane>
   );
 }
 
@@ -1220,6 +1473,14 @@ export default function DropPadOS({
   const [syncing, setSyncing] = useState(false);
   const [userId, setUserId] = useState<string | null>(null);
 
+  // Spatial home: one holographic environment, five places to stand in it.
+  const [space, setSpace] = useState<SpatialSpace>("home");
+  const [activityItems, setActivityItems] = useState<ActivityChannelItem[]>([]);
+  const [brainSignals, setBrainSignals] = useState<BoardSignal[]>([]);
+  const [workTab, setWorkTab] = useState<"assets" | "portfolio">("assets");
+  const spaceCooldownRef = useRef(0);
+  const touchStartRef = useRef<{ x: number; y: number } | null>(null);
+
   const [modal, setModal] = useState<InputModalState>({ open: false });
 
   // ✅ Work Calls
@@ -1480,6 +1741,78 @@ export default function DropPadOS({
     setMode("screen");
   }, [osOn, osApp]);
 
+  // Power-on always lands on the orb home, never on the space you left from.
+  useEffect(() => {
+    if (!osOn) setSpace("home");
+  }, [osOn]);
+
+  useEffect(() => {
+    if (!osOn || bootPhase !== "ready") return;
+    setActivityItems(buildActivityChannelItems(userId));
+    setBrainSignals(deriveBoardSignals(userId));
+    let cancelled = false;
+    void fetchActivityChannelItems(userId).then((items) => {
+      if (!cancelled && items.length) setActivityItems(items);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [osOn, bootPhase, userId]);
+
+  const navSpace = (next: SpatialSpace) => {
+    const now = Date.now();
+    if (now < spaceCooldownRef.current) return;
+    spaceCooldownRef.current = now + 420;
+    setSpace(next);
+  };
+
+  /** Swipes read from wherever you are: off home into a space, or back to home. */
+  const spaceForGesture = (dx: number, dy: number): SpatialSpace | null => {
+    const horizontal = Math.abs(dx) > Math.abs(dy);
+    if (space === "home") {
+      if (horizontal) return dx < 0 ? "work" : "free";
+      return dy < 0 ? "activity" : "bucketBrain";
+    }
+    if (space === "activity" && !horizontal && dy > 0) return "home";
+    if (space === "bucketBrain" && !horizontal && dy < 0) return "home";
+    if (space === "work" && horizontal && dx > 0) return "home";
+    if (space === "free" && horizontal && dx < 0) return "home";
+    return null;
+  };
+
+  const onSpaceTouchStart = (e: React.TouchEvent) => {
+    const touch = e.touches[0];
+    touchStartRef.current = touch ? { x: touch.clientX, y: touch.clientY } : null;
+  };
+
+  const onSpaceTouchEnd = (e: React.TouchEvent) => {
+    const start = touchStartRef.current;
+    touchStartRef.current = null;
+    const touch = e.changedTouches[0];
+    if (!start || !touch) return;
+    const dx = touch.clientX - start.x;
+    const dy = touch.clientY - start.y;
+    if (Math.max(Math.abs(dx), Math.abs(dy)) < 56) return;
+    const next = spaceForGesture(dx, dy);
+    if (next) navSpace(next);
+  };
+
+  const onSpaceKeyDown = (e: React.KeyboardEvent) => {
+    const map: Record<string, [number, number]> = {
+      ArrowUp: [0, -1],
+      ArrowDown: [0, 1],
+      ArrowLeft: [-1, 0],
+      ArrowRight: [1, 0],
+    };
+    const delta = map[e.key];
+    if (!delta) return;
+    // Arrow keys mirror the swipe direction, so Up walks into the Activity Channel.
+    const next = spaceForGesture(-delta[0], -delta[1]);
+    if (!next) return;
+    e.preventDefault();
+    navSpace(next);
+  };
+
   const openRoute = (route: DropRoute) => {
     // keep backward-compat with any older parent listeners
     onSelect?.(route);
@@ -1543,7 +1876,12 @@ export default function DropPadOS({
     setMode("screen");
   };
 
-  const placeAsset = async (asset: AssetItem, destination: DropDestination) => {
+  const placeAsset = async (incoming: AssetItem, destination: DropDestination) => {
+    // Framed in the studio → sent here → kept as an Asset or Portfolio Drop.
+    const asset: AssetItem = {
+      ...incoming,
+      stage: advanceDropStage(incoming.stage, stageForDestination(destination)),
+    };
     if (destination === "portfolio") {
       syncPortfolioDropsLocal([asset, ...portfolioDrops]);
     } else if (destination === "projects") {
@@ -1915,7 +2253,11 @@ export default function DropPadOS({
           </div>
 
           <div className="text-xs text-white/45">
-            {osOn ? (mode === "menu" ? "Drops Menu" : `Embedded: ${assets.length}`) : "Offline"}
+            {osOn
+              ? mode === "menu"
+                ? SPACE_LABEL[space]
+                : `Embedded: ${assets.length}`
+              : "Offline"}
           </div>
         </div>
       </div>
@@ -1993,7 +2335,7 @@ export default function DropPadOS({
                       ← Back to Drops
                     </button>
                   ) : (
-                    <div className="text-sm text-white/65">Drops Menu</div>
+                    <div className="text-sm text-white/65">{SPACE_LABEL[space]}</div>
                   )}
 
                   <div className="flex items-center gap-3">
@@ -2013,9 +2355,32 @@ export default function DropPadOS({
                 </div>
               </div>
 
-              {/* MENU (crown center + orbit bubbles) */}
+              {/* MENU — the orb home sits at the centre of a five-place environment. */}
               {mode === "menu" && (
-                <div className="relative h-[560px] sm:h-[620px]">
+                <div
+                  className="relative h-[560px] sm:h-[620px] overflow-hidden outline-none"
+                  tabIndex={0}
+                  role="group"
+                  aria-label={`Drop Pad — ${SPACE_LABEL[space]}`}
+                  onTouchStart={onSpaceTouchStart}
+                  onTouchEnd={onSpaceTouchEnd}
+                  onKeyDown={onSpaceKeyDown}
+                >
+                  <div
+                    className="absolute inset-0"
+                    style={{
+                      transform: `translate3d(${-SPACE_OFFSET[space].x * 100}%, ${
+                        -SPACE_OFFSET[space].y * 100
+                      }%, 0)`,
+                      transition: reducedMotion
+                        ? undefined
+                        : "transform 520ms cubic-bezier(0.22, 1, 0.36, 1)",
+                    }}
+                  >
+                <div
+                  className="absolute inset-0"
+                  aria-hidden={space !== "home"}
+                >
                   {/* Crown center */}
                   <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none">
                     <div className="relative grid place-items-center">
@@ -2082,8 +2447,70 @@ export default function DropPadOS({
                   })}
 
                   <div className="absolute bottom-5 left-6 right-6 text-center text-xs text-white/40">
-                    Tap a bubble to open a screen inside Drop Pad.
+                    Tap a bubble to open a screen — swipe to walk the Drop Pad spaces.
                   </div>
+                </div>
+
+                    {/* UP — Activity Channel */}
+                    <div
+                      className="absolute inset-0 p-4"
+                      style={{ transform: "translate3d(0, -100%, 0)" }}
+                      aria-hidden={space !== "activity"}
+                    >
+                      <DropPadActivityChannel
+                        items={activityItems}
+                        active={space === "activity"}
+                        layout="zone"
+                        onReturn={() => navSpace("home")}
+                      />
+                    </div>
+
+                    {/* DOWN — Bucket Brain */}
+                    <div
+                      className="absolute inset-0 p-4"
+                      style={{ transform: "translate3d(0, 100%, 0)" }}
+                      aria-hidden={space !== "bucketBrain"}
+                    >
+                      <DropPadBucketBrain
+                        signals={brainSignals}
+                        layout="zone"
+                        onReturn={() => navSpace("home")}
+                      />
+                    </div>
+
+                    {/* LEFT — Free Space */}
+                    <div
+                      className="absolute inset-0 p-4"
+                      style={{ transform: "translate3d(-100%, 0, 0)" }}
+                      aria-hidden={space !== "free"}
+                    >
+                      <FreeSpacePane
+                        assetCount={assets.length}
+                        portfolioCount={portfolioDrops.length}
+                        projectCount={projectDrops.length}
+                        workCallCount={workCalls.length}
+                        onReturn={() => navSpace("home")}
+                      />
+                    </div>
+
+                    {/* RIGHT — Work Space */}
+                    <div
+                      className="absolute inset-0 p-4"
+                      style={{ transform: "translate3d(100%, 0, 0)" }}
+                      aria-hidden={space !== "work"}
+                    >
+                      <WorkSpacePane
+                        tab={workTab}
+                        onTab={setWorkTab}
+                        assets={assets}
+                        portfolioDrops={portfolioDrops}
+                        onOpenFull={(route) => openRoute(route)}
+                        onReturn={() => navSpace("home")}
+                      />
+                    </div>
+                  </div>
+
+                  <SpaceEdges space={space} onGo={navSpace} />
                 </div>
               )}
 
