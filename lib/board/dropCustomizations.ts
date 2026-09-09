@@ -38,6 +38,8 @@ export type DropCustomization = {
   stickers?: DropStudioSticker[];
   actionButton?: DropStudioActionButton | null;
   effects?: DropStudioEffects;
+  /** Data-URL or blob URL of an art canvas overlay composited on top of the drop media. */
+  artOverlayUrl?: string;
 };
 
 function clampPosition(value: unknown, fallback: number) {
