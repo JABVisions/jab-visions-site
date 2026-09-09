@@ -66,19 +66,22 @@ function DropPreview({
 /**
  * Activity Channel — a conversational signal waterfall. Signals are primary,
  * whispers a soft secondary layer, and drops appear only attached to a signal.
- * The "Activity Channel" title is a bottom-anchored gateway; the stream flows
- * upward above it (newest near the gateway, scroll up for deeper signals).
+ *
+ * `layout="overlay"` — full-layer view with a bottom gateway (legacy swipe-up).
+ * `layout="zone"` — top-space panel for the Drop Pad OS spatial home grid.
  */
 export default function DropPadActivityChannel({
   items,
   active,
   onReturn,
   scrollRef,
+  layout = "overlay",
 }: {
   items: ActivityChannelItem[];
   active: boolean;
-  onReturn: () => void;
+  onReturn?: () => void;
   scrollRef?: RefObject<HTMLDivElement | null>;
+  layout?: "overlay" | "zone";
 }) {
   // Render oldest → newest (top → bottom) so the freshest sits by the gateway.
   const ordered = useMemo(() => [...items].reverse(), [items]);
@@ -94,63 +97,80 @@ export default function DropPadActivityChannel({
     return () => window.cancelAnimationFrame(id);
   }, [active, items, scrollRef]);
 
+  const isZone = layout === "zone";
+
   return (
-    <div className={styles.channel}>
+    <div className={`${styles.channel} ${isZone ? styles.channelZone : ""}`}>
+      {isZone ? (
+        <div className={styles.zoneHead}>
+          <div className={styles.zoneEyebrow}>Drop Pad · Top Space</div>
+          <h2 className={styles.zoneTitle}>Activity Channel</h2>
+        </div>
+      ) : null}
+
       <div className={styles.stream} ref={scrollRef}>
-        <div className={styles.streamInner}>
-          {ordered.map((item) =>
-            item.kind === "whisper" ? (
-              <p
-                key={item.id}
-                className={`${styles.whisper} ${
-                  item.intensity === "medium" ? styles.whisperMedium : ""
-                }`}
-              >
-                {item.message}
-              </p>
-            ) : (
-              <div
-                key={item.id}
-                className={styles.signal}
-                style={{ ["--accent" as string]: ACCENTS[item.signalType ?? "push"] }}
-              >
-                {item.user?.avatarUrl ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img className={styles.avatar} src={item.user.avatarUrl} alt="" />
-                ) : (
-                  <span className={styles.avatar} aria-hidden>
-                    {(item.user?.name ?? "B").slice(0, 1).toUpperCase()}
-                  </span>
-                )}
-                <div className={styles.body}>
-                  <p className={styles.message}>{item.message}</p>
-                  <div className={styles.meta}>
-                    <span>{relTime(item.timestamp)}</span>
-                    {item.signalType ? (
-                      <span className={styles.typeChip}>{item.signalType}</span>
-                    ) : null}
+        <div className={`${styles.streamInner} ${isZone ? styles.streamInnerZone : ""}`}>
+          {ordered.length === 0 ? (
+            <p className={styles.whisper}>Signals will land here as Board activity moves.</p>
+          ) : (
+            ordered.map((item) =>
+              item.kind === "whisper" ? (
+                <p
+                  key={item.id}
+                  className={`${styles.whisper} ${
+                    item.intensity === "medium" ? styles.whisperMedium : ""
+                  }`}
+                >
+                  {item.message}
+                </p>
+              ) : (
+                <div
+                  key={item.id}
+                  className={styles.signal}
+                  style={{ ["--accent" as string]: ACCENTS[item.signalType ?? "push"] }}
+                >
+                  {item.user?.avatarUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img className={styles.avatar} src={item.user.avatarUrl} alt="" />
+                  ) : (
+                    <span className={styles.avatar} aria-hidden>
+                      {(item.user?.name ?? "B").slice(0, 1).toUpperCase()}
+                    </span>
+                  )}
+                  <div className={styles.body}>
+                    <p className={styles.message}>{item.message}</p>
+                    <div className={styles.meta}>
+                      <span>{relTime(item.timestamp)}</span>
+                      {item.signalType ? (
+                        <span className={styles.typeChip}>{item.signalType}</span>
+                      ) : null}
+                    </div>
+                    {item.relatedDrop ? <DropPreview drop={item.relatedDrop} /> : null}
                   </div>
-                  {item.relatedDrop ? <DropPreview drop={item.relatedDrop} /> : null}
                 </div>
-              </div>
+              )
             )
           )}
         </div>
       </div>
 
-      <div className={styles.gateway}>
-        <button
-          type="button"
-          className={styles.gatewayReturn}
-          onClick={onReturn}
-          aria-label="Return to Orb Home"
-        >
-          ⌄
-        </button>
-        <div className={styles.gatewayEyebrow}>Drop Pad · Upper Layer</div>
-        <h2 className={styles.gatewayTitle}>Activity Channel</h2>
-        <div className={styles.gatewayHint}>Swipe down to return to Orb Home</div>
-      </div>
+      {!isZone ? (
+        <div className={styles.gateway}>
+          {onReturn ? (
+            <button
+              type="button"
+              className={styles.gatewayReturn}
+              onClick={onReturn}
+              aria-label="Return to Orb Home"
+            >
+              ⌄
+            </button>
+          ) : null}
+          <div className={styles.gatewayEyebrow}>Drop Pad · Upper Layer</div>
+          <h2 className={styles.gatewayTitle}>Activity Channel</h2>
+          <div className={styles.gatewayHint}>Swipe down to return to Orb Home</div>
+        </div>
+      ) : null}
     </div>
   );
 }

@@ -29,7 +29,6 @@ import DropPadBucketBrain from "@/app/components/board/DropPadBucketBrain";
 import {
   ASSETS_STORAGE_KEY,
   CROWN_SRC,
-  ORBIT_MODE,
   PORTFOLIO_DROPS_STORAGE_KEY,
   PROJECT_DROPS_STORAGE_KEY,
   PROJECT_DROPS_UPDATED_EVENT,
@@ -536,7 +535,7 @@ export default function DropPadOS({
   >("photo");
   const [studioValue, setStudioValue] = useState<DropCustomization>({});
 
-  // ✅ Profile Work Board (the spatial page to the right of the orb home).
+  // ✅ Profile Work Board stats (status chip in Free Space).
   const [profileStats, setProfileStats] = useState<{
     status: "unemployed" | "working" | "on_vacation";
     job: string;
@@ -547,67 +546,16 @@ export default function DropPadOS({
   // ✅ Activity Channel (signal waterfall) + Bucket Brain signals.
   const [activityItems, setActivityItems] = useState<ActivityChannelItem[]>([]);
   const [signals, setSignals] = useState<BoardSignal[]>([]);
-
-  // Vertical spatial navigation: orb "home" ↔ "activity" (up) ↔ "bucketBrain" (down).
-  const [verticalSpace, setVerticalSpace] = useState<"home" | "activity" | "bucketBrain">("home");
-  const spaceCooldownRef = useRef(0);
-  const menuTouchRef = useRef<{ x: number; y: number } | null>(null);
   const activityScrollRef = useRef<HTMLDivElement | null>(null);
 
-  function navVertical(space: "home" | "activity" | "bucketBrain") {
-    const now = Date.now();
-    if (now - spaceCooldownRef.current < 480) return;
-    spaceCooldownRef.current = now;
-    setVerticalSpace(space);
-  }
+  // Right workspace pane — Assets + Portfolio live here on the spatial home.
+  const [workspaceTab, setWorkspaceTab] = useState<"assets" | "portfolio">("assets");
 
-  function activityAtBottom() {
-    const el = activityScrollRef.current;
-    if (!el) return true;
-    return el.scrollTop + el.clientHeight >= el.scrollHeight - 4;
-  }
-  function activityScrollable() {
-    const el = activityScrollRef.current;
-    return el ? el.scrollHeight - el.clientHeight > 4 : false;
-  }
-
-  function onMenuWheel(e: React.WheelEvent) {
-    if (Math.abs(e.deltaY) < 22) return;
-    const up = e.deltaY < 0;
-    if (verticalSpace === "home") {
-      navVertical(up ? "activity" : "bucketBrain"); // up → Activity, down → Bucket Brain
-    } else if (verticalSpace === "activity") {
-      // The "Activity Channel" gateway sits at the bottom — scroll down there to
-      // drop back to Orb Home (or any down when there's nothing to scroll).
-      if ((!up && activityAtBottom()) || !activityScrollable()) navVertical("home");
-    } else if (verticalSpace === "bucketBrain") {
-      if (up) navVertical("home"); // leave the lower layer by scrolling up
-    }
-  }
-
-  function onMenuTouchStart(e: React.TouchEvent) {
-    const t = e.touches[0];
-    menuTouchRef.current = { x: t.clientX, y: t.clientY };
-  }
-
-  function onMenuTouchEnd(e: React.TouchEvent) {
-    const s = menuTouchRef.current;
-    menuTouchRef.current = null;
-    if (!s) return;
-    const t = e.changedTouches[0];
-    const dx = t.clientX - s.x;
-    const dy = t.clientY - s.y;
-    if (Math.abs(dy) < 50 || Math.abs(dy) <= Math.abs(dx)) return; // need a vertical swipe
-    const swipeUp = dy < 0;
-    const swipeDown = dy > 0;
-    if (verticalSpace === "home") {
-      navVertical(swipeUp ? "activity" : "bucketBrain");
-    } else if (verticalSpace === "activity") {
-      if ((swipeDown && activityAtBottom()) || !activityScrollable()) navVertical("home");
-    } else if (verticalSpace === "bucketBrain") {
-      if (swipeUp) navVertical("home");
-    }
-  }
+  // Free-space bubbles (left): everything except Assets/Portfolio, which own the right workspace.
+  const FREE_SPACE_ROUTES = useMemo(
+    () => new Set<DropRoute>(["board", "projects", "workcalls", "profiledrops", "storedrops"]),
+    []
+  );
 
   // ✅ Work Calls
   const [workCalls, setWorkCalls] = useState<WorkCallItem[]>([]);
@@ -707,29 +655,10 @@ export default function DropPadOS({
   );
 
   const menuDrops = drops?.length ? drops : DEFAULT_DROPS;
-
-  // Orbit positions (percent-based, stable with your fixed menu container)
-  const getOrbitPos = (i: number, total: number) => {
-    const cx = 50;
-    const cy = 52;
-
-    // ellipse radii in percent
-    const rx = 30;
-    const ry = 24;
-
-    if (total <= 1) return { x: cx, y: cy - ry };
-
-    if (ORBIT_MODE === "arch") {
-      const start = Math.PI * 1.15;
-      const end = Math.PI * -0.15;
-      const t = total === 1 ? 0.5 : i / (total - 1);
-      const a = start + (end - start) * t;
-      return { x: cx + Math.cos(a) * rx, y: cy + Math.sin(a) * ry };
-    }
-
-    const a = (i / total) * Math.PI * 2 - Math.PI / 2;
-    return { x: cx + Math.cos(a) * rx, y: cy + Math.sin(a) * ry };
-  };
+  const freeSpaceDrops = useMemo(
+    () => menuDrops.filter((drop) => FREE_SPACE_ROUTES.has(drop.route)),
+    [menuDrops, FREE_SPACE_ROUTES]
+  );
 
   // local cache first
   useEffect(() => {
@@ -1557,7 +1486,7 @@ export default function DropPadOS({
           </div>
 
           <div className="text-xs text-white/45">
-            {osOn ? (mode === "menu" ? "Drops Menu" : `Embedded: ${assets.length}`) : "Offline"}
+            {osOn ? (mode === "menu" ? "Spatial Home" : `Embedded: ${assets.length}`) : "Offline"}
           </div>
         </div>
       </div>
@@ -1659,7 +1588,7 @@ export default function DropPadOS({
                       ← Back to Drops
                     </button>
                   ) : (
-                    <div className="text-sm text-white/65">Drops Menu</div>
+                    <div className="text-sm text-white/65">Spatial Home</div>
                   )}
 
                   <div className="flex items-center gap-3">
@@ -1679,157 +1608,155 @@ export default function DropPadOS({
                 </div>
               </div>
 
-              {/* MENU — spatial nav: orb home ↔ Work Board (→) and Activity Channel (↑) */}
+              {/* MENU — spatial home: Activity (top) · Free Space (left) · Workspace (right) · Bucket Brain (bottom) */}
               {mode === "menu" && (
-                <div
-                  className="osMenuRoot"
-                  onWheel={onMenuWheel}
-                  onTouchStart={onMenuTouchStart}
-                  onTouchEnd={onMenuTouchEnd}
-                >
-                <div
-                  className="osPager"
-                  aria-label="Spatial home — swipe between Drops and your Profile Work Board"
-                >
-                  <section className="osPage">
-                    <div className="relative h-[560px] sm:h-[620px]">
-                  {/* Crown center */}
-                  <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none">
-                    <div className="relative grid place-items-center">
-                      <div className="absolute inset-0 rounded-full blur-3xl opacity-25 bg-lime-400" />
-                      <Image
-                        src={CROWN_SRC}
-                        alt="JAB Visions Crown"
-                        width={190}
-                        height={190}
-                        priority
-                        className="relative z-10 select-none drop-shadow-[0_0_34px_rgba(163,230,53,0.45)]"
+                <div className="osMenuRoot" aria-label="Drop Pad OS spatial home">
+                  <div className="osSpatialHome">
+                    <section className="osZone osZoneActivity" aria-label="Activity Channel">
+                      <DropPadActivityChannel
+                        active
+                        layout="zone"
+                        items={activityItems}
+                        scrollRef={activityScrollRef}
                       />
-                    </div>
-                  </div>
+                    </section>
 
-                  {menuDrops.map((drop, i) => {
-                    const pos = getOrbitPos(i, menuDrops.length);
-                    const size = 112;
-
-                    return (
-                      <button
-                        key={drop.id}
-                        type="button"
-                        onClick={() => openRoute(drop.route)}
-                        className={clsx(
-                          "absolute rounded-full",
-                          "border border-white/15",
-                          "backdrop-blur-md",
-                          "shadow-[0_10px_40px_rgba(0,0,0,0.35)]",
-                          "transition active:scale-[0.98] focus:outline-none focus:ring-2 focus:ring-lime-300/40",
-                          "hover:ring-2 hover:ring-white/10"
-                        )}
-                        style={{
-                          left: `${pos.x}%`,
-                          top: `${pos.y}%`,
-                          width: `${size}px`,
-                          height: `${size}px`,
-                          transform: "translate(-50%, -50%)",
-                          animation: reducedMotion
-                            ? undefined
-                            : `floaty ${5.2 + (i % 4) * 0.8}s ease-in-out ${i * 0.12}s infinite`,
-                        }}
-                        aria-label={`Open ${drop.label}`}
-                        title={drop.label}
-                      >
-                        <span
-                          className="absolute inset-0 rounded-full"
-                          style={{
-                            background:
-                              "radial-gradient(circle at 30% 28%, rgba(255,255,255,0.30), rgba(255,255,255,0.07) 42%, rgba(163,230,53,0.10) 64%, rgba(34,211,238,0.08) 78%, rgba(217,70,239,0.06) 100%)",
-                          }}
-                        />
-                        <span className="absolute left-[18%] top-[16%] h-[26%] w-[26%] rounded-full bg-white/20 blur-sm" />
-                        <span className="absolute right-[14%] bottom-[12%] h-[18%] w-[18%] rounded-full bg-lime-300/15 blur-md" />
-
-                        <span className="relative z-10 grid h-full w-full place-items-center px-3 text-center">
-                          <span className="text-[18px] leading-none">{drop.emoji ?? "🫧"}</span>
-                          <span className="mt-2 text-[11px] font-medium text-white/85 leading-tight">
-                            {drop.label}
+                    <section className="osZone osZoneFree" aria-label="Free space">
+                      <div className="osFreeHead">
+                        <div className="osFreeEyebrow">Left Space</div>
+                        <div className="osFreeTitle">Free Space</div>
+                        <div className="osFreeStatus">
+                          <span
+                            className={clsx(
+                              "osFreeDot",
+                              profileStats.status === "working" && "working",
+                              profileStats.status === "on_vacation" && "vacation"
+                            )}
+                          />
+                          <span>
+                            {profileStats.status === "working"
+                              ? "Working"
+                              : profileStats.status === "on_vacation"
+                                ? "On Vacation"
+                                : "Open to Work"}
+                            {profileStats.job ? ` · ${profileStats.job}` : ""}
                           </span>
-                        </span>
-                      </button>
-                    );
-                  })}
+                        </div>
+                      </div>
+                      <div className="osFreeStage">
+                        <div className="osFreeCrown" aria-hidden>
+                          <div className="osFreeCrownGlow" />
+                          <Image
+                            src={CROWN_SRC}
+                            alt=""
+                            width={112}
+                            height={112}
+                            priority
+                            className="osFreeCrownImg"
+                          />
+                        </div>
 
-                  <div className="absolute bottom-5 left-6 right-6 text-center text-xs text-white/40">
-                    Tap a bubble · swipe&nbsp;↑&nbsp;Activity · swipe&nbsp;→&nbsp;Work Board · swipe&nbsp;↓&nbsp;Bucket Brain
-                  </div>
-                    </div>
-                  </section>
+                        <div className="osFreeBubbles">
+                          {freeSpaceDrops.map((drop, i) => (
+                            <button
+                              key={drop.id}
+                              type="button"
+                              onClick={() => openRoute(drop.route)}
+                              className="osFreeBubble"
+                              style={{
+                                animation: reducedMotion
+                                  ? undefined
+                                  : `floaty ${5.2 + (i % 4) * 0.8}s ease-in-out ${i * 0.12}s infinite`,
+                              }}
+                              aria-label={`Open ${drop.label}`}
+                              title={drop.label}
+                            >
+                              <span className="osFreeBubbleEmoji">{drop.emoji ?? "🫧"}</span>
+                              <span className="osFreeBubbleLabel">{drop.label}</span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </section>
 
-                  <section className="osPage osProfilePage">
-                    <div className="pwb">
-                      <div className="pwbHead">
-                        <div className="pwbEyebrow">Profile</div>
-                        <div className="pwbTitle">Work Board</div>
+                    <section className="osZone osZoneWork" aria-label="Work space">
+                      <div className="osWorkHead">
+                        <div>
+                          <div className="osWorkEyebrow">Right Space</div>
+                          <div className="osWorkTitle">Work Space</div>
+                        </div>
+                        <div className="osWorkTabs" role="tablist" aria-label="Work space views">
+                          <button
+                            type="button"
+                            role="tab"
+                            className={clsx("osWorkTab", workspaceTab === "assets" && "on")}
+                            aria-selected={workspaceTab === "assets"}
+                            onClick={() => setWorkspaceTab("assets")}
+                          >
+                            Assets
+                          </button>
+                          <button
+                            type="button"
+                            role="tab"
+                            className={clsx("osWorkTab", workspaceTab === "portfolio" && "on")}
+                            aria-selected={workspaceTab === "portfolio"}
+                            onClick={() => setWorkspaceTab("portfolio")}
+                          >
+                            Portfolio
+                          </button>
+                        </div>
                       </div>
 
-                      <div className="pwbDesk">
-                        <div className="pwbStatusRow">
-                          <span className={clsx("pwbDot", profileStats.status)} />
-                          <div className="min-w-0">
-                            <div className="pwbStatusLabel">
-                              {profileStats.status === "working"
-                                ? "Working"
-                                : profileStats.status === "on_vacation"
-                                  ? "On Vacation"
-                                  : "Open to Work"}
+                      <div className="osWorkBody">
+                        <div className="osWorkMeta">
+                          <span>
+                            {workspaceTab === "assets"
+                              ? `${assets.length} asset${assets.length === 1 ? "" : "s"}`
+                              : `${portfolioDrops.length} piece${portfolioDrops.length === 1 ? "" : "s"}`}
+                          </span>
+                          {syncing ? <span className="osWorkSync">Syncing…</span> : null}
+                          <button
+                            type="button"
+                            className="osWorkOpen"
+                            onClick={() =>
+                              openRoute(workspaceTab === "assets" ? "assets" : "portfolio")
+                            }
+                          >
+                            Open full →
+                          </button>
+                        </div>
+
+                        <div className="osWorkGrid">
+                          {workspaceTab === "assets" ? (
+                            assets.length === 0 ? (
+                              <div className="osWorkEmpty">
+                                Place drops here from Board Drops or Drop Studio.
+                              </div>
+                            ) : (
+                              assets
+                                .slice()
+                                .sort((a, b) => b.createdAt - a.createdAt)
+                                .slice(0, 6)
+                                .map((a) => <EmbeddedAssetTile key={a.id} a={a} />)
+                            )
+                          ) : portfolioDrops.length === 0 ? (
+                            <div className="osWorkEmpty">
+                              Pin polished drops into Portfolio from Board Drops.
                             </div>
-                            <div className="pwbJob">{profileStats.job || "No job set yet"}</div>
-                          </div>
-                        </div>
-
-                        <div className="pwbStats">
-                          <button
-                            type="button"
-                            className="pwbStat"
-                            onClick={() => openRoute("storedrops")}
-                          >
-                            <div className="pwbStatNum">{profileStats.payDrops}</div>
-                            <div className="pwbStatLabel">Pay Drops</div>
-                          </button>
-                          <button
-                            type="button"
-                            className="pwbStat"
-                            onClick={() => openRoute("projects")}
-                          >
-                            <div className="pwbStatNum">{profileStats.projects}</div>
-                            <div className="pwbStatLabel">Projects</div>
-                          </button>
+                          ) : (
+                            portfolioDrops
+                              .slice()
+                              .sort((a, b) => b.createdAt - a.createdAt)
+                              .slice(0, 6)
+                              .map((a) => <EmbeddedAssetTile key={a.id} a={a} />)
+                          )}
                         </div>
                       </div>
+                    </section>
 
-                      <div className="pwbHint">← swipe back to your Drops</div>
-                    </div>
-                  </section>
-                  </div>
-
-                  {/* ACTIVITY CHANNEL — floating upper layer (swipe / scroll up) */}
-                  <div
-                    className={clsx("osActivityLayer", verticalSpace === "activity" && "open")}
-                    aria-hidden={verticalSpace !== "activity"}
-                  >
-                    <DropPadActivityChannel
-                      active={verticalSpace === "activity"}
-                      items={activityItems}
-                      onReturn={() => navVertical("home")}
-                      scrollRef={activityScrollRef}
-                    />
-                  </div>
-
-                  {/* BUCKET BRAIN — lower layer (swipe / scroll down) */}
-                  <div
-                    className={clsx("osBucketLayer", verticalSpace === "bucketBrain" && "open")}
-                    aria-hidden={verticalSpace !== "bucketBrain"}
-                  >
-                    <DropPadBucketBrain onReturn={() => navVertical("home")} signals={signals} />
+                    <section className="osZone osZoneBrain" aria-label="Bucket Brain">
+                      <DropPadBucketBrain layout="zone" signals={signals} />
+                    </section>
                   </div>
                 </div>
               )}
@@ -2239,368 +2166,295 @@ export default function DropPadOS({
         .osMenuRoot {
           position: relative;
           overflow: hidden;
+          padding: 8px 8px 0;
         }
 
-        /* Activity Channel — a glowing floating upper layer that slides down over
-           the orb home when you swipe/scroll up, and back up to return. */
-        .osActivityLayer {
-          position: absolute;
-          inset: 0;
-          z-index: 26;
-          transform: translateY(-100%);
-          transition: transform 460ms cubic-bezier(0.22, 0.61, 0.36, 1);
-          pointer-events: none;
+        /* Drop Pad OS spatial home —
+           TOP Activity Channel · BOTTOM Bucket Brain · LEFT Free Space · RIGHT Work Space */
+        .osSpatialHome {
+          display: grid;
+          grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+          grid-template-rows: minmax(132px, 0.9fr) minmax(220px, 1.35fr) minmax(168px, 1fr);
+          grid-template-areas:
+            "activity activity"
+            "free work"
+            "brain brain";
+          gap: 8px;
+          height: min(720px, calc(100vh - 220px));
+          min-height: 560px;
+        }
+        .osZone {
+          min-width: 0;
+          min-height: 0;
+          overflow: hidden;
+          border-radius: 18px;
+          border: 1px solid rgba(255, 255, 255, 0.12);
+          background:
+            radial-gradient(circle at 14% 0%, rgba(255, 255, 255, 0.06), transparent 46%),
+            linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.02));
+          box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1);
+        }
+        .osZoneActivity {
+          grid-area: activity;
+          background:
+            radial-gradient(circle at 18% 0%, rgba(126, 226, 255, 0.16), transparent 44%),
+            radial-gradient(circle at 88% 10%, rgba(217, 70, 239, 0.1), transparent 40%),
+            linear-gradient(180deg, rgba(6, 12, 22, 0.88), rgba(4, 8, 16, 0.94));
+        }
+        .osZoneFree {
+          grid-area: free;
           display: flex;
           flex-direction: column;
           background:
-            radial-gradient(circle at 20% 0%, rgba(126, 226, 255, 0.18), transparent 42%),
-            radial-gradient(circle at 86% 8%, rgba(217, 70, 239, 0.14), transparent 40%),
-            linear-gradient(180deg, rgba(6, 12, 22, 0.92), rgba(4, 8, 16, 0.97));
-          backdrop-filter: blur(16px) saturate(1.1);
-          -webkit-backdrop-filter: blur(16px) saturate(1.1);
-          box-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.06);
+            radial-gradient(circle at 50% 35%, rgba(163, 230, 53, 0.14), transparent 48%),
+            linear-gradient(180deg, rgba(8, 14, 20, 0.9), rgba(4, 8, 14, 0.96));
         }
-        .osActivityLayer.open {
-          transform: translateY(0);
-          pointer-events: auto;
+        .osZoneWork {
+          grid-area: work;
+          display: flex;
+          flex-direction: column;
+          background:
+            radial-gradient(circle at 80% 0%, rgba(34, 211, 238, 0.14), transparent 42%),
+            linear-gradient(180deg, rgba(8, 12, 20, 0.92), rgba(4, 8, 14, 0.96));
+        }
+        .osZoneBrain {
+          grid-area: brain;
+          border: none;
+          background: transparent;
+          box-shadow: none;
         }
 
-        /* Bucket Brain — lower layer that rises from below on swipe/scroll down. */
-        .osBucketLayer {
-          position: absolute;
-          inset: 0;
-          z-index: 26;
-          transform: translateY(100%);
-          transition: transform 460ms cubic-bezier(0.22, 0.61, 0.36, 1);
-          pointer-events: none;
-          overflow: hidden;
-          background:
-            radial-gradient(circle at 20% 100%, rgba(163, 230, 53, 0.16), transparent 44%),
-            linear-gradient(180deg, rgba(4, 8, 16, 0.97), rgba(6, 12, 22, 0.94));
-          backdrop-filter: blur(16px) saturate(1.1);
-          -webkit-backdrop-filter: blur(16px) saturate(1.1);
-        }
-        .osBucketLayer.open {
-          transform: translateY(0);
-          pointer-events: auto;
-        }
-        .osActivityScroll {
-          flex: 1 1 auto;
-          min-height: 0;
-          overflow-y: auto;
-          padding: 20px 16px 30px;
-          scrollbar-width: none;
-        }
-        .osActivityScroll::-webkit-scrollbar {
-          display: none;
-        }
-        .actTitleWrap {
-          text-align: center;
-          display: grid;
-          gap: 4px;
-          padding: 6px 0 14px;
-        }
-        .actEyebrow {
-          font-size: 10px;
-          letter-spacing: 0.34em;
-          text-transform: uppercase;
-          color: rgba(126, 226, 255, 0.7);
-        }
-        .actTitle {
-          margin: 2px 0 0;
-          font-size: 1.7rem;
-          font-weight: 900;
-          color: #fff;
-          text-shadow:
-            0 0 18px rgba(126, 226, 255, 0.5),
-            0 0 40px rgba(217, 70, 239, 0.25);
-        }
-        .actSub {
-          margin: 0;
-          font-size: 12px;
-          color: rgba(236, 255, 251, 0.55);
-        }
-        .actReturn {
-          justify-self: center;
-          margin-top: 8px;
-          border-radius: 999px;
-          padding: 6px 14px;
-          font-size: 11px;
-          font-weight: 900;
-          letter-spacing: 0.1em;
-          text-transform: uppercase;
-          color: rgba(232, 255, 248, 0.82);
-          background: rgba(255, 255, 255, 0.07);
-          border: 1px solid rgba(167, 244, 232, 0.22);
-          cursor: pointer;
-        }
-        .actSignals {
-          display: grid;
-          gap: 7px;
-          margin-bottom: 16px;
-        }
-        .actSectionLabel {
-          font-size: 10px;
-          font-weight: 900;
-          letter-spacing: 0.24em;
-          text-transform: uppercase;
-          color: rgba(126, 226, 255, 0.72);
-          padding: 0 2px 2px;
-        }
-        .actSignal {
-          display: flex;
-          align-items: center;
-          gap: 10px;
-          border-radius: 16px;
-          padding: 9px 12px;
-          font-size: 12px;
-          color: rgba(236, 255, 251, 0.86);
-          background: rgba(126, 226, 255, 0.08);
-          border: 1px solid rgba(126, 226, 255, 0.18);
-        }
-        .actSignal.interaction {
-          background: rgba(217, 70, 239, 0.1);
-          border-color: rgba(217, 70, 239, 0.24);
-          color: rgba(255, 234, 252, 0.9);
-        }
-        .actSigIcon {
+        .osFreeHead,
+        .osWorkHead {
           flex: 0 0 auto;
-          font-size: 14px;
-          line-height: 1;
+          padding: 10px 12px 8px;
+          border-bottom: 1px solid rgba(255, 255, 255, 0.08);
         }
-        .actSigText {
-          flex: 1 1 auto;
-          min-width: 0;
-          overflow: hidden;
-          text-overflow: ellipsis;
-          white-space: nowrap;
-        }
-        .actSigTime {
-          flex: 0 0 auto;
-          font-size: 10px;
-          color: rgba(255, 255, 255, 0.42);
-        }
-        .actStream {
-          display: grid;
-          gap: 12px;
-        }
-        .actCard {
-          border-radius: 20px;
-          padding: 14px;
-          border: 1px solid rgba(255, 255, 255, 0.12);
-          background:
-            radial-gradient(circle at 14% 0%, rgba(126, 226, 255, 0.08), transparent 50%),
-            linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.02));
-          box-shadow:
-            0 10px 30px rgba(0, 0, 0, 0.3),
-            inset 0 1px 0 rgba(255, 255, 255, 0.14);
-        }
-        .actCardTop {
-          display: flex;
-          align-items: center;
-          gap: 11px;
-        }
-        .actAvatar {
-          flex: 0 0 auto;
-          width: 36px;
-          height: 36px;
-          border-radius: 999px;
-          object-fit: cover;
-          display: grid;
-          place-items: center;
-          font-weight: 900;
-          color: #06121a;
-          background: radial-gradient(circle at 30% 20%, #fff, #7ee2ff);
-        }
-        .actAvatar.fallback {
-          font-size: 14px;
-        }
-        .actCardHead {
-          flex: 1 1 auto;
-          min-width: 0;
-        }
-        .actCardKind {
+        .osFreeEyebrow,
+        .osWorkEyebrow {
           font-size: 9px;
-          letter-spacing: 0.18em;
+          letter-spacing: 0.28em;
           text-transform: uppercase;
-          color: rgba(126, 246, 230, 0.78);
+          color: rgba(163, 230, 53, 0.75);
         }
-        .actCardTitle {
-          margin-top: 1px;
-          font-size: 14px;
-          font-weight: 800;
-          color: #fff;
-          overflow: hidden;
-          text-overflow: ellipsis;
-          white-space: nowrap;
+        .osWorkEyebrow {
+          color: rgba(34, 211, 238, 0.78);
         }
-        .actCardTime {
-          flex: 0 0 auto;
-          font-size: 10px;
-          color: rgba(255, 255, 255, 0.4);
-        }
-        .actCardBody {
-          margin-top: 9px;
-          font-size: 13px;
-          line-height: 1.45;
-          color: rgba(236, 255, 251, 0.72);
-          display: -webkit-box;
-          -webkit-line-clamp: 3;
-          -webkit-box-orient: vertical;
-          overflow: hidden;
-        }
-        .actEmpty {
-          border-radius: 18px;
-          padding: 18px;
-          text-align: center;
-          font-size: 13px;
-          color: rgba(236, 255, 251, 0.55);
-          border: 1px dashed rgba(255, 255, 255, 0.14);
-          background: rgba(255, 255, 255, 0.03);
-        }
-
-        /* Spatial home pager — swipe/scroll horizontally between the orb home and
-           the Profile Work Board for an AR-like depth feel in the web prototype. */
-        .osPager {
-          display: flex;
-          height: 560px;
-          overflow-x: auto;
-          overflow-y: hidden;
-          scroll-snap-type: x mandatory;
-          -webkit-overflow-scrolling: touch;
-          scrollbar-width: none;
-        }
-        .osPager::-webkit-scrollbar {
-          display: none;
-        }
-        @media (min-width: 640px) {
-          .osPager {
-            height: 620px;
-          }
-        }
-        .osPage {
-          position: relative;
-          flex: 0 0 100%;
-          width: 100%;
-          height: 100%;
-          scroll-snap-align: start;
-        }
-        .osProfilePage {
-          overflow-y: auto;
-          scrollbar-width: none;
-          -ms-overflow-style: none;
-        }
-        .osProfilePage::-webkit-scrollbar {
-          display: none;
-          width: 0;
-          height: 0;
-        }
-        .pwb {
-          display: grid;
-          align-content: start;
-          gap: 16px;
-          padding: 22px 20px 28px;
-          height: 100%;
-        }
-        .pwbEyebrow {
-          font-size: 11px;
-          letter-spacing: 0.34em;
-          text-transform: uppercase;
-          color: rgba(255, 255, 255, 0.5);
-        }
-        .pwbTitle {
-          margin-top: 4px;
-          font-size: 1.5rem;
-          font-weight: 850;
+        .osFreeTitle,
+        .osWorkTitle {
+          margin-top: 2px;
+          font-size: 1.05rem;
+          font-weight: 900;
           color: #fff;
         }
-        .pwbDesk {
-          display: grid;
-          gap: 16px;
-          border-radius: 26px;
-          padding: 18px;
-          border: 1px solid rgba(255, 255, 255, 0.12);
-          background:
-            radial-gradient(circle at 16% 0%, rgba(163, 230, 53, 0.12), transparent 44%),
-            radial-gradient(circle at 92% 6%, rgba(34, 211, 238, 0.12), transparent 42%),
-            linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.02));
-          box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16);
-        }
-        .pwbStatusRow {
+        .osFreeStatus {
           display: flex;
           align-items: center;
-          gap: 12px;
+          gap: 7px;
+          margin-top: 6px;
+          font-size: 11px;
+          color: rgba(236, 255, 251, 0.62);
         }
-        .pwbDot {
-          flex: 0 0 auto;
-          width: 13px;
-          height: 13px;
+        .osFreeDot {
+          width: 8px;
+          height: 8px;
           border-radius: 999px;
           background: rgba(255, 255, 255, 0.4);
         }
-        .pwbDot.working {
+        .osFreeDot.working {
           background: #a3ff12;
-          box-shadow: 0 0 12px rgba(163, 255, 18, 0.6);
+          box-shadow: 0 0 10px rgba(163, 255, 18, 0.55);
         }
-        .pwbDot.on_vacation {
+        .osFreeDot.vacation {
           background: #ffcf4d;
-          box-shadow: 0 0 12px rgba(255, 207, 77, 0.5);
+          box-shadow: 0 0 10px rgba(255, 207, 77, 0.45);
         }
-        .pwbStatusLabel {
-          font-size: 1rem;
-          font-weight: 850;
-          color: #fff;
+        .osFreeStage {
+          position: relative;
+          flex: 1 1 auto;
+          min-height: 0;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          gap: 12px;
+          padding: 10px;
+          overflow: auto;
         }
-        .pwbJob {
-          font-size: 12px;
-          color: rgba(255, 255, 255, 0.6);
-        }
-        .pwbStats {
+        .osFreeCrown {
+          position: relative;
+          width: 112px;
+          height: 112px;
           display: grid;
-          grid-template-columns: 1fr 1fr;
-          gap: 10px;
+          place-items: center;
         }
-        .pwbStat {
-          text-align: left;
+        .osFreeCrownGlow {
+          position: absolute;
+          inset: -8px;
+          border-radius: 999px;
+          background: rgba(163, 230, 53, 0.22);
+          filter: blur(18px);
+        }
+        .osFreeCrownImg {
+          position: relative;
+          z-index: 1;
+          width: 112px;
+          height: 112px;
+          object-fit: contain;
+          filter: drop-shadow(0 0 24px rgba(163, 230, 53, 0.4));
+        }
+        .osFreeBubbles {
+          display: flex;
+          flex-wrap: wrap;
+          justify-content: center;
+          gap: 8px;
+          width: 100%;
+        }
+        .osFreeBubble {
+          display: grid;
+          justify-items: center;
+          gap: 4px;
+          width: 76px;
+          padding: 10px 6px;
           border-radius: 18px;
-          padding: 14px;
-          border: 1px solid rgba(255, 255, 255, 0.1);
-          background: rgba(255, 255, 255, 0.04);
+          border: 1px solid rgba(255, 255, 255, 0.14);
+          background:
+            radial-gradient(circle at 30% 25%, rgba(255, 255, 255, 0.22), rgba(255, 255, 255, 0.05) 48%),
+            rgba(0, 0, 0, 0.28);
+          color: rgba(255, 255, 255, 0.9);
+          backdrop-filter: blur(8px);
           cursor: pointer;
-          transition: background 140ms ease, transform 140ms ease;
+          transition: transform 140ms ease, border-color 140ms ease;
         }
-        .pwbStat:hover {
-          background: rgba(255, 255, 255, 0.08);
-          transform: translateY(-1px);
+        .osFreeBubble:hover {
+          transform: translateY(-2px);
+          border-color: rgba(163, 230, 53, 0.4);
         }
-        .pwbStatNum {
-          font-size: 1.9rem;
-          font-weight: 950;
+        .osFreeBubbleEmoji {
+          font-size: 16px;
           line-height: 1;
-          color: #fff;
         }
-        .pwbStatLabel {
-          margin-top: 6px;
+        .osFreeBubbleLabel {
           font-size: 10px;
-          letter-spacing: 0.16em;
-          text-transform: uppercase;
-          color: rgba(255, 255, 255, 0.5);
-        }
-        .pwbHint {
+          font-weight: 700;
           text-align: center;
+          line-height: 1.15;
+          color: rgba(255, 255, 255, 0.82);
+        }
+
+        .osWorkHead {
+          display: flex;
+          align-items: flex-start;
+          justify-content: space-between;
+          gap: 8px;
+        }
+        .osWorkTabs {
+          display: inline-flex;
+          gap: 4px;
+          padding: 3px;
+          border-radius: 999px;
+          border: 1px solid rgba(255, 255, 255, 0.12);
+          background: rgba(0, 0, 0, 0.28);
+        }
+        .osWorkTab {
+          border: 0;
+          border-radius: 999px;
+          padding: 6px 10px;
+          font-size: 10px;
+          font-weight: 800;
+          letter-spacing: 0.04em;
+          text-transform: uppercase;
+          color: rgba(255, 255, 255, 0.62);
+          background: transparent;
+          cursor: pointer;
+        }
+        .osWorkTab.on {
+          color: #06121a;
+          background: radial-gradient(circle at 30% 20%, #fff, #7ee2ff);
+        }
+        .osWorkBody {
+          flex: 1 1 auto;
+          min-height: 0;
+          display: flex;
+          flex-direction: column;
+          gap: 8px;
+          padding: 8px 10px 10px;
+          overflow: hidden;
+        }
+        .osWorkMeta {
+          display: flex;
+          align-items: center;
+          gap: 8px;
           font-size: 11px;
-          color: rgba(255, 255, 255, 0.4);
+          color: rgba(236, 255, 251, 0.6);
+        }
+        .osWorkSync {
+          color: rgba(126, 226, 255, 0.75);
+        }
+        .osWorkOpen {
+          margin-left: auto;
+          border: 0;
+          background: transparent;
+          color: rgba(126, 226, 255, 0.9);
+          font-size: 11px;
+          font-weight: 700;
+          cursor: pointer;
+        }
+        .osWorkGrid {
+          flex: 1 1 auto;
+          min-height: 0;
+          overflow: auto;
+          display: grid;
+          gap: 8px;
+          align-content: start;
+          scrollbar-width: none;
+        }
+        .osWorkGrid::-webkit-scrollbar {
+          display: none;
+        }
+        .osWorkEmpty {
+          border-radius: 14px;
+          padding: 14px;
+          border: 1px dashed rgba(255, 255, 255, 0.14);
+          background: rgba(255, 255, 255, 0.03);
+          color: rgba(236, 255, 251, 0.55);
+          font-size: 12px;
+          line-height: 1.45;
+        }
+
+        @media (max-width: 720px) {
+          .osSpatialHome {
+            grid-template-columns: 1fr;
+            grid-template-rows: minmax(120px, auto) minmax(200px, auto) minmax(220px, auto) minmax(180px, auto);
+            grid-template-areas:
+              "activity"
+              "free"
+              "work"
+              "brain";
+            height: auto;
+            min-height: 0;
+          }
+          .osZoneActivity {
+            height: 160px;
+          }
+          .osZoneFree,
+          .osZoneWork {
+            min-height: 220px;
+          }
+          .osZoneBrain {
+            min-height: 220px;
+          }
         }
 
         @keyframes floaty {
           0% {
-            transform: translate(-50%, -50%) translateY(0px);
+            transform: translateY(0px);
           }
           50% {
-            transform: translate(-50%, -50%) translateY(-14px);
+            transform: translateY(-8px);
           }
           100% {
-            transform: translate(-50%, -50%) translateY(0px);
+            transform: translateY(0px);
           }
         }
       `}</style>

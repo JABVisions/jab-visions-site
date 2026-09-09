@@ -5,6 +5,29 @@
   flex-direction: column;
   color: #eef7ff;
 }
+.channelZone {
+  min-height: 0;
+}
+
+.zoneHead {
+  flex: 0 0 auto;
+  padding: 10px 14px 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  background: linear-gradient(180deg, rgba(126, 226, 255, 0.08), transparent);
+}
+.zoneEyebrow {
+  font-size: 9px;
+  letter-spacing: 0.28em;
+  text-transform: uppercase;
+  color: rgba(126, 226, 255, 0.72);
+}
+.zoneTitle {
+  margin: 2px 0 0;
+  font-size: 1.05rem;
+  font-weight: 900;
+  color: #fff;
+  text-shadow: 0 0 16px rgba(126, 226, 255, 0.35);
+}
 
 /* The signal waterfall — newest sits near the gateway, scroll up for deeper. */
 .stream {
@@ -17,6 +40,10 @@
   -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 64px, #000 100%);
   mask-image: linear-gradient(to bottom, transparent 0, #000 64px, #000 100%);
 }
+.channelZone .stream {
+  -webkit-mask-image: none;
+  mask-image: none;
+}
 .stream::-webkit-scrollbar {
   display: none;
 }
@@ -26,6 +53,10 @@
   gap: 16px;
   /* Big top space so the top fades into an open, "end of the world" feel. */
   padding: 120px 16px 14px;
+}
+.streamInnerZone {
+  gap: 10px;
+  padding: 10px 12px 12px;
 }
 
 /* ---- Signal (primary, conversational) ---- */
