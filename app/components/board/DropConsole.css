@@ -1,0 +1,525 @@
+/* Styles extracted verbatim from DropConsole.tsx */
+        .dc { width: 100%; }
+        .dcInner { padding: 16px; }
+
+        .dcTitleRow { display: flex; align-items: center; gap: 10px; }
+        .dcTitle { margin: 0; font-size: 16px; font-weight: 950; color: rgba(0,170,160,1); }
+        .dcHint { margin: 6px 0 0; font-size: 12px; color: rgba(0,0,0,0.52); }
+
+        .dcSleep {
+          border-radius: 999px; padding: 8px 10px; font-size: 10px;
+          font-weight: 950; letter-spacing: 0.18em; text-transform: uppercase;
+          border: 1px solid rgba(0,0,0,0.12);
+          background: rgba(0,0,0,0.84); color: rgba(255,255,255,0.92);
+          cursor: pointer;
+        }
+
+        .dcModePills { margin-top: 10px; display: flex; flex-wrap: wrap; gap: 10px; }
+        .dcModePill {
+          border-radius: 999px;
+          padding: 8px 12px;
+          border: 1px solid rgba(0,0,0,0.12);
+          background: rgba(255,255,255,0.70);
+          color: rgba(0,0,0,0.62);
+          font-size: 12px;
+          font-weight: 900;
+          letter-spacing: 0.12em;
+          text-transform: uppercase;
+          cursor: pointer;
+          transition: transform 160ms ease, filter 160ms ease, background 160ms ease;
+        }
+        .dcModePill:hover { transform: translateY(-1px); filter: brightness(1.02); }
+        .dcModePill.on {
+          background: rgba(0,0,0,0.86);
+          color: rgba(200,255,230,0.95);
+          border-color: rgba(0,0,0,0.18);
+        }
+
+        .dcSection { margin-top: 12px; }
+        .dcSectionHead { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
+        .dcSectionLabel { font-size: 11px; font-weight: 950; letter-spacing: 0.18em; text-transform: uppercase; color: rgba(0,0,0,0.52); }
+        .dcSectionNote { font-size: 12px; color: rgba(0,0,0,0.46); font-weight: 800; }
+
+        .dcPills { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 10px; }
+        .dcDropTypeRows {
+          margin-top: 8px;
+          display: grid;
+          gap: 10px;
+          min-width: 0;
+          max-width: 100%;
+        }
+        .dcDropTypeRow {
+          display: flex;
+          gap: 10px;
+          flex-wrap: wrap;
+          min-width: 0;
+          max-width: 100%;
+        }
+        .dcTypeBtn {
+          min-width: 72px;
+          border-radius: 999px;
+          padding: 8px 12px;
+          border: 1px solid rgba(0,0,0,0.12);
+          background: rgba(255,255,255,0.70);
+          color: rgba(0,0,0,0.62);
+          cursor: pointer;
+          display: inline-grid;
+          gap: 4px;
+          text-align: left;
+          transition: transform 160ms ease, filter 160ms ease, background 160ms ease;
+        }
+        .dcTypeBtn:hover { transform: translateY(-1px); filter: brightness(1.02); }
+        .dcTypeBtn span {
+          font-size: 12px;
+          font-weight: 900;
+          letter-spacing: 0.12em;
+          text-transform: uppercase;
+        }
+        .dcTypeBtn small {
+          font-size: 12px;
+          font-weight: 650;
+          color: rgba(0,0,0,0.48);
+        }
+        .dcTypeBtn.on {
+          background: rgba(0,0,0,0.86);
+          color: rgba(200,255,230,0.95);
+          border-color: rgba(0,0,0,0.18);
+        }
+        .dcTypeBtn.on small { color: rgba(255,255,255,0.70); }
+
+        .dcForm { margin-top: 12px; display: grid; gap: 12px; }
+
+        .dcFieldLabel { font-size: 11px; font-weight: 950; letter-spacing: 0.18em; text-transform: uppercase; color: rgba(0,0,0,0.52); margin-bottom: 6px; }
+        .dcInput {
+          width: 100%;
+          border-radius: 16px;
+          border: 1px solid rgba(0,0,0,0.12);
+          background: rgba(255,255,255,0.72);
+          padding: 12px 14px;
+          outline: none;
+          color: rgba(0,0,0,0.72);
+          font-weight: 750;
+          min-width: 0;
+        }
+        .dcTextarea {
+          width: 100%;
+          border-radius: 16px;
+          border: 1px solid rgba(0,0,0,0.12);
+          background: rgba(255,255,255,0.72);
+          padding: 12px 14px;
+          outline: none;
+          resize: vertical;
+          color: rgba(0,0,0,0.72);
+          font-weight: 750;
+          min-width: 0;
+        }
+        .dcInput:focus, .dcTextarea:focus {
+          box-shadow:
+            0 0 0 2px rgba(160,220,255,0.68),
+            0 0 18px rgba(160,220,255,0.28);
+          border-color: rgba(160,220,255,0.75);
+          background: rgba(255,255,255,0.84);
+        }
+
+        .dcFieldHelp { margin-top: 6px; font-size: 12px; color: rgba(0,0,0,0.46); font-weight: 800; }
+        .fileLine {
+          display: grid;
+          gap: 8px;
+        }
+        .fileInput {
+          position: absolute;
+          width: 1px;
+          height: 1px;
+          opacity: 0;
+          pointer-events: none;
+        }
+        .fileMeta {
+          display: flex;
+          gap: 10px;
+          align-items: center;
+          flex-wrap: wrap;
+          min-width: 0;
+          max-width: 100%;
+        }
+        .fileName {
+          font-weight: 900;
+          color: rgba(0,0,0,0.68);
+          min-width: 0;
+          max-width: 100%;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+        .fileName.dim {
+          color: rgba(0,0,0,0.45);
+        }
+        .fileSize {
+          font-size: 12px;
+          color: rgba(0,0,0,0.50);
+          font-weight: 800;
+          letter-spacing: 0.08em;
+          text-transform: uppercase;
+        }
+        .fileStatus {
+          margin-top: 8px;
+          min-height: 18px;
+        }
+        .payProviderRow {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 8px;
+        }
+        .visibilityRow {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 8px;
+          justify-content: flex-end;
+          width: 100%;
+          margin-bottom: 2px;
+        }
+        .mediaActionRow.pairRow .studioAction,
+        .mediaActionRow.pairRow .uploadAction {
+          flex: 1 1 100%;
+          width: 100%;
+        }
+        .providerChip {
+          border: 1px solid rgba(0,0,0,0.12);
+          background: rgba(255,255,255,0.84);
+          color: rgba(0,0,0,0.58);
+          border-radius: 999px;
+          padding: 9px 12px;
+          font-size: 11px;
+          font-weight: 900;
+          letter-spacing: 0.12em;
+          text-transform: uppercase;
+          cursor: pointer;
+        }
+        .providerChip.on {
+          background: rgba(0,0,0,0.86);
+          color: rgba(255,255,255,0.92);
+        }
+        .payGatewayNote {
+          font-size: 12px;
+          color: rgba(0,0,0,0.56);
+          font-weight: 700;
+        }
+
+        .dcTagsPreview { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 8px; }
+        .dcTagChip {
+          border-radius: 999px; padding: 6px 10px; font-size: 11px;
+          font-weight: 900; letter-spacing: 0.08em;
+          border: 1px solid rgba(0,0,0,0.10);
+          background: rgba(255,255,255,0.78);
+          color: rgba(0,0,0,0.60);
+        }
+
+        .mediaRow { display: grid; gap: 10px; align-items: center; }
+
+        .mediaActionRow {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 8px;
+          margin-top: 10px;
+        }
+
+        .mediaAction {
+          position: relative;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          min-height: 38px;
+          border-radius: 999px;
+          padding: 9px 14px;
+          font-size: 11px;
+          font-weight: 950;
+          letter-spacing: 0.12em;
+          text-transform: uppercase;
+          cursor: pointer;
+          white-space: nowrap;
+          transition:
+            transform 160ms ease,
+            box-shadow 160ms ease,
+            filter 160ms ease,
+            border-color 160ms ease;
+        }
+
+        .mediaAction:hover {
+          transform: translateY(-1px);
+          filter: brightness(1.02);
+        }
+
+        .uploadBtn {
+          border-radius: 999px;
+          padding: 10px 14px;
+          font-size: 11px;
+          font-weight: 900;
+          letter-spacing: 0.12em;
+          text-transform: uppercase;
+          border: 1px solid rgba(0,0,0,0.16);
+          background: rgba(0,0,0,0.86);
+          color: rgba(200,255,230,0.95);
+          cursor: pointer;
+          white-space: nowrap;
+          transition: transform 160ms ease, filter 160ms ease;
+        }
+        .uploadBtn:hover { transform: translateY(-1px); filter: brightness(1.02); }
+        .uploadBtn.busy { opacity: 0.7; cursor: not-allowed; }
+        .uploadAction {
+          border: 1px solid rgba(0,0,0,0.16);
+          background:
+            radial-gradient(circle at 22% 18%, rgba(200,255,230,0.18), transparent 38%),
+            rgba(0,0,0,0.88);
+          color: rgba(200,255,230,0.95);
+          box-shadow: inset 0 0 14px rgba(255,255,255,0.06);
+        }
+        .uploadAction:hover {
+          box-shadow:
+            0 0 18px rgba(0, 180, 150, 0.12),
+            inset 0 0 14px rgba(255,255,255,0.08);
+        }
+        .uploadAction.busy {
+          opacity: 0.62;
+          cursor: wait;
+          pointer-events: none;
+        }
+        .captureRow {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 8px;
+          margin-top: 10px;
+        }
+        .captureAction {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          border-radius: 999px;
+          padding: 9px 14px;
+          border: 1px solid rgba(0, 120, 105, 0.24);
+          background: rgba(220, 255, 246, 0.72);
+          color: rgba(0, 92, 80, 0.82);
+          font-size: 11px;
+          font-weight: 900;
+          letter-spacing: 0.1em;
+          text-transform: uppercase;
+          cursor: pointer;
+          transition: transform 160ms ease, box-shadow 160ms ease, filter 160ms ease;
+        }
+        .captureAction:hover {
+          transform: translateY(-1px);
+          filter: brightness(1.02);
+          box-shadow: 0 0 18px rgba(0, 180, 150, 0.15);
+        }
+        .captureAction.busy {
+          opacity: 0.62;
+          pointer-events: none;
+        }
+        .studioAction {
+          flex: 1 1 100%;
+          border: 1px solid rgba(126, 226, 255, 0.45);
+          background:
+            radial-gradient(circle at 30% 18%, rgba(255, 255, 255, 0.18), transparent 55%),
+            linear-gradient(180deg, rgba(126, 226, 255, 0.22), rgba(255, 79, 216, 0.14));
+          color: rgba(0, 60, 70, 0.9);
+          box-shadow: 0 0 18px rgba(126, 226, 255, 0.22);
+          gap: 8px;
+        }
+        .studioAction:hover {
+          transform: translateY(-1px);
+          filter: brightness(1.03);
+          box-shadow: 0 0 26px rgba(126, 226, 255, 0.34);
+        }
+        .studioAction.busy {
+          opacity: 0.62;
+          pointer-events: none;
+        }
+        .annStudioPreview {
+          position: relative;
+          margin-top: 10px;
+          overflow: hidden;
+          border-radius: 16px;
+          border: 1px solid rgba(0, 120, 105, 0.2);
+          background: rgba(3, 24, 24, 0.92);
+          aspect-ratio: 4 / 5;
+          max-height: 220px;
+        }
+        .annStudioImg {
+          width: 100%;
+          height: 100%;
+          object-fit: cover;
+          display: block;
+        }
+        .captureHelp {
+          margin-top: 7px;
+          font-size: 11px;
+          font-weight: 750;
+          color: rgba(0, 0, 0, 0.45);
+        }
+        .consoleMediaPreview {
+          position: relative;
+          overflow: hidden;
+          border: 1px solid rgba(0, 120, 105, 0.2);
+          border-radius: 16px;
+          background: rgba(3, 24, 24, 0.92);
+          box-shadow: 0 0 20px rgba(0, 180, 150, 0.12);
+        }
+        .consoleMediaPreview img,
+        .consoleMediaPreview video {
+          display: block;
+          width: 100%;
+          max-height: 280px;
+          object-fit: contain;
+          background: rgba(2, 12, 14, 0.96);
+        }
+        .consoleMediaPreview span {
+          position: absolute;
+          top: 9px;
+          left: 9px;
+          border: 1px solid rgba(140, 255, 230, 0.25);
+          border-radius: 999px;
+          padding: 5px 8px;
+          background: rgba(0, 28, 28, 0.72);
+          color: rgba(210, 255, 244, 0.92);
+          font-size: 9px;
+          font-weight: 900;
+          letter-spacing: 0.1em;
+          text-transform: uppercase;
+        }
+
+        .consoleStudioWrap {
+          position: relative;
+        }
+        .dcMediaRemove {
+          position: absolute;
+          top: 9px;
+          right: 9px;
+          z-index: 4;
+          border: 1px solid rgba(255, 120, 160, 0.55);
+          border-radius: 999px;
+          padding: 6px 11px;
+          background: rgba(28, 6, 14, 0.82);
+          color: #ffd7e3;
+          font-size: 10px;
+          font-weight: 900;
+          letter-spacing: 0.08em;
+          text-transform: uppercase;
+          cursor: pointer;
+          backdrop-filter: blur(4px);
+          box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3);
+          transition: transform 140ms ease, filter 140ms ease;
+        }
+        .dcMediaRemove:hover {
+          transform: translateY(-1px);
+          filter: brightness(1.08);
+        }
+
+        .thoughtAttachmentPreview {
+          position: relative;
+          overflow: hidden;
+          border-radius: 20px;
+          border: 1px solid rgba(0, 190, 170, 0.22);
+          background:
+            radial-gradient(circle at 20% 10%, rgba(170,255,230,0.22), transparent 40%),
+            rgba(255, 255, 255, 0.72);
+          box-shadow: inset 0 0 22px rgba(0, 190, 170, 0.08);
+        }
+        .thoughtAttachmentPreview img,
+        .thoughtAttachmentPreview audio {
+          width: 100%;
+          display: block;
+        }
+        .thoughtAttachmentPreview img {
+          max-height: 210px;
+          object-fit: contain;
+          background: rgba(0, 0, 0, 0.84);
+        }
+        .thoughtAttachmentPreview span {
+          display: inline-flex;
+          margin: 9px;
+          border-radius: 999px;
+          padding: 5px 8px;
+          background: rgba(0, 30, 30, 0.72);
+          color: rgba(210, 255, 244, 0.92);
+          font-size: 9px;
+          font-weight: 900;
+          letter-spacing: 0.1em;
+          text-transform: uppercase;
+        }
+        .thoughtTextarea {
+          min-height: 92px;
+          background:
+            radial-gradient(circle at 0% 0%, rgba(145,255,225,0.16), transparent 35%),
+            rgba(255,255,255,0.78);
+        }
+
+        .dcErr { font-size: 13px; font-weight: 800; color: rgba(190,0,0,0.75); }
+        .dcOk { font-size: 13px; font-weight: 800; color: rgba(0,120,90,0.85); }
+
+        .dcBottom { margin-top: 2px; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+        .dcFoot { font-size: 12px; color: rgba(0,0,0,0.52); }
+        .dcFootLink a {
+          display: inline-block; margin-top: 6px; font-size: 12px; font-weight: 900;
+          letter-spacing: 0.08em; text-transform: uppercase;
+          color: rgba(255,0,190,0.85); text-decoration: underline; text-underline-offset: 4px;
+        }
+
+        .dcSubmit {
+          border-radius: 16px;
+          padding: 12px 16px;
+          font-weight: 900;
+          letter-spacing: 0.08em;
+          text-transform: uppercase;
+          border: 1px solid rgba(0,0,0,0.16);
+          background: rgba(0,0,0,0.86);
+          color: rgba(200,255,230,0.95);
+          cursor: pointer;
+          transition: transform 140ms ease, filter 140ms ease;
+        }
+        .dcSubmit:hover { transform: translateY(-1px); filter: brightness(1.02); }
+        .dcSubmit:disabled { opacity: 0.65; cursor: not-allowed; transform: none; }
+
+        @media (max-width: 520px) {
+          .mediaRow { grid-template-columns: 1fr; }
+        }
+
+/* --- viewer overlay block --- */
+          .dock {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            border-radius: 20px;
+            padding: 12px 14px;
+            background: rgba(255, 255, 255, 0.92);
+            border: 1px solid rgba(0, 0, 0, 0.08);
+            box-shadow: 0 12px 30px rgba(0, 0, 0, 0.12);
+          }
+          .dockTitle {
+            font-size: 11px;
+            font-weight: 950;
+            letter-spacing: 0.22em;
+            text-transform: uppercase;
+            color: rgba(0, 170, 160, 1);
+          }
+          .dockSub {
+            margin-top: 6px;
+            font-size: 12px;
+            font-weight: 800;
+            color: rgba(0, 0, 0, 0.48);
+          }
+        .dockWake {
+            border-radius: 16px;
+            padding: 12px 14px;
+            font-size: 11px;
+            font-weight: 900;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            border: 1px solid rgba(0, 0, 0, 0.16);
+            background: rgba(0, 0, 0, 0.84);
+            color: rgba(200, 255, 230, 0.95);
+            cursor: pointer;
+            transition: transform 160ms ease, filter 160ms ease;
+          }
+          .dockWake:hover {
+            transform: translateY(-1px);
+            filter: brightness(1.02);
+          }

@@ -45,11 +45,13 @@ export default function SoundtrackTile(props: {
       </div>
 
       <div className="music-form">
-        <input
+        <textarea
           value={musicTitle}
           onChange={(e) => setMusicTitle(e.target.value)}
-          className="music-input"
+          className="music-input music-title-input"
           placeholder="Title (optional)"
+          rows={2}
+          aria-label="Title (optional)"
         />
         <input
           value={musicUrl}

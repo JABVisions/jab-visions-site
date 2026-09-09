@@ -1,5 +1,6 @@
 "use client";
 
+import "./public-profile.css";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
@@ -22,9 +23,15 @@ import {
 } from "@/lib/board/dropCustomizations";
 import { recordBoardVisitWhisper } from "@/lib/board/visitWhispers";
 import {
-  PROFILE_ACTIVITY_WHISPERS,
+  deriveActivityWhispers,
   type BoardWhisper as ProfileWhisper,
 } from "@/lib/board/whispers";
+import {
+  PROFILE_ACTIVITY_CHANNEL_FETCH_LIMIT,
+  PROFILE_ACTIVITY_CHANNEL_LIMIT,
+  resolveProfileActivityDrops,
+  dropVisibleToViewer,
+} from "@/lib/board/profileActivityChannel";
 import { supabaseBrowser } from "@/lib/supabase/browser";
 import DropStudioOverlay from "@/app/components/board/DropStudioOverlay";
 
@@ -32,7 +39,6 @@ const PROFILE_STORAGE_KEY = "jab_board_profile_v2";
 const OPTIONS_STORAGE_KEY = "board.options.v1";
 const DROP_STORAGE_KEY = "jab_board_drops_v2";
 const DROP_DELETED_STORAGE_KEY = "jab_board_drops_deleted_v1";
-const ACTIVITY_CHANNEL_LIMIT = 80;
 
 function activityBelongsToUser(item: BoardActivity, userId: string) {
   const meta = item.meta && typeof item.meta === "object" ? item.meta : null;
@@ -79,7 +85,6 @@ type ProfilePayload = {
   displayName?: string;
   bio?: string;
   glowColor?: string;
-  energyLevel?: number;
   avatarDataUrl?: string | null;
   avatarPath?: string | null;
   visionSlots?: (string | null)[];
@@ -106,7 +111,6 @@ type StaticProfile = {
   avatarPath?: string | null;
   coverPath?: string | null;
   visionSlotPaths?: (string | null)[];
-  energyLevel?: number;
 };
 
 type RemoteBoardStyle = {
@@ -125,7 +129,6 @@ type RemoteBoardStyle = {
   boardDrops?: unknown[];
   boardDropsDeleted?: unknown[];
   visibility?: "public" | "private";
-  energyLevel?: number;
 };
 
 type RemoteProfileRow = {
@@ -184,11 +187,13 @@ type DropItem = {
   fileSize?: number;
   mime?: string;
   mediaKind?: MediaKind;
+  mediaUrl?: string;
   priceCents?: number;
   description?: string;
   linkUrl?: string;
   payProvider?: PayProviderMode;
   customizations?: DropCustomization;
+  visibility?: "public" | "private";
 };
 
 type RemoteBoardDrop = DropItem;
@@ -419,7 +424,6 @@ function buildGenericProfile(identifier: string): StaticProfile {
     avatarPath: null,
     coverPath: null,
     visionSlotPaths: EMPTY_VISION,
-    energyLevel: 60,
   };
 }
 
@@ -672,10 +676,6 @@ export default function ProfileBoardViewPage({
             base.bio,
           glowColor: resolveBoardGlow(boardStyle, base.glowColor),
           auraMood: boardStyle?.auraMood ?? base.auraMood,
-          energyLevel:
-            typeof boardStyle?.energyLevel === "number"
-              ? clamp(boardStyle.energyLevel, 0, 100)
-              : base.energyLevel ?? 60,
           avatarDataUrl:
             (typeof boardStyle?.avatarDataUrl === "string" &&
               boardStyle.avatarDataUrl.trim()) ||
@@ -802,7 +802,7 @@ export default function ProfileBoardViewPage({
           .eq("id", userId)
           .maybeSingle();
         const response = await fetch(
-          `/api/board/activity?limit=${ACTIVITY_CHANNEL_LIMIT}`,
+          `/api/board/activity?limit=${PROFILE_ACTIVITY_CHANNEL_FETCH_LIMIT}`,
           { cache: "no-store" }
         );
         if (!response.ok) throw new Error("Could not load Board activity.");
@@ -831,7 +831,9 @@ export default function ProfileBoardViewPage({
             ? filterCurrentDropTileActivity(items, remoteDropIds)
             : filterDeletedActivity(items, deletedIds);
 
-        setRecentDrops(dedupeActivity(visibleItems));
+        setRecentDrops(
+          dedupeActivity(visibleItems).slice(0, PROFILE_ACTIVITY_CHANNEL_LIMIT)
+        );
         setRecentDropsLoading(false);
       } catch {
         if (cancelled) return;
@@ -863,7 +865,7 @@ export default function ProfileBoardViewPage({
             )
           ),
           readLocalDeletedDropIds()
-        ).slice(0, ACTIVITY_CHANNEL_LIMIT)
+        ).slice(0, PROFILE_ACTIVITY_CHANNEL_LIMIT)
       );
       setRecentDropsLoading(false);
     }
@@ -890,7 +892,7 @@ export default function ProfileBoardViewPage({
       const dropId = activityDropId(detail);
       if (dropId && readLocalDeletedDropIds().includes(dropId)) return;
       if (isDropTileActivity(detail) && (!dropId || !readLocalDropIds().includes(dropId))) return;
-      setRecentDrops((prev) => dedupeActivity([detail, ...prev]).slice(0, ACTIVITY_CHANNEL_LIMIT));
+      setRecentDrops((prev) => dedupeActivity([detail, ...prev]).slice(0, PROFILE_ACTIVITY_CHANNEL_LIMIT));
       setRecentDropsLoading(false);
     }
 
@@ -1063,6 +1065,7 @@ export default function ProfileBoardViewPage({
           meta?.mediaKind === "image" || meta?.mediaKind === "video" || meta?.mediaKind === "audio"
             ? meta.mediaKind
             : undefined,
+        mediaUrl: typeof meta?.mediaUrl === "string" ? meta.mediaUrl : undefined,
         priceCents: typeof meta?.priceCents === "number" ? meta.priceCents : undefined,
         description: typeof item.body === "string" ? item.body : undefined,
         linkUrl: safeType === "Pay" && href ? href : undefined,
@@ -1273,7 +1276,6 @@ export default function ProfileBoardViewPage({
       glow: hexToRgba(profile.glowColor, 0.18 + intensity * 0.18),
     };
   }, [profile.glowColor, auraIntensity]);
-  const energyLevel = clamp(profile.energyLevel ?? 60, 0, 100);
 
   const mood = AURA_MOODS[profile.auraMood] ?? AURA_MOODS.locked_in;
   const boardDropActivityFallback = useMemo(
@@ -1286,15 +1288,38 @@ export default function ProfileBoardViewPage({
     [recentDrops]
   );
 
+  const viewerIsOwner = useMemo(
+    () => Boolean(selfUser && routeKey && selfUser === routeKey),
+    [selfUser, routeKey]
+  );
+
+  const visibleBoardDrops = useMemo(
+    () => boardDrops.filter((drop) => dropVisibleToViewer(drop.visibility, viewerIsOwner)),
+    [boardDrops, viewerIsOwner]
+  );
+
+  const profileActivityChannelDrops = useMemo(
+    () =>
+      resolveProfileActivityDrops(recentDrops, boardDrops, {
+        userId: remoteUserId,
+        username: routeKey,
+        displayName: profile.displayName,
+      }, { viewerIsOwner }),
+    [recentDrops, boardDrops, remoteUserId, routeKey, profile.displayName, viewerIsOwner]
+  );
+
   async function openPayCheckout(drop: DropItem) {
-    if (drop.linkUrl) {
-      window.open(drop.linkUrl, "_blank", "noopener,noreferrer");
+    const explicitPaymentLink = drop.payProvider === "payment_link" && drop.linkUrl;
+
+    if (explicitPaymentLink) {
+      window.open(explicitPaymentLink, "_blank", "noopener,noreferrer");
       return;
     }
 
     const shouldUseHostedCheckout =
+      drop.payProvider === "stripe_connect" ||
       drop.payProvider === "authorize_net_accept_hosted" ||
-      (drop.type === "Pay" && !drop.linkUrl && !!drop.priceCents);
+      (drop.type === "Pay" && !!drop.priceCents);
 
     if (!shouldUseHostedCheckout) {
       return;
@@ -1310,7 +1335,7 @@ export default function ProfileBoardViewPage({
       });
     } catch (error) {
       window.alert(
-        error instanceof Error ? error.message : "Could not open National Bankcard checkout."
+        error instanceof Error ? error.message : "Could not open Stripe checkout."
       );
     } finally {
       setPayCheckoutBusyId(null);
@@ -1319,7 +1344,7 @@ export default function ProfileBoardViewPage({
 
   return (
     <main className="min-h-screen board-bg text-black">
-      <section className="mx-auto max-w-[1500px] px-4 pb-24 pt-14 sm:px-6 lg:px-8">
+      <section className="profile-board-section mx-auto max-w-[1500px] pb-24 pt-14">
         <div className="poster-board" style={{ boxShadow: aura.ring, borderColor: aura.border }}>
           <div className="board-top">
             <div>
@@ -1341,7 +1366,7 @@ export default function ProfileBoardViewPage({
 
           <div className="profile-grid">
             <div className="left-column">
-              <section className="inner-tile profile-vision">
+              <section className="inner-tile">
                 <div className="tile-head">
                   <div>
                     <div className="tile-title">Vision Wall</div>
@@ -1365,7 +1390,7 @@ export default function ProfileBoardViewPage({
                 </div>
               </section>
 
-              <section className="inner-tile profile-aura">
+              <section className="inner-tile">
                 <div className="tile-head">
                   <div>
                     <div className="tile-title">Aura Snapshot</div>
@@ -1376,9 +1401,9 @@ export default function ProfileBoardViewPage({
                 <div className="snap-grid">
                   <div className="snap-card">
                     <div className="snap-label">Energy</div>
-                    <div className="snap-value">{energyLevel}%</div>
+                    <div className="snap-value">{auraIntensity}%</div>
                     <div className="energy-bar">
-                      <div className="energy-fill" style={{ width: `${energyLevel}%`, background: profile.glowColor }} />
+                      <div className="energy-fill" style={{ width: `${auraIntensity}%`, background: profile.glowColor }} />
                     </div>
                   </div>
 
@@ -1404,7 +1429,7 @@ export default function ProfileBoardViewPage({
                 </div>
               </section>
 
-              <section className="inner-tile profile-board-drop">
+              <section className="inner-tile">
                 <div className="tile-head board-drop-head">
                   <div>
                     <div className="tile-title">Board Drop</div>
@@ -1430,9 +1455,9 @@ export default function ProfileBoardViewPage({
                       Pulling the saved drop collection from this board tile.
                     </div>
                   </div>
-                ) : boardDrops.length > 0 ? (
+                ) : visibleBoardDrops.length > 0 ? (
                   <div className="board-drop-stack">
-                    {boardDrops.map((drop) => {
+                    {visibleBoardDrops.map((drop) => {
                       const signedKey =
                         drop.bucket && drop.storagePath
                           ? `${drop.bucket}:${drop.storagePath}`
@@ -1456,7 +1481,12 @@ export default function ProfileBoardViewPage({
                       const linkLabel = drop.type === "News" ? "News Drop" : "Link Drop";
 
                       return (
-                        <div key={drop.id} className="board-drop-item">
+                        <div
+                          key={drop.id}
+                          className={`board-drop-item${
+                            (drop.visibility ?? "public") === "private" ? " board-drop-item-private" : ""
+                          }`}
+                        >
                           <div className="board-drop-top">
                             <div className="board-drop-title">{drop.title}</div>
                             <div className="board-drop-badges">
@@ -1559,7 +1589,7 @@ export default function ProfileBoardViewPage({
                                   onClick={() => void openPayCheckout(drop)}
                                   disabled={payCheckoutBusyId === drop.id}
                                 >
-                                  {payCheckoutBusyId === drop.id ? "Opening..." : "Open checkout"}
+                                  {payCheckoutBusyId === drop.id ? "Opening..." : "Pay on Board"}
                                 </button>
                               ) : null}
                               {drop.type === "Doc" && signedUrl ? (
@@ -1631,8 +1661,7 @@ export default function ProfileBoardViewPage({
             </div>
 
             <div className="center-column">
-              <section className="inner-tile identity profile-identity">
-                <h1 className="name profile-name">{profile.displayName}</h1>
+              <section className="inner-tile identity">
                 <div className="identity-row">
                   <div className="avatar-shell" style={{ boxShadow: aura.ring, borderColor: aura.border }}>
                     <div className="avatar-inner">
@@ -1645,6 +1674,7 @@ export default function ProfileBoardViewPage({
                   </div>
 
                   <div className="identity-meta">
+                    <h1 className="name">{profile.displayName}</h1>
                     <div className="handle">{profile.handle}</div>
                     <p className="bio">{profile.bio}</p>
                     <div className="status-pill">View-only board</div>
@@ -1652,7 +1682,7 @@ export default function ProfileBoardViewPage({
                 </div>
               </section>
 
-              <section className="inner-tile profile-activity">
+              <section className="inner-tile">
                 <div className="tile-head">
                   <div>
                     <div className="tile-title">Activity Channel</div>
@@ -1667,16 +1697,17 @@ export default function ProfileBoardViewPage({
                       Pulling live board activity into this profile preview.
                     </div>
                   </div>
-                ) : recentDrops.length > 0 ? (
+                ) : profileActivityChannelDrops.length > 0 ? (
                   <div className="recent-drops-stack activity-feed-stack">
-                    <BoardWhisper whisper={PROFILE_ACTIVITY_WHISPERS[0]} />
-                    {recentDrops.map((item, index) => {
-                      const whisper = PROFILE_ACTIVITY_WHISPERS[index + 1];
+                    {profileActivityChannelDrops.map((item, index) => {
+                      const whispers = deriveActivityWhispers(item, index);
 
                       return (
                         <div key={item.id} className="activity-feed-entry">
                           <ActivityCard item={item} compact />
-                          {whisper ? <BoardWhisper whisper={whisper} /> : null}
+                          {whispers.map((whisper) => (
+                            <BoardWhisper key={whisper.id} whisper={whisper} />
+                          ))}
                         </div>
                       );
                     })}
@@ -1693,7 +1724,7 @@ export default function ProfileBoardViewPage({
             </div>
 
             <div className="right-column">
-              <section className="inner-tile cover profile-cover">
+              <section className="inner-tile cover">
                 <div className="tile-head">
                   <div>
                     <div className="tile-title">Cover Poster</div>
@@ -1713,7 +1744,7 @@ export default function ProfileBoardViewPage({
                 </div>
               </section>
 
-              <section className="inner-tile profile-friend-zone">
+              <section className="inner-tile">
                 <div className="tile-head">
                   <div>
                     <div className="tile-title">Friend Zone</div>
@@ -1763,7 +1794,7 @@ export default function ProfileBoardViewPage({
                 </div>
               </section>
 
-              <section className="inner-tile bucket-panel profile-bucket">
+              <section className="inner-tile bucket-panel">
                 <div className="tile-head">
                   <div>
                     <div className="tile-title">Drops Bucket</div>
@@ -1787,1007 +1818,6 @@ export default function ProfileBoardViewPage({
         </div>
       </section>
 
-      <style jsx global>{`
-        .board-bg {
-          background:
-            radial-gradient(1100px 700px at 20% 12%, rgba(0, 255, 150, 0.1), transparent 60%),
-            radial-gradient(900px 600px at 85% 28%, rgba(255, 0, 190, 0.1), transparent 55%),
-            linear-gradient(180deg, #fff7c9, #fff3b0);
-        }
-
-        .poster-board {
-          position: relative;
-          width: 100%;
-          max-width: 100%;
-          border-radius: 34px;
-          border: 2px solid rgba(0, 0, 0, 0.12);
-          overflow: hidden;
-          background:
-            linear-gradient(180deg, rgba(255, 255, 255, 0.7), rgba(255, 255, 255, 0.55)),
-            repeating-linear-gradient(
-              0deg,
-              rgba(0, 0, 0, 0.03) 0px,
-              rgba(0, 0, 0, 0.03) 1px,
-              transparent 1px,
-              transparent 10px
-            ),
-            repeating-linear-gradient(
-              90deg,
-              rgba(0, 0, 0, 0.02) 0px,
-              rgba(0, 0, 0, 0.02) 1px,
-              transparent 1px,
-              transparent 12px
-            );
-          backdrop-filter: blur(10px);
-          padding: 18px;
-        }
-
-        .board-top {
-          display: flex;
-          justify-content: space-between;
-          gap: 16px;
-          align-items: flex-start;
-          margin-bottom: 18px;
-        }
-
-        .board-title {
-          font-size: 30px;
-          font-weight: 900;
-          letter-spacing: -0.04em;
-          color: #1c1a13;
-        }
-
-        .board-subtitle {
-          margin-top: 4px;
-          color: rgba(0, 0, 0, 0.6);
-        }
-
-        .board-top-right {
-          display: flex;
-          gap: 10px;
-          flex-wrap: wrap;
-        }
-
-        .board-pill-link,
-        .board-pill-cta {
-          border-radius: 999px;
-          padding: 10px 14px;
-          font-size: 12px;
-          font-weight: 800;
-          text-transform: uppercase;
-          letter-spacing: 0.16em;
-        }
-
-        .board-pill-link {
-          background: rgba(255, 255, 255, 0.75);
-          border: 1px solid rgba(0, 0, 0, 0.1);
-        }
-
-        .board-pill-cta {
-          background: rgba(27, 24, 15, 0.95);
-          color: #fff4c0;
-        }
-
-        .profile-grid {
-          display: grid;
-          grid-template-columns: repeat(2, minmax(0, 1fr));
-          grid-template-areas:
-            "identity aura"
-            "vision cover"
-            "board activity"
-            "friend-zone bucket";
-          gap: 16px;
-          min-width: 0;
-        }
-
-        .left-column,
-        .center-column,
-        .right-column {
-          display: contents;
-        }
-
-        .profile-vision {
-          grid-area: vision;
-        }
-
-        .profile-cover {
-          grid-area: cover;
-        }
-
-        .profile-identity {
-          grid-area: identity;
-        }
-
-        .profile-board-drop {
-          grid-area: board;
-        }
-
-        .profile-activity {
-          grid-area: activity;
-        }
-
-        .profile-aura {
-          grid-area: aura;
-        }
-
-        .profile-friend-zone {
-          grid-area: friend-zone;
-        }
-
-        .profile-bucket {
-          grid-area: bucket;
-        }
-
-        .profile-grid > section {
-          min-width: 0;
-        }
-
-        .inner-tile {
-          min-width: 0;
-          border-radius: 28px;
-          border: 1px solid rgba(0, 0, 0, 0.1);
-          background: rgba(246, 240, 194, 0.92);
-          padding: 16px;
-          box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.45);
-        }
-
-        .tile-head {
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          justify-content: center;
-          gap: 12px;
-          margin-bottom: 14px;
-          min-width: 0;
-          text-align: center;
-        }
-
-        .tile-title {
-          font-size: 18px;
-          font-weight: 900;
-          color: #18150f;
-        }
-
-        .tile-sub {
-          margin-top: 4px;
-          font-size: 12px;
-          color: rgba(0, 0, 0, 0.55);
-        }
-
-        .vision-grid {
-          display: grid;
-          grid-template-columns: repeat(3, minmax(0, 1fr));
-          gap: 10px;
-        }
-
-        .vision-slot,
-        .cover-shell {
-          border-radius: 20px;
-          border: 1px solid rgba(0, 0, 0, 0.1);
-          overflow: hidden;
-          background: rgba(0, 0, 0, 0.06);
-        }
-
-        .vision-slot {
-          aspect-ratio: 1 / 1;
-        }
-
-        .vision-img,
-        .cover-img {
-          width: 100%;
-          height: 100%;
-          object-fit: cover;
-          display: block;
-        }
-
-        .vision-empty,
-        .cover-empty {
-          height: 100%;
-          display: grid;
-          place-items: center;
-          color: rgba(0, 0, 0, 0.4);
-          text-align: center;
-          padding: 14px;
-        }
-
-        .plus {
-          font-size: 28px;
-          font-weight: 900;
-          line-height: 1;
-        }
-
-        .label {
-          margin-top: 4px;
-          font-size: 10px;
-          font-weight: 800;
-          letter-spacing: 0.18em;
-          text-transform: uppercase;
-        }
-
-        .snap-grid {
-          display: grid;
-          grid-template-columns: repeat(2, minmax(0, 1fr));
-          gap: 10px;
-        }
-
-        .snap-card {
-          border-radius: 20px;
-          border: 1px solid rgba(0, 0, 0, 0.1);
-          background: rgba(255, 251, 221, 0.7);
-          padding: 14px;
-        }
-
-        .snap-label {
-          font-size: 11px;
-          font-weight: 800;
-          letter-spacing: 0.16em;
-          text-transform: uppercase;
-          color: rgba(0, 0, 0, 0.45);
-        }
-
-        .snap-value {
-          margin-top: 8px;
-          font-weight: 800;
-          color: #1a1711;
-        }
-
-        .energy-bar {
-          margin-top: 10px;
-          height: 8px;
-          border-radius: 999px;
-          background: rgba(0, 0, 0, 0.08);
-          overflow: hidden;
-        }
-
-        .energy-fill {
-          height: 100%;
-          border-radius: 999px;
-        }
-
-        .signal-row {
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          margin-top: 8px;
-        }
-
-        .signal-dot {
-          width: 12px;
-          height: 12px;
-          border-radius: 999px;
-          display: inline-block;
-        }
-
-        .identity-row {
-          display: flex;
-          flex-direction: column;
-          gap: 16px;
-          align-items: center;
-          text-align: center;
-        }
-
-        .avatar-shell {
-          width: 120px;
-          height: 120px;
-          flex-shrink: 0;
-          border-radius: 999px;
-          border: 2px solid rgba(0, 0, 0, 0.1);
-          display: grid;
-          place-items: center;
-          background: rgba(255, 255, 255, 0.4);
-        }
-
-        .avatar-inner {
-          width: 98px;
-          height: 98px;
-          border-radius: 999px;
-          overflow: hidden;
-          border: 1px solid rgba(255, 255, 255, 0.45);
-          background: rgba(0, 0, 0, 0.08);
-        }
-
-        .avatar-img {
-          width: 100%;
-          height: 100%;
-          object-fit: cover;
-          display: block;
-        }
-
-        .avatar-placeholder {
-          width: 100%;
-          height: 100%;
-          display: grid;
-          place-items: center;
-          font-size: 34px;
-          font-weight: 900;
-          color: rgba(0, 0, 0, 0.55);
-        }
-
-        .name {
-          font-size: clamp(18px, 4vw, 34px);
-          line-height: 1;
-          font-weight: 900;
-          letter-spacing: -0.04em;
-          color: #191611;
-          overflow-wrap: anywhere;
-        }
-
-        .profile-name {
-          margin: 0 0 16px;
-          text-align: center;
-        }
-
-        .handle {
-          margin-top: 6px;
-          font-size: 13px;
-          color: rgba(0, 0, 0, 0.48);
-        }
-
-        .bio {
-          margin-top: 10px;
-          line-height: 1.6;
-          color: rgba(0, 0, 0, 0.62);
-        }
-
-        .identity-meta {
-          min-width: 0;
-          width: 100%;
-        }
-
-        .status-pill {
-          margin-top: 12px;
-          display: inline-flex;
-          border-radius: 999px;
-          border: 1px solid rgba(0, 0, 0, 0.1);
-          background: rgba(255, 255, 255, 0.5);
-          padding: 8px 12px;
-          font-size: 10px;
-          font-weight: 800;
-          letter-spacing: 0.18em;
-          text-transform: uppercase;
-          color: rgba(0, 0, 0, 0.58);
-        }
-
-        .note-card {
-          border-radius: 22px;
-          border: 1px solid rgba(0, 0, 0, 0.1);
-          background: rgba(255, 251, 221, 0.78);
-          padding: 16px;
-        }
-
-        .board-drop-head {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          gap: 16px;
-        }
-
-        .board-drop-side-avatar {
-          width: 74px;
-          height: 74px;
-          flex: 0 0 74px;
-          border-radius: 999px;
-          border: 1px solid rgba(0, 0, 0, 0.1);
-          display: grid;
-          place-items: center;
-          background:
-            radial-gradient(circle at 35% 25%, rgba(255, 255, 255, 0.88), rgba(255, 255, 255, 0.18) 50%, rgba(0, 0, 0, 0.06)),
-            rgba(255, 255, 255, 0.52);
-        }
-
-        .board-drop-side-avatar-inner {
-          width: 54px;
-          height: 54px;
-          border-radius: 999px;
-          overflow: hidden;
-          display: grid;
-          place-items: center;
-          border: 1px solid rgba(255, 255, 255, 0.62);
-          background: rgba(0, 0, 0, 0.12);
-        }
-
-        .board-drop-side-avatar-img {
-          width: 100%;
-          height: 100%;
-          object-fit: cover;
-          display: block;
-        }
-
-        .board-drop-side-avatar-fallback {
-          width: 100%;
-          height: 100%;
-          display: grid;
-          place-items: center;
-          font-size: 20px;
-          font-weight: 950;
-          color: rgba(0, 0, 0, 0.58);
-          background: rgba(255, 255, 255, 0.36);
-        }
-
-        .board-drop-stack {
-          display: grid;
-          gap: 12px;
-          width: 100%;
-          max-width: 100%;
-          min-width: 0;
-          overflow: hidden;
-        }
-
-        .board-drop-item {
-          border-radius: 20px;
-          border: 1px solid rgba(0, 0, 0, 0.1);
-          background: rgba(255, 255, 255, 0.66);
-          padding: 14px;
-          display: grid;
-          gap: 10px;
-          width: 100%;
-          max-width: 100%;
-          min-width: 0;
-          overflow: hidden;
-        }
-
-        .board-drop-top {
-          display: flex;
-          gap: 10px;
-          justify-content: space-between;
-          align-items: flex-start;
-        }
-
-        .board-drop-title {
-          font-weight: 800;
-          color: #18150f;
-        }
-
-        .board-drop-badges {
-          display: flex;
-          gap: 6px;
-          flex-wrap: wrap;
-          justify-content: flex-end;
-        }
-
-        .board-drop-badge {
-          border-radius: 999px;
-          padding: 6px 8px;
-          font-size: 10px;
-          font-weight: 800;
-          letter-spacing: 0.12em;
-          text-transform: uppercase;
-          background: rgba(0, 160, 80, 0.12);
-          color: rgba(0, 160, 80, 0.92);
-        }
-
-        .board-drop-badge.ghost {
-          background: rgba(0, 0, 0, 0.06);
-          color: rgba(0, 0, 0, 0.56);
-        }
-
-        .board-drop-media-frame {
-          position: relative;
-          display: flex;
-          justify-content: center;
-          width: 100%;
-          max-width: 100%;
-          margin: 0 auto;
-          border-radius: 16px;
-          overflow: hidden;
-        }
-
-        .board-drop-media-frame.video {
-          width: 100%;
-        }
-
-        .board-drop-media-frame.audio {
-          width: 100%;
-        }
-
-        .board-drop-media {
-          width: auto;
-          height: auto;
-          max-width: 100%;
-          max-height: min(520px, 72vh);
-          border-radius: 16px;
-          border: 1px solid rgba(0, 0, 0, 0.1);
-          object-fit: contain;
-          display: block;
-          background:
-            radial-gradient(circle at 18% 18%, rgba(255, 0, 190, 0.08), transparent 34%),
-            radial-gradient(circle at 80% 22%, rgba(0, 180, 255, 0.08), transparent 34%),
-            rgba(0, 0, 0, 0.055);
-        }
-
-        .board-drop-media-frame.video .board-drop-media {
-          width: 100%;
-          height: auto;
-          background: #000;
-        }
-
-        .board-drop-audio {
-          width: 100%;
-          display: grid;
-          gap: 10px;
-          border-radius: 16px;
-          border: 1px solid rgba(0, 0, 0, 0.1);
-          background:
-            radial-gradient(circle at 18% 18%, rgba(45, 124, 255, 0.12), transparent 34%),
-            radial-gradient(circle at 80% 22%, rgba(255, 0, 190, 0.10), transparent 34%),
-            rgba(255, 255, 255, 0.72);
-          padding: 14px;
-        }
-
-        .board-drop-audio-label {
-          font-size: 11px;
-          font-weight: 950;
-          letter-spacing: 0.18em;
-          text-transform: uppercase;
-          color: rgba(45, 124, 255, 0.86);
-        }
-
-        .board-drop-audio-player {
-          width: 100%;
-        }
-
-        .board-drop-embed {
-          border-radius: 16px;
-          overflow: hidden;
-          border: 1px solid rgba(0, 0, 0, 0.1);
-          background: rgba(23, 23, 23, 0.92);
-          height: 220px;
-          width: 100%;
-          max-width: 100%;
-          min-width: 0;
-          position: relative;
-        }
-
-        .board-drop-embed iframe {
-          width: 100%;
-          height: 100%;
-          max-width: 100%;
-          border: 0;
-          display: block;
-          overflow: hidden;
-        }
-
-        .board-drop-embed.spotify {
-          min-width: 0;
-          background: #282828;
-          border-radius: 18px;
-          overflow: visible;
-        }
-
-        .board-drop-embed.spotify iframe.spotify-frame {
-          display: block;
-          width: 100%;
-          height: 80px;
-          border: 0;
-          border-radius: 18px;
-        }
-
-        .board-drop-embed.spotify iframe {
-          min-width: 0;
-          width: 1px;
-          min-width: 100%;
-        }
-
-        .board-drop-description {
-          font-size: 13px;
-          line-height: 1.6;
-          color: rgba(0, 0, 0, 0.62);
-        }
-
-        .board-drop-links {
-          display: flex;
-          flex-wrap: wrap;
-          gap: 8px;
-        }
-
-        .board-link-preview {
-          display: block;
-          overflow: hidden;
-          border-radius: 18px;
-          border: 1px solid rgba(0, 0, 0, 0.1);
-          background: rgba(255, 255, 255, 0.68);
-          color: inherit;
-          text-decoration: none;
-        }
-
-        .board-link-art {
-          position: relative;
-          min-height: 220px;
-          overflow: hidden;
-          background:
-            radial-gradient(circle at 18% 20%, rgba(255, 0, 190, 0.16), transparent 34%),
-            radial-gradient(circle at 80% 22%, rgba(0, 180, 255, 0.14), transparent 34%),
-            linear-gradient(135deg, rgba(24, 21, 15, 0.92), rgba(76, 66, 43, 0.9));
-        }
-
-        .board-link-img {
-          position: absolute;
-          inset: 0;
-          width: 100%;
-          height: 100%;
-          object-fit: cover;
-          display: block;
-        }
-
-        .board-link-shade {
-          position: absolute;
-          inset: 0;
-          background:
-            linear-gradient(180deg, rgba(0, 0, 0, 0.08), rgba(0, 0, 0, 0.78)),
-            radial-gradient(circle at 75% 10%, rgba(255, 255, 255, 0.2), transparent 34%);
-        }
-
-        .board-link-host {
-          position: absolute;
-          left: 14px;
-          top: 14px;
-          max-width: calc(100% - 28px);
-          overflow: hidden;
-          text-overflow: ellipsis;
-          white-space: nowrap;
-          border-radius: 999px;
-          border: 1px solid rgba(255, 255, 255, 0.32);
-          background: rgba(0, 0, 0, 0.48);
-          padding: 7px 10px;
-          color: rgba(255, 255, 255, 0.92);
-          font-size: 10px;
-          font-weight: 950;
-          letter-spacing: 0.14em;
-          text-transform: uppercase;
-          backdrop-filter: blur(10px);
-        }
-
-        .board-link-copy {
-          position: absolute;
-          left: 14px;
-          right: 14px;
-          bottom: 14px;
-          color: #fff;
-        }
-
-        .board-link-label {
-          font-size: 10px;
-          font-weight: 950;
-          letter-spacing: 0.18em;
-          text-transform: uppercase;
-          color: rgba(200, 255, 230, 0.9);
-        }
-
-        .board-link-title {
-          margin-top: 6px;
-          font-size: 20px;
-          line-height: 1.1;
-          font-weight: 950;
-          letter-spacing: -0.02em;
-          text-shadow: 0 2px 12px rgba(0, 0, 0, 0.42);
-          display: -webkit-box;
-          -webkit-line-clamp: 2;
-          -webkit-box-orient: vertical;
-          overflow: hidden;
-        }
-
-        .board-link-desc {
-          margin-top: 7px;
-          font-size: 12px;
-          line-height: 1.45;
-          color: rgba(255, 255, 255, 0.78);
-          display: -webkit-box;
-          -webkit-line-clamp: 2;
-          -webkit-box-orient: vertical;
-          overflow: hidden;
-        }
-
-        .board-link-url {
-          padding: 12px 14px;
-          font-size: 12px;
-          color: rgba(0, 0, 0, 0.58);
-          overflow-wrap: anywhere;
-        }
-
-        .board-drop-rail {
-          margin-top: 2px;
-        }
-
-        .board-drop-link {
-          border-radius: 999px;
-          border: 1px solid rgba(0, 0, 0, 0.1);
-          background: rgba(255, 255, 255, 0.78);
-          padding: 8px 12px;
-          font-size: 11px;
-          font-weight: 800;
-          letter-spacing: 0.12em;
-          text-transform: uppercase;
-          color: rgba(255, 0, 190, 0.82);
-          text-decoration: none;
-          cursor: pointer;
-        }
-        .board-drop-link:disabled {
-          opacity: 0.58;
-          cursor: wait;
-        }
-
-        .recent-drops-stack {
-          display: grid;
-          gap: 12px;
-        }
-
-        .activity-feed-stack {
-          gap: 10px;
-        }
-
-        .activity-feed-entry {
-          display: grid;
-          gap: 10px;
-        }
-
-        .board-whisper {
-          margin: 4px 8px 8px;
-          text-align: center;
-          font-size: 12px;
-          line-height: 1.5;
-          font-weight: 750;
-          font-style: italic;
-          letter-spacing: 0.02em;
-          opacity: 0.9;
-          pointer-events: none;
-          text-wrap: balance;
-          animation: boardWhisperFloatIn 520ms ease both;
-        }
-
-        .board-whisper.profile {
-          color: rgba(142, 199, 255, 0.9);
-          text-shadow: 0 0 10px rgba(96, 165, 250, 0.22), 0 0 26px rgba(190, 220, 255, 0.14);
-        }
-
-        .board-whisper.signal {
-          color: rgba(116, 231, 199, 0.9);
-          text-shadow: 0 0 10px rgba(110, 231, 183, 0.22), 0 0 26px rgba(170, 255, 230, 0.14);
-        }
-
-        .board-whisper.memory {
-          color: rgba(178, 132, 224, 0.88);
-          text-shadow: 0 0 10px rgba(216, 180, 254, 0.24), 0 0 26px rgba(220, 190, 255, 0.16);
-        }
-
-        .board-whisper.friendZone {
-          color: rgba(247, 197, 122, 0.9);
-          text-shadow: 0 0 10px rgba(253, 224, 171, 0.24), 0 0 26px rgba(255, 232, 190, 0.14);
-        }
-
-        .board-whisper.system {
-          color: rgba(180, 194, 222, 0.86);
-          text-shadow: 0 0 10px rgba(200, 220, 255, 0.16), 0 0 26px rgba(200, 220, 255, 0.12);
-        }
-
-        .board-whisper.quiet {
-          color: rgba(202, 184, 218, 0.78);
-          text-shadow: 0 0 10px rgba(220, 210, 240, 0.14), 0 0 26px rgba(220, 210, 240, 0.1);
-        }
-
-        @keyframes boardWhisperFloatIn {
-          from {
-            opacity: 0;
-            transform: translateY(5px);
-            filter: blur(2px);
-          }
-
-          to {
-            opacity: 0.9;
-            transform: translateY(0);
-            filter: blur(0);
-          }
-        }
-
-        .note-title {
-          font-weight: 900;
-          color: #18150f;
-        }
-
-        .note-text {
-          margin-top: 6px;
-          font-size: 14px;
-          line-height: 1.6;
-          color: rgba(0, 0, 0, 0.62);
-        }
-
-        .cover-shell {
-          height: 420px;
-        }
-
-        .friend-zone-card {
-          display: grid;
-          gap: 12px;
-          border-radius: 20px;
-          border: 1px solid rgba(0, 0, 0, 0.1);
-          background: rgba(255, 251, 221, 0.78);
-          padding: 14px;
-        }
-
-        .friend-zone-status {
-          border-radius: 16px;
-          border: 1px solid rgba(0, 0, 0, 0.08);
-          background: rgba(255, 255, 255, 0.62);
-          padding: 12px;
-        }
-
-        .friend-zone-label {
-          font-size: 11px;
-          font-weight: 800;
-          letter-spacing: 0.16em;
-          text-transform: uppercase;
-          color: rgba(0, 0, 0, 0.45);
-        }
-
-        .friend-zone-value {
-          margin-top: 6px;
-          font-size: 16px;
-          font-weight: 800;
-          color: rgba(0, 160, 80, 1);
-        }
-
-        .friend-zone-actions {
-          display: grid;
-          grid-template-columns: repeat(2, minmax(0, 1fr));
-          gap: 10px;
-        }
-
-        .friend-zone-btn {
-          border-radius: 999px;
-          border: 1px solid rgba(0, 0, 0, 0.1);
-          background: rgba(255, 255, 255, 0.78);
-          padding: 10px 12px;
-          font-size: 11px;
-          font-weight: 800;
-          letter-spacing: 0.14em;
-          text-transform: uppercase;
-          color: rgba(255, 0, 190, 0.82);
-          transition: transform 160ms ease, filter 160ms ease;
-        }
-
-        .friend-zone-btn.on {
-          background: rgba(0, 160, 80, 0.14);
-          color: rgba(0, 160, 80, 1);
-          border-color: rgba(0, 160, 80, 0.2);
-        }
-
-        .friend-zone-notice {
-          border-radius: 999px;
-          border: 1px solid rgba(0, 160, 80, 0.18);
-          background: rgba(255, 255, 255, 0.7);
-          padding: 8px 12px;
-          font-size: 10px;
-          font-weight: 900;
-          letter-spacing: 0.12em;
-          text-transform: uppercase;
-          color: rgba(0, 115, 62, 0.9);
-        }
-
-        .friend-zone-links {
-          display: flex;
-          flex-wrap: wrap;
-          gap: 8px;
-        }
-
-        .friend-zone-link {
-          border-radius: 999px;
-          border: 1px solid rgba(0, 0, 0, 0.1);
-          background: rgba(255, 255, 255, 0.78);
-          padding: 8px 12px;
-          font-size: 11px;
-          font-weight: 800;
-          letter-spacing: 0.12em;
-          text-transform: uppercase;
-          color: rgba(0, 0, 0, 0.6);
-          text-decoration: none;
-        }
-
-        .bucket-panel {
-          overflow: visible;
-        }
-
-        .bucket-wrap {
-          margin-top: 4px;
-          min-width: 0;
-          max-width: 100%;
-        }
-
-        .bucket-wrap :global(.bucket) {
-          min-width: 0;
-          max-width: 100%;
-        }
-
-        .bucket-wrap :global(.bucket *) {
-          box-sizing: border-box;
-        }
-
-        .bucket-wrap :global(.bucket .shell) {
-          min-width: 0;
-          max-width: 100%;
-          background: rgba(255, 251, 221, 0.78);
-          border: 1px solid rgba(0, 0, 0, 0.1);
-          box-shadow: none;
-        }
-
-        .bucket-wrap :global(.bucket .topRow) {
-          display: none;
-        }
-
-        .bucket-wrap :global(.bucket .openBtn) {
-          width: 100%;
-          white-space: normal;
-        }
-
-        .bucket-wrap :global(.bucket .right) {
-          width: 100%;
-          min-width: 0;
-        }
-
-        .bucket-wrap :global(.bucket .waveBar) {
-          align-items: stretch;
-          flex-wrap: wrap;
-        }
-
-        .bucket-wrap :global(.bucket .waveBtn) {
-          flex: 1 1 112px;
-          justify-content: center;
-          min-width: 0;
-        }
-
-        .bucket-wrap :global(.bucket .waveText),
-        .bucket-wrap :global(.bucket .folderText) {
-          min-width: 0;
-          flex-wrap: wrap;
-          justify-content: center;
-        }
-
-        .bucket-wrap :global(.bucket .waveMeta) {
-          flex: 1 1 100%;
-          min-width: 0;
-          flex-wrap: wrap;
-          justify-content: center;
-          text-align: center;
-        }
-
-        .bucket-wrap :global(.bucket .folderRow) {
-          display: grid;
-          grid-template-columns: repeat(3, minmax(0, 1fr));
-        }
-
-        .bucket-wrap :global(.bucket .folder) {
-          justify-content: center;
-          min-width: 0;
-          padding-inline: 8px;
-        }
-
-        @media (max-width: 1180px) {
-          .profile-grid {
-            grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-            grid-template-areas:
-              "identity aura"
-              "vision cover"
-              "board activity"
-              "friend-zone bucket";
-          }
-        }
-
-        @media (max-width: 720px) {
-          .profile-grid {
-            gap: 8px;
-          }
-
-          .identity-row {
-            align-items: center;
-          }
-
-          .cover-shell {
-            min-height: 320px;
-          }
-
-          .friend-zone-actions {
-            grid-template-columns: 1fr;
-          }
-        }
-      `}</style>
     </main>
   );
 }

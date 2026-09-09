@@ -8,18 +8,32 @@ export type LinkPreview = {
   type: "video" | "music" | "link";
 };
 
+const previewInflight = new Map<string, Promise<LinkPreview | null>>();
+
 export async function fetchLinkPreview(url: string): Promise<LinkPreview | null> {
   const clean = url.trim();
   if (!clean) return null;
 
-  const res = await fetch(`/api/link-preview?url=${encodeURIComponent(clean)}`, {
-    method: "GET",
-    headers: { accept: "application/json" },
-  });
+  const existing = previewInflight.get(clean);
+  if (existing) return existing;
 
-  if (!res.ok) return null;
+  const request = (async () => {
+    try {
+      const res = await fetch(`/api/link-preview?url=${encodeURIComponent(clean)}`, {
+        method: "GET",
+        headers: { accept: "application/json" },
+      });
 
-  const data = (await res.json()) as LinkPreview;
-  if (!data?.url) return null;
-  return data;
+      if (!res.ok) return null;
+
+      const data = (await res.json()) as LinkPreview;
+      if (!data?.url) return null;
+      return data;
+    } finally {
+      previewInflight.delete(clean);
+    }
+  })();
+
+  previewInflight.set(clean, request);
+  return request;
 }

@@ -6,652 +6,80 @@ import { supabaseBrowser } from "@/lib/supabase/browser";
 import WorkCallsList, { type WorkCallItem } from "@/app/components/board/WorkCallsList";
 import ProjectCenter from "@/app/components/board/ProjectCenter";
 import StoreDropTile, { type StoreDrop } from "@/app/components/board/StoreDropTile";
+import LazyDropStudioStage from "@/app/components/board/LazyDropStudioStage";
+import type { DropCustomization } from "@/lib/board/dropCustomizations";
+import {
+  DESCRIPT_SHARE_EVENT,
+  descriptPlainText,
+  type DescriptDoc,
+} from "@/lib/board/descriptDocs";
+import { DROP_PAD_ASSETS_UPDATED_EVENT } from "@/lib/board/dropPadAssets";
+import { readPayDrops } from "@/lib/board/paydrops";
+import { readBoardProjects } from "@/lib/board/projects";
+import { BOARD_DROP_SIGNAL_EVENT } from "@/lib/board/dropSignals";
+import { deriveBoardSignals, type BoardSignal } from "@/lib/board/boardSignals";
+import {
+  buildActivityChannelItems,
+  fetchActivityChannelItems,
+  type ActivityChannelItem,
+} from "@/lib/board/activityChannel";
+import DropPadActivityChannel from "@/app/components/board/DropPadActivityChannel";
+import DropPadBucketBrain from "@/app/components/board/DropPadBucketBrain";
+
+import {
+  ASSETS_STORAGE_KEY,
+  CROWN_SRC,
+  ORBIT_MODE,
+  PORTFOLIO_DROPS_STORAGE_KEY,
+  PROJECT_DROPS_STORAGE_KEY,
+  PROJECT_DROPS_UPDATED_EVENT,
+  RouteTitle,
+  WORK_CALLS_STORAGE_KEY,
+  buildMusicEmbed,
+  buildYouTubeEmbed,
+  clamp,
+  clsx,
+  deleteAllAssetsFromSupabase,
+  fetchAssetsFromSupabase,
+  getAuthedUserId,
+  kindEmoji,
+  kindLabel,
+  normalizeUrl,
+  parseAppleMusic,
+  parseSoundCloud,
+  parseSpotify,
+  parseYouTubeId,
+  readAssetsFromStorage,
+  readDropItemsFromStorage,
+  readFileAsDataUrl,
+  readWorkCallsFromStorage,
+  safeHostname,
+  uid,
+  upsertAssetToSupabase,
+  uploadMediaToSupabaseStorage,
+  useReducedMotion,
+  withTimeout,
+  writeAssetsToStorage,
+  writeDropItemsToStorage,
+  writeWorkCallsToStorage,
+  type AssetItem,
+  type AssetKind,
+  type DropDestination,
+  type DropPadApp,
+  type DropBubble,
+  type DropRoute,
+  type ScreenMode,
+  type WorkCallDraft,
+  type WorkCallType,
+} from "./dropPadShared";
+
+// Re-export so existing `import type { DropPadApp } from ".../DropPadOS"`
+// callers (e.g. explore page) keep working unchanged.
+export type { DropPadApp, DropBubble } from "./dropPadShared";
+
+
+import { EmbeddedAssetTile } from "./dropPadTiles";
 
-type DropRoute =
-  | "board"
-  | "assets"
-  | "projects"
-  | "portfolio"
-  | "workcalls"
-  | "profiledrops"
-  | "storedrops";
-type ScreenMode = "menu" | "screen";
-
-// This matches your Remote + WorkPage usage
-export type DropPadApp =
-  | "home"
-  | "board_drops"
-  | "assets"
-  | "projects"
-  | "portfolio"
-  | "work_calls"
-  | "profile_drops"
-  | "store_drops";
-
-export type DropBubble = {
-  id: string;
-  label: string;
-  route: DropRoute;
-  emoji?: string;
-};
-
-type AssetKind = "media" | "music" | "youtube" | "link" | "doc" | "note";
-type DropDestination = "assets" | "portfolio" | "projects";
-
-type AssetItem = {
-  id: string;
-  kind: AssetKind;
-  title: string;
-  description?: string;
-  createdAt: number;
-
-  payload?: {
-    // media
-    mediaUrl?: string;
-    mediaType?: "image";
-
-    // embeds
-    embedUrl?: string;
-
-    // link/doc
-    url?: string;
-
-    // note
-    text?: string;
-  };
-};
-
-type WorkCallType = "casting" | "crew" | "gigs" | "collaborations";
-
-type WorkCallDraft = {
-  open: boolean;
-  type: WorkCallType;
-  title: string;
-  preview: string;
-  error?: string | null;
-};
-
-const ASSETS_STORAGE_KEY = "jab_drop_pad_assets_v4";
-const PORTFOLIO_DROPS_STORAGE_KEY = "jab_drop_pad_portfolio_drops_v1";
-const PROJECT_DROPS_STORAGE_KEY = "jab_drop_pad_project_drops_v1";
-const PROJECT_DROPS_UPDATED_EVENT = "board:project-drops:updated";
-const WORK_CALLS_STORAGE_KEY = "jab_work_calls_v1";
-
-// Crown center image (expects: public/assets/BoardLogo.png)
-const CROWN_SRC = "/assets/BoardLogo.png";
-// Orbit mode: "circle" (full orbit) or "arch" (top arc)
-const ORBIT_MODE: "circle" | "arch" = "circle";
-
-/* -------------------------------------------------------------------------- */
-/* helpers                                                                    */
-/* -------------------------------------------------------------------------- */
-
-function clsx(...parts: Array<string | false | null | undefined>) {
-  return parts.filter(Boolean).join(" ");
-}
-
-function clamp(n: number, min: number, max: number) {
-  return Math.max(min, Math.min(max, n));
-}
-
-function useReducedMotion() {
-  const [reduced, setReduced] = useState(false);
-  useEffect(() => {
-    const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
-    const onChange = () => setReduced(!!mq.matches);
-    onChange();
-    mq.addEventListener?.("change", onChange);
-    return () => mq.removeEventListener?.("change", onChange);
-  }, []);
-  return reduced;
-}
-
-function RouteTitle(route: DropRoute) {
-  switch (route) {
-    case "board":
-      return "Board Drops";
-    case "assets":
-      return "Assets";
-    case "projects":
-      return "Projects";
-    case "portfolio":
-      return "Portfolio";
-    case "workcalls":
-      return "Work Calls";
-    case "profiledrops":
-      return "Profile Drops";
-    case "storedrops":
-      return "Store Drops";
-    default:
-      return "Drop Pad";
-  }
-}
-
-function kindLabel(kind: AssetKind) {
-    switch (kind) {
-      case "media":
-        return "Vision Drop";
-    case "music":
-      return "Music Drop";
-    case "youtube":
-      return "YouTube Drop";
-    case "doc":
-      return "Doc Drop";
-    case "link":
-      return "Link Drop";
-    case "note":
-      return "Note Drop";
-  }
-}
-
-function kindEmoji(kind: AssetKind) {
-  switch (kind) {
-    case "media":
-      return "🖼️";
-    case "music":
-      return "🎧";
-    case "youtube":
-      return "📺";
-    case "doc":
-      return "📄";
-    case "link":
-      return "🔗";
-    case "note":
-      return "📝";
-  }
-}
-
-function safeHostname(url?: string) {
-  if (!url) return "";
-  try {
-    return new URL(url).hostname.replace(/^www\./, "");
-  } catch {
-    return "";
-  }
-}
-
-function readAssetsFromStorage(): AssetItem[] {
-  return readDropItemsFromStorage(ASSETS_STORAGE_KEY);
-}
-
-function readDropItemsFromStorage(key: string): AssetItem[] {
-  try {
-    const raw = localStorage.getItem(key);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed
-      .map((x: any) => ({
-        id: String(x?.id ?? ""),
-        kind: x?.kind as AssetKind,
-        title: String(x?.title ?? ""),
-        description: x?.description ? String(x.description) : undefined,
-        createdAt: Number(x?.createdAt ?? Date.now()),
-        payload: typeof x?.payload === "object" ? x.payload : undefined,
-      }))
-      .filter((x) => x.id && x.kind && x.title);
-  } catch {
-    return [];
-  }
-}
-
-function writeAssetsToStorage(items: AssetItem[]) {
-  writeDropItemsToStorage(ASSETS_STORAGE_KEY, items);
-}
-
-function writeDropItemsToStorage(key: string, items: AssetItem[]) {
-  try {
-    localStorage.setItem(key, JSON.stringify(items));
-  } catch {}
-}
-
-function uid() {
-  return `${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 9)}`;
-}
-
-function readFileAsDataUrl(file: File) {
-  return new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result ?? ""));
-    reader.onerror = () => reject(new Error("read_error"));
-    reader.readAsDataURL(file);
-  });
-}
-
-function withTimeout<T>(promise: Promise<T>, ms: number) {
-  return new Promise<T>((resolve, reject) => {
-    const timer = window.setTimeout(() => reject(new Error("timeout")), ms);
-    promise
-      .then((value) => {
-        window.clearTimeout(timer);
-        resolve(value);
-      })
-      .catch((error) => {
-        window.clearTimeout(timer);
-        reject(error);
-      });
-  });
-}
-
-function readWorkCallsFromStorage(): WorkCallItem[] {
-  try {
-    const raw = localStorage.getItem(WORK_CALLS_STORAGE_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed
-      .map((x: any) => ({
-        id: String(x?.id ?? ""),
-        type: x?.type,
-        title: String(x?.title ?? ""),
-        preview: x?.preview ? String(x.preview) : undefined,
-        createdAt: Number(x?.createdAt ?? Date.now()),
-        unread: !!x?.unread,
-      }))
-      .filter((x) => x.id && x.type && x.title);
-  } catch {
-    return [];
-  }
-}
-
-function writeWorkCallsToStorage(items: WorkCallItem[]) {
-  try {
-    localStorage.setItem(WORK_CALLS_STORAGE_KEY, JSON.stringify(items));
-  } catch {}
-}
-
-/* -------------------------------------------------------------------------- */
-/* URL + embed helpers                                                         */
-/* -------------------------------------------------------------------------- */
-
-function normalizeUrl(raw: string) {
-  const trimmed = raw.trim();
-  if (!trimmed) return "";
-  if (!/^https?:\/\//i.test(trimmed)) return `https://${trimmed}`;
-  return trimmed;
-}
-
-function parseYouTubeId(url: string) {
-  try {
-    const u = new URL(url);
-    if (u.hostname.includes("youtu.be")) {
-      const id = u.pathname.replace("/", "");
-      return id || null;
-    }
-    if (u.hostname.includes("youtube.com")) {
-      const id = u.searchParams.get("v");
-      if (id) return id;
-      const parts = u.pathname.split("/").filter(Boolean);
-      const embedIdx = parts.indexOf("embed");
-      if (embedIdx >= 0 && parts[embedIdx + 1]) return parts[embedIdx + 1];
-      const shortsIdx = parts.indexOf("shorts");
-      if (shortsIdx >= 0 && parts[shortsIdx + 1]) return parts[shortsIdx + 1];
-    }
-    return null;
-  } catch {
-    return null;
-  }
-}
-
-function buildYouTubeEmbed(rawUrl: string) {
-  const url = normalizeUrl(rawUrl);
-  if (!url) return { embedUrl: "" };
-  const id = parseYouTubeId(url);
-  if (!id) return { embedUrl: "" };
-  return { embedUrl: `https://www.youtube.com/embed/${id}` };
-}
-
-function parseSpotify(url: string) {
-  try {
-    const u = new URL(url);
-    if (u.hostname.includes("open.spotify.com") && u.pathname.startsWith("/embed/")) {
-      return { embedUrl: url, label: "Spotify" };
-    }
-    if (!u.hostname.includes("open.spotify.com")) return null;
-    const parts = u.pathname.split("/").filter(Boolean);
-    if (parts.length >= 2) {
-      const type = parts[0];
-      const id = parts[1];
-      const embedUrl = `https://open.spotify.com/embed/${type}/${id}`;
-      return { embedUrl, label: "Spotify" };
-    }
-    return null;
-  } catch {
-    return null;
-  }
-}
-
-function parseSoundCloud(url: string) {
-  try {
-    const u = new URL(url);
-    if (!u.hostname.includes("soundcloud.com") && !u.hostname.includes("snd.sc")) return null;
-    const embedUrl = `https://w.soundcloud.com/player/?url=${encodeURIComponent(url)}`;
-    return { embedUrl, label: "SoundCloud" };
-  } catch {
-    return null;
-  }
-}
-
-function parseAppleMusic(url: string) {
-  try {
-    const u = new URL(url);
-    const host = u.hostname.toLowerCase();
-    if (host === "embed.music.apple.com") return { embedUrl: url, label: "Apple Music" };
-    if (host !== "music.apple.com") return null;
-
-    const parts = u.pathname.split("/").filter(Boolean);
-    if (parts[0] === "embed") {
-      return {
-        embedUrl: `https://embed.music.apple.com/${parts.slice(1).join("/")}${u.search}`,
-        label: "Apple Music",
-      };
-    }
-    if (parts.length < 3) return null;
-
-    return { embedUrl: `https://embed.music.apple.com${u.pathname}${u.search}`, label: "Apple Music" };
-  } catch {
-    return null;
-  }
-}
-
-function buildMusicEmbed(rawUrl: string) {
-  const url = normalizeUrl(rawUrl);
-  if (!url) return { embedUrl: "", provider: "" };
-
-  const sp = parseSpotify(url);
-  if (sp) return { embedUrl: sp.embedUrl, provider: sp.label };
-
-  const sc = parseSoundCloud(url);
-  if (sc) return { embedUrl: sc.embedUrl, provider: sc.label };
-
-  const am = parseAppleMusic(url);
-  if (am) return { embedUrl: am.embedUrl, provider: am.label };
-
-  return { embedUrl: "", provider: "" };
-}
-
-/* -------------------------------------------------------------------------- */
-/* Supabase wiring                                                             */
-/* -------------------------------------------------------------------------- */
-
-async function getAuthedUserId(sb: ReturnType<typeof supabaseBrowser>): Promise<string | null> {
-  const { data, error } = await sb.auth.getUser();
-  if (error) return null;
-  return data?.user?.id ?? null;
-}
-
-async function fetchAssetsFromSupabase(sb: ReturnType<typeof supabaseBrowser>, userId: string) {
-  const { data, error } = await sb
-    .from("board_assets")
-    .select("id, kind, title, description, payload, created_at")
-    .eq("user_id", userId)
-    .order("created_at", { ascending: false });
-
-  if (error) return { ok: false as const, items: [] as AssetItem[] };
-
-  const items: AssetItem[] =
-    data?.map((r: any) => ({
-      id: String(r.id),
-      kind: r.kind as AssetKind,
-      title: String(r.title),
-      description: r.description ? String(r.description) : undefined,
-      createdAt: new Date(r.created_at).getTime(),
-      payload: (r.payload ?? undefined) as any,
-    })) ?? [];
-
-  return { ok: true as const, items };
-}
-
-async function upsertAssetToSupabase(
-  sb: ReturnType<typeof supabaseBrowser>,
-  userId: string,
-  asset: AssetItem
-) {
-  const row = {
-    id: asset.id,
-    user_id: userId,
-    kind: asset.kind,
-    title: asset.title,
-    description: asset.description ?? null,
-    payload: asset.payload ?? null,
-    created_at: new Date(asset.createdAt).toISOString(),
-  };
-
-  const { error } = await sb.from("board_assets").upsert(row, { onConflict: "id" });
-  return { ok: !error };
-}
-
-async function deleteAllAssetsFromSupabase(sb: ReturnType<typeof supabaseBrowser>, userId: string) {
-  const { error } = await sb.from("board_assets").delete().eq("user_id", userId);
-  return { ok: !error };
-}
-
-async function uploadMediaToSupabaseStorage(
-  sb: ReturnType<typeof supabaseBrowser>,
-  userId: string,
-  file: File
-): Promise<{ ok: true; publicUrl: string } | { ok: false }> {
-  const safeName = file.name.replace(/[^\w.\-]+/g, "_");
-  const path = `${userId}/${Date.now()}_${safeName}`;
-
-  const { error: upErr } = await withTimeout(
-    sb.storage.from("board-media").upload(path, file, {
-      cacheControl: "3600",
-      upsert: false,
-      contentType: file.type,
-    }),
-    12000
-  ).catch(() => ({ error: new Error("upload_timeout") }));
-
-  if (upErr) return { ok: false };
-
-  const { data } = sb.storage.from("board-media").getPublicUrl(path);
-  const publicUrl = data?.publicUrl ?? "";
-  if (!publicUrl) return { ok: false };
-
-  return { ok: true, publicUrl };
-}
-
-/* -------------------------------------------------------------------------- */
-/* UI tiles                                                                    */
-/* -------------------------------------------------------------------------- */
-
-function TileFrame({ children, className }: { children: React.ReactNode; className?: string }) {
-  return (
-    <div
-      className={clsx(
-        "rounded-3xl border border-white/10 bg-black/20 overflow-hidden",
-        "shadow-[0_12px_44px_rgba(0,0,0,0.35)]",
-        className
-      )}
-    >
-      {children}
-    </div>
-  );
-}
-
-function DropHeader({
-  emoji,
-  title,
-  meta,
-  description,
-}: {
-  emoji: string;
-  title: string;
-  meta?: string;
-  description?: string;
-}) {
-  return (
-    <div className="px-4 pt-4">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="text-sm font-medium text-white/90 truncate">{title}</div>
-          {meta ? <div className="mt-1 text-xs text-white/50 truncate">{meta}</div> : null}
-        </div>
-        <div className="text-xl shrink-0">{emoji}</div>
-      </div>
-
-      {description ? (
-        <div className="mt-2 text-xs text-white/55 line-clamp-2">{description}</div>
-      ) : null}
-    </div>
-  );
-}
-
-function MediaDropTile({ a }: { a: AssetItem }) {
-  const url = a.payload?.mediaUrl;
-
-  return (
-    <TileFrame>
-      <DropHeader emoji={kindEmoji("media")} title={a.title} meta="Image embed" description={a.description} />
-      <div className="mt-3 px-4 pb-4">
-        <div className="inline-block max-w-full overflow-hidden rounded-2xl border border-white/10 bg-white/5 align-top">
-          {url ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={url} alt={a.title} className="block h-auto max-h-72 max-w-full object-contain" loading="lazy" />
-          ) : (
-            <div className="grid min-h-32 min-w-48 place-items-center text-sm text-white/50">No image</div>
-          )}
-        </div>
-      </div>
-    </TileFrame>
-  );
-}
-
-function MusicDropTile({ a }: { a: AssetItem }) {
-  const embedUrl = a.payload?.embedUrl;
-  return (
-    <TileFrame>
-      <DropHeader emoji={kindEmoji("music")} title={a.title} meta={embedUrl ? "Embedded player" : "No embed"} description={a.description} />
-      <div className="mt-3 px-4 pb-4">
-        <div className="rounded-2xl overflow-hidden border border-white/10 bg-black/30">
-          {embedUrl ? (
-            <iframe
-              title={a.title}
-              src={embedUrl}
-              className="w-full h-44"
-              allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
-              loading="lazy"
-            />
-          ) : (
-            <div className="h-44 grid place-items-center text-sm text-white/50">Unsupported music link</div>
-          )}
-        </div>
-      </div>
-    </TileFrame>
-  );
-}
-
-function YouTubeDropTile({ a }: { a: AssetItem }) {
-  const embedUrl = a.payload?.embedUrl;
-  return (
-    <TileFrame>
-      <DropHeader emoji={kindEmoji("youtube")} title={a.title} meta={embedUrl ? "YouTube embed" : "No embed"} description={a.description} />
-      <div className="mt-3 px-4 pb-4">
-        <div className="rounded-2xl overflow-hidden border border-white/10 bg-black/30">
-          {embedUrl ? (
-            <iframe
-              title={a.title}
-              src={embedUrl}
-              className="w-full h-44"
-              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-              loading="lazy"
-            />
-          ) : (
-            <div className="h-44 grid place-items-center text-sm text-white/50">Invalid YouTube link</div>
-          )}
-        </div>
-      </div>
-    </TileFrame>
-  );
-}
-
-function LinkDropTile({ a }: { a: AssetItem }) {
-  const url = a.payload?.url;
-  const host = safeHostname(url);
-  return (
-    <TileFrame>
-      <DropHeader emoji={kindEmoji("link")} title={a.title} meta={host ? host : "Link"} description={a.description} />
-      <div className="mt-3 px-4 pb-4">
-        <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-          <div className="text-xs tracking-[0.25em] text-white/45">LINK PREVIEW</div>
-          <div className="mt-2 text-sm text-white/80 break-words">{url ?? "No URL"}</div>
-          {url ? (
-            <a
-              href={url}
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex mt-3 text-sm text-lime-200/80 hover:text-lime-200 transition"
-            >
-              Open →
-            </a>
-          ) : null}
-        </div>
-      </div>
-    </TileFrame>
-  );
-}
-
-function DocDropTile({ a }: { a: AssetItem }) {
-  const url = a.payload?.url;
-  const host = safeHostname(url);
-
-  return (
-    <TileFrame>
-      <DropHeader emoji={kindEmoji("doc")} title={a.title} meta={host ? `Doc link • ${host}` : "Doc link"} description={a.description} />
-      <div className="mt-3 px-4 pb-4">
-        <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-          <div className="text-xs tracking-[0.25em] text-white/45">DOC DROP</div>
-          <div className="mt-2 text-sm text-white/80 break-words">{url ?? "No URL"}</div>
-          {url ? (
-            <a
-              href={url}
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex mt-3 text-sm text-lime-200/80 hover:text-lime-200 transition"
-            >
-              Open Doc →
-            </a>
-          ) : null}
-          <div className="mt-3 text-xs text-white/45">(Next: embed previews + PDF thumbs.)</div>
-        </div>
-      </div>
-    </TileFrame>
-  );
-}
-
-function NoteDropTile({ a }: { a: AssetItem }) {
-  const text = a.payload?.text ?? "";
-  return (
-    <TileFrame>
-      <DropHeader emoji={kindEmoji("note")} title={a.title} meta="Text note" description={a.description} />
-      <div className="mt-3 px-4 pb-4">
-        <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-          <div className="text-sm text-white/80 whitespace-pre-wrap">{text || "No note"}</div>
-        </div>
-      </div>
-    </TileFrame>
-  );
-}
-
-function EmbeddedAssetTile({ a }: { a: AssetItem }) {
-  switch (a.kind) {
-    case "media":
-      return <MediaDropTile a={a} />;
-    case "music":
-      return <MusicDropTile a={a} />;
-    case "youtube":
-      return <YouTubeDropTile a={a} />;
-    case "link":
-      return <LinkDropTile a={a} />;
-    case "doc":
-      return <DocDropTile a={a} />;
-    case "note":
-      return <NoteDropTile a={a} />;
-    default:
-      return <NoteDropTile a={a} />;
-  }
-}
 
 /* -------------------------------------------------------------------------- */
 /* Modal state                                                                 */
@@ -714,10 +142,10 @@ function BoardDropsScreen({
   onBeginPlace: (kind: AssetKind) => void;
 }) {
   // Creation-first order, mirroring lib/board/dropFlavors.ts: native-creation
-  // Drops lead (Vision, Note≈Thought), then the link-ingest types.
+  // Drops lead (Vision, Thought), then the link-ingest types.
   const DROP_TYPES: Array<{ kind: AssetKind; title: string; desc: string; hint: string }> = [
     { kind: "media", title: "Vision", desc: "Image embed", hint: "Upload an image" },
-    { kind: "note", title: "Note", desc: "Text drop", hint: "Write something short" },
+    { kind: "note", title: "Thought", desc: "Text drop", hint: "Write something short" },
     { kind: "youtube", title: "YouTube", desc: "YouTube video embed", hint: "Paste a YouTube link" },
     { kind: "music", title: "Music", desc: "Spotify / SoundCloud", hint: "Paste a music link" },
     { kind: "link", title: "Link", desc: "Any URL", hint: "Paste a link" },
@@ -1101,6 +529,132 @@ export default function DropPadOS({
 
   const [modal, setModal] = useState<InputModalState>({ open: false });
 
+  // ✅ Drop Pad OS 4 — Drop Studio launches straight from the lock screen.
+  const [studioOpen, setStudioOpen] = useState(false);
+  const [studioInitialMode, setStudioInitialMode] = useState<
+    "photo" | "video" | "audio" | "art" | "descript"
+  >("photo");
+  const [studioValue, setStudioValue] = useState<DropCustomization>({});
+
+  // ✅ Profile Work Board stats (status chip in Free Space).
+  const [profileStats, setProfileStats] = useState<{
+    status: "unemployed" | "working" | "on_vacation";
+    job: string;
+    payDrops: number;
+    projects: number;
+  }>({ status: "unemployed", job: "", payDrops: 0, projects: 0 });
+
+  // ✅ Activity Channel (signal waterfall) + Bucket Brain signals.
+  const [activityItems, setActivityItems] = useState<ActivityChannelItem[]>([]);
+  const [signals, setSignals] = useState<BoardSignal[]>([]);
+  const activityScrollRef = useRef<HTMLDivElement | null>(null);
+  const horizontalPagerRef = useRef<HTMLDivElement | null>(null);
+
+  // Spatial home: Orb center, swipe ↑ Activity · ← Free · → Work · ↓ Bucket Brain
+  type SpatialSpace = "home" | "activity" | "free" | "work" | "bucketBrain";
+  const [spatialSpace, setSpatialSpace] = useState<SpatialSpace>("home");
+  const spaceCooldownRef = useRef(0);
+  const menuTouchRef = useRef<{ x: number; y: number } | null>(null);
+  const [workspaceTab, setWorkspaceTab] = useState<"assets" | "portfolio">("assets");
+
+  function navSpace(space: SpatialSpace) {
+    const now = Date.now();
+    if (now - spaceCooldownRef.current < 420) return;
+    spaceCooldownRef.current = now;
+    setSpatialSpace(space);
+
+    // Keep the horizontal pager synced for free / home / work.
+    const pager = horizontalPagerRef.current;
+    if (!pager) return;
+    const pageWidth = pager.clientWidth || 1;
+    const pageIndex = space === "free" ? 0 : space === "work" ? 2 : 1;
+    if (space === "free" || space === "home" || space === "work") {
+      pager.scrollTo({ left: pageIndex * pageWidth, behavior: "smooth" });
+    }
+  }
+
+  function activityAtBottom() {
+    const el = activityScrollRef.current;
+    if (!el) return true;
+    return el.scrollTop + el.clientHeight >= el.scrollHeight - 4;
+  }
+  function activityScrollable() {
+    const el = activityScrollRef.current;
+    return el ? el.scrollHeight - el.clientHeight > 4 : false;
+  }
+
+  function onMenuWheel(e: React.WheelEvent) {
+    if (Math.abs(e.deltaY) < 20 && Math.abs(e.deltaX) < 20) return;
+    const verticalDominant = Math.abs(e.deltaY) >= Math.abs(e.deltaX);
+    if (verticalDominant) {
+      const up = e.deltaY < 0;
+      if (spatialSpace === "home") {
+        navSpace(up ? "activity" : "bucketBrain");
+      } else if (spatialSpace === "activity") {
+        if ((!up && activityAtBottom()) || !activityScrollable()) navSpace("home");
+      } else if (spatialSpace === "bucketBrain") {
+        if (up) navSpace("home");
+      }
+      return;
+    }
+    const left = e.deltaX < 0;
+    if (spatialSpace === "home") {
+      navSpace(left ? "free" : "work");
+    } else if (spatialSpace === "free" && !left) {
+      navSpace("home");
+    } else if (spatialSpace === "work" && left) {
+      navSpace("home");
+    }
+  }
+
+  function onMenuTouchStart(e: React.TouchEvent) {
+    const t = e.touches[0];
+    menuTouchRef.current = { x: t.clientX, y: t.clientY };
+  }
+
+  function onMenuTouchEnd(e: React.TouchEvent) {
+    const s = menuTouchRef.current;
+    menuTouchRef.current = null;
+    if (!s) return;
+    const t = e.changedTouches[0];
+    const dx = t.clientX - s.x;
+    const dy = t.clientY - s.y;
+    const absX = Math.abs(dx);
+    const absY = Math.abs(dy);
+    if (absX < 48 && absY < 48) return;
+
+    if (absY > absX) {
+      const swipeUp = dy < 0;
+      if (spatialSpace === "home") {
+        navSpace(swipeUp ? "activity" : "bucketBrain");
+      } else if (spatialSpace === "activity") {
+        if ((!swipeUp && activityAtBottom()) || !activityScrollable()) navSpace("home");
+      } else if (spatialSpace === "bucketBrain") {
+        if (swipeUp) navSpace("home");
+      }
+      return;
+    }
+
+    const swipeLeft = dx < 0; // finger moves left → reveal right space
+    if (spatialSpace === "home") {
+      navSpace(swipeLeft ? "work" : "free");
+    } else if (spatialSpace === "free" && swipeLeft) {
+      navSpace("home");
+    } else if (spatialSpace === "work" && !swipeLeft) {
+      navSpace("home");
+    }
+  }
+
+  function onHorizontalScroll() {
+    if (spatialSpace === "activity" || spatialSpace === "bucketBrain") return;
+    const pager = horizontalPagerRef.current;
+    if (!pager) return;
+    const pageWidth = pager.clientWidth || 1;
+    const index = Math.round(pager.scrollLeft / pageWidth);
+    const next: SpatialSpace = index <= 0 ? "free" : index >= 2 ? "work" : "home";
+    if (next !== spatialSpace) setSpatialSpace(next);
+  }
+
   // ✅ Work Calls
   const [workCalls, setWorkCalls] = useState<WorkCallItem[]>([]);
   const workCallCounts = useMemo(() => {
@@ -1200,12 +754,10 @@ export default function DropPadOS({
 
   const menuDrops = drops?.length ? drops : DEFAULT_DROPS;
 
-  // Orbit positions (percent-based, stable with your fixed menu container)
+  // Orbit positions around the crown (Orb Home center).
   const getOrbitPos = (i: number, total: number) => {
     const cx = 50;
     const cy = 52;
-
-    // ellipse radii in percent
     const rx = 30;
     const ry = 24;
 
@@ -1223,12 +775,108 @@ export default function DropPadOS({
     return { x: cx + Math.cos(a) * rx, y: cy + Math.sin(a) * ry };
   };
 
+  // Reset to Orb Home whenever Drop Pad powers on / finishes boot.
+  useEffect(() => {
+    if (!osOn || bootPhase !== "ready") return;
+    setSpatialSpace("home");
+    requestAnimationFrame(() => {
+      const pager = horizontalPagerRef.current;
+      if (!pager) return;
+      pager.scrollTo({ left: pager.clientWidth, behavior: "auto" });
+    });
+  }, [osOn, bootPhase]);
+
   // local cache first
   useEffect(() => {
     setAssets(readAssetsFromStorage());
     setPortfolioDrops(readDropItemsFromStorage(PORTFOLIO_DROPS_STORAGE_KEY));
     setProjectDrops(readDropItemsFromStorage(PROJECT_DROPS_STORAGE_KEY));
     setWorkCalls(readWorkCallsFromStorage());
+  }, []);
+
+  // Load the Profile Work Board stats (work status/job, pay drop + project counts).
+  useEffect(() => {
+    if (!osOn) return;
+    const load = () => {
+      let status: "unemployed" | "working" | "on_vacation" = "unemployed";
+      let job = "";
+      try {
+        const raw = localStorage.getItem("jab_board_work_desk_v1");
+        if (raw) {
+          const p = JSON.parse(raw);
+          if (p?.status === "working" || p?.status === "on_vacation" || p?.status === "unemployed") {
+            status = p.status;
+          }
+          if (typeof p?.job === "string") job = p.job;
+        }
+      } catch {
+        /* noop */
+      }
+      let payDrops = 0;
+      let projects = 0;
+      try {
+        payDrops = readPayDrops(userId).length;
+      } catch {
+        /* noop */
+      }
+      try {
+        projects = readBoardProjects().length;
+      } catch {
+        /* noop */
+      }
+      setProfileStats({ status, job, payDrops, projects });
+    };
+    load();
+    window.addEventListener("storage", load);
+    window.addEventListener("focus", load);
+    window.addEventListener("board:projects:updated", load as EventListener);
+    return () => {
+      window.removeEventListener("storage", load);
+      window.removeEventListener("focus", load);
+      window.removeEventListener("board:projects:updated", load as EventListener);
+    };
+  }, [osOn, userId]);
+
+  // Load the Activity Channel waterfall + Bucket Brain signals.
+  useEffect(() => {
+    if (!osOn) return;
+    let cancelled = false;
+    const refresh = () => {
+      // Fast local fallback, then replace with real Supabase-backed signals.
+      setActivityItems(buildActivityChannelItems(userId));
+      setSignals(deriveBoardSignals(userId));
+      void fetchActivityChannelItems(userId).then((items) => {
+        if (!cancelled && items.length) setActivityItems(items);
+      });
+    };
+    refresh();
+    const onEvt = () => refresh();
+    window.addEventListener("board:activity:new", onEvt as EventListener);
+    window.addEventListener("storage", onEvt);
+    window.addEventListener(BOARD_DROP_SIGNAL_EVENT, onEvt as EventListener);
+    window.addEventListener("board:drop-comments:updated", onEvt as EventListener);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("board:activity:new", onEvt as EventListener);
+      window.removeEventListener("storage", onEvt);
+      window.removeEventListener(BOARD_DROP_SIGNAL_EVENT, onEvt as EventListener);
+      window.removeEventListener("board:drop-comments:updated", onEvt as EventListener);
+    };
+  }, [osOn, userId]);
+
+  // Refresh the Assets bin whenever a Work Drop is added from another surface
+  // (e.g. the Work Drop Station) so it shows up without a reload.
+  useEffect(() => {
+    const reload = () => setAssets(readAssetsFromStorage());
+    const onStorage = (event: StorageEvent) => {
+      if (!event.key || event.key === ASSETS_STORAGE_KEY) reload();
+    };
+    window.addEventListener(DROP_PAD_ASSETS_UPDATED_EVENT, reload as EventListener);
+    window.addEventListener("storage", onStorage);
+    return () => {
+      window.removeEventListener(DROP_PAD_ASSETS_UPDATED_EVENT, reload as EventListener);
+      window.removeEventListener("storage", onStorage);
+    };
   }, []);
 
   // persist work calls locally (for now)
@@ -1370,6 +1018,20 @@ export default function DropPadOS({
     setMode("screen");
   };
 
+  const openOrbBubble = (route: DropRoute) => {
+    if (route === "assets") {
+      setWorkspaceTab("assets");
+      navSpace("work");
+      return;
+    }
+    if (route === "portfolio") {
+      setWorkspaceTab("portfolio");
+      navSpace("work");
+      return;
+    }
+    openRoute(route);
+  };
+
   const jumpToAssets = () => {
     onSelect?.("assets");
     onNavigate?.("assets");
@@ -1421,6 +1083,176 @@ export default function DropPadOS({
     onNavigate?.(destination);
     setMode("screen");
   };
+
+  // Drop Pad OS 4 — a drop captured in Drop Studio is a "Work Drop" and lands
+  // straight in the Assets bin (no manual destination picker).
+  const addWorkDropToAssets = async (file: File) => {
+    setStudioOpen(false);
+    setStudioValue({});
+    const now = Date.now();
+    const isImage = file.type.startsWith("image/");
+
+    let mediaUrl = "";
+    if (userId) {
+      const uploaded = await uploadMediaToSupabaseStorage(sb, userId, file);
+      if (uploaded.ok) mediaUrl = uploaded.publicUrl;
+    }
+    if (!mediaUrl) {
+      mediaUrl = await readFileAsDataUrl(file).catch(() => "");
+    }
+    if (!mediaUrl) {
+      triggerDropPlacedIndicator("SYSTEM: Work Drop couldn’t be saved");
+      return;
+    }
+
+    const asset: AssetItem = {
+      id: uid(),
+      kind: "media",
+      title: `Work Drop · ${new Date(now).toLocaleDateString()}`,
+      createdAt: now,
+      payload: isImage ? { mediaType: "image", mediaUrl } : { mediaUrl },
+    };
+
+    syncAssetsLocal([asset, ...assets]);
+    if (userId) {
+      setSyncing(true);
+      await withTimeout(upsertAssetToSupabase(sb, userId, asset), 8000).catch(() => ({ ok: false }));
+      setSyncing(false);
+    }
+    triggerDropPlacedIndicator("SYSTEM: Work Drop placed in Assets");
+  };
+
+  const addWorkLinkToAssets = async (drop: {
+    flavor: "youtube" | "news" | "music" | "link";
+    url: string;
+    embedUrl?: string;
+    title?: string;
+  }) => {
+    setStudioOpen(false);
+    setStudioValue({});
+    const now = Date.now();
+    const kind: AssetKind =
+      drop.flavor === "youtube"
+        ? "youtube"
+        : drop.flavor === "music"
+          ? "music"
+          : drop.flavor === "news" || drop.flavor === "link"
+            ? "link"
+            : "link";
+
+    const asset: AssetItem = {
+      id: uid(),
+      kind,
+      title: drop.title || `${kindLabel(kind)} · ${new Date(now).toLocaleDateString()}`,
+      createdAt: now,
+      payload:
+        kind === "youtube" || kind === "music"
+          ? { embedUrl: drop.embedUrl || drop.url, url: drop.url }
+          : { url: drop.url },
+    };
+
+    syncAssetsLocal([asset, ...assets]);
+    if (userId) {
+      setSyncing(true);
+      await withTimeout(upsertAssetToSupabase(sb, userId, asset), 8000).catch(() => ({ ok: false }));
+      setSyncing(false);
+    }
+    triggerDropPlacedIndicator(`SYSTEM: ${kindLabel(kind)} placed in Assets`);
+  };
+
+  const addDropbookToAssets = async (payload: {
+    id: string;
+    title: string;
+    bookColor: string;
+    coverUrl?: string;
+    pages: Array<{
+      id: string;
+      label?: string;
+      mode?: string;
+      linkFlavor?: string;
+      linkUrl?: string;
+      embedUrl?: string;
+      previewUrl?: string;
+    }>;
+  }) => {
+    const now = Date.now();
+    const asset: AssetItem = {
+      id: payload.id.startsWith("dropbook") ? payload.id : `dropbook-${payload.id}`,
+      kind: "dropbook",
+      title: payload.title,
+      description: `${payload.pages.length} page${payload.pages.length === 1 ? "" : "s"} · accessible Dropbook`,
+      createdAt: now,
+      payload: {
+        mediaUrl: payload.coverUrl,
+        dropbook: {
+          bookColor: payload.bookColor,
+          coverUrl: payload.coverUrl,
+          pageCount: payload.pages.length,
+          pages: payload.pages.map((page) => ({
+            id: page.id,
+            label: page.label,
+            mode: page.mode,
+            linkFlavor: page.linkFlavor,
+            linkUrl: page.linkUrl,
+            embedUrl: page.embedUrl,
+            previewUrl: page.previewUrl,
+          })),
+        },
+      },
+    };
+
+    syncAssetsLocal([asset, ...assets.filter((item) => item.id !== asset.id)]);
+    if (userId) {
+      setSyncing(true);
+      await withTimeout(upsertAssetToSupabase(sb, userId, asset), 8000).catch(() => ({ ok: false }));
+      setSyncing(false);
+    }
+    jumpToAssets();
+    triggerDropPlacedIndicator("SYSTEM: Dropbook placed in Assets");
+  };
+
+  const addWorkDropFromDescript = async (doc: DescriptDoc) => {
+    setStudioOpen(false);
+    setStudioValue({});
+    const now = Date.now();
+    const plain = doc.plainText?.trim() || descriptPlainText(doc.html);
+    if (!plain && !doc.title?.trim()) {
+      triggerDropPlacedIndicator("SYSTEM: Descript was empty");
+      return;
+    }
+
+    const asset: AssetItem = {
+      id: uid(),
+      kind: "note",
+      title: doc.title?.trim() || `Work Drop · ${new Date(now).toLocaleDateString()}`,
+      description: plain.slice(0, 500) || undefined,
+      createdAt: now,
+      payload: { text: plain },
+    };
+
+    setAssets((prev) => {
+      const next = [asset, ...prev];
+      syncAssetsLocal(next);
+      return next;
+    });
+
+    if (userId) {
+      setSyncing(true);
+      await withTimeout(upsertAssetToSupabase(sb, userId, asset), 8000).catch(() => ({ ok: false }));
+      setSyncing(false);
+    }
+    triggerDropPlacedIndicator("SYSTEM: Descript Work Drop placed in Assets");
+  };
+
+  useEffect(() => {
+    function onDescriptShare(event: Event) {
+      const doc = (event as CustomEvent<DescriptDoc>).detail;
+      if (!doc || doc.destination !== "work") return;
+      void addWorkDropFromDescript(doc);
+    }
+    window.addEventListener(DESCRIPT_SHARE_EVENT, onDescriptShare as EventListener);
+    return () => window.removeEventListener(DESCRIPT_SHARE_EVENT, onDescriptShare as EventListener);
+  }, [userId, sb]);
 
   const placeAsset = async (asset: AssetItem, destination: DropDestination) => {
     if (destination === "portfolio") {
@@ -1794,7 +1626,7 @@ export default function DropPadOS({
           </div>
 
           <div className="text-xs text-white/45">
-            {osOn ? (mode === "menu" ? "Drops Menu" : `Embedded: ${assets.length}`) : "Offline"}
+            {osOn ? (mode === "menu" ? "Orb Home" : `Embedded: ${assets.length}`) : "Standby"}
           </div>
         </div>
       </div>
@@ -1802,10 +1634,7 @@ export default function DropPadOS({
       {/* Scrollable + extendable iPad screen */}
       <div className="relative z-10 mt-4 px-5 sm:px-6 pb-6">
         <div
-          className={clsx(
-            "relative w-full rounded-3xl border border-white/10 bg-white/[0.03]",
-            "overflow-y-auto overflow-x-hidden"
-          )}
+          className="osScreenViewport relative w-full rounded-3xl border border-white/10 bg-white/[0.03]"
           style={{ height: `${screenPx}px` }}
         >
           {/* scanlines */}
@@ -1834,7 +1663,34 @@ export default function DropPadOS({
                   <div className="text-white/60 text-sm tracking-widest">DROP PAD</div>
                   <div className="mt-2 text-2xl font-semibold text-white/85">Standby</div>
                   <div className="mt-2 text-sm text-white/50 max-w-[46ch] mx-auto">
-                    Power on to open the holographic Drops menu.
+                    Power on to open Orb Home — crown center with drop orbs.
+                  </div>
+
+                  <div className="flex flex-wrap items-center justify-center gap-3 mt-6">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setStudioInitialMode("photo");
+                        setStudioOpen(true);
+                      }}
+                      className="group relative z-10 inline-flex items-center gap-2 rounded-full border border-cyan-200/30 bg-gradient-to-b from-cyan-300/15 to-fuchsia-400/10 px-6 py-3 text-sm font-extrabold uppercase tracking-[0.18em] text-cyan-50/90 shadow-[0_0_24px_rgba(126,226,255,0.28)] backdrop-blur-sm transition hover:from-cyan-300/25 hover:to-fuchsia-400/18 hover:shadow-[0_0_32px_rgba(126,226,255,0.42)]"
+                      aria-label="Open Drop Studio"
+                    >
+                      <span aria-hidden className="text-base leading-none">🎬</span>
+                      Drop Studio
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setStudioInitialMode("descript");
+                        setStudioOpen(true);
+                      }}
+                      className="group relative z-10 inline-flex items-center gap-2 rounded-full border border-slate-200/30 bg-gradient-to-b from-slate-200/14 to-slate-400/10 px-6 py-3 text-sm font-extrabold uppercase tracking-[0.18em] text-slate-50/90 shadow-[0_0_24px_rgba(200,210,230,0.22)] backdrop-blur-sm transition hover:from-slate-200/22 hover:to-slate-400/16 hover:shadow-[0_0_32px_rgba(200,210,230,0.34)]"
+                      aria-label="Open Descript in Drop Studio"
+                    >
+                      <span aria-hidden className="text-base leading-none">📝</span>
+                      Descript
+                    </button>
                   </div>
                 </div>
               </div>
@@ -1872,7 +1728,7 @@ export default function DropPadOS({
                       ← Back to Drops
                     </button>
                   ) : (
-                    <div className="text-sm text-white/65">Drops Menu</div>
+                    <div className="text-sm text-white/65">Orb Home</div>
                   )}
 
                   <div className="flex items-center gap-3">
@@ -1892,76 +1748,269 @@ export default function DropPadOS({
                 </div>
               </div>
 
-              {/* MENU (crown center + orbit bubbles) */}
+              {/* MENU — Orb Home center; swipe ↑ Activity · ← Free · → Work · ↓ Bucket Brain */}
               {mode === "menu" && (
-                <div className="relative h-[560px] sm:h-[620px]">
-                  {/* Crown center */}
-                  <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none">
-                    <div className="relative grid place-items-center">
-                      <div className="absolute inset-0 rounded-full blur-3xl opacity-25 bg-lime-400" />
-                      <Image
-                        src={CROWN_SRC}
-                        alt="JAB Visions Crown"
-                        width={190}
-                        height={190}
-                        priority
-                        className="relative z-10 select-none drop-shadow-[0_0_34px_rgba(163,230,53,0.45)]"
-                      />
-                    </div>
+                <div
+                  className="osMenuRoot"
+                  aria-label="Drop Pad OS spatial home"
+                  onWheel={onMenuWheel}
+                  onTouchStart={onMenuTouchStart}
+                  onTouchEnd={onMenuTouchEnd}
+                >
+                  <div
+                    className={clsx(
+                      "osPager",
+                      (spatialSpace === "activity" || spatialSpace === "bucketBrain") && "osPagerLocked"
+                    )}
+                    ref={horizontalPagerRef}
+                    onScroll={onHorizontalScroll}
+                    aria-label="Swipe between Free Space, Orb Home, and Work Space"
+                  >
+                    {/* LEFT — Free Space */}
+                    <section className="osPage osFreePage" aria-label="Free Space">
+                      <div className="osFreePanel">
+                        <div className="osFreeHead">
+                          <div className="osFreeEyebrow">Left Space</div>
+                          <div className="osFreeTitle">Free Space</div>
+                          <div className="osFreeStatus">
+                            <span
+                              className={clsx(
+                                "osFreeDot",
+                                profileStats.status === "working" && "working",
+                                profileStats.status === "on_vacation" && "vacation"
+                              )}
+                            />
+                            <span>
+                              {profileStats.status === "working"
+                                ? "Working"
+                                : profileStats.status === "on_vacation"
+                                  ? "On Vacation"
+                                  : "Open to Work"}
+                              {profileStats.job ? ` · ${profileStats.job}` : ""}
+                            </span>
+                          </div>
+                        </div>
+                        <div className="osFreeBody">
+                          <p className="osFreeCopy">
+                            Open creative room. Capture, sketch ideas, and park loose drops before they enter Work.
+                          </p>
+                          <div className="osFreeActions">
+                            <button
+                              type="button"
+                              className="osFreeAction"
+                              onClick={() => {
+                                setStudioInitialMode("photo");
+                                setStudioOpen(true);
+                              }}
+                            >
+                              🎬 Drop Studio
+                            </button>
+                            <button
+                              type="button"
+                              className="osFreeAction"
+                              onClick={() => {
+                                setStudioInitialMode("descript");
+                                setStudioOpen(true);
+                              }}
+                            >
+                              📝 Descript
+                            </button>
+                            <button
+                              type="button"
+                              className="osFreeAction"
+                              onClick={() => navSpace("home")}
+                            >
+                              → Orb Home
+                            </button>
+                          </div>
+                        </div>
+                        <div className="osSpaceHint">swipe right to Orb Home</div>
+                      </div>
+                    </section>
+
+                    {/* CENTER — Orb Home */}
+                    <section className="osPage" aria-label="Orb Home">
+                      <div className="relative h-full min-h-[560px] sm:min-h-[620px]">
+                        <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none">
+                          <div className="relative grid place-items-center">
+                            <div className="absolute inset-0 rounded-full blur-3xl opacity-25 bg-lime-400" />
+                            <Image
+                              src={CROWN_SRC}
+                              alt="JAB Visions Crown"
+                              width={190}
+                              height={190}
+                              priority
+                              className="relative z-10 select-none drop-shadow-[0_0_34px_rgba(163,230,53,0.45)]"
+                            />
+                          </div>
+                        </div>
+
+                        {menuDrops.map((drop, i) => {
+                          const pos = getOrbitPos(i, menuDrops.length);
+                          const size = 112;
+                          return (
+                            <button
+                              key={drop.id}
+                              type="button"
+                              onClick={() => openOrbBubble(drop.route)}
+                              className={clsx(
+                                "absolute rounded-full",
+                                "border border-white/15",
+                                "backdrop-blur-md",
+                                "shadow-[0_10px_40px_rgba(0,0,0,0.35)]",
+                                "transition active:scale-[0.98] focus:outline-none focus:ring-2 focus:ring-lime-300/40",
+                                "hover:ring-2 hover:ring-white/10"
+                              )}
+                              style={{
+                                left: `${pos.x}%`,
+                                top: `${pos.y}%`,
+                                width: `${size}px`,
+                                height: `${size}px`,
+                                transform: "translate(-50%, -50%)",
+                                animation: reducedMotion
+                                  ? undefined
+                                  : `floaty ${5.2 + (i % 4) * 0.8}s ease-in-out ${i * 0.12}s infinite`,
+                              }}
+                              aria-label={`Open ${drop.label}`}
+                              title={drop.label}
+                            >
+                              <span
+                                className="absolute inset-0 rounded-full"
+                                style={{
+                                  background:
+                                    "radial-gradient(circle at 30% 28%, rgba(255,255,255,0.30), rgba(255,255,255,0.07) 42%, rgba(163,230,53,0.10) 64%, rgba(34,211,238,0.08) 78%, rgba(217,70,239,0.06) 100%)",
+                                }}
+                              />
+                              <span className="absolute left-[18%] top-[16%] h-[26%] w-[26%] rounded-full bg-white/20 blur-sm" />
+                              <span className="absolute right-[14%] bottom-[12%] h-[18%] w-[18%] rounded-full bg-lime-300/15 blur-md" />
+                              <span className="relative z-10 grid h-full w-full place-items-center px-3 text-center">
+                                <span className="text-[18px] leading-none">{drop.emoji ?? "🫧"}</span>
+                                <span className="mt-2 text-[11px] font-medium text-white/85 leading-tight">
+                                  {drop.label}
+                                </span>
+                              </span>
+                            </button>
+                          );
+                        })}
+
+                        <div className="absolute bottom-5 left-6 right-6 text-center text-xs text-white/40">
+                          Tap a bubble · swipe ↑ Activity · ← Free · → Work · ↓ Bucket Brain
+                        </div>
+                      </div>
+                    </section>
+
+                    {/* RIGHT — Work Space (Assets + Portfolio folders) */}
+                    <section className="osPage osWorkPage" aria-label="Work Space">
+                      <div className="osWorkPanel">
+                        <div className="osWorkHead">
+                          <div>
+                            <div className="osWorkEyebrow">Right Space</div>
+                            <div className="osWorkTitle">Work Space</div>
+                          </div>
+                          <button
+                            type="button"
+                            className="osWorkBack"
+                            onClick={() => navSpace("home")}
+                          >
+                            ← Orb Home
+                          </button>
+                        </div>
+
+                        <div className="osWorkFolders">
+                          <button
+                            type="button"
+                            className={clsx("osWorkFolder", workspaceTab === "assets" && "on")}
+                            onClick={() => setWorkspaceTab("assets")}
+                          >
+                            <span className="osWorkFolderIcon" aria-hidden>
+                              🗂️
+                            </span>
+                            <span className="osWorkFolderName">Assets</span>
+                            <span className="osWorkFolderCount">{assets.length}</span>
+                          </button>
+                          <button
+                            type="button"
+                            className={clsx("osWorkFolder", workspaceTab === "portfolio" && "on")}
+                            onClick={() => setWorkspaceTab("portfolio")}
+                          >
+                            <span className="osWorkFolderIcon" aria-hidden>
+                              🎞️
+                            </span>
+                            <span className="osWorkFolderName">Portfolio</span>
+                            <span className="osWorkFolderCount">{portfolioDrops.length}</span>
+                          </button>
+                        </div>
+
+                        <div className="osWorkMeta">
+                          <span>
+                            {workspaceTab === "assets" ? "Assets folder" : "Portfolio folder"}
+                          </span>
+                          {syncing ? <span className="osWorkSync">Syncing…</span> : null}
+                          <button
+                            type="button"
+                            className="osWorkOpen"
+                            onClick={() =>
+                              openRoute(workspaceTab === "assets" ? "assets" : "portfolio")
+                            }
+                          >
+                            Open full →
+                          </button>
+                        </div>
+
+                        <div className="osWorkGrid">
+                          {workspaceTab === "assets" ? (
+                            assets.length === 0 ? (
+                              <div className="osWorkEmpty">
+                                Place drops here from Board Drops or Drop Studio.
+                              </div>
+                            ) : (
+                              assets
+                                .slice()
+                                .sort((a, b) => b.createdAt - a.createdAt)
+                                .slice(0, 8)
+                                .map((a) => <EmbeddedAssetTile key={a.id} a={a} />)
+                            )
+                          ) : portfolioDrops.length === 0 ? (
+                            <div className="osWorkEmpty">
+                              Pin polished drops into Portfolio from Board Drops.
+                            </div>
+                          ) : (
+                            portfolioDrops
+                              .slice()
+                              .sort((a, b) => b.createdAt - a.createdAt)
+                              .slice(0, 8)
+                              .map((a) => <EmbeddedAssetTile key={a.id} a={a} />)
+                          )}
+                        </div>
+                        <div className="osSpaceHint">swipe left to Orb Home</div>
+                      </div>
+                    </section>
                   </div>
 
-                  {menuDrops.map((drop, i) => {
-                    const pos = getOrbitPos(i, menuDrops.length);
-                    const size = 112;
+                  {/* TOP — Activity Channel */}
+                  <div
+                    className={clsx("osActivityLayer", spatialSpace === "activity" && "open")}
+                    aria-hidden={spatialSpace !== "activity"}
+                  >
+                    <DropPadActivityChannel
+                      active={spatialSpace === "activity"}
+                      layout="overlay"
+                      items={activityItems}
+                      onReturn={() => navSpace("home")}
+                      scrollRef={activityScrollRef}
+                    />
+                  </div>
 
-                    return (
-                      <button
-                        key={drop.id}
-                        type="button"
-                        onClick={() => openRoute(drop.route)}
-                        className={clsx(
-                          "absolute rounded-full",
-                          "border border-white/15",
-                          "backdrop-blur-md",
-                          "shadow-[0_10px_40px_rgba(0,0,0,0.35)]",
-                          "transition active:scale-[0.98] focus:outline-none focus:ring-2 focus:ring-lime-300/40",
-                          "hover:ring-2 hover:ring-white/10"
-                        )}
-                        style={{
-                          left: `${pos.x}%`,
-                          top: `${pos.y}%`,
-                          width: `${size}px`,
-                          height: `${size}px`,
-                          transform: "translate(-50%, -50%)",
-                          animation: reducedMotion
-                            ? undefined
-                            : `floaty ${5.2 + (i % 4) * 0.8}s ease-in-out ${i * 0.12}s infinite`,
-                        }}
-                        aria-label={`Open ${drop.label}`}
-                        title={drop.label}
-                      >
-                        <span
-                          className="absolute inset-0 rounded-full"
-                          style={{
-                            background:
-                              "radial-gradient(circle at 30% 28%, rgba(255,255,255,0.30), rgba(255,255,255,0.07) 42%, rgba(163,230,53,0.10) 64%, rgba(34,211,238,0.08) 78%, rgba(217,70,239,0.06) 100%)",
-                          }}
-                        />
-                        <span className="absolute left-[18%] top-[16%] h-[26%] w-[26%] rounded-full bg-white/20 blur-sm" />
-                        <span className="absolute right-[14%] bottom-[12%] h-[18%] w-[18%] rounded-full bg-lime-300/15 blur-md" />
-
-                        <span className="relative z-10 grid h-full w-full place-items-center px-3 text-center">
-                          <span className="text-[18px] leading-none">{drop.emoji ?? "🫧"}</span>
-                          <span className="mt-2 text-[11px] font-medium text-white/85 leading-tight">
-                            {drop.label}
-                          </span>
-                        </span>
-                      </button>
-                    );
-                  })}
-
-                  <div className="absolute bottom-5 left-6 right-6 text-center text-xs text-white/40">
-                    Tap a bubble to open a screen inside Drop Pad.
+                  {/* BOTTOM — Bucket Brain */}
+                  <div
+                    className={clsx("osBucketLayer", spatialSpace === "bucketBrain" && "open")}
+                    aria-hidden={spatialSpace !== "bucketBrain"}
+                  >
+                    <DropPadBucketBrain
+                      layout="overlay"
+                      signals={signals}
+                      onReturn={() => navSpace("home")}
+                    />
                   </div>
                 </div>
               )}
@@ -2339,7 +2388,308 @@ export default function DropPadOS({
         </div>
       ) : null}
 
+      <LazyDropStudioStage
+        open={studioOpen}
+        initialFile={null}
+        initialMode={studioInitialMode}
+        allowedModes={["photo", "video", "audio", "art", "descript"]}
+        descriptDestination="work"
+        value={studioValue}
+        onChange={setStudioValue}
+        onClose={() => setStudioOpen(false)}
+        onComplete={(file) => void addWorkDropToAssets(file)}
+        onCompleteLink={(drop) => void addWorkLinkToAssets(drop)}
+        onCompleteDropbook={(payload) => void addDropbookToAssets(payload)}
+      />
+
       <style jsx>{`
+        /* Main monitor — scroll when needed, but no bulky OS scrollbar rail. */
+        .osScreenViewport {
+          overflow-x: hidden;
+          overflow-y: auto;
+          -webkit-overflow-scrolling: touch;
+          scrollbar-width: none;
+          -ms-overflow-style: none;
+        }
+        .osScreenViewport::-webkit-scrollbar {
+          display: none;
+          width: 0;
+          height: 0;
+        }
+
+        .osMenuRoot {
+          position: relative;
+          overflow: hidden;
+        }
+
+        /* Horizontal spatial pager: Free ← Orb Home → Work */
+        .osPager {
+          display: flex;
+          height: 560px;
+          overflow-x: auto;
+          overflow-y: hidden;
+          scroll-snap-type: x mandatory;
+          -webkit-overflow-scrolling: touch;
+          scrollbar-width: none;
+        }
+        .osPager::-webkit-scrollbar {
+          display: none;
+        }
+        .osPagerLocked {
+          overflow-x: hidden;
+          pointer-events: none;
+        }
+        @media (min-width: 640px) {
+          .osPager {
+            height: 620px;
+          }
+        }
+        .osPage {
+          position: relative;
+          flex: 0 0 100%;
+          width: 100%;
+          height: 100%;
+          scroll-snap-align: start;
+          overflow: hidden;
+        }
+        .osFreePage,
+        .osWorkPage {
+          overflow-y: auto;
+          scrollbar-width: none;
+        }
+        .osFreePage::-webkit-scrollbar,
+        .osWorkPage::-webkit-scrollbar {
+          display: none;
+        }
+
+        /* Activity Channel — swipe/scroll up from Orb Home */
+        .osActivityLayer {
+          position: absolute;
+          inset: 0;
+          z-index: 26;
+          transform: translateY(-100%);
+          transition: transform 460ms cubic-bezier(0.22, 0.61, 0.36, 1);
+          pointer-events: none;
+          display: flex;
+          flex-direction: column;
+          background:
+            radial-gradient(circle at 20% 0%, rgba(126, 226, 255, 0.18), transparent 42%),
+            radial-gradient(circle at 86% 8%, rgba(217, 70, 239, 0.14), transparent 40%),
+            linear-gradient(180deg, rgba(6, 12, 22, 0.92), rgba(4, 8, 16, 0.97));
+          backdrop-filter: blur(16px) saturate(1.1);
+          -webkit-backdrop-filter: blur(16px) saturate(1.1);
+          box-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.06);
+        }
+        .osActivityLayer.open {
+          transform: translateY(0);
+          pointer-events: auto;
+        }
+
+        /* Bucket Brain — swipe/scroll down from Orb Home */
+        .osBucketLayer {
+          position: absolute;
+          inset: 0;
+          z-index: 26;
+          transform: translateY(100%);
+          transition: transform 460ms cubic-bezier(0.22, 0.61, 0.36, 1);
+          pointer-events: none;
+          overflow: hidden;
+          background:
+            radial-gradient(circle at 20% 100%, rgba(163, 230, 53, 0.16), transparent 44%),
+            linear-gradient(180deg, rgba(4, 8, 16, 0.97), rgba(6, 12, 22, 0.94));
+          backdrop-filter: blur(16px) saturate(1.1);
+          -webkit-backdrop-filter: blur(16px) saturate(1.1);
+        }
+        .osBucketLayer.open {
+          transform: translateY(0);
+          pointer-events: auto;
+        }
+
+        .osFreePanel,
+        .osWorkPanel {
+          display: flex;
+          flex-direction: column;
+          gap: 12px;
+          height: 100%;
+          padding: 18px 16px 22px;
+          background:
+            radial-gradient(circle at 16% 0%, rgba(163, 230, 53, 0.12), transparent 44%),
+            linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.02));
+        }
+        .osWorkPanel {
+          background:
+            radial-gradient(circle at 84% 0%, rgba(34, 211, 238, 0.14), transparent 42%),
+            linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.02));
+        }
+        .osFreeHead,
+        .osWorkHead {
+          display: flex;
+          align-items: flex-start;
+          justify-content: space-between;
+          gap: 10px;
+        }
+        .osFreeEyebrow,
+        .osWorkEyebrow {
+          font-size: 10px;
+          letter-spacing: 0.3em;
+          text-transform: uppercase;
+          color: rgba(163, 230, 53, 0.75);
+        }
+        .osWorkEyebrow {
+          color: rgba(34, 211, 238, 0.8);
+        }
+        .osFreeTitle,
+        .osWorkTitle {
+          margin-top: 4px;
+          font-size: 1.45rem;
+          font-weight: 900;
+          color: #fff;
+        }
+        .osFreeStatus {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          margin-top: 8px;
+          font-size: 12px;
+          color: rgba(236, 255, 251, 0.62);
+        }
+        .osFreeDot {
+          width: 8px;
+          height: 8px;
+          border-radius: 999px;
+          background: rgba(255, 255, 255, 0.4);
+        }
+        .osFreeDot.working {
+          background: #a3ff12;
+          box-shadow: 0 0 10px rgba(163, 255, 18, 0.55);
+        }
+        .osFreeDot.vacation {
+          background: #ffcf4d;
+          box-shadow: 0 0 10px rgba(255, 207, 77, 0.45);
+        }
+        .osFreeBody {
+          display: grid;
+          gap: 14px;
+          flex: 1 1 auto;
+          align-content: start;
+        }
+        .osFreeCopy {
+          margin: 0;
+          max-width: 36ch;
+          font-size: 14px;
+          line-height: 1.5;
+          color: rgba(236, 255, 251, 0.68);
+        }
+        .osFreeActions {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 8px;
+        }
+        .osFreeAction,
+        .osWorkBack {
+          border-radius: 999px;
+          border: 1px solid rgba(255, 255, 255, 0.14);
+          background: rgba(255, 255, 255, 0.06);
+          color: rgba(236, 255, 251, 0.88);
+          padding: 8px 12px;
+          font-size: 12px;
+          font-weight: 700;
+          cursor: pointer;
+        }
+        .osFreeAction:hover,
+        .osWorkBack:hover {
+          border-color: rgba(163, 230, 53, 0.4);
+          background: rgba(163, 230, 53, 0.1);
+        }
+        .osSpaceHint {
+          margin-top: auto;
+          text-align: center;
+          font-size: 11px;
+          color: rgba(255, 255, 255, 0.38);
+        }
+
+        .osWorkFolders {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 10px;
+        }
+        .osWorkFolder {
+          display: grid;
+          gap: 6px;
+          justify-items: start;
+          text-align: left;
+          border-radius: 18px;
+          border: 1px solid rgba(255, 255, 255, 0.12);
+          background: rgba(0, 0, 0, 0.28);
+          padding: 14px;
+          color: rgba(255, 255, 255, 0.88);
+          cursor: pointer;
+          transition: border-color 140ms ease, background 140ms ease, transform 140ms ease;
+        }
+        .osWorkFolder:hover {
+          transform: translateY(-1px);
+          border-color: rgba(34, 211, 238, 0.4);
+        }
+        .osWorkFolder.on {
+          border-color: rgba(126, 226, 255, 0.55);
+          background:
+            radial-gradient(circle at 20% 0%, rgba(126, 226, 255, 0.18), transparent 55%),
+            rgba(0, 0, 0, 0.35);
+          box-shadow: 0 0 18px rgba(126, 226, 255, 0.16);
+        }
+        .osWorkFolderIcon {
+          font-size: 22px;
+          line-height: 1;
+        }
+        .osWorkFolderName {
+          font-size: 14px;
+          font-weight: 800;
+        }
+        .osWorkFolderCount {
+          font-size: 11px;
+          color: rgba(236, 255, 251, 0.55);
+        }
+        .osWorkMeta {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          font-size: 11px;
+          color: rgba(236, 255, 251, 0.6);
+        }
+        .osWorkSync {
+          color: rgba(126, 226, 255, 0.75);
+        }
+        .osWorkOpen {
+          margin-left: auto;
+          border: 0;
+          background: transparent;
+          color: rgba(126, 226, 255, 0.9);
+          font-size: 11px;
+          font-weight: 700;
+          cursor: pointer;
+        }
+        .osWorkGrid {
+          flex: 1 1 auto;
+          min-height: 0;
+          overflow: auto;
+          display: grid;
+          gap: 8px;
+          align-content: start;
+          scrollbar-width: none;
+        }
+        .osWorkGrid::-webkit-scrollbar {
+          display: none;
+        }
+        .osWorkEmpty {
+          border-radius: 14px;
+          padding: 14px;
+          border: 1px dashed rgba(255, 255, 255, 0.14);
+          background: rgba(255, 255, 255, 0.03);
+          color: rgba(236, 255, 251, 0.55);
+          font-size: 12px;
+          line-height: 1.45;
+        }
+
         @keyframes floaty {
           0% {
             transform: translate(-50%, -50%) translateY(0px);

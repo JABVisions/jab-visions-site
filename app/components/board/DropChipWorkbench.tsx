@@ -45,7 +45,7 @@ export function DropChipStage({
   );
 }
 
-/** Edit phase — Palette opens beside the media so it never covers the canvas. */
+/** Edit phase — Palette opens from the dock; tap the canvas to dismiss and return to editing. */
 export default function DropChipWorkbench({
   chip,
   deck,
@@ -81,26 +81,32 @@ export default function DropChipWorkbench({
       <div className={styles.chipSlot}>
         <div className={styles.chipAssembly}>
           <div className={styles.chipFrame} data-frame={mediaFrame}>
-            <DropChipMonitor>{chip}</DropChipMonitor>
-          </div>
-
-          <aside
-            id="drop-studio-palette"
-            className={styles.palettePanel}
-            aria-label="Palette"
-            aria-hidden={!paletteOpen}
-          >
-            <button
-              type="button"
-              className={styles.paletteClose}
-              onClick={() => setPaletteOpen(false)}
-              aria-label="Close Palette"
-              title="Close Palette"
+            <DropChipMonitor
+              overlay={
+                <>
+                  {paletteOpen ? (
+                    <button
+                      type="button"
+                      className={styles.paletteDismiss}
+                      aria-label="Return to canvas"
+                      title="Return to canvas"
+                      onClick={() => setPaletteOpen(false)}
+                    />
+                  ) : null}
+                  <aside
+                    id="drop-studio-palette"
+                    className={styles.palettePanel}
+                    aria-label="Palette"
+                    aria-hidden={!paletteOpen}
+                  >
+                    <div className={styles.paletteBody}>{deck}</div>
+                  </aside>
+                </>
+              }
             >
-              ×
-            </button>
-            <div className={styles.paletteBody}>{deck}</div>
-          </aside>
+              {chip}
+            </DropChipMonitor>
+          </div>
 
           {!paletteOpen ? (
             <div className={styles.chipDock}>

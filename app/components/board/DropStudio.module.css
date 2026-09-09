@@ -546,14 +546,6 @@
   background: #02070a;
 }
 
-/* Editing is a fit view: keep every edge of the captured photo/video visible.
-   Published Drop cards retain their own cover-style presentation. */
-.previewInFrame .mediaLayer > img,
-.previewInFrame .mediaLayer > video {
-  object-fit: contain;
-  object-position: 50% 50%;
-}
-
 .previewInFrame > img,
 .previewInFrame > video {
   width: 100%;
@@ -654,32 +646,6 @@
   gap: 8px;
   margin-top: 2px;
   padding-top: 8px;
-}
-
-.inlineArtPalette {
-  display: grid;
-  gap: 8px;
-  padding-top: 8px;
-  border-top: 1px solid rgba(167, 244, 232, 0.18);
-}
-
-.inlineArtHeading {
-  font-size: 0.58rem;
-  font-weight: 950;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-  color: #ff9de7;
-  text-shadow: 0 0 12px rgba(255, 79, 216, 0.3);
-}
-
-.artCanvasLayer {
-  position: absolute;
-  inset: 0;
-  z-index: 3;
-  width: 100%;
-  height: 100%;
-  touch-action: none;
-  cursor: crosshair;
 }
 
 .workbenchDrawer input {

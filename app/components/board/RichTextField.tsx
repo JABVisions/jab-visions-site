@@ -162,26 +162,8 @@ export function RichTextField({
   const handleInput = useCallback(() => {
     const el = editorRef.current;
     if (!el) return;
-    // Never replace innerHTML while the user is typing. Rebuilding a live
-    // contentEditable tree resets its browser selection (usually to offset 0),
-    // which makes the next character appear at the front and words look
-    // backwards. Sanitize the value sent to React while leaving the active DOM
-    // and caret untouched.
-    const normalized = normalizeInlineMarkup(el.innerHTML);
-    const clean = sanitizeRichHtml(normalized);
-    lastHtmlRef.current = clean;
-    emit({ html: clean });
-
-    if (!applyingHistoryRef.current) {
-      const stack = undoStackRef.current;
-      if (stack[stack.length - 1] !== clean) {
-        stack.push(clean);
-        if (stack.length > MAX_HISTORY) stack.shift();
-        redoStackRef.current = [];
-      }
-      syncHistoryFlags();
-    }
-  }, [emit, syncHistoryFlags]);
+    applyHtml(el.innerHTML, true);
+  }, [applyHtml]);
 
   useEffect(() => {
     const el = editorRef.current;

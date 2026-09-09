@@ -4,10 +4,11 @@
 import React, { useEffect, useMemo, useState } from "react";
 import {
   EVT_UPDATED,
+  depositToBrain,
   type BucketFolder,
   type BucketMemoryDrop,
   readBrain,
-  writeBrain,
+  withdrawFromBrain,
 } from "@/lib/board/bucketBrain";
 
 function clsx(...parts: Array<string | false | null | undefined>) {
@@ -54,7 +55,7 @@ type Props = {
   size?: "sm" | "md";
   item?: BucketMemoryDrop | null;
   // optional: let parent know something happened (for toast)
-  onSignal?: (folder: BucketFolder) => void;
+  onSignal?: (folder: BucketFolder, action: "deposit" | "withdraw") => void;
 };
 
 export default function ReactionRail({
@@ -67,21 +68,26 @@ export default function ReactionRail({
   const disabled = !id;
 
   const [pulse, setPulse] = useState<BucketFolder | null>(null);
-  const [selected, setSelected] = useState<BucketFolder | null>(null);
+  const [selected, setSelected] = useState({
+    pass: false,
+    pin: false,
+    push: false,
+  });
   const [userAuraColor, setUserAuraColor] = useState(fallbackAuraColor);
 
   useEffect(() => {
     const sync = () => {
       setUserAuraColor(readUserAuraColor());
       if (!id) {
-        setSelected(null);
+        setSelected({ pass: false, pin: false, push: false });
         return;
       }
       const brain = readBrain();
-      const match = (["pass", "pin", "push"] as BucketFolder[]).find((folder) =>
-        (brain[folder] ?? []).some((entry) => String(entry.activityId) === id)
-      );
-      setSelected(match ?? null);
+      setSelected({
+        pass: (brain.pass ?? []).some((entry) => String(entry.activityId) === id),
+        pin: (brain.pin ?? []).some((entry) => String(entry.activityId) === id),
+        push: (brain.push ?? []).some((entry) => String(entry.activityId) === id),
+      });
     };
 
     sync();
@@ -93,49 +99,42 @@ export default function ReactionRail({
     };
   }, [id]);
 
-  const deposit = (folder: BucketFolder) => {
+  const toggleReaction = (folder: BucketFolder) => {
     if (!id) return;
 
-    const brain = readBrain();
-    const list = (brain as any)[folder] as Array<{ activityId: string; savedAt: number }>;
+    const exists = (readBrain()[folder] ?? []).some(
+      (entry) => String(entry.activityId) === id
+    );
 
-    const exists = Array.isArray(list) && list.some((x) => String(x.activityId) === id);
-    const nextList = exists
-      ? list // idempotent: don’t duplicate
-      : [
-          {
-            activityId: id,
-            savedAt: Date.now(),
-            ...(item ? { item } : {}),
-          },
-          ...(Array.isArray(list) ? list : []),
-        ].slice(0, 200);
+    if (exists) {
+      withdrawFromBrain(folder, id);
+      setSelected((prev) => ({ ...prev, [folder]: false }));
+      setPulse(folder);
+      window.setTimeout(() => setPulse(null), 220);
+      onSignal?.(folder, "withdraw");
+      return;
+    }
 
-    const next = {
-      ...brain,
-      [folder]: nextList,
-      updatedAt: Date.now(),
-    };
+    depositToBrain(folder, id, item ?? null);
+    setSelected((prev) => ({ ...prev, [folder]: true }));
 
-    writeBrain(next);
-    setSelected(folder);
-
-    // micro interaction
     setPulse(folder);
     window.setTimeout(() => setPulse(null), 220);
 
-    onSignal?.(folder);
+    onSignal?.(folder, "deposit");
   };
 
   const btnSize = size === "sm" ? "btn sm" : "btn";
 
   return (
-    <div className={clsx("rail", size === "sm" && "railSm")}>
+    <div
+      className={clsx("rail", size === "sm" && "railSm")}
+      style={{ "--reaction-aura": userAuraColor } as React.CSSProperties}
+    >
       <button
         type="button"
-        className={clsx(btnSize, selected === "pass" && "selected", pulse === "pass" && "pulse")}
-        style={selected === "pass" ? ({ "--reaction-aura": userAuraColor } as React.CSSProperties) : undefined}
-        onClick={() => deposit("pass")}
+        className={clsx(btnSize, selected.pass && "selected", pulse === "pass" && "pulse")}
+        onClick={() => toggleReaction("pass")}
         disabled={disabled}
         title="PASS (acknowledge)"
       >
@@ -147,9 +146,8 @@ export default function ReactionRail({
 
       <button
         type="button"
-        className={clsx(btnSize, selected === "pin" && "selected", pulse === "pin" && "pulse")}
-        style={selected === "pin" ? ({ "--reaction-aura": userAuraColor } as React.CSSProperties) : undefined}
-        onClick={() => deposit("pin")}
+        className={clsx(btnSize, selected.pin && "selected", pulse === "pin" && "pulse")}
+        onClick={() => toggleReaction("pin")}
         disabled={disabled}
         title="PIN (save)"
       >
@@ -161,9 +159,8 @@ export default function ReactionRail({
 
       <button
         type="button"
-        className={clsx(btnSize, selected === "push" && "selected", pulse === "push" && "pulse")}
-        style={selected === "push" ? ({ "--reaction-aura": userAuraColor } as React.CSSProperties) : undefined}
-        onClick={() => deposit("push")}
+        className={clsx(btnSize, selected.push && "selected", pulse === "push" && "pulse")}
+        onClick={() => toggleReaction("push")}
         disabled={disabled}
         title="PUSH (boost)"
       >
@@ -195,7 +192,7 @@ export default function ReactionRail({
           background: rgba(255,255,255,0.78);
           cursor: pointer;
           color: rgba(0,0,0,0.62);
-          transition: transform 140ms ease, filter 140ms ease, background 140ms ease, border-color 140ms ease, box-shadow 140ms ease;
+          transition: transform 140ms ease, filter 140ms ease, background 140ms ease, border-color 280ms ease, box-shadow 280ms ease, color 280ms ease, text-shadow 280ms ease;
           user-select: none;
         }
 
@@ -237,9 +234,14 @@ export default function ReactionRail({
           text-shadow: 0 0 12px var(--reaction-aura, ${fallbackAuraColor});
         }
 
-        .selected .lbl {
+        .selected .lbl,
+        .selected .ico {
           color: var(--reaction-aura, ${fallbackAuraColor});
           text-shadow: 0 0 12px var(--reaction-aura, ${fallbackAuraColor});
+        }
+
+        .selected .ico svg {
+          filter: drop-shadow(0 0 8px var(--reaction-aura, ${fallbackAuraColor}));
         }
 
         .pulse {

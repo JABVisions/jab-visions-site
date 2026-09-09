@@ -102,12 +102,10 @@ export default function PayDropsMiniPanel({
   };
 
   async function openCheckout(drop: PayDrop) {
-    if (drop.checkoutUrl) {
+    if (drop.provider === "payment_link" && drop.checkoutUrl) {
       window.open(drop.checkoutUrl, "_blank", "noopener,noreferrer");
       return;
     }
-
-    if (drop.provider !== "authorize_net_accept_hosted" && drop.checkoutUrl) return;
 
     try {
       setBusyId(drop.id);
@@ -119,7 +117,7 @@ export default function PayDropsMiniPanel({
       });
     } catch (error) {
       window.alert(
-        error instanceof Error ? error.message : "Could not open National Bankcard checkout."
+        error instanceof Error ? error.message : "Could not open Stripe checkout."
       );
     } finally {
       setBusyId(null);
@@ -203,7 +201,7 @@ export default function PayDropsMiniPanel({
                   disabled={busyId === d.id}
                   className="mt-3 inline-flex rounded-full px-3 py-2 text-xs font-extrabold tracking-[0.12em] uppercase bg-white/70 border border-black/10 text-[rgba(255,0,190,0.9)] disabled:opacity-60 disabled:cursor-wait"
                 >
-                  {busyId === d.id ? "Opening..." : "Checkout →"}
+                  {busyId === d.id ? "Opening..." : "Pay on Board"}
                 </button>
               ) : null}
             </div>
