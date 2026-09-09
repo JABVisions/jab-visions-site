@@ -35,7 +35,7 @@ export type DropBubble = {
   emoji?: string;
 };
 
-type AssetKind = "media" | "music" | "youtube" | "link" | "doc" | "note";
+type AssetKind = "media" | "music" | "youtube" | "link" | "doc" | "note" | "dropbook";
 type DropDestination = "assets" | "portfolio" | "projects";
 
 type AssetItem = {
@@ -58,6 +58,22 @@ type AssetItem = {
 
     // note
     text?: string;
+
+    // dropbook — cover + serialized shelf pages
+    dropbook?: {
+      bookColor?: string;
+      coverUrl?: string;
+      pageCount: number;
+      pages: Array<{
+        id: string;
+        label?: string;
+        mode?: string;
+        linkFlavor?: string;
+        linkUrl?: string;
+        embedUrl?: string;
+        previewUrl?: string;
+      }>;
+    };
   };
 };
 
@@ -141,6 +157,8 @@ function kindLabel(kind: AssetKind) {
       return "Link Drop";
     case "note":
       return "Note Drop";
+    case "dropbook":
+      return "Dropbook";
   }
 }
 
@@ -158,6 +176,8 @@ function kindEmoji(kind: AssetKind) {
       return "🔗";
     case "note":
       return "📝";
+    case "dropbook":
+      return "📕";
   }
 }
 
@@ -634,6 +654,105 @@ function NoteDropTile({ a }: { a: AssetItem }) {
   );
 }
 
+/** A placed Dropbook: cover plus a readable strip of its pages. */
+function DropbookDropTile({ a }: { a: AssetItem }) {
+  const book = a.payload?.dropbook;
+  const pages = book?.pages ?? [];
+  const [openPage, setOpenPage] = useState(-1);
+  const page = openPage >= 0 ? pages[openPage] : undefined;
+
+  return (
+    <TileFrame>
+      <DropHeader
+        emoji={kindEmoji("dropbook")}
+        title={a.title}
+        meta={`${pages.length} page${pages.length === 1 ? "" : "s"}`}
+        description={a.description}
+      />
+      <div className="mt-3 px-4 pb-4">
+        <div
+          className="overflow-hidden rounded-2xl border border-white/10"
+          style={{ background: book?.bookColor || "rgba(255,255,255,0.05)" }}
+        >
+          {page ? (
+            page.embedUrl ? (
+              <iframe
+                title={page.label ?? "Dropbook page"}
+                src={page.embedUrl}
+                className="w-full h-52"
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                loading="lazy"
+              />
+            ) : page.previewUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={page.previewUrl}
+                alt={page.label ?? ""}
+                className="block max-h-72 w-full object-contain"
+                loading="lazy"
+              />
+            ) : page.linkUrl ? (
+              <div className="p-4 text-sm text-white/80 break-words">
+                {page.linkUrl}
+                <a
+                  href={page.linkUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="mt-3 inline-flex text-sm text-lime-200/80 transition hover:text-lime-200"
+                >
+                  Open →
+                </a>
+              </div>
+            ) : (
+              <div className="grid min-h-32 place-items-center text-sm text-white/60">
+                {page.label ?? "Page"}
+              </div>
+            )
+          ) : book?.coverUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={book.coverUrl}
+              alt={a.title}
+              className="block max-h-72 w-full object-contain"
+              loading="lazy"
+            />
+          ) : (
+            <div className="grid min-h-32 place-items-center text-sm text-white/70">Cover</div>
+          )}
+        </div>
+
+        <div className="mt-3 flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => setOpenPage(-1)}
+            className={`rounded-full border px-3 py-1 text-xs transition ${
+              openPage === -1
+                ? "border-white/40 bg-white/15 text-white"
+                : "border-white/15 bg-white/5 text-white/65 hover:text-white"
+            }`}
+          >
+            Cover
+          </button>
+          {pages.map((p, i) => (
+            <button
+              key={p.id}
+              type="button"
+              onClick={() => setOpenPage(i)}
+              className={`rounded-full border px-3 py-1 text-xs transition ${
+                openPage === i
+                  ? "border-white/40 bg-white/15 text-white"
+                  : "border-white/15 bg-white/5 text-white/65 hover:text-white"
+              }`}
+            >
+              {p.label?.trim() || `Page ${i + 1}`}
+            </button>
+          ))}
+        </div>
+      </div>
+    </TileFrame>
+  );
+}
+
 function EmbeddedAssetTile({ a }: { a: AssetItem }) {
   switch (a.kind) {
     case "media":
@@ -648,6 +767,8 @@ function EmbeddedAssetTile({ a }: { a: AssetItem }) {
       return <DocDropTile a={a} />;
     case "note":
       return <NoteDropTile a={a} />;
+    case "dropbook":
+      return <DropbookDropTile a={a} />;
     default:
       return <NoteDropTile a={a} />;
   }

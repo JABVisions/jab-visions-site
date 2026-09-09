@@ -50,10 +50,27 @@ import { saveDropDraft, draftToFile, type DropDraft } from "@/lib/board/dropDraf
 import DropDraftsDrawer from "./DropDraftsDrawer";
 import VocalVisualizer from "./VocalVisualizer";
 import VoicePresets from "./VoicePresets";
+import {
+  DROP_FLAVOR_LABEL,
+  DROP_FLAVOR_LINK_ROW,
+  DROP_FLAVOR_SUB,
+} from "@/lib/board/dropFlavors";
+import {
+  hydrateDropbookProgress,
+  saveDropbookProgress,
+  type RestoredDropbookProgress,
+} from "@/lib/board/dropbookProgress";
+import {
+  linkFlavorGlyph,
+  linkFlavorLabel,
+  linkFlavorPlaceholder,
+  resolveStudioLink,
+  type StudioLinkFlavor,
+} from "@/lib/board/studioLinks";
 
 type CaptureMode = "photo" | "video" | "audio" | "art" | "descript";
 type FacingMode = "user" | "environment";
-type Phase = "choose" | "capture" | "edit";
+type Phase = "choose" | "capture" | "edit" | "link";
 
 /** A single page/slot in an in-progress Dropbook collection. */
 export type DropbookChip = {
@@ -67,6 +84,10 @@ export type DropbookChip = {
   descriptDocId?: string;
   descriptTitle?: string;
   descriptPreview?: string;
+  /** Link / embed page (YouTube clip, news, music, URL). */
+  linkFlavor?: StudioLinkFlavor;
+  linkUrl?: string;
+  embedUrl?: string;
 };
 
 /** Page zero — the Dropbook's permanent cover identity. */
@@ -135,6 +156,9 @@ type DropbookShelfSlot =
       mode?: CaptureMode;
       descriptTitle?: string;
       descriptPreview?: string;
+      linkFlavor?: StudioLinkFlavor;
+      linkUrl?: string;
+      embedUrl?: string;
     }
   | {
       id: string;
@@ -205,6 +229,7 @@ export default function DropStudioStage({
   value,
   onChange,
   onComplete,
+  onCompleteDropbook,
   onClose,
   studioDraftRef,
   allowedModes = DEFAULT_CAPTURE_MODES,
@@ -216,6 +241,14 @@ export default function DropStudioStage({
   value: DropCustomization;
   onChange: (next: DropCustomization) => void;
   onComplete: (file: File, source: "capture" | "upload") => void;
+  /** Finished Dropbook handed to the surface that can store it (Drop Pad Assets). */
+  onCompleteDropbook?: (payload: {
+    id: string;
+    title: string;
+    bookColor: string;
+    coverUrl?: string;
+    pages: DropbookChip[];
+  }) => void;
   onClose: () => void;
   /** Live studio customizations (frame/rotation/etc.) without parent re-renders. */
   studioDraftRef?: React.MutableRefObject<DropCustomization | undefined>;
@@ -270,6 +303,11 @@ export default function DropStudioStage({
   const [dropbookCoverMode, setDropbookCoverMode] = useState<"choose" | "blank">("choose");
   const [dropbookCoverBlankColor, setDropbookCoverBlankColor] = useState("#000000");
   const [dropbookCoverDragOver, setDropbookCoverDragOver] = useState(false);
+  const [linkFlavor, setLinkFlavor] = useState<StudioLinkFlavor | null>(null);
+  const [linkDraftUrl, setLinkDraftUrl] = useState("");
+  const [linkError, setLinkError] = useState("");
+  const dropbookPersistTimerRef = useRef<number | null>(null);
+  const coverPickRef = useRef<HTMLInputElement>(null);
   const [audioPlaying, setAudioPlaying] = useState(false);
   const [studioValue, setStudioValue] = useState<DropCustomization>(value);
 
@@ -447,6 +485,9 @@ export default function DropStudioStage({
     setDropbookIntroKey(0);
     setDropbookEditingCover(false);
     setDropbookCoverMode("choose");
+    setLinkFlavor(null);
+    setLinkDraftUrl("");
+    setLinkError("");
     dropbookPageSeqRef.current = 0;
     dropbookPageFilesRef.current.clear();
     dropbookPageDocsRef.current.clear();
@@ -522,6 +563,20 @@ export default function DropStudioStage({
         return;
       }
 
+      if (chip.linkFlavor && chip.linkUrl) {
+        editingDropbookPageIdRef.current = chipId;
+        setDropbookEditingDescriptDoc(null);
+        setLinkFlavor(chip.linkFlavor);
+        setLinkDraftUrl(chip.linkUrl);
+        setLinkError("");
+        setDropbookEditingCover(false);
+        setDropbookCoverMode("choose");
+        setDropbookCreating(true);
+        setPhase("link");
+        stopCamera();
+        return;
+      }
+
       if (chip.mode === "descript") {
         const doc = dropbookPageDocsRef.current.get(chipId);
         if (!doc) {
@@ -531,6 +586,7 @@ export default function DropStudioStage({
         editingDropbookPageIdRef.current = chipId;
         setDropbookEditingDescriptDoc(doc);
         setMode("descript");
+        setLinkFlavor(null);
         setDropbookEditingCover(false);
         setDropbookCoverMode("choose");
         setDropbookCreating(true);
@@ -543,6 +599,7 @@ export default function DropStudioStage({
         return;
       }
       setDropbookEditingDescriptDoc(null);
+      setLinkFlavor(null);
       fileRef.current = file;
       setMediaKind(
         file.type.startsWith("audio")
@@ -609,6 +666,9 @@ export default function DropStudioStage({
             descriptDocId: chip.descriptDocId,
             descriptTitle: chip.descriptTitle,
             descriptPreview: chip.descriptPreview,
+            linkFlavor: chip.linkFlavor,
+            linkUrl: chip.linkUrl,
+            embedUrl: chip.embedUrl,
           },
         ];
       });
@@ -627,6 +687,9 @@ export default function DropStudioStage({
         | "descriptDocId"
         | "descriptTitle"
         | "descriptPreview"
+        | "linkFlavor"
+        | "linkUrl"
+        | "embedUrl"
       >,
       file?: File | null,
       doc?: DescriptDoc | null
@@ -644,6 +707,9 @@ export default function DropStudioStage({
             descriptDocId: chip.descriptDocId,
             descriptTitle: chip.descriptTitle,
             descriptPreview: chip.descriptPreview,
+            linkFlavor: chip.linkFlavor,
+            linkUrl: chip.linkUrl,
+            embedUrl: chip.embedUrl,
           };
         })
       );
@@ -679,6 +745,38 @@ export default function DropStudioStage({
     },
     [dropbookCover, dropbookPages, flashSaveNote]
   );
+
+  const applyFileToCover = useCallback(
+    (file: File) => {
+      const previewUrl = URL.createObjectURL(file);
+      setDropbookCover((prev) => {
+        if (!prev) return prev;
+        if (prev.previewUrl?.startsWith("blob:")) URL.revokeObjectURL(prev.previewUrl);
+        return {
+          ...prev,
+          previewUrl,
+          complete: true,
+          coverSource: "drop",
+          sourceChipId: undefined,
+          mode: "photo",
+        };
+      });
+      setDropbookEditingCover(false);
+      setDropbookCoverMode("choose");
+      flashSaveNote("Dropbook cover set ✦");
+    },
+    [flashSaveNote]
+  );
+
+  /** Cover from an existing drop: newest shelf page with a preview, else pick a file. */
+  const useExistingDropAsCover = useCallback(() => {
+    const withPreview = [...dropbookPages].reverse().find((page) => page.previewUrl);
+    if (withPreview) {
+      applyPageToCover(withPreview.id);
+      return;
+    }
+    coverPickRef.current?.click();
+  }, [dropbookPages, applyPageToCover]);
 
   const commitCoverBlank = useCallback(
     (file: File) => {
@@ -724,6 +822,9 @@ export default function DropStudioStage({
       mode: chip.mode,
       descriptTitle: chip.descriptTitle,
       descriptPreview: chip.descriptPreview,
+      linkFlavor: chip.linkFlavor,
+      linkUrl: chip.linkUrl,
+      embedUrl: chip.embedUrl,
     }));
     const shelfFull = dropbookPages.length >= DROPBOOK_MAX_PAGES;
     const placeholder: DropbookShelfSlot[] = shelfFull
@@ -752,9 +853,44 @@ export default function DropStudioStage({
   const returnToDropbookShelf = useCallback(() => {
     editingDropbookPageIdRef.current = null;
     setDropbookEditingDescriptDoc(null);
+    setLinkFlavor(null);
+    setLinkDraftUrl("");
+    setLinkError("");
     resetCreationSurface();
     setDropbookCreating(false);
   }, [resetCreationSurface]);
+
+  const applyRestoredDropbook = useCallback((saved: RestoredDropbookProgress) => {
+    setDropbookCoverBlankColor(saved.coverBlankColor || "#000000");
+    setDropbookCover({
+      id: saved.cover.id,
+      bookColor: saved.cover.bookColor,
+      bookColorSet: saved.cover.bookColorSet,
+      complete: saved.cover.complete,
+      coverSource: saved.cover.coverSource,
+      sourceChipId: saved.cover.sourceChipId,
+      mode: saved.cover.mode,
+      previewUrl: saved.cover.previewUrl,
+    });
+    dropbookPageFilesRef.current.clear();
+    dropbookPageDocsRef.current.clear();
+    const pages: DropbookChip[] = saved.pages.map((page, index) => {
+      if (page.sourceFile) dropbookPageFilesRef.current.set(page.id, page.sourceFile);
+      const seq = Number(String(page.id).replace(/\D+/g, "")) || index + 1;
+      if (seq > dropbookPageSeqRef.current) dropbookPageSeqRef.current = seq;
+      return {
+        id: page.id,
+        dropId: page.dropId,
+        mode: page.mode,
+        label: page.label,
+        previewUrl: page.previewUrl,
+        linkFlavor: page.linkFlavor,
+        linkUrl: page.linkUrl,
+        embedUrl: page.embedUrl,
+      };
+    });
+    setDropbookPages(pages);
+  }, []);
 
   const startDropbookSession = useCallback(() => {
     // Always play the intro — never nest these side effects inside a setState updater
@@ -778,11 +914,22 @@ export default function DropStudioStage({
     setDropbookEditingCover(false);
     setDropbookCoverMode("choose");
     setDropbookCoverBlankColor("#000000");
+    setLinkFlavor(null);
+    setLinkDraftUrl("");
+    setLinkError("");
     resetCreationSurface();
     setDropbookIntroKey((key) => key + 1);
     setDropbookIntroPhase("splash");
     setIsDropbookMode(true);
-  }, [resetCreationSurface]);
+
+    // A book in progress follows the user across devices — the splash still plays
+    // while the saved shelf hydrates behind it.
+    void hydrateDropbookProgress().then((saved) => {
+      if (!saved) return;
+      applyRestoredDropbook(saved);
+      flashSaveNote("Dropbook shelf restored ✦");
+    });
+  }, [resetCreationSurface, applyRestoredDropbook, flashSaveNote]);
 
   const exitDropbookSession = useCallback(() => {
     setIsDropbookMode(false);
@@ -790,11 +937,18 @@ export default function DropStudioStage({
     setDropbookIntroPhase(null);
     setDropbookEditingCover(false);
     setDropbookCoverMode("choose");
+    setLinkFlavor(null);
+    setLinkDraftUrl("");
+    setLinkError("");
+    setPhase((prev) => (prev === "link" ? "choose" : prev));
   }, []);
 
   const goDropbookHome = useCallback(() => {
     editingDropbookPageIdRef.current = null;
     setDropbookEditingDescriptDoc(null);
+    setLinkFlavor(null);
+    setLinkDraftUrl("");
+    setLinkError("");
     resetCreationSurface();
     setDropbookCreating(false);
     setDropbookIntroPhase("workspace");
@@ -805,6 +959,140 @@ export default function DropStudioStage({
       setMode(fallback);
     }
   }, [resetCreationSurface, mode, allowedModes]);
+
+  const persistDropbookShelf = useCallback(() => {
+    if (!dropbookCover) return;
+    void saveDropbookProgress({
+      coverBlankColor: dropbookCoverBlankColor,
+      cover: {
+        id: dropbookCover.id,
+        bookColor: dropbookCover.bookColor,
+        bookColorSet: dropbookCover.bookColorSet,
+        complete: dropbookCover.complete,
+        coverSource: dropbookCover.coverSource,
+        sourceChipId: dropbookCover.sourceChipId,
+        mode: dropbookCover.mode,
+        previewUrl: dropbookCover.previewUrl,
+      },
+      pages: dropbookPages.map((page) => ({
+        id: page.id,
+        dropId: page.dropId,
+        mode: page.mode,
+        label: page.label,
+        linkFlavor: page.linkFlavor,
+        linkUrl: page.linkUrl,
+        embedUrl: page.embedUrl,
+        previewUrl: page.previewUrl,
+        sourceFile: dropbookPageFilesRef.current.get(page.id),
+      })),
+    });
+  }, [dropbookCover, dropbookCoverBlankColor, dropbookPages]);
+
+  useEffect(() => {
+    if (!isDropbookMode || !dropbookCover) return;
+    if (dropbookPersistTimerRef.current) window.clearTimeout(dropbookPersistTimerRef.current);
+    dropbookPersistTimerRef.current = window.setTimeout(persistDropbookShelf, 450);
+    return () => {
+      if (dropbookPersistTimerRef.current) window.clearTimeout(dropbookPersistTimerRef.current);
+    };
+  }, [isDropbookMode, dropbookCover, dropbookPages, dropbookCoverBlankColor, persistDropbookShelf]);
+
+  const openLinkCapture = useCallback(
+    (flavor: StudioLinkFlavor) => {
+      if (!dropbookCover?.complete) {
+        flashSaveNote("Set your Dropbook cover first");
+        return;
+      }
+      if (!editingDropbookPageIdRef.current && dropbookShelfFull) {
+        flashSaveNote("Dropbook holds up to 3 drops plus your cover");
+        return;
+      }
+      editingDropbookPageIdRef.current = null;
+      setDropbookEditingDescriptDoc(null);
+      setDropbookEditingCover(false);
+      setDropbookCoverMode("choose");
+      setDropbookCreating(true);
+      setLinkFlavor(flavor);
+      setLinkDraftUrl("");
+      setLinkError("");
+      stopCamera();
+      setDrawOpen(false);
+      setAudioPlaying(false);
+      setPhase("link");
+    },
+    [dropbookCover, dropbookShelfFull, stopCamera, flashSaveNote]
+  );
+
+  const commitStudioLink = useCallback(() => {
+    if (!linkFlavor) return;
+    const resolved = resolveStudioLink(linkFlavor, linkDraftUrl);
+    if (!resolved.ok) {
+      setLinkError(resolved.error);
+      return;
+    }
+    const drop = resolved.drop;
+    if (!dropbookCover?.complete) {
+      flashSaveNote("Set your Dropbook cover first");
+      return;
+    }
+    const chipFields = {
+      mode: undefined,
+      label: drop.title || linkFlavorLabel(drop.flavor),
+      previewUrl: drop.previewUrl,
+      linkFlavor: drop.flavor,
+      linkUrl: drop.url,
+      embedUrl: drop.embedUrl,
+      descriptDocId: undefined,
+      descriptTitle: undefined,
+      descriptPreview: undefined,
+    };
+    const editingPageId = editingDropbookPageIdRef.current;
+    if (editingPageId) {
+      updateDropbookPage(editingPageId, chipFields, null, null);
+      editingDropbookPageIdRef.current = null;
+      returnToDropbookShelf();
+      flashSaveNote("Link page updated ✦");
+      return;
+    }
+    if (dropbookShelfFull) {
+      flashSaveNote("Dropbook holds up to 3 drops plus your cover");
+      return;
+    }
+    appendDropbookPage(chipFields, null, null);
+    returnToDropbookShelf();
+    flashSaveNote(
+      drop.flavor === "youtube" ? "YouTube clip added to Dropbook ✦" : "Link page added to Dropbook ✦"
+    );
+  }, [
+    linkFlavor,
+    linkDraftUrl,
+    dropbookCover,
+    dropbookShelfFull,
+    updateDropbookPage,
+    appendDropbookPage,
+    returnToDropbookShelf,
+    flashSaveNote,
+  ]);
+
+  const placeDropbookInAssets = useCallback(() => {
+    if (!dropbookCover?.complete) {
+      flashSaveNote("Set your Dropbook cover first");
+      return;
+    }
+    if (dropbookPages.length === 0) {
+      flashSaveNote("Add at least one page to your Dropbook");
+      return;
+    }
+    persistDropbookShelf();
+    onCompleteDropbook?.({
+      id: dropbookCover.id,
+      title: `Dropbook · ${new Date().toLocaleDateString()}`,
+      bookColor: dropbookCover.bookColor,
+      coverUrl: dropbookCover.previewUrl,
+      pages: dropbookPages,
+    });
+    flashSaveNote("Dropbook placed in Assets ✦");
+  }, [dropbookCover, dropbookPages, persistDropbookShelf, onCompleteDropbook, flashSaveNote]);
 
   const commitDescriptToDropbook = useCallback(
     (doc: DescriptDoc) => {
@@ -820,6 +1108,9 @@ export default function DropStudioStage({
         descriptDocId: doc.id,
         descriptTitle: doc.title?.trim() || "Untitled Descript",
         descriptPreview: previewText,
+        linkFlavor: undefined,
+        linkUrl: undefined,
+        embedUrl: undefined,
       };
       const editingPageId = editingDropbookPageIdRef.current;
       if (editingPageId) {
@@ -1074,6 +1365,9 @@ export default function DropStudioStage({
             descriptDocId: undefined,
             descriptTitle: undefined,
             descriptPreview: undefined,
+            linkFlavor: undefined,
+            linkUrl: undefined,
+            embedUrl: undefined,
           },
           file,
           null
@@ -1286,7 +1580,9 @@ export default function DropStudioStage({
               DROP STUDIO
             </div>
             <span className="studioPill">
-              {isDropbookMode
+              {phase === "link" && linkFlavor
+                ? `${linkFlavorLabel(linkFlavor)} Link`
+                : isDropbookMode
                 ? "Dropbook Mode"
                 : mode === "descript"
                   ? "Descript"
@@ -1345,6 +1641,9 @@ export default function DropStudioStage({
                       }`}
                       onClick={() => {
                         if (!enabled) return;
+                        setLinkFlavor(null);
+                        setLinkDraftUrl("");
+                        setLinkError("");
                         if (isDropbookMode) {
                           if (dropbookShelfFull) {
                             flashSaveNote("Dropbook holds up to 3 drops plus your cover");
@@ -1362,6 +1661,7 @@ export default function DropStudioStage({
                         }
                         // Switching mode mid-edit returns to live capture in that mode.
                         if (phase === "edit" && mode !== "descript") retake();
+                        else if (phase === "link") setPhase("choose");
                         setMode(m);
                       }}
                       disabled={recording || !enabled}
@@ -1381,6 +1681,33 @@ export default function DropStudioStage({
                   );
                 })}
               </nav>
+
+              {/* Links only become a Dropbook page type once a book is open. */}
+              {isDropbookMode && dropbookIntroPhase === "workspace" ? (
+                <div className="studioLinkBar" role="tablist" aria-label="Dropbook link pages">
+                  {DROP_FLAVOR_LINK_ROW.map((flavor) => {
+                    const linkKey = flavor as StudioLinkFlavor;
+                    const on = linkFlavor === linkKey && phase === "link";
+                    return (
+                      <button
+                        key={flavor}
+                        type="button"
+                        role="tab"
+                        className={`studioLinkBtn ${on ? "on" : ""}`}
+                        onClick={() => openLinkCapture(linkKey)}
+                        aria-selected={on}
+                        title={DROP_FLAVOR_LABEL[flavor]}
+                      >
+                        <span className="studioLinkGlyph" aria-hidden>
+                          {linkFlavorGlyph(linkKey)}
+                        </span>
+                        <span className="studioLinkName">{DROP_FLAVOR_LABEL[flavor]}</span>
+                        <small className="studioLinkSub">{DROP_FLAVOR_SUB[flavor]}</small>
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : null}
 
               <div className="dropbookEntryRow">
                 <button
@@ -1412,6 +1739,20 @@ export default function DropStudioStage({
                     <span className="dropbookHomeIcon" aria-hidden>
                       ⌂
                     </span>
+                  </button>
+                ) : null}
+                {isDropbookMode &&
+                dropbookCover?.complete &&
+                dropbookPages.length > 0 &&
+                !dropbookCreating ? (
+                  <button
+                    type="button"
+                    className="dropbookPlaceBtn"
+                    onClick={placeDropbookInAssets}
+                    title="Place Dropbook in Assets"
+                    aria-label="Place Dropbook in Assets"
+                  >
+                    Place
                   </button>
                 ) : null}
               </div>
@@ -1510,11 +1851,20 @@ export default function DropStudioStage({
                               <img className={chipStyles.preview} src={slot.previewUrl} alt="" />
                             ) : (
                               <span className={chipStyles.modeGlyph} aria-hidden>
-                                {slot.mode ? modeGlyph(slot.mode) : "✦"}
+                                {slot.linkFlavor
+                                  ? linkFlavorGlyph(slot.linkFlavor)
+                                  : slot.mode
+                                    ? modeGlyph(slot.mode)
+                                    : "✦"}
                               </span>
                             )}
                             <span className={chipStyles.footer}>
-                              {slot.label ?? (slot.mode ? modeLabel(slot.mode) : "Drop")}
+                              {slot.label ??
+                                (slot.linkFlavor
+                                  ? linkFlavorLabel(slot.linkFlavor)
+                                  : slot.mode
+                                    ? modeLabel(slot.mode)
+                                    : "Drop")}
                             </span>
                           </button>
                         )
@@ -1625,9 +1975,7 @@ export default function DropStudioStage({
                       <button
                         type="button"
                         className="dropbookCoverChooseBtn"
-                        onClick={() =>
-                          flashSaveNote("Drag any shelf drop onto the Cover slate")
-                        }
+                        onClick={useExistingDropAsCover}
                       >
                         <span className="dropbookCoverChooseGlyph" aria-hidden>
                           📎
@@ -1637,6 +1985,17 @@ export default function DropStudioStage({
                           Drag a drop onto Cover
                         </span>
                       </button>
+                      <input
+                        ref={coverPickRef}
+                        type="file"
+                        accept="image/*"
+                        hidden
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          e.target.value = "";
+                          if (file) applyFileToCover(file);
+                        }}
+                      />
                     </div>
                   </div>
                 </div>
@@ -1681,6 +2040,73 @@ export default function DropStudioStage({
                   }
                   defaultDestination={descriptDestination}
                 />
+              ) : phase === "link" && linkFlavor ? (
+                <div className="capMonitorHost">
+                  <div className="studioLinkCapture" aria-label={`${linkFlavorLabel(linkFlavor)} link`}>
+                    <div className="studioLinkCaptureHead">
+                      <span className="studioLinkCaptureGlyph" aria-hidden>
+                        {linkFlavorGlyph(linkFlavor)}
+                      </span>
+                      <div>
+                        <div className="studioLinkCaptureTitle">{linkFlavorLabel(linkFlavor)}</div>
+                        <div className="studioLinkCaptureHint">
+                          Add this clip or link as a Dropbook page
+                        </div>
+                      </div>
+                    </div>
+                    <form
+                      className="studioLinkCaptureForm"
+                      onSubmit={(e) => {
+                        e.preventDefault();
+                        commitStudioLink();
+                      }}
+                    >
+                      <input
+                        className="studioLinkCaptureInput"
+                        value={linkDraftUrl}
+                        onChange={(e) => {
+                          setLinkDraftUrl(e.target.value);
+                          setLinkError("");
+                        }}
+                        placeholder={linkFlavorPlaceholder(linkFlavor)}
+                        autoFocus
+                        inputMode="url"
+                        autoCapitalize="off"
+                        autoCorrect="off"
+                        spellCheck={false}
+                      />
+                      {linkError ? <div className="studioLinkCaptureError">{linkError}</div> : null}
+                      <div className="studioLinkCaptureActions">
+                        <button
+                          type="button"
+                          className="studioGhost"
+                          onClick={returnToDropbookShelf}
+                        >
+                          Cancel
+                        </button>
+                        <button type="submit" className="studioLinkCaptureSubmit">
+                          {editingDropbookPageIdRef.current ? "Update page →" : "Add to Dropbook →"}
+                        </button>
+                      </div>
+                    </form>
+                    {linkFlavor === "youtube" && linkDraftUrl.trim() ? (
+                      <div className="studioLinkCapturePreview">
+                        {(() => {
+                          const resolved = resolveStudioLink("youtube", linkDraftUrl);
+                          if (!resolved.ok || !resolved.drop.embedUrl) return null;
+                          return (
+                            <iframe
+                              title="YouTube preview"
+                              src={resolved.drop.embedUrl}
+                              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                              allowFullScreen
+                            />
+                          );
+                        })()}
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
               ) : phase === "choose" ? (
                 <div className="capMonitorHost">
                   <DropChipStage

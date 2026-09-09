@@ -4,6 +4,10 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { supabaseBrowser } from "@/lib/supabase/browser";
+import {
+  placeDropbookInDropPadAssets,
+  upsertDropPadAssetRemote,
+} from "@/lib/board/dropPadAssets";
 
 import { createActivity, type BoardActivityKind } from "@/lib/board/activity";
 import { readCurrentBoardIdentity } from "@/lib/board/currentProfile";
@@ -1669,6 +1673,16 @@ function BoardDropConsoleFields({
         value={customizations}
         onChange={setCustomizations}
         onComplete={(file) => uploadToBoardMedia(file, "capture")}
+        onCompleteDropbook={(book) => {
+          const asset = placeDropbookInDropPadAssets(book);
+          setStudioOpen(false);
+          void (async () => {
+            const client = supabaseBrowser();
+            const { data } = await client.auth.getUser();
+            const userId = data.user?.id;
+            if (userId) await upsertDropPadAssetRemote(client, userId, asset);
+          })();
+        }}
         onClose={() => setStudioOpen(false)}
       />
 

@@ -24,6 +24,8 @@ export function kindLabel(kind: AssetKind) {
       return "Link Drop";
     case "note":
       return "Note Drop";
+    case "dropbook":
+      return "Dropbook";
   }
 }
 
@@ -41,6 +43,8 @@ export function kindEmoji(kind: AssetKind) {
       return "🔗";
     case "note":
       return "📝";
+    case "dropbook":
+      return "📕";
   }
 }
 
