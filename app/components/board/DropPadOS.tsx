@@ -794,60 +794,45 @@ function DropbookDropTile({ a }: { a: AssetItem }) {
   );
 }
 
-/** Edge affordances so the spaces are reachable without knowing the swipe. */
-function SpaceEdges({
+/**
+ * Space navigation lives in the always-visible OS header rather than floating
+ * over the orbs — the screen is user-resizable, so anything pinned inside the
+ * orb area can scroll out of reach (and crowd the bubbles on the way).
+ */
+function SpaceSwitcher({
   space,
   onGo,
 }: {
   space: SpatialSpace;
   onGo: (next: SpatialSpace) => void;
 }) {
-  if (space !== "home") {
-    return (
-      <button
-        type="button"
-        onClick={() => onGo("home")}
-        className="absolute left-1/2 top-3 z-20 -translate-x-1/2 rounded-full border border-white/15 bg-black/45 px-4 py-1.5 text-xs text-white/70 backdrop-blur-sm transition hover:text-white"
-      >
-        ⌂ Orb Home
-      </button>
-    );
-  }
-
-  const edge =
-    "absolute z-20 rounded-full border border-white/12 bg-black/35 px-3 py-1.5 text-[11px] text-white/55 backdrop-blur-sm transition hover:text-white/90";
+  const stops: Array<{ key: SpatialSpace; label: string }> = [
+    { key: "activity", label: "↑ Activity" },
+    { key: "free", label: "← Free" },
+    { key: "home", label: "⌂ Orb Home" },
+    { key: "work", label: "Work →" },
+    { key: "bucketBrain", label: "↓ Brain" },
+  ];
 
   return (
-    <>
-      <button
-        type="button"
-        onClick={() => onGo("activity")}
-        className={`${edge} left-1/2 top-3 -translate-x-1/2`}
-      >
-        ↑ Activity Channel
-      </button>
-      <button
-        type="button"
-        onClick={() => onGo("bucketBrain")}
-        className={`${edge} bottom-14 left-1/2 -translate-x-1/2`}
-      >
-        ↓ Bucket Brain
-      </button>
-      <button
-        type="button"
-        onClick={() => onGo("free")}
-        className={`${edge} left-3 top-1/2 -translate-y-1/2`}
-      >
-        ← Free
-      </button>
-      <button
-        type="button"
-        onClick={() => onGo("work")}
-        className={`${edge} right-3 top-1/2 -translate-y-1/2`}
-      >
-        Work →
-      </button>
-    </>
+    <div className="flex flex-wrap items-center gap-1.5">
+      {stops.map((stop) => (
+        <button
+          key={stop.key}
+          type="button"
+          onClick={() => onGo(stop.key)}
+          aria-current={space === stop.key}
+          className={clsx(
+            "rounded-full border px-2.5 py-1 text-[11px] transition",
+            space === stop.key
+              ? "border-lime-300/40 bg-lime-300/15 text-lime-100"
+              : "border-white/12 bg-black/30 text-white/55 hover:text-white/90"
+          )}
+        >
+          {stop.label}
+        </button>
+      ))}
+    </div>
   );
 }
 
@@ -2319,7 +2304,7 @@ export default function DropPadOS({
           {osOn && bootPhase === "ready" && (
             <div className="relative">
               <div className="sticky top-0 z-20 px-4 pt-4">
-                <div className="flex items-center justify-between gap-3">
+                <div className="flex flex-wrap items-center justify-between gap-3">
                   {mode === "screen" ? (
                     <button
                       type="button"
@@ -2335,7 +2320,7 @@ export default function DropPadOS({
                       ← Back to Drops
                     </button>
                   ) : (
-                    <div className="text-sm text-white/65">{SPACE_LABEL[space]}</div>
+                    <SpaceSwitcher space={space} onGo={navSpace} />
                   )}
 
                   <div className="flex items-center gap-3">
@@ -2509,8 +2494,6 @@ export default function DropPadOS({
                       />
                     </div>
                   </div>
-
-                  <SpaceEdges space={space} onGo={navSpace} />
                 </div>
               )}
 
