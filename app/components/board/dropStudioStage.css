@@ -417,6 +417,15 @@
   align-items: center;
   justify-content: center;
 }
+.capMonitorHost.voiceStudioHost {
+  align-items: stretch;
+  justify-content: flex-start;
+}
+.capMonitorHost.voiceStudioHost > :global(*) {
+  flex: 1 1 auto;
+  width: 100%;
+  min-height: 0;
+}
 .capMonitorHost :global([data-drop-chip-host]) {
   flex: 1 1 auto;
   width: 100%;

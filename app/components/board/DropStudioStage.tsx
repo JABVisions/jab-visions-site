@@ -50,6 +50,7 @@ import { saveDropDraft, draftToFile, type DropDraft } from "@/lib/board/dropDraf
 import DropDraftsDrawer from "./DropDraftsDrawer";
 import VocalVisualizer from "./VocalVisualizer";
 import VoicePresets from "./VoicePresets";
+import VoiceStudio from "./VoiceStudio";
 
 type CaptureMode = "photo" | "video" | "audio" | "art" | "descript";
 type FacingMode = "user" | "environment";
@@ -1663,6 +1664,15 @@ export default function DropStudioStage({
                   }
                   defaultDestination={descriptDestination}
                 />
+              ) : mode === "audio" && (phase === "choose" || phase === "capture") ? (
+                <div className="capMonitorHost voiceStudioHost">
+                  <VoiceStudio
+                    onComplete={(file) => {
+                      commitBlob(file, "audio", "capture");
+                    }}
+                    onCancel={handleClose}
+                  />
+                </div>
               ) : phase === "choose" ? (
                 <div className="capMonitorHost">
                   <DropChipStage
@@ -1826,13 +1836,16 @@ export default function DropStudioStage({
                         <div className="vocalReview">
                           <div className="studioBrand">
                             <span className="studioDot" aria-hidden />
-                            VOCAL THOUGHT READY
+                            VOICE STUDIO MIX READY
                           </div>
                           <div className="reviewViz">
                             <VocalVisualizer state={audioPlaying ? "playback" : "saved"} />
                           </div>
                           <VoicePresets src={mediaUrl} onPlayingChange={setAudioPlaying} />
-                          <p>Use this voice memo as the audio layer for your Thought Drop.</p>
+                          <p>
+                            Your instrumental, lead, and adlibs are mixed. Dial a vocal preset, then
+                            use this as your Voice Drop.
+                          </p>
                         </div>
                       </div>
                       <div className="editActions">
