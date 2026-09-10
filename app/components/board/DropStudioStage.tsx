@@ -309,8 +309,6 @@ export default function DropStudioStage({
   const [linkError, setLinkError] = useState("");
   const dropbookPersistTimerRef = useRef<number | null>(null);
   const coverPickRef = useRef<HTMLInputElement>(null);
-  /** Voice Studio booth — an extension of Voice mode, not a replacement. */
-  const [voiceStudioOpen, setVoiceStudioOpen] = useState(false);
   const [audioPlaying, setAudioPlaying] = useState(false);
   const [studioValue, setStudioValue] = useState<DropCustomization>(value);
 
@@ -482,7 +480,6 @@ export default function DropStudioStage({
     setStudioValue(initialStudio);
     writeStudioDraft(initialStudio);
     setDrawOpen(false);
-    setVoiceStudioOpen(false);
     setIsDropbookMode(false);
     setDropbookCreating(false);
     setDropbookIntroPhase(null);
@@ -2113,16 +2110,13 @@ export default function DropStudioStage({
                     ) : null}
                   </div>
                 </div>
-              ) : mode === "audio" &&
-                voiceStudioOpen &&
-                (phase === "choose" || phase === "capture") ? (
+              ) : mode === "audio" && (phase === "choose" || phase === "capture") ? (
                 <div className="capMonitorHost voiceStudioHost">
                   <VoiceStudio
                     onComplete={(file) => {
-                      setVoiceStudioOpen(false);
                       commitBlob(file, "audio", "capture");
                     }}
-                    onCancel={() => setVoiceStudioOpen(false)}
+                    onCancel={handleClose}
                   />
                 </div>
               ) : phase === "choose" ? (
@@ -2159,18 +2153,7 @@ export default function DropStudioStage({
                               mode === "audio" ? "Start recording" : mode === "art" ? "Start drawing" : "Start capture"
                             }
                           />
-                          {mode === "audio" ? (
-                            <button
-                              type="button"
-                              className="capStudioBtn"
-                              onClick={() => setVoiceStudioOpen(true)}
-                              title="Open Voice Studio"
-                            >
-                              Studio
-                            </button>
-                          ) : (
-                            <span className="capSpacer" />
-                          )}
+                          <span className="capSpacer" />
                         </div>
                       </div>
                     }
@@ -2251,15 +2234,7 @@ export default function DropStudioStage({
                             )}
 
                             {mode === "audio" ? (
-                              <button
-                                type="button"
-                                className="capStudioBtn"
-                                onClick={() => setVoiceStudioOpen(true)}
-                                disabled={recording}
-                                title="Open Voice Studio"
-                              >
-                                Studio
-                              </button>
+                              <span className="capSpacer" />
                             ) : (
                               <button
                                 type="button"
@@ -2307,13 +2282,16 @@ export default function DropStudioStage({
                         <div className="vocalReview">
                           <div className="studioBrand">
                             <span className="studioDot" aria-hidden />
-                            VOCAL THOUGHT READY
+                            VOICE STUDIO MIX READY
                           </div>
                           <div className="reviewViz">
                             <VocalVisualizer state={audioPlaying ? "playback" : "saved"} />
                           </div>
                           <VoicePresets src={mediaUrl} onPlayingChange={setAudioPlaying} />
-                          <p>Use this voice memo as the audio layer for your Thought Drop.</p>
+                          <p>
+                            Your instrumental, lead, and adlibs are mixed. Dial a vocal preset, then
+                            use this as your Voice Drop.
+                          </p>
                         </div>
                       </div>
                       <div className="editActions">
