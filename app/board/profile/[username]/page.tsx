@@ -1361,7 +1361,7 @@ export default function ProfileBoardViewPage({
 
           <div className="profile-grid">
             <div className="left-column">
-              <section className="inner-tile profile-vision">
+              <section className="inner-tile">
                 <div className="tile-head">
                   <div>
                     <div className="tile-title">Vision Wall</div>
@@ -1385,7 +1385,7 @@ export default function ProfileBoardViewPage({
                 </div>
               </section>
 
-              <section className="inner-tile profile-aura">
+              <section className="inner-tile">
                 <div className="tile-head">
                   <div>
                     <div className="tile-title">Aura Snapshot</div>
@@ -1424,7 +1424,7 @@ export default function ProfileBoardViewPage({
                 </div>
               </section>
 
-              <section className="inner-tile profile-board-drop">
+              <section className="inner-tile">
                 <div className="tile-head board-drop-head">
                   <div>
                     <div className="tile-title">Board Drop</div>
@@ -1651,7 +1651,7 @@ export default function ProfileBoardViewPage({
             </div>
 
             <div className="center-column">
-              <section className="inner-tile identity profile-identity">
+              <section className="inner-tile identity">
                 <h1 className="name profile-name">{profile.displayName}</h1>
                 <div className="identity-row">
                   <div className="avatar-shell" style={{ boxShadow: aura.ring, borderColor: aura.border }}>
@@ -1672,7 +1672,7 @@ export default function ProfileBoardViewPage({
                 </div>
               </section>
 
-              <section className="inner-tile profile-activity">
+              <section className="inner-tile">
                 <div className="tile-head">
                   <div>
                     <div className="tile-title">Activity Channel</div>
@@ -1713,7 +1713,7 @@ export default function ProfileBoardViewPage({
             </div>
 
             <div className="right-column">
-              <section className="inner-tile cover profile-cover">
+              <section className="inner-tile cover">
                 <div className="tile-head">
                   <div>
                     <div className="tile-title">Cover Poster</div>
@@ -1733,7 +1733,7 @@ export default function ProfileBoardViewPage({
                 </div>
               </section>
 
-              <section className="inner-tile profile-friend-zone">
+              <section className="inner-tile">
                 <div className="tile-head">
                   <div>
                     <div className="tile-title">Friend Zone</div>
@@ -1783,7 +1783,7 @@ export default function ProfileBoardViewPage({
                 </div>
               </section>
 
-              <section className="inner-tile bucket-panel profile-bucket">
+              <section className="inner-tile bucket-panel">
                 <div className="tile-head">
                   <div>
                     <div className="tile-title">Drops Bucket</div>
@@ -1890,12 +1890,7 @@ export default function ProfileBoardViewPage({
 
         .profile-grid {
           display: grid;
-          grid-template-columns: repeat(2, minmax(0, 1fr));
-          grid-template-areas:
-            "identity aura"
-            "vision cover"
-            "board activity"
-            "friend-zone bucket";
+          grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.15fr) minmax(0, 0.95fr);
           gap: 16px;
           min-width: 0;
         }
@@ -1903,39 +1898,10 @@ export default function ProfileBoardViewPage({
         .left-column,
         .center-column,
         .right-column {
-          display: contents;
-        }
-
-        .profile-vision {
-          grid-area: vision;
-        }
-
-        .profile-cover {
-          grid-area: cover;
-        }
-
-        .profile-identity {
-          grid-area: identity;
-        }
-
-        .profile-board-drop {
-          grid-area: board;
-        }
-
-        .profile-activity {
-          grid-area: activity;
-        }
-
-        .profile-aura {
-          grid-area: aura;
-        }
-
-        .profile-friend-zone {
-          grid-area: friend-zone;
-        }
-
-        .profile-bucket {
-          grid-area: bucket;
+          display: grid;
+          gap: 16px;
+          align-content: start;
+          min-width: 0;
         }
 
         .profile-grid > section {
@@ -2782,11 +2748,20 @@ export default function ProfileBoardViewPage({
         @media (max-width: 1180px) {
           .profile-grid {
             grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-            grid-template-areas:
-              "identity aura"
-              "vision cover"
-              "board activity"
-              "friend-zone bucket";
+          }
+
+          .center-column {
+            grid-column: 1 / -1;
+          }
+        }
+
+        @media (max-width: 980px) {
+          .profile-grid {
+            grid-template-columns: 1fr;
+          }
+
+          .center-column {
+            grid-column: auto;
           }
         }
 

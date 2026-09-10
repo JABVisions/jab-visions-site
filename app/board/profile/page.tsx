@@ -1943,7 +1943,7 @@ export default function BoardProfileHubPage() {
 
           <div className="profile-grid">
             <div className="left-column">
-              <section className="inner-tile profile-vision">
+              <section className="inner-tile">
                 <div className="tile-head">
                   <div>
                     <div className="tile-title">Vision Wall</div>
@@ -2014,13 +2014,11 @@ export default function BoardProfileHubPage() {
                 </div>
               </section>
 
-              <div className="profile-board-drop">
-                <DropTile />
-              </div>
+              <DropTile />
             </div>
 
             <div className="center-column">
-              <section className="inner-tile identity profile-identity">
+              <section className="inner-tile identity">
                 <h1 className="name profile-name">{profile.displayName}</h1>
                 <div className="identity-row">
                   <button
@@ -2112,7 +2110,7 @@ export default function BoardProfileHubPage() {
                 </div>
               </section>
 
-              <section className="inner-tile profile-aura">
+              <section className="inner-tile">
                 <div className="tile-head">
                   <div>
                     <div className="tile-title">Aura Snapshot</div>
@@ -2174,7 +2172,7 @@ export default function BoardProfileHubPage() {
                 </div>
               </section>
 
-              <section className="inner-tile profile-activity">
+              <section className="inner-tile">
                 <div className="tile-head">
                   <div>
                     <div className="tile-title">Activity Channel</div>
@@ -2227,7 +2225,7 @@ export default function BoardProfileHubPage() {
             </div>
 
             <div className="right-column">
-              <section className="inner-tile cover profile-cover">
+              <section className="inner-tile cover">
                 <div className="tile-head">
                   <div>
                     <div className="tile-title">Cover Poster</div>
@@ -2274,7 +2272,7 @@ export default function BoardProfileHubPage() {
                 </div>
               </section>
 
-              <section className="inner-tile bookmarks-card profile-bookmarks">
+              <section className="inner-tile bookmarks-card">
                 <div className="tile-head">
                   <div>
                     <div className="tile-title">Board Bookmarks</div>
@@ -2291,7 +2289,7 @@ export default function BoardProfileHubPage() {
                 </div>
               </section>
 
-              <section className="inner-tile store-collection-card profile-store">
+              <section className="inner-tile store-collection-card">
                 <div className="tile-head">
                   <div>
                     <div className="tile-title">Store Drops Collection</div>
@@ -2438,12 +2436,7 @@ export default function BoardProfileHubPage() {
 
         .profile-grid {
           display: grid;
-          grid-template-columns: repeat(2, minmax(0, 1fr));
-          grid-template-areas:
-            "identity aura"
-            "vision cover"
-            "board activity"
-            "bookmarks store";
+          grid-template-columns: minmax(280px, 0.95fr) minmax(340px, 1.2fr) minmax(280px, 0.95fr);
           gap: 16px;
           min-width: 0;
         }
@@ -2451,41 +2444,10 @@ export default function BoardProfileHubPage() {
         .left-column,
         .center-column,
         .right-column {
-          display: contents;
-        }
-
-        .profile-vision {
-          grid-area: vision;
-        }
-
-        .profile-cover {
-          grid-area: cover;
-        }
-
-        .profile-identity {
-          grid-area: identity;
-        }
-
-        .profile-board-drop {
-          grid-area: board;
+          display: grid;
+          gap: 16px;
+          align-content: start;
           min-width: 0;
-          max-width: 100%;
-        }
-
-        .profile-activity {
-          grid-area: activity;
-        }
-
-        .profile-aura {
-          grid-area: aura;
-        }
-
-        .profile-bookmarks {
-          grid-area: bookmarks;
-        }
-
-        .profile-store {
-          grid-area: store;
         }
 
         .inner-tile {
@@ -3779,11 +3741,20 @@ export default function BoardProfileHubPage() {
         @media (max-width: 1180px) {
           .profile-grid {
             grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-            grid-template-areas:
-              "identity aura"
-              "vision cover"
-              "board activity"
-              "bookmarks store";
+          }
+
+          .center-column {
+            grid-column: 1 / -1;
+          }
+        }
+
+        @media (max-width: 980px) {
+          .profile-grid {
+            grid-template-columns: 1fr;
+          }
+
+          .center-column {
+            grid-column: auto;
           }
         }
 
