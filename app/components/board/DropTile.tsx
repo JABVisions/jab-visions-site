@@ -19,7 +19,9 @@ import {
   type DropCustomization,
 } from "@/lib/board/dropCustomizations";
 import { DROP_FLAVOR_ORDER, type DropFlavorKey } from "@/lib/board/dropFlavors";
+import { shouldEmbedDescriptDoc } from "@/lib/board/descriptEmbed";
 import RemovableDropBadge from "./RemovableDropBadge";
+import DescriptDocEmbed from "./DescriptDocEmbed";
 import DropCommentsDrawer from "./DropCommentsDrawer";
 import LazyDropStudioStage from "./LazyDropStudioStage";
 import DropStudioOverlay from "./DropStudioOverlay";
@@ -91,6 +93,8 @@ export type DropItem = {
   visibility?: "public" | "private";
   thoughtFormat?: "text" | "voice" | "doodle";
   thoughtText?: string;
+  /** True only when this drop's text was authored in Descript. */
+  fromDescript?: boolean;
 };
 
 const STORAGE_KEY = "jab_board_drops_v2";
@@ -489,6 +493,7 @@ function normalizeDropItems(input: unknown, userId: string | null): DropItem[] {
           ? x.thoughtFormat
           : undefined,
       thoughtText: typeof x.thoughtText === "string" ? x.thoughtText : undefined,
+      fromDescript: x.fromDescript === true ? true : undefined,
     }))
     .filter((d) => d.id && d.title && !deletedIds.includes(d.id)));
 }
@@ -828,6 +833,7 @@ export default function DropTile() {
             visibility: "private",
             thoughtText: item.thoughtText || null,
             thoughtFormat: item.thoughtFormat || "text",
+            fromDescript: item.fromDescript === true ? true : null,
             description: item.description || null,
             authorUsername: username ?? null,
             authorName: displayName ?? username ?? null,
@@ -911,6 +917,7 @@ export default function DropTile() {
           visibility: item.type === "Thought" ? item.visibility ?? "public" : "public",
           thoughtText: item.type === "Thought" ? item.thoughtText ?? body : null,
           thoughtFormat: item.type === "Thought" ? item.thoughtFormat ?? "text" : null,
+          fromDescript: item.fromDescript === true ? true : null,
           priceCents: item.priceCents ?? null,
           payProvider: item.payProvider ?? null,
           paymentRequestType: item.paymentRequestType ?? null,
@@ -939,6 +946,7 @@ export default function DropTile() {
           visibility: "public",
           thoughtFormat: item.thoughtFormat || "text",
           thoughtText: item.thoughtText || body,
+          fromDescript: item.fromDescript === true ? true : undefined,
           mediaUrl: item.url,
           mediaKind: item.mediaKind === "audio" ? "audio" : item.mediaKind === "image" ? "image" : undefined,
           authorId: sess.userId,
@@ -2039,6 +2047,18 @@ export default function DropTile() {
             const signedKey = d.bucket && d.storagePath ? `${d.bucket}:${d.storagePath}` : "";
             const signedUrl = signedKey ? signedUrlByKey[signedKey] : undefined;
 
+            const docEmbed = isThought
+              ? shouldEmbedDescriptDoc({
+                  meta: {
+                    dropType: d.type,
+                    thoughtText: d.thoughtText,
+                    description: d.description,
+                    fromDescript: d.fromDescript,
+                  },
+                  fromDescript: d.fromDescript,
+                })
+              : { show: false, text: "" };
+
             return (
               <div key={d.id} className="drop-item">
                 <div className="drop-titleTop">{d.title}</div>
@@ -2106,11 +2126,16 @@ export default function DropTile() {
                   </div>
                 </div>
 
-                {d.description && !isPay && !isDoc ? (
+                {d.description &&
+                !isPay &&
+                !isDoc &&
+                d.description.trim() !== docEmbed.text.trim() ? (
                   <div className="drop-description">{d.description}</div>
                 ) : null}
 
-                {isThought && d.thoughtText ? (
+                {docEmbed.show ? (
+                  <DescriptDocEmbed title={d.title} text={docEmbed.text} />
+                ) : isThought && d.thoughtText ? (
                   <div className="thought-body">{d.thoughtText}</div>
                 ) : null}
 

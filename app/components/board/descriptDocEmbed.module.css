@@ -1,0 +1,115 @@
+/* Laminated Descript doc sheet — a 4:5 Board frame that scrolls its own body so
+   a long chapter stays inside the drop instead of running off the card. */
+.sheet {
+  position: relative;
+  margin-top: 10px;
+  width: min(100%, calc(72vh * 4 / 5));
+  max-width: 100%;
+  margin-left: auto;
+  margin-right: auto;
+  aspect-ratio: 4 / 5;
+  box-sizing: border-box;
+  padding: 14px 15px 15px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow: hidden;
+  border-radius: 18px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  background:
+    radial-gradient(circle at 12% 10%, rgba(255, 79, 216, 0.12), transparent 42%),
+    radial-gradient(circle at 88% 18%, rgba(45, 124, 255, 0.1), transparent 46%),
+    linear-gradient(160deg, rgba(255, 255, 255, 0.88), rgba(255, 255, 255, 0.68));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.62),
+    0 10px 26px rgba(0, 0, 0, 0.08);
+}
+
+/* The lamination: a fixed sheen across the sheet, plus a soft bottom fade that
+   tells the reader the body keeps going. */
+.laminate {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background:
+    linear-gradient(
+      118deg,
+      rgba(255, 255, 255, 0) 34%,
+      rgba(255, 255, 255, 0.42) 46%,
+      rgba(255, 255, 255, 0.08) 54%,
+      rgba(255, 255, 255, 0) 62%
+    ),
+    linear-gradient(to top, rgba(255, 255, 255, 0.82), rgba(255, 255, 255, 0) 16%);
+  mix-blend-mode: screen;
+}
+
+.head {
+  position: relative;
+  z-index: 1;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.label {
+  font-size: 9px;
+  font-weight: 950;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: rgba(0, 0, 0, 0.5);
+}
+
+.count {
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(0, 0, 0, 0.38);
+  white-space: nowrap;
+}
+
+.title {
+  position: relative;
+  z-index: 1;
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-weight: 950;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgba(0, 0, 0, 0.78);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.body {
+  position: relative;
+  z-index: 1;
+  flex: 1 1 auto;
+  min-height: 0;
+  padding-bottom: 10px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  color: rgba(0, 0, 0, 0.72);
+  font-size: 14px;
+  font-weight: 800;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.body::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+.body:focus-visible {
+  outline: 2px solid rgba(45, 124, 255, 0.55);
+  outline-offset: 4px;
+  border-radius: 10px;
+}
