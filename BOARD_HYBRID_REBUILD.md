@@ -111,21 +111,29 @@ opens a picker when no visual page exists yet.
 
 ## Voice Studio
 
-Reached from a **Studio** button in the Voice capture controls, so Voice mode itself is unchanged.
-The booth renders inside the existing studio monitor rather than replacing it.
+This is the **Recording Booth from `cd5d935`, restored byte for byte** — `VoiceStudio.tsx` and
+`voiceStudio.module.css` are identical to that commit, and the `DropStudioStage` wiring matches it
+too. A rewritten booth briefly replaced it on this branch; the original was preferred and put back.
 
-- `lib/audio/voiceMix.ts` keeps the instrumental, lead and ad-lib takes as separate tracks, each
-  with its own trim window (`trimStartSec`/`trimEndSec`), placement offset, gain and mute, right up
-  to mixdown. It also owns WAV encoding and waveform peak extraction.
-- `lib/audio/vocalPresets.ts` defines the thirteen vocal presets (Clean, Warm, Deep, Bright, Airy,
-  Radio, Dream, Echo, Reverb, Pitch Up, Pitch Down, Robot, Distorted) as Web Audio graph builders.
-  The same definition drives preview and mixdown, so adding a preset is a one-entry change. Pitch
-  presets resample the take; Echo/Reverb/Dream use a generated impulse; Robot ring-modulates.
-- The **Voice** button beside Record opens the preset grid. **Preview mix** renders the real
-  mixdown so what you hear is what saves.
-- The Ad-Libs Sound Bar records short takes that stay individually auditionable, trimmable,
-  placeable and deletable.
-- Mixdown produces a WAV that continues through the existing audio Drop pipeline unchanged.
+Voice mode opens the booth directly (no intermediate capture screen and no Studio button):
+
+- Load an instrumental (mp3 / wav / m4a), play and pause it, or Replace it.
+- Record Lead over the beat — the beat restarts from the top each take so layers align — then
+  Re-record Lead or stack Add Adlib takes.
+- The Session list shows every take as BEAT / LEAD / ADLIB with its duration, Mute, and Remove.
+- **Mix & Use Vocal →** renders the stack to a WAV through `OfflineAudioContext` and hands it to
+  the existing audio Drop pipeline. The instrumental sits at 0.72 gain and ad-libs at 0.92 so leads
+  cut through.
+- The review screen that follows reads VOICE STUDIO MIX READY and runs the existing `VoicePresets`
+  over the mixed result, which is where vocal alteration lives in this design.
+
+An instrumental is required before recording, by design — this is a booth, not a memo recorder.
+
+Deliberately **not** in this version (they were in the rewrite that was reverted): trimming takes
+or imported audio, an Ad-Libs Sound Bar with per-clip audition and trim, per-track placement
+offsets, waveform-accurate peak rendering, a preview-the-mix step before saving, and an in-booth
+preset grid. These remain open if the booth should grow; they need to be added in this UI's idiom
+rather than by replacing it.
 
 ## Drop Studio gaps
 
@@ -177,8 +185,9 @@ Checked in a browser against a dev server (desktop): Drop Pad standby crown, boo
 unchanged, all five spaces sliding in the same frame with no overlapping controls at the smallest
 and largest screen sizes; Drop Studio mode rail; link bar absent before Dropbook Mode and present
 above the Dropbook controls after it; cover save; YouTube link resolving to a preview and then to a
-shelf chip; Place present; Voice Studio booth with the beat import, record, ad-libs bar and the
-full preset grid.
+shelf chip; Place present; and Voice mode opening straight into the restored Recording Booth with
+its instrumental upload card, Record Lead / Add Adlib controls, empty Session list and
+Mix & Use Vocal footer.
 
 Not verified: a 390×844 mobile viewport (the VM's browser would not resize), and microphone-driven
 recording, playback and mixdown (no audio input device). Mobile layout rests on the responsive
