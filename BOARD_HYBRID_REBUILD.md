@@ -162,6 +162,47 @@ against the baseline's existing `activity`, `dropComments`, `bucketBrain` and `w
 Free Space is a glance (clock plus counts). Work Space exposes Assets and Portfolio with a route
 into the full screens, deliberately left uncluttered for a dedicated Drop Pad OS 4 design.
 
+## Profile boards
+
+Both profile boards are back on the **three-column layout from before `7a0358a`**
+("Restore Drop Studio and refine profile board"), which is the commit that had replaced it with a
+two-column `grid-template-areas` arrangement.
+
+That commit did not move any markup — it set `display: contents` on the three column wrappers and
+reordered everything through named areas, which put a new `identity` tile in the top-left and
+pushed Vision Wall and Cover Poster down to the second row. Reverting is therefore CSS-only: the
+column wrappers are real grids again, `.profile-grid` is back to three tracks, and the
+`grid-area` hook classes that `7a0358a` added to each `<section>` are removed. Section markup now
+matches the pre-`7a0358a` build exactly.
+
+Restored arrangement, own profile (`app/board/profile/page.tsx`):
+
+| Column | Tiles |
+|---|---|
+| Left | Vision Wall, then the Board Drop tile |
+| Centre (wider) | Identity, Aura Snapshot, Activity Channel |
+| Right | Cover Poster, Board Bookmarks, Store Drops Collection |
+
+Restored arrangement, public profile (`app/board/profile/[username]/page.tsx`):
+
+| Column | Tiles |
+|---|---|
+| Left | Vision Wall, Aura Snapshot, Board Drop |
+| Centre (wider) | Identity, Activity Channel |
+| Right | Cover Poster, Friend Zone, Drops Bucket |
+
+Track widths are the pre-`7a0358a` values:
+`minmax(280px, 0.95fr) minmax(340px, 1.2fr) minmax(280px, 0.95fr)` on the own profile and
+`minmax(0, 0.95fr) minmax(0, 1.15fr) minmax(0, 0.95fr)` on the public profile. The responsive
+ladder is restored too — two columns with the centre spanning both at ≤1180 px, one column at
+≤980 px — while the newer ≤720 px tweaks (tighter gap, centred identity row) are kept.
+
+Note: no literal `3/5` ratio exists anywhere in this repo's history. Searching every commit for
+`3fr`, `5fr`, `3 / 5`, `aspect-ratio: 3`, `0.6fr` and `62.5%` in the profile files returns nothing,
+so the three-column build above is the layout being referred to. If the outer columns should
+specifically sit at three-fifths of the centre, that is the `0.95fr` value in each
+`.profile-grid` rule and nothing else.
+
 ## Drop lifecycle
 
 `lib/board/dropLifecycle.ts` models `Framed → Sent → Asset Drop / Portfolio Drop`. `advanceDropStage`
