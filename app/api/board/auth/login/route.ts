@@ -3,11 +3,17 @@ import {
   boardAuthErrorMessage,
   createSupabaseRouteClient,
 } from "@/lib/supabase/routeClient";
+import {
+  isSupabaseConfigured,
+  supabaseNotConfiguredResponse,
+} from "@/lib/supabase/config";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function POST(request: NextRequest) {
+  if (!isSupabaseConfigured()) return supabaseNotConfiguredResponse();
+
   try {
     const body = await request.json();
     const email = String(body?.email || "").trim();

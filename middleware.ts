@@ -1,5 +1,6 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextRequest, NextResponse } from "next/server";
+import { supabaseCredentials } from "@/lib/supabase/config";
 
 function isPublicBoardRoute(pathname: string) {
   if (
@@ -25,13 +26,9 @@ export async function middleware(request: NextRequest) {
     },
   });
 
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const supabaseAnonKey =
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
-    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
-
   // Keep UI-only local development usable until a Supabase project is linked.
-  if (!supabaseUrl || !supabaseAnonKey) {
+  const credentials = supabaseCredentials();
+  if (!credentials) {
     return response;
   }
 
@@ -40,8 +37,8 @@ export async function middleware(request: NextRequest) {
   }
 
   const supabase = createServerClient(
-    supabaseUrl,
-    supabaseAnonKey,
+    credentials.url,
+    credentials.key,
     {
       cookies: {
         getAll() {

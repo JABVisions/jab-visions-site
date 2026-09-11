@@ -1,17 +1,24 @@
 // app/api/submit/route.ts
 import { NextRequest } from "next/server";
 import { createServerClient } from "@supabase/ssr";
+import {
+  supabaseCredentials,
+  supabaseNotConfiguredResponse,
+} from "@/lib/supabase/config";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function POST(req: NextRequest) {
   // ✅ Require a logged-in Supabase user (Board account)
+  const credentials = supabaseCredentials();
+  if (!credentials) return supabaseNotConfiguredResponse();
+
   const cookieResponse = new Response();
 
   const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    credentials.url,
+    credentials.key,
     {
       cookies: {
         getAll() {

@@ -1,17 +1,26 @@
 import { cookies } from "next/headers";
 import { createServerClient } from "@supabase/ssr";
+import {
+  supabaseCredentials,
+  supabaseNotConfiguredResponse,
+} from "@/lib/supabase/config";
 import type { BoardActivity, BoardActivityKind } from "@/lib/board/activity";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 const SOURCE_TIMEOUT_MS = 3500;
 
+// Null when no Supabase project is linked yet, so each handler can degrade
+// instead of throwing an unhandled error at the edge of the request.
 function supabaseServer() {
+  const credentials = supabaseCredentials();
+  if (!credentials) return null;
+
   const cookieStore = cookies();
 
   return createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    credentials.url,
+    credentials.key,
     {
       cookies: {
         getAll: () => cookieStore.getAll(),
@@ -337,6 +346,10 @@ async function selectRows<T>(
 
 export async function GET(req: Request) {
   const supabase = supabaseServer();
+  // Board is local-first: an unlinked project yields an empty feed so the UI
+  // shows its own empty state instead of an error.
+  if (!supabase) return supabaseNotConfiguredResponse({ items: [] }, 200);
+
   const url = new URL(req.url);
   const limit = Math.max(1, Math.min(200, Number(url.searchParams.get("limit") || 80)));
   const offset = Math.max(0, Number(url.searchParams.get("offset") || 0));

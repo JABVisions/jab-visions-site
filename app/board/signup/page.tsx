@@ -3,7 +3,10 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { isSupabaseConfigured } from "@/lib/supabase/browser";
+import {
+  isSupabaseConfigured,
+  SUPABASE_SETUP_HINT,
+} from "@/lib/supabase/config";
 
 const MONTHS = [
   { value: "1", label: "January" },
@@ -148,7 +151,7 @@ export default function BoardSignupPage() {
     }
     if (!authAvailable) {
       setErr(
-        "Supabase is not connected. Add NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY to .env.local, then restart the development server."
+        SUPABASE_SETUP_HINT
       );
       return;
     }

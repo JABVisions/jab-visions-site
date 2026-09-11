@@ -1,15 +1,24 @@
 import { NextRequest } from "next/server";
 import { cookies } from "next/headers";
 import { createServerClient } from "@supabase/ssr";
+import {
+  supabaseCredentials,
+  supabaseNotConfiguredResponse,
+} from "@/lib/supabase/config";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+// Null when no Supabase project is linked yet, so each handler can degrade
+// instead of throwing an unhandled error at the edge of the request.
 function supabaseServer() {
+  const credentials = supabaseCredentials();
+  if (!credentials) return null;
+
   const cookieStore = cookies();
   return createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    credentials.url,
+    credentials.key,
     {
       cookies: {
         getAll: () => cookieStore.getAll(),
@@ -21,6 +30,8 @@ function supabaseServer() {
 
 export async function POST(req: NextRequest) {
   const supabase = supabaseServer();
+  if (!supabase) return supabaseNotConfiguredResponse();
+
 
   const {
     data: { user },

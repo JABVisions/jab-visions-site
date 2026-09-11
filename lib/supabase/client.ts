@@ -1,4 +1,5 @@
 import { createBrowserClient } from "@supabase/ssr";
+import { SUPABASE_SETUP_HINT, supabaseCredentials } from "@/lib/supabase/config";
 
 let browserClient: ReturnType<typeof createBrowserClient> | null = null;
 const authLocks = new Map<string, Promise<unknown>>();
@@ -37,16 +38,12 @@ async function runWithBrowserAuthLock<T>(
 export function createClient() {
   if (browserClient) return browserClient;
 
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-
-  if (!url || !anon) {
-    throw new Error(
-      "Missing NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_SUPABASE_ANON_KEY in .env.local"
-    );
+  const credentials = supabaseCredentials();
+  if (!credentials) {
+    throw new Error(SUPABASE_SETUP_HINT);
   }
 
-  browserClient = createBrowserClient(url, anon, {
+  browserClient = createBrowserClient(credentials.url, credentials.key, {
     auth: {
       persistSession: true,
       autoRefreshToken: true,
