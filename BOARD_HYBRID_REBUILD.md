@@ -211,6 +211,35 @@ between them. Drop Console stamps `sent` on publish, `BoardDropEditModal` keeps 
 and `placeAsset` promotes to `asset` or `portfolio`. The stage rides inside the existing
 `board_assets.payload` and `board_style.boardDrops` JSON, so no migration was needed.
 
+## Descript doc embed
+
+A Thought Drop written in Descript used to dump its whole document inline, so a chapter ran off the
+bottom of the card with no end. The Drop Studio 3 build had already solved this with a glossy 4:5
+Descript chip, which was lost in the older baseline. That presentation is restored as
+`app/components/board/DescriptDocEmbed.tsx`: one laminated 4:5 Board frame (the same aspect as every
+other drop) carrying a `DESCRIPT DOC` label, word count, the drop title, and a body that scrolls
+inside itself with `overscroll-behavior: contain` so a mobile swipe does not scroll the page behind
+it.
+
+`lib/board/descriptEmbed.ts` decides when a drop earns the sheet. It is narrower than the historical
+rule, which framed *every* thought: an explicit `fromDescript` drop always gets the sheet, and
+anything else only when its text is long-form (≥560 characters, or ≥4 blank-line-separated blocks).
+Short one-line thoughts keep the flat `.thought-body` they have today, so nothing regresses. When
+the sheet shows, the duplicate inline copy of the same text is suppressed — the drop carries the
+document and nothing else.
+
+Wired into both surfaces that render thought bodies: the profile Drop tile (`DropTile.tsx`) and the
+feed card (`ActivityCard.tsx`). Compact feed cards are left alone because they already clamp to
+three lines.
+
+`fromDescript` already existed on `DropItem` and in `syncActivitiesForDropEdit`, but nothing ever
+set it. It is now stamped where a Descript actually becomes a drop, and carried through
+`UniversalDrop` and the activity meta. That required restoring the Drop Console's
+`DESCRIPT_SHARE_EVENT` listener, which was missing here: Drop Studio's Descript mode fired the share
+event and, outside the edit modal, nobody was listening, so "Sent to Drop Console" silently lost the
+document. The console now wakes on the doc's destination (thought / pay / doc / announcement) and
+remembers the origin until the drop is published.
+
 ## Supabase
 
 No schema changes. Everything reuses existing storage: `profiles.board_style` (drops, dropbook
@@ -230,7 +259,15 @@ shelf chip; Place present; and Voice mode opening straight into the restored Rec
 its instrumental upload card, Record Lead / Add Adlib controls, empty Session list and
 Mix & Use Vocal footer.
 
-Not verified: a 390×844 mobile viewport (the VM's browser would not resize), and microphone-driven
-recording, playback and mixdown (no audio input device). Mobile layout rests on the responsive
-rules added alongside each surface — the link bar is a `minmax(0, 1fr)` four-column grid, the booth
-collapses to single-column controls under 520 px, and the header chip row wraps.
+The Descript doc embed was checked at 390×844 and 1280×900 by driving headless Chrome against the
+dev server with a seeded long-form thought. On the profile board and in the feed the sheet renders
+contained (413 px tall at mobile, 648 px at desktop) with no horizontal overflow
+(`document.scrollWidth === window.innerWidth`), its body scrolls internally (`scrollTop` 0 → 755),
+the duplicate inline body is gone, and the short thought beside it still renders as the old 49 px
+flat box. The feed page logs a hydration warning at 390 px, but it reproduces on an untouched feed
+with no seeded data, so it predates this work.
+
+Not verified: microphone-driven recording, playback and mixdown in the restored Voice Studio (the VM
+has no audio input device). Mobile layout for the other surfaces rests on the responsive rules added
+alongside each one — the link bar is a `minmax(0, 1fr)` four-column grid, the booth collapses to
+single-column controls under 520 px, and the header chip row wraps.
