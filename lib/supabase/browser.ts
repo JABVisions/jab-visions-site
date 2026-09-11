@@ -1,5 +1,10 @@
 import { createBrowserClient } from "@supabase/ssr";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import {
+  isSupabaseConfigured,
+  supabasePublishableKey,
+  supabaseUrl,
+} from "@/lib/supabase/config";
 
 /**
  * IMPORTANT:
@@ -12,13 +17,7 @@ const authLocks = new Map<string, Promise<unknown>>();
 const LOCAL_SUPABASE_URL = "http://127.0.0.1:54321";
 const LOCAL_SUPABASE_ANON_KEY = "local-board-guest";
 
-export function isSupabaseConfigured() {
-  return Boolean(
-    process.env.NEXT_PUBLIC_SUPABASE_URL &&
-      (process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
-        process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY)
-  );
-}
+export { isSupabaseConfigured };
 
 async function runWithBrowserAuthLock<T>(
   name: string,
@@ -57,13 +56,10 @@ export function supabaseBrowser(): SupabaseClient {
   // Keep local/demo Board pages usable when a Supabase project has not been
   // connected yet. Requests to this fallback fail closed, so it grants no
   // remote data access or authenticated permissions.
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || LOCAL_SUPABASE_URL;
-  const supabaseAnonKey =
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
-    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
-    LOCAL_SUPABASE_ANON_KEY;
+  const url = supabaseUrl() || LOCAL_SUPABASE_URL;
+  const anonKey = supabasePublishableKey() || LOCAL_SUPABASE_ANON_KEY;
 
-  browserClient = createBrowserClient(supabaseUrl, supabaseAnonKey, {
+  browserClient = createBrowserClient(url, anonKey, {
     auth: {
       persistSession: true,
       autoRefreshToken: true,
