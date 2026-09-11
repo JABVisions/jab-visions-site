@@ -187,17 +187,28 @@ export function depositToBrain(
 ) {
   const t = now();
   const prev = readBrain();
+  const id = String(activityId);
+  const previousEntry = (["pass", "pin", "push"] as BucketFolder[])
+    .flatMap((key) => prev[key] ?? [])
+    .find((entry) => String(entry.activityId) === id);
 
   const entry: BucketEntry = {
-    activityId: String(activityId),
+    ...previousEntry,
+    activityId: id,
     savedAt: t,
-    ...(item ? { item } : {}),
+    ...(item ? { item: { ...(previousEntry?.item ?? {}), ...item } } : {}),
   };
 
   const next: BucketBrainState = {
     ...prev,
+    pass: prev.pass.filter((saved) => String(saved.activityId) !== id),
+    pin: prev.pin.filter((saved) => String(saved.activityId) !== id),
+    push: prev.push.filter((saved) => String(saved.activityId) !== id),
     [folder]: sortBucketEntries(
-      uniqBucketByActivityId([entry, ...(prev[folder] ?? [])]),
+      uniqBucketByActivityId([
+        entry,
+        ...(prev[folder] ?? []).filter((saved) => String(saved.activityId) !== id),
+      ]),
       folder
     ),
     updatedAt: t,

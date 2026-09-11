@@ -7,6 +7,7 @@
 import { supabaseBrowser } from "@/lib/supabase/browser";
 import { syncActivitiesForDropEdit } from "@/lib/board/activity";
 import { ensureImageFileMinResolution } from "@/lib/board/imageQuality";
+import { checkUploadSize, resolveUploadContentType } from "@/lib/board/uploadLimits";
 import type { DropItem } from "@/lib/board/dropItem";
 import { rememberDeletedDropId } from "@/lib/board/dropItem";
 
@@ -214,10 +215,16 @@ export async function uploadDropMedia(
       ? await ensureImageFileMinResolution(file)
       : file;
 
+  const sizeError = checkUploadSize(uploadFile);
+  if (sizeError) {
+    console.error("Drop media upload rejected:", sizeError);
+    return null;
+  }
+
   const storagePath = `${userId}/${dropId}/${Date.now()}-${sanitizeFileName(uploadFile.name)}`;
   const { error } = await supabase.storage.from(BOARD_MEDIA_BUCKET).upload(storagePath, uploadFile, {
     upsert: true,
-    contentType: uploadFile.type || "application/octet-stream",
+    contentType: resolveUploadContentType(uploadFile),
     cacheControl: "3600",
   });
   if (error) {

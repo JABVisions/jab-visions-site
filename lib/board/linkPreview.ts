@@ -4,6 +4,7 @@ export type LinkPreview = {
   title: string | null;
   description: string | null;
   image: string | null;
+  images?: string[];
   embedUrl: string | null;
   type: "video" | "music" | "link";
 };

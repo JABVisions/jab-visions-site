@@ -50,6 +50,57 @@ import { saveDropDraft, draftToFile, type DropDraft } from "@/lib/board/dropDraf
 import DropDraftsDrawer from "./DropDraftsDrawer";
 import VocalVisualizer from "./VocalVisualizer";
 import VoicePresets from "./VoicePresets";
+import VoiceStudioSession from "./VoiceStudioSession";
+import {
+  AudioSessionEngine,
+  createAudioSession,
+  createSessionHistory,
+  decodeAudioFile,
+  defaultAlteration,
+  duplicateAdlibTrack,
+  duplicateClip,
+  getAudioContextConstructor,
+  moveAdlibTrack,
+  pushHistory,
+  readStudioLatencyMs,
+  redoHistory,
+  removeClip,
+  removeLane,
+  removeTrackById,
+  renameTrack,
+  renderSessionFile,
+  restoreClipOriginal,
+  sessionDurationMs,
+  sessionHasLane,
+  splitClipAtPlayhead,
+  studioAudioExtension,
+  createStudioTakeCapture,
+  getMusicMicStream,
+  undoHistory,
+  updateClip,
+  updateTrackMix,
+  upsertLaneFromFile,
+  writeStudioLatencyMs,
+  type AlterationParams,
+  type AudioSession,
+  type LaneKind,
+  type SessionHistory,
+  type StudioTakeCapture,
+} from "@/lib/board/audioSession";
+import {
+  renderVoicePresetFile,
+  type VoicePresetKey,
+} from "@/lib/board/voicePresetAudio";
+import {
+  loadVoiceStudioProject,
+  saveVoiceStudioProject,
+} from "@/lib/board/voiceStudioProject";
+import {
+  DROPBOOK_MIME,
+  type DropbookManifest,
+  type DropbookSlide,
+} from "@/lib/board/dropbookSlides";
+import { resolveDropbookLink, type DropbookLinkKind } from "@/lib/board/dropbookLink";
 
 type CaptureMode = "photo" | "video" | "audio" | "art" | "descript";
 type FacingMode = "user" | "environment";
@@ -67,6 +118,12 @@ export type DropbookChip = {
   descriptDocId?: string;
   descriptTitle?: string;
   descriptPreview?: string;
+  /** Session-only link page (YouTube / music / web). Never auto-posts to Board. */
+  linkKind?: DropbookLinkKind;
+  linkUrl?: string;
+  linkEmbedUrl?: string;
+  linkProvider?: string;
+  linkDescription?: string;
 };
 
 /** Page zero — the Dropbook's permanent cover identity. */
@@ -83,16 +140,6 @@ export type DropbookCover = {
 
 const DROPBOOK_MAX_PAGES = 3;
 const DROPBOOK_INTRO_MS = 1800;
-const DROPBOOK_BOOK_COLORS = [
-  "#2563EB",
-  "#DC2626",
-  "#171717",
-  "#FFD12D",
-  "#EC4899",
-  "#7EE2FF",
-  "#7A44FF",
-  "#B7FF2D",
-];
 
 function createEmptyDropbookCover(): DropbookCover {
   return {
@@ -116,6 +163,111 @@ function solidColorBackgroundUrl(hex: string) {
   return canvas.toDataURL("image/jpeg", 0.92);
 }
 
+/** Book color field with an embedded photo (color shows as a matte frame). */
+async function composeCoverBackground(hex: string, photoUrl: string | null) {
+  if (typeof document === "undefined") return "";
+  if (!photoUrl) return solidColorBackgroundUrl(hex);
+  const { width, height } = boardDropFramePixelSize(800, 1000);
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return solidColorBackgroundUrl(hex);
+  ctx.fillStyle = hex;
+  ctx.fillRect(0, 0, width, height);
+  try {
+    const image = await loadStudioImage(photoUrl);
+    const pad = Math.round(Math.min(width, height) * 0.07);
+    const boxW = width - pad * 2;
+    const boxH = height - pad * 2;
+    const scale = Math.min(boxW / image.naturalWidth, boxH / image.naturalHeight);
+    const drawW = image.naturalWidth * scale;
+    const drawH = image.naturalHeight * scale;
+    ctx.drawImage(image, (width - drawW) / 2, (height - drawH) / 2, drawW, drawH);
+  } catch {
+    return solidColorBackgroundUrl(hex);
+  }
+  return canvas.toDataURL("image/jpeg", 0.92);
+}
+
+function loadStudioImage(src: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error("The Art Palette layer could not be loaded."));
+    image.src = src;
+  });
+}
+
+function blobToDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(typeof reader.result === "string" ? reader.result : "");
+    reader.onerror = () => reject(reader.error ?? new Error("Dropbook page could not be read."));
+    reader.readAsDataURL(blob);
+  });
+}
+
+async function sourceToDataUrl(source: string): Promise<string> {
+  if (source.startsWith("data:")) return source;
+  const response = await fetch(source);
+  if (!response.ok) throw new Error("Dropbook cover could not be read.");
+  return blobToDataUrl(await response.blob());
+}
+
+async function coverDataUrlToFile(dataUrl: string) {
+  const response = await fetch(dataUrl);
+  const blob = await response.blob();
+  return new File([blob], `dropbook-cover-${Date.now()}.jpg`, {
+    type: blob.type || "image/jpeg",
+  });
+}
+
+/**
+ * Art Palette strokes start as a temporary data URL so the editor can update
+ * instantly. Flatten image-drop strokes into the actual upload before leaving
+ * Drop Studio; Board storage intentionally removes large inline data URLs.
+ */
+async function flattenArtLayerIntoImage(file: File, artOverlayUrl: string): Promise<File> {
+  const fileUrl = URL.createObjectURL(file);
+  try {
+    const [base, overlay] = await Promise.all([
+      loadStudioImage(fileUrl),
+      loadStudioImage(artOverlayUrl),
+    ]);
+    const width = Math.max(1, overlay.naturalWidth || base.naturalWidth);
+    const height = Math.max(1, overlay.naturalHeight || base.naturalHeight);
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext("2d");
+    if (!context) throw new Error("The edited artwork could not be rendered.");
+
+    context.fillStyle = "#02070a";
+    context.fillRect(0, 0, width, height);
+
+    // Drop Studio's operating-table preview uses object-fit: contain. Recreate
+    // that exact composition so strokes stay aligned when the card is published.
+    const scale = Math.min(width / base.naturalWidth, height / base.naturalHeight);
+    const drawWidth = base.naturalWidth * scale;
+    const drawHeight = base.naturalHeight * scale;
+    context.drawImage(base, (width - drawWidth) / 2, (height - drawHeight) / 2, drawWidth, drawHeight);
+    context.drawImage(overlay, 0, 0, width, height);
+
+    const blob = await new Promise<Blob | null>((resolve) =>
+      canvas.toBlob(resolve, "image/png")
+    );
+    if (!blob) throw new Error("The edited artwork could not be exported.");
+    const baseName = file.name.replace(/\.[^.]+$/, "") || "board-art";
+    return new File([blob], `${baseName}-art.png`, {
+      type: "image/png",
+      lastModified: Date.now(),
+    });
+  } finally {
+    URL.revokeObjectURL(fileUrl);
+  }
+}
+
 type DropbookShelfSlot =
   | {
       id: string;
@@ -135,6 +287,7 @@ type DropbookShelfSlot =
       mode?: CaptureMode;
       descriptTitle?: string;
       descriptPreview?: string;
+      linkKind?: DropbookLinkKind;
     }
   | {
       id: string;
@@ -205,17 +358,22 @@ export default function DropStudioStage({
   value,
   onChange,
   onComplete,
+  onDescriptComplete,
   onClose,
   studioDraftRef,
   allowedModes = DEFAULT_CAPTURE_MODES,
   initialMode = "photo",
   descriptDestination = "doc",
+  initialDescriptDoc = null,
+  descriptReturnOnBack = false,
+  descriptOnReturn,
 }: {
   open: boolean;
   initialFile: File | null;
   value: DropCustomization;
   onChange: (next: DropCustomization) => void;
-  onComplete: (file: File, source: "capture" | "upload") => void;
+  onComplete: (file: File, source: "capture" | "upload") => void | Promise<void>;
+  onDescriptComplete?: (doc: DescriptDoc) => void | Promise<void>;
   onClose: () => void;
   /** Live studio customizations (frame/rotation/etc.) without parent re-renders. */
   studioDraftRef?: React.MutableRefObject<DropCustomization | undefined>;
@@ -223,6 +381,11 @@ export default function DropStudioStage({
   initialMode?: CaptureMode;
   /** Drop type already chosen in Drop Console — Descript shares back into it. */
   descriptDestination?: DescriptDestination;
+  /** Existing Descript content when editing a published Descript drop. */
+  initialDescriptDoc?: DescriptDoc | null;
+  /** Return from Descript directly to the host Board surface. */
+  descriptReturnOnBack?: boolean;
+  descriptOnReturn?: () => void;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -267,8 +430,40 @@ export default function DropStudioStage({
   const [dropbookEditingCover, setDropbookEditingCover] = useState(false);
   const [dropbookCoverMode, setDropbookCoverMode] = useState<"choose" | "blank">("choose");
   const [dropbookCoverBlankColor, setDropbookCoverBlankColor] = useState("#000000");
+  const [dropbookCoverPhotoUrl, setDropbookCoverPhotoUrl] = useState<string | null>(null);
+  const [coverBlankBackgroundUrl, setCoverBlankBackgroundUrl] = useState("");
   const [dropbookCoverDragOver, setDropbookCoverDragOver] = useState(false);
+  const dropbookCoverPhotoInputRef = useRef<HTMLInputElement | null>(null);
+  const [finishingDropbook, setFinishingDropbook] = useState(false);
+  const [dropbookLinkDraft, setDropbookLinkDraft] = useState("");
+  const [dropbookLinkBusy, setDropbookLinkBusy] = useState(false);
   const [audioPlaying, setAudioPlaying] = useState(false);
+  const [voicePreset, setVoicePreset] = useState<VoicePresetKey>("clean");
+  const [processingVocal, setProcessingVocal] = useState(false);
+  const [voiceStudioOpen, setVoiceStudioOpen] = useState(false);
+  const [audioSession, setAudioSession] = useState<AudioSession | null>(null);
+  const [studioHeadphonesOk, setStudioHeadphonesOk] = useState(false);
+  const [studioLatencyMs, setStudioLatencyMs] = useState(0);
+  const [studioPlaying, setStudioPlaying] = useState(false);
+  const [studioCountIn, setStudioCountIn] = useState<number | null>(null);
+  const [studioMicStream, setStudioMicStream] = useState<MediaStream | null>(null);
+  const [studioLaneAnalysers, setStudioLaneAnalysers] = useState<
+    Partial<Record<"vocal" | "instrumental" | "audio" | "fx" | "adlib", AnalyserNode>>
+  >({});
+  const [studioRecordElapsedMs, setStudioRecordElapsedMs] = useState(0);
+  const [adlibRecording, setAdlibRecording] = useState(false);
+  const [presetPreviewing, setPresetPreviewing] = useState(false);
+  const [sessionHistory, setSessionHistory] = useState<SessionHistory>(() => createSessionHistory());
+  const studioEngineRef = useRef<AudioSessionEngine | null>(null);
+  const studioTakeRef = useRef<StudioTakeCapture | null>(null);
+  const adlibTakeRef = useRef<StudioTakeCapture | null>(null);
+  const studioRecordGenRef = useRef(0);
+  const adlibRecordGenRef = useRef(0);
+  const studioCountInTimerRef = useRef<number[]>([]);
+  const studioRecordStartedAtRef = useRef(0);
+  const studioLoopRef = useRef(false);
+  const audioSessionRef = useRef<AudioSession | null>(null);
+  const sessionHistoryRef = useRef<SessionHistory>(createSessionHistory());
   const [studioValue, setStudioValue] = useState<DropCustomization>(value);
 
   const studioFrame = studioValue.effects?.frame;
@@ -276,6 +471,10 @@ export default function DropStudioStage({
     () => resolveDropMediaFrame(studioValue),
     [studioFrame]
   );
+  const editingFlattenedArtwork =
+    mediaKind === "image" &&
+    /^board-art-/i.test(fileRef.current?.name ?? "") &&
+    !studioValue.artOverlayUrl;
 
   const writeStudioDraft = useCallback(
     (next: DropCustomization) => {
@@ -312,9 +511,502 @@ export default function DropStudioStage({
     saveNoteTimerRef.current = window.setTimeout(() => setSaveNote(""), 2600);
   }, []);
 
-  const saveToDevice = useCallback(() => {
-    const file = fileRef.current;
+  useEffect(() => {
+    audioSessionRef.current = audioSession;
+    studioLoopRef.current = Boolean(audioSession?.loop);
+  }, [audioSession]);
+
+  useEffect(() => {
+    sessionHistoryRef.current = sessionHistory;
+  }, [sessionHistory]);
+
+  const pushSessionEdit = useCallback((mutator: (session: AudioSession) => AudioSession) => {
+    setAudioSession((current) => {
+      if (!current) return current;
+      const nextHistory = pushHistory(sessionHistoryRef.current, current);
+      sessionHistoryRef.current = nextHistory;
+      setSessionHistory(nextHistory);
+      return mutator(current);
+    });
+  }, []);
+
+  const haltStudioTransport = () => {
+    studioCountInTimerRef.current.forEach((id) => window.clearTimeout(id));
+    studioCountInTimerRef.current = [];
+    setStudioCountIn(null);
+    studioEngineRef.current?.stop();
+    setStudioPlaying(false);
+    setStudioLaneAnalysers({});
+  };
+
+  const studioEngine = () => {
+    if (!studioEngineRef.current) {
+      const engine = new AudioSessionEngine();
+      engine.setEndedHandler(() => {
+        if (studioLoopRef.current) {
+          const session = audioSessionRef.current;
+          if (session) {
+            void (async () => {
+              try {
+                const from = session.loop?.inMs ?? 0;
+                const analysers = await engine.play(session, from);
+                setStudioLaneAnalysers(analysers);
+                setStudioPlaying(true);
+                setAudioSession((current) =>
+                  current ? { ...current, playheadMs: from } : current
+                );
+              } catch {
+                setStudioPlaying(false);
+                setStudioLaneAnalysers({});
+              }
+            })();
+            return;
+          }
+        }
+        setStudioPlaying(false);
+        // Keep the live mic meter if a take is still armed after the beat ends.
+        const vocal = studioTakeRef.current?.analyser;
+        setStudioLaneAnalysers(vocal ? { vocal } : {});
+        setAudioSession((current) => {
+          if (!current) return current;
+          const end = sessionDurationMs(current);
+          return { ...current, playheadMs: end };
+        });
+      });
+      studioEngineRef.current = engine;
+    }
+    return studioEngineRef.current;
+  };
+
+  const openVoiceStudio = useCallback(() => {
+    setError("");
+    setStudioLatencyMs(readStudioLatencyMs());
+    setAudioSession((current) => {
+      let next = current ?? createAudioSession();
+      const vocal = fileRef.current;
+      if (vocal?.type.startsWith("audio/")) {
+        next = upsertLaneFromFile(next, "vocal", vocal, {
+          mix: { preset: voicePreset },
+          latencyMs: readStudioLatencyMs(),
+        });
+      }
+      return next;
+    });
+    setVoiceStudioOpen(true);
+  }, [voicePreset]);
+
+  const collapseVoiceStudio = useCallback(() => {
+    if (audioSession && sessionHasLane(audioSession, "instrumental")) {
+      flashSaveNote("Keep Studio open to mix the instrumental.");
+      return;
+    }
+    haltStudioTransport();
+    setVoiceStudioOpen(false);
+  }, [audioSession, flashSaveNote]);
+
+  const removeStudioLane = useCallback(
+    (kind: LaneKind) => {
+      if (kind !== "vocal" && kind !== "instrumental") return;
+      haltStudioTransport();
+      setAudioSession((current) => (current ? removeLane(current, kind) : current));
+      if (kind === "vocal") {
+        const vocal = fileRef.current;
+        if (vocal?.type.startsWith("audio/")) {
+          fileRef.current = null;
+          setMediaUrl("");
+          urlRef.current = "";
+          setMediaFileTick((tick) => tick + 1);
+        }
+        flashSaveNote("Vocal removed");
+      } else {
+        flashSaveNote("Instrumental removed");
+      }
+    },
+    [flashSaveNote]
+  );
+
+  const setStudioInstrumental = useCallback((file: File) => {
+    setError("");
+    setAudioSession((current) =>
+      upsertLaneFromFile(current ?? createAudioSession(), "instrumental", file)
+    );
+    flashSaveNote("Instrumental loaded — tap + on Vocals or Record to sing over it");
+    void (async () => {
+      try {
+        const Constructor = getAudioContextConstructor();
+        if (!Constructor) return;
+        const ctx = new Constructor();
+        const decoded = await decodeAudioFile(file, ctx);
+        await ctx.close().catch(() => undefined);
+        setAudioSession((current) => {
+          if (!current) return current;
+          return {
+            ...current,
+            tracks: current.tracks.map((track) => {
+              if (track.kind !== "instrumental") return track;
+              return {
+                ...track,
+                clips: track.clips.map((clip) =>
+                  clip.file === file || clip.file.name === file.name
+                    ? { ...clip, decoded }
+                    : clip
+                ),
+              };
+            }),
+          };
+        });
+      } catch (reason) {
+        setError(
+          reason instanceof Error
+            ? reason.message
+            : "Couldn't read that instrumental. Try WAV/MP3."
+        );
+      }
+    })();
+  }, [flashSaveNote]);
+
+  const playStudioSession = useCallback(async () => {
+    if (!audioSession) return;
+    setError("");
+    try {
+      const fromMs = audioSession.playheadMs || 0;
+      const analysers = await studioEngine().play(audioSession, fromMs);
+      setStudioLaneAnalysers(analysers);
+      setStudioPlaying(true);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Couldn't play this session.");
+      setStudioLaneAnalysers({});
+      setStudioPlaying(false);
+    }
+  }, [audioSession]);
+
+  // Visible record timer while a vocal or ad-lib take is armed.
+  useEffect(() => {
+    if (!recording && !adlibRecording) {
+      setStudioRecordElapsedMs(0);
+      studioRecordStartedAtRef.current = 0;
+      return;
+    }
+    studioRecordStartedAtRef.current = performance.now();
+    const tick = window.setInterval(() => {
+      setStudioRecordElapsedMs(performance.now() - studioRecordStartedAtRef.current);
+    }, 200);
+    return () => window.clearInterval(tick);
+  }, [recording, adlibRecording]);
+
+  // Keep timeline playhead synced during live playback.
+  useEffect(() => {
+    if (!studioPlaying || recording || adlibRecording) return;
+    let frame = 0;
+    const tick = () => {
+      const engine = studioEngineRef.current;
+      if (engine?.isPlaying) {
+        const ms = engine.getPlayheadMs();
+        setAudioSession((current) =>
+          current && Math.abs(current.playheadMs - ms) > 30
+            ? { ...current, playheadMs: ms }
+            : current
+        );
+      }
+      frame = window.requestAnimationFrame(tick);
+    };
+    frame = window.requestAnimationFrame(tick);
+    return () => window.cancelAnimationFrame(frame);
+  }, [studioPlaying, recording, adlibRecording]);
+
+  const commitAdlibTake = useCallback(
+    (take: StudioTakeCapture, generation: number) => {
+      if (generation !== adlibRecordGenRef.current) return;
+      const blob = take.stop();
+      const peak = take.peakLevel();
+      take.dispose();
+      if (adlibTakeRef.current === take) adlibTakeRef.current = null;
+      setAdlibRecording(false);
+      setStudioMicStream(null);
+
+      if (!blob.size || peak < 0.0008) {
+        setError(
+          peak < 0.0008
+            ? "Ad-lib mic was silent — check permissions, then try again."
+            : "That ad-lib take was empty — try again."
+        );
+        return;
+      }
+
+      const file = new File([blob], `studio-adlib-${Date.now()}.wav`, { type: "audio/wav" });
+      const offsetMs = audioSessionRef.current?.playheadMs ?? 0;
+      pushSessionEdit((current) =>
+        upsertLaneFromFile(current, "adlib", file, {
+          offsetMs,
+          name: `Ad-Lib ${(current.tracks.filter((t) => t.kind === "adlib").length || 0) + 1}`,
+        })
+      );
+      flashSaveNote("Ad-lib lane added");
+    },
+    [flashSaveNote, pushSessionEdit]
+  );
+
+  const startAdlibRecord = useCallback(async () => {
+    if (recording) {
+      flashSaveNote("Stop the vocal take before recording an ad-lib.");
+      return;
+    }
+    adlibRecordGenRef.current += 1;
+    const generation = adlibRecordGenRef.current;
+    haltStudioTransport();
+    adlibTakeRef.current?.dispose();
+    adlibTakeRef.current = null;
+    setError("");
+    try {
+      const stream = await getMusicMicStream();
+      if (generation !== adlibRecordGenRef.current) {
+        stream.getTracks().forEach((track) => track.stop());
+        return;
+      }
+      const ctx = await studioEngine().ensureContext();
+      const take = createStudioTakeCapture(ctx, stream);
+      adlibTakeRef.current = take;
+      setStudioMicStream(stream);
+      take.start();
+      setStudioLaneAnalysers({ vocal: take.analyser });
+      setAdlibRecording(true);
+    } catch {
+      adlibTakeRef.current?.dispose();
+      adlibTakeRef.current = null;
+      setAdlibRecording(false);
+      setError("Microphone blocked. Allow access to record an ad-lib.");
+    }
+  }, [flashSaveNote, recording]);
+
+  const stopAdlibRecord = useCallback(() => {
+    const take = adlibTakeRef.current;
+    const generation = adlibRecordGenRef.current;
+    if (take?.isRecording()) {
+      commitAdlibTake(take, generation);
+      return;
+    }
+    adlibRecordGenRef.current += 1;
+    adlibTakeRef.current?.dispose();
+    adlibTakeRef.current = null;
+    setAdlibRecording(false);
+    setStudioMicStream(null);
+  }, [commitAdlibTake]);
+
+  const previewAdlibTrack = useCallback(
+    async (trackId: string) => {
+      const session = audioSession;
+      if (!session) return;
+      const track = session.tracks.find((item) => item.id === trackId);
+      if (!track?.clips.length) return;
+      haltStudioTransport();
+      try {
+        const soloSession: AudioSession = {
+          ...session,
+          playheadMs: track.clips[0]?.offsetMs ?? 0,
+          tracks: session.tracks.map((item) =>
+            item.id === trackId
+              ? { ...item, mix: { ...item.mix, muted: false, solo: true } }
+              : { ...item, mix: { ...item.mix, solo: false } }
+          ),
+        };
+        const analysers = await studioEngine().play(soloSession, soloSession.playheadMs);
+        setStudioLaneAnalysers(analysers);
+        setStudioPlaying(true);
+      } catch (reason) {
+        setError(reason instanceof Error ? reason.message : "Couldn't preview that ad-lib.");
+      }
+    },
+    [audioSession]
+  );
+
+  const previewVocalPreset = useCallback(async () => {
+    const session = audioSession;
+    const vocal = session?.tracks.find((track) => track.kind === "vocal");
+    const file = vocal?.clips[0]?.file ?? fileRef.current;
+    if (!file?.type.startsWith("audio/")) {
+      flashSaveNote("Record a vocal before previewing Voice.");
+      return;
+    }
+    setPresetPreviewing(true);
+    try {
+      const presetRaw = vocal?.mix.preset;
+      const preset: VoicePresetKey =
+        !presetRaw || presetRaw === "none" ? voicePreset : presetRaw;
+      const previewFile = await renderVoicePresetFile(file, preset);
+      const url = URL.createObjectURL(previewFile);
+      const audio = new Audio(url);
+      await audio.play();
+      audio.onended = () => URL.revokeObjectURL(url);
+      window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+      flashSaveNote(`Previewing ${preset}`);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Couldn't preview that preset.");
+    } finally {
+      setPresetPreviewing(false);
+    }
+  }, [audioSession, flashSaveNote, voicePreset]);
+
+  const commitStudioTake = useCallback(
+    (take: StudioTakeCapture, session: AudioSession, hasBeat: boolean, generation: number) => {
+      if (generation !== studioRecordGenRef.current) return;
+      studioEngine().stop();
+      setStudioPlaying(false);
+      setStudioLaneAnalysers({});
+      setStudioCountIn(null);
+
+      const blob = take.stop();
+      const peak = take.peakLevel();
+      take.dispose();
+      if (studioTakeRef.current === take) studioTakeRef.current = null;
+      streamRef.current = null;
+      recorderRef.current = null;
+      setStudioMicStream(null);
+      setRecording(false);
+
+      if (!blob.size || peak < 0.0008) {
+        setError(
+          peak < 0.0008
+            ? "Mic was silent — check permissions / input device, then try again."
+            : "That take was empty — try recording again."
+        );
+        return;
+      }
+
+      const file = new File(
+        [blob],
+        `studio-vocal-${Date.now()}.wav`,
+        { type: "audio/wav" }
+      );
+      fileRef.current = file;
+      setMediaKind("audio");
+      setSource("capture");
+      setPhase("edit");
+      setAudioSession((current) =>
+        upsertLaneFromFile(current ?? session, "vocal", file, {
+          offsetMs: 0,
+          latencyMs: studioLatencyMs,
+          mix: { preset: voicePreset },
+        })
+      );
+      syncMediaPreview();
+      flashSaveNote(hasBeat ? "Vocal locked to the beat" : "Vocal take ready");
+    },
+    [flashSaveNote, studioLatencyMs, voicePreset]
+  );
+
+  const startStudioVocal = useCallback(async () => {
+    const session = audioSession ?? createAudioSession();
+    const hasBeat = sessionHasLane(session, "instrumental");
+
+    studioRecordGenRef.current += 1;
+    const generation = studioRecordGenRef.current;
+    haltStudioTransport();
+    studioTakeRef.current?.dispose();
+    studioTakeRef.current = null;
+    recorderRef.current = null;
+    streamRef.current?.getTracks().forEach((track) => track.stop());
+    streamRef.current = null;
+    setStudioMicStream(null);
+    setError("");
+    setRecording(false);
+
+    try {
+      const stream = await getMusicMicStream();
+      if (generation !== studioRecordGenRef.current) {
+        stream.getTracks().forEach((track) => track.stop());
+        return;
+      }
+
+      // Same AudioContext as the beat. PCM ScriptProcessor capture (not MediaRecorder)
+      // so Chromium keeps writing mic samples while the instrumental plays.
+      const ctx = await studioEngine().ensureContext();
+      if (generation !== studioRecordGenRef.current) {
+        stream.getTracks().forEach((track) => track.stop());
+        return;
+      }
+
+      const take = createStudioTakeCapture(ctx, stream);
+      studioTakeRef.current = take;
+      streamRef.current = stream;
+      setStudioMicStream(stream);
+      take.start();
+
+      if (hasBeat) {
+        if (!audioSession) setAudioSession(session);
+        const analysers = await studioEngine().playBacking(session, 0);
+        if (generation !== studioRecordGenRef.current) {
+          take.dispose();
+          studioTakeRef.current = null;
+          setStudioMicStream(null);
+          return;
+        }
+        if (!take.isRecording()) {
+          studioEngine().stop();
+          take.dispose();
+          studioTakeRef.current = null;
+          setStudioMicStream(null);
+          setError("Vocal recorder stopped when the beat started. Try again.");
+          return;
+        }
+        setStudioLaneAnalysers({ ...analysers, vocal: take.analyser });
+        setStudioPlaying(true);
+        setRecording(true);
+        setStudioCountIn(3);
+        studioCountInTimerRef.current = [2, 1, 0].map((value, index) =>
+          window.setTimeout(() => {
+            if (generation !== studioRecordGenRef.current) return;
+            if (value > 0) setStudioCountIn(value);
+            else setStudioCountIn(null);
+          }, (index + 1) * 1000)
+        );
+      } else {
+        setStudioLaneAnalysers({ vocal: take.analyser });
+        setRecording(true);
+      }
+    } catch {
+      studioTakeRef.current?.dispose();
+      studioTakeRef.current = null;
+      setStudioMicStream(null);
+      setError("Microphone blocked. Allow access, or upload a vocal instead.");
+    }
+  }, [audioSession]);
+
+  const saveToDevice = useCallback(async () => {
+    let file = fileRef.current;
     if (!file) return;
+    if (file.type.startsWith("audio/")) {
+      const originalFile = file;
+      setProcessingVocal(true);
+      try {
+        if (audioSession && sessionHasLane(audioSession, "instrumental")) {
+          file = await renderSessionFile({
+            ...audioSession,
+            tracks: audioSession.tracks.map((track) =>
+              track.kind === "vocal"
+                ? {
+                    ...track,
+                    latencyMs: studioLatencyMs,
+                    mix: { ...track.mix, preset: voicePreset },
+                  }
+                : track
+            ),
+          });
+        } else if (
+          audioSession &&
+          (sessionHasLane(audioSession, "adlib") || sessionHasLane(audioSession, "fx"))
+        ) {
+          file = await renderSessionFile(audioSession);
+        } else {
+          file = await renderVoicePresetFile(file, voicePreset);
+        }
+      } catch (error) {
+        console.error("[DropStudioStage] vocal download enhancement failed", error);
+        file = originalFile;
+        flashSaveNote("Mix timed out — saving the original voice.");
+      } finally {
+        setProcessingVocal(false);
+      }
+    }
     const url = URL.createObjectURL(file);
     const a = document.createElement("a");
     a.href = url;
@@ -324,7 +1016,7 @@ export default function DropStudioStage({
     a.remove();
     window.setTimeout(() => URL.revokeObjectURL(url), 4000);
     flashSaveNote("Saved to your device ⬇");
-  }, [flashSaveNote]);
+  }, [audioSession, flashSaveNote, studioLatencyMs, voicePreset]);
 
   const saveToDrafts = useCallback(
     async (auto = false) => {
@@ -334,6 +1026,9 @@ export default function DropStudioStage({
         draftIdRef.current = `draft_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
       }
       const saved = await saveDropDraft(file, draftIdRef.current);
+      if (saved && audioSessionRef.current && audioSessionRef.current.tracks.length > 0) {
+        await saveVoiceStudioProject(draftIdRef.current, audioSessionRef.current);
+      }
       if (auto) {
         if (saved) flashSaveNote("Auto-saved to Drafts");
         return;
@@ -357,12 +1052,38 @@ export default function DropStudioStage({
   }, []);
 
   const stopCamera = useCallback(() => {
-    if (recorderRef.current?.state === "recording") recorderRef.current.stop();
+    studioCountInTimerRef.current.forEach((id) => window.clearTimeout(id));
+    studioCountInTimerRef.current = [];
+    setStudioCountIn(null);
+    studioEngineRef.current?.stop();
+    setStudioPlaying(false);
+    setStudioLaneAnalysers({});
+    setStudioMicStream(null);
+    studioTakeRef.current?.dispose();
+    studioTakeRef.current = null;
+    if (recorderRef.current?.state === "recording") {
+      try {
+        recorderRef.current.stop();
+      } catch {
+        // already stopped
+      }
+    }
     recorderRef.current = null;
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
     if (videoRef.current) videoRef.current.srcObject = null;
     setRecording(false);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      studioTakeRef.current?.dispose();
+      studioTakeRef.current = null;
+      adlibTakeRef.current?.dispose();
+      adlibTakeRef.current = null;
+      studioEngineRef.current?.dispose();
+      studioEngineRef.current = null;
+    };
   }, []);
 
   // Reopen a saved draft straight into the editor.
@@ -378,8 +1099,28 @@ export default function DropStudioStage({
       setPhase("edit");
       setDraftsOpen(false);
       syncMediaPreview();
+      if (draft.kind === "audio") {
+        void (async () => {
+          const project = await loadVoiceStudioProject(draft.id);
+          if (project) {
+            setAudioSession(project);
+            setSessionHistory(createSessionHistory());
+            setVoiceStudioOpen(true);
+            const vocal = project.tracks.find((track) => track.kind === "vocal");
+            const preset = vocal?.mix.preset;
+            if (preset && preset !== "none") setVoicePreset(preset);
+            flashSaveNote("Voice Studio project restored");
+            return;
+          }
+          setAudioSession(
+            upsertLaneFromFile(createAudioSession(), "vocal", file, {
+              mix: { preset: voicePreset },
+            })
+          );
+        })();
+      }
     },
-    [stopCamera, syncMediaPreview]
+    [flashSaveNote, stopCamera, syncMediaPreview, voicePreset]
   );
 
   const startCamera = useCallback(
@@ -439,11 +1180,21 @@ export default function DropStudioStage({
     setStudioValue(initialStudio);
     writeStudioDraft(initialStudio);
     setDrawOpen(false);
+    setVoicePreset("clean");
+    setProcessingVocal(false);
+    setVoiceStudioOpen(false);
+    setAudioSession(null);
+    setStudioHeadphonesOk(false);
+    setStudioPlaying(false);
+    setStudioCountIn(null);
+    studioEngineRef.current?.dispose();
+    studioEngineRef.current = null;
     setIsDropbookMode(false);
     setDropbookCreating(false);
     setDropbookIntroPhase(null);
     setDropbookEditingCover(false);
     setDropbookCoverMode("choose");
+    setFinishingDropbook(false);
     dropbookPageSeqRef.current = 0;
     dropbookPageFilesRef.current.clear();
     dropbookPageDocsRef.current.clear();
@@ -519,6 +1270,17 @@ export default function DropStudioStage({
         return;
       }
 
+      if (chip.linkKind && chip.linkUrl) {
+        flashSaveNote(
+          chip.linkKind === "youtube"
+            ? "YouTube page locked in this Dropbook"
+            : chip.linkKind === "music"
+              ? "Music page locked in this Dropbook"
+              : "Link page locked in this Dropbook"
+        );
+        return;
+      }
+
       if (chip.mode === "descript") {
         const doc = dropbookPageDocsRef.current.get(chipId);
         if (!doc) {
@@ -570,6 +1332,7 @@ export default function DropStudioStage({
     setDrawOpen(false);
     setAudioPlaying(false);
     setPhase("choose");
+    setVoiceStudioOpen(false);
     stopCamera();
     draftIdRef.current = "";
     syncMediaPreview();
@@ -579,6 +1342,35 @@ export default function DropStudioStage({
     setDropbookCoverBlankColor(color);
     setDropbookCover((prev) => (prev ? { ...prev, bookColor: color, bookColorSet: true } : prev));
   }, []);
+
+  const clearDropbookCoverPhoto = useCallback(() => {
+    setDropbookCoverPhotoUrl((prev) => {
+      if (prev?.startsWith("blob:")) URL.revokeObjectURL(prev);
+      return null;
+    });
+  }, []);
+
+  const onDropbookCoverPhoto = useCallback((file: File | undefined) => {
+    if (!file || !file.type.startsWith("image/")) {
+      flashSaveNote("Choose an image for the cover.");
+      return;
+    }
+    setDropbookCoverPhotoUrl((prev) => {
+      if (prev?.startsWith("blob:")) URL.revokeObjectURL(prev);
+      return URL.createObjectURL(file);
+    });
+    flashSaveNote("Picture embedded on cover");
+  }, [flashSaveNote]);
+
+  useEffect(() => {
+    let alive = true;
+    void composeCoverBackground(dropbookCoverBlankColor, dropbookCoverPhotoUrl).then((url) => {
+      if (alive) setCoverBlankBackgroundUrl(url);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [dropbookCoverBlankColor, dropbookCoverPhotoUrl]);
 
   const appendDropbookPage = useCallback(
     (
@@ -606,6 +1398,11 @@ export default function DropStudioStage({
             descriptDocId: chip.descriptDocId,
             descriptTitle: chip.descriptTitle,
             descriptPreview: chip.descriptPreview,
+            linkKind: chip.linkKind,
+            linkUrl: chip.linkUrl,
+            linkEmbedUrl: chip.linkEmbedUrl,
+            linkProvider: chip.linkProvider,
+            linkDescription: chip.linkDescription,
           },
         ];
       });
@@ -701,6 +1498,24 @@ export default function DropStudioStage({
     [dropbookCoverBlankColor, flashSaveNote, resetCreationSurface]
   );
 
+  const finishCoverFromField = useCallback(async () => {
+    try {
+      const background = await composeCoverBackground(
+        dropbookCoverBlankColor,
+        dropbookCoverPhotoUrl
+      );
+      if (!background) throw new Error("Cover background unavailable");
+      commitCoverBlank(await coverDataUrlToFile(background));
+    } catch {
+      flashSaveNote("Couldn't finish this book cover. Try again.");
+    }
+  }, [
+    commitCoverBlank,
+    dropbookCoverBlankColor,
+    dropbookCoverPhotoUrl,
+    flashSaveNote,
+  ]);
+
   const dropbookShelfSlots = useMemo((): DropbookShelfSlot[] => {
     if (!dropbookCover) return [];
     const coverSlot: DropbookShelfSlot = {
@@ -721,6 +1536,7 @@ export default function DropStudioStage({
       mode: chip.mode,
       descriptTitle: chip.descriptTitle,
       descriptPreview: chip.descriptPreview,
+      linkKind: chip.linkKind,
     }));
     const shelfFull = dropbookPages.length >= DROPBOOK_MAX_PAGES;
     const placeholder: DropbookShelfSlot[] = shelfFull
@@ -731,9 +1547,51 @@ export default function DropStudioStage({
 
   const dropbookShelfFull = dropbookPages.length >= DROPBOOK_MAX_PAGES;
 
-  const coverBlankBackgroundUrl = useMemo(
-    () => solidColorBackgroundUrl(dropbookCoverBlankColor),
-    [dropbookCoverBlankColor]
+  const renderBookColorField = (className = "") => (
+    <div className={`dropbookCoverColorRow ${className}`.trim()}>
+      <span className="dropbookCoverColorLabel">Book cover color</span>
+      <label className="dropbookCoverColorField">
+        <input
+          type="color"
+          className="dropbookCoverColorPicker"
+          value={/^#[0-9a-fA-F]{6}$/.test(dropbookCoverBlankColor) ? dropbookCoverBlankColor : "#000000"}
+          aria-label="Choose book cover color"
+          onChange={(event) => pickBookColor(event.currentTarget.value)}
+        />
+        <span className="dropbookCoverColorValue">{dropbookCoverBlankColor.toUpperCase()}</span>
+        <span className="dropbookCoverColorChange">Change color</span>
+      </label>
+    </div>
+  );
+
+  const renderCoverPhotoControls = () => (
+    <div className="dropbookCoverPhotoRow">
+      <input
+        ref={dropbookCoverPhotoInputRef}
+        type="file"
+        accept="image/*"
+        hidden
+        onChange={(event) => {
+          onDropbookCoverPhoto(event.currentTarget.files?.[0]);
+          event.currentTarget.value = "";
+        }}
+      />
+      <button
+        type="button"
+        className="studioGhost dropbookCoverPhotoBtn"
+        onClick={() => dropbookCoverPhotoInputRef.current?.click()}
+      >
+        {dropbookCoverPhotoUrl ? "Change picture" : "Add picture"}
+      </button>
+      {dropbookCoverPhotoUrl ? (
+        <button type="button" className="studioGhost dropbookCoverPhotoBtn" onClick={clearDropbookCoverPhoto}>
+          Remove picture
+        </button>
+      ) : null}
+      <span className="dropbookCoverPhotoHint">
+        Embeds inside the book color matte — draw over it in Edit Cover.
+      </span>
+    </div>
   );
 
   useEffect(() => {
@@ -769,10 +1627,6 @@ export default function DropStudioStage({
 
   const commitDescriptToDropbook = useCallback(
     (doc: DescriptDoc) => {
-      if (!dropbookCover?.complete) {
-        flashSaveNote("Set your Dropbook cover first");
-        return;
-      }
       const previewText = doc.plainText?.trim() || descriptPlainText(doc.html);
       const chipFields = {
         mode: "descript" as const,
@@ -801,7 +1655,6 @@ export default function DropStudioStage({
       flashSaveNote("Page added to Dropbook ✦");
     },
     [
-      dropbookCover,
       dropbookShelfFull,
       appendDropbookPage,
       updateDropbookPage,
@@ -810,11 +1663,116 @@ export default function DropStudioStage({
     ]
   );
 
-  const startDropbookPageCapture = useCallback(() => {
+  const completeDescript = useCallback(
+    async (doc: DescriptDoc) => {
+      if (!onDescriptComplete) return;
+      try {
+        await onDescriptComplete(doc);
+        onClose();
+      } catch (error) {
+        console.error("[DropStudioStage] Descript completion failed", error);
+        flashSaveNote("Couldn't save this Descript. Try again.");
+      }
+    },
+    [flashSaveNote, onClose, onDescriptComplete]
+  );
+
+  const finishDropbook = useCallback(async () => {
     if (!dropbookCover?.complete) {
       flashSaveNote("Set your Dropbook cover first");
       return;
     }
+    if (!dropbookPages.length) {
+      flashSaveNote("Add at least one page before finishing");
+      return;
+    }
+    if (finishingDropbook) return;
+
+    setFinishingDropbook(true);
+    flashSaveNote("Building Dropbook…");
+    try {
+      const slides: DropbookSlide[] = [];
+      const coverSrc = dropbookCover.previewUrl
+        ? await sourceToDataUrl(dropbookCover.previewUrl)
+        : undefined;
+      slides.push({
+        id: dropbookCover.id,
+        kind: "cover",
+        title: "Cover",
+        src: coverSrc,
+      });
+
+      for (const page of dropbookPages) {
+        if (page.linkKind && page.linkUrl) {
+          slides.push({
+            id: page.id,
+            kind: page.linkKind,
+            title: page.label || page.linkProvider || "Link",
+            src: page.previewUrl,
+            text: page.linkDescription,
+            url: page.linkUrl,
+            embedUrl: page.linkEmbedUrl,
+            provider: page.linkProvider,
+          });
+          continue;
+        }
+
+        if (page.mode === "descript") {
+          const doc = dropbookPageDocsRef.current.get(page.id);
+          slides.push({
+            id: page.id,
+            kind: "descript",
+            title: page.descriptTitle || page.label || "Descript",
+            text: doc?.plainText?.trim() || page.descriptPreview || "",
+          });
+          continue;
+        }
+
+        const file = dropbookPageFilesRef.current.get(page.id);
+        if (!file) throw new Error(`Dropbook page ${page.label || page.id} is unavailable.`);
+        const kind: DropbookSlide["kind"] = file.type.startsWith("video/")
+          ? "video"
+          : file.type.startsWith("audio/")
+            ? "audio"
+            : "image";
+        slides.push({
+          id: page.id,
+          kind,
+          title: page.label || modeLabel(page.mode ?? "photo"),
+          src: await blobToDataUrl(file),
+        });
+      }
+
+      const manifest: DropbookManifest = {
+        format: "jab-dropbook",
+        version: 1,
+        createdAt: Date.now(),
+        bookColor: dropbookCover.bookColor,
+        slides,
+      };
+      const file = new File(
+        [JSON.stringify(manifest)],
+        `dropbook-${Date.now()}.dropbook.json`,
+        { type: DROPBOOK_MIME }
+      );
+      await onComplete(file, "capture");
+      onClose();
+    } catch (error) {
+      console.error("[DropStudioStage] Dropbook completion failed", error);
+      flashSaveNote(error instanceof Error ? error.message : "Couldn't finish this Dropbook.");
+    } finally {
+      setFinishingDropbook(false);
+    }
+  }, [
+    dropbookCover,
+    dropbookPages,
+    finishingDropbook,
+    flashSaveNote,
+    onComplete,
+    onClose,
+  ]);
+
+  const startDropbookPageCapture = useCallback(() => {
     if (dropbookShelfFull) {
       flashSaveNote("Dropbook holds up to 3 drops plus your cover");
       return;
@@ -825,7 +1783,82 @@ export default function DropStudioStage({
     setDropbookEditingCover(false);
     setDropbookCoverMode("choose");
     setDropbookCreating(true);
-  }, [dropbookCover, dropbookShelfFull, resetCreationSurface, flashSaveNote]);
+  }, [dropbookShelfFull, resetCreationSurface, flashSaveNote]);
+
+  const beginDropbookSession = useCallback(() => {
+    // Activating a Dropbook must not discard or navigate away from the drop
+    // currently being captured/edited. The existing completion action will
+    // add that work as a page; Home is the explicit route to the book screen.
+    setDropbookCreating(true);
+    setDropbookCover(createEmptyDropbookCover());
+    setDropbookPages([]);
+    dropbookPageFilesRef.current.clear();
+    dropbookPageDocsRef.current.clear();
+    editingDropbookPageIdRef.current = null;
+    setDropbookEditingDescriptDoc(null);
+    dropbookPageSeqRef.current = 0;
+    setDropbookIntroPhase("workspace");
+    setDropbookEditingCover(false);
+    setDropbookCoverMode("choose");
+    setDropbookCoverBlankColor("#000000");
+    clearDropbookCoverPhoto();
+    setDropbookLinkBusy(false);
+    setIsDropbookMode(true);
+    flashSaveNote("Dropbook ready — add this drop or open Home");
+  }, [clearDropbookCoverPhoto, flashSaveNote]);
+
+  const addDropbookLinkPage = useCallback(async () => {
+    if (isDropbookMode && dropbookShelfFull) {
+      flashSaveNote("Dropbook holds up to 3 drops plus your cover");
+      return;
+    }
+    const draft = dropbookLinkDraft.trim();
+    if (!draft) {
+      flashSaveNote("Paste a YouTube, music, or web link");
+      return;
+    }
+
+    setDropbookLinkBusy(true);
+    try {
+      const resolved = await resolveDropbookLink(draft);
+      if (!resolved) {
+        flashSaveNote("That doesn't look like a usable link");
+        return;
+      }
+      // Link pages live in a Dropbook session only — never Board-publish alone.
+      if (!isDropbookMode) {
+        beginDropbookSession();
+      }
+      appendDropbookPage({
+        label: resolved.chipLabel,
+        previewUrl: resolved.image,
+        linkKind: resolved.kind,
+        linkUrl: resolved.url,
+        linkEmbedUrl: resolved.embedUrl,
+        linkProvider: resolved.provider,
+        linkDescription: resolved.description,
+      });
+      setDropbookLinkDraft("");
+      flashSaveNote(
+        resolved.kind === "youtube"
+          ? "YouTube page added to Dropbook ✦"
+          : resolved.kind === "music"
+            ? "Music page added to Dropbook ✦"
+            : "Link page added to Dropbook ✦"
+      );
+    } catch {
+      flashSaveNote("Couldn't read that link. Try again.");
+    } finally {
+      setDropbookLinkBusy(false);
+    }
+  }, [
+    appendDropbookPage,
+    beginDropbookSession,
+    dropbookLinkDraft,
+    dropbookShelfFull,
+    flashSaveNote,
+    isDropbookMode,
+  ]);
 
   // Single source of truth for the editor preview URL — recreated whenever the file changes.
   useEffect(() => {
@@ -978,11 +2011,24 @@ export default function DropStudioStage({
     urlRef.current = "";
     setDrawOpen(false);
     setAudioPlaying(false);
+    setVoicePreset("clean");
+    setProcessingVocal(false);
     setPhase("capture");
     syncMediaPreview();
   }
 
   async function done() {
+    if (
+      audioSession &&
+      sessionHasLane(audioSession, "instrumental") &&
+      !sessionHasLane(audioSession, "vocal")
+    ) {
+      flashSaveNote("Record a vocal before mixing.");
+      return;
+    }
+
+    let completionValue = studioValue;
+
     if (
       fileRef.current?.type.startsWith("image/") &&
       fileRef.current.type !== "image/gif" &&
@@ -999,23 +2045,80 @@ export default function DropStudioStage({
       fileRef.current.type !== "image/svg+xml"
     ) {
       fileRef.current = await rotateImageFile(fileRef.current, rotation);
-      setStudioValue((prev) => ({
-        ...prev,
+      completionValue = {
+        ...completionValue,
         effects: {
-          ...(prev.effects ?? {}),
+          ...(completionValue.effects ?? {}),
           rotation: null,
         },
-      }));
+      };
+      setStudioValue(completionValue);
     }
 
-    const file = fileRef.current;
+    let file = fileRef.current;
     if (!file) return;
 
-    if (isDropbookMode) {
-      if (!dropbookCover?.complete) {
-        flashSaveNote("Set your Dropbook cover first");
+    if (file.type.startsWith("image/") && completionValue.artOverlayUrl) {
+      flashSaveNote("Rendering Art Palette drawing…");
+      try {
+        file = await flattenArtLayerIntoImage(file, completionValue.artOverlayUrl);
+        fileRef.current = file;
+        completionValue = { ...completionValue, artOverlayUrl: undefined };
+        setStudioValue(completionValue);
+      } catch (error) {
+        console.error("[DropStudioStage] Art Palette rendering failed", error);
+        flashSaveNote("Couldn't render this drawing. Try Apply Art again.");
         return;
       }
+    }
+
+    if (file.type.startsWith("audio/")) {
+      const originalFile = file;
+      setProcessingVocal(true);
+      flashSaveNote(
+        audioSession &&
+          (sessionHasLane(audioSession, "instrumental") ||
+            sessionHasLane(audioSession, "adlib") ||
+            sessionHasLane(audioSession, "fx"))
+          ? "Mixing Voice Studio session…"
+          : "Applying vocal enhancement…"
+      );
+      await new Promise<void>((resolve) => {
+        if (typeof window !== "undefined") window.requestAnimationFrame(() => resolve());
+        else resolve();
+      });
+      try {
+        if (
+          audioSession &&
+          (sessionHasLane(audioSession, "instrumental") ||
+            sessionHasLane(audioSession, "adlib") ||
+            sessionHasLane(audioSession, "fx"))
+        ) {
+          const mixed = await renderSessionFile({
+            ...audioSession,
+            tracks: audioSession.tracks.map((track) =>
+              track.kind === "vocal" ? { ...track, latencyMs: studioLatencyMs } : track
+            ),
+          });
+          file = mixed;
+          fileRef.current = mixed;
+          setMediaKind("audio");
+          syncMediaPreview();
+        } else {
+          file = await renderVoicePresetFile(file, voicePreset);
+          fileRef.current = file;
+        }
+      } catch (error) {
+        console.error("[DropStudioStage] vocal enhancement failed", error);
+        file = originalFile;
+        fileRef.current = originalFile;
+        flashSaveNote("Mix timed out — using the original voice.");
+      } finally {
+        setProcessingVocal(false);
+      }
+    }
+
+    if (isDropbookMode) {
       const editingPageId = editingDropbookPageIdRef.current;
       if (!editingPageId && dropbookShelfFull) {
         flashSaveNote("Dropbook holds up to 3 drops plus your cover");
@@ -1059,9 +2162,15 @@ export default function DropStudioStage({
       return;
     }
 
-    flushStudioValue();
-    onComplete(file, source);
-    onClose();
+    const completedCustomizations = writeStudioDraft(completionValue);
+    onChange(completedCustomizations);
+    try {
+      await onComplete(file, source);
+      onClose();
+    } catch (error) {
+      console.error("[DropStudioStage] completion failed", error);
+      flashSaveNote("Couldn't save this Drop. Try again.");
+    }
   }
 
   if (!open || typeof document === "undefined") return null;
@@ -1343,40 +2452,69 @@ export default function DropStudioStage({
                 })}
               </nav>
 
+              <form
+                className="dropbookLinkEntry studioMethodLink"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  void addDropbookLinkPage();
+                }}
+              >
+                <label className="dropbookLinkField">
+                  <span className="dropbookLinkIcon" aria-hidden>
+                    🔗
+                  </span>
+                  <input
+                    type="url"
+                    inputMode="url"
+                    autoComplete="url"
+                    placeholder="Paste YouTube, music, or web link"
+                    value={dropbookLinkDraft}
+                    onChange={(event) => setDropbookLinkDraft(event.currentTarget.value)}
+                    disabled={dropbookLinkBusy || (isDropbookMode && dropbookShelfFull)}
+                    aria-label="Paste YouTube, music, or web link for Dropbook"
+                  />
+                </label>
+                <button
+                  type="submit"
+                  className="dropbookLinkAdd"
+                  disabled={
+                    dropbookLinkBusy ||
+                    (isDropbookMode && dropbookShelfFull) ||
+                    !dropbookLinkDraft.trim()
+                  }
+                >
+                  {dropbookLinkBusy ? "…" : "Add →"}
+                </button>
+              </form>
+
               <div className="dropbookEntryRow">
                 <button
                   type="button"
                   className={`dropbookEntry ${isDropbookMode ? "dropbookEntryActive" : ""}`}
                   onClick={() => {
-                    setIsDropbookMode((active) => {
-                      const next = !active;
-                      if (next) {
-                        setDropbookCreating(false);
-                        resetCreationSurface();
-                        setDropbookCover(createEmptyDropbookCover());
-                        setDropbookPages([]);
-                        dropbookPageFilesRef.current.clear();
-                        dropbookPageDocsRef.current.clear();
-                        editingDropbookPageIdRef.current = null;
-                        setDropbookEditingDescriptDoc(null);
-                        dropbookPageSeqRef.current = 0;
-                        setDropbookIntroPhase("splash");
-                        setDropbookEditingCover(false);
-                        setDropbookCoverMode("choose");
-                        setDropbookCoverBlankColor("#000000");
-                      } else {
-                        setDropbookCreating(false);
-                        setDropbookIntroPhase(null);
-                        setDropbookEditingCover(false);
-                        setDropbookCoverMode("choose");
-                      }
-                      return next;
-                    });
+                    if (isDropbookMode) {
+                      setIsDropbookMode(false);
+                      setDropbookCreating(false);
+                      setDropbookIntroPhase(null);
+                      setDropbookEditingCover(false);
+                      setDropbookCoverMode("choose");
+                      setDropbookLinkDraft("");
+                      setDropbookLinkBusy(false);
+                      setDropbookPages([]);
+                      setDropbookCover(null);
+                      clearDropbookCoverPhoto();
+                      setDropbookCoverBlankColor("#000000");
+                      dropbookPageFilesRef.current.clear();
+                      dropbookPageDocsRef.current.clear();
+                      return;
+                    }
+                    beginDropbookSession();
+                    setDropbookLinkDraft("");
                   }}
                   aria-pressed={isDropbookMode}
                 >
                   <span className="dropbookEntryLabel">
-                    {isDropbookMode ? "Dropbook Mode" : "Start a Dropbook"}
+                    {isDropbookMode ? "◉ Dropbook Active" : "Start a Dropbook"}
                   </span>
                 </button>
                 {isDropbookMode &&
@@ -1416,10 +2554,18 @@ export default function DropStudioStage({
                       <span className="dropbookShelfHint">
                         {dropbookShelfFull
                           ? "Cover + 3 drops — your Dropbook is full"
-                          : dropbookCover?.complete
-                            ? "Create drops to build your Dropbook"
-                            : "Start with your Dropbook cover"}
+                          : "Add drops or paste a link above — cover can wait"}
                       </span>
+                      {dropbookPages.length > 0 ? (
+                        <button
+                          type="button"
+                          className="dropbookFinishBtn"
+                          onClick={() => void finishDropbook()}
+                          disabled={finishingDropbook}
+                        >
+                          {finishingDropbook ? "Building Dropbook…" : "Finish Dropbook →"}
+                        </button>
+                      ) : null}
                     </div>
                     <div
                       className={`dropbookShelfScroll ${
@@ -1490,11 +2636,28 @@ export default function DropStudioStage({
                               <img className={chipStyles.preview} src={slot.previewUrl} alt="" />
                             ) : (
                               <span className={chipStyles.modeGlyph} aria-hidden>
-                                {slot.mode ? modeGlyph(slot.mode) : "✦"}
+                                {slot.linkKind === "youtube"
+                                  ? "▶"
+                                  : slot.linkKind === "music"
+                                    ? "♫"
+                                    : slot.linkKind === "link"
+                                      ? "🔗"
+                                      : slot.mode
+                                        ? modeGlyph(slot.mode)
+                                        : "✦"}
                               </span>
                             )}
                             <span className={chipStyles.footer}>
-                              {slot.label ?? (slot.mode ? modeLabel(slot.mode) : "Drop")}
+                              {slot.label ??
+                                (slot.linkKind === "youtube"
+                                  ? "YouTube ▶"
+                                  : slot.linkKind === "music"
+                                    ? "Song ♫"
+                                    : slot.linkKind === "link"
+                                      ? "Link"
+                                      : slot.mode
+                                        ? modeLabel(slot.mode)
+                                        : "Drop")}
                             </span>
                           </button>
                         )
@@ -1526,28 +2689,16 @@ export default function DropStudioStage({
                     >
                       ← Cover options
                     </button>
-                    <span className="dropbookCoverEditorTitle">Blank Cover</span>
+                    <span className="dropbookCoverEditorTitle">Edit Cover</span>
                   </div>
-                  <div className="dropbookCoverColorRow">
-                    <span className="dropbookCoverColorLabel">Book color</span>
-                    <div className="dropbookCoverColorSwatches">
-                      {DROPBOOK_BOOK_COLORS.map((color) => (
-                        <button
-                          key={color}
-                          type="button"
-                          className={`dropbookColorSwatch ${dropbookCoverBlankColor === color ? "on" : ""}`}
-                          style={{ background: color }}
-                          aria-label={`Book color ${color}`}
-                          onClick={() => pickBookColor(color)}
-                        />
-                      ))}
-                    </div>
-                  </div>
+                  {renderBookColorField()}
+                  {renderCoverPhotoControls()}
                   <div className="dropbookCoverStage capMonitorHost">
                     <BoardArtCanvas
                       operatingTable
-                      backgroundImageUrl={coverBlankBackgroundUrl}
-                      saveLabel="Save cover →"
+                      layout="stack"
+                      backgroundImageUrl={coverBlankBackgroundUrl || undefined}
+                      saveLabel="Finish Book Cover →"
                       onSave={commitCoverBlank}
                     />
                   </div>
@@ -1557,30 +2708,19 @@ export default function DropStudioStage({
                 dropbookEditingCover &&
                 dropbookCoverMode === "choose" ? (
                 <div className="dropbookCoverWorkspace">
-                  {renderModeChooseMonitor("Create the identity of your Dropbook.", true)}
                   <div className="dropbookCoverChooseStack">
                     <div className="dropbookCoverChooseHead">
                       <div className="dropbookMonitorLabel">Dropbook Cover</div>
                     </div>
-                    <div className="dropbookCoverColorRow dropbookCoverColorRowChoose">
-                      <span className="dropbookCoverColorLabel">Book color</span>
-                      <div className="dropbookCoverColorSwatches">
-                        {DROPBOOK_BOOK_COLORS.map((color) => (
-                          <button
-                            key={color}
-                            type="button"
-                            className={`dropbookColorSwatch ${
-                              dropbookCover?.bookColorSet && dropbookCover.bookColor === color
-                                ? "on"
-                                : ""
-                            }`}
-                            style={{ background: color }}
-                            aria-label={`Book color ${color}`}
-                            onClick={() => pickBookColor(color)}
-                          />
-                        ))}
-                      </div>
-                    </div>
+                    {renderBookColorField("dropbookCoverColorRowChoose")}
+                    {renderCoverPhotoControls()}
+                    <button
+                      type="button"
+                      className="dropbookCoverFinishBtn"
+                      onClick={() => void finishCoverFromField()}
+                    >
+                      Finish Book Cover →
+                    </button>
                     <div className="dropbookCoverChooseBtns">
                       <button
                         type="button"
@@ -1593,24 +2733,9 @@ export default function DropStudioStage({
                         <span className="dropbookCoverChooseGlyph" aria-hidden>
                           🎨
                         </span>
-                        <span className="dropbookCoverChooseTitle">Blank Cover</span>
+                        <span className="dropbookCoverChooseTitle">Edit Cover</span>
                         <span className="dropbookCoverChooseHint">
-                          Solid color · draw · paint
-                        </span>
-                      </button>
-                      <button
-                        type="button"
-                        className="dropbookCoverChooseBtn"
-                        onClick={() =>
-                          flashSaveNote("Drag any shelf drop onto the Cover slate")
-                        }
-                      >
-                        <span className="dropbookCoverChooseGlyph" aria-hidden>
-                          📎
-                        </span>
-                        <span className="dropbookCoverChooseTitle">Use Existing Drop</span>
-                        <span className="dropbookCoverChooseHint">
-                          Drag a drop onto Cover
+                          Color · picture · draw · paint
                         </span>
                       </button>
                     </div>
@@ -1619,11 +2744,11 @@ export default function DropStudioStage({
               ) : isDropbookMode && !dropbookCreating && dropbookIntroPhase === "workspace" ? (
                 <div className="dropbookMonitorHost" aria-label="Dropbook workspace">
                   {renderModeChooseMonitor(
-                    dropbookCover?.complete
-                      ? "Tap here or a + slot to add your next drop."
-                      : "Set your cover to begin building your Dropbook.",
+                    dropbookShelfFull
+                      ? "Your Dropbook shelf is full."
+                      : "Tap here or a + slot to add a drop — cover can wait.",
                     true,
-                    dropbookCover?.complete && !dropbookShelfFull
+                    !dropbookShelfFull
                       ? {
                           onActivate: startDropbookPageCapture,
                           activateLabel: `Add ${modeLabel(mode)} drop page`,
@@ -1636,10 +2761,16 @@ export default function DropStudioStage({
                   key={
                     isDropbookMode
                       ? `dropbook-descript-${dropbookEditingDescriptDoc?.id ?? "new"}`
-                      : "descript"
+                      : `descript-${initialDescriptDoc?.id ?? "new"}`
                   }
-                  initialDoc={isDropbookMode ? dropbookEditingDescriptDoc : null}
-                  startInEditor={isDropbookMode && dropbookEditingDescriptDoc !== null}
+                  initialDoc={isDropbookMode ? dropbookEditingDescriptDoc : initialDescriptDoc}
+                  startInEditor={
+                    isDropbookMode
+                      ? dropbookEditingDescriptDoc !== null
+                      : initialDescriptDoc !== null
+                  }
+                  returnOnBack={!isDropbookMode && descriptReturnOnBack}
+                  onReturn={descriptOnReturn}
                   onClose={
                     isDropbookMode && dropbookCreating
                       ? () => {
@@ -1650,13 +2781,262 @@ export default function DropStudioStage({
                       : handleClose
                   }
                   onShared={
-                    isDropbookMode && dropbookCreating ? commitDescriptToDropbook : undefined
+                    isDropbookMode && dropbookCreating
+                      ? commitDescriptToDropbook
+                      : onDescriptComplete
+                        ? (doc) => {
+                            void completeDescript(doc);
+                          }
+                        : undefined
                   }
                   shareLabel={
                     isDropbookMode && dropbookCreating ? "Add to Dropbook →" : undefined
                   }
                   defaultDestination={descriptDestination}
                 />
+              ) : voiceStudioOpen && mode === "audio" && audioSession ? (
+                <div className="capEdit">
+                  <div className="capEditScroll">
+                    <VoiceStudioSession
+                      session={audioSession}
+                      recording={recording}
+                      playing={studioPlaying}
+                      countIn={studioCountIn}
+                      error={error}
+                      headphonesOk={studioHeadphonesOk}
+                      latencyMs={studioLatencyMs}
+                      canCollapse={!sessionHasLane(audioSession, "instrumental")}
+                      micStream={studioMicStream}
+                      laneAnalysers={studioLaneAnalysers}
+                      recordElapsedMs={studioRecordElapsedMs}
+                      canUndo={sessionHistory.past.length > 0}
+                      canRedo={sessionHistory.future.length > 0}
+                      adlibRecording={adlibRecording}
+                      presetPreviewing={presetPreviewing}
+                      onHeadphonesOk={setStudioHeadphonesOk}
+                      onLatencyMs={(value) => {
+                        const next = writeStudioLatencyMs(value) ?? value;
+                        setStudioLatencyMs(next);
+                        setAudioSession((current) =>
+                          current
+                            ? {
+                                ...current,
+                                tracks: current.tracks.map((track) =>
+                                  track.kind === "vocal" ? { ...track, latencyMs: next } : track
+                                ),
+                              }
+                            : current
+                        );
+                      }}
+                      onInstrumental={setStudioInstrumental}
+                      onMute={(trackId) => {
+                        setAudioSession((current) => {
+                          if (!current) return current;
+                          const track = current.tracks.find((item) => item.id === trackId);
+                          if (!track) return current;
+                          const muted = !track.mix.muted;
+                          studioEngine().setTrackMix(trackId, {
+                            muted,
+                            volume: track.mix.volume,
+                          });
+                          return updateTrackMix(current, trackId, { muted });
+                        });
+                      }}
+                      onSolo={(trackId) => {
+                        pushSessionEdit((current) => {
+                          const track = current.tracks.find((item) => item.id === trackId);
+                          if (!track) return current;
+                          return updateTrackMix(current, trackId, { solo: !track.mix.solo });
+                        });
+                      }}
+                      onVolume={(trackId, volume) => {
+                        setAudioSession((current) => {
+                          if (!current) return current;
+                          const track = current.tracks.find((item) => item.id === trackId);
+                          if (track) {
+                            studioEngine().setTrackMix(trackId, {
+                              volume,
+                              muted: track.mix.muted,
+                            });
+                          }
+                          return updateTrackMix(current, trackId, { volume });
+                        });
+                      }}
+                      onRemove={removeStudioLane}
+                      onPlay={() => void playStudioSession()}
+                      onStopPlay={() => {
+                        haltStudioTransport();
+                      }}
+                      onRecord={() => void startStudioVocal()}
+                      onStopRecord={() => {
+                        const take = studioTakeRef.current;
+                        const generation = studioRecordGenRef.current;
+                        if (take?.isRecording()) {
+                          const session = audioSession ?? createAudioSession();
+                          const hasBeat = sessionHasLane(session, "instrumental");
+                          commitStudioTake(take, session, hasBeat, generation);
+                          return;
+                        }
+                        haltStudioTransport();
+                        studioRecordGenRef.current += 1;
+                        studioTakeRef.current?.dispose();
+                        studioTakeRef.current = null;
+                        setRecording(false);
+                        streamRef.current?.getTracks().forEach((track) => track.stop());
+                        streamRef.current = null;
+                        setStudioMicStream(null);
+                      }}
+                      onCollapse={collapseVoiceStudio}
+                      onNotice={flashSaveNote}
+                      onAdlibUpload={(file) => {
+                        const offsetMs = audioSession.playheadMs || 0;
+                        pushSessionEdit((current) =>
+                          upsertLaneFromFile(current, "adlib", file, {
+                            offsetMs,
+                            name: file.name.replace(/\.[^.]+$/, "") || "Ad-Lib",
+                          })
+                        );
+                        flashSaveNote("Ad-lib uploaded");
+                      }}
+                      onAdlibRecord={() => void startAdlibRecord()}
+                      onAdlibStopRecord={stopAdlibRecord}
+                      onAdlibPreview={(trackId) => void previewAdlibTrack(trackId)}
+                      onAdlibRename={(trackId, name) => {
+                        pushSessionEdit((current) => renameTrack(current, trackId, name));
+                      }}
+                      onAdlibDuplicate={(trackId) => {
+                        pushSessionEdit((current) => duplicateAdlibTrack(current, trackId));
+                      }}
+                      onAdlibDelete={(trackId) => {
+                        haltStudioTransport();
+                        pushSessionEdit((current) => removeTrackById(current, trackId));
+                        flashSaveNote("Ad-lib removed");
+                      }}
+                      onAdlibMove={(trackId, direction) => {
+                        pushSessionEdit((current) => moveAdlibTrack(current, trackId, direction));
+                      }}
+                      onAdlibFade={(trackId, fadeInMs, fadeOutMs) => {
+                        pushSessionEdit((current) =>
+                          updateTrackMix(current, trackId, { fadeInMs, fadeOutMs })
+                        );
+                      }}
+                      onVocalPreset={(preset) => {
+                        setVoicePreset(preset);
+                        pushSessionEdit((current) => {
+                          const vocal = current.tracks.find((track) => track.kind === "vocal");
+                          if (!vocal) return current;
+                          return updateTrackMix(current, vocal.id, {
+                            preset,
+                            alteration: defaultAlteration(preset),
+                          });
+                        });
+                      }}
+                      onVocalAlteration={(patch: Partial<AlterationParams>) => {
+                        pushSessionEdit((current) => {
+                          const vocal = current.tracks.find((track) => track.kind === "vocal");
+                          if (!vocal) return current;
+                          return updateTrackMix(current, vocal.id, {
+                            alteration: { ...defaultAlteration(vocal.mix.preset), ...vocal.mix.alteration, ...patch },
+                          });
+                        });
+                      }}
+                      onPreviewPreset={() => void previewVocalPreset()}
+                      onScrub={(ms) => {
+                        haltStudioTransport();
+                        setAudioSession((current) =>
+                          current ? { ...current, playheadMs: Math.max(0, ms) } : current
+                        );
+                      }}
+                      onMoveClip={(trackId, clipId, offsetMs) => {
+                        pushSessionEdit((current) =>
+                          updateClip(current, trackId, clipId, { offsetMs: Math.max(0, offsetMs) })
+                        );
+                      }}
+                      onTrimClip={(trackId, clipId, trimInMs, trimOutMs) => {
+                        pushSessionEdit((current) =>
+                          updateClip(current, trackId, clipId, {
+                            trimInMs: Math.max(0, trimInMs),
+                            trimOutMs: Math.max(0, trimOutMs),
+                          })
+                        );
+                      }}
+                      onSplitSelected={(trackId, clipId) => {
+                        pushSessionEdit((current) =>
+                          splitClipAtPlayhead(current, trackId, clipId, current.playheadMs)
+                        );
+                      }}
+                      onDeleteSelected={(trackId, clipId) => {
+                        pushSessionEdit((current) => removeClip(current, trackId, clipId));
+                      }}
+                      onDuplicateSelected={(trackId, clipId) => {
+                        pushSessionEdit((current) => duplicateClip(current, trackId, clipId));
+                      }}
+                      onRestoreSelected={(trackId, clipId) => {
+                        pushSessionEdit((current) => restoreClipOriginal(current, trackId, clipId));
+                      }}
+                      onUndo={() => {
+                        haltStudioTransport();
+                        const current = audioSessionRef.current;
+                        if (!current) return;
+                        const result = undoHistory(sessionHistoryRef.current, current);
+                        if (!result) return;
+                        sessionHistoryRef.current = result.history;
+                        setSessionHistory(result.history);
+                        setAudioSession(result.session);
+                      }}
+                      onRedo={() => {
+                        haltStudioTransport();
+                        const current = audioSessionRef.current;
+                        if (!current) return;
+                        const result = redoHistory(sessionHistoryRef.current, current);
+                        if (!result) return;
+                        sessionHistoryRef.current = result.history;
+                        setSessionHistory(result.history);
+                        setAudioSession(result.session);
+                      }}
+                      onLoopChange={(loop) => {
+                        setAudioSession((current) => {
+                          if (!current) return current;
+                          const duration = sessionDurationMs(current);
+                          return {
+                            ...current,
+                            loop: loop ? { inMs: 0, outMs: Math.max(duration, 1000) } : undefined,
+                          };
+                        });
+                      }}
+                    />
+                  </div>
+                  <div className="editActions">
+                    {saveNote ? <span className="saveNote">{saveNote}</span> : null}
+                    <button
+                      type="button"
+                      className="studioGhost"
+                      onClick={() => void saveToDevice()}
+                      disabled={processingVocal}
+                    >
+                      ⬇ Save
+                    </button>
+                    <button type="button" className="studioGhost" onClick={() => void saveToDrafts(false)}>
+                      🗂 Drafts
+                    </button>
+                    <button
+                      type="button"
+                      className="studioDone"
+                      onClick={done}
+                      disabled={processingVocal}
+                    >
+                      {processingVocal
+                        ? "Mixing…"
+                        : isDropbookMode
+                          ? "Add Vocal to Dropbook →"
+                        : sessionHasLane(audioSession, "instrumental") ||
+                            sessionHasLane(audioSession, "adlib") ||
+                            sessionHasLane(audioSession, "fx")
+                          ? "Mix to Drop →"
+                          : "Use this Vocal →"}
+                    </button>
+                  </div>
+                </div>
               ) : phase === "choose" ? (
                 <div className="capMonitorHost">
                   <DropChipStage
@@ -1772,7 +3152,16 @@ export default function DropStudioStage({
                             )}
 
                             {mode === "audio" ? (
-                              <span className="capSpacer" />
+                              <>
+                                <button
+                                  type="button"
+                                  className="capFlip"
+                                  onClick={openVoiceStudio}
+                                  disabled={recording}
+                                >
+                                  Studio
+                                </button>
+                              </>
                             ) : (
                               <button
                                 type="button"
@@ -1825,20 +3214,41 @@ export default function DropStudioStage({
                           <div className="reviewViz">
                             <VocalVisualizer state={audioPlaying ? "playback" : "saved"} />
                           </div>
-                          <VoicePresets src={mediaUrl} onPlayingChange={setAudioPlaying} />
-                          <p>Use this voice memo as the audio layer for your Thought Drop.</p>
+                          <VoicePresets
+                            src={mediaUrl}
+                            onPlayingChange={setAudioPlaying}
+                            onPresetChange={setVoicePreset}
+                          />
+                          <p>The selected vocal enhancement will be baked into your Voice Drop.</p>
+                          <button type="button" className="studioGhost" onClick={openVoiceStudio}>
+                            Studio — add an instrumental
+                          </button>
                         </div>
                       </div>
                       <div className="editActions">
                         {saveNote ? <span className="saveNote">{saveNote}</span> : null}
-                        <button type="button" className="studioGhost" onClick={saveToDevice}>
+                        <button
+                          type="button"
+                          className="studioGhost"
+                          onClick={() => void saveToDevice()}
+                          disabled={processingVocal}
+                        >
                           ⬇ Save
                         </button>
                         <button type="button" className="studioGhost" onClick={() => void saveToDrafts(false)}>
                           🗂 Drafts
                         </button>
-                        <button type="button" className="studioDone" onClick={done}>
-                          Use this Vocal →
+                        <button
+                          type="button"
+                          className="studioDone"
+                          onClick={done}
+                          disabled={processingVocal}
+                        >
+                          {processingVocal
+                            ? "Enhancing Vocal…"
+                            : isDropbookMode
+                              ? "Add Vocal to Dropbook →"
+                              : "Use this Vocal →"}
                         </button>
                       </div>
                     </>
@@ -1846,19 +3256,35 @@ export default function DropStudioStage({
                     <div className="capMonitorHost">
                       <BoardArtCanvas
                         operatingTable
-                        backgroundImageUrl={mediaKind === "image" ? mediaUrl : undefined}
+                        backgroundImageUrl={
+                          mediaKind === "image" && !editingFlattenedArtwork
+                            ? mediaUrl
+                            : undefined
+                        }
                         backgroundVideoUrl={mediaKind === "video" ? mediaUrl : undefined}
-                        exportMode={mediaKind === "video" ? "overlay" : "composite"}
+                        initialOverlayUrl={
+                          studioValue.artOverlayUrl ||
+                          (editingFlattenedArtwork ? mediaUrl : undefined)
+                        }
+                        exportMode={
+                          mediaKind === "video" ||
+                          (mediaKind === "image" && !editingFlattenedArtwork)
+                            ? "overlay"
+                            : "composite"
+                        }
                         saveLabel="Apply drawing →"
                         onSave={(f) => {
-                          if (mediaKind === "video") {
+                          if (
+                            mediaKind === "video" ||
+                            (mediaKind === "image" && !editingFlattenedArtwork)
+                          ) {
                             const reader = new FileReader();
                             reader.onload = () => {
                               const artOverlayUrl =
                                 typeof reader.result === "string" ? reader.result : "";
                               if (artOverlayUrl) {
                                 handleStudioChange({ ...studioValue, artOverlayUrl });
-                                flashSaveNote("Video Art Palette layer applied");
+                                flashSaveNote("Art Palette layer applied");
                               }
                             };
                             reader.readAsDataURL(f);
@@ -1891,7 +3317,9 @@ export default function DropStudioStage({
                           🗂 Drafts
                         </button>
                         <button type="button" className="studioDone" onClick={done}>
-                          Add {mediaKind === "video" ? "Video" : "Vision"} to Drop →
+                          {isDropbookMode
+                            ? `Add ${mediaKind === "video" ? "Video" : "Vision"} to Dropbook →`
+                            : `Add ${mediaKind === "video" ? "Video" : "Vision"} to Drop →`}
                         </button>
                       </div>
                     </>

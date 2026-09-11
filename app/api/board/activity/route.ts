@@ -148,6 +148,7 @@ function normalizeProfileBoardDrop(row: any): BoardActivity[] {
 
   return drops
     .filter((drop: any) => drop && typeof drop === "object")
+    .filter((drop: any) => drop.visibility !== "private")
     .filter((drop: any) => {
       const id = String(drop.id ?? "");
       return id && !deletedIds.includes(id);
@@ -167,12 +168,18 @@ function normalizeProfileBoardDrop(row: any): BoardActivity[] {
             : `New ${type.toLowerCase()} drop from ${ownerLabel}.`;
       const previewImage =
         (typeof drop.previewImage === "string" && drop.previewImage.trim()) ||
+        (drop.mediaKind === "image" &&
+        typeof drop.mediaUrl === "string" &&
+        drop.mediaUrl.trim()
+          ? drop.mediaUrl
+          : "") ||
         (type === "Media" && drop.mediaKind === "image" && typeof drop.url === "string"
           ? drop.url
           : "") ||
         "";
       const href =
         (type === "Pay" && typeof drop.linkUrl === "string" && drop.linkUrl.trim()) ||
+        (typeof drop.mediaUrl === "string" && drop.mediaUrl.trim()) ||
         (typeof drop.url === "string" && drop.url.trim()) ||
         null;
 
@@ -199,22 +206,27 @@ function normalizeProfileBoardDrop(row: any): BoardActivity[] {
           previewTitle: drop.previewTitle ?? null,
           previewDescription: drop.previewDescription ?? null,
           previewImage: previewImage || null,
+          previewImages: Array.isArray(drop.previewImages) ? drop.previewImages.slice(0, 4) : null,
           priceCents: typeof drop.priceCents === "number" ? drop.priceCents : null,
           payProvider: drop.payProvider ?? null,
           mediaKind: drop.mediaKind ?? null,
+          mediaUrl: drop.mediaUrl ?? null,
           storagePath: drop.storagePath ?? null,
           bucket: drop.bucket ?? null,
           fileName: drop.fileName ?? null,
+          fromDescript: drop.fromDescript === true ? true : null,
           customizations: drop.customizations ?? null,
           ownerUsername,
           ownerLabel,
           preview: {
             image: previewImage || null,
+            images: Array.isArray(drop.previewImages) ? drop.previewImages.slice(0, 4) : null,
             title: drop.previewTitle ?? title,
             description: drop.previewDescription ?? description,
             bucket: drop.bucket ?? null,
             storagePath: drop.storagePath ?? null,
             mediaKind: drop.mediaKind ?? null,
+            mediaUrl: drop.mediaUrl ?? null,
             customizations: drop.customizations ?? null,
           },
         },
@@ -223,15 +235,53 @@ function normalizeProfileBoardDrop(row: any): BoardActivity[] {
     .filter(Boolean) as BoardActivity[];
 }
 
+function mergeActivityRecords(
+  preferred: BoardActivity,
+  fallback: BoardActivity
+): BoardActivity {
+  const preferredMeta =
+    preferred.meta && typeof preferred.meta === "object" ? preferred.meta : {};
+  const fallbackMeta =
+    fallback.meta && typeof fallback.meta === "object" ? fallback.meta : {};
+  const preferredPreview =
+    preferredMeta.preview && typeof preferredMeta.preview === "object"
+      ? preferredMeta.preview
+      : {};
+  const fallbackPreview =
+    fallbackMeta.preview && typeof fallbackMeta.preview === "object"
+      ? fallbackMeta.preview
+      : {};
+
+  return {
+    ...fallback,
+    ...preferred,
+    title: preferred.title || fallback.title,
+    body: preferred.body || fallback.body,
+    href: preferred.href || fallback.href,
+    image_url: preferred.image_url || fallback.image_url,
+    meta: {
+      ...fallbackMeta,
+      ...preferredMeta,
+      preview: {
+        ...fallbackPreview,
+        ...preferredPreview,
+      },
+    },
+  };
+}
+
 function dedupe(items: BoardActivity[]) {
   const map = new Map<string, BoardActivity>();
   const aliases = new Map<string, string>();
   for (const item of items) {
     if (!item?.id) continue;
     const meta = item.meta && typeof item.meta === "object" ? item.meta : null;
+    const isRecipientActivity = meta?.activityAudience === "recipient";
     const ownerKey =
       typeof meta?.ownerUsername === "string" && meta.ownerUsername
         ? meta.ownerUsername
+        : typeof meta?.authorUsername === "string" && meta.authorUsername
+          ? meta.authorUsername
         : item.user_id
           ? String(item.user_id)
           : "";
@@ -256,20 +306,28 @@ function dedupe(items: BoardActivity[]) {
         : "";
     const isRecoveredMirror = /^New .+ drop from .+/i.test(item.body ?? "");
     const hasStrongIdentity = Boolean(dropId || href || image);
-    const itemAliases = [
-      dropId,
-      href,
-      image,
-      isProjectDrop ? titleBody : "",
-      !dropId && !href && !image ? titleBody : "",
-    ].filter(Boolean);
+    const itemAliases = isRecipientActivity
+      ? [`recipient:${item.id}`]
+      : [
+          dropId,
+          href,
+          image,
+          isProjectDrop ? titleBody : "",
+          !dropId && !href && !image ? titleBody : "",
+        ].filter(Boolean);
     const weakAliases = [generatedCaption].filter(Boolean);
     const matchableAliases =
-      hasStrongIdentity && !isRecoveredMirror
+      isRecipientActivity
+        ? itemAliases
+        : hasStrongIdentity && !isRecoveredMirror
         ? itemAliases
         : [...itemAliases, ...weakAliases];
     const matchedAlias = matchableAliases.find((alias) => aliases.has(alias));
-    const key = matchedAlias ? aliases.get(matchedAlias)! : dropId || href || image || item.id || titleBody;
+    const key = matchedAlias
+      ? aliases.get(matchedAlias)!
+      : isRecipientActivity
+        ? itemAliases[0]
+        : dropId || href || image || item.id || titleBody;
     const previous = map.get(key);
     if (!previous) {
       map.set(key, item);
@@ -283,9 +341,15 @@ function dedupe(items: BoardActivity[]) {
     const previousScore =
       (previous.image_url ? 3 : 0) + (previous.href ? 1 : 0) + (previous.meta ? 1 : 0);
     const nextScore = (item.image_url ? 3 : 0) + (item.href ? 1 : 0) + (item.meta ? 1 : 0);
-    if (nextScore > previousScore || item.created_at > previous.created_at) {
-      map.set(key, item);
-    }
+    const preferNext =
+      nextScore > previousScore ||
+      (nextScore === previousScore && item.created_at > previous.created_at);
+    map.set(
+      key,
+      preferNext
+        ? mergeActivityRecords(item, previous)
+        : mergeActivityRecords(previous, item)
+    );
     for (const alias of itemAliases) aliases.set(alias, key);
     for (const alias of weakAliases) {
       if (!aliases.has(alias)) aliases.set(alias, key);
@@ -337,6 +401,9 @@ async function selectRows<T>(
 
 export async function GET(req: Request) {
   const supabase = supabaseServer();
+  const {
+    data: { user: viewer },
+  } = await supabase.auth.getUser();
   const url = new URL(req.url);
   const limit = Math.max(1, Math.min(200, Number(url.searchParams.get("limit") || 80)));
   const offset = Math.max(0, Number(url.searchParams.get("offset") || 0));
@@ -402,8 +469,17 @@ export async function GET(req: Request) {
   const scoped = kinds.length
     ? items.filter((item) => kinds.includes(item.kind))
     : items;
+  const visible = scoped.filter((item) => {
+    const meta = item.meta && typeof item.meta === "object" ? item.meta : null;
+    if (meta?.visibility !== "private") return true;
+    if (!viewer?.id) return false;
+    return (
+      String(item.user_id || "") === viewer.id ||
+      String(meta?.recipientUserId || "") === viewer.id
+    );
+  });
 
-  return new Response(JSON.stringify({ ok: true, items: scoped.slice(0, limit) }), {
+  return new Response(JSON.stringify({ ok: true, items: visible.slice(0, limit) }), {
     status: 200,
     headers: { "content-type": "application/json" },
   });

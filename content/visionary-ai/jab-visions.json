@@ -1,0 +1,17 @@
+{
+  "id": "jab-visions",
+  "title": "JAB Visions",
+  "category": "company",
+  "visibility": "public",
+  "summary": "JAB Visions is an entertainment-tech company founded by John Andy. It connects original story worlds, creator commerce, and creator-production infrastructure in one evolving ecosystem.",
+  "facts": [
+    "The public origin begins with John Andy making childhood comics and original characters, then developing work through Just John Andy, John Andy Books, JAB, JAB Merch, and finally JAB Visions LLC.",
+    "The public company model connects an IP engine, a commerce engine, and an infrastructure engine.",
+    "JAB Visions describes its work as building stories into worlds and connecting those worlds to communities and creative infrastructure.",
+    "Its public identity combines cinematic storytelling, technology, design, literature, music, comics, fashion, and creator collaboration.",
+    "Its stated creative philosophy is rooted in imagination, survival, faith, purpose, and transformation, including the belief that stories can help people encounter identity and meaning in new ways.",
+    "The company should be described as independent and evolving; do not imply scale, revenue, partnerships, or releases that are not publicly confirmed."
+  ],
+  "keywords": ["jab visions", "company", "history", "mission", "identity", "philosophy", "john andy", "entertainment", "technology", "creative"],
+  "sources": [{ "title": "JAB Visions", "path": "/" }, { "title": "JAB Founder", "path": "/john-andy" }]
+}

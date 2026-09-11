@@ -1,218 +1,138 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import {
+  renderVoicePresetFile,
+  VOICE_PRESETS,
+  type VoicePresetKey,
+} from "@/lib/board/voicePresetAudio";
 import styles from "./voicePresets.module.css";
 
-export type VoicePresetKey = "clean" | "warm" | "radio" | "concert" | "dream";
-
-const PRESETS: { key: VoicePresetKey; label: string }[] = [
-  { key: "clean", label: "Studio Clean" },
-  { key: "warm", label: "Warm Vocal" },
-  { key: "radio", label: "Radio Voice" },
-  { key: "concert", label: "Concert Hall" },
-  { key: "dream", label: "Dream Voice" },
-];
-
-type Nodes = {
-  ctx: AudioContext;
-  hp: BiquadFilterNode;
-  lp: BiquadFilterNode;
-  low: BiquadFilterNode;
-  high: BiquadFilterNode;
-  peak: BiquadFilterNode;
-  dry: GainNode;
-  wet: GainNode;
-  master: GainNode;
-};
-
-// A short decaying-noise impulse → lightweight reverb for the hall/dream presets.
-function makeImpulse(ctx: AudioContext, seconds: number, decay: number) {
-  const rate = ctx.sampleRate;
-  const len = Math.max(1, Math.floor(rate * seconds));
-  const buf = ctx.createBuffer(2, len, rate);
-  for (let ch = 0; ch < 2; ch += 1) {
-    const data = buf.getChannelData(ch);
-    for (let i = 0; i < len; i += 1) {
-      data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, decay);
-    }
-  }
-  return buf;
-}
-
-function applyPreset(n: Nodes, preset: VoicePresetKey) {
-  const t = n.ctx.currentTime;
-  const set = (p: AudioParam, v: number) => {
-    try {
-      p.setTargetAtTime(v, t, 0.03);
-    } catch {
-      p.value = v;
-    }
-  };
-
-  n.hp.type = "highpass";
-  n.lp.type = "lowpass";
-  n.low.type = "lowshelf";
-  n.high.type = "highshelf";
-  n.peak.type = "peaking";
-
-  switch (preset) {
-    case "warm":
-      set(n.hp.frequency, 60);
-      set(n.lp.frequency, 9000);
-      set(n.low.frequency, 220);
-      set(n.low.gain, 4.5);
-      set(n.high.frequency, 8000);
-      set(n.high.gain, -3);
-      set(n.peak.frequency, 1500);
-      set(n.peak.gain, 1.5);
-      set(n.peak.Q, 1);
-      set(n.wet.gain, 0.08);
-      set(n.dry.gain, 1);
-      break;
-    case "radio":
-      set(n.hp.frequency, 350);
-      set(n.lp.frequency, 3200);
-      set(n.low.frequency, 200);
-      set(n.low.gain, -4);
-      set(n.high.frequency, 6000);
-      set(n.high.gain, -6);
-      set(n.peak.frequency, 2000);
-      set(n.peak.gain, 6);
-      set(n.peak.Q, 1.4);
-      set(n.wet.gain, 0.03);
-      set(n.dry.gain, 1);
-      break;
-    case "concert":
-      set(n.hp.frequency, 70);
-      set(n.lp.frequency, 16000);
-      set(n.low.frequency, 200);
-      set(n.low.gain, 1);
-      set(n.high.frequency, 9000);
-      set(n.high.gain, 1.5);
-      set(n.peak.frequency, 3000);
-      set(n.peak.gain, 1);
-      set(n.peak.Q, 0.8);
-      set(n.wet.gain, 0.42);
-      set(n.dry.gain, 0.85);
-      break;
-    case "dream":
-      set(n.hp.frequency, 90);
-      set(n.lp.frequency, 12000);
-      set(n.low.frequency, 250);
-      set(n.low.gain, 2);
-      set(n.high.frequency, 10000);
-      set(n.high.gain, 3.5);
-      set(n.peak.frequency, 4000);
-      set(n.peak.gain, 0);
-      set(n.peak.Q, 0.7);
-      set(n.wet.gain, 0.5);
-      set(n.dry.gain, 0.8);
-      break;
-    case "clean":
-    default:
-      set(n.hp.frequency, 75);
-      set(n.lp.frequency, 18000);
-      set(n.low.frequency, 200);
-      set(n.low.gain, 0);
-      set(n.high.frequency, 8000);
-      set(n.high.gain, 2);
-      set(n.peak.frequency, 3000);
-      set(n.peak.gain, 2);
-      set(n.peak.Q, 0.9);
-      set(n.wet.gain, 0);
-      set(n.dry.gain, 1);
-      break;
-  }
+function extensionForMime(mime: string) {
+  if (mime.includes("wav")) return "wav";
+  if (mime.includes("mpeg")) return "mp3";
+  if (mime.includes("mp4") || mime.includes("m4a")) return "m4a";
+  if (mime.includes("ogg")) return "ogg";
+  return "webm";
 }
 
 /**
- * Voice playback with welcoming, named enhancement presets — built on a guarded
- * Web Audio filter chain. Owns its own <audio> element so the MediaElementSource
- * is created exactly once. Falls back to plain playback if Web Audio is missing.
+ * Renders each selected preset through the same offline processor used by the
+ * final saved Voice Drop. This avoids mobile Web Audio routing differences and
+ * makes the preview an exact representation of the exported effect.
  */
 export default function VoicePresets({
   src,
   onPlayingChange,
+  onPresetChange,
   layout = "horizontal",
   compactDeck = false,
 }: {
   src: string;
   onPlayingChange?: (playing: boolean) => void;
+  onPresetChange?: (preset: VoicePresetKey) => void;
   layout?: "horizontal" | "vertical";
   compactDeck?: boolean;
 }) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  const nodesRef = useRef<Nodes | null>(null);
-  const setupTriedRef = useRef(false);
-  const [preset, setPreset] = useState<VoicePresetKey>("clean");
-
-  function ensureGraph() {
-    if (nodesRef.current || setupTriedRef.current) return nodesRef.current;
-    setupTriedRef.current = true;
-    const el = audioRef.current;
-    if (!el || typeof window === "undefined") return null;
-    const AC =
-      window.AudioContext ||
-      (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-    if (!AC) return null;
-    try {
-      const ctx = new AC();
-      const source = ctx.createMediaElementSource(el);
-      const hp = ctx.createBiquadFilter();
-      const lp = ctx.createBiquadFilter();
-      const low = ctx.createBiquadFilter();
-      const high = ctx.createBiquadFilter();
-      const peak = ctx.createBiquadFilter();
-      const dry = ctx.createGain();
-      const wet = ctx.createGain();
-      const master = ctx.createGain();
-      const conv = ctx.createConvolver();
-      conv.buffer = makeImpulse(ctx, 2.6, 2.4);
-
-      source.connect(hp);
-      hp.connect(lp);
-      lp.connect(low);
-      low.connect(high);
-      high.connect(peak);
-      peak.connect(dry);
-      dry.connect(master);
-      peak.connect(conv);
-      conv.connect(wet);
-      wet.connect(master);
-      master.connect(ctx.destination);
-
-      const nodes: Nodes = { ctx, hp, lp, low, high, peak, dry, wet, master };
-      nodesRef.current = nodes;
-      applyPreset(nodes, preset);
-      return nodes;
-    } catch {
-      return null;
-    }
-  }
-
-  // NOTE: do NOT build the audio graph on mount. Creating an AudioContext before
-  // any user gesture leaves it "suspended", which silences the FIRST playback.
-  // The graph is built lazily on the first play / preset tap (a real gesture),
-  // so the context starts running and audio is audible right away.
+  const sourceFilePromiseRef = useRef<Promise<File> | null>(null);
+  const renderedUrlsRef = useRef<Map<VoicePresetKey, string>>(new Map());
+  const renderRequestRef = useRef(0);
+  const resumeAfterRenderRef = useRef(false);
+  const [preset, setPreset] = useState<VoicePresetKey | null>(null);
+  const [previewSrc, setPreviewSrc] = useState("");
+  const [renderingPreset, setRenderingPreset] = useState<VoicePresetKey | null>(null);
+  const [effectError, setEffectError] = useState("");
 
   useEffect(() => {
-    if (nodesRef.current) applyPreset(nodesRef.current, preset);
-  }, [preset]);
+    sourceFilePromiseRef.current = null;
+    renderRequestRef.current += 1;
+    setPreviewSrc("");
+    setPreset(null);
+    setRenderingPreset(null);
+    setEffectError("");
 
-  useEffect(
-    () => () => {
-      // Suspend (never close) on unmount. A MediaElementSource can only be created
-      // ONCE per <audio> element, ever — closing the context would permanently
-      // strand the element on a dead graph (this is what made presets sound flat,
-      // since React StrictMode mounts→cleans up→remounts the effect in dev).
-      try {
-        void nodesRef.current?.ctx.suspend();
-      } catch {
-        /* noop */
+    const oldUrls = renderedUrlsRef.current;
+    renderedUrlsRef.current = new Map();
+    oldUrls.forEach((url) => URL.revokeObjectURL(url));
+
+    return () => {
+      renderedUrlsRef.current.forEach((url) => URL.revokeObjectURL(url));
+      renderedUrlsRef.current.clear();
+    };
+  }, [src]);
+
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    audio.load();
+    if (!resumeAfterRenderRef.current) return;
+    resumeAfterRenderRef.current = false;
+    void audio.play().catch(() => {
+      // Mobile Safari can require another tap after async processing.
+    });
+  }, [previewSrc]);
+
+  function getSourceFile() {
+    if (!sourceFilePromiseRef.current) {
+      sourceFilePromiseRef.current = (async () => {
+        const controller = new AbortController();
+        const timeoutId = window.setTimeout(() => controller.abort(), 12_000);
+        try {
+          const response = await fetch(src, { signal: controller.signal });
+          if (!response.ok) throw new Error(`Voice preview source returned ${response.status}`);
+          const blob = await response.blob();
+          return new File([blob], `voice-preview.${extensionForMime(blob.type)}`, {
+            type: blob.type || "audio/webm",
+          });
+        } finally {
+          window.clearTimeout(timeoutId);
+        }
+      })().catch((error) => {
+        sourceFilePromiseRef.current = null;
+        throw error;
+      });
+    }
+    return sourceFilePromiseRef.current;
+  }
+
+  async function choosePreset(nextPreset: VoicePresetKey) {
+    const audio = audioRef.current;
+    resumeAfterRenderRef.current = Boolean(audio && !audio.paused);
+    audio?.pause();
+    setPreset(nextPreset);
+    onPresetChange?.(nextPreset);
+    setEffectError("");
+
+    const cachedUrl = renderedUrlsRef.current.get(nextPreset);
+    if (cachedUrl) {
+      setPreviewSrc(cachedUrl);
+      return;
+    }
+
+    const requestId = ++renderRequestRef.current;
+    setPreviewSrc("");
+    setRenderingPreset(nextPreset);
+    try {
+      const sourceFile = await getSourceFile();
+      const renderedFile = await renderVoicePresetFile(sourceFile, nextPreset);
+      if (renderedFile === sourceFile) {
+        throw new Error("Offline audio rendering is unavailable in this browser");
       }
-    },
-    []
-  );
+      if (requestId !== renderRequestRef.current) return;
+      const renderedUrl = URL.createObjectURL(renderedFile);
+      renderedUrlsRef.current.set(nextPreset, renderedUrl);
+      setPreviewSrc(renderedUrl);
+    } catch (error) {
+      console.error("[VoicePresets] preset preview render failed", error);
+      if (requestId === renderRequestRef.current) {
+        setEffectError("That effect could not render. Playing the original recording instead.");
+        setPreviewSrc(src);
+      }
+    } finally {
+      if (requestId === renderRequestRef.current) setRenderingPreset(null);
+    }
+  }
 
   return (
     <div
@@ -229,41 +149,54 @@ export default function VoicePresets({
       ) : (
         <div className={styles.head}>
           <span className={styles.eyebrow}>Vocal Enhancement</span>
-          <span className={styles.hint}>Pick a sound — no audio knobs required.</span>
+          <span className={styles.hint}>Tap a preset, let it render, then press play.</span>
         </div>
       )}
       <div className={styles.chips} role="tablist" aria-label="Voice presets">
-        {PRESETS.map((p) => (
-          <button
-            key={p.key}
-            type="button"
-            role="tab"
-            aria-selected={preset === p.key}
-            className={[styles.chip, preset === p.key ? styles.chipOn : ""].filter(Boolean).join(" ")}
-            onClick={() => {
-              ensureGraph();
-              setPreset(p.key);
-              void nodesRef.current?.ctx.resume?.();
-            }}
-          >
-            {p.label}
-          </button>
-        ))}
+        {VOICE_PRESETS.map((option) => {
+          const rendering = renderingPreset === option.key;
+          return (
+            <button
+              key={option.key}
+              type="button"
+              role="tab"
+              aria-selected={preset === option.key}
+              aria-label={`${option.label}: ${option.detail}`}
+              title={option.detail}
+              disabled={renderingPreset !== null}
+              className={[styles.chip, preset === option.key ? styles.chipOn : ""]
+                .filter(Boolean)
+                .join(" ")}
+              onClick={() => void choosePreset(option.key)}
+            >
+              <span>{rendering ? "Rendering…" : option.label}</span>
+              <small>{option.detail}</small>
+            </button>
+          );
+        })}
       </div>
-      <audio
-        ref={audioRef}
-        className={styles.audio}
-        src={src}
-        controls
-        preload="metadata"
-        onPlay={() => {
-          ensureGraph();
-          void nodesRef.current?.ctx.resume?.();
-          onPlayingChange?.(true);
-        }}
-        onPause={() => onPlayingChange?.(false)}
-        onEnded={() => onPlayingChange?.(false)}
-      />
+      {renderingPreset ? (
+        <div className={styles.effectStatus} role="status">
+          Building the {VOICE_PRESETS.find((item) => item.key === renderingPreset)?.label} preview…
+        </div>
+      ) : !previewSrc ? (
+        <div className={styles.effectStatus} role="status">
+          Choose a preset to build an effected preview.
+        </div>
+      ) : null}
+      {effectError ? <div className={styles.effectError}>{effectError}</div> : null}
+      {previewSrc ? (
+        <audio
+          ref={audioRef}
+          className={styles.audio}
+          src={previewSrc}
+          controls
+          preload="metadata"
+          onPlay={() => onPlayingChange?.(true)}
+          onPause={() => onPlayingChange?.(false)}
+          onEnded={() => onPlayingChange?.(false)}
+        />
+      ) : null}
     </div>
   );
 }

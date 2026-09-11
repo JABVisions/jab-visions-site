@@ -16,8 +16,12 @@ export const DESCRIPT_DOCS_UPDATED_EVENT = "board:descript-docs:updated";
 export const DESCRIPT_SHARE_EVENT = "board:descript:share";
 
 const MAX_DOCS = 100;
-// Guard against a runaway paste blowing the localStorage quota (~400KB of HTML).
-const MAX_HTML_LENGTH = 400_000;
+// Supports long-form chapters and scripts while still guarding against a
+// runaway paste. The previous 400k ceiling could silently shorten large works.
+const MAX_HTML_LENGTH = 2_000_000;
+// plainText duplicates the HTML body and is only needed for draft-list counts,
+// search, and a compact fallback. Keep the complete text in HTML/export files.
+const MAX_STORED_PLAIN_TEXT_LENGTH = 80_000;
 
 /** How a Descript was started — drives analytics + Bucket Brain context later. */
 export type DescriptSourceKind = "blank" | "template" | "upload" | "capture";
@@ -88,16 +92,29 @@ function writeDescriptDocs(docs: DescriptDoc[]) {
   const ordered = [...docs]
     .sort((a, b) => b.updatedAt - a.updatedAt)
     .slice(0, MAX_DOCS);
+  const storageReady = ordered.map((doc) => ({
+    ...doc,
+    plainText: doc.plainText.slice(0, MAX_STORED_PLAIN_TEXT_LENGTH),
+  }));
   try {
-    window.localStorage.setItem(DESCRIPT_DOCS_STORAGE_KEY, JSON.stringify(ordered));
+    window.localStorage.setItem(DESCRIPT_DOCS_STORAGE_KEY, JSON.stringify(storageReady));
   } catch {
     try {
       window.localStorage.setItem(
         DESCRIPT_DOCS_STORAGE_KEY,
-        JSON.stringify(ordered.slice(0, 20))
+        JSON.stringify(storageReady.slice(0, 20))
       );
     } catch {
-      return;
+      try {
+        // Preserve the document currently being edited even when older drafts
+        // plus a long chapter exceed this browser's localStorage allowance.
+        window.localStorage.setItem(
+          DESCRIPT_DOCS_STORAGE_KEY,
+          JSON.stringify(storageReady.slice(0, 1))
+        );
+      } catch {
+        return;
+      }
     }
   }
   try {
@@ -249,10 +266,36 @@ export function descriptPlainText(html: unknown): string {
   const raw = typeof html === "string" ? html : "";
   if (!raw) return "";
   if (typeof window === "undefined" || typeof DOMParser === "undefined") {
-    return raw.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+    return raw
+      .replace(/<br\s*\/?\s*>/gi, "\n")
+      .replace(/<\/(?:p|div|h[1-3]|blockquote|li|ul|ol)>/gi, "\n")
+      .replace(/<[^>]*>/g, "")
+      .replace(/&nbsp;|&#160;/gi, " ")
+      .replace(/[ \t]+/g, " ")
+      .replace(/ *\n */g, "\n")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim();
   }
   const doc = new DOMParser().parseFromString(raw, "text/html");
-  return (doc.body.textContent || "").replace(/ /g, " ");
+  const blockTags = new Set(["P", "DIV", "H1", "H2", "H3", "BLOCKQUOTE", "LI", "UL", "OL"]);
+
+  function readNode(node: Node): string {
+    if (node.nodeType === Node.TEXT_NODE) return node.textContent ?? "";
+    if (node.nodeType !== Node.ELEMENT_NODE) return "";
+    const element = node as HTMLElement;
+    if (element.tagName === "BR") return "\n";
+    const text = Array.from(element.childNodes).map(readNode).join("");
+    return blockTags.has(element.tagName) ? `${text}\n` : text;
+  }
+
+  return Array.from(doc.body.childNodes)
+    .map(readNode)
+    .join("")
+    .replace(/\u00a0/g, " ")
+    .replace(/[ \t]+/g, " ")
+    .replace(/ *\n */g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 }
 
 export function countWords(text: string): number {
@@ -263,4 +306,43 @@ export function countWords(text: string): number {
 
 export function countCharacters(text: string): number {
   return (text || "").length;
+}
+
+/**
+ * Older Drop Studio shares could save a Descript chapter as a text-only
+ * Thought before the HTML attachment finished crossing into Drop Console.
+ * Keep this deliberately narrow so ordinary Thought Drops retain their UI.
+ */
+export function isLegacyDescriptText(input: {
+  dropType?: unknown;
+  body?: unknown;
+  href?: unknown;
+  mediaKind?: unknown;
+}): boolean {
+  const dropType = typeof input.dropType === "string" ? input.dropType.toLowerCase() : "";
+  const body = typeof input.body === "string" ? input.body.trim() : "";
+  const href = typeof input.href === "string" ? input.href.trim() : "";
+  const mediaKind = typeof input.mediaKind === "string" ? input.mediaKind.toLowerCase() : "";
+
+  if (!/\bthought(?: drop)?\b/.test(dropType)) return false;
+  if (body.length < 1200 || href) return false;
+  if (mediaKind && mediaKind !== "text" && mediaKind !== "doc") return false;
+
+  return true;
+}
+
+/** Convert a finished Descript into a portable HTML file for upload/storage hosts. */
+export function descriptDocToFile(doc: DescriptDoc): File {
+  const safeTitle = (doc.title || "Untitled Descript")
+    .replace(/[^a-z0-9._-]+/gi, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 80) || "descript";
+  const escapedTitle = (doc.title || "Untitled Descript")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+  const html = `<!doctype html><html><head><meta charset="utf-8"><title>${escapedTitle}</title></head><body>${doc.html}</body></html>`;
+  return new File([html], `${safeTitle}.html`, { type: "text/html" });
 }

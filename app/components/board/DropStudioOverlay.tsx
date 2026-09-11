@@ -48,6 +48,10 @@ export default function DropStudioOverlay({
           alt=""
           aria-hidden="true"
           draggable={false}
+          onError={(event) => {
+            console.warn("[DropStudioOverlay] Art Palette layer could not be displayed");
+            event.currentTarget.hidden = true;
+          }}
         />
       ) : null}
 

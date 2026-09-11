@@ -20,6 +20,9 @@ import {
   DROP_FLAVOR_SUB,
   type DropFlavorKey,
 } from "@/lib/board/dropFlavors";
+import { descriptDocToFile, type DescriptDoc } from "@/lib/board/descriptDocs";
+import { isDropbookSlideFile } from "@/lib/board/dropbookSlides";
+import { checkUploadSize, resolveUploadContentType } from "@/lib/board/uploadLimits";
 
 import {
   createThread,
@@ -28,7 +31,6 @@ import {
   seedForumsIfEmpty,
   type BoardUser,
 } from "@/lib/boardStore";
-import CameraDropPortal from "./CameraDropPortal";
 import LazyDropStudioStage from "./LazyDropStudioStage";
 
 /* -------------------------------------------------------------------------- */
@@ -199,6 +201,17 @@ function thoughtFormatFromMedia(mediaType: string | null) {
   return "text";
 }
 
+function profileDropType(flavor: DropFlavor) {
+  if (flavor === "youtube") return "YouTube";
+  if (flavor === "music") return "Music";
+  if (flavor === "news") return "News";
+  if (flavor === "link") return "Link";
+  if (flavor === "doc") return "Doc";
+  if (flavor === "pay") return "Pay";
+  if (flavor === "thought") return "Thought";
+  return "Media";
+}
+
 /* -------------------------------------------------------------------------- */
 /* component */
 /* -------------------------------------------------------------------------- */
@@ -223,7 +236,6 @@ export default function DropConsole({
   const [body, setBody] = useState("");
   const [attachUrl, setAttachUrl] = useState("");
   const [uploadedFileName, setUploadedFileName] = useState("");
-  const [cameraMode, setCameraMode] = useState<"photo" | "video" | null>(null);
   const [dropCustomizations, setDropCustomizations] = useState<DropCustomization>({});
   const [dropDesc, setDropDesc] = useState("");
   const [mediaSource, setMediaSource] = useState<"upload" | "capture" | null>(null);
@@ -247,6 +259,9 @@ export default function DropConsole({
   // Announcement mode
   const [vibe, setVibe] = useState<AnnouncementVibe>("hype");
   const [announceMediaUrl, setAnnounceMediaUrl] = useState("");
+  const [announceMediaName, setAnnounceMediaName] = useState("");
+  const [announceStudioOpen, setAnnounceStudioOpen] = useState(false);
+  const [announceCustomizations, setAnnounceCustomizations] = useState<DropCustomization>({});
 
   const [uploading, setUploading] = useState(false);
   const [uploadErr, setUploadErr] = useState<string | null>(null);
@@ -314,6 +329,13 @@ export default function DropConsole({
 
   async function uploadToBoardMedia(file: File, source: "upload" | "capture" = "upload") {
     setUploadErr(null);
+
+    const tooLarge = checkUploadSize(file);
+    if (tooLarge) {
+      setUploadErr(tooLarge);
+      return;
+    }
+
     setUploading(true);
 
     try {
@@ -328,7 +350,7 @@ export default function DropConsole({
         .upload(path, file, {
           cacheControl: "3600",
           upsert: false,
-          contentType: file.type || undefined,
+          contentType: resolveUploadContentType(file),
         });
 
       if (error) throw error;
@@ -336,7 +358,10 @@ export default function DropConsole({
       const pub = sb.storage.from(bucket).getPublicUrl(path);
       const url = pub.data.publicUrl;
 
-      if (mode === "announcement") setAnnounceMediaUrl(url);
+      if (mode === "announcement") {
+        setAnnounceMediaUrl(url);
+        setAnnounceMediaName(file.name);
+      }
       if (mode === "board_drop") {
         setAttachUrl(url);
         setUploadedFileName(file.name);
@@ -353,6 +378,70 @@ export default function DropConsole({
     } finally {
       setUploading(false);
     }
+  }
+
+  async function persistBoardDropToProfile(drop: Record<string, unknown>): Promise<boolean> {
+    try {
+      const { data: auth, error: authError } = await sb.auth.getUser();
+      if (authError || !auth.user?.id) return false;
+
+      const { data: profile, error: profileError } = await sb
+        .from("profiles")
+        .select("board_style")
+        .eq("id", auth.user.id)
+        .maybeSingle();
+      if (profileError) throw profileError;
+
+      const boardStyle =
+        profile?.board_style && typeof profile.board_style === "object"
+          ? profile.board_style
+          : {};
+      const currentDrops = Array.isArray((boardStyle as any).boardDrops)
+        ? (boardStyle as any).boardDrops
+        : [];
+      const dropId = String(drop.id ?? "");
+      const boardDrops = [
+        drop,
+        ...currentDrops.filter((item: any) => String(item?.id ?? "") !== dropId),
+      ].slice(0, 120);
+
+      const { data: updatedProfile, error: updateError } = await sb
+        .from("profiles")
+        .update({ board_style: { ...boardStyle, boardDrops } })
+        .eq("id", auth.user.id)
+        .select("id")
+        .maybeSingle();
+      if (updateError) throw updateError;
+      if (!updatedProfile?.id) throw new Error("News Drop save did not update a profile row.");
+      return true;
+    } catch (error) {
+      console.error("[DropConsole] Board Drop profile save failed", error);
+      return false;
+    }
+  }
+
+  async function durableMediaCustomizations(
+    input: DropCustomization | undefined,
+    dropId: string
+  ): Promise<DropCustomization | undefined> {
+    const overlay = input?.artOverlayUrl;
+    if (!overlay?.startsWith("data:image/")) return input;
+    const { data: auth } = await sb.auth.getUser();
+    if (!auth.user?.id) throw new Error("Sign in to save the editable art layer.");
+
+    const response = await fetch(overlay);
+    const blob = await response.blob();
+    const extension = blob.type.includes("webp") ? "webp" : "png";
+    const path = `${auth.user.id}/${dropId}-art-layer/${Date.now()}-art-layer.${extension}`;
+    const { error } = await sb.storage.from("board-media").upload(path, blob, {
+      upsert: true,
+      contentType: blob.type || "image/png",
+      cacheControl: "3600",
+    });
+    if (error) throw error;
+    const publicUrl = sb.storage.from("board-media").getPublicUrl(path).data.publicUrl;
+    if (!publicUrl) throw new Error("Couldn't resolve the editable art layer.");
+    return { ...input, artOverlayUrl: publicUrl };
   }
 
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
@@ -385,8 +474,24 @@ export default function DropConsole({
       const attachMediaType = cleanAttach ? inferMediaType(cleanAttach) : null;
       const thoughtFormat =
         dropFlavor === "thought" ? thoughtFormatFromMedia(attachMediaType) : null;
+      const isHtmlDocument =
+        /\.html?$/i.test(uploadedFileName) ||
+        /\.html?(?:$|[?#])/i.test(cleanAttach ?? "");
+      const isDropbookSlide = isDropbookSlideFile({
+        name: uploadedFileName,
+        url: cleanAttach,
+      });
+      const fromDescript =
+        mode === "board_drop" &&
+        dropFlavor === "doc" &&
+        isHtmlDocument;
+      const storedBoardDropDescription = boardDropDescription;
       const identity = readCurrentBoardIdentity();
       const boardDropId = mode === "board_drop" ? newId(dropFlavor) : null;
+      const savedMediaCustomizations =
+        boardDropId && mediaCustomizations
+          ? await durableMediaCustomizations(mediaCustomizations, boardDropId)
+          : mediaCustomizations;
 
       if (mode === "board_drop") {
         cleanBody =
@@ -397,9 +502,9 @@ export default function DropConsole({
             : dropFlavor === "pay"
             ? boardDropDescription || (cleanTitle ? `Pay Drop: ${cleanTitle}` : "")
             : dropFlavor === "doc"
-            ? boardDropDescription || (cleanTitle ? `Doc Drop: ${cleanTitle}` : "")
-            : boardDropDescription
-            ? boardDropDescription
+            ? storedBoardDropDescription || (cleanTitle ? `Doc Drop: ${cleanTitle}` : "")
+            : storedBoardDropDescription
+            ? storedBoardDropDescription
             : cleanTitle
             ? `New ${dropFlavor} drop added to Board.`
             : "";
@@ -443,7 +548,12 @@ export default function DropConsole({
 
       // Board Drop: preview if external attachment
       let preview: any = null;
-      if (mode === "board_drop" && cleanAttach && isExternalHref(cleanAttach)) {
+      if (
+        mode === "board_drop" &&
+        cleanAttach &&
+        !isDropbookSlide &&
+        isExternalHref(cleanAttach)
+      ) {
         preview = await fetchLinkPreview(cleanAttach);
       }
 
@@ -467,6 +577,57 @@ export default function DropConsole({
           ? cleanAttach
           : null;
 
+      const boardDropProfileSave =
+        mode === "board_drop" && boardDropId
+          ? persistBoardDropToProfile({
+              id: boardDropId,
+              title: cleanTitle || preview?.title || `${profileDropType(dropFlavor)} Drop`,
+              type: profileDropType(dropFlavor),
+              createdAt: Date.now(),
+              url: cleanAttach || undefined,
+              embedUrl: preview?.embedUrl ?? null,
+              hostLabel: preview?.provider ?? null,
+              headline: dropFlavor === "news" ? preview?.title ?? cleanTitle ?? undefined : undefined,
+              previewTitle: preview?.title ?? undefined,
+              previewDescription: preview?.description ?? undefined,
+              previewImage: preview?.image ?? undefined,
+              previewImages: Array.isArray(preview?.images)
+                ? preview.images.slice(0, 4)
+                : preview?.image
+                  ? [preview.image]
+                  : undefined,
+              description: storedBoardDropDescription || cleanBody || undefined,
+              fileName: uploadedFileName || undefined,
+              mediaKind:
+                dropFlavor === "music"
+                  ? "audio"
+                  : dropFlavor === "thought"
+                    ? thoughtFormat === "voice"
+                      ? "audio"
+                      : thoughtFormat === "doodle"
+                        ? "image"
+                        : undefined
+                    : dropFlavor === "doc"
+                      ? undefined
+                      : attachMediaType === "video"
+                        ? "video"
+                        : attachMediaType === "image"
+                          ? "image"
+                          : undefined,
+              mediaSource: mediaSource ?? undefined,
+              fromDescript: fromDescript || undefined,
+              fromDropbook: isDropbookSlide || undefined,
+              visibility: dropFlavor === "thought" ? thoughtVisibility : "public",
+              thoughtText: dropFlavor === "thought" ? thoughtText.trim() || cleanBody : undefined,
+              thoughtFormat: dropFlavor === "thought" ? thoughtFormat : undefined,
+              priceCents: dropFlavor === "pay" ? payPriceCents ?? undefined : undefined,
+              payProvider: dropFlavor === "pay" ? payProvider : undefined,
+              paymentLink: dropFlavor === "pay" ? payLink.trim() || undefined : undefined,
+              linkUrl: dropFlavor === "pay" ? payLink.trim() || undefined : undefined,
+              customizations: savedMediaCustomizations ?? undefined,
+            })
+          : Promise.resolve(false);
+
       const res = await createActivity(sb, {
         user_id: meId,
         kind,
@@ -486,7 +647,7 @@ export default function DropConsole({
           ...(mode === "board_drop"
             ? {
                 drop_flavor: dropFlavor,
-                dropType: dropFlavor,
+                dropType: isDropbookSlide ? "dropbook" : dropFlavor,
                 dropId: boardDropId,
                 fileName: uploadedFileName || null,
                 mediaKind:
@@ -511,8 +672,8 @@ export default function DropConsole({
                     : dropFlavor === "doc"
                     ? "doc"
                     : null,
-                customizations: mediaCustomizations ?? null,
-                description: boardDropDescription || null,
+                customizations: savedMediaCustomizations ?? null,
+                description: storedBoardDropDescription || null,
                 visibility: dropFlavor === "thought" ? thoughtVisibility : "public",
                 thoughtText: dropFlavor === "thought" ? thoughtText.trim() || cleanBody : null,
                 thoughtFormat,
@@ -524,6 +685,8 @@ export default function DropConsole({
                 authorAuraIntensity: identity.auraIntensity,
                 mediaSource: mediaSource,
                 badgeLabel: mediaSource === "capture" ? "Captured on Board" : null,
+                fromDescript: fromDescript || null,
+                fromDropbook: isDropbookSlide || null,
                 ...(dropFlavor === "pay"
                   ? {
                       payProvider,
@@ -578,7 +741,7 @@ export default function DropConsole({
           ...(mode === "board_drop"
             ? {
                 drop_flavor: dropFlavor,
-                dropType: dropFlavor,
+                dropType: isDropbookSlide ? "dropbook" : dropFlavor,
                 dropId: boardDropId,
                 fileName: uploadedFileName || null,
                 mediaKind:
@@ -603,8 +766,8 @@ export default function DropConsole({
                     : dropFlavor === "doc"
                     ? "doc"
                     : null,
-                customizations: mediaCustomizations ?? null,
-                description: boardDropDescription || null,
+                customizations: savedMediaCustomizations ?? null,
+                description: storedBoardDropDescription || null,
                 visibility: dropFlavor === "thought" ? thoughtVisibility : "public",
                 thoughtText: dropFlavor === "thought" ? thoughtText.trim() || cleanBody : null,
                 thoughtFormat,
@@ -616,6 +779,8 @@ export default function DropConsole({
                 authorAuraIntensity: identity.auraIntensity,
                 mediaSource,
                 badgeLabel: mediaSource === "capture" ? "Captured on Board" : null,
+                fromDescript: fromDescript || null,
+                fromDropbook: isDropbookSlide || null,
                 ...(dropFlavor === "pay"
                   ? {
                       payProvider,
@@ -638,6 +803,15 @@ export default function DropConsole({
             : {}),
         },
       });
+
+      const boardDropSavedToProfile = await boardDropProfileSave;
+      if (
+        mode === "board_drop" &&
+        res.source !== "db" &&
+        !boardDropSavedToProfile
+      ) {
+        throw new Error("The Drop could not be saved. Check your connection and try again.");
+      }
 
       if (mode === "board_drop" && dropFlavor === "thought") {
         const dropId = boardDropId ?? newId("thought");
@@ -697,6 +871,8 @@ export default function DropConsole({
       setMediaSource(null);
       setTagsInput("");
       setAnnounceMediaUrl("");
+      setAnnounceMediaName("");
+      setAnnounceCustomizations({});
       setPayPrice("");
       setPayDesc("");
       setPayLink("");
@@ -777,11 +953,26 @@ export default function DropConsole({
 
   const content = (
     <div className="dc">
-      <CameraDropPortal
-        open={cameraMode !== null}
-        initialMode={cameraMode ?? "photo"}
-        onClose={() => setCameraMode(null)}
-        onCapture={(file) => uploadToBoardMedia(file, "capture")}
+      <LazyDropStudioStage
+        open={announceStudioOpen && mode === "announcement"}
+        initialFile={null}
+        initialMode="photo"
+        allowedModes={["photo", "video", "audio", "art", "descript"]}
+        descriptDestination="announcement"
+        value={announceCustomizations}
+        onChange={setAnnounceCustomizations}
+        onComplete={async (file) => {
+          await uploadToBoardMedia(file, "capture");
+          setAnnounceStudioOpen(false);
+        }}
+        onDescriptComplete={async (doc: DescriptDoc) => {
+          const plainText = doc.plainText.trim();
+          setTitle((current) => current.trim() || doc.title);
+          if (plainText && !body.trim()) setBody(plainText);
+          await uploadToBoardMedia(descriptDocToFile(doc), "capture");
+          setAnnounceStudioOpen(false);
+        }}
+        onClose={() => setAnnounceStudioOpen(false)}
       />
       <div className="dcInner">
         <div className="dcTop">
@@ -897,50 +1088,59 @@ export default function DropConsole({
             </div>
           )}
 
-          {/* Announcement media */}
+          {/* Announcement media — Drop Studio only (no paste-link field) */}
           {mode === "announcement" && (
             <div className="dcField">
               <div className="dcFieldLabel">Announcement Media</div>
 
-              <div className="mediaRow">
-                <input
-                  value={announceMediaUrl}
-                  onChange={(e) => setAnnounceMediaUrl(e.target.value)}
-                  placeholder="Paste image/video link (optional)"
-                  className="dcInput"
-                />
-              </div>
-
               <div className="mediaActionRow" aria-label="Announcement media actions">
-                <label className={clsx("mediaAction", "uploadAction", uploading && "busy")}>
-                  <span>{uploading ? "Uploading..." : "Upload"}</span>
-                  <input
-                    className="fileInput"
-                    type="file"
-                    accept="image/*,video/*"
-                    disabled={uploading}
-                    onChange={(e) => {
-                      const f = e.currentTarget.files?.[0];
-                      if (f) uploadToBoardMedia(f);
-                      e.currentTarget.value = "";
-                    }}
-                  />
-                </label>
-
                 <button
                   type="button"
-                  className={clsx("mediaAction", "captureAction", uploading && "busy")}
-                  onClick={() => setCameraMode("photo")}
+                  className={clsx("mediaAction", "uploadAction", uploading && "busy")}
+                  onClick={() => setAnnounceStudioOpen(true)}
                   disabled={uploading}
                 >
-                  Capture
+                  {uploading ? "Uploading..." : "Open Drop Studio"}
                 </button>
               </div>
 
+              <div className="fileMeta fileStatus">
+                {announceMediaName || announceMediaUrl ? (
+                  <span className="fileName">{announceMediaName || "Media attached"}</span>
+                ) : (
+                  <span className="fileName dim">Optional — design media in Drop Studio</span>
+                )}
+                {uploading ? <span className="fileSize">Uploading...</span> : null}
+              </div>
+
+              {announceMediaUrl ? (
+                <div className="consoleMediaPreview">
+                  {inferMediaType(announceMediaUrl) === "video" ||
+                  /\.(mp4|webm|mov|m4v)$/i.test(announceMediaName) ? (
+                    <video src={announceMediaUrl} controls playsInline />
+                  ) : inferMediaType(announceMediaUrl) === "audio" ||
+                    /\.(mp3|wav|m4a|aac|ogg|flac)$/i.test(announceMediaName) ? (
+                    <audio src={announceMediaUrl} controls preload="metadata" />
+                  ) : (
+                    <img src={announceMediaUrl} alt="Announcement media preview" />
+                  )}
+                  <button
+                    type="button"
+                    className="mediaAction"
+                    onClick={() => {
+                      setAnnounceMediaUrl("");
+                      setAnnounceMediaName("");
+                      setAnnounceCustomizations({});
+                    }}
+                  >
+                    Remove
+                  </button>
+                </div>
+              ) : null}
+
               {uploadErr && <div className="dcErr">{uploadErr}</div>}
               <div className="dcFieldHelp">
-                Uploads to <b>board-media</b>. On phones, the capture buttons open
-                this device&apos;s camera.
+                Open Drop Studio to capture, upload, or design the announcement visual.
               </div>
             </div>
           )}
@@ -958,7 +1158,9 @@ export default function DropConsole({
 
           {mode === "board_drop" ? (
             <BoardDropConsoleFields
+              setTitle={setTitle}
               dropFlavor={dropFlavor}
+              setDropFlavor={setDropFlavor}
               attachUrl={attachUrl}
               setAttachUrl={setAttachUrl}
               uploadedFileName={uploadedFileName}
@@ -1482,7 +1684,9 @@ export default function DropConsole({
 }
 
 function BoardDropConsoleFields({
+  setTitle,
   dropFlavor,
+  setDropFlavor,
   attachUrl,
   setAttachUrl,
   uploadedFileName,
@@ -1509,7 +1713,9 @@ function BoardDropConsoleFields({
   thoughtVisibility,
   setThoughtVisibility,
 }: {
+  setTitle: React.Dispatch<React.SetStateAction<string>>;
   dropFlavor: DropFlavor;
+  setDropFlavor: (value: DropFlavor) => void;
   attachUrl: string;
   setAttachUrl: (value: string) => void;
   uploadedFileName: string;
@@ -1663,12 +1869,24 @@ function BoardDropConsoleFields({
             ? ["audio", "art", "descript"]
             : ["photo", "video", "audio", "art", "descript"]
         }
-        descriptDestination={
-          dropFlavor === "thought" ? "thought" : dropFlavor === "pay" ? "pay" : "doc"
-        }
+        descriptDestination="doc"
         value={customizations}
         onChange={setCustomizations}
-        onComplete={(file) => uploadToBoardMedia(file, "capture")}
+        onComplete={async (file) => {
+          if (isDropbookSlideFile({ name: file.name, type: file.type })) {
+            setDropFlavor("media");
+            setTitle((current) => current.trim() || "Dropbook");
+            setDropDesc("");
+          }
+          await uploadToBoardMedia(file, "capture");
+        }}
+        onDescriptComplete={async (doc: DescriptDoc) => {
+          const plainText = doc.plainText.trim();
+          setDropFlavor("doc");
+          setTitle((current) => current.trim() || doc.title);
+          setDocDesc(plainText);
+          await uploadToBoardMedia(descriptDocToFile(doc), "capture");
+        }}
         onClose={() => setStudioOpen(false)}
       />
 

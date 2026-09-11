@@ -548,4 +548,101 @@
   .save {
     width: auto;
   }
+
+  /* Drop Studio's embedded Art Palette is a compact mobile control surface.
+     Use real grid tracks instead of flex wrapping so buttons cannot overlap. */
+  .toolsPalette {
+    gap: 12px;
+    padding: 2px 0 4px;
+  }
+
+  .toolsPalette .wheelRow {
+    display: grid;
+    grid-template-columns: minmax(92px, 0.8fr) minmax(150px, 1.2fr);
+    align-items: center;
+    justify-content: stretch;
+    gap: 14px;
+  }
+
+  .toolsPalette .wheel {
+    width: clamp(92px, 27vw, 112px);
+    height: clamp(92px, 27vw, 112px);
+    justify-self: center;
+  }
+
+  .toolsPalette .wheelSide {
+    gap: 10px;
+  }
+
+  .toolsPalette .colors {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(28px, 1fr));
+    gap: 7px;
+    justify-items: center;
+  }
+
+  .toolsPalette .swatch {
+    width: 30px;
+    height: 30px;
+  }
+
+  .toolsPalette .light,
+  .toolsPalette .brushRow {
+    display: grid;
+    grid-template-columns: 46px 16px minmax(0, 1fr);
+    align-items: center;
+    gap: 7px;
+  }
+
+  .toolsPalette .light {
+    grid-template-columns: 46px minmax(0, 1fr);
+  }
+
+  .toolsPalette .fieldLabel {
+    width: auto;
+    font-size: 10px;
+  }
+
+  .toolsPalette input[type="range"] {
+    width: 100%;
+    min-width: 0;
+    margin: 0;
+  }
+
+  .toolsPalette .blendBrushBtn {
+    min-height: 40px;
+    padding: 9px 12px;
+    font-size: 10px;
+  }
+
+  .toolsPalette .actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .toolsPalette .ghost,
+  .toolsPalette .save {
+    width: 100%;
+    min-width: 0;
+    min-height: 44px;
+    padding: 10px 8px;
+    font-size: 11px;
+  }
+
+  .toolsPalette .save {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 360px) {
+  .toolsPalette .wheelRow {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .toolsPalette .wheel {
+    width: 96px;
+    height: 96px;
+  }
 }

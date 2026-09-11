@@ -70,15 +70,21 @@ export default function VocalVisualizer({
   state,
   stream = null,
   playbackAudioRef = null,
+  analyser: externalAnalyser = null,
   disableTap = false,
+  label: labelOverride,
 }: {
   state: VocalVisualizerState;
   stream?: MediaStream | null;
   /** When playing a voice/audio drop, pass the <audio> ref for real-time waveform. */
   playbackAudioRef?: RefObject<HTMLAudioElement | null> | null;
+  /** Studio lane tap — live Web Audio analyser from the session engine. */
+  analyser?: AnalyserNode | null;
   /** Skip the Web-Audio tap (e.g. a cross-origin clip with no CORS) so we never
    *  mute the element — playback stays audible with a non-reactive waveform. */
   disableTap?: boolean;
+  /** Optional status chip (defaults from state). */
+  label?: string;
 }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const rafRef = useRef<number>(0);
@@ -90,9 +96,12 @@ export default function VocalVisualizer({
 
   const playbackAnalyserRef = useRef<AnalyserNode | null>(null);
   const playbackDataRef = useRef<Uint8Array | null>(null);
+  const externalDataRef = useRef<Uint8Array | null>(null);
 
   const stateRef = useRef(state);
   stateRef.current = state;
+  const externalAnalyserRef = useRef(externalAnalyser);
+  externalAnalyserRef.current = externalAnalyser;
 
   // Live microphone analysis while recording.
   useEffect(() => {
@@ -228,6 +237,14 @@ export default function VocalVisualizer({
         analyser = micAnalyserRef.current;
         data = micDataRef.current;
         liveGain = 1.15;
+      } else if (externalAnalyserRef.current) {
+        const ext = externalAnalyserRef.current;
+        if (!externalDataRef.current || externalDataRef.current.length !== ext.fftSize) {
+          externalDataRef.current = new Uint8Array(ext.fftSize);
+        }
+        analyser = ext;
+        data = externalDataRef.current;
+        liveGain = 1.35;
       } else if (currentState === "playback" && playbackAnalyserRef.current && playbackDataRef.current) {
         analyser = playbackAnalyserRef.current;
         data = playbackDataRef.current;
@@ -292,13 +309,14 @@ export default function VocalVisualizer({
   }, []);
 
   const label =
-    state === "recording"
+    labelOverride ??
+    (state === "recording"
       ? "Listening"
       : state === "playback"
         ? "Playing"
         : state === "saved"
           ? "Voice Drop"
-          : "Voice Mode";
+          : "Voice Mode");
 
   return (
     <div className={`${styles.shell} ${styles[state] ?? ""}`}>

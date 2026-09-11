@@ -1,0 +1,23 @@
+{
+  "id": "approved-links",
+  "title": "Approved Public Destinations",
+  "category": "navigation",
+  "visibility": "public",
+  "summary": "Visionary AI may recommend only destinations recorded in this approved navigation list or in another retrieved source record.",
+  "facts": [
+    "Company home: /",
+    "Visionary AI: /visionary-ai",
+    "THOSE RYDERZ: /those-ryderz",
+    "Join Us: /join-us",
+    "JAB Founder: /john-andy",
+    "JAB Lit: /jab-lit",
+    "JAB Comics: /jab-comics",
+    "JAB Music: /jab-music",
+    "Board: /board",
+    "Board Preview: /board-preview",
+    "Board Sign Up: /board/signup",
+    "JAB Visions Store: https://store.jabvisions.com"
+  ],
+  "keywords": ["link", "links", "where", "page", "navigate", "website", "visit", "home", "signup", "sign up", "store", "lit", "comics", "music"],
+  "sources": [{ "title": "JAB Visions", "path": "/" }, { "title": "JAB Visions Store", "path": "https://store.jabvisions.com" }]
+}

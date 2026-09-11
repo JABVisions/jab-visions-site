@@ -1,11 +1,19 @@
 "use client";
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import { supabaseBrowser } from "@/lib/supabase/browser";
 import WorkCallsList, { type WorkCallItem } from "@/app/components/board/WorkCallsList";
 import ProjectCenter from "@/app/components/board/ProjectCenter";
 import StoreDropTile, { type StoreDrop } from "@/app/components/board/StoreDropTile";
+import DropPadSpatialWorld, {
+  type DropPadSpace,
+  type SpatialLibraryDrop,
+} from "@/app/components/board/DropPadSpatialWorld";
+import LazyDropStudioStage from "@/app/components/board/LazyDropStudioStage";
+import VoiceDropSoundboard from "@/app/components/board/VoiceDropSoundboard";
+import type { DropCustomization } from "@/lib/board/dropCustomizations";
+import { descriptDocToFile, type DescriptDoc } from "@/lib/board/descriptDocs";
 
 type DropRoute =
   | "board"
@@ -37,6 +45,16 @@ export type DropBubble = {
 
 type AssetKind = "media" | "music" | "youtube" | "link" | "doc" | "note";
 type DropDestination = "assets" | "portfolio" | "projects";
+type DropLifecycle = {
+  phase: "framed" | "sent";
+  framedAt?: number;
+  sentAt?: number;
+};
+type DropLibraryState = {
+  isAsset: boolean;
+  isPortfolio: boolean;
+  archivedAt?: number;
+};
 
 type AssetItem = {
   id: string;
@@ -48,7 +66,10 @@ type AssetItem = {
   payload?: {
     // media
     mediaUrl?: string;
-    mediaType?: "image";
+    mediaType?: "image" | "video" | "audio" | "file";
+    fileName?: string;
+    mimeType?: string;
+    customizations?: DropCustomization;
 
     // embeds
     embedUrl?: string;
@@ -58,8 +79,33 @@ type AssetItem = {
 
     // note
     text?: string;
+
+    // Drop lifecycle and library classification. These remain on one canonical
+    // record in board_assets; Assets and Portfolio are classified views.
+    lifecycle?: DropLifecycle;
+    library?: DropLibraryState;
+    origin?: "drop-studio" | "board-drop";
   };
 };
+
+type SentDropReceipt = {
+  asset: AssetItem;
+  savingTo: "assets" | "portfolio" | null;
+  inAssets: boolean;
+  inPortfolio: boolean;
+  error: string | null;
+};
+
+function toSpatialDrop(asset: AssetItem): SpatialLibraryDrop {
+  return {
+    id: asset.id,
+    title: asset.title,
+    createdAt: asset.createdAt,
+    kind: asset.kind,
+    mediaUrl: asset.payload?.mediaUrl,
+    mediaType: asset.payload?.mediaType,
+  };
+}
 
 type WorkCallType = "casting" | "crew" | "gigs" | "collaborations";
 
@@ -196,13 +242,43 @@ function readDropItemsFromStorage(key: string): AssetItem[] {
 }
 
 function writeAssetsToStorage(items: AssetItem[]) {
-  writeDropItemsToStorage(ASSETS_STORAGE_KEY, items);
+  return writeDropItemsToStorage(ASSETS_STORAGE_KEY, items);
 }
 
 function writeDropItemsToStorage(key: string, items: AssetItem[]) {
   try {
     localStorage.setItem(key, JSON.stringify(items));
-  } catch {}
+    return true;
+  } catch (error) {
+    console.error("[DropPadOS] local persistence failed", { key, error });
+    return false;
+  }
+}
+
+function mergeAssetItems(...groups: AssetItem[][]) {
+  const items = new Map<string, AssetItem>();
+  for (const group of groups) {
+    for (const item of group) {
+      const previous = items.get(item.id);
+      items.set(item.id, previous ? { ...previous, ...item, payload: { ...previous.payload, ...item.payload } } : item);
+    }
+  }
+  return Array.from(items.values()).sort((a, b) => b.createdAt - a.createdAt);
+}
+
+function libraryState(item: AssetItem, fallback: DropLibraryState): DropLibraryState {
+  return item.payload?.library ?? fallback;
+}
+
+function classifyAsset(item: AssetItem, patch: Partial<DropLibraryState>): AssetItem {
+  const current = libraryState(item, { isAsset: false, isPortfolio: false });
+  return {
+    ...item,
+    payload: {
+      ...item.payload,
+      library: { ...current, ...patch },
+    },
+  };
 }
 
 function uid() {
@@ -498,21 +574,33 @@ function DropHeader({
   );
 }
 
-function MediaDropTile({ a }: { a: AssetItem }) {
+function MediaDropTile({ a, expanded = false }: { a: AssetItem; expanded?: boolean }) {
   const url = a.payload?.mediaUrl;
+  const mediaType = a.payload?.mediaType ?? "image";
+  const mediaLabel = mediaType === "file" ? "Studio file" : `${mediaType[0].toUpperCase()}${mediaType.slice(1)} embed`;
 
   return (
     <TileFrame>
-      <DropHeader emoji={kindEmoji("media")} title={a.title} meta="Image embed" description={a.description} />
+      <DropHeader emoji={kindEmoji("media")} title={a.title} meta={mediaLabel} description={a.description} />
       <div className="mt-3 px-4 pb-4">
-        <div className="inline-block max-w-full overflow-hidden rounded-2xl border border-white/10 bg-white/5 align-top">
-          {url ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={url} alt={a.title} className="block h-auto max-h-72 max-w-full object-contain" loading="lazy" />
-          ) : (
-            <div className="grid min-h-32 min-w-48 place-items-center text-sm text-white/50">No image</div>
-          )}
-        </div>
+        {url && mediaType === "audio" ? (
+          <VoiceDropSoundboard src={url} title={a.title} compact />
+        ) : (
+          <div className="inline-block max-w-full overflow-hidden rounded-2xl border border-white/10 bg-white/5 align-top">
+            {url && mediaType === "image" ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={url} alt={a.title} className={expanded ? "block h-auto max-h-[68vh] max-w-full object-contain" : "block h-auto max-h-72 max-w-full object-contain"} loading="lazy" />
+            ) : url && mediaType === "video" ? (
+              <video src={url} controls playsInline className={expanded ? "block h-auto max-h-[68vh] max-w-full" : "block h-auto max-h-72 max-w-full"} />
+            ) : url ? (
+              <a href={url} download={a.payload?.fileName ?? a.title} className="block px-5 py-4 text-sm text-cyan-50/80 underline underline-offset-4">
+                Open saved file
+              </a>
+            ) : (
+              <div className="grid min-h-32 min-w-48 place-items-center text-sm text-white/50">No file</div>
+            )}
+          </div>
+        )}
       </div>
     </TileFrame>
   );
@@ -634,10 +722,10 @@ function NoteDropTile({ a }: { a: AssetItem }) {
   );
 }
 
-function EmbeddedAssetTile({ a }: { a: AssetItem }) {
+function EmbeddedAssetTile({ a, expanded = false }: { a: AssetItem; expanded?: boolean }) {
   switch (a.kind) {
     case "media":
-      return <MediaDropTile a={a} />;
+      return <MediaDropTile a={a} expanded={expanded} />;
     case "music":
       return <MusicDropTile a={a} />;
     case "youtube":
@@ -833,13 +921,41 @@ function BoardDropsScreen({
   );
 }
 
+function LibraryDropCard({
+  asset,
+  onView,
+  onDelete,
+}: {
+  asset: AssetItem;
+  onView?: (asset: AssetItem) => void;
+  onDelete?: (asset: AssetItem) => void;
+}) {
+  return (
+    <div className="overflow-hidden rounded-3xl border border-white/10 bg-black/20">
+      <EmbeddedAssetTile a={asset} />
+      <div className="flex gap-2 border-t border-white/10 p-3">
+        <button type="button" onClick={() => onView?.(asset)} className="flex-1 rounded-full border border-cyan-200/20 bg-cyan-200/10 px-3 py-2 text-xs font-semibold text-cyan-50/85 hover:bg-cyan-200/15">
+          Expand Drop
+        </button>
+        <button type="button" onClick={() => onDelete?.(asset)} className="rounded-full border border-rose-200/20 bg-rose-200/10 px-3 py-2 text-xs font-semibold text-rose-100/80 hover:bg-rose-200/15">
+          Delete
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function AssetsScreen({
   assets,
   onClear,
+  onView,
+  onDelete,
   syncing,
 }: {
   assets: AssetItem[];
   onClear: () => void;
+  onView: (asset: AssetItem) => void;
+  onDelete: (asset: AssetItem) => void;
   syncing: boolean;
 }) {
   return (
@@ -869,7 +985,7 @@ function AssetsScreen({
           assets
             .slice()
             .sort((a, b) => b.createdAt - a.createdAt)
-            .map((a) => <EmbeddedAssetTile key={a.id} a={a} />)
+            .map((a) => <LibraryDropCard key={a.id} asset={a} onView={onView} onDelete={onDelete} />)
         )}
       </div>
     </ScreenShell>
@@ -889,13 +1005,23 @@ function ProjectsScreen({ drops }: { drops: AssetItem[] }) {
   );
 }
 
-function PortfolioScreen({ drops }: { drops: AssetItem[] }) {
+function PortfolioScreen({
+  drops,
+  onView,
+  onDelete,
+}: {
+  drops: AssetItem[];
+  onView: (asset: AssetItem) => void;
+  onDelete: (asset: AssetItem) => void;
+}) {
   return (
     <ScreenShell title="Portfolio" description="Showcase-ready Board Drops pinned into your portfolio.">
       <PlacedDropsSection
         title="Portfolio Drops"
         empty="Place polished media, links, notes, and embeds here as portfolio pieces."
         drops={drops}
+        onView={onView}
+        onDelete={onDelete}
       />
     </ScreenShell>
   );
@@ -905,10 +1031,14 @@ function PlacedDropsSection({
   title,
   empty,
   drops,
+  onView,
+  onDelete,
 }: {
   title: string;
   empty: string;
   drops: AssetItem[];
+  onView?: (asset: AssetItem) => void;
+  onDelete?: (asset: AssetItem) => void;
 }) {
   return (
     <div className="mb-5 rounded-3xl border border-white/10 bg-black/25 p-4">
@@ -925,7 +1055,9 @@ function PlacedDropsSection({
           drops
             .slice()
             .sort((a, b) => b.createdAt - a.createdAt)
-            .map((a) => <EmbeddedAssetTile key={a.id} a={a} />)
+            .map((a) => onView && onDelete
+              ? <LibraryDropCard key={a.id} asset={a} onView={onView} onDelete={onDelete} />
+              : <EmbeddedAssetTile key={a.id} a={a} />)
         )}
       </div>
     </div>
@@ -1067,6 +1199,7 @@ export default function DropPadOS({
   subtitle = "Work Profile Console",
   maxScreenPx,
   storeDrops = [],
+  swapAssetPortfolioDestinations = false,
 }: {
   className?: string;
   drops?: DropBubble[];
@@ -1084,9 +1217,11 @@ export default function DropPadOS({
   subtitle?: string;
   maxScreenPx?: number;
   storeDrops?: StoreDrop[];
+  swapAssetPortfolioDestinations?: boolean;
 }) {
   const sb = useMemo(() => supabaseBrowser(), []);
   const reducedMotion = useReducedMotion();
+  const [activeSpace, setActiveSpace] = useState<DropPadSpace>("home");
 
   // ✅ internal view state (menu vs screen), but power is external
   const [mode, setMode] = useState<ScreenMode>("menu");
@@ -1096,8 +1231,20 @@ export default function DropPadOS({
   const [portfolioDrops, setPortfolioDrops] = useState<AssetItem[]>([]);
   const [projectDrops, setProjectDrops] = useState<AssetItem[]>([]);
   const [dropDestination, setDropDestination] = useState<DropDestination>("assets");
+  const [dropStudioOpen, setDropStudioOpen] = useState(false);
+  const [dropStudioCustomizations, setDropStudioCustomizations] = useState<DropCustomization>({});
+  const [sentDropReceipt, setSentDropReceipt] = useState<SentDropReceipt | null>(null);
+  const [viewingAsset, setViewingAsset] = useState<AssetItem | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [userId, setUserId] = useState<string | null>(null);
+  const spatialAssets = useMemo(
+    () => (swapAssetPortfolioDestinations ? portfolioDrops : assets).map(toSpatialDrop),
+    [assets, portfolioDrops, swapAssetPortfolioDestinations]
+  );
+  const spatialPortfolio = useMemo(
+    () => (swapAssetPortfolioDestinations ? assets : portfolioDrops).map(toSpatialDrop),
+    [assets, portfolioDrops, swapAssetPortfolioDestinations]
+  );
 
   const [modal, setModal] = useState<InputModalState>({ open: false });
 
@@ -1251,8 +1398,25 @@ export default function DropPadOS({
       const res = await fetchAssetsFromSupabase(sb, uid_);
       if (!cancelled) {
         if (res.ok) {
-          setAssets(res.items);
-          writeAssetsToStorage(res.items);
+          const remoteAssets = res.items.filter((item) =>
+            libraryState(item, { isAsset: !swapAssetPortfolioDestinations, isPortfolio: swapAssetPortfolioDestinations }).isAsset
+          );
+          const remotePortfolio = res.items.filter((item) =>
+            libraryState(item, { isAsset: !swapAssetPortfolioDestinations, isPortfolio: swapAssetPortfolioDestinations }).isPortfolio
+          );
+          const logicalAssets = mergeAssetItems(remoteAssets, swapAssetPortfolioDestinations ? readDropItemsFromStorage(PORTFOLIO_DROPS_STORAGE_KEY) : readAssetsFromStorage());
+          const logicalPortfolio = mergeAssetItems(remotePortfolio, swapAssetPortfolioDestinations ? readAssetsFromStorage() : readDropItemsFromStorage(PORTFOLIO_DROPS_STORAGE_KEY));
+          if (swapAssetPortfolioDestinations) {
+            setPortfolioDrops(logicalAssets);
+            writeDropItemsToStorage(PORTFOLIO_DROPS_STORAGE_KEY, logicalAssets);
+            setAssets(logicalPortfolio);
+            writeAssetsToStorage(logicalPortfolio);
+          } else {
+            setAssets(logicalAssets);
+            writeAssetsToStorage(logicalAssets);
+            setPortfolioDrops(logicalPortfolio);
+            writeDropItemsToStorage(PORTFOLIO_DROPS_STORAGE_KEY, logicalPortfolio);
+          }
         }
         setSyncing(false);
       }
@@ -1271,8 +1435,19 @@ export default function DropPadOS({
       const res = await fetchAssetsFromSupabase(sb, uid_);
       if (!cancelled) {
         if (res.ok) {
-          setAssets(res.items);
-          writeAssetsToStorage(res.items);
+          const remoteAssets = res.items.filter((item) =>
+            libraryState(item, { isAsset: !swapAssetPortfolioDestinations, isPortfolio: swapAssetPortfolioDestinations }).isAsset
+          );
+          const remotePortfolio = res.items.filter((item) =>
+            libraryState(item, { isAsset: !swapAssetPortfolioDestinations, isPortfolio: swapAssetPortfolioDestinations }).isPortfolio
+          );
+          if (swapAssetPortfolioDestinations) {
+            syncPortfolioDropsLocal(mergeAssetItems(remoteAssets, readDropItemsFromStorage(PORTFOLIO_DROPS_STORAGE_KEY)));
+            syncAssetsLocal(mergeAssetItems(remotePortfolio, readAssetsFromStorage()));
+          } else {
+            syncAssetsLocal(mergeAssetItems(remoteAssets, readAssetsFromStorage()));
+            syncPortfolioDropsLocal(mergeAssetItems(remotePortfolio, readDropItemsFromStorage(PORTFOLIO_DROPS_STORAGE_KEY)));
+          }
         }
         setSyncing(false);
       }
@@ -1282,7 +1457,7 @@ export default function DropPadOS({
       cancelled = true;
       sub?.subscription?.unsubscribe?.();
     };
-  }, [sb]);
+  }, [sb, swapAssetPortfolioDestinations]);
 
   // compute max based on viewport
   useEffect(() => {
@@ -1303,30 +1478,94 @@ export default function DropPadOS({
       if (e.key === "Escape") {
         if (modal.open) setModal({ open: false });
         if (wcDraft.open) setWcDraft((p) => ({ ...p, open: false }));
+        if (viewingAsset) setViewingAsset(null);
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [modal.open, wcDraft.open]);
+  }, [modal.open, viewingAsset, wcDraft.open]);
 
   const syncAssetsLocal = (next: AssetItem[]) => {
     setAssets(next);
-    writeAssetsToStorage(next);
+    return writeAssetsToStorage(next);
   };
 
   const syncPortfolioDropsLocal = (next: AssetItem[]) => {
     setPortfolioDrops(next);
-    writeDropItemsToStorage(PORTFOLIO_DROPS_STORAGE_KEY, next);
+    return writeDropItemsToStorage(PORTFOLIO_DROPS_STORAGE_KEY, next);
   };
 
   const syncProjectDropsLocal = (next: AssetItem[]) => {
     setProjectDrops(next);
-    writeDropItemsToStorage(PROJECT_DROPS_STORAGE_KEY, next);
+    return writeDropItemsToStorage(PROJECT_DROPS_STORAGE_KEY, next);
+  };
+
+  const deleteLibraryDrop = async (assetId: string, library: "assets" | "portfolio") => {
+    const logicalAssets = swapAssetPortfolioDestinations ? portfolioDrops : assets;
+    const logicalPortfolio = swapAssetPortfolioDestinations ? assets : portfolioDrops;
+    const asset = logicalAssets.find((item) => item.id === assetId) ?? logicalPortfolio.find((item) => item.id === assetId);
+    if (!asset) return;
+
+    const confirmed = window.confirm(
+      `Remove “${asset.title}” from ${library === "assets" ? "Assets" : "Portfolio"}? It will remain in the other folder if you saved it there.`
+    );
+    if (!confirmed) return;
+
+    const normalizedAsset: AssetItem = {
+      ...asset,
+      payload: {
+        ...asset.payload,
+        library: libraryState(asset, {
+          isAsset: logicalAssets.some((item) => item.id === assetId),
+          isPortfolio: logicalPortfolio.some((item) => item.id === assetId),
+        }),
+      },
+    };
+    const updated = classifyAsset(
+      normalizedAsset,
+      library === "assets" ? { isAsset: false } : { isPortfolio: false }
+    );
+    const nextAssets = library === "assets"
+      ? logicalAssets.filter((item) => item.id !== assetId)
+      : logicalAssets.map((item) => item.id === assetId ? updated : item);
+    const nextPortfolio = library === "portfolio"
+      ? logicalPortfolio.filter((item) => item.id !== assetId)
+      : logicalPortfolio.map((item) => item.id === assetId ? updated : item);
+    let remoteResult = { ok: true };
+    if (userId) remoteResult = await upsertAssetToSupabase(sb, userId, updated);
+
+    if (userId && !remoteResult.ok) {
+      triggerDropPlacedIndicator("SYSTEM: Drop could not be deleted. Try again.");
+      return;
+    }
+
+    const assetsSaved = swapAssetPortfolioDestinations
+      ? syncPortfolioDropsLocal(nextAssets)
+      : syncAssetsLocal(nextAssets);
+    const portfolioSaved = swapAssetPortfolioDestinations
+      ? syncAssetsLocal(nextPortfolio)
+      : syncPortfolioDropsLocal(nextPortfolio);
+
+    if (!assetsSaved && !portfolioSaved && !remoteResult.ok) {
+      triggerDropPlacedIndicator("SYSTEM: Drop could not be deleted");
+      return;
+    }
+    setViewingAsset((current) => current?.id === assetId ? null : current);
+    triggerDropPlacedIndicator(`SYSTEM: Drop removed from ${library === "assets" ? "Assets" : "Portfolio"}`);
+  };
+
+  const openSpatialDrop = (assetId: string, library: "assets" | "portfolio") => {
+    const items = library === "assets"
+      ? (swapAssetPortfolioDestinations ? portfolioDrops : assets)
+      : (swapAssetPortfolioDestinations ? assets : portfolioDrops);
+    const asset = items.find((item) => item.id === assetId);
+    if (asset) setViewingAsset(asset);
   };
 
   // ✅ Controlled: whenever osOn changes, drive boot phases + cleanup
   useEffect(() => {
     if (osOn) {
+      setActiveSpace("home");
       setScreenPx(clamp(initialScreenPx, screenMinPx, screenMaxPxRef.current));
       setBootPhase("booting");
       setMode("menu");
@@ -1348,16 +1587,35 @@ export default function DropPadOS({
   // ✅ Controlled: whenever osApp changes, open correct screen if powered
   const activeRoute = appToRoute(osApp);
   const showProjectHologram =
-    osOn && bootPhase === "ready" && mode === "screen" && activeRoute === "projects";
+    osOn && bootPhase === "ready" && activeSpace === "work" && mode === "screen" && activeRoute === "projects";
 
   useEffect(() => {
     if (!osOn) return;
     if (osApp === "home") {
       setMode("menu");
+      setActiveSpace("home");
       return;
     }
     setMode("screen");
+    setActiveSpace("work");
   }, [osOn, osApp]);
+
+  const navigateToSpace = useCallback(
+    (space: DropPadSpace) => {
+      setActiveSpace(space);
+      if (space === "home") {
+        setMode("menu");
+        onHome?.();
+        onNavigate?.("home");
+        return;
+      }
+      if (space === "work") {
+        setMode("screen");
+        if (osApp === "home") onNavigate?.("board_drops");
+      }
+    },
+    [onHome, onNavigate, osApp]
+  );
 
   const openRoute = (route: DropRoute) => {
     // keep backward-compat with any older parent listeners
@@ -1368,12 +1626,14 @@ export default function DropPadOS({
 
     // local view update (screen)
     setMode("screen");
+    setActiveSpace("work");
   };
 
   const jumpToAssets = () => {
     onSelect?.("assets");
     onNavigate?.("assets");
     setMode("screen");
+    setActiveSpace("work");
   };
 
   const clearAssets = async () => {
@@ -1420,29 +1680,135 @@ export default function DropPadOS({
     onSelect?.(destination);
     onNavigate?.(destination);
     setMode("screen");
+    setActiveSpace("work");
   };
 
-  const placeAsset = async (asset: AssetItem, destination: DropDestination) => {
+  const placeAsset = async (
+    asset: AssetItem,
+    destination: DropDestination,
+    displayedDestination: DropDestination = destination
+  ) => {
+    let savedLocally = false;
     if (destination === "portfolio") {
-      syncPortfolioDropsLocal([asset, ...portfolioDrops]);
+      savedLocally = syncPortfolioDropsLocal([asset, ...portfolioDrops]);
     } else if (destination === "projects") {
-      syncProjectDropsLocal([asset, ...projectDrops]);
+      savedLocally = syncProjectDropsLocal([asset, ...projectDrops]);
       window.dispatchEvent(new CustomEvent(PROJECT_DROPS_UPDATED_EVENT));
     } else {
       const next = [asset, ...assets];
-      syncAssetsLocal(next);
+      savedLocally = syncAssetsLocal(next);
     }
 
+    let savedRemotely = false;
     if (userId && destination === "assets") {
+      setSyncing(true);
+      const result = await withTimeout(upsertAssetToSupabase(sb, userId, asset), 8000).catch(() => ({ ok: false }));
+      savedRemotely = result.ok;
+      setSyncing(false);
+    }
+
+    if (!savedLocally && !savedRemotely) {
+      throw new Error(`Unable to persist Drop Studio file to ${displayedDestination}`);
+    }
+
+    triggerDropPlacedIndicator(`SYSTEM: ${kindLabel(asset.kind)} placed in ${destinationLabel(displayedDestination)}`);
+
+    setModal({ open: false });
+    jumpToDestination(destination);
+  };
+
+  const saveDropStudioFile = async (file: File) => {
+    let mediaUrl = "";
+    if (userId) {
+      const uploaded = await uploadMediaToSupabaseStorage(sb, userId, file);
+      if (uploaded.ok) mediaUrl = uploaded.publicUrl;
+    }
+    if (!mediaUrl) mediaUrl = await readFileAsDataUrl(file).catch(() => "");
+    if (!mediaUrl) throw new Error("Drop Studio file could not be read or uploaded");
+
+    const mediaType: NonNullable<AssetItem["payload"]>["mediaType"] = file.type.startsWith("image/")
+      ? "image"
+      : file.type.startsWith("video/")
+        ? "video"
+        : file.type.startsWith("audio/")
+          ? "audio"
+          : "file";
+
+    const now = Date.now();
+    const asset: AssetItem = {
+      id: uid(),
+      // Studio files share the rich media renderer; mimeType/mediaType preserve
+      // whether the framed output is art, video, voice, or a document file.
+      kind: "media",
+      title: file.name.replace(/\.[^.]+$/, "") || "Drop Studio file",
+      description: "Created and sent from Drop Studio.",
+      createdAt: now,
+      payload: {
+        mediaUrl,
+        mediaType,
+        fileName: file.name,
+        mimeType: file.type,
+        customizations: dropStudioCustomizations,
+        lifecycle: { phase: "sent", framedAt: now, sentAt: now },
+        library: { isAsset: false, isPortfolio: false },
+        origin: "drop-studio",
+      },
+    };
+
+    if (userId) {
       setSyncing(true);
       await withTimeout(upsertAssetToSupabase(sb, userId, asset), 8000).catch(() => ({ ok: false }));
       setSyncing(false);
     }
 
-    triggerDropPlacedIndicator(`SYSTEM: ${kindLabel(asset.kind)} placed in ${destinationLabel(destination)}`);
+    setDropStudioCustomizations({});
+    setSentDropReceipt({ asset, savingTo: null, inAssets: false, inPortfolio: false, error: null });
+    triggerDropPlacedIndicator("SYSTEM: Drop sent. Choose its folders.");
+  };
 
-    setModal({ open: false });
-    jumpToDestination(destination);
+  const addSentDropToLibrary = async (library: "assets" | "portfolio") => {
+    if (!sentDropReceipt || sentDropReceipt.savingTo) return;
+    if (library === "assets" ? sentDropReceipt.inAssets : sentDropReceipt.inPortfolio) return;
+    const classified = classifyAsset(
+      sentDropReceipt.asset,
+      library === "assets" ? { isAsset: true } : { isPortfolio: true }
+    );
+    setSentDropReceipt((current) => current ? { ...current, asset: classified, savingTo: library, error: null } : current);
+
+    const logicalAssets = swapAssetPortfolioDestinations ? portfolioDrops : assets;
+    const logicalPortfolio = swapAssetPortfolioDestinations ? assets : portfolioDrops;
+    const state = libraryState(classified, { isAsset: false, isPortfolio: false });
+    const nextAssets = state.isAsset
+      ? mergeAssetItems([classified], logicalAssets.map((item) => item.id === classified.id ? classified : item))
+      : logicalAssets;
+    const nextPortfolio = state.isPortfolio
+      ? mergeAssetItems([classified], logicalPortfolio.map((item) => item.id === classified.id ? classified : item))
+      : logicalPortfolio;
+    const assetsSaved = swapAssetPortfolioDestinations
+      ? syncPortfolioDropsLocal(nextAssets)
+      : syncAssetsLocal(nextAssets);
+    const portfolioSaved = swapAssetPortfolioDestinations
+      ? syncAssetsLocal(nextPortfolio)
+      : syncPortfolioDropsLocal(nextPortfolio);
+
+    let remoteSaved = false;
+    if (userId) {
+      const result = await withTimeout(upsertAssetToSupabase(sb, userId, classified), 8000).catch(() => ({ ok: false }));
+      remoteSaved = result.ok;
+    }
+    if (!assetsSaved && !portfolioSaved && !remoteSaved) {
+      setSentDropReceipt((current) => current ? { ...current, savingTo: null, error: `${library === "assets" ? "Assets" : "Portfolio"} could not be updated. Try again.` } : current);
+      return;
+    }
+    setSentDropReceipt((current) => current ? {
+      ...current,
+      asset: classified,
+      savingTo: null,
+      inAssets: library === "assets" ? true : current.inAssets,
+      inPortfolio: library === "portfolio" ? true : current.inPortfolio,
+      error: null,
+    } : current);
+    triggerDropPlacedIndicator(`SYSTEM: Drop added to ${library === "assets" ? "Assets" : "Portfolio"}`);
   };
 
   const submitModal = async () => {
@@ -1631,11 +1997,25 @@ export default function DropPadOS({
           />
         );
       case "assets":
-        return <AssetsScreen assets={assets} onClear={clearAssets} syncing={syncing} />;
+        return (
+          <AssetsScreen
+            assets={assets}
+            onClear={clearAssets}
+            onView={setViewingAsset}
+            onDelete={(asset) => deleteLibraryDrop(asset.id, swapAssetPortfolioDestinations ? "portfolio" : "assets")}
+            syncing={syncing}
+          />
+        );
       case "projects":
         return <ProjectsScreen drops={projectDrops} />;
       case "portfolio":
-        return <PortfolioScreen drops={portfolioDrops} />;
+        return (
+          <PortfolioScreen
+            drops={portfolioDrops}
+            onView={setViewingAsset}
+            onDelete={(asset) => deleteLibraryDrop(asset.id, swapAssetPortfolioDestinations ? "assets" : "portfolio")}
+          />
+        );
       case "workcalls":
         return (
           <WorkCallsScreen
@@ -1751,9 +2131,15 @@ export default function DropPadOS({
 
           <p className="mt-1 text-sm text-white/55 max-w-[62ch]">
             {osOn
-              ? mode === "menu"
-                ? "Select a bubble to open a screen."
-                : "Board Drops places embedded tiles into Assets."
+              ? activeSpace === "home"
+                ? "Move through Board Spaces from the Home Orb."
+                : activeSpace === "activity"
+                  ? "A live waterfall of Board signals and whispers."
+                  : activeSpace === "work"
+                    ? "Your productive Board lives east of Home."
+                    : activeSpace === "bucket-brain"
+                      ? "Board memory and contextual intelligence live below Home."
+                      : "The quiet edge of Drop Pad OS."
               : "Power on to summon the Drops menu."}
           </p>
         </div>
@@ -1780,11 +2166,11 @@ export default function DropPadOS({
         </button>
       </header>
 
-      {/* Active route hint + placement pulse indicator */}
+      {/* Active Space + placement pulse indicator */}
       <div className="relative z-10 px-5 sm:px-6">
         <div className="flex items-center justify-between rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
           <div className="text-sm text-white/70 flex items-center gap-2">
-            Active: <span className="text-white/90 font-medium">{RouteTitle(activeRoute)}</span>
+            Space: <span className="text-white/90 font-medium">{activeSpace === "bucket-brain" ? "Bucket Brain" : activeSpace[0].toUpperCase() + activeSpace.slice(1)}</span>
             {dropPlacedPulse ? (
               <span className="relative inline-flex h-2 w-2">
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-lime-300 opacity-60" />
@@ -1794,17 +2180,17 @@ export default function DropPadOS({
           </div>
 
           <div className="text-xs text-white/45">
-            {osOn ? (mode === "menu" ? "Drops Menu" : `Embedded: ${assets.length}`) : "Offline"}
+            {osOn ? (activeSpace === "work" ? "Undesigned field" : "Spatial world") : "Offline"}
           </div>
         </div>
       </div>
 
-      {/* Scrollable + extendable iPad screen */}
+      {/* Contained + extendable Drop Pad viewport */}
       <div className="relative z-10 mt-4 px-5 sm:px-6 pb-6">
         <div
           className={clsx(
             "relative w-full rounded-3xl border border-white/10 bg-white/[0.03]",
-            "overflow-y-auto overflow-x-hidden"
+            "overflow-hidden"
           )}
           style={{ height: `${screenPx}px` }}
         >
@@ -1834,7 +2220,7 @@ export default function DropPadOS({
                   <div className="text-white/60 text-sm tracking-widest">DROP PAD</div>
                   <div className="mt-2 text-2xl font-semibold text-white/85">Standby</div>
                   <div className="mt-2 text-sm text-white/50 max-w-[46ch] mx-auto">
-                    Power on to open the holographic Drops menu.
+                    Power on to enter the Board Spaces world.
                   </div>
                 </div>
               </div>
@@ -1854,26 +2240,14 @@ export default function DropPadOS({
           )}
 
           {osOn && bootPhase === "ready" && (
-            <div className="relative">
-              <div className="sticky top-0 z-20 px-4 pt-4">
+            <div className="relative flex h-full min-h-0 flex-col">
+              <div className="relative z-40 shrink-0 px-4 pt-4">
                 <div className="flex items-center justify-between gap-3">
-                  {mode === "screen" ? (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setMode("menu");
-                        onHome?.();
-                        onNavigate?.("home");
-                      }}
-                      className="rounded-2xl border border-white/10 bg-black/30 px-4 py-2 text-sm text-white/80 hover:bg-black/40 transition"
-                      aria-label="Back to Drops menu"
-                      title="Back to Drops"
-                    >
-                      ← Back to Drops
-                    </button>
-                  ) : (
-                    <div className="text-sm text-white/65">Drops Menu</div>
-                  )}
+                  <div className="text-sm text-white/65">
+                    {activeSpace === "bucket-brain"
+                      ? "Bucket Brain Space"
+                      : `${activeSpace[0].toUpperCase()}${activeSpace.slice(1)} Space`}
+                  </div>
 
                   <div className="flex items-center gap-3">
                     <div className="hidden sm:block text-xs text-white/45">Screen</div>
@@ -1892,83 +2266,85 @@ export default function DropPadOS({
                 </div>
               </div>
 
-              {/* MENU (crown center + orbit bubbles) */}
-              {mode === "menu" && (
-                <div className="relative h-[560px] sm:h-[620px]">
-                  {/* Crown center */}
-                  <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none">
-                    <div className="relative grid place-items-center">
-                      <div className="absolute inset-0 rounded-full blur-3xl opacity-25 bg-lime-400" />
-                      <Image
-                        src={CROWN_SRC}
-                        alt="JAB Visions Crown"
-                        width={190}
-                        height={190}
-                        priority
-                        className="relative z-10 select-none drop-shadow-[0_0_34px_rgba(163,230,53,0.45)]"
-                      />
+              <div className="min-h-0 flex-1 pt-3">
+                <DropPadSpatialWorld
+                  activeSpace={activeSpace}
+                  onSpaceChange={navigateToSpace}
+                  crownSrc={CROWN_SRC}
+                  reducedMotion={reducedMotion}
+                  workAssets={spatialAssets}
+                  workPortfolio={spatialPortfolio}
+                  onOpenWorkDrop={openSpatialDrop}
+                  onDeleteWorkDrop={deleteLibraryDrop}
+                  onLock={() => {
+                    setActiveSpace("free");
+                    onOff?.();
+                  }}
+                  onOpenDropStudio={() => {
+                    setDropStudioCustomizations({});
+                    setSentDropReceipt(null);
+                    setDropStudioOpen(true);
+                  }}
+                  home={
+                    <div className="relative h-full min-h-[320px]">
+                      <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none">
+                        <div className="relative grid place-items-center">
+                          <div className="absolute inset-0 rounded-full blur-3xl opacity-25 bg-lime-400" />
+                          <Image
+                            src={CROWN_SRC}
+                            alt="JAB Visions Crown"
+                            width={190}
+                            height={190}
+                            priority
+                            className="relative z-10 w-[min(42vw,170px)] select-none drop-shadow-[0_0_34px_rgba(163,230,53,0.45)]"
+                          />
+                        </div>
+                      </div>
+
+                      {menuDrops.map((drop, i) => {
+                        const pos = getOrbitPos(i, menuDrops.length);
+                        return (
+                          <button
+                            key={drop.id}
+                            type="button"
+                            onClick={() => openRoute(drop.route)}
+                            className={clsx(
+                              "absolute h-[clamp(72px,24%,104px)] w-[clamp(72px,24%,104px)] rounded-full",
+                              "border border-white/15 backdrop-blur-md",
+                              "shadow-[0_10px_40px_rgba(0,0,0,0.35)]",
+                              "transition active:scale-[0.98] focus:outline-none focus:ring-2 focus:ring-lime-300/40",
+                              "hover:ring-2 hover:ring-white/10"
+                            )}
+                            style={{
+                              left: `${pos.x}%`,
+                              top: `${pos.y}%`,
+                              transform: "translate(-50%, -50%)",
+                              animation: reducedMotion
+                                ? undefined
+                                : `floaty ${5.2 + (i % 4) * 0.8}s ease-in-out ${i * 0.12}s infinite`,
+                            }}
+                            aria-label={`Open ${drop.label} in Work Space`}
+                            title={`${drop.label} · Work Space`}
+                          >
+                            <span className="absolute inset-0 rounded-full bg-[radial-gradient(circle_at_30%_28%,rgba(255,255,255,0.30),rgba(255,255,255,0.07)_42%,rgba(163,230,53,0.10)_64%,rgba(34,211,238,0.08)_78%,rgba(217,70,239,0.06)_100%)]" />
+                            <span className="absolute left-[18%] top-[16%] h-[26%] w-[26%] rounded-full bg-white/20 blur-sm" />
+                            <span className="relative z-10 grid h-full w-full place-items-center px-2 text-center">
+                              <span className="text-[16px] leading-none">{drop.emoji ?? "🫧"}</span>
+                              <span className="mt-1 text-[10px] font-medium leading-tight text-white/85">{drop.label}</span>
+                            </span>
+                          </button>
+                        );
+                      })}
+
+                      <div className="absolute bottom-8 left-10 right-10 text-center text-[10px] tracking-[0.12em] text-white/38">
+                        Swipe to cross into a neighboring Board Space.
+                      </div>
                     </div>
-                  </div>
+                  }
+                />
+              </div>
 
-                  {menuDrops.map((drop, i) => {
-                    const pos = getOrbitPos(i, menuDrops.length);
-                    const size = 112;
-
-                    return (
-                      <button
-                        key={drop.id}
-                        type="button"
-                        onClick={() => openRoute(drop.route)}
-                        className={clsx(
-                          "absolute rounded-full",
-                          "border border-white/15",
-                          "backdrop-blur-md",
-                          "shadow-[0_10px_40px_rgba(0,0,0,0.35)]",
-                          "transition active:scale-[0.98] focus:outline-none focus:ring-2 focus:ring-lime-300/40",
-                          "hover:ring-2 hover:ring-white/10"
-                        )}
-                        style={{
-                          left: `${pos.x}%`,
-                          top: `${pos.y}%`,
-                          width: `${size}px`,
-                          height: `${size}px`,
-                          transform: "translate(-50%, -50%)",
-                          animation: reducedMotion
-                            ? undefined
-                            : `floaty ${5.2 + (i % 4) * 0.8}s ease-in-out ${i * 0.12}s infinite`,
-                        }}
-                        aria-label={`Open ${drop.label}`}
-                        title={drop.label}
-                      >
-                        <span
-                          className="absolute inset-0 rounded-full"
-                          style={{
-                            background:
-                              "radial-gradient(circle at 30% 28%, rgba(255,255,255,0.30), rgba(255,255,255,0.07) 42%, rgba(163,230,53,0.10) 64%, rgba(34,211,238,0.08) 78%, rgba(217,70,239,0.06) 100%)",
-                          }}
-                        />
-                        <span className="absolute left-[18%] top-[16%] h-[26%] w-[26%] rounded-full bg-white/20 blur-sm" />
-                        <span className="absolute right-[14%] bottom-[12%] h-[18%] w-[18%] rounded-full bg-lime-300/15 blur-md" />
-
-                        <span className="relative z-10 grid h-full w-full place-items-center px-3 text-center">
-                          <span className="text-[18px] leading-none">{drop.emoji ?? "🫧"}</span>
-                          <span className="mt-2 text-[11px] font-medium text-white/85 leading-tight">
-                            {drop.label}
-                          </span>
-                        </span>
-                      </button>
-                    );
-                  })}
-
-                  <div className="absolute bottom-5 left-6 right-6 text-center text-xs text-white/40">
-                    Tap a bubble to open a screen inside Drop Pad.
-                  </div>
-                </div>
-              )}
-
-              {mode === "screen" && !showProjectHologram && <div className="pt-2">{renderScreen()}</div>}
-
-              <div className="sticky bottom-0 z-30 px-4 pb-3 pt-2 bg-gradient-to-t from-black/35 to-transparent">
+              <div className="relative z-40 shrink-0 px-4 pb-3 pt-2 bg-gradient-to-t from-black/35 to-transparent">
                 <div className="flex items-center justify-center">
                   <button
                     type="button"
@@ -2302,6 +2678,84 @@ export default function DropPadOS({
           )}
         </div>
       </div>
+
+      <LazyDropStudioStage
+        open={dropStudioOpen}
+        initialFile={null}
+        initialMode="photo"
+        allowedModes={["photo", "video", "audio", "art", "descript"]}
+        descriptDestination="doc"
+        value={dropStudioCustomizations}
+        onChange={setDropStudioCustomizations}
+        onComplete={(file) => {
+          return saveDropStudioFile(file);
+        }}
+        onDescriptComplete={(doc: DescriptDoc) => saveDropStudioFile(descriptDocToFile(doc))}
+        onClose={() => setDropStudioOpen(false)}
+      />
+
+      {viewingAsset ? (
+        <div className="fixed inset-0 z-[1140] grid place-items-center bg-black/70 p-4 backdrop-blur-md" role="dialog" aria-modal="true" aria-labelledby="library-drop-viewer-title">
+          <button type="button" className="absolute inset-0" onClick={() => setViewingAsset(null)} aria-label="Close enlarged Drop" />
+          <div className="relative max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-[30px] border border-cyan-100/25 bg-[#071019]/95 p-4 shadow-[0_0_90px_rgba(100,225,255,.2)] sm:p-6">
+            <div className="mb-4 flex items-center justify-between gap-4">
+              <div className="min-w-0">
+                <div className="text-[10px] font-semibold tracking-[0.32em] text-cyan-100/55">ENLARGED DROP</div>
+                <h2 id="library-drop-viewer-title" className="mt-1 truncate text-lg font-bold text-white/90">{viewingAsset.title}</h2>
+              </div>
+              <button type="button" onClick={() => setViewingAsset(null)} className="shrink-0 rounded-full border border-white/15 bg-white/10 px-4 py-2 text-sm text-white/80 hover:bg-white/15">Close</button>
+            </div>
+            <EmbeddedAssetTile a={viewingAsset} expanded />
+          </div>
+        </div>
+      ) : null}
+
+      {sentDropReceipt && !dropStudioOpen ? (
+        <div className="fixed inset-0 z-[1150] grid place-items-center bg-black/55 px-4 backdrop-blur-md" role="dialog" aria-modal="true" aria-labelledby="drop-sent-title">
+          <div className="relative w-full max-w-md overflow-hidden rounded-[30px] border border-cyan-100/25 bg-[linear-gradient(145deg,rgba(11,29,38,.96),rgba(5,10,18,.98))] p-6 text-center shadow-[0_0_80px_rgba(100,225,255,.18)]">
+            <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(144,239,255,.14),transparent_48%)]" />
+            <div className="relative">
+              <div className="text-[11px] font-semibold tracking-[0.38em] text-cyan-100/65">DROP LIFECYCLE</div>
+              <h2 id="drop-sent-title" className="mt-4 text-3xl font-black tracking-[0.16em] text-white">SENT <span className="text-cyan-200">✓</span></h2>
+              <p className="mt-3 text-sm text-white/68">{sentDropReceipt.asset.title}</p>
+              <div className="mx-auto mt-5 rounded-2xl border border-cyan-100/15 bg-cyan-100/[0.06] px-4 py-3 text-sm text-cyan-50/85">
+                Choose one folder or add the Drop to both.
+              </div>
+              <div className="mt-3 flex flex-wrap justify-center gap-2 text-xs font-semibold">
+                {sentDropReceipt.inAssets ? <span className="rounded-full border border-lime-200/20 bg-lime-200/10 px-3 py-1 text-lime-100">In Assets ✓</span> : null}
+                {sentDropReceipt.inPortfolio ? <span className="rounded-full border border-lime-200/20 bg-lime-200/10 px-3 py-1 text-lime-100">In Portfolio ✓</span> : null}
+              </div>
+              {sentDropReceipt.error ? <p className="mt-3 text-sm text-rose-200">{sentDropReceipt.error}</p> : null}
+              <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <button
+                  type="button"
+                  onClick={() => addSentDropToLibrary("assets")}
+                  disabled={Boolean(sentDropReceipt.savingTo) || sentDropReceipt.inAssets}
+                  className="rounded-full border border-cyan-200/30 bg-cyan-200/10 px-5 py-3 text-sm font-bold text-cyan-50 transition hover:bg-cyan-200/15 disabled:cursor-default disabled:opacity-55"
+                >
+                  {sentDropReceipt.savingTo === "assets" ? "Adding…" : sentDropReceipt.inAssets ? "In Assets" : "Add to Assets"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => addSentDropToLibrary("portfolio")}
+                  disabled={Boolean(sentDropReceipt.savingTo) || sentDropReceipt.inPortfolio}
+                  className="rounded-full border border-fuchsia-200/30 bg-fuchsia-200/10 px-5 py-3 text-sm font-bold text-fuchsia-50 transition hover:bg-fuchsia-200/15 disabled:cursor-default disabled:opacity-55"
+                >
+                  {sentDropReceipt.savingTo === "portfolio" ? "Adding…" : sentDropReceipt.inPortfolio ? "In Portfolio" : "Add to Portfolio"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSentDropReceipt(null)}
+                  disabled={!sentDropReceipt.inAssets && !sentDropReceipt.inPortfolio}
+                  className="rounded-full border border-white/15 bg-white/8 px-5 py-3 text-sm font-bold text-white/85 transition hover:bg-white/12 disabled:cursor-not-allowed disabled:opacity-40 sm:col-span-2"
+                >
+                  {sentDropReceipt.inAssets || sentDropReceipt.inPortfolio ? "Done" : "Choose a Folder"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {showProjectHologram ? (
         <div className="pointer-events-none fixed inset-0 z-[130]">

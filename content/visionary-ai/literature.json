@@ -1,0 +1,17 @@
+{
+  "id": "literature",
+  "title": "JAB Lit and John Andy's Authorship",
+  "category": "literature",
+  "visibility": "public",
+  "summary": "JAB Lit is the literary archive of JAB Visions, tracing John Andy's development from handmade comics and early online writing through John Andy Books and into the wider company.",
+  "facts": [
+    "John Andy is publicly described as an author, scholar, worldbuilder, and the founder of JAB Visions.",
+    "His early creative history includes childhood comics, original characters, Just John Andy work on Sitey and Tumblr, early novels, and fictional memoirs.",
+    "Solomon's Secrets: Sunrise is the first official published artifact listed by JAB Lit. It explores self-discovery, spirituality, identity, fate, free will, and the metaphysical in relation to the tangible.",
+    "Fatal Stars is listed as archive material from the John Andy Books era, not as a newly released title.",
+    "Other library material is explicitly labeled in development or coming soon and must not be described as published.",
+    "JAB Lit is intended to grow gradually as a home for books, comics, novels, essays, mythologies, excerpts, previews, and author notes."
+  ],
+  "keywords": ["jab lit", "john andy", "author", "authorship", "books", "published", "literature", "solomon's secrets", "sunrise", "fatal stars", "reading room", "novels", "essays"],
+  "sources": [{ "title": "JAB Lit", "path": "/jab-lit" }, { "title": "Solomon's Secrets: Sunrise", "path": "https://www.amazon.com/Solomons-Secrets-John-Andy-Books/dp/B0DMN7X84N" }, { "title": "JAB Founder", "path": "/john-andy" }]
+}

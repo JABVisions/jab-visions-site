@@ -35,7 +35,10 @@ const STATE_DESCRIPTIONS: Record<FriendZoneState, string> = {
 };
 
 export function getFriendZoneState(user: FriendZoneOrbUser): FriendZoneState {
-  return user.relationshipState || user.state || "fresh";
+  const value = user?.relationshipState || user?.state;
+  return value && Object.prototype.hasOwnProperty.call(STATE_LABELS, value)
+    ? value
+    : "fresh";
 }
 
 export function getRelationshipLabel(state: FriendZoneState) {

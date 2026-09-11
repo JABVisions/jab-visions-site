@@ -9,6 +9,7 @@ type Preview = {
   title: string | null;
   description: string | null;
   image: string | null;
+  images?: string[];
   embedUrl: string | null;
   type: "youtube" | "spotify" | "image" | "video" | "link";
 };
@@ -169,6 +170,64 @@ function pickImage(html: string) {
   );
 }
 
+function plainText(value: string | null) {
+  if (!value) return null;
+  const text = decodeEntities(value.replace(/<[^>]*>/g, " ")).replace(/\s+/g, " ").trim();
+  return text || null;
+}
+
+function jsonLdHeadline(html: string) {
+  const hit = html.match(/"headline"\s*:\s*"((?:\\.|[^"\\])*)"/i)?.[1];
+  if (!hit) return null;
+  try {
+    return plainText(JSON.parse(`"${hit}"`));
+  } catch {
+    return plainText(hit.replace(/\\"/g, '"'));
+  }
+}
+
+function articleHeadline(html: string) {
+  return (
+    plainText(meta(html, "og:title")) ??
+    plainText(meta(html, "twitter:title")) ??
+    plainText(meta(html, "parsely-title")) ??
+    plainText(meta(html, "sailthru.title")) ??
+    plainText(meta(html, "headline")) ??
+    jsonLdHeadline(html) ??
+    plainText(html.match(/<h1\b[^>]*>([\s\S]*?)<\/h1>/i)?.[1] ?? null) ??
+    plainText(html.match(/<title\b[^>]*>([\s\S]*?)<\/title>/i)?.[1] ?? null)
+  );
+}
+
+function pickArticleImages(base: string, html: string, lead: string | null) {
+  const candidates: string[] = [];
+  if (lead) candidates.push(lead);
+
+  for (const tag of html.match(/<meta\b[^>]*>/gi) ?? []) {
+    if (!/(?:og:image|twitter:image|itemprop=["']image)/i.test(tag)) continue;
+    const content = tag.match(/\bcontent\s*=\s*["']([^"']+)["']/i)?.[1];
+    if (content) candidates.push(decodeEntities(content));
+  }
+  for (const tag of html.match(/<img\b[^>]*>/gi) ?? []) {
+    const src = tag.match(/\b(?:src|data-src|data-lazy-src)\s*=\s*["']([^"']+)["']/i)?.[1];
+    if (src) candidates.push(decodeEntities(src));
+  }
+
+  const seen = new Set<string>();
+  const images: string[] = [];
+  for (const candidate of candidates) {
+    const absolute = absUrl(base, candidate);
+    if (!absolute || !/^https?:\/\//i.test(absolute)) continue;
+    if (/\b(?:logo|icon|avatar|sprite|pixel|tracker|badge)\b/i.test(absolute)) continue;
+    const key = absolute.replace(/[?#].*$/, "").toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    images.push(absolute);
+    if (images.length === 4) break;
+  }
+  return images;
+}
+
 // Scrape OG metadata, preferring whichever UA actually yields an image.
 async function scrapeOg(raw: string) {
   let best: { html: string; image: string | null } | null = null;
@@ -183,6 +242,34 @@ async function scrapeOg(raw: string) {
   }
 
   return best;
+}
+
+async function readerPreview(raw: string) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 9000);
+  try {
+    const response = await fetch(`https://r.jina.ai/${raw}`, {
+      headers: { accept: "text/plain" },
+      cache: "no-store",
+      signal: controller.signal,
+    });
+    if (!response.ok) return null;
+    const text = await response.text();
+    const title = plainText(
+      text.match(/^Title:\s*(.+)$/im)?.[1] ??
+      text.match(/^#\s+(.+)$/m)?.[1] ??
+      null
+    );
+    const images = Array.from(text.matchAll(/!\[[^\]]*\]\((https?:\/\/[^)\s]+)[^)]*\)/g))
+      .map((match) => match[1])
+      .filter((image) => !/\b(?:logo|icon|avatar|sprite|pixel|tracker|badge)\b/i.test(image))
+      .slice(0, 4);
+    return title || images.length ? { title, images } : null;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 // ---- Instagram --------------------------------------------------------------
@@ -344,12 +431,14 @@ export async function GET(req: Request) {
   try {
     const scraped = await scrapeOg(raw);
     if (!scraped) {
+      const reader = await readerPreview(raw);
       const out: Preview = {
         url: raw,
         provider: host(raw) || null,
-        title: null,
+        title: reader?.title ?? null,
         description: null,
-        image: resolveLinkPreviewImage(raw, null),
+        image: resolveLinkPreviewImage(raw, reader?.images[0] ?? null),
+        images: reader?.images ?? [],
         embedUrl: null,
         type: guessType(raw),
       };
@@ -357,9 +446,13 @@ export async function GET(req: Request) {
     }
 
     const { html } = scraped;
-    const title = meta(html, "og:title") ?? meta(html, "twitter:title");
+    const extractedTitle = articleHeadline(html);
+    const reader = extractedTitle ? null : await readerPreview(raw);
+    const title = extractedTitle ?? reader?.title ?? null;
     const description = meta(html, "og:description") ?? meta(html, "twitter:description");
     const image = scraped.image ?? pickImage(html);
+    const images = pickArticleImages(raw, html, image);
+    const allImages = Array.from(new Set([...images, ...(reader?.images ?? [])])).slice(0, 4);
     const embed =
       meta(html, "og:video:secure_url") ??
       meta(html, "og:video") ??
@@ -371,6 +464,7 @@ export async function GET(req: Request) {
       title,
       description,
       image: resolveLinkPreviewImage(raw, absUrl(raw, image)),
+      images: allImages.map((item) => resolveLinkPreviewImage(raw, item) ?? item),
       embedUrl: absUrl(raw, embed),
       type: guessType(raw),
     };

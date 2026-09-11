@@ -193,6 +193,87 @@ export function removeLocalActivity(
   }
 }
 
+/**
+ * Move public activity rows that previously fell back to this browser's local
+ * cache into the shared feed. This lets Safari or an installed Home Screen
+ * client recover its own unsynced Drops without requiring Profile Board first.
+ */
+export async function reconcileLocalActivityToRemote(
+  sb: SupabaseClient,
+  userId: string
+): Promise<number> {
+  const pending = getLocalActivity().filter(
+    (item) =>
+      item.id.startsWith("local_") &&
+      item.user_id === userId &&
+      item.meta?.visibility !== "private"
+  );
+  if (!pending.length) return 0;
+
+  const recoveredIds = new Set<string>();
+  const remoteRows: BoardActivity[] = [];
+
+  for (const item of pending) {
+    const dropId =
+      typeof item.meta?.dropId === "string" && item.meta.dropId
+        ? item.meta.dropId
+        : null;
+
+    if (dropId) {
+      const { data: existing, error: existingError } = await sb
+        .from("board_activity")
+        .select("*")
+        .eq("user_id", userId)
+        .contains("meta", { dropId })
+        .limit(1);
+      if (!existingError && existing?.[0]) {
+        const normalized = normalizeActivity(existing[0]);
+        if (normalized) remoteRows.push(normalized);
+        recoveredIds.add(item.id);
+        continue;
+      }
+    }
+
+    const { data, error } = await sb
+      .from("board_activity")
+      .insert({
+        scope: "global",
+        user_id: userId,
+        kind: item.kind,
+        title: item.title,
+        body: item.body,
+        href: item.href,
+        image_url: item.image_url,
+        meta: item.meta,
+      })
+      .select("*")
+      .single();
+    if (error) {
+      console.error("[BoardActivity] local feed recovery failed", {
+        localActivityId: item.id,
+        dropId,
+        error,
+      });
+      continue;
+    }
+
+    const normalized = normalizeActivity(data);
+    if (normalized) remoteRows.push(normalized);
+    recoveredIds.add(item.id);
+  }
+
+  if (!recoveredIds.size) return 0;
+  const remaining = getLocalActivity().filter((item) => !recoveredIds.has(item.id));
+  const merged = [...remoteRows, ...remaining].sort((a, b) =>
+    a.created_at < b.created_at ? 1 : -1
+  );
+  setLocalActivity(merged);
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new StorageEvent("storage", { key: STORAGE_KEY }));
+  }
+  return recoveredIds.size;
+}
+
 /** Whether a feed row represents the given board drop id. */
 export function activityMatchesDropId(item: BoardActivity, dropId: string): boolean {
   if (!dropId) return false;
@@ -483,7 +564,8 @@ export async function createActivity(
 
     appendLocalActivity(dbActivity);
     return { activity: dbActivity, source: "db" };
-  } catch {
+  } catch (error) {
+    console.error("[BoardActivity] database insert failed; using local fallback", error);
     appendLocalActivity(localActivity);
     return { activity: localActivity, source: "local" };
   }

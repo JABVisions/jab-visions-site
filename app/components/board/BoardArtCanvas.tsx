@@ -35,6 +35,7 @@ export default function BoardArtCanvas({
   onSave,
   backgroundImageUrl,
   backgroundVideoUrl,
+  initialOverlayUrl,
   exportMode = "composite",
   saveLabel = "Use art →",
   operatingTable = false,
@@ -44,6 +45,8 @@ export default function BoardArtCanvas({
   /** When set, strokes draw on top of this image (draw-on-photo for Vision). */
   backgroundImageUrl?: string;
   backgroundVideoUrl?: string;
+  /** Existing paint layer (or legacy flattened artwork) to continue editing. */
+  initialOverlayUrl?: string;
   exportMode?: "composite" | "overlay";
   saveLabel?: string;
   /** Uniform 4:5 monitor + Palette overlay (Drop Studio stage). */
@@ -149,6 +152,36 @@ export default function BoardArtCanvas({
     return () => ro.disconnect();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    if (!initialOverlayUrl) return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    syncCanvas();
+    const ctx = ctxRef.current;
+    if (!ctx) return;
+
+    let cancelled = false;
+    const image = new Image();
+    image.crossOrigin = "anonymous";
+    image.onload = () => {
+      if (cancelled || !image.naturalWidth || !image.naturalHeight) return;
+      ctx.save();
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+      ctx.restore();
+      undoRef.current = [];
+      redoRef.current = [];
+    };
+    image.src = initialOverlayUrl;
+    return () => {
+      cancelled = true;
+      image.onload = null;
+    };
+    // syncCanvas is intentionally local; the URL is the layer identity.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialOverlayUrl]);
 
   function pointFromXY(clientX: number, clientY: number) {
     const r = canvasRef.current!.getBoundingClientRect();

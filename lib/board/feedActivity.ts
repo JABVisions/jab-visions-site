@@ -32,6 +32,41 @@ function activitySortTime(item: BoardActivity) {
   return Number.isFinite(time) ? time : 0;
 }
 
+function mergeActivityRecords(
+  preferred: BoardActivity,
+  fallback: BoardActivity
+): BoardActivity {
+  const preferredMeta =
+    preferred.meta && typeof preferred.meta === "object" ? preferred.meta : {};
+  const fallbackMeta =
+    fallback.meta && typeof fallback.meta === "object" ? fallback.meta : {};
+  const preferredPreview =
+    preferredMeta.preview && typeof preferredMeta.preview === "object"
+      ? preferredMeta.preview
+      : {};
+  const fallbackPreview =
+    fallbackMeta.preview && typeof fallbackMeta.preview === "object"
+      ? fallbackMeta.preview
+      : {};
+
+  return {
+    ...fallback,
+    ...preferred,
+    title: preferred.title || fallback.title,
+    body: preferred.body || fallback.body,
+    href: preferred.href || fallback.href,
+    image_url: preferred.image_url || fallback.image_url,
+    meta: {
+      ...fallbackMeta,
+      ...preferredMeta,
+      preview: {
+        ...fallbackPreview,
+        ...preferredPreview,
+      },
+    },
+  };
+}
+
 export function feedDropToActivity(drop: FeedDrop): BoardActivity {
   const kind: BoardActivityKind =
     drop.type === "forum_thread" || drop.type === "forum_reply"
@@ -69,6 +104,7 @@ export function dedupeActivity(items: BoardActivity[]) {
     if (!item?.id) continue;
     const meta = item.meta && typeof item.meta === "object" ? item.meta : null;
     const isPushed = Boolean(meta?.isPushed);
+    const isRecipientActivity = meta?.activityAudience === "recipient";
     const ownerKey =
       typeof meta?.ownerUsername === "string" && meta.ownerUsername
         ? meta.ownerUsername
@@ -92,6 +128,24 @@ export function dedupeActivity(items: BoardActivity[]) {
       ? `body:${item.kind}:${ownerKey}:${item.body.trim().toLowerCase()}`
       : "";
     const hrefKey = item.href ? `href:${item.href}` : "";
+    const normalizedTitle = item.title?.trim().toLowerCase() ?? "";
+    const normalizedBodyPrefix = item.body
+      ?.trim()
+      .toLowerCase()
+      .replace(/\s+/g, " ")
+      .slice(0, 240) ?? "";
+    const isHtmlDocument =
+      meta?.fromDescript === true ||
+      /\.html?(?:$|[?#])/i.test(item.href ?? "") ||
+      /\.html?$/i.test(typeof meta?.fileName === "string" ? meta.fileName : "");
+    // Descript used to create a plain Thought mirror before its uploaded HTML
+    // record was recovered. Give both records the same content identity so a
+    // chapter appears once, while retaining the richer HTML-backed record.
+    const descriptContentKey =
+      normalizedTitle && normalizedBodyPrefix &&
+      (isHtmlDocument || (item.kind === "board_drop" && normalizedBodyPrefix.length >= 120))
+        ? `descript-content:${ownerKey}:${normalizedTitle}:${normalizedBodyPrefix}`
+        : "";
     const imageKey = item.image_url ? `image:${item.image_url}` : "";
     const titleBodyKey =
       titleKey && bodyKey ? `${titleKey}:${bodyKey}` : titleKey || bodyKey;
@@ -104,18 +158,23 @@ export function dedupeActivity(items: BoardActivity[]) {
     const pushKey = isPushed
       ? `push:${meta?.originalDropId || item.id}:${meta?.pushedByUserId || ""}`
       : "";
-    const itemAliases = isPushed
+    const itemAliases = isRecipientActivity
+      ? [`recipient:${item.id}`]
+      : isPushed
       ? [pushKey || item.id]
       : [
           dropId,
           hrefKey,
           imageKey,
+          descriptContentKey,
           isProjectDrop ? titleBodyKey : "",
           !dropId && !hrefKey && !imageKey ? titleBodyKey : "",
         ].filter(Boolean);
     const weakAliases = [generatedCaptionKey].filter(Boolean);
     const matchableAliases =
-      isPushed
+      isRecipientActivity
+        ? itemAliases
+        : isPushed
         ? itemAliases
         : hasStrongIdentity && !isRecoveredMirror
         ? itemAliases
@@ -123,7 +182,9 @@ export function dedupeActivity(items: BoardActivity[]) {
     const matchedAlias = matchableAliases.find((alias) => aliases.has(alias));
     const key = matchedAlias
       ? aliases.get(matchedAlias)!
-      : isPushed
+      : isRecipientActivity
+        ? itemAliases[0]
+        : isPushed
         ? pushKey || item.id
         : dropId || hrefKey || imageKey || item.id || titleBodyKey;
     const previous = map.get(key);
@@ -139,9 +200,16 @@ export function dedupeActivity(items: BoardActivity[]) {
     const previousScore =
       (previous.image_url ? 2 : 0) + (previous.href ? 1 : 0) + (previous.meta ? 1 : 0);
     const nextScore = (item.image_url ? 2 : 0) + (item.href ? 1 : 0) + (item.meta ? 1 : 0);
-    if (nextScore > previousScore || activitySortTime(item) > activitySortTime(previous)) {
-      map.set(key, item);
-    }
+    const preferNext =
+      nextScore > previousScore ||
+      (nextScore === previousScore &&
+        activitySortTime(item) > activitySortTime(previous));
+    map.set(
+      key,
+      preferNext
+        ? mergeActivityRecords(item, previous)
+        : mergeActivityRecords(previous, item)
+    );
     for (const alias of itemAliases) aliases.set(alias, key);
     for (const alias of weakAliases) {
       if (!aliases.has(alias)) aliases.set(alias, key);

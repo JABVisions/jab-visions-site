@@ -9,6 +9,7 @@ export default function BoardLoginPage() {
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
 
   const [agree, setAgree] = useState(false);
 
@@ -120,15 +121,30 @@ export default function BoardLoginPage() {
             </div>
 
             <div className="grid gap-2">
-              <label className="text-xs opacity-70">Password</label>
-              <input
-                className="w-full rounded-2xl border border-white/10 bg-black/40 px-4 py-3 text-sm outline-none focus:border-white/20"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                type="password"
-                placeholder="••••••••"
-                autoComplete="current-password"
-              />
+              <label htmlFor="board-login-password" className="text-xs opacity-70">
+                Password
+              </label>
+              <div className="relative">
+                <input
+                  id="board-login-password"
+                  className="w-full rounded-2xl border border-white/10 bg-black/40 px-4 py-3 pr-20 text-sm outline-none focus:border-white/20"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  type={showPassword ? "text" : "password"}
+                  placeholder="••••••••"
+                  autoComplete="current-password"
+                />
+                <button
+                  type="button"
+                  className="absolute inset-y-1 right-1 min-w-[4.25rem] rounded-xl px-3 text-xs font-semibold text-white/70 transition hover:bg-white/10 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-white/70"
+                  aria-controls="board-login-password"
+                  aria-pressed={showPassword}
+                  aria-label={showPassword ? "Hide password" : "Show password"}
+                  onClick={() => setShowPassword((visible) => !visible)}
+                >
+                  {showPassword ? "Hide" : "Show"}
+                </button>
+              </div>
               <div className="flex justify-end">
                 <Link
                   href="/board/reset-password"

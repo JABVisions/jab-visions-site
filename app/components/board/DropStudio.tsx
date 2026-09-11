@@ -271,6 +271,8 @@ function DropStudio({
               playsInline
               preload="metadata"
               style={mediaRotationStyle}
+              onPointerDown={(event) => event.stopPropagation()}
+              onError={() => onMediaError?.()}
             />
           ) : (
             <img

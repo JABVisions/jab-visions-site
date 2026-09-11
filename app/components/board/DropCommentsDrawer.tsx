@@ -22,6 +22,10 @@ type Props = {
   onClose: () => void;
   dropId: string;
   dropTitle?: string;
+  dropOwnerUserId?: string;
+  canonicalDropId?: string;
+  dropHref?: string;
+  dropImageUrl?: string;
 };
 
 function readViewerIdentity() {
@@ -100,7 +104,16 @@ function saveCommentToBucketBrain(comment: DropComment, dropTitle?: string) {
   });
 }
 
-export default function DropCommentsDrawer({ open, onClose, dropId, dropTitle }: Props) {
+export default function DropCommentsDrawer({
+  open,
+  onClose,
+  dropId,
+  dropTitle,
+  dropOwnerUserId,
+  canonicalDropId,
+  dropHref,
+  dropImageUrl,
+}: Props) {
   const [mounted, setMounted] = useState(false);
   const [comments, setComments] = useState<DropComment[]>([]);
   const [draft, setDraft] = useState("");
@@ -160,6 +173,11 @@ export default function DropCommentsDrawer({ open, onClose, dropId, dropTitle }:
       displayName: viewer.displayName,
       avatarUrl: viewer.avatarUrl,
       body,
+      dropOwnerUserId,
+      canonicalDropId,
+      dropTitle,
+      dropHref,
+      dropImageUrl,
     });
     saveCommentToBucketBrain(comment, dropTitle);
     setComments(readDropComments(dropId));

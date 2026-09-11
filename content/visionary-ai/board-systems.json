@@ -1,0 +1,19 @@
+{
+  "id": "board-systems",
+  "title": "Board Systems",
+  "category": "creator-infrastructure",
+  "visibility": "public",
+  "summary": "Board's named systems turn creative material and social activity into Drops, signals, spatial work areas, saved memory, and collaborative surfaces.",
+  "facts": [
+    "Drop Studio is Board's creation and editing environment. Current modes include visual media, Voice, Art, and Descript document work.",
+    "Dropbooks are an emerging notebook and cover-based way to organize creative material; their final public behavior is still evolving.",
+    "Drop Pad OS is Board's holographic spatial interface. Its spaces place activity and tools within one continuous operating environment.",
+    "Signals are interaction or activity events around Board content. Pass, Pin, and Push are current examples.",
+    "Whispers are short ambient Board observations or notices generated from activity context; they are not private messages by default.",
+    "Friend Zone organizes Board relationships as orbs, circles, constellations, and social orbits, with messaging connections in development.",
+    "Work Board is the work and project surface for auditions, casting calls, crew needs, files, tasks, roles, and collaborations.",
+    "Bucket Brain is Board's memory and intelligence concept. The current Bucket stores user-chosen Drops and signals; deeper intelligence behavior is still developing."
+  ],
+  "keywords": ["drop studio", "dropbooks", "dropbook", "drop pad os", "drop pad", "drops", "signals", "whispers", "friendzone", "friend zone", "work board", "work page", "bucket brain", "descript", "voice drop", "art mode"],
+  "sources": [{ "title": "Board", "path": "/board" }, { "title": "Work Board", "path": "/board/work" }, { "title": "Friend Zone", "path": "/board/friend-zone" }]
+}

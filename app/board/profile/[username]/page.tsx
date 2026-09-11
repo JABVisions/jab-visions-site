@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import ActivityCard from "@/app/components/board/ActivityCard";
 import DropsBucket from "@/app/components/board/DropsBucket";
@@ -27,6 +27,12 @@ import {
 } from "@/lib/board/whispers";
 import { supabaseBrowser } from "@/lib/supabase/browser";
 import DropStudioOverlay from "@/app/components/board/DropStudioOverlay";
+import DescriptDropScreen from "@/app/components/board/DescriptDropScreen";
+import VoiceDropSoundboard from "@/app/components/board/VoiceDropSoundboard";
+import NewsDropMagazine from "@/app/components/board/NewsDropMagazine";
+import { isLegacyDescriptText } from "@/lib/board/descriptDocs";
+import { isDropbookSlideFile } from "@/lib/board/dropbookSlides";
+import DropbookSlideScreen from "@/app/components/board/DropbookSlideScreen";
 
 const PROFILE_STORAGE_KEY = "jab_board_profile_v2";
 const OPTIONS_STORAGE_KEY = "board.options.v1";
@@ -49,6 +55,11 @@ function activityBelongsToProfile(
   username: string | null | undefined
 ) {
   const meta = item.meta && typeof item.meta === "object" ? item.meta : null;
+  if (meta?.activityType === "drop_comment_received") {
+    return Boolean(
+      profileId && String(meta.recipientUserId || "") === String(profileId)
+    );
+  }
   const cleanUsername = String(username || "").trim().replace(/^@+/, "").toLowerCase();
   const metaUsernames = [
     meta?.authorUsername,
@@ -158,7 +169,7 @@ function resolveBoardGlow(
   return fallbackGlow;
 }
 
-type DropType = "YouTube" | "Music" | "News" | "Link" | "Media" | "Pay" | "Doc";
+type DropType = "YouTube" | "Music" | "News" | "Link" | "Media" | "Pay" | "Doc" | "Thought";
 type MediaKind = "image" | "video" | "audio";
 type PayProviderMode = "payment_link" | "stripe_connect" | "authorize_net_accept_hosted";
 
@@ -178,6 +189,8 @@ type DropItem = {
   previewTitle?: string;
   previewDescription?: string;
   previewImage?: string;
+  previewImages?: string[];
+  mediaUrl?: string;
   bucket?: string;
   storagePath?: string;
   fileName?: string;
@@ -189,6 +202,8 @@ type DropItem = {
   linkUrl?: string;
   payProvider?: PayProviderMode;
   customizations?: DropCustomization;
+  fromDescript?: boolean;
+  fromDropbook?: boolean;
 };
 
 type RemoteBoardDrop = DropItem;
@@ -296,8 +311,15 @@ function boardDropIdsFromStyle(boardDrops: unknown): string[] {
     .filter(Boolean);
 }
 
-function filterCurrentDropTileActivity(items: BoardActivity[], extraDropIds: string[] = []) {
-  const currentDropIds = new Set([...readLocalDropIds(), ...extraDropIds]);
+function filterCurrentDropTileActivity(
+  items: BoardActivity[],
+  extraDropIds: string[] = [],
+  includeLocalDropIds = true
+) {
+  const currentDropIds = new Set([
+    ...(includeLocalDropIds ? readLocalDropIds() : []),
+    ...extraDropIds,
+  ]);
   const hasKnownDropIds = currentDropIds.size > 0;
 
   return items.filter((item) => {
@@ -791,59 +813,162 @@ export default function ProfileBoardViewPage({
     }
 
     const userId = remoteUserId;
+    const sb = supabaseBrowser();
     let cancelled = false;
+    let refreshTimer: number | null = null;
+    let requestSequence = 0;
 
     async function loadRemoteRecentDrops() {
+      const requestId = ++requestSequence;
       try {
-        const sb = supabaseBrowser();
-        const { data: profileData } = await sb
-          .from("profiles")
-          .select("board_style")
-          .eq("id", userId)
-          .maybeSingle();
-        const response = await fetch(
-          `/api/board/activity?limit=${ACTIVITY_CHANNEL_LIMIT}`,
-          { cache: "no-store" }
-        );
+        // The global Activity endpoint can push a quieter user's rows beyond
+        // its page limit. Fetch this profile's authored rows directly as well,
+        // then merge both sources before applying profile ownership filters.
+        const [profileResult, authoredResult, response] = await Promise.all([
+          sb
+            .from("profiles")
+            .select("board_style")
+            .eq("id", userId)
+            .maybeSingle(),
+          sb
+            .from("board_activity")
+            .select("*")
+            .eq("user_id", userId)
+            .order("created_at", { ascending: false })
+            .limit(ACTIVITY_CHANNEL_LIMIT),
+          fetch(`/api/board/activity?limit=${ACTIVITY_CHANNEL_LIMIT}`, {
+            cache: "no-store",
+          }),
+        ]);
         if (!response.ok) throw new Error("Could not load Board activity.");
         const payload = await response.json();
-        if (cancelled) return;
+        if (cancelled || requestId !== requestSequence) return;
 
         const remoteItems = Array.isArray(payload?.items)
           ? (payload.items.filter((item: unknown) => item && typeof item === "object") as BoardActivity[])
           : [];
+        const authoredItems = Array.isArray(authoredResult.data)
+          ? (authoredResult.data.filter(
+              (item: unknown) => item && typeof item === "object"
+            ) as BoardActivity[])
+          : [];
         const mergedItems = mergeActivityWithFeed(
-          [...remoteItems, ...getLocalActivity()],
+          [...authoredItems, ...remoteItems, ...getLocalActivity()],
           readFeed()
         );
         const items = mergedItems.filter((item) =>
           activityBelongsToProfile(item, userId, routeKey)
         );
         const boardStyle =
-          profileData?.board_style && typeof profileData.board_style === "object"
-            ? (profileData.board_style as RemoteBoardStyle)
+          profileResult.data?.board_style &&
+          typeof profileResult.data.board_style === "object"
+            ? (profileResult.data.board_style as RemoteBoardStyle)
             : null;
         const deletedIds = normalizeDeletedDropIds(boardStyle?.boardDropsDeleted);
         const remoteDropIds = boardDropIdsFromStyle(boardStyle?.boardDrops);
 
         const visibleItems =
           routeKey === "johnandy"
-            ? filterCurrentDropTileActivity(items, remoteDropIds)
+            ? filterCurrentDropTileActivity(items, remoteDropIds, false)
             : filterDeletedActivity(items, deletedIds);
 
         setRecentDrops(dedupeActivity(visibleItems));
         setRecentDropsLoading(false);
-      } catch {
-        if (cancelled) return;
-        setRecentDrops([]);
+      } catch (error) {
+        if (cancelled || requestId !== requestSequence) return;
+        console.error("[ProfileActivity] refresh failed", error);
+        // Preserve the last successful channel instead of flashing an empty
+        // state during a temporary network or Supabase interruption.
         setRecentDropsLoading(false);
       }
     }
 
+    function scheduleRemoteRefresh() {
+      if (cancelled) return;
+      if (refreshTimer !== null) window.clearTimeout(refreshTimer);
+      refreshTimer = window.setTimeout(() => {
+        refreshTimer = null;
+        void loadRemoteRecentDrops();
+      }, 120);
+    }
+
+    function onStorage(event: StorageEvent) {
+      if (
+        event.key === null ||
+        event.key === "jab_board_activity_v1" ||
+        event.key === "jab_board_feed_v1" ||
+        event.key === DROP_STORAGE_KEY ||
+        event.key === DROP_DELETED_STORAGE_KEY ||
+        event.key?.startsWith("jab_board_projects_v2")
+      ) {
+        scheduleRemoteRefresh();
+      }
+    }
+
+    function onVisibilityChange() {
+      if (document.visibilityState === "visible") scheduleRemoteRefresh();
+    }
+
     void loadRemoteRecentDrops();
+
+    const activityChannel = sb
+      .channel(`profile-activity-${userId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "board_activity",
+          filter: `user_id=eq.${userId}`,
+        },
+        scheduleRemoteRefresh
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "profiles",
+          filter: `id=eq.${userId}`,
+        },
+        scheduleRemoteRefresh
+      )
+      .subscribe();
+
+    const refreshEvents = [
+      EVENTS.feedUpdated,
+      "board:projects:updated",
+      "board:activity:new",
+      "board:activity:updated",
+      "board:drop:updated",
+      "board:drop:removed",
+      "board:drops:updated",
+    ];
+    for (const eventName of refreshEvents) {
+      window.addEventListener(eventName, scheduleRemoteRefresh as EventListener);
+    }
+    window.addEventListener("storage", onStorage);
+    window.addEventListener("focus", scheduleRemoteRefresh);
+    window.addEventListener("online", scheduleRemoteRefresh);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+
+    // Realtime may be disabled for a table in some Supabase environments.
+    // This modest poll keeps an open public profile fresh across devices too.
+    const intervalId = window.setInterval(scheduleRemoteRefresh, 15000);
 
     return () => {
       cancelled = true;
+      requestSequence += 1;
+      if (refreshTimer !== null) window.clearTimeout(refreshTimer);
+      window.clearInterval(intervalId);
+      for (const eventName of refreshEvents) {
+        window.removeEventListener(eventName, scheduleRemoteRefresh as EventListener);
+      }
+      window.removeEventListener("storage", onStorage);
+      window.removeEventListener("focus", scheduleRemoteRefresh);
+      window.removeEventListener("online", scheduleRemoteRefresh);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      void sb.removeChannel(activityChannel);
     };
   }, [remoteUserId, routeKey]);
 
@@ -929,6 +1054,10 @@ export default function ProfileBoardViewPage({
           previewDescription:
             typeof x.previewDescription === "string" ? x.previewDescription : undefined,
           previewImage: typeof x.previewImage === "string" ? x.previewImage : undefined,
+          previewImages: Array.isArray(x.previewImages)
+            ? x.previewImages.filter((item: unknown): item is string => typeof item === "string" && Boolean(item)).slice(0, 4)
+            : undefined,
+          mediaUrl: typeof x.mediaUrl === "string" ? x.mediaUrl : undefined,
           bucket: typeof x.bucket === "string" ? x.bucket : undefined,
           storagePath: typeof x.storagePath === "string" ? x.storagePath : undefined,
           fileName: typeof x.fileName === "string" ? x.fileName : undefined,
@@ -947,6 +1076,8 @@ export default function ProfileBoardViewPage({
               ? x.payProvider
               : undefined,
           customizations: normalizeDropCustomizations(x.customizations),
+          fromDescript: x.fromDescript === true ? true : undefined,
+          fromDropbook: x.fromDropbook === true ? true : undefined,
         }))
         .filter((item) => item.id);
     }
@@ -964,6 +1095,7 @@ export default function ProfileBoardViewPage({
             storagePath: drop.storagePath ?? existing?.storagePath,
             mediaKind: drop.mediaKind ?? existing?.mediaKind,
             previewImage: drop.previewImage ?? existing?.previewImage,
+            previewImages: drop.previewImages ?? existing?.previewImages,
             linkUrl: drop.linkUrl ?? existing?.linkUrl,
             payProvider: drop.payProvider ?? existing?.payProvider,
           });
@@ -1056,6 +1188,12 @@ export default function ProfileBoardViewPage({
               ? preview.description
               : undefined,
         previewImage: resolveLinkPreviewImage(href, previewImage) ?? undefined,
+        mediaUrl:
+          typeof meta?.mediaUrl === "string"
+            ? meta.mediaUrl
+            : typeof preview?.mediaUrl === "string"
+              ? preview.mediaUrl
+              : undefined,
         bucket: typeof meta?.bucket === "string" ? meta.bucket : undefined,
         storagePath: typeof meta?.storagePath === "string" ? meta.storagePath : undefined,
         fileName: typeof meta?.fileName === "string" ? meta.fileName : undefined,
@@ -1152,8 +1290,9 @@ export default function ProfileBoardViewPage({
           setBoardDrops(mergedDrops);
           setBoardDropsLoading(false);
         }
-      } catch {
-        if (!cancelled) setBoardDrops([]);
+      } catch (error) {
+        console.error("[ProfileBoardDrops] refresh failed", error);
+        // Keep the last successful Board collection during a transient failure.
       } finally {
         if (!cancelled) setBoardDropsLoading(false);
       }
@@ -1164,19 +1303,51 @@ export default function ProfileBoardViewPage({
     function onStorage(event: StorageEvent) {
       if (
         event.key === null ||
-        event.key === DROP_STORAGE_KEY ||
-        event.key === DROP_DELETED_STORAGE_KEY
+        event.key?.startsWith(DROP_STORAGE_KEY) ||
+        event.key?.startsWith(DROP_DELETED_STORAGE_KEY)
       ) {
         void syncBoardDrops();
       }
     }
 
+    function onDropsUpdated(event: Event) {
+      const detail = (
+        event as CustomEvent<{ userId?: string | null; drops?: unknown }>
+      ).detail;
+      if (
+        detail?.userId &&
+        remoteUserId &&
+        detail.userId !== remoteUserId
+      ) {
+        return;
+      }
+
+      const instantDrops = normalizeDrops(detail?.drops);
+      if (instantDrops.length) {
+        setBoardDrops(instantDrops);
+        setBoardDropsLoading(false);
+      }
+      void syncBoardDrops();
+    }
+
+    function onVisible() {
+      if (document.visibilityState === "visible") void syncBoardDrops();
+    }
+
     window.addEventListener("storage", onStorage);
+    window.addEventListener("board:drops:updated", onDropsUpdated as EventListener);
+    window.addEventListener("focus", syncBoardDrops);
+    document.addEventListener("visibilitychange", onVisible);
+    const intervalId = window.setInterval(() => void syncBoardDrops(), 15000);
     return () => {
       cancelled = true;
+      window.clearInterval(intervalId);
       window.removeEventListener("storage", onStorage);
+      window.removeEventListener("board:drops:updated", onDropsUpdated as EventListener);
+      window.removeEventListener("focus", syncBoardDrops);
+      document.removeEventListener("visibilitychange", onVisible);
     };
-  }, [routeKey]);
+  }, [remoteUserId, routeKey]);
 
   useEffect(() => {
     if (!boardDrops.length) return;
@@ -1195,8 +1366,12 @@ export default function ProfileBoardViewPage({
           .from(drop.bucket)
           .createSignedUrl(drop.storagePath, 60 * 45);
 
-        if (cancelled || error || !data?.signedUrl) continue;
-        next[key] = data.signedUrl;
+        if (cancelled) continue;
+        const publicUrl = supabase.storage
+          .from(drop.bucket)
+          .getPublicUrl(drop.storagePath).data.publicUrl;
+        const resolvedUrl = (!error && data?.signedUrl) || publicUrl;
+        if (resolvedUrl) next[key] = resolvedUrl;
       }
 
       if (!cancelled && Object.keys(next).length > 0) {
@@ -1209,6 +1384,20 @@ export default function ProfileBoardViewPage({
       cancelled = true;
     };
   }, [boardDrops, signedUrlByKey]);
+
+  // Storage signed URLs expire (45m). Media players call this to replace a dead
+  // link instead of staying stuck on a playback error.
+  const refreshDropSignedUrl = useCallback(async (bucket?: string, path?: string) => {
+    if (!bucket || !path) return;
+    const supabase = supabaseBrowser();
+    const { data, error } = await supabase.storage
+      .from(bucket)
+      .createSignedUrl(path, 60 * 45);
+    const publicUrl = supabase.storage.from(bucket).getPublicUrl(path).data.publicUrl;
+    const resolvedUrl = (!error && data?.signedUrl) || publicUrl;
+    if (!resolvedUrl) return;
+    setSignedUrlByKey((prev) => ({ ...prev, [`${bucket}:${path}`]: resolvedUrl }));
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -1285,6 +1474,60 @@ export default function ProfileBoardViewPage({
       }),
     [recentDrops]
   );
+  const currentBoardDropActivity = useMemo(
+    () =>
+      boardDrops
+        .filter((drop) => (drop as DropItem & { visibility?: string }).visibility !== "private")
+        .map((drop): BoardActivity => {
+          const storageKey =
+            drop.bucket && drop.storagePath ? `${drop.bucket}:${drop.storagePath}` : "";
+          const mediaUrl =
+            (storageKey ? signedUrlByKey[storageKey] : undefined) ||
+            drop.mediaUrl;
+          const href = drop.linkUrl || drop.url || drop.embedUrl || mediaUrl || null;
+
+          return {
+            id: `current-profile-drop:${routeKey}:${drop.id}`,
+            created_at: new Date(drop.createdAt || Date.now()).toISOString(),
+            user_id: remoteUserId,
+            kind: "board_drop",
+            title: drop.title || "Board Drop",
+            body: drop.description || `New ${displayDropType(drop.type)} Drop added to Board.`,
+            href,
+            image_url:
+              drop.mediaKind === "image" ? mediaUrl || drop.previewImage || null : drop.previewImage || null,
+            meta: {
+              source: "profiles.board_style.boardDrops",
+              dropId: drop.id,
+              dropType: drop.type,
+              mediaKind: drop.mediaKind ?? null,
+              bucket: drop.bucket ?? null,
+              storagePath: drop.storagePath ?? null,
+              fileName: drop.fileName ?? null,
+              previewImage: drop.previewImage ?? null,
+              previewImages: drop.previewImages ?? null,
+              previewTitle: drop.previewTitle ?? null,
+              previewDescription: drop.previewDescription ?? null,
+              embedUrl: drop.embedUrl ?? null,
+              priceCents: drop.priceCents ?? null,
+              payProvider: drop.payProvider ?? null,
+              fromDescript: drop.fromDescript ?? null,
+              customizations: drop.customizations ?? null,
+            },
+          };
+        }),
+    [boardDrops, remoteUserId, routeKey, signedUrlByKey]
+  );
+  const activityChannelItems = useMemo(
+    () =>
+      dedupeActivity([...currentBoardDropActivity, ...recentDrops]).slice(
+        0,
+        ACTIVITY_CHANNEL_LIMIT
+      ),
+    [currentBoardDropActivity, recentDrops]
+  );
+  const activityChannelLoading =
+    recentDropsLoading && boardDropsLoading && activityChannelItems.length === 0;
 
   async function openPayCheckout(drop: DropItem) {
     if (drop.linkUrl) {
@@ -1454,13 +1697,35 @@ export default function ProfileBoardViewPage({
                       );
                       const linkTitle = drop.previewTitle || drop.headline || drop.title;
                       const linkLabel = drop.type === "News" ? "News Drop" : "Link Drop";
+                      const isDescriptDrop =
+                        drop.fromDescript ||
+                        drop.mime === "text/html" ||
+                        /\.html?$/i.test(drop.fileName ?? "") ||
+                        /\.html?(?:$|[?#])/i.test(drop.url ?? "") ||
+                        isLegacyDescriptText({
+                          dropType: drop.type,
+                          body: drop.description,
+                          href: drop.url,
+                          mediaKind: drop.mediaKind,
+                        });
+                      const isDropbookSlide =
+                        drop.fromDropbook === true ||
+                        isDropbookSlideFile({
+                          name: drop.fileName,
+                          type: drop.mime,
+                          url: drop.url,
+                        });
 
                       return (
                         <div key={drop.id} className="board-drop-item">
                           <div className="board-drop-top">
-                            <div className="board-drop-title">{drop.title}</div>
+                            <div className="board-drop-title">
+                              {drop.type === "News" ? linkTitle : drop.title}
+                            </div>
                             <div className="board-drop-badges">
-                              <span className="board-drop-badge">{displayDropType(drop.type)}</span>
+                              <span className="board-drop-badge">
+                                {isDropbookSlide ? "Dropbook" : displayDropType(drop.type)}
+                              </span>
                               {drop.hostLabel ? (
                                 <span className="board-drop-badge ghost">{drop.hostLabel}</span>
                               ) : null}
@@ -1472,7 +1737,12 @@ export default function ProfileBoardViewPage({
                             </div>
                           </div>
 
-                          {isMedia && signedUrl ? (
+                          {isDropbookSlide ? (
+                            <DropbookSlideScreen
+                              title={drop.title}
+                              src={signedUrl || drop.url}
+                            />
+                          ) : isMedia && signedUrl ? (
                             <div
                               className={`board-drop-media-frame ${
                                 drop.mediaKind === "video"
@@ -1483,10 +1753,14 @@ export default function ProfileBoardViewPage({
                               }`}
                             >
                               {drop.mediaKind === "audio" ? (
-                                <div className="board-drop-audio">
-                                  <div className="board-drop-audio-label">Full song</div>
-                                  <audio className="board-drop-audio-player" src={signedUrl} controls preload="metadata" />
-                                </div>
+                                <VoiceDropSoundboard
+                                  src={signedUrl}
+                                  title={drop.title}
+                                  label={drop.type === "Thought" ? "VOICE DROP" : "AUDIO DROP"}
+                                  onReload={() =>
+                                    refreshDropSignedUrl(drop.bucket, drop.storagePath)
+                                  }
+                                />
                               ) : drop.mediaKind === "video" ? (
                                 <video className="board-drop-media" src={signedUrl} controls playsInline preload="metadata" />
                               ) : (
@@ -1496,6 +1770,12 @@ export default function ProfileBoardViewPage({
                                 <DropStudioOverlay customizations={drop.customizations} />
                               ) : null}
                             </div>
+                          ) : isDescriptDrop ? (
+                            <DescriptDropScreen
+                              title={drop.title}
+                              src={signedUrl || drop.url}
+                              preview={drop.description}
+                            />
                           ) : drop.embedUrl ? (
                             <div
                               className={`board-drop-embed ${isSpotifyEmbed ? "spotify" : ""} ${isAppleMusicEmbed ? "apple-music" : ""}`}
@@ -1513,6 +1793,17 @@ export default function ProfileBoardViewPage({
                                 className={isSpotifyEmbed ? "spotify-frame" : undefined}
                               />
                             </div>
+                          ) : isLinkDrop && drop.type === "News" ? (
+                            <NewsDropMagazine
+                              url={drop.url!}
+                              headline={drop.headline || drop.previewTitle || drop.title}
+                              source={drop.hostLabel}
+                              description={drop.previewDescription}
+                              images={Array.from(new Set([
+                                ...(drop.previewImages ?? []),
+                                linkCover,
+                              ].filter((item): item is string => Boolean(item))))}
+                            />
                           ) : isLinkDrop ? (
                             <a className="board-link-preview" href={drop.url} target="_blank" rel="noreferrer">
                               <div className="board-link-art">
@@ -1541,7 +1832,7 @@ export default function ProfileBoardViewPage({
                             </a>
                           ) : null}
 
-                          {drop.description ? (
+                          {drop.description && !isDescriptDrop && !isDropbookSlide ? (
                             <div className="board-drop-description">{drop.description}</div>
                           ) : null}
 
@@ -1660,22 +1951,22 @@ export default function ProfileBoardViewPage({
                   </div>
                 </div>
 
-                {recentDropsLoading ? (
+                {activityChannelLoading ? (
                   <div className="note-card">
                     <div className="note-title">Loading Activity Channel…</div>
                     <div className="note-text">
                       Pulling live board activity into this profile preview.
                     </div>
                   </div>
-                ) : recentDrops.length > 0 ? (
+                ) : activityChannelItems.length > 0 ? (
                   <div className="recent-drops-stack activity-feed-stack">
                     <BoardWhisper whisper={PROFILE_ACTIVITY_WHISPERS[0]} />
-                    {recentDrops.map((item, index) => {
+                    {activityChannelItems.map((item, index) => {
                       const whisper = PROFILE_ACTIVITY_WHISPERS[index + 1];
 
                       return (
                         <div key={item.id} className="activity-feed-entry">
-                          <ActivityCard item={item} compact />
+                          <ActivityCard item={item} compact hideAuthor />
                           {whisper ? <BoardWhisper whisper={whisper} /> : null}
                         </div>
                       );
@@ -1870,13 +2161,20 @@ export default function ProfileBoardViewPage({
 
         .profile-grid {
           display: grid;
-          grid-template-columns: repeat(2, minmax(0, 1fr));
+          grid-template-columns: minmax(0, 1fr);
           grid-template-areas:
-            "identity aura"
-            "vision cover"
-            "board activity"
-            "friend-zone bucket";
+            "identity"
+            "cover"
+            "vision"
+            "aura"
+            "board"
+            "activity"
+            "friend-zone"
+            "bucket";
           gap: 16px;
+          width: 100%;
+          max-width: 920px;
+          margin-inline: auto;
           min-width: 0;
         }
 
@@ -1956,7 +2254,7 @@ export default function ProfileBoardViewPage({
 
         .vision-grid {
           display: grid;
-          grid-template-columns: repeat(3, minmax(0, 1fr));
+          grid-template-columns: repeat(2, minmax(0, 1fr));
           gap: 10px;
         }
 
@@ -1976,8 +2274,16 @@ export default function ProfileBoardViewPage({
         .cover-img {
           width: 100%;
           height: 100%;
-          object-fit: cover;
           display: block;
+        }
+
+        .vision-img {
+          object-fit: cover;
+        }
+
+        .cover-img {
+          object-fit: cover;
+          object-position: center;
         }
 
         .vision-empty,
@@ -2761,12 +3067,7 @@ export default function ProfileBoardViewPage({
 
         @media (max-width: 1180px) {
           .profile-grid {
-            grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-            grid-template-areas:
-              "identity aura"
-              "vision cover"
-              "board activity"
-              "friend-zone bucket";
+            grid-template-columns: minmax(0, 1fr);
           }
         }
 

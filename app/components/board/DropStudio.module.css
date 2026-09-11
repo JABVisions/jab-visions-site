@@ -546,6 +546,14 @@
   background: #02070a;
 }
 
+/* `.preview` sets `touch-action: none` so dragging stickers/text doesn't scroll
+   the page. Video needs it back, otherwise the native controls can't be tapped
+   or scrubbed on touch devices. */
+.mediaLayer > video {
+  touch-action: auto;
+  pointer-events: auto;
+}
+
 /* Editing is a fit view: keep every edge of the captured photo/video visible.
    Published Drop cards retain their own cover-style presentation. */
 .previewInFrame .mediaLayer > img,
@@ -933,6 +941,38 @@
 }
 
 @media (max-width: 640px) {
+  .workbenchPaletteScroll {
+    gap: 10px;
+    padding: 10px 10px 14px;
+    scrollbar-gutter: stable;
+  }
+
+  .workbenchHead {
+    padding-right: 40px;
+    font-size: 0.68rem;
+  }
+
+  .workbenchTools {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 7px;
+    padding: 7px;
+  }
+
+  .workbenchTools button {
+    min-height: 42px;
+    padding: 0.62rem 0.35rem;
+    font-size: 0.62rem;
+  }
+
+  .workbenchArtTools,
+  .inlineArtPalette {
+    gap: 10px;
+  }
+
+  .inlineArtHeading {
+    font-size: 0.64rem;
+  }
+
   .sheetStudio {
     flex-direction: column;
   }

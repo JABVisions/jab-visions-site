@@ -22,10 +22,11 @@ const FEED_WHISPER_EVERY = 5;
 
 import {
   getLocalActivity,
+  reconcileLocalActivityToRemote,
   type BoardActivity,
   type BoardActivityKind,
 } from "@/lib/board/activity";
-import { mergeActivityWithFeed } from "@/lib/board/feedActivity";
+import { dedupeActivity, mergeActivityWithFeed } from "@/lib/board/feedActivity";
 import {
   BOARD_PROJECTS_UPDATED_EVENT,
   syncResolvedProjectsToStorage,
@@ -33,6 +34,7 @@ import {
 import { EVENTS, readFeed, seedForumsIfEmpty } from "@/lib/boardStore";
 
 import { installBucketBrainBridge } from "@/lib/board/bucketBrain";
+import { recoverOrphanedDescriptDrops } from "@/lib/board/descriptRecovery";
 
 function clsx(...parts: Array<string | false | null | undefined>) {
   return parts.filter(Boolean).join(" ");
@@ -269,6 +271,11 @@ export default function HomeBoardFeedPage() {
       syncFromLocal();
 
       try {
+        const { data: auth } = await sb.auth.getUser();
+        if (auth.user?.id) {
+          await reconcileLocalActivityToRemote(sb, auth.user.id);
+          await recoverOrphanedDescriptDrops(sb, auth.user.id);
+        }
         const data = await Promise.race([
           fetchSupabaseActivity({ limit: PAGE_SIZE, offset: 0, kinds }),
           new Promise<BoardActivity[]>((_, reject) =>
@@ -279,11 +286,12 @@ export default function HomeBoardFeedPage() {
         if (!alive) return;
 
         const cleaned = Array.isArray(data) ? data : [];
-        const localActivity = getLocalActivity();
-        const sharedFeed = readFeed();
-        const merged = mergeActivityWithFeed([...cleaned, ...localActivity], sharedFeed);
-        const nextItems = (merged.length ? merged : visibleFallbackItems).filter(
-          (item) => !isPrivateDropActivity(item)
+        // A successful API response is the shared, cross-device source of truth.
+        // Device-local caches are used only by syncFromLocal when this request fails.
+        const nextItems = dedupeActivity(
+          (cleaned.length ? cleaned : visibleFallbackItems).filter(
+            (item) => !isPrivateDropActivity(item)
+          )
         );
 
         setItems(nextItems);
@@ -324,7 +332,7 @@ export default function HomeBoardFeedPage() {
 
       setItems((prev) => {
         if (prev.some((p) => p.id === a.id)) return prev;
-        return [a, ...prev];
+        return dedupeActivity([a, ...prev]);
       });
     };
 
@@ -352,7 +360,7 @@ export default function HomeBoardFeedPage() {
 
           const cleaned = Array.isArray(next) ? next : [];
 
-          setItems((prev) => [...prev, ...cleaned]);
+          setItems((prev) => dedupeActivity([...prev, ...cleaned]));
           setHasMore(cleaned.length === PAGE_SIZE);
           setOffset((p) => p + cleaned.length);
         } finally {

@@ -1,0 +1,17 @@
+{
+  "id": "store",
+  "title": "JAB Visions Store",
+  "category": "commerce-and-artifacts",
+  "visibility": "public",
+  "summary": "The JAB Visions Store is the ecosystem's commerce engine, presenting products as numbered, signal-charged artifacts connected to the wider visual and story language of JAB Visions.",
+  "facts": [
+    "The Store supports the JAB Visions brand, original productions, audience growth, and future artifacts.",
+    "Its current public visual language uses neon signal color, auras, energy, crowns, seals, field equipment, and artifact numbering.",
+    "Current Board marketplace concepts include fashion, accessories, wearable technology, lighting, patches, jewelry, bags, and audio objects.",
+    "Public artifact names visible in the project include the AGENT ADAMS Smartwatch, Field Power Unit, Signal Halo, Wayfarer Pack, Signal Crown Headphones, Aaron Black Seal Pendant, and Divine Femme Top.",
+    "Product availability, price, materials, shipping, and return terms must come from the live Store; Visionary AI must not invent or promise them.",
+    "Store imagery and concepts should not be promoted to story canon unless an approved record explicitly says they are canon."
+  ],
+  "keywords": ["store", "shop", "products", "fashion", "artifacts", "visual mythology", "merch", "clothing", "headphones", "jewelry", "aura", "signal crown"],
+  "sources": [{ "title": "JAB Visions Store", "path": "https://store.jabvisions.com" }, { "title": "JAB Visions Ecosystem", "path": "/" }]
+}

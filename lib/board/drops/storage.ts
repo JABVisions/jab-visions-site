@@ -48,6 +48,7 @@ export type UniversalDrop = {
 };
 
 export const DROPS_KEY = "jab_board_drops_v2";
+export const DROPS_UPDATED_EVENT = "board:drops:updated";
 
 export function readDrops(): UniversalDrop[] {
   if (typeof window === "undefined") return [];
@@ -143,7 +144,7 @@ export function removeDrops(matcher: (drop: UniversalDrop) => boolean) {
   const next = current.filter((drop) => !matcher(drop));
   writeDrops(next);
   if (typeof window !== "undefined") {
-    window.dispatchEvent(new CustomEvent("board:drops:updated"));
+    window.dispatchEvent(new CustomEvent(DROPS_UPDATED_EVENT));
   }
   return next;
 }

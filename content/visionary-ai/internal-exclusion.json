@@ -1,0 +1,13 @@
+{
+  "id": "private-internal-exclusion",
+  "title": "Private and Internal Material",
+  "category": "internal-exclusion",
+  "visibility": "private",
+  "summary": "Restricted-category marker. No private facts are stored in the visitor-facing knowledge bundle.",
+  "facts": [
+    "This marker exists to verify that private records are excluded from public retrieval.",
+    "Private source material must never be copied into this public knowledge directory."
+  ],
+  "keywords": ["private", "internal", "restricted"],
+  "sources": []
+}

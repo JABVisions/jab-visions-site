@@ -155,18 +155,23 @@ function formatDraftTime(ts: number) {
 
 export default function DescriptStudio({
   onClose,
+  onReturn,
   onShared,
   startInEditor = false,
   initialDoc = null,
+  returnOnBack = false,
   shareLabel,
   defaultDestination = "doc",
 }: {
   onClose?: () => void;
+  onReturn?: () => void;
   onShared?: (doc: DescriptDoc) => void;
   /** Skip the launcher when reopening from a host that already picked a doc. */
   startInEditor?: boolean;
   /** Open this doc in the editor on mount (Dropbook page re-edit). */
   initialDoc?: DescriptDoc | null;
+  /** Close back to the host surface instead of opening the Descript launcher. */
+  returnOnBack?: boolean;
   /** Override the primary share CTA label (e.g. Dropbook shelf). */
   shareLabel?: string;
   /** Drop type chosen in Drop Console before opening Descript. */
@@ -939,7 +944,15 @@ export default function DescriptStudio({
     <div className={`descript ${theme}`}>
       <div className="dHead">
         <div className="dBrand">
-          <button type="button" className="dBack" onClick={() => setPhase("launcher")} aria-label="Back to Descript home">
+          <button
+            type="button"
+            className="dBack"
+            onClick={() => {
+              if (returnOnBack && (onReturn || onClose)) (onReturn ?? onClose)?.();
+              else setPhase("launcher");
+            }}
+            aria-label={returnOnBack ? "Back to Board" : "Back to Descript home"}
+          >
             ←
           </button>
           <span className="dDot" aria-hidden />

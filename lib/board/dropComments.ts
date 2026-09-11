@@ -210,6 +210,11 @@ export async function addDropCommentRemote(
   input: Omit<DropComment, "id" | "createdAt"> & {
     id?: string;
     createdAt?: string;
+    dropOwnerUserId?: string;
+    canonicalDropId?: string;
+    dropTitle?: string;
+    dropHref?: string;
+    dropImageUrl?: string;
   }
 ) {
   if (typeof window === "undefined") return addDropComment(input);

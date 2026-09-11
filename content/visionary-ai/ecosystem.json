@@ -1,0 +1,16 @@
+{
+  "id": "ecosystem",
+  "title": "The JAB Visions Ecosystem",
+  "category": "ecosystem",
+  "visibility": "public",
+  "summary": "The JAB ecosystem connects original intellectual property, commerce, and creator infrastructure, with literature, comics, and music extending the same creative universe.",
+  "facts": [
+    "THOSE RYDERZ is presented as the flagship IP engine.",
+    "The JAB Visions Store is the commerce engine supporting the brand, original productions, audience growth, and future artifacts.",
+    "Board is the infrastructure engine: a creator-production network for creative work, people, projects, and community activity.",
+    "JAB Lit, JAB Comics, and JAB Music are public branches that extend JAB's storytelling and creative identity into their respective forms.",
+    "The public ecosystem principle is: IP creates culture, commerce sustains it, and infrastructure connects it."
+  ],
+  "keywords": ["ecosystem", "branches", "connect", "ip engine", "commerce engine", "infrastructure engine", "store", "board", "jab lit", "jab comics", "jab music"],
+  "sources": [{ "title": "JAB Visions Ecosystem", "path": "/" }]
+}

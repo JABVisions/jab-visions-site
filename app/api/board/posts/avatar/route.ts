@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { cookies } from "next/headers";
 import { createServerClient } from "@supabase/ssr";
+import { checkUploadSize } from "@/lib/board/uploadLimits";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -35,9 +36,9 @@ export async function POST(req: NextRequest) {
   if (!file) return Response.json({ ok: false, message: "Missing file" }, { status: 400 });
   if (!file.type.startsWith("image/")) return Response.json({ ok: false, message: "Images only" }, { status: 400 });
 
-  const MAX_MB = 5;
-  if (file.size > MAX_MB * 1024 * 1024) {
-    return Response.json({ ok: false, message: `Avatar too large (max ${MAX_MB}MB)` }, { status: 400 });
+  const sizeError = checkUploadSize(file, "avatar");
+  if (sizeError) {
+    return Response.json({ ok: false, message: sizeError }, { status: 413 });
   }
 
   const bytes = new Uint8Array(await file.arrayBuffer());

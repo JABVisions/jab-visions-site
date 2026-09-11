@@ -1,0 +1,759 @@
+.session {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  min-height: 0;
+  height: max-content;
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
+  overflow-x: clip;
+  overflow-y: visible;
+  color: #e8fbff;
+}
+
+.session > * {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.brand {
+  font-size: 11px;
+  font-weight: 950;
+  letter-spacing: 0.18em;
+}
+
+.clock {
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  color: rgba(232, 251, 255, 0.62);
+}
+
+.headphones {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 196, 120, 0.35);
+  background: rgba(40, 24, 8, 0.45);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.headphones label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 800;
+}
+
+.lane {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  width: 100%;
+  padding: 12px;
+  border-radius: 16px;
+  border: 1px solid rgba(126, 226, 255, 0.22);
+  background: rgba(8, 16, 22, 0.55);
+}
+
+.laneHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 10px;
+  font-weight: 950;
+  letter-spacing: 0.16em;
+}
+
+.wave {
+  height: 36px;
+  border-radius: 10px;
+  background:
+    repeating-linear-gradient(
+      90deg,
+      rgba(126, 226, 255, 0.18) 0 2px,
+      transparent 2px 7px
+    );
+  opacity: 0.85;
+}
+
+.waveEmpty {
+  opacity: 0.28;
+  height: 100%;
+  min-height: 72px;
+}
+
+.eq {
+  position: relative;
+  height: 88px;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid rgba(126, 226, 255, 0.16);
+  background: rgba(2, 10, 16, 0.72);
+}
+
+.eqEmpty {
+  border-style: dashed;
+  opacity: 0.7;
+}
+
+.lanePlus {
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 6px;
+  width: 100%;
+  height: 100%;
+  min-height: 88px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  padding: 12px;
+}
+
+.lanePlus:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.lanePlus:not(:disabled):hover,
+.lanePlus:not(:disabled):focus-visible {
+  background: rgba(126, 226, 255, 0.08);
+  outline: none;
+}
+
+.lanePlusIcon {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 999px;
+  border: 1.5px solid rgba(126, 226, 255, 0.55);
+  background: rgba(126, 226, 255, 0.12);
+  font-size: 28px;
+  font-weight: 300;
+  line-height: 1;
+  color: #8effed;
+}
+
+.lanePlusText {
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgba(232, 251, 255, 0.72);
+}
+
+.laneLive {
+  border-color: rgba(126, 226, 255, 0.48);
+  box-shadow: inset 0 0 0 1px rgba(126, 226, 255, 0.12);
+}
+
+.laneStatus {
+  color: rgba(232, 251, 255, 0.55);
+}
+
+.laneLive .laneStatus {
+  color: #8effed;
+}
+
+.laneTools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.laneTools button,
+.ghost,
+.record,
+.addBtn {
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.06);
+  color: inherit;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 7px 10px;
+  cursor: pointer;
+}
+
+.laneTools button[aria-pressed="true"] {
+  border-color: rgba(126, 226, 255, 0.7);
+  background: rgba(126, 226, 255, 0.16);
+}
+
+.removeBtn {
+  border-color: rgba(255, 120, 150, 0.45) !important;
+  background: rgba(255, 70, 120, 0.14) !important;
+  margin-left: auto;
+}
+
+.removeBtn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.laneTools input[type="range"] {
+  width: 88px;
+}
+
+.drawer {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border-radius: 14px;
+  border: 1px dashed rgba(126, 226, 255, 0.35);
+}
+
+.drawer:empty {
+  display: none;
+  padding: 0;
+  border: 0;
+}
+
+.drawerClose {
+  margin-left: auto;
+}
+
+.drawerRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.drawerRow button {
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.06);
+  color: inherit;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 7px 10px;
+  cursor: pointer;
+}
+
+.drawerRow button[aria-pressed="true"] {
+  border-color: rgba(126, 226, 255, 0.7);
+  background: rgba(126, 226, 255, 0.16);
+}
+
+.boardList {
+  display: grid;
+  gap: 6px;
+  max-height: 140px;
+  overflow: auto;
+}
+
+.boardList button {
+  text-align: left;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.05);
+  color: inherit;
+  padding: 8px 10px;
+  cursor: pointer;
+}
+
+.transport {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  padding-top: 4px;
+}
+
+.record {
+  min-width: 132px;
+  padding: 12px 22px;
+  border-color: rgba(255, 90, 140, 0.55);
+  background: rgba(255, 70, 120, 0.2);
+  font-size: 12px;
+}
+
+.recordLive {
+  background: rgba(255, 70, 120, 0.45);
+}
+
+.countIn {
+  text-align: center;
+  font-size: 28px;
+  font-weight: 950;
+  letter-spacing: 0.08em;
+}
+
+.latency {
+  display: grid;
+  gap: 4px;
+  font-size: 11px;
+  color: rgba(232, 251, 255, 0.7);
+}
+
+.latency input {
+  width: 100%;
+}
+
+.error {
+  color: #ffb4c8;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.hint {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: rgba(232, 251, 255, 0.62);
+}
+
+.ghostOn {
+  border-color: rgba(126, 226, 255, 0.55);
+  background: rgba(126, 226, 255, 0.16);
+}
+
+.drawer {
+  margin-top: 8px;
+  padding: 12px;
+  border-radius: 16px;
+  border: 1px solid rgba(126, 226, 255, 0.28);
+  background: rgba(4, 12, 18, 0.92);
+}
+
+.drawerHead,
+.timelineHead,
+.adlibToggle {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 11px;
+  font-weight: 950;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: rgba(232, 251, 255, 0.86);
+}
+
+.drawerClose,
+.adlibToggle,
+.adlibActions button,
+.adlibTools button,
+.timelineTools button,
+.drawerActions button,
+.starterPad,
+.presetChip {
+  border-radius: 999px;
+  border: 1px solid rgba(126, 226, 255, 0.22);
+  background: rgba(126, 226, 255, 0.08);
+  color: rgba(232, 251, 255, 0.9);
+  font-size: 10px;
+  font-weight: 850;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 8px 10px;
+  cursor: pointer;
+}
+
+.presetGrid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.presetChipOn {
+  background: linear-gradient(120deg, #dff8ff, #7ee2ff);
+  color: #041018;
+  border-color: transparent;
+}
+
+.controlStack {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.controlRow {
+  display: grid;
+  grid-template-columns: 84px 1fr;
+  gap: 8px;
+  align-items: center;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(232, 251, 255, 0.7);
+}
+
+.controlRow input {
+  width: 100%;
+}
+
+.drawerActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.drawerNote {
+  margin: 10px 0 0;
+  font-size: 11px;
+  line-height: 1.45;
+  color: rgba(232, 251, 255, 0.55);
+}
+
+.adlibShell {
+  margin-top: 8px;
+  min-width: 0;
+  width: 100%;
+}
+
+.adlibTray {
+  margin-top: 8px;
+  padding: 10px;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 90, 140, 0.28);
+  background: rgba(12, 6, 14, 0.88);
+}
+
+.adlibActions,
+.starterPads,
+.adlibTools,
+.timelineTools {
+  display: flex;
+  flex-wrap: wrap;
+  min-width: 0;
+  max-width: 100%;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.timelineTools {
+  justify-content: flex-end;
+}
+
+.timelineTools label {
+  display: flex;
+  flex: 1 1 150px;
+  min-width: 0;
+  max-width: 220px;
+  align-items: center;
+  gap: 6px;
+}
+
+.timelineTools input[type="range"] {
+  flex: 1 1 auto;
+  min-width: 72px;
+  width: 100%;
+}
+
+.clipPositionBar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  padding: 7px 8px;
+  border-radius: 12px;
+  background: rgba(126, 226, 255, 0.07);
+}
+
+.clipPositionBar button {
+  border-radius: 999px;
+  border: 1px solid rgba(126, 226, 255, 0.24);
+  background: rgba(126, 226, 255, 0.08);
+  color: rgba(232, 251, 255, 0.9);
+  padding: 6px 9px;
+  font-size: 9px;
+  font-weight: 900;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.clipPositionName {
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 10px;
+  font-weight: 900;
+}
+
+.clipPositionTime {
+  margin-right: auto;
+  color: #8effed;
+  font-variant-numeric: tabular-nums;
+  font-size: 10px;
+  font-weight: 900;
+}
+
+.timelineHint {
+  margin: 7px 0 0;
+  font-size: 10px;
+  color: rgba(232, 251, 255, 0.55);
+}
+
+.starterPad {
+  min-width: 58px;
+}
+
+.adlibList {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.adlibCard {
+  padding: 10px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.adlibName,
+.renameInput {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: #e8fbff;
+  font-size: 13px;
+  font-weight: 850;
+  text-align: left;
+}
+
+.timelineShell {
+  margin-top: 10px;
+  min-width: 0;
+  min-height: 190px;
+  width: 100%;
+  max-width: 100%;
+  overflow-x: clip;
+  overflow-y: visible;
+  padding: 10px;
+  border-radius: 16px;
+  border: 1px solid rgba(126, 226, 255, 0.2);
+  background: rgba(3, 10, 16, 0.9);
+}
+
+.timelineScroll {
+  display: block;
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-inline: contain;
+  margin-top: 8px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(0, 0, 0, 0.35);
+}
+
+.timelineCanvas {
+  position: relative;
+  max-width: none;
+  min-height: 120px;
+  padding: 0 0 8px;
+}
+
+.timelineRuler {
+  display: grid;
+  grid-template-columns: 72px 1fr;
+  gap: 6px;
+  height: 28px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.09);
+}
+
+.timelineRulerLabel {
+  align-self: center;
+  padding-left: 8px;
+  font-size: 8px;
+  font-weight: 950;
+  letter-spacing: 0.12em;
+  color: rgba(232, 251, 255, 0.4);
+}
+
+.timelineRulerTrack {
+  position: relative;
+  height: 100%;
+}
+
+.timelineTick {
+  position: absolute;
+  inset-block: 0;
+  color: rgba(232, 251, 255, 0.46);
+  font-variant-numeric: tabular-nums;
+}
+
+.timelineTick i {
+  position: absolute;
+  top: 15px;
+  left: 0;
+  width: 1px;
+  height: 12px;
+  background: rgba(232, 251, 255, 0.28);
+}
+
+.timelineTick b {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  font-size: 8px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.playhead {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: #ff5a8c;
+  box-shadow: 0 0 12px rgba(255, 90, 140, 0.7);
+  z-index: 3;
+  pointer-events: none;
+}
+
+.playhead span {
+  position: absolute;
+  top: 1px;
+  left: 4px;
+  padding: 2px 4px;
+  border-radius: 5px;
+  background: #ff5a8c;
+  color: #17050b;
+  font-size: 8px;
+  font-weight: 950;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.timelineLane {
+  display: grid;
+  grid-template-columns: 72px 1fr;
+  gap: 6px;
+  align-items: center;
+  min-height: 44px;
+  margin-bottom: 8px;
+}
+
+.timelineLaneLabel {
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: rgba(232, 251, 255, 0.55);
+  padding-left: 8px;
+}
+
+.timelineLaneTrack {
+  position: relative;
+  height: 36px;
+}
+
+.timelineClip {
+  position: absolute;
+  top: 2px;
+  height: 32px;
+  min-width: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  border-radius: 8px;
+  border: 1px solid rgba(126, 226, 255, 0.35);
+  background: linear-gradient(120deg, rgba(126, 226, 255, 0.28), rgba(255, 90, 140, 0.22));
+  color: #041018;
+  font-size: 10px;
+  font-weight: 850;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+
+.timelineClipOn {
+  outline: 2px solid #fff;
+}
+
+.laneKind_vocal .timelineClip {
+  background: linear-gradient(120deg, rgba(126, 226, 255, 0.45), rgba(90, 170, 255, 0.3));
+}
+
+.laneKind_adlib .timelineClip,
+.laneKind_fx .timelineClip {
+  background: linear-gradient(120deg, rgba(255, 180, 90, 0.45), rgba(255, 90, 140, 0.28));
+}
+
+.laneKind_instrumental .timelineClip {
+  background: linear-gradient(120deg, rgba(140, 255, 190, 0.35), rgba(90, 200, 160, 0.25));
+}
+
+.trimHandle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 10px;
+  border: 0;
+  padding: 0;
+  background: rgba(4, 16, 24, 0.45);
+  cursor: ew-resize;
+}
+
+.trimIn { left: 0; border-radius: 8px 0 0 8px; }
+.trimOut { right: 0; border-radius: 0 8px 8px 0; }
+
+.timelineMeta {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+  font-size: 11px;
+  color: rgba(232, 251, 255, 0.6);
+}
+
+@media (max-width: 560px) {
+  .timelineHead {
+    align-items: flex-start;
+  }
+
+  .timelineHead > span {
+    width: 100%;
+  }
+
+  .timelineTools {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .timelineTools button {
+    flex: 1 1 auto;
+  }
+
+  .transport {
+    width: 100%;
+  }
+
+  .transport .ghost {
+    flex: 1 1 72px;
+  }
+
+  .record {
+    flex: 1 1 132px;
+  }
+}

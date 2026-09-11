@@ -16,6 +16,7 @@ import { openHostedPayDropCheckout } from "@/lib/board/payCheckout";
 import { readPayDrops, type PayDrop } from "@/lib/board/paydrops";
 import { EVT_UPDATED, readBrain, sendWave } from "@/lib/board/bucketBrain";
 import { resolveLinkPreviewImage } from "@/lib/board/linkPreviewImages";
+import { DROPS_UPDATED_EVENT } from "@/lib/board/drops/storage";
 import {
   normalizeDropCustomizations,
   type DropCustomization,
@@ -69,6 +70,11 @@ function activityBelongsToProfile(
   username: string | null | undefined
 ) {
   const meta = item.meta && typeof item.meta === "object" ? item.meta : null;
+  if (meta?.activityType === "drop_comment_received") {
+    return Boolean(
+      profileId && String(meta.recipientUserId || "") === String(profileId)
+    );
+  }
   const cleanUsername = String(username || "").trim().replace(/^@+/, "").toLowerCase();
   const metaUsernames = [
     meta?.authorUsername,
@@ -237,6 +243,8 @@ type DropItem = {
   previewTitle?: string;
   previewDescription?: string;
   previewImage?: string;
+  previewImages?: string[];
+  mediaUrl?: string;
   bucket?: string;
   storagePath?: string;
   fileName?: string;
@@ -1175,9 +1183,15 @@ export default function BoardProfileHubPage() {
     }
 
     void loadRemoteRecentDrops();
+    const intervalId = window.setInterval(() => {
+      void loadRemoteRecentDrops();
+    }, 15000);
+    window.addEventListener("focus", loadRemoteRecentDrops);
 
     return () => {
       cancelled = true;
+      window.clearInterval(intervalId);
+      window.removeEventListener("focus", loadRemoteRecentDrops);
     };
   }, [remoteUserId, routeKey]);
 
@@ -1265,6 +1279,10 @@ export default function BoardProfileHubPage() {
           previewDescription:
             typeof x.previewDescription === "string" ? x.previewDescription : undefined,
           previewImage: typeof x.previewImage === "string" ? x.previewImage : undefined,
+          previewImages: Array.isArray(x.previewImages)
+            ? x.previewImages.filter((item: unknown): item is string => typeof item === "string" && Boolean(item)).slice(0, 4)
+            : undefined,
+          mediaUrl: typeof x.mediaUrl === "string" ? x.mediaUrl : undefined,
           bucket: typeof x.bucket === "string" ? x.bucket : undefined,
           storagePath: typeof x.storagePath === "string" ? x.storagePath : undefined,
           fileName: typeof x.fileName === "string" ? x.fileName : undefined,
@@ -1300,6 +1318,7 @@ export default function BoardProfileHubPage() {
             storagePath: drop.storagePath ?? existing?.storagePath,
             mediaKind: drop.mediaKind ?? existing?.mediaKind,
             previewImage: drop.previewImage ?? existing?.previewImage,
+            previewImages: drop.previewImages ?? existing?.previewImages,
             linkUrl: drop.linkUrl ?? existing?.linkUrl,
             payProvider: drop.payProvider ?? existing?.payProvider,
           });
@@ -1392,6 +1411,12 @@ export default function BoardProfileHubPage() {
               ? preview.description
               : undefined,
         previewImage: resolveLinkPreviewImage(href, previewImage) ?? undefined,
+        mediaUrl:
+          typeof meta?.mediaUrl === "string"
+            ? meta.mediaUrl
+            : typeof preview?.mediaUrl === "string"
+              ? preview.mediaUrl
+              : undefined,
         bucket: typeof meta?.bucket === "string" ? meta.bucket : undefined,
         storagePath: typeof meta?.storagePath === "string" ? meta.storagePath : undefined,
         fileName: typeof meta?.fileName === "string" ? meta.fileName : undefined,
@@ -1460,10 +1485,15 @@ export default function BoardProfileHubPage() {
         const localDeletedIds = routeKey === "johnandy" ? readLocalDeletedDropIds() : [];
         const deletedIds = Array.from(new Set([...remoteDeletedIds, ...localDeletedIds]));
 
-        const raw = routeKey === "johnandy" ? window.localStorage.getItem(DROP_STORAGE_KEY) : null;
+        const scopedRaw = profileRow?.id
+          ? window.localStorage.getItem(`${DROP_STORAGE_KEY}:${profileRow.id}`)
+          : null;
+        const raw =
+          scopedRaw ||
+          (routeKey === "johnandy" ? window.localStorage.getItem(DROP_STORAGE_KEY) : null);
         const parsed = raw ? JSON.parse(raw) : [];
-        const localDrops = routeKey === "johnandy" ? normalizeDrops(parsed) : [];
-        const localPayDrops = routeKey === "johnandy" ? readPayDrops(null, true).map(payDropToDrop) : [];
+        const localDrops = normalizeDrops(parsed);
+        const localPayDrops = readPayDrops(profileRow?.id ?? null, true).map(payDropToDrop);
         const remoteDrops = normalizeDrops(boardStyle?.boardDrops);
 
         let activityDrops: DropItem[] = [];
@@ -1532,19 +1562,37 @@ export default function BoardProfileHubPage() {
 
     function onStorage(event: StorageEvent) {
       if (
-        routeKey === "johnandy" &&
-        (event.key === null ||
-          event.key === DROP_STORAGE_KEY ||
-          event.key === DROP_DELETED_STORAGE_KEY)
+        event.key === null ||
+        event.key === DROP_STORAGE_KEY ||
+        event.key?.startsWith(`${DROP_STORAGE_KEY}:`) ||
+        event.key === DROP_DELETED_STORAGE_KEY ||
+        event.key?.startsWith(`${DROP_DELETED_STORAGE_KEY}:`)
       ) {
         void syncBoardDrops();
       }
     }
 
+    function onDropsUpdated(event: Event) {
+      const detail = (event as CustomEvent<{ drops?: unknown }>).detail;
+      const incoming = normalizeDrops(detail?.drops);
+      if (!incoming.length) {
+        void syncBoardDrops();
+        return;
+      }
+
+      const deletedIds = readLocalDeletedDropIds();
+      setBoardDrops((current) =>
+        mergeDrops(incoming, current).filter((drop) => !deletedIds.includes(drop.id))
+      );
+      setBoardDropsLoading(false);
+    }
+
     window.addEventListener("storage", onStorage);
+    window.addEventListener(DROPS_UPDATED_EVENT, onDropsUpdated as EventListener);
     return () => {
       cancelled = true;
       window.removeEventListener("storage", onStorage);
+      window.removeEventListener(DROPS_UPDATED_EVENT, onDropsUpdated as EventListener);
     };
   }, [routeKey]);
 
@@ -1565,8 +1613,12 @@ export default function BoardProfileHubPage() {
           .from(drop.bucket)
           .createSignedUrl(drop.storagePath, 60 * 45);
 
-        if (cancelled || error || !data?.signedUrl) continue;
-        next[key] = data.signedUrl;
+        if (cancelled) continue;
+        const publicUrl = supabase.storage
+          .from(drop.bucket)
+          .getPublicUrl(drop.storagePath).data.publicUrl;
+        const resolvedUrl = (!error && data?.signedUrl) || publicUrl;
+        if (resolvedUrl) next[key] = resolvedUrl;
       }
 
       if (!cancelled && Object.keys(next).length > 0) {
@@ -1655,6 +1707,71 @@ export default function BoardProfileHubPage() {
         return kind === "board_drop" && !title.startsWith("Project Drop:");
       }),
     [recentDrops]
+  );
+  const currentBoardDropActivity = useMemo(
+    () =>
+      boardDrops
+        .filter(
+          (drop) =>
+            (drop as DropItem & { visibility?: string }).visibility !== "private"
+        )
+        .map((drop): BoardActivity => {
+          const storageKey =
+            drop.bucket && drop.storagePath
+              ? `${drop.bucket}:${drop.storagePath}`
+              : "";
+          const mediaUrl =
+            (storageKey ? signedUrlByKey[storageKey] : undefined) ||
+            drop.mediaUrl;
+          const href =
+            drop.linkUrl || drop.url || drop.embedUrl || mediaUrl || null;
+
+          return {
+            id: `current-profile-drop:${routeKey}:${drop.id}`,
+            created_at: new Date(
+              drop.createdAt || Date.now()
+            ).toISOString(),
+            user_id: remoteUserId,
+            kind: "board_drop",
+            title: drop.title || "Board Drop",
+            body:
+              drop.description ||
+              `New ${drop.type || "Board"} Drop added to Board.`,
+            href,
+            image_url:
+              drop.mediaKind === "image"
+                ? mediaUrl || drop.previewImage || null
+                : drop.previewImage || null,
+            meta: {
+              source: "profiles.board_style.boardDrops",
+              dropId: drop.id,
+              dropType: drop.type,
+              mediaKind: drop.mediaKind ?? null,
+              mediaUrl: mediaUrl ?? null,
+              bucket: drop.bucket ?? null,
+              storagePath: drop.storagePath ?? null,
+              fileName: drop.fileName ?? null,
+              mime: drop.mime ?? null,
+              previewImage: drop.previewImage ?? null,
+              previewImages: drop.previewImages ?? null,
+              previewTitle: drop.previewTitle ?? null,
+              previewDescription: drop.previewDescription ?? null,
+              embedUrl: drop.embedUrl ?? null,
+              priceCents: drop.priceCents ?? null,
+              payProvider: drop.payProvider ?? null,
+              customizations: drop.customizations ?? null,
+            },
+          };
+        }),
+    [boardDrops, remoteUserId, routeKey, signedUrlByKey]
+  );
+  const activityChannelItems = useMemo(
+    () =>
+      dedupeActivity([...currentBoardDropActivity, ...recentDrops]).slice(
+        0,
+        ACTIVITY_CHANNEL_LIMIT
+      ),
+    [currentBoardDropActivity, recentDrops]
   );
 
   async function openPayCheckout(drop: DropItem) {
@@ -1971,12 +2088,13 @@ export default function BoardProfileHubPage() {
                           <button
                             type="button"
                             className="vision-replace-btn"
+                            aria-label={`Replace vision wall slot ${idx + 1}`}
                             onClick={() => {
                               pendingVisionSlotRef.current = idx;
                               visionInputRef.current?.click();
                             }}
                           >
-                            Replace
+                            +
                           </button>
                         </>
                       ) : (
@@ -2184,27 +2302,27 @@ export default function BoardProfileHubPage() {
                   <Link href="/board/feed" className="tiny-cta">Open feed</Link>
                 </div>
 
-                {recentDropsLoading ? (
+                {recentDropsLoading && boardDropsLoading && activityChannelItems.length === 0 ? (
                   <div className="note-card">
                     <div className="note-title">Loading Activity Channel…</div>
                     <div className="note-text">
                       Pulling live board activity into this profile preview.
                     </div>
                   </div>
-                ) : recentDrops.length > 0 ? (
+                ) : activityChannelItems.length > 0 ? (
                   <div className="recent-drops-stack activity-feed-stack">
                     {[...visitWhispers, PROFILE_ACTIVITY_WHISPERS[0]].map((whisper) => (
                       <BoardWhisper key={whisper.id} whisper={whisper} />
                     ))}
 
-                    {recentDrops.map((item, index) => {
+                    {activityChannelItems.map((item, index) => {
                       // Whisper derived from this drop's real activity, not a canned list.
                       const whisper =
                         index % 2 === 0 ? deriveActivityWhisper(item, String(index)) : null;
 
                       return (
                         <div key={item.id} className="activity-feed-entry">
-                          <ActivityCard item={item} compact />
+                          <ActivityCard item={item} compact hideAuthor />
                           {whisper ? <BoardWhisper whisper={whisper} /> : null}
                         </div>
                       );
@@ -2439,13 +2557,20 @@ export default function BoardProfileHubPage() {
 
         .profile-grid {
           display: grid;
-          grid-template-columns: repeat(2, minmax(0, 1fr));
+          grid-template-columns: minmax(0, 1fr);
           grid-template-areas:
-            "identity aura"
-            "vision cover"
-            "board activity"
-            "bookmarks store";
+            "identity"
+            "cover"
+            "vision"
+            "aura"
+            "board"
+            "activity"
+            "bookmarks"
+            "store";
           gap: 16px;
+          width: 100%;
+          max-width: 920px;
+          margin-inline: auto;
           min-width: 0;
         }
 
@@ -2581,7 +2706,7 @@ export default function BoardProfileHubPage() {
 
         .vision-grid {
           display: grid;
-          grid-template-columns: repeat(3, minmax(0, 1fr));
+          grid-template-columns: repeat(2, minmax(0, 1fr));
           gap: 10px;
         }
 
@@ -2619,8 +2744,16 @@ export default function BoardProfileHubPage() {
         .cover-img {
           width: 100%;
           height: 100%;
-          object-fit: cover;
           display: block;
+        }
+
+        .vision-img {
+          object-fit: cover;
+        }
+
+        .cover-img {
+          object-fit: cover;
+          object-position: center;
         }
 
         .vision-empty,
@@ -2670,11 +2803,14 @@ export default function BoardProfileHubPage() {
           border-radius: 999px;
           background: rgba(255, 255, 255, 0.86);
           color: #ff28c9;
-          font-size: 9px;
+          width: 28px;
+          height: 28px;
+          display: grid;
+          place-items: center;
+          font-size: 20px;
+          line-height: 1;
           font-weight: 900;
-          letter-spacing: 0.12em;
-          text-transform: uppercase;
-          padding: 4px 7px;
+          padding: 0;
           cursor: pointer;
           font-family: inherit;
           box-shadow: 0 0 14px rgba(255, 40, 201, 0.18);
@@ -3779,12 +3915,7 @@ export default function BoardProfileHubPage() {
 
         @media (max-width: 1180px) {
           .profile-grid {
-            grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-            grid-template-areas:
-              "identity aura"
-              "vision cover"
-              "board activity"
-              "bookmarks store";
+            grid-template-columns: minmax(0, 1fr);
           }
         }
 

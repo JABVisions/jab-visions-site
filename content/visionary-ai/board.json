@@ -1,0 +1,16 @@
+{
+  "id": "board",
+  "title": "JAB Visions Board",
+  "category": "creator-infrastructure",
+  "visibility": "public",
+  "summary": "Board is JAB Visions' evolving creator-production network and creative operating system for sharing work, building profiles, organizing projects, and connecting creative activity.",
+  "facts": [
+    "Board began as a private production tool for JAB Visions cast and crew and is evolving into a broader creator-production network.",
+    "A Drop is Board's core unit of creative material. Current implementations support text, image, video, audio, document, link, and payment-request contexts.",
+    "Board's public areas include Feed, Forums, Work, Profile, Explore, Friend Zone, Drop Studio, and Drop Pad OS experiences.",
+    "Pass, Pin, and Push are interaction signals attached to Drops.",
+    "Board is currently a web beta. Features and language should be described as evolving rather than finished or guaranteed."
+  ],
+  "keywords": ["board", "creative operating system", "creator network", "production network", "drops", "feed", "forums", "profile", "explore", "beta", "pass", "pin", "push"],
+  "sources": [{ "title": "Board Preview", "path": "/board-preview" }, { "title": "Board", "path": "/board" }]
+}

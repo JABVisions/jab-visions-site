@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react"
 import { supabaseBrowser } from "@/lib/supabase/browser";
 import { removePayDrop, upsertPayDrop } from "@/lib/board/paydrops";
 import { appendLocalActivity, createActivity, type BoardActivity } from "@/lib/board/activity";
-import { pushDrop } from "@/lib/board/drops/storage";
+import { DROPS_UPDATED_EVENT, pushDrop } from "@/lib/board/drops/storage";
 import { emitBoardDropSignal } from "@/lib/board/dropSignals";
 import { fetchLinkPreview } from "@/lib/board/linkPreview";
 import { resolveLinkPreviewImage } from "@/lib/board/linkPreviewImages";
@@ -19,10 +19,28 @@ import {
   type DropCustomization,
 } from "@/lib/board/dropCustomizations";
 import { DROP_FLAVOR_ORDER, type DropFlavorKey } from "@/lib/board/dropFlavors";
+import {
+  descriptDocToFile,
+  isLegacyDescriptText,
+  type DescriptDoc,
+} from "@/lib/board/descriptDocs";
 import RemovableDropBadge from "./RemovableDropBadge";
 import DropCommentsDrawer from "./DropCommentsDrawer";
 import LazyDropStudioStage from "./LazyDropStudioStage";
 import DropStudioOverlay from "./DropStudioOverlay";
+import DescriptDropScreen from "./DescriptDropScreen";
+import VoiceDropSoundboard from "./VoiceDropSoundboard";
+import NewsDropMagazine from "./NewsDropMagazine";
+import DropbookSlideScreen from "./DropbookSlideScreen";
+import { isDropbookSlideFile } from "@/lib/board/dropbookSlides";
+import { checkUploadSize, resolveUploadContentType } from "@/lib/board/uploadLimits";
+import {
+  buildDropDownloadFilename,
+  classifyDropDownload,
+  downloadDropFromUrl,
+  downloadDropText,
+  resolveDropDownloadExtension,
+} from "@/lib/board/dropDownload";
 
 type DropType =
   | "YouTube"
@@ -67,6 +85,7 @@ export type DropItem = {
   previewTitle?: string;
   previewDescription?: string;
   previewImage?: string;
+  previewImages?: string[];
 
   bucket?: string;
   storagePath?: string;
@@ -91,6 +110,7 @@ export type DropItem = {
   visibility?: "public" | "private";
   thoughtFormat?: "text" | "voice" | "doodle";
   thoughtText?: string;
+  fromDescript?: boolean;
 };
 
 const STORAGE_KEY = "jab_board_drops_v2";
@@ -437,6 +457,9 @@ function normalizeDropItems(input: unknown, userId: string | null): DropItem[] {
       previewDescription:
         typeof x.previewDescription === "string" ? x.previewDescription : undefined,
       previewImage: typeof x.previewImage === "string" ? x.previewImage : undefined,
+      previewImages: Array.isArray(x.previewImages)
+        ? x.previewImages.filter((item: unknown): item is string => typeof item === "string" && Boolean(item)).slice(0, 4)
+        : undefined,
       bucket: typeof x.bucket === "string" ? x.bucket : undefined,
       storagePath: typeof x.storagePath === "string" ? x.storagePath : undefined,
       fileName: typeof x.fileName === "string" ? x.fileName : undefined,
@@ -462,6 +485,7 @@ function normalizeDropItems(input: unknown, userId: string | null): DropItem[] {
         x.mediaSource === "capture" || x.mediaSource === "upload"
           ? x.mediaSource
           : undefined,
+      fromDescript: x.fromDescript === true ? true : undefined,
       badgeLabel: typeof x.badgeLabel === "string" ? x.badgeLabel : undefined,
       recipientUserId:
         typeof x.recipientUserId === "string" && x.recipientUserId.trim()
@@ -579,6 +603,7 @@ export default function DropTile() {
   const [commentsDropId, setCommentsDropId] = useState<string | null>(null);
   const [commentCountByDrop, setCommentCountByDrop] = useState<Record<string, number>>({});
   const [payCheckoutBusyId, setPayCheckoutBusyId] = useState<string | null>(null);
+  const [downloadBusyId, setDownloadBusyId] = useState<string | null>(null);
   const [studioOpen, setStudioOpen] = useState(false);
   const [mediaSource, setMediaSource] = useState<"upload" | "capture" | null>(null);
   const [selectedMediaPreview, setSelectedMediaPreview] = useState("");
@@ -723,6 +748,7 @@ export default function DropTile() {
     }
 
     let cancelled = false;
+    let localDrops: DropItem[] = [];
 
     function applyLocalDrops() {
       const key = scopedStorageKey(STORAGE_KEY, userId);
@@ -736,6 +762,7 @@ export default function DropTile() {
       const safe = normalizeDropItems(parsed, userId);
       if (!safe.length) return false;
 
+      localDrops = safe;
       setDrops(safe);
       return true;
     }
@@ -754,11 +781,37 @@ export default function DropTile() {
             ? (profile.board_style as any)
             : null;
         const remoteDrops = normalizeDropItems(boardStyle?.boardDrops, userId);
-        if (!remoteDrops.length || cancelled) return;
+        if (cancelled) return;
 
-        setDrops(remoteDrops);
+        const mergedDrops = dedupeDropItems([...localDrops, ...remoteDrops]);
+        if (!mergedDrops.length) return;
+
+        setDrops(mergedDrops);
         const key = scopedStorageKey(STORAGE_KEY, userId);
-        if (key) localStorage.setItem(key, JSON.stringify(remoteDrops));
+        if (key) localStorage.setItem(key, JSON.stringify(mergedDrops));
+
+        const remoteIds = new Set(remoteDrops.map((drop) => drop.id));
+        const recoveredLocalDrops = localDrops.filter((drop) => !remoteIds.has(drop.id));
+        if (recoveredLocalDrops.length) {
+          const { data: recoveredProfile, error: recoveryError } = await supabase
+            .from("profiles")
+            .update({
+              board_style: {
+                ...(boardStyle ?? {}),
+                boardDrops: mergedDrops,
+                boardDropsDeleted: readDeletedDropIds(userId),
+              },
+            })
+            .eq("id", userId)
+            .select("id")
+            .maybeSingle();
+          if (recoveryError || !recoveredProfile?.id) {
+            console.error(
+              "[DropTile] local Drop recovery failed",
+              recoveryError ?? new Error("Recovery did not update a profile row.")
+            );
+          }
+        }
       } catch {
         // keep local drops
       }
@@ -776,39 +829,47 @@ export default function DropTile() {
     };
   }, [userId, username]);
 
-  async function syncDropsToSupabase(next: DropItem[]) {
+  async function syncDropsToSupabase(next: DropItem[]): Promise<boolean> {
     try {
       const sess = await requireSession();
-      if (!sess) return;
+      if (!sess) return false;
 
       const { supabase, userId } = sess;
-      const { data: profile } = await supabase
+      const { data: profile, error: profileError } = await supabase
         .from("profiles")
         .select("board_style")
         .eq("id", userId)
         .maybeSingle();
+      if (profileError) throw profileError;
 
       const currentStyle =
         profile?.board_style && typeof profile.board_style === "object"
           ? profile.board_style
           : {};
 
-      await supabase
+      const { data: updatedProfile, error: updateError } = await supabase
         .from("profiles")
-        .upsert({
-          id: userId,
+        .update({
           board_style: {
             ...currentStyle,
             boardDrops: next,
             boardDropsDeleted: readDeletedDropIds(userId),
           },
-        }, { onConflict: "id" });
-    } catch {
+        })
+        .eq("id", userId)
+        .select("id")
+        .maybeSingle();
+      if (updateError) throw updateError;
+      if (!updatedProfile?.id) throw new Error("Profile Drop save did not update a row.");
+      return true;
+    } catch (error) {
+      console.error("[DropTile] profile Drop sync failed", error);
       // Keep local drop tile state if profile sync fails.
+      return false;
     }
   }
 
-  async function syncBoardDropActivity(item: DropItem) {
+  async function syncBoardDropActivity(item: DropItem): Promise<"db" | "local"> {
     try {
       if (item.type === "Thought" && item.visibility === "private") {
         const localActivity: BoardActivity = {
@@ -850,11 +911,11 @@ export default function DropTile() {
           title: item.title || "Thought Drop",
           meta: { visibility: "private", source: "board_drop_tile" },
         });
-        return;
+        return "local";
       }
 
       const sess = await requireSession();
-      if (!sess) return;
+      if (!sess) return "local";
 
       const imageUrl =
         item.type === "Media" && item.mediaKind === "image" && item.bucket && item.storagePath
@@ -896,7 +957,13 @@ export default function DropTile() {
         meta: {
           source: "board_drop_tile",
           dropId: item.id,
-          dropType: item.type,
+          dropType: isDropbookSlideFile({
+            name: item.fileName,
+            type: item.mime,
+            url: item.url,
+          })
+            ? "dropbook"
+            : item.type,
           authorUsername: username ?? null,
           authorName: displayName ?? username ?? null,
           authorAvatar: avatarSrc || null,
@@ -907,6 +974,7 @@ export default function DropTile() {
           previewTitle: item.previewTitle ?? null,
           previewDescription: item.previewDescription ?? null,
           previewImage: item.previewImage ?? null,
+          previewImages: item.previewImages ?? null,
           description: item.description ?? null,
           visibility: item.type === "Thought" ? item.visibility ?? "public" : "public",
           thoughtText: item.type === "Thought" ? item.thoughtText ?? body : null,
@@ -925,6 +993,12 @@ export default function DropTile() {
           storagePath: item.storagePath ?? null,
           bucket: item.bucket ?? null,
           fileName: item.fileName ?? null,
+          fromDescript: item.fromDescript ?? null,
+          fromDropbook: isDropbookSlideFile({
+            name: item.fileName,
+            type: item.mime,
+            url: item.url,
+          }),
           customizations: item.customizations ?? null,
         },
       });
@@ -967,19 +1041,37 @@ export default function DropTile() {
       }
 
       emitNewActivity(result.activity);
-    } catch {
+      return result.source;
+    } catch (error) {
+      console.error("[DropTile] activity sync failed", error);
       // keep local drop state even if activity sync fails
+      return "local";
     }
   }
 
-  function persist(next: DropItem[]) {
+  function persist(next: DropItem[]): Promise<boolean> {
     const cleaned = dedupeDropItems(next);
     setDrops(cleaned);
     try {
       const key = scopedStorageKey(STORAGE_KEY, userId);
       if (key) localStorage.setItem(key, JSON.stringify(cleaned));
     } catch { }
-    void syncDropsToSupabase(cleaned);
+    window.dispatchEvent(
+      new CustomEvent(DROPS_UPDATED_EVENT, {
+        detail: { userId, drops: cleaned },
+      })
+    );
+    return syncDropsToSupabase(cleaned);
+  }
+
+  async function persistCreatedDrop(next: DropItem[], item: DropItem): Promise<boolean> {
+    const [profileSaved, activitySource] = await Promise.all([
+      persist(next),
+      syncBoardDropActivity(item),
+    ]);
+    if (profileSaved || activitySource === "db") return true;
+    flash(setMsg, "Could not save this Drop. Check your connection and try again.", 3200);
+    return false;
   }
 
   const hint = useMemo(() => {
@@ -1002,9 +1094,14 @@ export default function DropTile() {
     return { supabase, userId: data.session.user.id };
   }
 
-  async function getSignedUrl(bucket: string, path: string, expiresIn = 60 * 30) {
+  async function getSignedUrl(
+    bucket: string,
+    path: string,
+    expiresIn = 60 * 30,
+    { force = false }: { force?: boolean } = {}
+  ) {
     const key = `${bucket}:${path}`;
-    if (signedUrlRef.current[key]) return signedUrlRef.current[key];
+    if (!force && signedUrlRef.current[key]) return signedUrlRef.current[key];
 
     const supabase = supabaseBrowser();
     const { data, error } = await supabase.storage.from(bucket).createSignedUrl(path, expiresIn);
@@ -1014,6 +1111,12 @@ export default function DropTile() {
     signedUrlRef.current[key] = data.signedUrl;
     setSignedUrlByKey((p) => ({ ...p, [key]: data.signedUrl }));
     return data.signedUrl;
+  }
+
+  /** Re-mint an expired signed URL so a stalled media player can recover. */
+  async function refreshSignedUrl(bucket?: string, path?: string) {
+    if (!bucket || !path) return;
+    await getSignedUrl(bucket, path, 60 * 45, { force: true });
   }
 
   async function addLinkDrop() {
@@ -1050,15 +1153,18 @@ export default function DropTile() {
         headline: mode === "News" ? preview?.title ?? t : undefined,
         previewTitle: preview?.title ?? undefined,
         previewDescription: preview?.description ?? undefined,
-        previewImage: resolveLinkPreviewImage(normalized, preview?.image) ?? undefined,
+          previewImage: resolveLinkPreviewImage(normalized, preview?.image) ?? undefined,
+          previewImages: preview?.images
+            ?.map((image) => resolveLinkPreviewImage(normalized, image))
+            .filter((image): image is string => Boolean(image))
+            .slice(0, 4),
         description: dropDesc.trim() || undefined,
         createdAt: Date.now(),
       },
       ...drops,
     ];
 
-    persist(next);
-    void syncBoardDropActivity(next[0]);
+    if (!(await persistCreatedDrop(next, next[0]))) return;
     setTitle("");
     setDropDesc("");
     setUrl("");
@@ -1077,10 +1183,11 @@ export default function DropTile() {
     }
 
     const { supabase, userId } = sess;
-    const sizeMb = opts.file.size / (1024 * 1024);
 
-    if (sizeMb > 800) {
-      flash(setMsg, "Huge file. Browser uploads may fail. Resumable upload is next.", 3200);
+    const tooLarge = checkUploadSize(opts.file);
+    if (tooLarge) {
+      flash(setMsg, tooLarge, 3600);
+      return null;
     }
 
     const cleanName = sanitizeFileName(opts.file.name);
@@ -1088,7 +1195,7 @@ export default function DropTile() {
 
     const { error } = await supabase.storage.from(opts.bucket).upload(storagePath, opts.file, {
       upsert: true,
-      contentType: opts.file.type || "application/octet-stream",
+      contentType: resolveUploadContentType(opts.file),
       cacheControl: "3600",
     });
 
@@ -1101,19 +1208,50 @@ export default function DropTile() {
     return { bucket: opts.bucket, storagePath };
   }
 
+  async function durableCustomizationsForDrop(
+    input: DropCustomization | undefined,
+    dropId: string
+  ): Promise<DropCustomization | undefined> {
+    const overlay = input?.artOverlayUrl;
+    if (!overlay?.startsWith("data:image/")) return input;
+
+    const response = await fetch(overlay);
+    const blob = await response.blob();
+    const extension = blob.type.includes("webp") ? "webp" : "png";
+    const layerFile = new File([blob], `board-art-layer-${Date.now()}.${extension}`, {
+      type: blob.type || "image/png",
+    });
+    const uploaded = await uploadFileToStorage({
+      bucket: BUCKET_MEDIA,
+      file: layerFile,
+      dropId: `${dropId}-art-layer`,
+    });
+    if (!uploaded) throw new Error("Couldn't save the editable art layer.");
+    const publicUrl = supabaseBrowser().storage.from(uploaded.bucket)
+      .getPublicUrl(uploaded.storagePath).data.publicUrl;
+    if (!publicUrl) throw new Error("Couldn't resolve the editable art layer.");
+    return { ...input, artOverlayUrl: publicUrl };
+  }
+
   async function addMediaDrop() {
     if (!file) return flash(setMsg, "Choose a photo or video first.", 1600);
 
     const isImage = file.type.startsWith("image/");
     const isVideo = file.type.startsWith("video/");
-    if (!isImage && !isVideo) return flash(setMsg, "Unsupported file type. Use image/video.", 2000);
+    const isDropbookSlide = isDropbookSlideFile({ name: file.name, type: file.type });
+    if (!isImage && !isVideo && !isDropbookSlide) {
+      return flash(setMsg, "Unsupported file type. Use image/video.", 2000);
+    }
 
     const t = title.trim() || "Untitled";
     const id = safeId();
 
     const up = await uploadFileToStorage({ bucket: BUCKET_MEDIA, file, dropId: id });
     if (!up) return;
-    const customizations = compactDropCustomizations(dropCustomizations);
+    const customizations = await durableCustomizationsForDrop(
+      compactDropCustomizations(dropCustomizations),
+      id
+    );
 
     const next: DropItem[] = [
       {
@@ -1135,8 +1273,7 @@ export default function DropTile() {
       ...drops,
     ];
 
-    persist(next);
-    void syncBoardDropActivity(next[0]);
+    if (!(await persistCreatedDrop(next, next[0]))) return;
     setTitle("");
     setDropDesc("");
     setFile(null);
@@ -1177,8 +1314,7 @@ export default function DropTile() {
       ...drops,
     ];
 
-    persist(next);
-    void syncBoardDropActivity(next[0]);
+    if (!(await persistCreatedDrop(next, next[0]))) return;
     setTitle("");
     setDropDesc("");
     setFile(null);
@@ -1195,6 +1331,7 @@ export default function DropTile() {
     const up = await uploadFileToStorage({ bucket: BUCKET_DOCS, file, dropId: id });
     if (!up) return;
 
+    const fromDescript = mediaSource === "capture" && file.type === "text/html";
     const next: DropItem[] = [
       {
         id,
@@ -1207,15 +1344,17 @@ export default function DropTile() {
         fileSize: file.size,
         mime: file.type,
         description: docDesc.trim() || undefined,
+        fromDescript: fromDescript || undefined,
+        mediaSource: fromDescript ? "capture" : "upload",
       },
       ...drops,
     ];
 
-    persist(next);
-    void syncBoardDropActivity(next[0]);
+    if (!(await persistCreatedDrop(next, next[0]))) return;
     setTitle("");
     setFile(null);
     setDocDesc("");
+    setMediaSource(null);
     flash(setMsg, "Doc added ✓", 1400);
   }
 
@@ -1234,7 +1373,10 @@ export default function DropTile() {
     }
 
     const id = safeId();
-    const customizations = compactDropCustomizations(dropCustomizations);
+    const customizations = await durableCustomizationsForDrop(
+      compactDropCustomizations(dropCustomizations),
+      id
+    );
     let uploaded: { bucket: string; storagePath: string } | null = null;
 
     if (file) {
@@ -1269,8 +1411,7 @@ export default function DropTile() {
       ...drops,
     ];
 
-    persist(next);
-    void syncBoardDropActivity(next[0]);
+    if (!(await persistCreatedDrop(next, next[0]))) return;
     setTitle("");
     setDropDesc("");
     setThoughtText("");
@@ -1297,7 +1438,10 @@ export default function DropTile() {
 
     const t = title.trim() || "Untitled";
     const id = safeId();
-    const customizations = compactDropCustomizations(dropCustomizations);
+    const customizations = await durableCustomizationsForDrop(
+      compactDropCustomizations(dropCustomizations),
+      id
+    );
 
     const up = await uploadFileToStorage({ bucket: BUCKET_MEDIA, file, dropId: id });
     if (!up) return;
@@ -1343,8 +1487,7 @@ export default function DropTile() {
       ...drops,
     ];
 
-    persist(next);
-    void syncBoardDropActivity(next[0]);
+    if (!(await persistCreatedDrop(next, next[0]))) return;
     upsertPayDrop(
       {
         id,
@@ -1391,12 +1534,22 @@ export default function DropTile() {
   }
 
   function addDrop() {
-    if (mode === "Media") void addMediaDrop();
-    else if (mode === "Music" && file) void addMusicFileDrop();
-    else if (mode === "Doc") void addDocDrop();
-    else if (mode === "Pay") void addPayDrop();
-    else if (mode === "Thought") void addThoughtDrop();
-    else addLinkDrop();
+    const action =
+      mode === "Media"
+        ? addMediaDrop()
+        : mode === "Music" && file
+          ? addMusicFileDrop()
+          : mode === "Doc"
+            ? addDocDrop()
+            : mode === "Pay"
+              ? addPayDrop()
+              : mode === "Thought"
+                ? addThoughtDrop()
+                : addLinkDrop();
+    void action.catch((error) => {
+      console.error("[DropTile] Drop creation failed", error);
+      flash(setMsg, error instanceof Error ? error.message : "Could not save this Drop.", 3200);
+    });
   }
 
   async function removeDrop(id: string) {
@@ -1473,6 +1626,89 @@ export default function DropTile() {
     }
   }
 
+  async function downloadBoardDrop(drop: DropItem, signedUrl?: string) {
+    if (downloadBusyId === drop.id) return;
+    const creator = username || displayName || "board";
+    const kind = classifyDropDownload({
+      embedKind: drop.embedUrl ? embedKindFromUrl(drop.embedUrl) : undefined,
+      mediaKind: drop.mediaKind,
+      mime: drop.mime,
+      fileName: drop.fileName,
+      href: drop.url || drop.embedUrl,
+      dropType: drop.type,
+      hasTextBody: Boolean(drop.thoughtText || drop.description),
+      fromDescript: drop.fromDescript,
+      fromDropbook: isDropbookSlideFile({
+        name: drop.fileName,
+        type: drop.mime,
+        url: drop.url,
+      }),
+      external: Boolean(drop.url && /^https?:\/\//i.test(drop.url) && !drop.storagePath),
+    });
+
+    if (kind === "open-link") {
+      const dest = drop.url || drop.embedUrl || drop.linkUrl;
+      if (dest) window.open(dest, "_blank", "noopener,noreferrer");
+      return;
+    }
+
+    try {
+      setDownloadBusyId(drop.id);
+      if (kind === "text") {
+        const text =
+          [drop.title, "", drop.thoughtText || drop.description || ""]
+            .filter((part) => part != null)
+            .join("\n")
+            .trim() || drop.title;
+        downloadDropText(
+          text,
+          buildDropDownloadFilename({
+            creator,
+            title: drop.title,
+            extension: "txt",
+          })
+        );
+        return;
+      }
+
+      const source = signedUrl || drop.url;
+      if (!source) {
+        flash(setMsg, "Nothing to download on this drop.", 2000);
+        return;
+      }
+      const extension = resolveDropDownloadExtension({
+        kind:
+          kind === "image" ||
+          kind === "video" ||
+          kind === "audio" ||
+          kind === "doc" ||
+          kind === "html"
+            ? kind
+            : drop.mediaKind === "image" ||
+                drop.mediaKind === "video" ||
+                drop.mediaKind === "audio"
+              ? drop.mediaKind
+              : "doc",
+        mime: drop.mime,
+        fileName: drop.fileName,
+        url: source,
+      });
+      await downloadDropFromUrl(
+        source,
+        buildDropDownloadFilename({
+          creator,
+          title: drop.title,
+          extension,
+        })
+      );
+    } catch (error) {
+      console.error("[DropTile] download failed", error);
+      flash(setMsg, "Download failed. Try opening the file instead.", 2400);
+    } finally {
+      setDownloadBusyId(null);
+    }
+  }
+
   useEffect(() => {
     if (!viewerOpen) return;
 
@@ -1524,7 +1760,7 @@ export default function DropTile() {
       (d) =>
         (d.type === "Link" || d.type === "News") &&
         !!d.url &&
-        !d.previewImage &&
+        (!d.previewImage || (d.type === "News" && !d.previewImages?.length)) &&
         !previewHydrationRef.current.has(d.id)
     );
     if (!targets.length) return;
@@ -1542,6 +1778,12 @@ export default function DropTile() {
         const image = resolveLinkPreviewImage(d.url!, preview?.image ?? null);
         const patch: Partial<DropItem> = {};
         if (image) patch.previewImage = image;
+        if (preview?.images?.length) {
+          patch.previewImages = preview.images
+            .map((item) => resolveLinkPreviewImage(d.url!, item))
+            .filter((item): item is string => Boolean(item))
+            .slice(0, 4);
+        }
         if (preview?.title) {
           patch.previewTitle = preview.title;
           if (d.type === "News") patch.headline = preview.title;
@@ -2021,7 +2263,24 @@ export default function DropTile() {
           drops.map((d) => {
             const isMedia = d.type === "Media";
             const isAudioMusic = d.type === "Music" && d.mediaKind === "audio";
+            const isAudioDrop = d.mediaKind === "audio";
             const isDoc = d.type === "Doc";
+            const isDescriptDrop =
+              d.fromDescript ||
+              d.mime === "text/html" ||
+              /\.html?$/i.test(d.fileName ?? "") ||
+              /\.html?(?:$|[?#])/i.test(d.url ?? "") ||
+              isLegacyDescriptText({
+                dropType: d.type,
+                body: d.thoughtText || d.description,
+                href: d.url,
+                mediaKind: d.mediaKind,
+              });
+            const isDropbookSlide = isDropbookSlideFile({
+              name: d.fileName,
+              type: d.mime,
+              url: d.url,
+            });
             const isPay = d.type === "Pay";
             const isThought = d.type === "Thought";
             const isNews = d.type === "News";
@@ -2041,12 +2300,12 @@ export default function DropTile() {
 
             return (
               <div key={d.id} className="drop-item">
-                <div className="drop-titleTop">{d.title}</div>
+                <div className="drop-titleTop">{isNews ? linkTitle : d.title}</div>
 
                 <div className="drop-metaRow">
                   <div className="drop-badges">
                     <RemovableDropBadge
-                      label={displayDropType(d.type).toUpperCase()}
+                      label={isDropbookSlide ? "DROPBOOK" : displayDropType(d.type).toUpperCase()}
                       canRemove
                       onRemove={() => removeDrop(d.id)}
                     />
@@ -2065,7 +2324,7 @@ export default function DropTile() {
                   </div>
 
                   <div className="drop-actions">
-                    {d.url ? (
+                    {d.url && !isDropbookSlide ? (
                       <a className="drop-open" href={d.url} target="_blank" rel="noreferrer">
                         OPEN
                       </a>
@@ -2083,14 +2342,36 @@ export default function DropTile() {
                     ) : null}
 
                     {isDoc && signedUrl ? (
-                      <a className="drop-mini" href={signedUrl} target="_blank" rel="noreferrer">
-                        OPEN DOC →
-                      </a>
+                      <button
+                        className="drop-mini"
+                        type="button"
+                        onClick={() => void downloadBoardDrop(d, signedUrl)}
+                        disabled={downloadBusyId === d.id}
+                      >
+                        {downloadBusyId === d.id ? "Downloading…" : "Download Drop"}
+                      </button>
                     ) : null}
 
                     {isMedia || isAudioMusic || (isThought && signedUrl) ? (
                       <button className="drop-mini" onClick={() => openViewer(d.id)}>
                         {isAudioMusic || d.mediaKind === "audio" ? "PLAY FULL" : "EXPAND"}
+                      </button>
+                    ) : null}
+
+                    {(isMedia ||
+                      isAudioDrop ||
+                      isDescriptDrop ||
+                      isDropbookSlide ||
+                      (isThought && (d.thoughtText || signedUrl))) &&
+                    !isPay &&
+                    !isDoc ? (
+                      <button
+                        className="drop-mini"
+                        type="button"
+                        onClick={() => void downloadBoardDrop(d, signedUrl)}
+                        disabled={downloadBusyId === d.id}
+                      >
+                        {downloadBusyId === d.id ? "Downloading…" : "Download Drop"}
                       </button>
                     ) : null}
 
@@ -2100,34 +2381,51 @@ export default function DropTile() {
 
                     {!isMedia && !canEmbed && isLinky && d.url ? (
                       <a className="drop-mini" href={d.url} target="_blank" rel="noreferrer">
-                        Open →
+                        Open Link
+                      </a>
+                    ) : null}
+
+                    {(d.type === "YouTube" || kind === "youtube") && d.url ? (
+                      <a className="drop-mini" href={d.url} target="_blank" rel="noreferrer">
+                        Open Link
                       </a>
                     ) : null}
                   </div>
                 </div>
 
-                {d.description && !isPay && !isDoc ? (
+                {d.description && !isPay && !isDoc && !isDescriptDrop && !isDropbookSlide ? (
                   <div className="drop-description">{d.description}</div>
                 ) : null}
 
-                {isThought && d.thoughtText ? (
+                {isThought && d.thoughtText && !isDescriptDrop && !isDropbookSlide ? (
                   <div className="thought-body">{d.thoughtText}</div>
                 ) : null}
 
-                {isAudioMusic || ((isThought || isPay) && d.mediaKind === "audio") ? (
-                  <div className={`audio-drop-card ${isThought ? "thought-audio-card" : ""}`}>
-                    <div className="audio-drop-label">
-                      {isThought ? "VOICE MEMO" : isPay ? "PAY DROP AUDIO" : "FULL SONG"}
-                    </div>
-                    {signedUrl ? (
-                      <audio src={signedUrl} controls preload="metadata" />
-                    ) : (
-                      <div className="media-missing">
-                        <div className="media-missing-title">Audio preparing…</div>
-                        <div className="media-missing-sub">If this just uploaded, give it a moment.</div>
+                {isDropbookSlide ? (
+                  <DropbookSlideScreen title={d.title} src={signedUrl || d.url} />
+                ) : isAudioDrop ? (
+                  signedUrl ? (
+                    <VoiceDropSoundboard
+                      src={signedUrl}
+                      title={d.title}
+                      label={isThought ? "VOICE DROP" : "AUDIO DROP"}
+                      onReload={() => refreshSignedUrl(d.bucket, d.storagePath)}
+                    />
+                  ) : (
+                    <div className="audio-drop-card">
+                      <div className="audio-drop-label">
+                        {isPay ? "PAY DROP AUDIO" : "FULL SONG"}
                       </div>
-                    )}
-                  </div>
+                      {signedUrl ? (
+                      <audio src={signedUrl} controls preload="metadata" />
+                      ) : (
+                        <div className="media-missing">
+                          <div className="media-missing-title">Audio preparing…</div>
+                          <div className="media-missing-sub">If this just uploaded, give it a moment.</div>
+                        </div>
+                      )}
+                    </div>
+                  )
                 ) : isThought && d.mediaKind === "image" ? (
                   <div className="media-thumb natural-media thought-media-thumb" aria-label="Thought image preview">
                     {signedUrl ? (
@@ -2177,40 +2475,19 @@ export default function DropTile() {
                     />
                   </div>
                 ) : isNews && d.url ? (
-                  <a className="newsCover" href={d.url} target="_blank" rel="noreferrer">
-                    <div className="newsTopBar">
-                      <span className="newsPill">NEWS DROP</span>
-                      <span className="newsSource">
-                        {fav ? <img className="newsFav" src={fav} alt="" /> : null}
-                        <span className="newsHost">{d.hostLabel ?? "ARTICLE"}</span>
-                      </span>
-                    </div>
-
-                    <div className="newsArt">
-                      {d.previewImage || cover ? (
-                        <img
-                          className="newsImg"
-                          src={d.previewImage || cover || ""}
-                          alt=""
-                          loading="lazy"
-                          onError={(e) => {
-                            (e.currentTarget as HTMLImageElement).style.display = "none";
-                          }}
-                        />
-                      ) : null}
-
-                      <div className="newsOverlay" />
-                      <div className="newsHeadline">
-                        <div className="newsHeadlineLabel">COVER STORY</div>
-                        <div className="newsHeadlineText">{linkTitle}</div>
-                      </div>
-                    </div>
-
-                    <div className="newsFooter">
-                      <span className="newsUrl">{d.url}</span>
-                      <span className="newsOpen">OPEN →</span>
-                    </div>
-                  </a>
+                  <NewsDropMagazine
+                    url={d.url}
+                    headline={d.headline || d.previewTitle || d.title}
+                    source={d.hostLabel}
+                    description={d.previewDescription}
+                    images={Array.from(new Set([...(d.previewImages ?? []), linkCover].filter((item): item is string => Boolean(item))))}
+                  />
+                ) : isDescriptDrop ? (
+                  <DescriptDropScreen
+                    title={d.title}
+                    src={signedUrl || d.url}
+                    preview={d.thoughtText || d.description}
+                  />
                 ) : isDoc ? (
                   <div className="doc-card">
                     <div className="doc-row">
@@ -2299,10 +2576,14 @@ export default function DropTile() {
               {viewerDrop.bucket && viewerDrop.storagePath ? (
                 viewerSignedUrl || signedUrlByKey[viewerSignedKey] ? (
                   viewerDrop.mediaKind === "audio" ? (
-                    <div className="viewerAudio">
-                      <div className="viewerAudioTitle">{viewerDrop.fileName || viewerDrop.title}</div>
-                      <audio src={(viewerSignedUrl || signedUrlByKey[viewerSignedKey])!} controls autoPlay />
-                    </div>
+                    <VoiceDropSoundboard
+                      src={(viewerSignedUrl || signedUrlByKey[viewerSignedKey])!}
+                      title={viewerDrop.title}
+                      label={viewerDrop.type === "Thought" ? "VOICE DROP" : "AUDIO DROP"}
+                      onReload={() =>
+                        refreshSignedUrl(viewerDrop.bucket, viewerDrop.storagePath)
+                      }
+                    />
                   ) : viewerDrop.mediaKind === "video" ? (
                     <div className="viewer-studio-frame">
                       <video src={(viewerSignedUrl || signedUrlByKey[viewerSignedKey])!} controls autoPlay playsInline />
@@ -2357,12 +2638,25 @@ export default function DropTile() {
             ? ["audio", "art", "descript"]
             : ["photo", "video", "audio", "art", "descript"]
         }
-        descriptDestination={mode === "Thought" ? "thought" : mode === "Pay" ? "pay" : "doc"}
+        descriptDestination="doc"
         value={dropCustomizations}
         onChange={setDropCustomizations}
         onComplete={(studioFile, source) => {
+          if (isDropbookSlideFile({ name: studioFile.name, type: studioFile.type })) {
+            setMode("Media");
+            setTitle((current) => current.trim() || "Dropbook");
+            setDropDesc("");
+          }
           setFile(studioFile);
           setMediaSource(source);
+        }}
+        onDescriptComplete={(doc: DescriptDoc) => {
+          const plainText = doc.plainText.trim();
+          setMode("Doc");
+          setTitle((current) => current.trim() || doc.title);
+          setDocDesc(plainText);
+          setFile(descriptDocToFile(doc));
+          setMediaSource("capture");
         }}
         onClose={() => setStudioOpen(false)}
       />

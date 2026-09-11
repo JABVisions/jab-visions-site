@@ -327,10 +327,61 @@
 
 @media (max-width: 720px) {
   .root {
-    --palette-panel-w: min(272px, 44vw);
+    --palette-panel-w: 100%;
   }
 
   .workbench:has([data-art-operating-host]) {
-    --palette-panel-w: min(300px, 46vw);
+    --palette-panel-w: 100%;
+  }
+
+  /* A side dock leaves neither the canvas nor the controls enough room on a
+     phone. Keep both surfaces full-width and stack the Palette beneath the
+     chip so drawing proportions stay intact and every control remains usable. */
+  .workbench.paletteOpen .chipAssembly,
+  .workbench.paletteOpen .chipAssembly:has(.chipFrame[data-frame="landscape"]) {
+    width: 100%;
+    height: 100%;
+    max-height: 100%;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(150px, 44%) minmax(0, 56%);
+    align-items: stretch;
+    gap: 8px;
+  }
+
+  .workbench.paletteOpen .chipFrame {
+    grid-column: 1;
+    grid-row: 1;
+    align-self: stretch;
+    justify-self: center;
+    width: auto;
+    height: 100%;
+    max-width: 100%;
+    min-height: 0;
+  }
+
+  .workbench.paletteOpen .palettePanel {
+    grid-column: 1;
+    grid-row: 2;
+    width: 100%;
+    height: 100%;
+    min-height: 0;
+    border: 1px solid rgba(132, 244, 231, 0.34);
+    border-radius: 18px;
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.12),
+      0 -8px 28px rgba(53, 230, 211, 0.12);
+  }
+
+  .paletteClose {
+    top: 8px;
+    right: 10px;
+    width: 34px;
+    height: 34px;
+    font-size: 22px;
+  }
+
+  .workbench:has([data-art-operating-host]) .paletteBody {
+    padding: 4px 6px 8px;
   }
 }

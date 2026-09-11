@@ -1,0 +1,16 @@
+{
+  "id": "join",
+  "title": "Ways to Join JAB Visions",
+  "category": "participation",
+  "visibility": "public",
+  "summary": "People can enter the public JAB ecosystem through the Join Us registration, Board, the Store, JAB Lit, and the story and media branches, depending on whether they want to collaborate, create, shop, or read.",
+  "facts": [
+    "The Join Us page accepts registration interest for cast, crew, music, and visual-art collaboration on THOSE RYDERZ and future projects.",
+    "Board users can sign up for the evolving creator-production network and use its public creative and community surfaces.",
+    "Customers can visit the JAB Visions Store; readers can visit JAB Lit and the approved retailer page for the published book.",
+    "Submitting a form or creating an account does not guarantee an audition, casting, employment, partnership, payment, or response.",
+    "Visionary AI can direct visitors to approved pages but cannot submit forms, create accounts, schedule auditions, or negotiate on anyone's behalf."
+  ],
+  "keywords": ["join", "cast", "crew", "collaborator", "collaboration", "audition", "acting", "music", "visual art", "customer", "reader", "board user", "sign up", "work with", "apply"],
+  "sources": [{ "title": "Join JAB Visions", "path": "/join-us" }, { "title": "Board Sign Up", "path": "/board/signup" }, { "title": "JAB Visions Store", "path": "https://store.jabvisions.com" }, { "title": "JAB Lit", "path": "/jab-lit" }]
+}

@@ -6,6 +6,14 @@ import { getLocalActivity } from "@/lib/board/activity";
 import { mergeActivityWithFeed } from "@/lib/board/feedActivity";
 import { EVENTS, readFeed } from "@/lib/boardStore";
 import { supabaseBrowser } from "@/lib/supabase/browser";
+import VoiceDropSoundboard from "./VoiceDropSoundboard";
+import {
+  buildDropDownloadFilename,
+  classifyDropDownload,
+  downloadDropFromUrl,
+  downloadDropText,
+  resolveDropDownloadExtension,
+} from "@/lib/board/dropDownload";
 
 import {
   type BucketFolder,
@@ -288,11 +296,13 @@ export default function DropsBucket({
   // TEMP: for testability until auth/users are wired
   selfUser = "me",
   statsOverride,
+  isActive = true,
 }: {
   title?: string;
   subtitle?: string;
   selfUser?: string;
   statsOverride?: BucketStatsOverride;
+  isActive?: boolean;
 }) {
   const [brain, setBrain] = useState<BucketBrainState>(EMPTY_BRAIN);
   const [active, setActive] = useState<BucketFolder>("pin");
@@ -349,9 +359,10 @@ export default function DropsBucket({
 
   // Keep brain synced (local demo). We can remove once backend real-time exists.
   useEffect(() => {
+    if (!isActive) return;
     const t = window.setInterval(() => setBrain(readBrain()), 1200);
     return () => window.clearInterval(t);
-  }, []);
+  }, [isActive]);
 
   useEffect(() => {
     if (!open) return;
@@ -466,6 +477,7 @@ export default function DropsBucket({
   useEffect(() => {
     if (typeof window === "undefined") return;
     if (statsOverride) return;
+    if (!isActive) return;
 
     let cancelled = false;
 
@@ -545,7 +557,7 @@ export default function DropsBucket({
     return () => {
       cancelled = true;
     };
-  }, [brain, inbound.length, mutualsForMe.length, selfUser, statsOverride]);
+  }, [brain, inbound.length, isActive, mutualsForMe.length, selfUser, statsOverride]);
 
   return (
     <div className="bucket">
@@ -942,7 +954,7 @@ export default function DropsBucket({
       )}
 
       {/* styles */}
-      <style>{`
+      <style jsx>{`
         .bucket { width: 100%; }
 
         .shell {
@@ -1598,24 +1610,106 @@ function BucketDropCard({
     typeof preview?.storagePath === "string" && preview.storagePath ? preview.storagePath : "";
   const previewHref =
     safeStr(item?.href) ||
+    safeStr(item?.image_url) ||
+    safeStr((rawMeta as any)?.mediaUrl) ||
+    safeStr((rawMeta as any)?.announcement_media_url) ||
     safeStr((preview as any)?.embedUrl) ||
     safeStr((preview as any)?.linkUrl) ||
     safeStr((preview as any)?.url) ||
     safeStr((preview as any)?.href) ||
-    safeStr((preview as any)?.src);
+    safeStr((preview as any)?.src) ||
+    safeStr((preview as any)?.image) ||
+    safeStr((preview as any)?.previewImage);
   const [signedPreviewUrl, setSignedPreviewUrl] = useState("");
   const href = signedPreviewUrl || previewHref;
   const external = href ? isExternalHref(href) : false;
 
   const [embedFailed, setEmbedFailed] = useState(false);
+  const [downloadBusy, setDownloadBusy] = useState(false);
   const embed = useMemo(() => computeEmbed(href), [href]);
-  const showEmbed = !!embed.url && !embedFailed && embed.kind !== "none";
+  const mediaKind = safeStr((rawMeta as any)?.mediaKind) || safeStr((preview as any)?.mediaKind);
+  const dropType =
+    safeStr((rawMeta as any)?.dropType) ||
+    safeStr((rawMeta as any)?.drop_flavor) ||
+    safeStr((preview as any)?.dropType);
+  const storedMime = safeStr((rawMeta as any)?.mime) || safeStr((preview as any)?.mime);
+  const storedFileName =
+    safeStr((rawMeta as any)?.fileName) || safeStr((preview as any)?.fileName);
+  const isAudioDrop = mediaKind === "audio" || embed.kind === "audio";
+  const isVoiceDrop =
+    isAudioDrop && /^(?:thought|voice)(?: drop| memo)?$/i.test(dropType);
+  const showEmbed = !!embed.url && !embedFailed && embed.kind !== "none" && !isAudioDrop;
   const attachmentLabel =
     embed.kind === "spotify"
       ? "Play full track in Spotify"
       : embed.kind === "apple_music"
         ? "Open in Apple Music"
         : "Open attachment";
+  const bodyText = safeStr(item?.body);
+  const downloadKind = classifyDropDownload({
+    embedKind: embed.kind,
+    mediaKind,
+    mime: storedMime,
+    fileName: storedFileName,
+    href,
+    dropType,
+    hasTextBody: Boolean(bodyText),
+    external,
+  });
+  const downloadSourceUrl =
+    signedPreviewUrl ||
+    (embed.kind === "image" || embed.kind === "video" || embed.kind === "audio"
+      ? embed.url
+      : "") ||
+    (downloadKind !== "open-link" && downloadKind !== "none" && downloadKind !== "text"
+      ? href
+      : "");
+
+  async function handleDownloadDrop() {
+    if (downloadBusy) return;
+    if (downloadKind === "open-link") {
+      if (href) window.open(href, "_blank", "noopener,noreferrer");
+      return;
+    }
+    const creator = "board";
+    const title = item?.title || "Saved Drop";
+    try {
+      setDownloadBusy(true);
+      if (downloadKind === "text") {
+        downloadDropText(
+          [title, "", bodyText].filter(Boolean).join("\n").trim() || title,
+          buildDropDownloadFilename({ creator, title, extension: "txt" })
+        );
+        return;
+      }
+      if (!downloadSourceUrl) throw new Error("No downloadable file");
+      const kind =
+        downloadKind === "image" ||
+        downloadKind === "video" ||
+        downloadKind === "audio" ||
+        downloadKind === "doc" ||
+        downloadKind === "html"
+          ? downloadKind
+          : mediaKind === "image" || mediaKind === "video" || mediaKind === "audio"
+            ? mediaKind
+            : "doc";
+      const extension = resolveDropDownloadExtension({
+        kind,
+        mime: storedMime,
+        fileName: storedFileName,
+        url: downloadSourceUrl,
+      });
+      await downloadDropFromUrl(
+        downloadSourceUrl,
+        buildDropDownloadFilename({ creator, title, extension })
+      );
+    } catch {
+      if (href) window.open(href, "_blank", "noopener,noreferrer");
+    } finally {
+      setDownloadBusy(false);
+    }
+  }
+
   const waveCount = entry.waveCount ?? 0;
   const lastWavedLabel = entry.lastWavedAt ? formatLastWaved(entry.lastWavedAt) : "";
 
@@ -1631,9 +1725,13 @@ function BucketDropCard({
         const { data, error } = await supabase.storage
           .from(previewBucket)
           .createSignedUrl(previewStoragePath, 60 * 45);
+        const publicUrl = supabase.storage
+          .from(previewBucket)
+          .getPublicUrl(previewStoragePath).data.publicUrl;
+        const resolvedUrl = (!error && data?.signedUrl) || publicUrl;
 
-        if (!cancelled && !error && data?.signedUrl) {
-          setSignedPreviewUrl(data.signedUrl);
+        if (!cancelled && resolvedUrl) {
+          setSignedPreviewUrl(resolvedUrl);
         }
       } catch {
         // Keep the saved href/preview fallback if signing fails.
@@ -1680,6 +1778,15 @@ function BucketDropCard({
         <div className="memoryMissing">
           This older bucket memory only saved an id. New Pass, Pin, and Push signals now save the full drop into Bucket Brain memory.
         </div>
+      ) : null}
+
+      {isAudioDrop && href ? (
+        <VoiceDropSoundboard
+          src={href}
+          title={item?.title || "Audio Drop"}
+          label={isVoiceDrop ? "VOICE DROP" : "AUDIO DROP"}
+          compact
+        />
       ) : null}
 
       {showEmbed && (
@@ -1742,11 +1849,26 @@ function BucketDropCard({
               <span className="embedLink dim">No attachment</span>
             )}
 
-            {href && (
-              <button type="button" className="embedFallback" onClick={() => setEmbedFailed(true)}>
-                Embed blocked? Show link
-              </button>
-            )}
+            {href &&
+              (downloadKind === "open-link" ? (
+                <a
+                  className="embedFallback"
+                  href={href}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  Open Link
+                </a>
+              ) : downloadKind !== "none" || downloadSourceUrl ? (
+                <button
+                  type="button"
+                  className="embedFallback"
+                  onClick={() => void handleDownloadDrop()}
+                  disabled={downloadBusy}
+                >
+                  {downloadBusy ? "Downloading…" : "Download Drop"}
+                </button>
+              ) : null)}
           </div>
 
           {embed.kind === "spotify" ? (
@@ -1771,7 +1893,7 @@ function BucketDropCard({
         </button>
       ) : null}
 
-      <style>{`
+      <style jsx>{`
         .card {
           border-radius: 22px;
           border: 1px solid rgba(120, 255, 240, 0.18);
@@ -1885,7 +2007,11 @@ function BucketDropCard({
           color: rgba(220, 255, 250, 0.92);
           font-size: 10px; font-weight: 950; letter-spacing: 0.14em; text-transform: uppercase;
           cursor: pointer;
+          text-decoration: none;
+          display: inline-flex;
+          align-items: center;
         }
+        .embedFallback:disabled { opacity: 0.55; cursor: wait; }
 
         .linkCard { margin-top: 12px; display: block; padding: 12px; border-radius: 16px; border: 1px solid rgba(120, 255, 240, 0.14); background: rgba(0, 0, 0, 0.18); text-decoration: none; }
         .linkLabel { font-size: 10px; font-weight: 950; letter-spacing: 0.18em; text-transform: uppercase; color: rgba(120, 255, 240, 0.60); }

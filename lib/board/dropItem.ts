@@ -82,6 +82,7 @@ export type DropItem = {
   previewTitle?: string;
   previewDescription?: string;
   previewImage?: string;
+  previewImages?: string[];
 
   bucket?: string;
   storagePath?: string;
@@ -475,6 +476,9 @@ export function normalizeDropItems(input: unknown, userId: string | null): DropI
       previewDescription:
         typeof x.previewDescription === "string" ? x.previewDescription : undefined,
       previewImage: typeof x.previewImage === "string" ? x.previewImage : undefined,
+      previewImages: Array.isArray(x.previewImages)
+        ? x.previewImages.filter((item: unknown): item is string => typeof item === "string" && Boolean(item)).slice(0, 4)
+        : undefined,
       bucket: typeof x.bucket === "string" ? x.bucket : undefined,
       storagePath: typeof x.storagePath === "string" ? x.storagePath : undefined,
       fileName: typeof x.fileName === "string" ? x.fileName : undefined,

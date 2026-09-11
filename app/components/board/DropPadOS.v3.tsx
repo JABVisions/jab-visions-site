@@ -80,6 +80,7 @@ export default function DropPadOSv3(props: {
       subtitle={props.subtitle}
       maxScreenPx={props.maxScreenPx}
       storeDrops={props.storeDrops}
+      swapAssetPortfolioDestinations
     />
   );
 }

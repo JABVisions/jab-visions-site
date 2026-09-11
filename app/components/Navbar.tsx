@@ -52,7 +52,7 @@ export default function Navbar() {
     >
       <div className="mx-auto max-w-7xl px-4 sm:px-6 py-3 sm:py-4">
         {/* DESKTOP */}
-        <div className="hidden md:flex items-center gap-6">
+        <div className="hidden xl:flex items-center gap-6">
           {/* LEFT: Brand + Board */}
           <div className="flex items-center gap-3 shrink-0">
             <Link
@@ -110,7 +110,29 @@ export default function Navbar() {
           </nav>
 
           {/* RIGHT */}
-          <div className="shrink-0">
+          <div className="flex shrink-0 flex-col items-center gap-2">
+            <Link
+              href="/visionary-ai"
+              aria-label="Open Visionary AI"
+              className={clsx(
+                `
+                  inline-flex h-14 w-14 items-center justify-center
+                  rounded-full border border-[#b9f3ff]
+                  bg-[#8fe9ff]
+                  px-2 text-center text-[8px] font-black uppercase leading-tight tracking-[0.12em]
+                  text-[#06212b]
+                  shadow-[0_0_24px_rgba(143,233,255,0.68)]
+                  transition
+                  hover:-translate-y-0.5 hover:bg-[#c8f7ff]
+                  hover:shadow-[0_0_32px_rgba(143,233,255,0.9)]
+                `,
+                isActive("/visionary-ai") &&
+                  "ring-2 ring-white ring-offset-2 ring-offset-black"
+              )}
+            >
+              Visionary AI
+            </Link>
+
             <a
               href={STORE_URL}
               target="_blank"
@@ -134,7 +156,7 @@ export default function Navbar() {
         </div>
 
         {/* MOBILE */}
-        <div className="md:hidden flex items-center justify-between">
+        <div className="xl:hidden flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Link
               href="/"
@@ -190,7 +212,7 @@ export default function Navbar() {
 
       {/* MOBILE DROPDOWN */}
       {open && (
-        <div className="md:hidden border-t border-white/10 bg-black/85 backdrop-blur-xl">
+        <div className="xl:hidden border-t border-white/10 bg-black/85 backdrop-blur-xl">
           <nav className="mx-auto flex max-w-7xl flex-col gap-1 px-4 py-3">
             {LINKS.map((link) => (
               <Link
@@ -206,6 +228,28 @@ export default function Navbar() {
                 {link.label}
               </Link>
             ))}
+
+            <Link
+              href="/visionary-ai"
+              aria-label="Open Visionary AI"
+              className={clsx(
+                `
+                  mx-auto mt-3 inline-flex h-16 w-16 items-center justify-center
+                  rounded-full border border-[#b9f3ff]
+                  bg-[#8fe9ff]
+                  px-2 text-center text-[9px] font-black uppercase leading-tight tracking-[0.12em]
+                  text-[#06212b]
+                  shadow-[0_0_26px_rgba(143,233,255,0.7)]
+                  transition
+                  hover:bg-[#c8f7ff]
+                  hover:shadow-[0_0_34px_rgba(143,233,255,0.92)]
+                `,
+                isActive("/visionary-ai") &&
+                  "ring-2 ring-white ring-offset-2 ring-offset-black"
+              )}
+            >
+              Visionary AI
+            </Link>
 
             <a
               href={STORE_URL}

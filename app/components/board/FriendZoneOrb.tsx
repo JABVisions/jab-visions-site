@@ -13,8 +13,11 @@ type Props = {
   user: FriendZoneOrbUser;
 };
 
-function cleanUsername(username: string) {
-  return username.replace(/^@+/, "").trim().toLowerCase();
+function cleanUsername(username: unknown) {
+  return String(username || "board")
+    .replace(/^@+/, "")
+    .trim()
+    .toLowerCase();
 }
 
 export default function FriendZoneOrb({ user }: Props) {
@@ -22,14 +25,20 @@ export default function FriendZoneOrb({ user }: Props) {
   const label = getRelationshipLabel(state);
   const description = getRelationshipDescription(state);
   const username = cleanUsername(user.username);
+  const name = String(user.name || username || "Board User");
+  const avatarUrl =
+    typeof user.avatarUrl === "string" && user.avatarUrl.trim()
+      ? user.avatarUrl
+      : "/assets/board-welcome-mark.jpg";
+  const lastActiveLabel = String(user.lastActiveLabel || "Board signal");
   const profileHref = `/board/profile/${encodeURIComponent(username)}`;
 
   return (
     <Link
       href={profileHref}
       className={`${styles.orbCard} ${styles[state]}`}
-      aria-label={`Open ${user.name}'s Board`}
-      title={`Open ${user.name}'s Board`}
+      aria-label={`Open ${name}'s Board`}
+      title={`Open ${name}'s Board`}
     >
       <div className={styles.orbShell}>
         <div className={styles.auraRing} />
@@ -37,9 +46,13 @@ export default function FriendZoneOrb({ user }: Props) {
         <div className={styles.glassBloom} />
 
         <img
-          src={user.avatarUrl}
-          alt={`${user.name}'s avatar`}
+          src={avatarUrl}
+          alt={`${name}'s avatar`}
           className={styles.avatar}
+          onError={(event) => {
+            event.currentTarget.onerror = null;
+            event.currentTarget.src = "/assets/board-welcome-mark.jpg";
+          }}
         />
 
         <div className={styles.memoryDust} />
@@ -47,11 +60,11 @@ export default function FriendZoneOrb({ user }: Props) {
       </div>
 
       <div className={styles.info}>
-        <p className={styles.name}>{user.name}</p>
+        <p className={styles.name}>{name}</p>
         <p className={styles.username}>@{username}</p>
         <p className={styles.status}>{label}</p>
         <p className={styles.description}>{description}</p>
-        <p className={styles.lastActive}>{user.lastActiveLabel}</p>
+        <p className={styles.lastActive}>{lastActiveLabel}</p>
       </div>
     </Link>
   );

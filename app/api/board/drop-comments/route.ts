@@ -72,6 +72,80 @@ function cleanText(value: unknown, fallback = "") {
   return typeof value === "string" ? value.trim() : fallback;
 }
 
+function cleanUserId(value: unknown) {
+  const id = cleanText(value);
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)
+    ? id
+    : "";
+}
+
+async function resolveDropOwner(
+  supabase: ReturnType<typeof supabaseServer>,
+  threadDropId: string,
+  canonicalDropId: string,
+  providedOwnerId: string
+) {
+  const lookupId = canonicalDropId || threadDropId;
+  let activity:
+    | {
+        user_id?: string | null;
+        title?: string | null;
+        href?: string | null;
+        image_url?: string | null;
+        meta?: Record<string, unknown> | null;
+      }
+    | null = null;
+
+  if (lookupId) {
+    const { data } = await supabase
+      .from("board_activity")
+      .select("user_id, title, href, image_url, meta")
+      .eq("meta->>dropId", lookupId)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    activity = data;
+  }
+
+  if (!activity && /^[0-9a-f-]{36}$/i.test(threadDropId)) {
+    const { data } = await supabase
+      .from("board_activity")
+      .select("user_id, title, href, image_url, meta")
+      .eq("id", threadDropId)
+      .maybeSingle();
+    activity = data;
+  }
+
+  if (activity?.user_id) {
+    return { ownerId: activity.user_id, activity };
+  }
+
+  if (!providedOwnerId) return { ownerId: "", activity: null };
+
+  // A client-provided owner is accepted only when that profile actually owns
+  // the canonical drop in its persisted Board collection.
+  const { data: ownerProfile } = await supabase
+    .from("profiles")
+    .select("id, board_style")
+    .eq("id", providedOwnerId)
+    .maybeSingle();
+  const boardStyle =
+    ownerProfile?.board_style && typeof ownerProfile.board_style === "object"
+      ? ownerProfile.board_style
+      : null;
+  const ownsDrop =
+    lookupId &&
+    Array.isArray((boardStyle as any)?.boardDrops) &&
+    (boardStyle as any).boardDrops.some(
+      (drop: any) => String(drop?.id ?? "") === lookupId
+    );
+
+  return {
+    ownerId: ownsDrop ? providedOwnerId : "",
+    activity: null,
+  };
+}
+
 function mapComment(row: DropCommentRow) {
   return {
     id: row.id,
@@ -154,6 +228,11 @@ export async function POST(req: NextRequest) {
     const username = cleanText(body?.username, "board").replace(/^@+/, "").toLowerCase();
     const displayName = cleanText(body?.displayName, "Board User");
     const avatarUrl = cleanText(body?.avatarUrl);
+    const canonicalDropId = cleanDropId(body?.canonicalDropId);
+    const providedOwnerId = cleanUserId(body?.dropOwnerUserId);
+    const dropTitle = cleanText(body?.dropTitle, "Drop").slice(0, 240);
+    const dropHref = cleanText(body?.dropHref).slice(0, 2000);
+    const dropImageUrl = cleanText(body?.dropImageUrl).slice(0, 2000);
 
     if (!dropId) {
       return json({ ok: false, message: "Missing dropId." }, 400);
@@ -180,7 +259,52 @@ export async function POST(req: NextRequest) {
       return json(commentStorageError(error), 500);
     }
 
-    return json({ ok: true, comment: mapComment(data as DropCommentRow) });
+    const comment = mapComment(data as DropCommentRow);
+    const { ownerId, activity } = await resolveDropOwner(
+      supabase,
+      dropId,
+      canonicalDropId,
+      providedOwnerId
+    );
+
+    // Store a private recipient activity owned by the commenter at the row
+    // level (so normal RLS insert rules still hold). Profile filtering uses
+    // recipientUserId to deliver it only to the drop owner.
+    if (ownerId && ownerId !== user.id) {
+      const sourceMeta =
+        activity?.meta && typeof activity.meta === "object" ? activity.meta : {};
+      await supabase.from("board_activity").insert({
+        scope: "global",
+        user_id: user.id,
+        kind: "status",
+        title: `${displayName || `@${username}`} commented on ${activity?.title || dropTitle}`,
+        body: text,
+        href: activity?.href || dropHref || null,
+        image_url: activity?.image_url || dropImageUrl || null,
+        meta: {
+          activityType: "drop_comment_received",
+          activityAudience: "recipient",
+          visibility: "private",
+          recipientUserId: ownerId,
+          commenterUserId: user.id,
+          authorId: user.id,
+          authorUsername: username,
+          authorName: displayName,
+          authorAvatar: avatarUrl || null,
+          commentId: comment.remoteId || comment.id,
+          commentDropId: dropId,
+          referencedDropId: canonicalDropId || sourceMeta.dropId || dropId,
+          dropTitle: activity?.title || dropTitle,
+          mediaKind: sourceMeta.mediaKind ?? null,
+          bucket: sourceMeta.bucket ?? null,
+          storagePath: sourceMeta.storagePath ?? null,
+          fileName: sourceMeta.fileName ?? null,
+          preview: sourceMeta.preview ?? null,
+        },
+      });
+    }
+
+    return json({ ok: true, comment });
   } catch (err) {
     return json(
       {

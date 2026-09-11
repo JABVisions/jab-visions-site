@@ -1,7 +1,7 @@
 // File: app/components/board/ActivityCard.tsx
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Eye, EyeOff, SlidersHorizontal } from "lucide-react";
 import {
   appendLocalActivity,
@@ -16,6 +16,16 @@ import { removeDrops as removeUniversalDrops } from "@/lib/board/drops/storage";
 import { resolveLinkPreviewImage } from "@/lib/board/linkPreviewImages";
 import { fetchLinkPreview } from "@/lib/board/linkPreview";
 import { openHostedPayDropCheckout } from "@/lib/board/payCheckout";
+import { isLegacyDescriptText } from "@/lib/board/descriptDocs";
+import { isDropbookSlideFile } from "@/lib/board/dropbookSlides";
+import {
+  buildDropDownloadFilename,
+  classifyDropDownload,
+  downloadDropFromUrl,
+  downloadDropText,
+  resolveDropDownloadExtension,
+  type DropDownloadKind,
+} from "@/lib/board/dropDownload";
 import { EVENTS as BOARD_STORE_EVENTS, removeDrops as removeFeedDrops } from "@/lib/boardStore";
 import {
   normalizeDropCustomizations,
@@ -29,6 +39,10 @@ import { supabaseBrowser } from "@/lib/supabase/browser";
 import DropCommentsDrawer from "./DropCommentsDrawer";
 import DropStudioOverlay from "./DropStudioOverlay";
 import RemovableDropBadge from "./RemovableDropBadge";
+import DescriptDropScreen from "./DescriptDropScreen";
+import VoiceDropSoundboard from "./VoiceDropSoundboard";
+import NewsDropMagazine from "./NewsDropMagazine";
+import DropbookSlideScreen from "./DropbookSlideScreen";
 
 const EVT_DEPOSIT = "board:bucketBrain:deposit";
 const EVT_OPEN = "board:bucketBrain:open";
@@ -84,6 +98,14 @@ function formatDropKindLabel(value: string) {
   const clean = value.replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim();
   if (!clean) return "";
   const lower = clean.toLowerCase();
+  if (
+    lower === "slide" ||
+    lower === "slide drop" ||
+    lower === "dropbook" ||
+    lower === "dropbook drop"
+  ) {
+    return "DROPBOOK";
+  }
   const renamed = DROP_KIND_DISPLAY_RENAMES[lower] ?? clean;
   return /\bdrop\b/i.test(renamed) ? renamed.toUpperCase() : `${renamed.toUpperCase()} DROP`;
 }
@@ -330,13 +352,15 @@ function guessMediaKind(url: string): EmbedKind {
 
   // Images
   if (["png", "jpg", "jpeg", "webp", "gif", "avif", "svg", "bmp", "tif", "tiff", "heic", "heif"].includes(ext)) return "image";
-  if (isLikelyImageUrl(url)) return "image";
 
   // Video
   if (["mp4", "webm", "mov", "m4v"].includes(ext)) return "video";
 
   // Audio
   if (["mp3", "wav", "m4a", "aac", "ogg", "flac"].includes(ext)) return "audio";
+
+  // Shared storage URLs without an extension are legacy image drops.
+  if (isLikelyImageUrl(url)) return "image";
 
   return "none";
 }
@@ -462,6 +486,7 @@ function computeEmbed(href: string): { kind: EmbedKind; url: string } {
 type Props = {
   item: BoardActivity;
   compact?: boolean;
+  hideAuthor?: boolean;
   openBucketOnSignal?: boolean; // feels “command-center-ish”
   onRemove?: (dropId: string) => void;
 };
@@ -469,15 +494,21 @@ type Props = {
 export default function ActivityCard({
   item,
   compact,
+  hideAuthor = false,
   openBucketOnSignal = false,
   onRemove,
 }: Props) {
   const [toast, setToast] = useState<string | null>(null);
   const [embedFailed, setEmbedFailed] = useState(false);
+  const [downloadBusy, setDownloadBusy] = useState(false);
   const [signedPreviewImage, setSignedPreviewImage] = useState<string>("");
+  // Bumped to re-mint the storage signed URL after it expires.
+  const [signedPreviewNonce, setSignedPreviewNonce] = useState(0);
   // Image fetched on the client for link drops whose stored record has no
   // thumbnail (e.g. an Instagram reel saved before the preview resolved).
   const [hydratedImage, setHydratedImage] = useState<string>("");
+  const [hydratedImages, setHydratedImages] = useState<string[]>([]);
+  const [hydratedTitle, setHydratedTitle] = useState("");
   const [payCheckoutBusy, setPayCheckoutBusy] = useState(false);
   const [isRemovingDrop, setIsRemovingDrop] = useState(false);
   const [dropHidden, setDropHidden] = useState(false);
@@ -590,6 +621,7 @@ export default function ActivityCard({
     (typeof preview?.previewImage === "string" && preview.previewImage) ||
     "";
   const previewTitle =
+    hydratedTitle ||
     (typeof preview?.title === "string" && preview.title) ||
     (typeof preview?.previewTitle === "string" && preview.previewTitle) ||
     title;
@@ -597,11 +629,40 @@ export default function ActivityCard({
     (typeof preview?.description === "string" && preview.description) ||
     (typeof preview?.previewDescription === "string" && preview.previewDescription) ||
     "";
-  const previewBucket =
-    typeof preview?.bucket === "string" && preview.bucket ? preview.bucket : "";
-  const previewStoragePath =
-    typeof preview?.storagePath === "string" && preview.storagePath ? preview.storagePath : "";
+  const previewBucket = metaString(preview?.bucket, meta?.bucket);
+  const previewStoragePath = metaString(preview?.storagePath, meta?.storagePath);
   const mediaKind = metaString(meta?.mediaKind, preview?.mediaKind);
+  const storedFileName = metaString(meta?.fileName, preview?.fileName);
+  const storedMime = metaString(meta?.mime, preview?.mime);
+  const isHtmlDocument =
+    /^text\/html(?:;|$)/i.test(storedMime) ||
+    /\.html?$/i.test(storedFileName) ||
+    /\.html?(?:$|[?#])/i.test(href);
+  const isDropbookSlide =
+    meta?.fromDropbook === true ||
+    isDropbookSlideFile({
+      name: storedFileName,
+      type: storedMime,
+      url: href,
+    });
+  const isLegacyDescriptDrop = isLegacyDescriptText({
+    dropType: metaString(meta?.dropType, meta?.drop_flavor, preview?.dropType),
+    body,
+    href,
+    mediaKind,
+  });
+  const isAudioFileDrop =
+    mediaKind === "audio" ||
+    /^audio\//i.test(storedMime) ||
+    /\.(?:mp3|wav|m4a|aac|ogg|flac)$/i.test(storedFileName) ||
+    /\b(?:mp3|wav|m4a|aac|ogg|flac)\b/i.test(title) ||
+    guessMediaKind(href) === "audio";
+  // The uploaded HTML file is the durable source of truth. Older Descript
+  // shares could retain a Thought/Pay label when the studio handoff raced
+  // React state, but they are still Descript documents and must use the
+  // laminated reader instead of exposing their body as a text card.
+  const isDescriptDrop =
+    meta?.fromDescript === true || isHtmlDocument || isLegacyDescriptDrop;
   const announcementMediaUrl = metaString(meta?.announcement_media_url);
   const announcementMediaType = metaString(meta?.announcement_media_type);
   const announcementImageUrl =
@@ -614,7 +675,7 @@ export default function ActivityCard({
     hydratedImage ||
     "";
   const isStoredVideoDrop = mediaKind === "video" && !!signedPreviewImage;
-  const isStoredAudioDrop = mediaKind === "audio" && !!signedPreviewImage;
+  const isStoredAudioDrop = isAudioFileDrop && Boolean(signedPreviewImage || href);
   const showAnnouncementImage =
     item?.kind === "announcement" &&
     !!resolvedPreviewImage &&
@@ -701,9 +762,13 @@ export default function ActivityCard({
         const { data, error } = await supabase.storage
           .from(previewBucket)
           .createSignedUrl(previewStoragePath, 60 * 45);
+        const publicUrl = supabase.storage
+          .from(previewBucket)
+          .getPublicUrl(previewStoragePath).data.publicUrl;
+        const resolvedUrl = (!error && data?.signedUrl) || publicUrl;
 
-        if (!cancelled && !error && data?.signedUrl) {
-          setSignedPreviewImage(data.signedUrl);
+        if (!cancelled && resolvedUrl) {
+          setSignedPreviewImage(resolvedUrl);
         }
       } catch {
         // Fall back to image_url/previewImage if storage signing fails.
@@ -715,6 +780,29 @@ export default function ActivityCard({
     return () => {
       cancelled = true;
     };
+  }, [previewBucket, previewStoragePath, signedPreviewNonce]);
+
+  // Storage signed URLs expire (45m). Media players call this to mint a fresh
+  // one instead of staying stuck on a dead link.
+  const refreshSignedMedia = useCallback(async () => {
+    if (!previewBucket || !previewStoragePath) return;
+    const supabase = supabaseBrowser();
+    try {
+      const { data, error } = await supabase.storage
+        .from(previewBucket)
+        .createSignedUrl(previewStoragePath, 60 * 45);
+      const publicUrl = supabase.storage
+        .from(previewBucket)
+        .getPublicUrl(previewStoragePath).data.publicUrl;
+      const resolvedUrl = (!error && data?.signedUrl) || publicUrl;
+      if (resolvedUrl) {
+        setSignedPreviewImage(resolvedUrl);
+        return;
+      }
+    } catch {
+      // Fall through to a full re-run of the signing effect.
+    }
+    setSignedPreviewNonce((tick) => tick + 1);
   }, [previewBucket, previewStoragePath]);
 
   useEffect(() => {
@@ -777,6 +865,8 @@ export default function ActivityCard({
   }, [authorUserId]);
 
   const kindLabel = useMemo(() => {
+    if (isDropbookSlide) return "DROPBOOK";
+
     const explicitDropKind = metaString(
       meta?.dropType,
       meta?.drop_flavor,
@@ -792,7 +882,10 @@ export default function ActivityCard({
 
     const k = String((item as any)?.kind || (item as any)?.type || "drop");
     return formatDropKindLabel(k);
-  }, [item, meta, preview]);
+  }, [item, meta, preview, isDropbookSlide]);
+  const isVoiceDrop =
+    isAudioFileDrop && /\b(?:thought|voice)(?: drop| memo)?\b/i.test(kindLabel);
+  const isNewsDrop = /\bnews(?: drop)?\b/i.test(kindLabel);
   const badgeLabel = metaString(meta?.badgeLabel, preview?.badgeLabel);
 
   const payDropId = metaString(meta?.dropId, preview?.dropId, id);
@@ -845,9 +938,11 @@ export default function ActivityCard({
   // saved before the preview pipeline could resolve it.
   useEffect(() => {
     setHydratedImage("");
+    setHydratedImages([]);
+    setHydratedTitle("");
 
     if (!href || !external) return;
-    if (previewImage || signedPreviewImage || announcementImageUrl) return;
+    if (!isNewsDrop && (previewImage || signedPreviewImage || announcementImageUrl)) return;
     if (isPayDrop || mediaKind === "video" || mediaKind === "audio") return;
 
     let cancelled = false;
@@ -856,6 +951,12 @@ export default function ActivityCard({
       if (cancelled) return;
       const img = resolveLinkPreviewImage(href, preview?.image ?? null);
       if (img) setHydratedImage(img);
+      if (isNewsDrop && preview?.title) setHydratedTitle(preview.title);
+      const images = preview?.images
+        ?.map((item) => resolveLinkPreviewImage(href, item))
+        .filter((item): item is string => Boolean(item))
+        .slice(0, 4) ?? [];
+      if (images.length) setHydratedImages(images);
     })();
 
     return () => {
@@ -868,7 +969,11 @@ export default function ActivityCard({
     signedPreviewImage,
     announcementImageUrl,
     isPayDrop,
+    isNewsDrop,
     mediaKind,
+    meta?.previewImages,
+    preview?.images,
+    preview?.previewImages,
   ]);
   const attachmentLabel =
     embed.kind === "spotify"
@@ -879,7 +984,105 @@ export default function ActivityCard({
   const compactSpotify = !!compact && embed.kind === "spotify";
 
   // Show embed unless user forces fallback or embed fails
-  const showEmbed = !!embed.url && !embedFailed && embed.kind !== "none";
+  const showEmbed =
+    !!embed.url &&
+    !embedFailed &&
+    embed.kind !== "none" &&
+    !isDescriptDrop &&
+    !isDropbookSlide &&
+    !isAudioFileDrop;
+  const audioSoundboardUrl = signedPreviewImage || (isAudioFileDrop ? href : "");
+
+  const downloadKind = useMemo((): DropDownloadKind => {
+    return classifyDropDownload({
+      embedKind: embed.kind,
+      mediaKind,
+      mime: storedMime,
+      fileName: storedFileName,
+      href,
+      dropType: kindLabel,
+      hasTextBody: Boolean(body?.trim()),
+      fromDescript: isDescriptDrop,
+      fromDropbook: isDropbookSlide,
+      external,
+    });
+  }, [
+    embed.kind,
+    mediaKind,
+    storedMime,
+    storedFileName,
+    href,
+    kindLabel,
+    body,
+    isDescriptDrop,
+    isDropbookSlide,
+    external,
+  ]);
+
+  const downloadSourceUrl =
+    signedPreviewImage ||
+    (embed.kind === "image" || embed.kind === "video" || embed.kind === "audio"
+      ? embed.url
+      : "") ||
+    (downloadKind !== "open-link" && downloadKind !== "none" && downloadKind !== "text"
+      ? href
+      : "");
+
+  async function handleDownloadDrop() {
+    if (downloadBusy) return;
+
+    if (downloadKind === "open-link") {
+      if (href) window.open(href, "_blank", "noopener,noreferrer");
+      return;
+    }
+
+    const creator = authorUsername || authorName || "board";
+    try {
+      setDownloadBusy(true);
+      if (downloadKind === "text") {
+        const filename = buildDropDownloadFilename({
+          creator,
+          title,
+          extension: "txt",
+        });
+        const text = [title, "", body].filter((part) => part != null).join("\n").trim();
+        downloadDropText(text || title, filename);
+        return;
+      }
+
+      if (!downloadSourceUrl) {
+        throw new Error("No downloadable file on this drop");
+      }
+
+      const kind: Exclude<DropDownloadKind, "open-link" | "none" | "text"> =
+        downloadKind === "image" ||
+        downloadKind === "video" ||
+        downloadKind === "audio" ||
+        downloadKind === "doc" ||
+        downloadKind === "html"
+          ? downloadKind
+          : mediaKind === "image" || mediaKind === "video" || mediaKind === "audio"
+            ? mediaKind
+            : "doc";
+      const extension = resolveDropDownloadExtension({
+        kind,
+        mime: storedMime,
+        fileName: storedFileName,
+        url: downloadSourceUrl,
+      });
+      const filename = buildDropDownloadFilename({
+        creator,
+        title,
+        extension,
+      });
+      await downloadDropFromUrl(downloadSourceUrl, filename);
+    } catch (error) {
+      console.error("[ActivityCard] download failed", error);
+      if (href) window.open(href, "_blank", "noopener,noreferrer");
+    } finally {
+      setDownloadBusy(false);
+    }
+  }
 
   function signal(folder: "pass" | "pin" | "push") {
     if (!id) return;
@@ -1108,7 +1311,7 @@ export default function ActivityCard({
         </div>
       ) : null}
       {isPushed ? <div className="pushedByLabel">⚡ Amplified by {pushedByName}</div> : null}
-      <div className="head">
+      <div className={clsx("head", hideAuthor && "headWithoutAuthor")}>
         <div className="headCopy">
           <div className="metaRow">
             <RemovableDropBadge
@@ -1124,31 +1327,33 @@ export default function ActivityCard({
             {isPayDrop && priceLabel ? <span className="metaBadge">{priceLabel}</span> : null}
             {timeLabel ? <span className="metaBadge timeBadge">{timeLabel}</span> : null}
           </div>
-          <div className="title">{title}</div>
+          <div className="title">{isNewsDrop ? previewTitle || title : title}</div>
         </div>
 
-        <div className="authorMark" aria-label={`Drop by ${authorHandle || authorName}`}>
-          {authorHandle ? <span className="authorHandle">{authorHandle}</span> : null}
-          <div className="authorAvatarFrame">
-            <div className="authorAvatarInner">
-              {authorAvatarSrc ? (
-                <img
-                  className="authorAvatarImg"
-                  src={authorAvatarSrc}
-                  alt={authorName || authorHandle || "Board avatar"}
-                  loading="lazy"
-                />
-              ) : (
-                <span className="authorAvatarFallback" aria-hidden>
-                  {getInitials(authorName || authorHandle)}
-                </span>
-              )}
+        {!hideAuthor ? (
+          <div className="authorMark" aria-label={`Drop by ${authorHandle || authorName}`}>
+            {authorHandle ? <span className="authorHandle">{authorHandle}</span> : null}
+            <div className="authorAvatarFrame">
+              <div className="authorAvatarInner">
+                {authorAvatarSrc ? (
+                  <img
+                    className="authorAvatarImg"
+                    src={authorAvatarSrc}
+                    alt={authorName || authorHandle || "Board avatar"}
+                    loading="lazy"
+                  />
+                ) : (
+                  <span className="authorAvatarFallback" aria-hidden>
+                    {getInitials(authorName || authorHandle)}
+                  </span>
+                )}
+              </div>
             </div>
           </div>
-        </div>
+        ) : null}
       </div>
 
-      {body ? <div className="body">{body}</div> : null}
+      {body && !isDescriptDrop && !isDropbookSlide ? <div className="body">{body}</div> : null}
 
       {isCurrentUserDrop ? (
         <div className="ownerTools" aria-label="Drop owner controls">
@@ -1236,6 +1441,16 @@ export default function ActivityCard({
         </div>
       ) : null}
 
+      {isDropbookSlide ? (
+        <DropbookSlideScreen title={title} src={signedPreviewImage || href} />
+      ) : isDescriptDrop ? (
+        <DescriptDropScreen
+          title={title}
+          src={signedPreviewImage || href}
+          preview={body}
+        />
+      ) : null}
+
       {/* ✅ EMBED (now media-aware) */}
       {showEmbed ? (
         <div className={clsx("embed", embed.kind)}>
@@ -1304,17 +1519,6 @@ export default function ActivityCard({
             ) : (
               <span className="embedLink dim">No attachment</span>
             )}
-
-            {href ? (
-              <button
-                type="button"
-                className="embedFallback"
-                onClick={() => setEmbedFailed(true)}
-                title="If the embed is blocked, switch to link view"
-              >
-                Embed blocked? Show link
-              </button>
-            ) : null}
           </div>
 
           {embed.kind === "spotify" ? (
@@ -1354,33 +1558,51 @@ export default function ActivityCard({
       ) : null}
 
       {!showEmbed &&
+      !isDescriptDrop &&
+      !isDropbookSlide &&
       !showAnnouncementImage &&
       href &&
       resolvedPreviewImage &&
       !isPayDrop &&
       !isStoredVideoDrop &&
       !isStoredAudioDrop ? (
-        <a
-          className="linkPreview"
-          href={href}
-          target={external ? "_blank" : undefined}
-          rel={external ? "noreferrer" : undefined}
-        >
-          <div className="linkPreviewArt">
-            <img className="linkPreviewImg" src={resolvedPreviewImage} alt="" loading="lazy" />
-            <div className="linkPreviewShade" />
-            <div className="linkPreviewCopy">
-              <div className="linkPreviewLabel">{kindLabel}</div>
-              <div className="linkPreviewTitle">{previewTitle}</div>
-              {previewDescription ? (
-                <div className="linkPreviewDesc">{previewDescription}</div>
-              ) : null}
+        isNewsDrop ? (
+          <NewsDropMagazine
+            url={href}
+            headline={previewTitle || title}
+            source={metaString(meta?.hostLabel, preview?.provider)}
+            description={previewDescription}
+            images={Array.from(new Set([
+              ...(Array.isArray(meta?.previewImages) ? meta.previewImages : []),
+              ...(Array.isArray(preview?.images) ? preview.images : []),
+              ...(Array.isArray(preview?.previewImages) ? preview.previewImages : []),
+              ...hydratedImages,
+              resolvedPreviewImage,
+            ].filter((item): item is string => typeof item === "string" && Boolean(item))))}
+          />
+        ) : (
+          <a
+            className="linkPreview"
+            href={href}
+            target={external ? "_blank" : undefined}
+            rel={external ? "noreferrer" : undefined}
+          >
+            <div className="linkPreviewArt">
+              <img className="linkPreviewImg" src={resolvedPreviewImage} alt="" loading="lazy" />
+              <div className="linkPreviewShade" />
+              <div className="linkPreviewCopy">
+                <div className="linkPreviewLabel">{kindLabel}</div>
+                <div className="linkPreviewTitle">{previewTitle}</div>
+                {previewDescription ? (
+                  <div className="linkPreviewDesc">{previewDescription}</div>
+                ) : null}
+              </div>
             </div>
-          </div>
-        </a>
+          </a>
+        )
       ) : null}
 
-      {!showEmbed && isStoredVideoDrop ? (
+      {!showEmbed && !isDescriptDrop && !isDropbookSlide && isStoredVideoDrop ? (
         <div className="mediaFrame storedVideoFrame">
           <video
             className="vid"
@@ -1394,20 +1616,18 @@ export default function ActivityCard({
         </div>
       ) : null}
 
-      {!showEmbed && isStoredAudioDrop ? (
-        <div className="mediaFrame storedAudioFrame">
-          <div className="audioLabel">Full song</div>
-          <audio
-            className="aud"
-            src={signedPreviewImage}
-            controls
-            preload="metadata"
-            onError={() => setEmbedFailed(true)}
-          />
-        </div>
+      {!showEmbed && !isDescriptDrop && !isDropbookSlide && isAudioFileDrop && audioSoundboardUrl ? (
+        <VoiceDropSoundboard
+          src={audioSoundboardUrl}
+          title={title}
+          label={isVoiceDrop ? "VOICE DROP" : "AUDIO DROP"}
+          onReload={refreshSignedMedia}
+        />
       ) : null}
 
       {!showEmbed &&
+      !isDescriptDrop &&
+      !isDropbookSlide &&
       resolvedPreviewImage &&
       !showAnnouncementImage &&
       (!href || isPayDrop) &&
@@ -1427,6 +1647,8 @@ export default function ActivityCard({
       {/* Universal cover fallback: any external link with no real image still
           gets a branded thumbnail card instead of a bare URL. */}
       {!showEmbed &&
+      !isDescriptDrop &&
+      !isDropbookSlide &&
       href &&
       external &&
       !resolvedPreviewImage &&
@@ -1475,7 +1697,7 @@ export default function ActivityCard({
             </div>
           </div>
         </a>
-      ) : !showEmbed && href && !resolvedPreviewImage ? (
+      ) : !showEmbed && !isDescriptDrop && !isDropbookSlide && href && !resolvedPreviewImage ? (
         <a
           className="href"
           href={href}
@@ -1536,6 +1758,35 @@ export default function ActivityCard({
           <span className="lbl">Comment{commentCount ? ` ${commentCount}` : ""}</span>
         </button>
 
+        {downloadKind === "open-link" && href ? (
+          <a
+            className="rbtn download"
+            href={href}
+            target="_blank"
+            rel="noreferrer"
+            title="Open the original link"
+          >
+            <span className="glyph" aria-hidden>
+              <LinkGlyph />
+            </span>
+            <span className="lbl">Link</span>
+          </a>
+        ) : (downloadKind === "text"
+          ? Boolean(body?.trim())
+          : downloadKind !== "none" || Boolean(downloadSourceUrl)) ? (
+          <button
+            type="button"
+            className="rbtn download"
+            onClick={() => void handleDownloadDrop()}
+            disabled={downloadBusy}
+            title="Download this Board drop"
+          >
+            <span className="glyph" aria-hidden>
+              <DownloadGlyph />
+            </span>
+            <span className="lbl">{downloadBusy ? "…" : "Download"}</span>
+          </button>
+        ) : null}
       </div>
 
       <DropCommentsDrawer
@@ -1543,6 +1794,10 @@ export default function ActivityCard({
         onClose={() => setCommentsOpen(false)}
         dropId={id}
         dropTitle={title}
+        dropOwnerUserId={authorUserId}
+        canonicalDropId={metaString(meta?.dropId, meta?.originalDropId)}
+        dropHref={href}
+        dropImageUrl={resolvedPreviewImage}
       />
 
       {toast ? <div className="toast">{toast}</div> : null}
@@ -1726,6 +1981,8 @@ export default function ActivityCard({
         }
 
         .authorMark {
+          position: relative;
+          z-index: 2;
           flex: 0 0 auto;
           display: inline-flex;
           align-items: center;
@@ -2268,19 +2525,6 @@ export default function ActivityCard({
           text-decoration: none;
         }
 
-        .embedFallback {
-          border-radius: 999px;
-          padding: 8px 10px;
-          border: 1px solid rgba(0, 0, 0, 0.1);
-          background: rgba(255, 255, 255, 0.82);
-          color: rgba(0, 0, 0, 0.7);
-          font-size: 10px;
-          font-weight: 950;
-          letter-spacing: 0.14em;
-          text-transform: uppercase;
-          cursor: pointer;
-        }
-
         .embedNote {
           padding: 10px 12px 12px;
           border-top: 1px solid rgba(0, 0, 0, 0.06);
@@ -2318,7 +2562,14 @@ export default function ActivityCard({
           background: rgba(255, 255, 255, 0.82);
           cursor: pointer;
           color: rgba(0, 0, 0, 0.62);
+          text-decoration: none;
           transition: transform 140ms ease, filter 140ms ease, border-color 140ms ease, box-shadow 140ms ease;
+        }
+
+        .rbtn:disabled {
+          opacity: 0.55;
+          cursor: wait;
+          transform: none;
         }
 
         .rbtn:hover {
@@ -2433,12 +2684,31 @@ export default function ActivityCard({
 
         @media (max-width: 620px) {
           .head {
-            align-items: flex-start;
-            gap: 10px;
+            display: grid;
+            grid-template-columns: minmax(0, 1fr);
+            align-items: stretch;
+            gap: 8px;
+          }
+
+          .headCopy {
+            grid-row: 2;
+            width: 100%;
+          }
+
+          .headWithoutAuthor .headCopy {
+            grid-row: 1;
+          }
+
+          .metaRow {
+            max-width: 100%;
           }
 
           .authorMark {
-            max-width: 54%;
+            grid-row: 1;
+            width: 100%;
+            max-width: 100%;
+            justify-self: stretch;
+            justify-content: flex-end;
             gap: 7px;
           }
 
@@ -2532,6 +2802,65 @@ function CommentGlyph() {
         fill="transparent"
         stroke="currentColor"
         strokeWidth="2.1"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function DownloadGlyph() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">
+      <path
+        d="M12 3.5v10.2"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2.2"
+        strokeLinecap="round"
+      />
+      <path
+        d="M8.2 10.4L12 14.2l3.8-3.8"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2.2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M5 17.5h14"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2.2"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+function LinkGlyph() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">
+      <path
+        d="M10.2 13.8l3.6-3.6"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2.2"
+        strokeLinecap="round"
+      />
+      <path
+        d="M8.4 12l-1.1 1.1a3.4 3.4 0 004.8 4.8l1.2-1.2"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2.2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M15.6 12l1.1-1.1a3.4 3.4 0 00-4.8-4.8L10.7 7.3"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2.2"
+        strokeLinecap="round"
         strokeLinejoin="round"
       />
     </svg>

@@ -3,11 +3,11 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import {
+  depositToBrain,
   EVT_UPDATED,
   type BucketFolder,
   type BucketMemoryDrop,
   readBrain,
-  writeBrain,
 } from "@/lib/board/bucketBrain";
 
 function clsx(...parts: Array<string | false | null | undefined>) {
@@ -96,28 +96,7 @@ export default function ReactionRail({
   const deposit = (folder: BucketFolder) => {
     if (!id) return;
 
-    const brain = readBrain();
-    const list = (brain as any)[folder] as Array<{ activityId: string; savedAt: number }>;
-
-    const exists = Array.isArray(list) && list.some((x) => String(x.activityId) === id);
-    const nextList = exists
-      ? list // idempotent: don’t duplicate
-      : [
-          {
-            activityId: id,
-            savedAt: Date.now(),
-            ...(item ? { item } : {}),
-          },
-          ...(Array.isArray(list) ? list : []),
-        ].slice(0, 200);
-
-    const next = {
-      ...brain,
-      [folder]: nextList,
-      updatedAt: Date.now(),
-    };
-
-    writeBrain(next);
+    depositToBrain(folder, id, item);
     setSelected(folder);
 
     // micro interaction

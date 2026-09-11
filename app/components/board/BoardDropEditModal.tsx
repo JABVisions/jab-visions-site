@@ -33,6 +33,7 @@ import { RichTextField } from "./RichTextField";
 import {
   DESCRIPT_SHARE_EVENT,
   descriptPlainText,
+  sanitizeDescriptHtml,
   type DescriptDoc,
 } from "@/lib/board/descriptDocs";
 
@@ -128,6 +129,7 @@ export default function BoardDropEditModal() {
   const [pendingFile, setPendingFile] = useState<File | null>(null);
   const [studioMode, setStudioMode] = useState<CaptureMode | null>(null);
   const [studioInitialFile, setStudioInitialFile] = useState<File | null>(null);
+  const [studioDescriptDoc, setStudioDescriptDoc] = useState<DescriptDoc | null>(null);
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
 
@@ -148,6 +150,7 @@ export default function BoardDropEditModal() {
     setPendingFile(null);
     setStudioMode(null);
     setStudioInitialFile(null);
+    setStudioDescriptDoc(null);
     setSaving(false);
   }, []);
 
@@ -156,6 +159,7 @@ export default function BoardDropEditModal() {
     setPendingFile(null);
     setStudioMode(null);
     setStudioInitialFile(null);
+    setStudioDescriptDoc(null);
     setSaving(false);
     document.body.style.overflow = "";
   }, []);
@@ -172,8 +176,24 @@ export default function BoardDropEditModal() {
   // target explicitly so it can be launched the moment a drop is opened — before
   // the `drop` state has committed — which is what the direct Drop Studio button
   // on a tile relies on.
-  const openDescriptStudioFor = useCallback(() => {
+  const openDescriptStudioFor = useCallback((target: DropItem) => {
+    const fallbackText =
+      (target.type === "Thought" ? target.thoughtText : target.description) || "";
+    const richHtml = normalizeRichText(target.descriptionRich)?.html;
+    const html = sanitizeDescriptHtml(richHtml || richTextFromPlain(fallbackText).html);
+    const now = Date.now();
+
     setStudioInitialFile(null);
+    setStudioDescriptDoc({
+      id: `published_${target.id}`,
+      title: target.title || "Untitled Descript",
+      html,
+      plainText: descriptPlainText(html),
+      createdAt: target.createdAt || now,
+      updatedAt: now,
+      sourceKind: "capture",
+      destination: descriptDestinationForDropType(target.type),
+    });
     setStudioMode("descript");
   }, []);
 
@@ -277,7 +297,7 @@ export default function BoardDropEditModal() {
 
       if (target.type === "Doc" || target.type === "Thought" || target.type === "Pay") {
         if (!hasMedia) {
-          openDescriptStudioFor();
+          openDescriptStudioFor(target);
           return;
         }
       } else if (!hasMedia) {
@@ -286,7 +306,7 @@ export default function BoardDropEditModal() {
       }
 
       if (target.type === "Doc") {
-        openDescriptStudioFor();
+        openDescriptStudioFor(target);
         return;
       }
 
@@ -347,7 +367,7 @@ export default function BoardDropEditModal() {
     if (hasMedia && !isDoc) {
       void openMediaStudio();
     } else {
-      openDescriptStudioFor();
+      openDescriptStudioFor(drop);
     }
   }
 
@@ -359,11 +379,28 @@ export default function BoardDropEditModal() {
     return pub.data.publicUrl || null;
   }
 
+  async function durableCustomizations(dropId: string) {
+    const next = customizationsForSave();
+    const overlay = next?.artOverlayUrl;
+    if (!overlay?.startsWith("data:image/")) return next;
+
+    const response = await fetch(overlay);
+    const blob = await response.blob();
+    const extension = blob.type.includes("webp") ? "webp" : "png";
+    const file = new File([blob], `board-art-layer-${Date.now()}.${extension}`, {
+      type: blob.type || "image/png",
+    });
+    const uploadedUrl = await publicUrlForUpload(file, `${dropId}-art-layer`);
+    if (!uploadedUrl) throw new Error("Couldn't save the editable art layer.");
+    return { ...next, artOverlayUrl: uploadedUrl };
+  }
+
   async function save() {
     if (!drop) return;
     setSaving(true);
     try {
       const ownerId = await getCurrentUserId();
+      const savedCustomizations = await durableCustomizations(drop.id);
 
       if (drop.editSource === "announcement" && drop.sourceActivityId) {
         const titleRichClean = normalizeRichText(titleRich);
@@ -395,7 +432,7 @@ export default function BoardDropEditModal() {
           meta: {
             announcement_media_url: mediaUrl,
             announcement_media_type: annMediaType,
-            customizations: customizationsForSave() ?? null,
+            customizations: savedCustomizations ?? null,
             titleRich: titleRichClean,
             descriptionRich: descRichClean,
           },
@@ -413,7 +450,7 @@ export default function BoardDropEditModal() {
                 descriptionRich: descRichClean,
                 mediaUrl: mediaUrl ?? undefined,
                 mediaKind,
-                customizations: customizationsForSave() ?? drop.customizations,
+                customizations: savedCustomizations ?? drop.customizations,
               },
             },
           })
@@ -475,7 +512,7 @@ export default function BoardDropEditModal() {
         priceCents: drop.type === "Pay" ? cents ?? drop.priceCents : drop.priceCents,
         paymentLink: drop.type === "Pay" ? cleanLink ?? undefined : drop.paymentLink,
         linkUrl: drop.type === "Pay" ? cleanLink ?? drop.linkUrl : drop.linkUrl,
-        customizations: customizationsForSave() ?? drop.customizations,
+        customizations: savedCustomizations ?? drop.customizations,
         ...media,
       };
 
@@ -690,6 +727,9 @@ export default function BoardDropEditModal() {
         }
         allowedModes={lockedStudioModes(drop)}
         descriptDestination={drop ? descriptDestinationForDropType(drop.type) : "doc"}
+        initialDescriptDoc={studioDescriptDoc}
+        descriptReturnOnBack
+        descriptOnReturn={close}
         value={customizations}
         studioDraftRef={studioCustomizationsRef}
         onChange={(next) => {
