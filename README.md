@@ -5,25 +5,18 @@
 Board talks to Supabase for auth, profiles, drops, and the feed. Create a `.env.local` in the
 repository root (next to `package.json`) before starting the dev server.
 
-The project is already linked to Vercel, so the quickest route is to pull the real values down:
-
-```bash
-vercel env pull .env.local
-```
-
-That overwrites `.env.local` with everything configured in Vercel. It defaults to the
-**development** environment, so if the Supabase keys were only ever set on Production, use:
-
-```bash
-vercel env pull .env.local --environment=production
-```
-
-To set them by hand instead, copy `.env.example` to `.env.local` and fill in the two values from
-Supabase Dashboard → Project Settings → API:
+Copy `.env.example` to `.env.local` and fill in the two values from Supabase Dashboard → Project
+Settings → API:
 
 ```bash
 cp .env.example .env.local
 ```
+
+`vercel env pull .env.local` will not get you there. The Supabase keys are stored as **Sensitive**
+variables on the Vercel project, which makes them write-only: the pull writes the literal string
+`[SENSITIVE]` in place of each value and warns that secret values cannot be pulled. The Vercel
+**development** environment has no Supabase keys at all, only `VERCEL_OIDC_TOKEN`. Take the values
+from the Supabase dashboard instead.
 
 | Variable | Required | Used for |
 | --- | --- | --- |
