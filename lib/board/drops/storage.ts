@@ -36,6 +36,8 @@ export type UniversalDrop = {
   visibility?: "public" | "private";
   thoughtFormat?: "text" | "voice" | "doodle";
   thoughtText?: string;
+  /** True only when this drop's text was authored in Descript. */
+  fromDescript?: boolean;
 
   projectId?: string;
   projectType?: string;
@@ -98,6 +100,7 @@ export function readDrops(): UniversalDrop[] {
             ? x.thoughtFormat
             : undefined,
         thoughtText: typeof x.thoughtText === "string" ? x.thoughtText : undefined,
+        fromDescript: x.fromDescript === true ? true : undefined,
         projectId: typeof x.projectId === "string" ? x.projectId : undefined,
         projectType: typeof x.projectType === "string" ? x.projectType : undefined,
         projectStatus:

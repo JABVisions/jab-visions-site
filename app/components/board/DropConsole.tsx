@@ -2,8 +2,18 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { supabaseBrowser } from "@/lib/supabase/browser";
+import {
+  DESCRIPT_SHARE_EVENT,
+  descriptPlainText,
+  type DescriptDoc,
+} from "@/lib/board/descriptDocs";
+import {
+  placeDropbookInDropPadAssets,
+  upsertDropPadAssetRemote,
+} from "@/lib/board/dropPadAssets";
+import type { DropLifecycleStage } from "@/lib/board/dropLifecycle";
 
 import { createActivity, type BoardActivityKind } from "@/lib/board/activity";
 import { readCurrentBoardIdentity } from "@/lib/board/currentProfile";
@@ -174,6 +184,8 @@ function uploadLabelForFlavor(flavor: DropFlavor) {
 }
 
 /** Broadcast to CommunityFeed so it can prepend immediately (no refresh). */
+const SENT_STAGE: DropLifecycleStage = "sent";
+
 function emitNewActivity(payload: any) {
   try {
     window.dispatchEvent(
@@ -237,6 +249,7 @@ export default function DropConsole({
   const [payDesc, setPayDesc] = useState("");
   const [payLink, setPayLink] = useState("");
   const [docDesc, setDocDesc] = useState("");
+  const descriptOriginRef = useRef(false);
 
   // Forum Post mode
   const [forumId, setForumId] = useState<string>("general");
@@ -303,6 +316,45 @@ export default function DropConsole({
         onForums as EventListener
       );
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  /* Descript → Drop Console hand-off. Drop Studio's Descript mode shares a
+     finished doc as an event; the console wakes up on the matching flavor and
+     remembers the origin so the drop renders as an embedded doc. */
+  useEffect(() => {
+    function onDescriptShare(event: Event) {
+      const doc = (event as CustomEvent<DescriptDoc>).detail;
+      if (!doc) return;
+
+      const plain = doc.plainText?.trim() || descriptPlainText(doc.html);
+      const cleanTitle = doc.title?.trim() || "Untitled Descript";
+      setSleeping(false);
+      setTitle(cleanTitle);
+
+      const destination = doc.destination ?? "doc";
+      if (destination === "announcement") {
+        setMode("announcement");
+        setBody(plain);
+      } else if (destination === "thought") {
+        setMode("board_drop");
+        setDropFlavor("thought");
+        setThoughtText(plain);
+      } else if (destination === "pay") {
+        setMode("board_drop");
+        setDropFlavor("pay");
+        setPayDesc(plain);
+      } else {
+        setMode("board_drop");
+        setDropFlavor("doc");
+        setDocDesc(plain);
+      }
+
+      descriptOriginRef.current = true;
+    }
+
+    window.addEventListener(DESCRIPT_SHARE_EVENT, onDescriptShare as EventListener);
+    return () =>
+      window.removeEventListener(DESCRIPT_SHARE_EVENT, onDescriptShare as EventListener);
   }, []);
 
   const bodyPlaceholder =
@@ -488,6 +540,8 @@ export default function DropConsole({
                 drop_flavor: dropFlavor,
                 dropType: dropFlavor,
                 dropId: boardDropId,
+                // Framed in Drop Studio, sent here; Drop Pad can promote it later.
+                stage: SENT_STAGE,
                 fileName: uploadedFileName || null,
                 mediaKind:
                   dropFlavor === "music"
@@ -516,6 +570,7 @@ export default function DropConsole({
                 visibility: dropFlavor === "thought" ? thoughtVisibility : "public",
                 thoughtText: dropFlavor === "thought" ? thoughtText.trim() || cleanBody : null,
                 thoughtFormat,
+                fromDescript: descriptOriginRef.current ? true : null,
                 authorId: identity.id,
                 authorName: identity.displayName,
                 authorUsername: identity.username || null,
@@ -580,6 +635,8 @@ export default function DropConsole({
                 drop_flavor: dropFlavor,
                 dropType: dropFlavor,
                 dropId: boardDropId,
+                // Framed in Drop Studio, sent here; Drop Pad can promote it later.
+                stage: SENT_STAGE,
                 fileName: uploadedFileName || null,
                 mediaKind:
                   dropFlavor === "music"
@@ -608,6 +665,7 @@ export default function DropConsole({
                 visibility: dropFlavor === "thought" ? thoughtVisibility : "public",
                 thoughtText: dropFlavor === "thought" ? thoughtText.trim() || cleanBody : null,
                 thoughtFormat,
+                fromDescript: descriptOriginRef.current ? true : null,
                 authorId: identity.id,
                 authorName: identity.displayName,
                 authorUsername: identity.username || null,
@@ -659,6 +717,7 @@ export default function DropConsole({
             visibility: thoughtVisibility,
             thoughtFormat: thoughtFormat ?? "text",
             thoughtText: thoughtText.trim() || cleanBody,
+            fromDescript: descriptOriginRef.current ? true : undefined,
             authorId: identity.id,
             authorName: identity.displayName,
             authorUsername: identity.username || undefined,
@@ -701,6 +760,7 @@ export default function DropConsole({
       setPayDesc("");
       setPayLink("");
       setDocDesc("");
+      descriptOriginRef.current = false;
 
       setPostMsg("Dropped ✓");
       window.setTimeout(() => setPostMsg(null), 1500);
@@ -1669,6 +1729,16 @@ function BoardDropConsoleFields({
         value={customizations}
         onChange={setCustomizations}
         onComplete={(file) => uploadToBoardMedia(file, "capture")}
+        onCompleteDropbook={(book) => {
+          const asset = placeDropbookInDropPadAssets(book);
+          setStudioOpen(false);
+          void (async () => {
+            const client = supabaseBrowser();
+            const { data } = await client.auth.getUser();
+            const userId = data.user?.id;
+            if (userId) await upsertDropPadAssetRemote(client, userId, asset);
+          })();
+        }}
         onClose={() => setStudioOpen(false)}
       />
 

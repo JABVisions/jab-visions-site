@@ -5,6 +5,7 @@
 // anything else that works with profile-board drops.
 
 import { resolveLinkPreviewImage } from "@/lib/board/linkPreviewImages";
+import { coerceDropStage, type DropLifecycleStage } from "@/lib/board/dropLifecycle";
 import {
   normalizeDropCustomizations,
   type DropCustomization,
@@ -72,8 +73,10 @@ export type DropItem = {
   /** Last-edited timestamp. Used to decide whether a cached local copy is fresh
    *  enough to override server feed data (see ActivityCard). */
   updatedAt?: number;
-  /** How many Drop Studio drafts have been saved while making this drop. */
+  /** How many times this drop has been redesigned and successfully republished. */
   draftCount?: number;
+  /** Framed → Sent → Asset Drop / Portfolio Drop. */
+  stage?: DropLifecycleStage;
 
   url?: string;
   embedUrl?: string | null;
@@ -467,6 +470,8 @@ export function normalizeDropItems(input: unknown, userId: string | null): DropI
       title: String(x.title ?? "Untitled"),
       type,
       createdAt: Number(x.createdAt ?? Date.now()),
+      draftCount: typeof x.draftCount === "number" ? x.draftCount : undefined,
+      stage: coerceDropStage(x.stage),
       url: typeof x.url === "string" ? x.url : undefined,
       embedUrl: typeof x.embedUrl === "string" ? x.embedUrl : null,
       hostLabel: typeof x.hostLabel === "string" ? x.hostLabel : undefined,

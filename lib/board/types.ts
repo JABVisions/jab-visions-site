@@ -5,7 +5,8 @@ export type AssetKind =
   | "media"
   | "doc"
   | "pay"
-  | "note";
+  | "note"
+  | "dropbook";
 
 export type DropRoute =
   | "home"

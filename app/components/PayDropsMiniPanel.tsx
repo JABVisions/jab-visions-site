@@ -119,7 +119,7 @@ export default function PayDropsMiniPanel({
       });
     } catch (error) {
       window.alert(
-        error instanceof Error ? error.message : "Could not open National Bankcard checkout."
+        error instanceof Error ? error.message : "Could not open Stripe checkout."
       );
     } finally {
       setBusyId(null);

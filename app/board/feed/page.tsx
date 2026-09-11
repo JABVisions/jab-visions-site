@@ -373,7 +373,7 @@ export default function HomeBoardFeedPage() {
       <div className="shell">
         <div className="controls">
           <div className="leftControls">
-            <div className="sectionTitle">Community Feed</div>
+            <div className="sectionTitle">Activity Channel</div>
 
             <div className="tabs">
               <button
@@ -392,7 +392,7 @@ export default function HomeBoardFeedPage() {
           </div>
 
           <div className="miniNote">
-            {loading ? "Loading…" : "Live feed"}
+            {loading ? "Loading…" : "Activity Channel"}
           </div>
         </div>
 

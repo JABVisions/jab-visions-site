@@ -21,6 +21,8 @@ import {
   BOARD_MEDIA_BUCKET,
 } from "@/lib/board/boardDropEditStore";
 import { persistActivityEdit } from "@/lib/board/activity";
+import { withDraftCount } from "@/lib/board/draftCount";
+import { advanceDropStage } from "@/lib/board/dropLifecycle";
 import { supabaseBrowser } from "@/lib/supabase/browser";
 import {
   normalizeRichText,
@@ -125,6 +127,7 @@ export default function BoardDropEditModal() {
   const [visibility, setVisibility] = useState<"public" | "private">("public");
   const [customizations, setCustomizations] = useState<DropCustomization>({});
   const studioCustomizationsRef = useRef<DropCustomization>({});
+  const descriptOriginRef = useRef(false);
   const [pendingFile, setPendingFile] = useState<File | null>(null);
   const [studioMode, setStudioMode] = useState<CaptureMode | null>(null);
   const [studioInitialFile, setStudioInitialFile] = useState<File | null>(null);
@@ -149,6 +152,7 @@ export default function BoardDropEditModal() {
     setStudioMode(null);
     setStudioInitialFile(null);
     setSaving(false);
+    descriptOriginRef.current = d.fromDescript === true;
   }, []);
 
   const close = useCallback(() => {
@@ -313,6 +317,7 @@ export default function BoardDropEditModal() {
           normalizeRichText({ html: sanitizeRichHtml(doc.html) }) ?? richTextFromPlain(plain)
         );
       }
+      descriptOriginRef.current = true;
       setStudioMode(null);
     }
     window.addEventListener(DESCRIPT_SHARE_EVENT, onDescriptShare as EventListener);
@@ -470,16 +475,18 @@ export default function BoardDropEditModal() {
         description: drop.type === "Thought" ? drop.description : descPlain || undefined,
         descriptionRich: descRichClean,
         thoughtText: drop.type === "Thought" ? descPlain || undefined : drop.thoughtText,
+        fromDescript: descriptOriginRef.current ? true : drop.fromDescript,
         visibility,
         url: isLink ? (linkUrl.trim() ? normalizeUrl(linkUrl) ?? drop.url : drop.url) : drop.url,
         priceCents: drop.type === "Pay" ? cents ?? drop.priceCents : drop.priceCents,
         paymentLink: drop.type === "Pay" ? cleanLink ?? undefined : drop.paymentLink,
         linkUrl: drop.type === "Pay" ? cleanLink ?? drop.linkUrl : drop.linkUrl,
         customizations: customizationsForSave() ?? drop.customizations,
+        stage: advanceDropStage(drop.stage, "sent"),
         ...media,
       };
 
-      await persistDropEdit(updated);
+      await persistDropEdit(withDraftCount(drop, updated));
 
       if (updated.type === "Pay") {
         upsertPayDrop(

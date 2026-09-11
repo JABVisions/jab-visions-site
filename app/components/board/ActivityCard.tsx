@@ -25,7 +25,9 @@ import {
   DROP_COMMENTS_UPDATED_EVENT,
   getDropCommentCount,
 } from "@/lib/board/dropComments";
+import { shouldEmbedDescriptDoc } from "@/lib/board/descriptEmbed";
 import { supabaseBrowser } from "@/lib/supabase/browser";
+import DescriptDocEmbed from "./DescriptDocEmbed";
 import DropCommentsDrawer from "./DropCommentsDrawer";
 import DropStudioOverlay from "./DropStudioOverlay";
 import RemovableDropBadge from "./RemovableDropBadge";
@@ -881,6 +883,23 @@ export default function ActivityCard({
   // Show embed unless user forces fallback or embed fails
   const showEmbed = !!embed.url && !embedFailed && embed.kind !== "none";
 
+  // A Descript-authored (or otherwise long-form) Thought/Doc drop carries its
+  // document as one laminated, self-scrolling sheet instead of an inline dump.
+  const docEmbed = useMemo(
+    () =>
+      shouldEmbedDescriptDoc({
+        meta,
+        body,
+        hasVisualMedia: Boolean(
+          showEmbed || resolvedPreviewImage || isStoredVideoDrop || isStoredAudioDrop
+        ),
+      }),
+    [meta, body, showEmbed, resolvedPreviewImage, isStoredVideoDrop, isStoredAudioDrop]
+  );
+  // Compact cards already clamp their body to three lines, so they stay as-is.
+  const showDocEmbed = docEmbed.show && !compact;
+  const showBodyText = Boolean(body) && (!showDocEmbed || body.trim() !== docEmbed.text.trim());
+
   function signal(folder: "pass" | "pin" | "push") {
     if (!id) return;
     const currentUser = readLocalProfileIdentity();
@@ -1148,7 +1167,7 @@ export default function ActivityCard({
         </div>
       </div>
 
-      {body ? <div className="body">{body}</div> : null}
+      {showBodyText ? <div className="body">{body}</div> : null}
 
       {isCurrentUserDrop ? (
         <div className="ownerTools" aria-label="Drop owner controls">
@@ -1485,6 +1504,8 @@ export default function ActivityCard({
           {href}
         </a>
       ) : null}
+
+      {showDocEmbed ? <DescriptDocEmbed title={title} text={docEmbed.text} /> : null}
 
       {/* ✅ Reaction rail stays in card */}
       <div className="rail" aria-label="Reaction rail">
