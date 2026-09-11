@@ -1,6 +1,7 @@
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
+import { SUPABASE_SETUP_HINT, supabaseCredentials } from "@/lib/supabase/config";
 
 type PendingCookie = {
   name: string;
@@ -9,14 +10,11 @@ type PendingCookie = {
 };
 
 export function createSupabaseRouteClient() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const key =
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
-    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
-
-  if (!url || !key) {
-    throw new Error("Supabase is not configured.");
+  const credentials = supabaseCredentials();
+  if (!credentials) {
+    throw new Error(SUPABASE_SETUP_HINT);
   }
+  const { url, key } = credentials;
 
   const cookieStore = cookies();
   const pendingCookies: PendingCookie[] = [];
