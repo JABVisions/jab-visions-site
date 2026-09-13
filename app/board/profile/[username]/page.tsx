@@ -2161,62 +2161,22 @@ export default function ProfileBoardViewPage({
 
         .profile-grid {
           display: grid;
-          grid-template-columns: minmax(0, 1fr);
-          grid-template-areas:
-            "identity"
-            "cover"
-            "vision"
-            "aura"
-            "board"
-            "activity"
-            "friend-zone"
-            "bucket";
+          grid-template-columns: minmax(280px, 0.95fr) minmax(340px, 1.2fr) minmax(280px, 0.95fr);
           gap: 16px;
           width: 100%;
-          max-width: 920px;
-          margin-inline: auto;
           min-width: 0;
         }
 
         .left-column,
         .center-column,
         .right-column {
-          display: contents;
+          display: grid;
+          gap: 16px;
+          align-content: start;
+          min-width: 0;
         }
 
-        .profile-vision {
-          grid-area: vision;
-        }
-
-        .profile-cover {
-          grid-area: cover;
-        }
-
-        .profile-identity {
-          grid-area: identity;
-        }
-
-        .profile-board-drop {
-          grid-area: board;
-        }
-
-        .profile-activity {
-          grid-area: activity;
-        }
-
-        .profile-aura {
-          grid-area: aura;
-        }
-
-        .profile-friend-zone {
-          grid-area: friend-zone;
-        }
-
-        .profile-bucket {
-          grid-area: bucket;
-        }
-
-        .profile-grid > section {
+        .profile-grid section {
           min-width: 0;
         }
 
@@ -3067,12 +3027,30 @@ export default function ProfileBoardViewPage({
 
         @media (max-width: 1180px) {
           .profile-grid {
+            grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+            grid-auto-flow: row dense;
+          }
+
+          .center-column {
+            grid-column: 1 / -1;
+          }
+        }
+
+        @media (max-width: 980px) {
+          .profile-grid {
             grid-template-columns: minmax(0, 1fr);
+          }
+
+          .center-column {
+            grid-column: auto;
           }
         }
 
         @media (max-width: 720px) {
-          .profile-grid {
+          .profile-grid,
+          .left-column,
+          .center-column,
+          .right-column {
             gap: 8px;
           }
 
