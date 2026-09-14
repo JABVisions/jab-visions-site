@@ -543,7 +543,7 @@
   width: 100%;
   height: 100%;
   object-fit: cover;
-  background: #02070a;
+  background: transparent;
 }
 
 /* `.preview` sets `touch-action: none` so dragging stickers/text doesn't scroll
@@ -555,7 +555,8 @@
 }
 
 /* Editing is a fit view: keep every edge of the captured photo/video visible.
-   Published Drop cards retain their own cover-style presentation. */
+   Flatten bakes strokes onto the photo's own pixels, so published cards
+   never inherit this chip's letterbox. */
 .previewInFrame .mediaLayer > img,
 .previewInFrame .mediaLayer > video {
   object-fit: contain;

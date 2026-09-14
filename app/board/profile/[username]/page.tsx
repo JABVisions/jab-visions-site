@@ -2564,7 +2564,7 @@ export default function ProfileBoardViewPage({
         .board-drop-media-frame.video .board-drop-media {
           width: 100%;
           height: auto;
-          background: #000;
+          background: transparent;
         }
 
         .board-drop-audio {

@@ -163,6 +163,7 @@ export default function DropStudioArtPalette({
       context.globalCompositeOperation = "source-over";
       context.globalAlpha = 1;
     }
+    applyArt();
   }
 
   function restore(stack: ImageData[], destination: ImageData[]) {

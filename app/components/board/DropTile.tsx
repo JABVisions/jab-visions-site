@@ -3591,15 +3591,23 @@ export default function DropTile() {
           line-height: 0;
         }
         .viewerBody img,
+        .viewerBody .viewer-studio-frame > img {
+          width: auto;
+          max-width: 100%;
+          max-height: calc(100vh - 220px);
+          border-radius: 18px;
+          border: 1px solid rgba(0, 0, 0, 0.12);
+          background: transparent;
+          object-fit: contain;
+        }
         .viewerBody video,
-        .viewerBody .viewer-studio-frame > img,
         .viewerBody .viewer-studio-frame > video {
           width: auto;
           max-width: 100%;
           max-height: calc(100vh - 220px);
           border-radius: 18px;
           border: 1px solid rgba(0, 0, 0, 0.12);
-          background: #000;
+          background: transparent;
           object-fit: contain;
         }
         .viewerAudio {

@@ -92,6 +92,13 @@
   pointer-events: none;
 }
 
+/* Match Drop Studio's operating-table preview (object-fit: contain) so strokes
+   land on the same pixels flattenArtLayerIntoImage maps back onto the photo. */
+.stageInFrame .bg {
+  object-fit: contain;
+  object-position: 50% 50%;
+}
+
 .canvas {
   position: absolute;
   inset: 0;

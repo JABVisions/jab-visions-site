@@ -223,10 +223,80 @@ async function coverDataUrlToFile(dataUrl: string) {
   });
 }
 
+function isStudioLetterboxPixel(r: number, g: number, b: number, a: number) {
+  if (a < 12) return true;
+  return r <= 20 && g <= 24 && b <= 28;
+}
+
+/**
+ * Find near-black / transparent bars left by an earlier contain-fit flatten
+ * (studio fill #02070a). Detection runs on a small downsample so 12MP photos
+ * stay cheap. Returns the full frame when the crop would throw away a dark
+ * photo rather than bars.
+ */
+function detectLetterboxCrop(image: HTMLImageElement) {
+  const width = Math.max(1, image.naturalWidth);
+  const height = Math.max(1, image.naturalHeight);
+  const maxEdge = 240;
+  const sampleScale = Math.min(1, maxEdge / Math.max(width, height));
+  const sampleWidth = Math.max(1, Math.round(width * sampleScale));
+  const sampleHeight = Math.max(1, Math.round(height * sampleScale));
+  const sample = document.createElement("canvas");
+  sample.width = sampleWidth;
+  sample.height = sampleHeight;
+  const context = sample.getContext("2d", { willReadFrequently: true });
+  if (!context) return { sx: 0, sy: 0, sw: width, sh: height };
+  context.drawImage(image, 0, 0, sampleWidth, sampleHeight);
+  const { data } = context.getImageData(0, 0, sampleWidth, sampleHeight);
+  const rowIsBar = (y: number) => {
+    let count = 0;
+    const row = y * sampleWidth * 4;
+    for (let x = 0; x < sampleWidth; x++) {
+      const i = row + x * 4;
+      if (isStudioLetterboxPixel(data[i], data[i + 1], data[i + 2], data[i + 3])) count++;
+    }
+    return count / sampleWidth >= 0.92;
+  };
+  const colIsBar = (x: number) => {
+    let count = 0;
+    for (let y = 0; y < sampleHeight; y++) {
+      const i = (y * sampleWidth + x) * 4;
+      if (isStudioLetterboxPixel(data[i], data[i + 1], data[i + 2], data[i + 3])) count++;
+    }
+    return count / sampleHeight >= 0.92;
+  };
+  let top = 0;
+  let bottom = sampleHeight;
+  let left = 0;
+  let right = sampleWidth;
+  while (top < bottom && rowIsBar(top)) top++;
+  while (bottom > top && rowIsBar(bottom - 1)) bottom--;
+  while (left < right && colIsBar(left)) left++;
+  while (right > left && colIsBar(right - 1)) right--;
+  const sampleW = right - left;
+  const sampleH = bottom - top;
+  if (sampleW < 8 || sampleH < 8) return { sx: 0, sy: 0, sw: width, sh: height };
+  if (sampleW * sampleH < sampleWidth * sampleHeight * 0.5) {
+    return { sx: 0, sy: 0, sw: width, sh: height };
+  }
+  const sx = Math.round(left / sampleScale);
+  const sy = Math.round(top / sampleScale);
+  return {
+    sx,
+    sy,
+    sw: Math.min(width - sx, Math.round(sampleW / sampleScale)),
+    sh: Math.min(height - sy, Math.round(sampleH / sampleScale)),
+  };
+}
+
 /**
  * Art Palette strokes start as a temporary data URL so the editor can update
  * instantly. Flatten image-drop strokes into the actual upload before leaving
  * Drop Studio; Board storage intentionally removes large inline data URLs.
+ *
+ * The studio preview is object-fit: contain inside a 4:5 chip. Map the overlay
+ * back onto the photo's own pixels (cropping any leftover letterbox) so the
+ * published Vision Drop is the photo plus ink — no baked-in black bars.
  */
 async function flattenArtLayerIntoImage(file: File, artOverlayUrl: string): Promise<File> {
   const fileUrl = URL.createObjectURL(file);
@@ -235,24 +305,52 @@ async function flattenArtLayerIntoImage(file: File, artOverlayUrl: string): Prom
       loadStudioImage(fileUrl),
       loadStudioImage(artOverlayUrl),
     ]);
-    const width = Math.max(1, overlay.naturalWidth || base.naturalWidth);
-    const height = Math.max(1, overlay.naturalHeight || base.naturalHeight);
+    const srcWidth = Math.max(1, base.naturalWidth);
+    const srcHeight = Math.max(1, base.naturalHeight);
+    const overlayWidth = Math.max(1, overlay.naturalWidth || srcWidth);
+    const overlayHeight = Math.max(1, overlay.naturalHeight || srcHeight);
+    const crop = detectLetterboxCrop(base);
+    const outWidth = Math.max(1, crop.sw);
+    const outHeight = Math.max(1, crop.sh);
+
     const canvas = document.createElement("canvas");
-    canvas.width = width;
-    canvas.height = height;
+    canvas.width = outWidth;
+    canvas.height = outHeight;
     const context = canvas.getContext("2d");
     if (!context) throw new Error("The edited artwork could not be rendered.");
 
-    context.fillStyle = "#02070a";
-    context.fillRect(0, 0, width, height);
+    context.drawImage(
+      base,
+      crop.sx,
+      crop.sy,
+      outWidth,
+      outHeight,
+      0,
+      0,
+      outWidth,
+      outHeight
+    );
 
-    // Drop Studio's operating-table preview uses object-fit: contain. Recreate
-    // that exact composition so strokes stay aligned when the card is published.
-    const scale = Math.min(width / base.naturalWidth, height / base.naturalHeight);
-    const drawWidth = base.naturalWidth * scale;
-    const drawHeight = base.naturalHeight * scale;
-    context.drawImage(base, (width - drawWidth) / 2, (height - drawHeight) / 2, drawWidth, drawHeight);
-    context.drawImage(overlay, 0, 0, width, height);
+    const containScale = Math.min(overlayWidth / srcWidth, overlayHeight / srcHeight);
+    const containedWidth = srcWidth * containScale;
+    const containedHeight = srcHeight * containScale;
+    const overlayOriginX = (overlayWidth - containedWidth) / 2;
+    const overlayOriginY = (overlayHeight - containedHeight) / 2;
+    const overlaySx = overlayOriginX + (crop.sx / srcWidth) * containedWidth;
+    const overlaySy = overlayOriginY + (crop.sy / srcHeight) * containedHeight;
+    const overlaySw = (outWidth / srcWidth) * containedWidth;
+    const overlaySh = (outHeight / srcHeight) * containedHeight;
+    context.drawImage(
+      overlay,
+      overlaySx,
+      overlaySy,
+      overlaySw,
+      overlaySh,
+      0,
+      0,
+      outWidth,
+      outHeight
+    );
 
     const blob = await new Promise<Blob | null>((resolve) =>
       canvas.toBlob(resolve, "image/png")

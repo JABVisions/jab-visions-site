@@ -564,6 +564,9 @@ export default function ActivityCard({
   const storedDropCustomizations = normalizeDropCustomizations(
     meta?.customizations ?? preview?.customizations
   );
+  const storedCustomizationsKey = JSON.stringify(
+    meta?.customizations ?? preview?.customizations ?? null
+  );
   const [dropCustomizations, setDropCustomizations] = useState<DropCustomization | undefined>(
     storedDropCustomizations
   );
@@ -684,7 +687,23 @@ export default function ActivityCard({
   useEffect(() => {
     setDropCustomizations(storedDropCustomizations);
     setDropHidden(false);
-  }, [id]);
+  }, [id, storedCustomizationsKey]);
+
+  useEffect(() => {
+    const dropId = String(meta?.dropId || meta?.originalDropId || "");
+    function onDropUpdated(event: Event) {
+      const detail = (event as CustomEvent).detail;
+      const updatedId = String(detail?.dropId || detail?.drop?.id || "");
+      if (!updatedId) return;
+      if (updatedId !== id && updatedId !== dropId) return;
+      const next = normalizeDropCustomizations(detail?.drop?.customizations);
+      setDropCustomizations(next);
+      setSignedPreviewNonce((tick) => tick + 1);
+    }
+    window.addEventListener("board:drop:updated", onDropUpdated as EventListener);
+    return () =>
+      window.removeEventListener("board:drop:updated", onDropUpdated as EventListener);
+  }, [id, meta?.dropId, meta?.originalDropId]);
 
   useEffect(() => {
     setAnnouncementImagePosition({ x: 50, y: 50 });
@@ -2429,7 +2448,7 @@ export default function ActivityCard({
           height: 100%;
           object-fit: contain;
           display: block;
-          background: #000;
+          background: transparent;
           max-height: 100%;
         }
 

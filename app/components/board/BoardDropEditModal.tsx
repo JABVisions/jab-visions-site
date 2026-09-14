@@ -395,8 +395,9 @@ export default function BoardDropEditModal() {
     return { ...next, artOverlayUrl: uploadedUrl };
   }
 
-  async function save() {
+  async function save(fileOverride?: File | null) {
     if (!drop) return;
+    const nextFile = fileOverride !== undefined ? fileOverride : pendingFile;
     setSaving(true);
     try {
       const ownerId = await getCurrentUserId();
@@ -410,13 +411,13 @@ export default function BoardDropEditModal() {
 
         let mediaUrl = drop.mediaUrl ?? null;
         let mediaKind = drop.mediaKind ?? "image";
-        if (pendingFile) {
-          const uploaded = await publicUrlForUpload(pendingFile, drop.sourceActivityId);
+        if (nextFile) {
+          const uploaded = await publicUrlForUpload(nextFile, drop.sourceActivityId);
           if (!uploaded) throw new Error("Couldn't upload announcement media.");
           mediaUrl = uploaded;
-          mediaKind = pendingFile.type.startsWith("video/")
+          mediaKind = nextFile.type.startsWith("video/")
             ? "video"
-            : pendingFile.type.startsWith("audio/")
+            : nextFile.type.startsWith("audio/")
               ? "audio"
               : "image";
         }
@@ -469,20 +470,20 @@ export default function BoardDropEditModal() {
         mime: drop.mime,
         fileSize: drop.fileSize,
       };
-      if (pendingFile) {
-        const up = await uploadDropMedia(pendingFile, drop.id);
+      if (nextFile) {
+        const up = await uploadDropMedia(nextFile, drop.id);
         if (up) {
           media = {
             bucket: up.bucket,
             storagePath: up.storagePath,
-            mediaKind: isAudioFile(pendingFile)
+            mediaKind: isAudioFile(nextFile)
               ? "audio"
-              : pendingFile.type.startsWith("video/")
+              : nextFile.type.startsWith("video/")
                 ? "video"
                 : "image",
-            fileName: pendingFile.name,
-            mime: pendingFile.type,
-            fileSize: pendingFile.size,
+            fileName: nextFile.name,
+            mime: nextFile.type,
+            fileSize: nextFile.size,
           };
         } else {
           throw new Error("Couldn't upload the new media. Check you're signed in.");
@@ -706,7 +707,7 @@ export default function BoardDropEditModal() {
               >
                 Cancel
               </button>
-              <button type="button" className="bde-save" onClick={save} disabled={saving}>
+              <button type="button" className="bde-save" onClick={() => void save()} disabled={saving}>
                 {saving ? "Saving…" : "Save changes"}
               </button>
             </div>
@@ -736,9 +737,13 @@ export default function BoardDropEditModal() {
           setCustomizations(next);
           studioCustomizationsRef.current = next;
         }}
-        onComplete={(captured) => {
+        onComplete={async (captured) => {
           setPendingFile(captured);
-          setStudioMode(null);
+          try {
+            await save(captured);
+          } finally {
+            setStudioMode(null);
+          }
         }}
         onClose={() => setStudioMode(null)}
       />

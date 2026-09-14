@@ -336,9 +336,99 @@ export default function HomeBoardFeedPage() {
       });
     };
 
+    const onUpdated = (e: any) => {
+      const a = normalizeIncoming(e?.detail);
+      if (!a) return;
+      if (isPrivateDropActivity(a)) return;
+      if (tab === "announcements" && a.kind !== "announcement") return;
+
+      setItems((prev) => {
+        const index = prev.findIndex((p) => {
+          const meta = p.meta && typeof p.meta === "object" ? p.meta : null;
+          const nextMeta = a.meta && typeof a.meta === "object" ? a.meta : null;
+          return (
+            p.id === a.id ||
+            (nextMeta?.dropId &&
+              (String(meta?.dropId || "") === String(nextMeta.dropId) ||
+                String(meta?.originalDropId || "") === String(nextMeta.dropId)))
+          );
+        });
+        if (index === -1) return prev;
+        const current = prev[index];
+        const next = [...prev];
+        next[index] = {
+          ...current,
+          ...a,
+          meta: {
+            ...(current.meta && typeof current.meta === "object" ? current.meta : {}),
+            ...(a.meta && typeof a.meta === "object" ? a.meta : {}),
+          },
+        };
+        return next;
+      });
+    };
+
+    const onDropUpdated = (e: any) => {
+      const drop = e?.detail?.drop;
+      const dropId = String(e?.detail?.dropId || drop?.id || "");
+      if (!dropId) return;
+
+      setItems((prev) =>
+        prev.map((item) => {
+          const meta = item.meta && typeof item.meta === "object" ? item.meta : null;
+          if (
+            item.id !== dropId &&
+            String(meta?.dropId || "") !== dropId &&
+            String(meta?.originalDropId || "") !== dropId &&
+            String(meta?.sourceActivityId || "") !== dropId
+          ) {
+            return item;
+          }
+          const previewUrl = drop?.mediaUrl || drop?.url || item.image_url;
+          const mediaKind = drop?.mediaKind ?? meta?.mediaKind;
+          return {
+            ...item,
+            title: drop?.title || item.title,
+            body: drop?.description || drop?.thoughtText || item.body,
+            href:
+              mediaKind === "video" || mediaKind === "audio"
+                ? previewUrl || item.href
+                : item.href,
+            image_url:
+              mediaKind === "image" || !mediaKind
+                ? previewUrl || item.image_url
+                : item.image_url,
+            meta: {
+              ...(meta ?? {}),
+              customizations: drop?.customizations ?? meta?.customizations ?? null,
+              storagePath: drop?.storagePath ?? meta?.storagePath ?? null,
+              bucket: drop?.bucket ?? meta?.bucket ?? null,
+              mediaKind: mediaKind ?? meta?.mediaKind ?? null,
+              mediaUrl: drop?.mediaUrl ?? meta?.mediaUrl ?? null,
+              fileName: drop?.fileName ?? meta?.fileName ?? null,
+              mime: drop?.mime ?? meta?.mime ?? null,
+              editedAt: Date.now(),
+              preview: {
+                ...(meta?.preview && typeof meta.preview === "object" ? meta.preview : {}),
+                image: previewUrl || meta?.preview?.image,
+                bucket: drop?.bucket ?? meta?.preview?.bucket ?? meta?.bucket,
+                storagePath: drop?.storagePath ?? meta?.preview?.storagePath ?? meta?.storagePath,
+                mediaKind: mediaKind ?? meta?.preview?.mediaKind,
+              },
+            },
+          };
+        })
+      );
+    };
+
     window.addEventListener("board:activity:new", onNew as EventListener);
-    return () =>
+    window.addEventListener("board:activity:updated", onUpdated as EventListener);
+    window.addEventListener("board:drop:updated", onDropUpdated as EventListener);
+    return () => {
       window.removeEventListener("board:activity:new", onNew as EventListener);
+      window.removeEventListener("board:activity:updated", onUpdated as EventListener);
+      window.removeEventListener("board:drop:updated", onDropUpdated as EventListener);
+    };
   }, [tab]);
 
   useEffect(() => {
