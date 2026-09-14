@@ -20,8 +20,8 @@ export function getStripe(): Stripe | null {
   if (!key) return null;
   if (cached) return cached;
   cached = new Stripe(key, {
-    // Pin a version so behavior is stable; bump intentionally.
-    apiVersion: "2024-12-18.acacia" as Stripe.LatestApiVersion,
+    apiVersion: "2026-07-29.dahlia",
+    typescript: true,
     appInfo: { name: "BOARD Pay Drops" },
   });
   return cached;
@@ -32,6 +32,11 @@ export function platformFeeBps(): number {
   const raw = Number(process.env.BOARD_PLATFORM_FEE_BPS ?? "0");
   if (!Number.isFinite(raw) || raw < 0) return 0;
   return Math.min(raw, 5000); // hard cap 50% for safety
+}
+
+/** Unique Checkout integration label required on current Stripe API versions. */
+export function checkoutIntegrationIdentifier() {
+  return "board_paydrops_qjmxnfrt";
 }
 
 /** Compute the application_fee_amount (in cents) for a given charge amount. */

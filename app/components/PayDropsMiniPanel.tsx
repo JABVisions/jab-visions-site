@@ -107,8 +107,6 @@ export default function PayDropsMiniPanel({
       return;
     }
 
-    if (drop.provider !== "authorize_net_accept_hosted" && drop.checkoutUrl) return;
-
     try {
       setBusyId(drop.id);
       await openHostedPayDropCheckout({
@@ -116,10 +114,11 @@ export default function PayDropsMiniPanel({
         title: drop.title,
         description: drop.description,
         amountCents: drop.amountCents,
+        recipientUserId: drop.recipientUserId ?? userId ?? undefined,
       });
     } catch (error) {
       window.alert(
-        error instanceof Error ? error.message : "Could not open National Bankcard checkout."
+        error instanceof Error ? error.message : "Could not open Stripe checkout."
       );
     } finally {
       setBusyId(null);
@@ -187,8 +186,8 @@ export default function PayDropsMiniPanel({
 
               <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px] font-extrabold tracking-[0.12em] uppercase">
                 <span className="rounded-full border border-black/10 bg-white/70 px-3 py-2 text-black/55">
-                  {d.provider === "authorize_net_accept_hosted"
-                    ? "Authorize.Net Hosted"
+                  {d.provider === "stripe_connect"
+                    ? "Stripe"
                     : "Payment Link"}
                 </span>
                 <span className="rounded-full border border-black/10 bg-white/70 px-3 py-2 text-black/45">
@@ -196,7 +195,7 @@ export default function PayDropsMiniPanel({
                 </span>
               </div>
 
-              {d.checkoutUrl || d.provider === "authorize_net_accept_hosted" ? (
+              {d.checkoutUrl || d.provider === "stripe_connect" ? (
                 <button
                   type="button"
                   onClick={() => void openCheckout(d)}

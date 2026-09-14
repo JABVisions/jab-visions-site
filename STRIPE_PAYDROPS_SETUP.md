@@ -1,76 +1,100 @@
-# Pay Drops → Stripe Connect — Setup & Status
+# Board Pay Drops — Stripe setup
 
-Pay Drops now run on **Stripe Connect (Express)** with **destination charges**: a
-supporter checks out on Stripe-hosted Checkout, the platform processes the
-payment, and funds transfer immediately to the recipient's connected account.
-An optional platform fee is supported.
+Board Pay Drops use Stripe Connect Accounts v2 with this configuration:
 
-> ⚠️ I could not `npm install` or run a build in this environment, so the
-> Stripe SDK code is written against the official docs but **untested**. Do the
-> setup below, then run a local build before deploying.
+- Dashboard: Express (lightweight creator payout view)
+- Fee collection: Board manages pricing
+- Negative balance liability: Board
+- Charge pattern: destination charges
+- Onboarding: Stripe-hosted account onboarding from Options → Banking
 
-## 1. Install + environment
+A buyer pays through Stripe Checkout. Stripe routes the creator's share to the
+creator's connected account and records the result through a signed webhook.
+The unused legacy Authorize.Net endpoints were removed; previously saved legacy
+Pay Drops still normalize to Stripe Connect in the client data model.
+
+## 1. Create the payment tables
+
+In Supabase Dashboard → SQL Editor, run:
+
+`supabase/sql/board_pay_drops.sql`
+
+The migration creates:
+
+- `pay_drop_accounts` for the server-owned creator/account mapping and safe bank status.
+- `pay_drop_payments` for pending, paid, refunded, and disputed payment records.
+- `pay_drop_webhook_events` for idempotent webhook processing.
+
+Clients can read only their own relevant records and cannot write payment state.
+
+## 2. Configure environment variables
+
+Set these locally in `.env.local` and in the production Vercel project:
+
+| Variable | Required | Purpose |
+| --- | --- | --- |
+| `STRIPE_SECRET_KEY` | Yes | Server-side Stripe key. Prefer a restricted key with only the required Connect, Checkout, Balance, Account, Transfer, and webhook-related access. |
+| `STRIPE_WEBHOOK_SECRET` | Yes | Signing secret for the production Pay Drop webhook endpoint. |
+| `SUPABASE_SERVICE_ROLE_KEY` | Yes | Server-only access for account mappings and the payment ledger. |
+| `NEXT_PUBLIC_APP_URL` | Yes | Canonical origin, such as `https://jabvisions.com`. |
+| `BOARD_PLATFORM_FEE_BPS` | Yes | Board fee in basis points: `1000` = 10%, `500` = 5%, `0` = no fee. |
+| `BOARD_STRIPE_DEFAULT_COUNTRY` | No | Two-letter onboarding country; defaults to `us`. |
+
+Never expose the Stripe secret key, webhook secret, or Supabase service-role key
+through a `NEXT_PUBLIC_` variable.
+
+## 3. Finish Connect setup in Stripe
+
+In Stripe Dashboard:
+
+1. Activate Connect and complete the platform profile.
+2. Add Board branding and the public business/support details Stripe requests.
+3. Configure the payment methods accepted by Checkout. The code intentionally
+   uses Stripe's dynamic payment methods instead of hard-coding card types.
+4. Review Radar for Platforms and payout settings.
+
+Creators connect or update their payout method from Board → Options → Banking.
+They manage payout schedule and eligible instant payout options through their
+Stripe Express dashboard.
+
+## 4. Register the webhook
+
+Create a webhook endpoint:
+
+`https://YOUR_DOMAIN/api/paydrops/stripe/webhook`
+
+Subscribe it to:
+
+- `checkout.session.completed`
+- `checkout.session.async_payment_succeeded`
+- `checkout.session.async_payment_failed`
+- `charge.refunded`
+- `charge.dispute.created`
+
+Copy the endpoint signing secret into `STRIPE_WEBHOOK_SECRET`.
+
+For local testing:
 
 ```bash
-npm install            # picks up "stripe" (added to package.json)
+stripe listen --forward-to localhost:3000/api/paydrops/stripe/webhook
 ```
 
-Set these env vars (Vercel project + `.env.local`):
+## 5. Test before live mode
 
-| Variable | Required | Notes |
-| --- | --- | --- |
-| `STRIPE_SECRET_KEY` | yes | `sk_test_…` while testing, `sk_live_…` in production |
-| `NEXT_PUBLIC_APP_URL` | yes | e.g. `https://board.jabvisions.com` — used for return/success URLs |
-| `BOARD_PLATFORM_FEE_BPS` | no | Platform fee in basis points (e.g. `250` = 2.5%). **Default 0 = no fee.** |
-| `STRIPE_WEBHOOK_SECRET` | for fulfillment | `whsec_…` once you add the webhook (below) |
+1. Sign in as a creator and complete Banking onboarding in Stripe test mode.
+2. Confirm Banking shows the masked payout account and a ready status.
+3. Create a Pay Drop.
+4. Sign in as a different Board user and purchase it with Stripe's test card
+   `4242 4242 4242 4242`, any future expiry, and any CVC.
+5. Confirm the payment appears in Stripe, the destination account receives the
+   creator share, and Banking shows the pending/available balance and ledger row.
+6. Test a refund and a dispute webhook.
 
-Then in the Stripe Dashboard: enable **Connect**, complete the platform profile,
-and set Connect branding (name/icon/color) — Express onboarding requires it.
+Do not switch to live keys until every step passes in test mode.
 
-## 2. What's wired up
+## Fee warning
 
-- `lib/stripe/server.ts` — server Stripe client + platform-fee helpers.
-- `POST /api/paydrops/stripe/connect` — create/link an **Express** account, return a
-  one-time onboarding URL. `GET ?accountId=` — returns `chargesEnabled` /
-  `payoutsEnabled` / `detailsSubmitted`.
-- `POST /api/paydrops/stripe/checkout` — Checkout Session as a **destination charge**
-  (`transfer_data.destination` + optional `application_fee_amount`).
-- `lib/board/payCheckout.ts` — `openHostedPayDropCheckout` now redirects to Stripe Checkout.
-- `lib/board/paydrops.ts` — provider model migrated to `stripe_connect` (legacy
-  Authorize.Net drops migrate forward; external payment links unchanged).
-- Composers (`DropTile`, `DropConsole`) — "Pay on Board" provider + Stripe copy.
-- Options → Banking — processor is **Stripe Connect**; "Connect" starts onboarding.
-- Privacy/Terms — processor language updated to Stripe (please have counsel review).
-
-## 3. Architecture choices (change if you prefer)
-
-- **Account type:** Express (Stripe-hosted onboarding; BOARD is the platform).
-- **Charge model:** Destination charge with `application_fee_amount`.
-- **Platform fee:** configurable, **defaults to 0** so nothing is taken until you set it.
-
-Stripe now recommends the **Accounts v2 API** for brand-new platforms; this uses
-the well-supported v1 Express path. Switch later if you want v2.
-
-## 4. Still TODO (not done here)
-
-1. **Webhook for fulfillment** — add `POST /api/paydrops/stripe/webhook` handling
-   `checkout.session.completed` to mark a Pay Drop paid / record the transaction.
-   Don't rely on the browser redirect for fulfillment.
-2. **Store the connected account id** — persist the recipient's `acct_…` on their
-   profile when onboarding returns, and stamp it onto each Pay Drop so the buyer's
-   checkout can route funds (`destinationAccountId`). Until then, checkout returns
-   a friendly "recipient hasn't connected payout" message.
-3. **Consolidate duplicated provider logic** — `profile/page.tsx`,
-   `profile/[username]/page.tsx`, `PayDropsPanel`, `PayDropsMiniPanel`, and
-   `WorkDesk` still carry their own copies + a few "National Bankcard" strings in
-   non-critical labels. They compile and route through the new Stripe seam, but
-   should be unified onto `lib/board/paydrops.ts` + `dropFlavors`-style shared types.
-4. **Remove the legacy Authorize.Net routes** (`app/api/paydrops/authorize-net/**`)
-   once you confirm nothing depends on them.
-
-## 5. Test checklist (local)
-
-- `npm run build` passes.
-- Options → Banking → Connect → completes Stripe Express onboarding (test mode).
-- Create a Pay Drop → checkout → Stripe test card `4242…` → funds show on the
-  connected account in the Stripe test dashboard.
+With destination charges, Board pays Stripe processing fees. If
+`BOARD_PLATFORM_FEE_BPS` is zero or below Stripe's processing cost, Board's
+margin on Pay Drops can be negative. Confirm current rates at
+https://stripe.com/pricing and monitor Connect margin reporting before launch.

@@ -77,7 +77,7 @@ function demoFeedItems(): BoardActivity[] {
       image_url: "/assets/BoardLogo.png",
       meta: {
         dropType: "pay",
-        payProvider: "authorize_net_accept_hosted",
+        payProvider: "stripe_connect",
         priceCents: 500,
         preview: {
           image: "/assets/BoardLogo.png",

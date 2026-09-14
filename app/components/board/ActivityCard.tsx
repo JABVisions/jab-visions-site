@@ -1176,7 +1176,7 @@ export default function ActivityCard({
         title,
         description: body,
         amountCents: priceCents,
-        destinationAccountId: metaString(meta?.recipientStripeAccountId) || undefined,
+        recipientUserId: metaString(meta?.recipientUserId, item.user_id) || undefined,
       });
     } catch (error) {
       window.alert(

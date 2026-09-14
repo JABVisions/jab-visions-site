@@ -941,91 +941,84 @@ function BankingPayDropsPanel({
     settings: BoardSettings;
     setSettings: React.Dispatch<React.SetStateAction<BoardSettings>>;
 }) {
+    const [liveProfile, setLiveProfile] = useState(bankingProfile);
+    const [bankingBusy, setBankingBusy] = useState<"connect" | "dashboard" | "refresh" | null>("refresh");
+    const [bankingError, setBankingError] = useState("");
     const profile = {
-        ...bankingProfile,
+        ...liveProfile,
         payDropsEnabled: settings.payDropsEnabled,
         showPayDropsOnProfile: settings.showPayDropsOnProfile,
         notifyOnPayDrop: settings.notifyOnPayDrop,
     };
     const statusLabel = BANKING_STATUS_LABELS[profile.status];
     const bankingConnected = Boolean(profile.bankName && profile.bankLast4);
-    const cashOutDisabled =
-        !profile.payoutsEnabled ||
-        !bankingConnected ||
-        profile.availableBalance <= 0 ||
-        profile.status !== "cash_out_available";
 
-    async function connectBanking() {
-        // Kick off Stripe Connect (Express) onboarding. The route creates/links the
-        // connected account and returns a one-time onboarding URL. Requires
-        // STRIPE_SECRET_KEY + Connect enabled (otherwise the route returns a
-        // helpful 503 surfaced below).
+    async function loadBanking() {
+        setBankingBusy("refresh");
+        setBankingError("");
         try {
-            const supabase = supabaseBrowser();
-            const { data: auth } = await supabase.auth.getUser();
-            const uid = auth?.user?.id;
-
-            // Reuse an existing connected account if onboarding was started before.
-            let currentStyle: Record<string, any> = {};
-            let existingAccountId: string | undefined;
-            if (uid) {
-                const { data: prof } = await supabase
-                    .from("profiles")
-                    .select("board_style")
-                    .eq("id", uid)
-                    .maybeSingle();
-                currentStyle =
-                    prof?.board_style && typeof prof.board_style === "object"
-                        ? (prof.board_style as Record<string, any>)
-                        : {};
-                if (typeof currentStyle.stripeAccountId === "string" && currentStyle.stripeAccountId.trim()) {
-                    existingAccountId = currentStyle.stripeAccountId.trim();
-                }
+            const res = await fetch("/api/paydrops/stripe/banking", { cache: "no-store" });
+            const data = await res.json().catch(() => null);
+            if (!res.ok || !data?.ok) {
+                throw new Error(data?.error || "Could not load Banking status.");
             }
 
+            setLiveProfile((current) => ({
+                ...current,
+                status: data.status ?? current.status,
+                availableBalance: Number(data.availableBalance ?? 0),
+                pendingBalance: Number(data.pendingBalance ?? 0),
+                lifetimePayDrops: Number(data.lifetimePayDrops ?? 0),
+                payoutsEnabled: Boolean(data.payoutsEnabled),
+                bankName: typeof data.bankName === "string" ? data.bankName : null,
+                bankLast4: typeof data.bankLast4 === "string" ? data.bankLast4 : null,
+                recentPayDrops: Array.isArray(data.recentPayDrops) ? data.recentPayDrops : [],
+            }));
+        } catch (error) {
+            setBankingError(error instanceof Error ? error.message : "Could not load Banking status.");
+        } finally {
+            setBankingBusy(null);
+        }
+    }
+
+    useEffect(() => {
+        void loadBanking();
+    }, []);
+
+    async function connectBanking() {
+        setBankingBusy("connect");
+        setBankingError("");
+        try {
             const res = await fetch("/api/paydrops/stripe/connect", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    accountId: existingAccountId,
-                    email: auth?.user?.email,
-                    returnPath: "/board/options",
-                    refreshPath: "/board/options",
-                }),
+                body: "{}",
             });
             const data = await res.json().catch(() => null);
             if (!res.ok || !data?.ok || !data.url) {
                 throw new Error(data?.error || "Could not start Stripe onboarding.");
             }
-
-            // Persist the connected account id so checkout can route funds and we
-            // can reuse onboarding next time.
-            if (uid && data.accountId) {
-                await supabase
-                    .from("profiles")
-                    .upsert(
-                        { id: uid, board_style: { ...currentStyle, stripeAccountId: data.accountId } },
-                        { onConflict: "id" }
-                    );
-            }
-
             window.location.href = data.url;
         } catch (error) {
-            if (typeof window !== "undefined") {
-                window.alert(
-                    error instanceof Error ? error.message : "Could not start Stripe onboarding."
-                );
-            }
+            setBankingError(error instanceof Error ? error.message : "Could not start Stripe onboarding.");
+            setBankingBusy(null);
         }
     }
 
-    function cashOut() {
-        // TODO: Fetch payout status.
-        // TODO: Fetch Pay Drop balance.
-        // TODO: Create cash-out transfer.
-        // TODO: Listen for payment/payout webhooks.
-        // TODO: Store safe transaction records in Supabase.
-        console.log("Cash Out clicked", { processor: profile.processor });
+    async function managePayouts() {
+        setBankingBusy("dashboard");
+        setBankingError("");
+        try {
+            const res = await fetch("/api/paydrops/stripe/banking", { method: "POST" });
+            const data = await res.json().catch(() => null);
+            if (!res.ok || !data?.ok || !data.url) {
+                throw new Error(data?.error || "Could not open payout management.");
+            }
+            window.location.href = data.url;
+        } catch (error) {
+            setBankingError(error instanceof Error ? error.message : "Could not open payout management.");
+            setBankingBusy(null);
+        }
     }
 
     const balanceCards = [
@@ -1131,6 +1124,7 @@ function BankingPayDropsPanel({
                         </p>
                         <button
                             type="button"
+                            disabled={bankingBusy !== null}
                             onClick={connectBanking}
                             className={cx(
                                 "mt-4 rounded-full border px-4 py-2 text-xs font-black uppercase tracking-[0.14em] transition",
@@ -1139,12 +1133,16 @@ function BankingPayDropsPanel({
                                     : "border-[#139b69]/25 bg-[#dffff1] text-[#146d50] hover:bg-[#cefde8]"
                             )}
                         >
-                            Connect Banking
+                            {bankingBusy === "connect"
+                                ? "Opening secure setup…"
+                                : bankingConnected
+                                    ? "Update payout details"
+                                    : "Connect payout account"}
                         </button>
                     </div>
                 </Card>
 
-                <Card title="Cash Out" subtitle="Transfer eligible balances." night={night}>
+                <Card title="Payouts" subtitle="Manage payout timing and methods." night={night}>
                     <div
                         className={cx(
                             "rounded-2xl border p-4",
@@ -1153,11 +1151,11 @@ function BankingPayDropsPanel({
                     >
                         <button
                             type="button"
-                            disabled={cashOutDisabled}
-                            onClick={cashOut}
+                            disabled={!bankingConnected || bankingBusy !== null}
+                            onClick={managePayouts}
                             className={cx(
                                 "w-full rounded-full border px-4 py-3 text-xs font-black uppercase tracking-[0.14em] transition",
-                                cashOutDisabled
+                                !bankingConnected || bankingBusy !== null
                                     ? night
                                         ? "cursor-not-allowed border-white/10 bg-white/6 text-white/32"
                                         : "cursor-not-allowed border-black/8 bg-black/5 text-black/32"
@@ -1166,13 +1164,32 @@ function BankingPayDropsPanel({
                                         : "border-[#d5ad25]/35 bg-[#fff1a8] text-[#725a0f] hover:bg-[#ffe77b]"
                             )}
                         >
-                            Cash Out to Bank
+                            {bankingBusy === "dashboard" ? "Opening payouts…" : "Manage payouts"}
                         </button>
                         <p className={cx("mt-3 text-xs leading-relaxed", night ? "text-white/55" : "text-black/55")}>
-                            Payout timing depends on the payment processor and the receiving bank.
+                            Choose your payout schedule and any eligible instant payout options securely in Stripe.
                         </p>
                     </div>
                 </Card>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-3">
+                <button
+                    type="button"
+                    onClick={() => void loadBanking()}
+                    disabled={bankingBusy !== null}
+                    className={cx(
+                        "rounded-full border px-4 py-2 text-xs font-black uppercase tracking-[0.12em] transition",
+                        night ? "border-white/16 bg-white/7 text-white/70" : "border-black/10 bg-white/70 text-black/60"
+                    )}
+                >
+                    {bankingBusy === "refresh" ? "Refreshing…" : "Refresh status"}
+                </button>
+                {bankingError ? (
+                    <span className={cx("text-xs font-semibold", night ? "text-[#ffb6d9]" : "text-[#9e285d]")}>
+                        {bankingError}
+                    </span>
+                ) : null}
             </div>
 
             <Card title="Pay Drop Settings" subtitle="Control how Pay Drops appear and notify you." night={night}>
@@ -1267,6 +1284,10 @@ export default function OptionsClient() {
 
     useEffect(() => {
         setMounted(true);
+        const requestedTab = new URLSearchParams(window.location.search).get("tab");
+        if (TABS.some((item) => item.key === requestedTab)) {
+            setTab(requestedTab as TabKey);
+        }
     }, []);
 
     useEffect(() => {

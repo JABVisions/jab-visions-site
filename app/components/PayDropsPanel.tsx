@@ -84,8 +84,6 @@ export default function PayDropsPanel() {
       return;
     }
 
-    if (drop.provider !== "authorize_net_accept_hosted" && drop.checkoutUrl) return;
-
     try {
       setBusyId(drop.id);
       await openHostedPayDropCheckout({
@@ -100,7 +98,7 @@ export default function PayDropsPanel() {
       });
     } catch (error) {
       window.alert(
-        error instanceof Error ? error.message : "Could not open National Bankcard checkout."
+        error instanceof Error ? error.message : "Could not open Stripe checkout."
       );
     } finally {
       setBusyId(null);
@@ -113,7 +111,7 @@ export default function PayDropsPanel() {
         Pay Drops
       </div>
       <div className="mt-2 text-sm text-black/70">
-        BOARD payment shell is ready for direct links now and National Bankcard hosted checkout next.
+        Pay securely on Board through Stripe, or use a creator&apos;s external payment link.
       </div>
 
       <div className="mt-4 grid gap-3">
@@ -136,11 +134,11 @@ export default function PayDropsPanel() {
                 </div>
 
                 <div className="text-right text-[11px] font-extrabold tracking-[0.14em] uppercase text-black/45">
-                  <div>{drop.provider === "authorize_net_accept_hosted" ? "Authorize.Net" : "Payment Link"}</div>
+                  <div>{drop.provider === "stripe_connect" ? "Stripe" : "Payment Link"}</div>
                   <div className="mt-1">{drop.status.replaceAll("_", " ")}</div>
                 </div>
               </div>
-              {drop.checkoutUrl || drop.provider === "authorize_net_accept_hosted" ? (
+              {drop.checkoutUrl || drop.provider === "stripe_connect" ? (
                 <button
                   type="button"
                   onClick={() => void openCheckout(drop)}

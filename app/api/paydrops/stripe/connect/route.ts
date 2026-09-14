@@ -1,117 +1,165 @@
-// File: app/api/paydrops/stripe/connect/route.ts
-// Stripe Connect onboarding for Pay Drop recipients (Express accounts).
-//
-// POST  -> create (or reuse) an Express connected account and return a one-time
-//          onboarding Account Link URL. The client persists the returned
-//          accountId onto the creator's profile (board_style.stripeAccountId).
-// GET    ?accountId=acct_… -> return onboarding/payout status flags.
-//
-// Requires: STRIPE_SECRET_KEY, a Connect-enabled platform, and NEXT_PUBLIC_APP_URL.
-
 import { NextRequest, NextResponse } from "next/server";
+import { supabaseServer } from "@/lib/supabase/server";
+import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { getStripe } from "@/lib/stripe/server";
 
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
-type PostBody = {
-  accountId?: string;
-  email?: string;
-  returnPath?: string;
-  refreshPath?: string;
-};
+function jsonError(error: string, status: number) {
+  return NextResponse.json({ ok: false, error }, { status });
+}
 
-function notConfigured() {
-  return NextResponse.json(
-    {
-      ok: false,
-      error:
-        "Stripe is not configured yet. Add STRIPE_SECRET_KEY and enable Connect to accept Pay Drops.",
-    },
-    { status: 503 }
-  );
+function appUrl(req: NextRequest) {
+  return process.env.NEXT_PUBLIC_APP_URL?.trim() || req.nextUrl.origin;
 }
 
 export async function POST(req: NextRequest) {
   const stripe = getStripe();
-  if (!stripe) return notConfigured();
+  const db = getSupabaseAdmin();
+  if (!stripe || !db) {
+    return jsonError(
+      "Pay Drops are not configured yet. Add the Stripe and Supabase server keys first.",
+      503
+    );
+  }
 
-  const body = (await req.json().catch(() => ({}))) as PostBody;
-  const appUrl =
-    process.env.NEXT_PUBLIC_APP_URL?.trim() || req.nextUrl.origin;
-  const returnUrl = new URL(body.returnPath || "/board/options", appUrl).toString();
-  const refreshUrl = new URL(body.refreshPath || "/board/options", appUrl).toString();
+  const supabase = supabaseServer();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return jsonError("Sign in to connect a payout account.", 401);
 
   try {
-    let accountId = String(body.accountId ?? "").trim();
+    const { data: storedAccount, error: storedError } = await db
+      .from("pay_drop_accounts")
+      .select("stripe_account_id")
+      .eq("user_id", user.id)
+      .maybeSingle();
+    if (storedError) throw storedError;
+
+    let accountId = storedAccount?.stripe_account_id as string | undefined;
+    let createdNewAccount = false;
 
     if (!accountId) {
-      const account = await stripe.accounts.create({
-        type: "express",
-        email: body.email?.trim() || undefined,
-        capabilities: {
-          transfers: { requested: true },
-          card_payments: { requested: true },
+      const { data: profile } = await db
+        .from("profiles")
+        .select("display_name, username")
+        .eq("id", user.id)
+        .maybeSingle();
+
+      const country = /^[a-z]{2}$/i.test(process.env.BOARD_STRIPE_DEFAULT_COUNTRY ?? "")
+        ? String(process.env.BOARD_STRIPE_DEFAULT_COUNTRY).toLowerCase()
+        : "us";
+      const displayName =
+        String(profile?.display_name ?? profile?.username ?? user.email?.split("@")[0] ?? "Board creator")
+          .trim()
+          .slice(0, 100) || "Board creator";
+
+      const account = await stripe.v2.core.accounts.create(
+        {
+          contact_email: user.email ?? undefined,
+          display_name: displayName,
+          dashboard: "express",
+          defaults: {
+            currency: "usd",
+            responsibilities: {
+              fees_collector: "application",
+              losses_collector: "application",
+            },
+            profile: {
+              business_url: "https://jabvisions.com/board",
+              doing_business_as: displayName,
+              product_description: "Creative work and digital content offered through Board Pay Drops.",
+            },
+          },
+          identity: { country },
+          configuration: {
+            recipient: {
+              capabilities: {
+                stripe_balance: {
+                  stripe_transfers: { requested: true },
+                },
+              },
+            },
+          },
+          metadata: {
+            board_user_id: user.id,
+            board_role: "paydrop_recipient",
+          },
+          include: ["configuration.recipient", "requirements"],
         },
-        business_type: "individual",
-        metadata: { board_role: "paydrop_recipient" },
-      });
+        { idempotencyKey: `board-paydrop-account-${user.id}` }
+      );
       accountId = account.id;
+      createdNewAccount = true;
+
+      const transferStatus =
+        account.configuration?.recipient?.capabilities?.stripe_balance?.stripe_transfers
+          ?.status ?? "pending";
+      const payoutStatus =
+        account.configuration?.recipient?.capabilities?.stripe_balance?.payouts?.status ??
+        "pending";
+      const requirements = account.requirements?.entries ?? [];
+
+      const { error: saveError } = await db.from("pay_drop_accounts").upsert(
+        {
+          user_id: user.id,
+          stripe_account_id: account.id,
+          livemode: account.livemode,
+          dashboard_mode: "express",
+          transfers_status: transferStatus,
+          payouts_status: payoutStatus,
+          requirements_due: requirements,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "user_id" }
+      );
+      if (saveError) throw saveError;
     }
 
-    const link = await stripe.accountLinks.create({
+    const base = appUrl(req);
+    const refreshUrl = new URL(
+      "/board/options?tab=banking&stripe=refresh",
+      base
+    ).toString();
+    const returnUrl = new URL(
+      "/board/options?tab=banking&stripe=return",
+      base
+    ).toString();
+    const collectionOptions = {
+      fields: "eventually_due" as const,
+      future_requirements: "include" as const,
+    };
+    const link = await stripe.v2.core.accountLinks.create({
       account: accountId,
-      refresh_url: refreshUrl,
-      return_url: returnUrl,
-      type: "account_onboarding",
+      use_case: createdNewAccount
+        ? {
+            type: "account_onboarding",
+            account_onboarding: {
+              configurations: ["recipient"],
+              collection_options: collectionOptions,
+              refresh_url: refreshUrl,
+              return_url: returnUrl,
+            },
+          }
+        : {
+            type: "account_update",
+            account_update: {
+              configurations: ["recipient"],
+              collection_options: collectionOptions,
+              refresh_url: refreshUrl,
+              return_url: returnUrl,
+            },
+          },
     });
 
-    return NextResponse.json({ ok: true, accountId, url: link.url });
+    return NextResponse.json({ ok: true, url: link.url });
   } catch (error) {
-    return NextResponse.json(
-      {
-        ok: false,
-        error: error instanceof Error ? error.message : "Could not start Stripe onboarding.",
-      },
-      { status: 500 }
-    );
-  }
-}
-
-export async function GET(req: NextRequest) {
-  const stripe = getStripe();
-  if (!stripe) return notConfigured();
-
-  const accountId = req.nextUrl.searchParams.get("accountId")?.trim();
-  if (!accountId) {
-    return NextResponse.json(
-      { ok: false, error: "accountId is required." },
-      { status: 400 }
-    );
-  }
-
-  try {
-    const account = await stripe.accounts.retrieve(accountId);
-    const requirementsDue = [
-      ...(account.requirements?.currently_due ?? []),
-      ...(account.requirements?.past_due ?? []),
-    ];
-
-    return NextResponse.json({
-      ok: true,
-      accountId,
-      chargesEnabled: account.charges_enabled,
-      payoutsEnabled: account.payouts_enabled,
-      detailsSubmitted: account.details_submitted,
-      disabledReason: account.requirements?.disabled_reason ?? null,
-      requirementsDue,
-    });
-  } catch (error) {
-    return NextResponse.json(
-      {
-        ok: false,
-        error: error instanceof Error ? error.message : "Could not load Stripe status.",
-      },
-      { status: 500 }
+    console.error("[Pay Drops] Connect onboarding failed", error);
+    return jsonError(
+      error instanceof Error ? error.message : "Could not start Stripe onboarding.",
+      500
     );
   }
 }

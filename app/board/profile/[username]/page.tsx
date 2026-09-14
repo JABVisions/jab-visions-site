@@ -1550,10 +1550,11 @@ export default function ProfileBoardViewPage({
         title: drop.title,
         description: drop.description,
         amountCents: drop.priceCents ?? 0,
+        recipientUserId: remoteUserId ?? undefined,
       });
     } catch (error) {
       window.alert(
-        error instanceof Error ? error.message : "Could not open National Bankcard checkout."
+        error instanceof Error ? error.message : "Could not open Stripe checkout."
       );
     } finally {
       setPayCheckoutBusyId(null);

@@ -222,6 +222,9 @@ export async function PATCH(req: NextRequest) {
         ...existingBoardStyle,
         ...sanitizedBoardStyle,
       };
+      // Connected payout account IDs are server-owned payment data and must
+      // never live in the publicly readable profile JSON.
+      delete mergedBoardStyle.stripeAccountId;
     }
 
     const update: any = { id: user.id };

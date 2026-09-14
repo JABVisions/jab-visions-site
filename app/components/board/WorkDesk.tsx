@@ -577,10 +577,11 @@ function PayDropStand({
         title: drop.title,
         description: drop.description,
         amountCents: drop.amountCents,
+        recipientUserId: drop.recipientUserId,
       });
     } catch (error) {
       window.alert(
-        error instanceof Error ? error.message : "Could not open National Bankcard checkout."
+        error instanceof Error ? error.message : "Could not open Stripe checkout."
       );
     } finally {
       setBusyId(null);
