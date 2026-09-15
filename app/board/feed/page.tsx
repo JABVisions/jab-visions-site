@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { supabaseBrowser } from "@/lib/supabase/browser";
 
 import DropConsole from "@/app/components/board/DropConsole";
@@ -40,7 +40,7 @@ function clsx(...parts: Array<string | false | null | undefined>) {
   return parts.filter(Boolean).join(" ");
 }
 
-const PAGE_SIZE = 80;
+const PAGE_SIZE = 20;
 const FEED_TIMEOUT_MS = 8000;
 const PROJECT_DROPS_UPDATED_EVENT = "board:project-drops:updated";
 
@@ -216,7 +216,7 @@ export default function HomeBoardFeedPage() {
     [items]
   );
 
-  function removeItemFromFeed(removedId: string) {
+  const removeItemFromFeed = useCallback((removedId: string) => {
     setItems((current) =>
       current.filter((item) => {
         const meta = item.meta && typeof item.meta === "object" ? item.meta : null;
@@ -227,7 +227,7 @@ export default function HomeBoardFeedPage() {
         );
       })
     );
-  }
+  }, []);
 
   useEffect(() => {
     installBucketBrainBridge();
@@ -273,8 +273,8 @@ export default function HomeBoardFeedPage() {
       try {
         const { data: auth } = await sb.auth.getUser();
         if (auth.user?.id) {
-          await reconcileLocalActivityToRemote(sb, auth.user.id);
-          await recoverOrphanedDescriptDrops(sb, auth.user.id);
+          void reconcileLocalActivityToRemote(sb, auth.user.id).catch(() => {});
+          void recoverOrphanedDescriptDrops(sb, auth.user.id).catch(() => {});
         }
         const data = await Promise.race([
           fetchSupabaseActivity({ limit: PAGE_SIZE, offset: 0, kinds }),

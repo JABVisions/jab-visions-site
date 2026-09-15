@@ -28,6 +28,7 @@ import RemovableDropBadge from "./RemovableDropBadge";
 import DropCommentsDrawer from "./DropCommentsDrawer";
 import LazyDropStudioStage from "./LazyDropStudioStage";
 import DropStudioOverlay from "./DropStudioOverlay";
+import BoardFeedVideo from "./BoardFeedVideo";
 import DescriptDropScreen from "./DescriptDropScreen";
 import VoiceDropSoundboard from "./VoiceDropSoundboard";
 import NewsDropMagazine from "./NewsDropMagazine";
@@ -2448,7 +2449,7 @@ export default function DropTile() {
                     {signedUrl ? (
                       <div className="drop-studio-media-frame">
                         {d.mediaKind === "video" ? (
-                          <video src={signedUrl} controls playsInline preload="metadata" />
+                          <BoardFeedVideo src={signedUrl} />
                         ) : (
                           <img src={signedUrl} alt={d.title} />
                         )}

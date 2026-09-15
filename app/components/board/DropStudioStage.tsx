@@ -310,8 +310,12 @@ async function flattenArtLayerIntoImage(file: File, artOverlayUrl: string): Prom
     const overlayWidth = Math.max(1, overlay.naturalWidth || srcWidth);
     const overlayHeight = Math.max(1, overlay.naturalHeight || srcHeight);
     const crop = detectLetterboxCrop(base);
-    const outWidth = Math.max(1, crop.sw);
-    const outHeight = Math.max(1, crop.sh);
+    const rawWidth = Math.max(1, crop.sw);
+    const rawHeight = Math.max(1, crop.sh);
+    const maxEdge = 2048;
+    const downscale = Math.min(1, maxEdge / Math.max(rawWidth, rawHeight));
+    const outWidth = Math.max(1, Math.round(rawWidth * downscale));
+    const outHeight = Math.max(1, Math.round(rawHeight * downscale));
 
     const canvas = document.createElement("canvas");
     canvas.width = outWidth;
@@ -323,8 +327,8 @@ async function flattenArtLayerIntoImage(file: File, artOverlayUrl: string): Prom
       base,
       crop.sx,
       crop.sy,
-      outWidth,
-      outHeight,
+      rawWidth,
+      rawHeight,
       0,
       0,
       outWidth,
@@ -353,12 +357,12 @@ async function flattenArtLayerIntoImage(file: File, artOverlayUrl: string): Prom
     );
 
     const blob = await new Promise<Blob | null>((resolve) =>
-      canvas.toBlob(resolve, "image/png")
+      canvas.toBlob(resolve, "image/jpeg", 0.92)
     );
     if (!blob) throw new Error("The edited artwork could not be exported.");
     const baseName = file.name.replace(/\.[^.]+$/, "") || "board-art";
-    return new File([blob], `${baseName}-art.png`, {
-      type: "image/png",
+    return new File([blob], `${baseName}-art.jpg`, {
+      type: "image/jpeg",
       lastModified: Date.now(),
     });
   } finally {

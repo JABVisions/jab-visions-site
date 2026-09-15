@@ -34,7 +34,7 @@ export default function DropStudioOverlay({
 
   return (
     <div
-      className={`${styles.overlay} ${filterClass} ${overlayClass}`}
+      className={`${styles.overlay} ${editable ? "" : styles.lite} ${filterClass} ${overlayClass}`}
       aria-label="Drop Studio customizations"
     >
       {value.effects?.filter || value.effects?.overlay ? (

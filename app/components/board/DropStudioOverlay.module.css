@@ -335,3 +335,16 @@
     animation: none;
   }
 }
+
+/* Feed/profile cards: backdrop-filter over <video> locks mobile GPUs.
+   Keep the color washes; drop the live blur. Studio (editable) stays full. */
+.lite::before,
+.lite .effectLayer {
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+
+.lite.overlay_sparkle .effectLayer,
+.lite.overlay_shimmer .effectLayer {
+  animation: none;
+}

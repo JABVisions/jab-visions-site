@@ -36,7 +36,9 @@ import {
   getDropCommentCount,
 } from "@/lib/board/dropComments";
 import { supabaseBrowser } from "@/lib/supabase/browser";
+import { getCachedSignedMediaUrl, invalidateSignedMediaUrl } from "@/lib/board/signedMediaUrl";
 import DropCommentsDrawer from "./DropCommentsDrawer";
+import BoardFeedVideo from "./BoardFeedVideo";
 import DropStudioOverlay from "./DropStudioOverlay";
 import RemovableDropBadge from "./RemovableDropBadge";
 import DescriptDropScreen from "./DescriptDropScreen";
@@ -491,7 +493,7 @@ type Props = {
   onRemove?: (dropId: string) => void;
 };
 
-export default function ActivityCard({
+function ActivityCard({
   item,
   compact,
   hideAuthor = false,
@@ -777,15 +779,7 @@ export default function ActivityCard({
 
     async function signPreviewImage() {
       try {
-        const supabase = supabaseBrowser();
-        const { data, error } = await supabase.storage
-          .from(previewBucket)
-          .createSignedUrl(previewStoragePath, 60 * 45);
-        const publicUrl = supabase.storage
-          .from(previewBucket)
-          .getPublicUrl(previewStoragePath).data.publicUrl;
-        const resolvedUrl = (!error && data?.signedUrl) || publicUrl;
-
+        const resolvedUrl = await getCachedSignedMediaUrl(previewBucket, previewStoragePath);
         if (!cancelled && resolvedUrl) {
           setSignedPreviewImage(resolvedUrl);
         }
@@ -805,15 +799,9 @@ export default function ActivityCard({
   // one instead of staying stuck on a dead link.
   const refreshSignedMedia = useCallback(async () => {
     if (!previewBucket || !previewStoragePath) return;
-    const supabase = supabaseBrowser();
+    invalidateSignedMediaUrl(previewBucket, previewStoragePath);
     try {
-      const { data, error } = await supabase.storage
-        .from(previewBucket)
-        .createSignedUrl(previewStoragePath, 60 * 45);
-      const publicUrl = supabase.storage
-        .from(previewBucket)
-        .getPublicUrl(previewStoragePath).data.publicUrl;
-      const resolvedUrl = (!error && data?.signedUrl) || publicUrl;
+      const resolvedUrl = await getCachedSignedMediaUrl(previewBucket, previewStoragePath);
       if (resolvedUrl) {
         setSignedPreviewImage(resolvedUrl);
         return;
@@ -1488,11 +1476,9 @@ export default function ActivityCard({
 
           {embed.kind === "video" && (
             <div className="mediaFrame">
-              <video
+              <BoardFeedVideo
                 className="vid"
                 src={embed.url}
-                controls
-                playsInline
                 onError={() => setEmbedFailed(true)}
               />
               <DropStudioOverlay customizations={dropCustomizations} />
@@ -1623,12 +1609,9 @@ export default function ActivityCard({
 
       {!showEmbed && !isDescriptDrop && !isDropbookSlide && isStoredVideoDrop ? (
         <div className="mediaFrame storedVideoFrame">
-          <video
+          <BoardFeedVideo
             className="vid"
             src={signedPreviewImage}
-            controls
-            playsInline
-            preload="metadata"
             onError={() => setEmbedFailed(true)}
           />
           <DropStudioOverlay customizations={dropCustomizations} />
@@ -2745,6 +2728,8 @@ export default function ActivityCard({
     </div>
   );
 }
+
+export default React.memo(ActivityCard);
 
 /* ---------- glyphs ---------- */
 

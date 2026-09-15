@@ -962,14 +962,14 @@ export default function DropConsole({
         value={announceCustomizations}
         onChange={setAnnounceCustomizations}
         onComplete={async (file) => {
-          await uploadToBoardMedia(file, "capture");
+          void uploadToBoardMedia(file, "capture");
           setAnnounceStudioOpen(false);
         }}
         onDescriptComplete={async (doc: DescriptDoc) => {
           const plainText = doc.plainText.trim();
           setTitle((current) => current.trim() || doc.title);
           if (plainText && !body.trim()) setBody(plainText);
-          await uploadToBoardMedia(descriptDocToFile(doc), "capture");
+          void uploadToBoardMedia(descriptDocToFile(doc), "capture");
           setAnnounceStudioOpen(false);
         }}
         onClose={() => setAnnounceStudioOpen(false)}
@@ -1878,14 +1878,14 @@ function BoardDropConsoleFields({
             setTitle((current) => current.trim() || "Dropbook");
             setDropDesc("");
           }
-          await uploadToBoardMedia(file, "capture");
+          void uploadToBoardMedia(file, "capture");
         }}
         onDescriptComplete={async (doc: DescriptDoc) => {
           const plainText = doc.plainText.trim();
           setDropFlavor("doc");
           setTitle((current) => current.trim() || doc.title);
           setDocDesc(plainText);
-          await uploadToBoardMedia(descriptDocToFile(doc), "capture");
+          void uploadToBoardMedia(descriptDocToFile(doc), "capture");
         }}
         onClose={() => setStudioOpen(false)}
       />
