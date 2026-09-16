@@ -1690,9 +1690,7 @@ export default function DropStudioStage({
           Remove picture
         </button>
       ) : null}
-      <span className="dropbookCoverPhotoHint">
-        Sits inside the 4:5 cover matte — change the book color with the wheel.
-      </span>
+      <span className="dropbookCoverPhotoHint">Picture sits in the cover matte</span>
     </div>
   );
 
@@ -2384,10 +2382,10 @@ export default function DropStudioStage({
           onDragLeave={opts?.onDragLeave}
           onDrop={opts?.onDrop}
         >
-          <span className={chipStyles.index}>Cover</span>
           <span className={chipStyles.plus} aria-hidden>
             +
           </span>
+          <span className={chipStyles.footer}>Cover</span>
         </div>
       );
     }
