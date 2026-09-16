@@ -2,10 +2,15 @@ import type { FriendZoneOrbUser, FriendZoneState } from "@/lib/board/friendZoneS
 
 export const DEFAULT_ORB_AVATAR = "/assets/board-welcome-mark.jpg";
 
+export const FRIEND_ZONE_ONLINE_MS = 10 * 60 * 1000;
+
 export type FriendZoneBoardStyle = {
   displayName?: string;
   avatarDataUrl?: string | null;
   visibility?: "public" | "private";
+  lastSeenAt?: string | null;
+  presenceOnline?: boolean;
+  presenceScope?: string;
 };
 
 export type FriendZoneActivityRow = {
@@ -57,6 +62,36 @@ export function publicOrbAvatarUrl(...values: unknown[]): string {
   return DEFAULT_ORB_AVATAR;
 }
 
+export function isFriendZonePresenceMeta(meta: unknown): boolean {
+  if (!meta || typeof meta !== "object") return false;
+  const value = meta as Record<string, unknown>;
+  return value.presence === true || value.hidden === "presence" || value.source === "board_presence";
+}
+
+export function activityTimestamp(row: FriendZoneActivityRow | null | undefined): string | null {
+  if (!row) return null;
+  const meta = row.meta && typeof row.meta === "object" ? row.meta : null;
+  const lastSeen =
+    meta && typeof meta.lastSeenAt === "string" && meta.lastSeenAt.trim()
+      ? meta.lastSeenAt.trim()
+      : null;
+  return latestTimestamp(lastSeen, row.created_at);
+}
+
+export function latestTimestamp(...values: Array<string | null | undefined>): string | null {
+  let latest: string | null = null;
+  let latestMs = Number.NEGATIVE_INFINITY;
+  for (const value of values) {
+    if (!value) continue;
+    const date = new Date(value);
+    const time = date.getTime();
+    if (Number.isNaN(time) || time <= latestMs) continue;
+    latest = date.toISOString();
+    latestMs = time;
+  }
+  return latest;
+}
+
 export function formatFriendZoneLastActive(iso?: string | null) {
   if (!iso) return "No drops yet";
   const date = new Date(iso);
@@ -67,7 +102,7 @@ export function formatFriendZoneLastActive(iso?: string | null) {
   const hour = 60 * minute;
   const day = 24 * hour;
 
-  if (diff < minute) return "Active now";
+  if (diff <= FRIEND_ZONE_ONLINE_MS) return "Active now";
   if (diff < hour) return `${Math.max(1, Math.floor(diff / minute))}m ago`;
   if (diff < day) return `${Math.max(1, Math.floor(diff / hour))}h ago`;
   if (diff < day * 7) return `${Math.max(1, Math.floor(diff / day))}d ago`;
@@ -85,10 +120,15 @@ function isWithin(value: string | null | undefined, ms: number) {
   return Date.now() - date.getTime() <= ms;
 }
 
-export function deriveFriendZoneState(activity: FriendZoneActivityRow[], updatedAt?: string | null): FriendZoneState {
+export function deriveFriendZoneState(
+  activity: FriendZoneActivityRow[],
+  updatedAt?: string | null,
+  lastSeenAt?: string | null
+): FriendZoneState {
   const day = 24 * 60 * 60 * 1000;
-  const recent = activity.filter((item) => isWithin(item.created_at, day * 7));
-  const today = activity.filter((item) => isWithin(item.created_at, day));
+  const visibleActivity = activity.filter((item) => !isFriendZonePresenceMeta(item.meta));
+  const recent = visibleActivity.filter((item) => isWithin(item.created_at, day * 7));
+  const today = visibleActivity.filter((item) => isWithin(item.created_at, day));
   const boardDrops = recent.filter((item) => item.kind === "board_drop");
   const highSignalDrop = recent.some((item) => {
     const meta = item.meta && typeof item.meta === "object" ? item.meta : null;
@@ -96,13 +136,18 @@ export function deriveFriendZoneState(activity: FriendZoneActivityRow[], updated
     return dropType.includes("pay") || dropType.includes("project") || dropType.includes("music");
   });
 
-  const latest = activity[0]?.created_at ?? null;
-  if (!latest) return isWithin(updatedAt, day * 5) ? "fresh" : "phantom";
+  const latest = latestTimestamp(
+    lastSeenAt,
+    updatedAt,
+    ...activity.map((item) => activityTimestamp(item))
+  );
+  if (isWithin(latest, FRIEND_ZONE_ONLINE_MS)) return "active";
+  if (!visibleActivity.length) return isWithin(updatedAt, day * 5) ? "fresh" : "phantom";
   if (boardDrops.length >= 2 || recent.length >= 5 || highSignalDrop) return "magnetic";
   if (today.length >= 1) return "active";
-  if (isWithin(latest, day * 3)) return "fresh";
-  if (isWithin(latest, day * 10)) return "echo";
-  if (isWithin(latest, day * 30)) return "fractured";
+  if (isWithin(visibleActivity[0]?.created_at, day * 3)) return "fresh";
+  if (isWithin(visibleActivity[0]?.created_at, day * 10)) return "echo";
+  if (isWithin(visibleActivity[0]?.created_at, day * 30)) return "fractured";
   return "phantom";
 }
 
@@ -115,7 +160,63 @@ export function scoreFriendZoneUser(user: FriendZoneOrbUser) {
     fractured: 2,
     phantom: 1,
   };
-  return stateScore[user.relationshipState || "fresh"] ?? 0;
+  const onlineBonus = user.lastActiveLabel === "Active now" ? 4 : 0;
+  return (stateScore[user.relationshipState || "fresh"] ?? 0) + onlineBonus;
+}
+
+function preferOrbLabel(a: string, b: string) {
+  if (a === "Active now") return a;
+  if (b === "Active now") return b;
+  if (a && a !== "No drops yet" && a !== "Board signal") return a;
+  return b || a;
+}
+
+function pickRicherOrb(current: FriendZoneOrbUser, incoming: FriendZoneOrbUser): FriendZoneOrbUser {
+  const incomingWins = scoreFriendZoneUser(incoming) > scoreFriendZoneUser(current);
+  const winner = incomingWins ? incoming : current;
+  const other = incomingWins ? current : incoming;
+  const name =
+    winner.name && winner.name.toLowerCase() !== "board user" ? winner.name : other.name || winner.name;
+  const username =
+    winner.username && !winner.username.startsWith("boarduser")
+      ? winner.username
+      : other.username || winner.username;
+  const lastActiveLabel = preferOrbLabel(winner.lastActiveLabel, other.lastActiveLabel);
+  return {
+    ...winner,
+    id: winner.id || other.id,
+    name,
+    username,
+    avatarUrl:
+      winner.avatarUrl && winner.avatarUrl !== DEFAULT_ORB_AVATAR ? winner.avatarUrl : other.avatarUrl,
+    lastActiveLabel,
+    relationshipState:
+      lastActiveLabel === "Active now"
+        ? "active"
+        : winner.relationshipState || other.relationshipState,
+  };
+}
+
+export function mergeFriendZoneOrbs(
+  groups: Array<FriendZoneOrbUser[] | null | undefined>,
+  opts: { currentUserId?: string | null; limit: number }
+): FriendZoneOrbUser[] {
+  const byKey = new Map<string, FriendZoneOrbUser>();
+
+  for (const group of groups) {
+    for (const orb of Array.isArray(group) ? group : []) {
+      if (!orb?.username && !orb?.id) continue;
+      if (opts.currentUserId && orb.id && orb.id === opts.currentUserId) continue;
+      const key = cleanFriendZoneUsername(orb.username, String(orb.id || ""));
+      if (!key) continue;
+      const existing = byKey.get(key);
+      byKey.set(key, existing ? pickRicherOrb(existing, orb) : orb);
+    }
+  }
+
+  return [...byKey.values()]
+    .sort((a, b) => scoreFriendZoneUser(b) - scoreFriendZoneUser(a))
+    .slice(0, opts.limit);
 }
 
 function metaString(...values: unknown[]) {
@@ -191,6 +292,7 @@ export function orbsFromActivityRows(
     }
     if (!name) name = username || "Board User";
 
+    const lastSeenAt = latestTimestamp(...activity.map((item) => activityTimestamp(item)));
     orbs.push({
       id: userId,
       name,
@@ -198,14 +300,55 @@ export function orbsFromActivityRows(
       avatarUrl: publicOrbAvatarUrl(
         ...metas.flatMap((meta) => [meta.authorAvatar, meta.avatarUrl, meta.recipientAvatar])
       ),
-      lastActiveLabel: formatFriendZoneLastActive(activity[0]?.created_at),
-      relationshipState: deriveFriendZoneState(activity),
+      lastActiveLabel: formatFriendZoneLastActive(lastSeenAt),
+      relationshipState: deriveFriendZoneState(activity, lastSeenAt, lastSeenAt),
     });
   }
 
   return orbs
     .sort((a, b) => scoreFriendZoneUser(b) - scoreFriendZoneUser(a))
     .slice(0, opts.limit);
+}
+
+export function orbFromProfileLike(input: {
+  id: string;
+  username?: string | null;
+  name?: string | null;
+  displayName?: string | null;
+  avatarUrl?: string | null;
+  updatedAt?: string | null;
+  lastSeenAt?: string | null;
+  boardStyle?: FriendZoneBoardStyle | string | null;
+  activity?: FriendZoneActivityRow[];
+}): FriendZoneOrbUser | null {
+  if (!input.id) return null;
+  const boardStyle = parseFriendZoneBoardStyle(input.boardStyle);
+  if (boardStyle?.visibility === "private") return null;
+  const username = cleanFriendZoneUsername(
+    input.username,
+    `boarduser${String(input.id).slice(0, 6)}`
+  );
+  if (!username) return null;
+  const activity = Array.isArray(input.activity) ? input.activity : [];
+  const lastSeenAt = latestTimestamp(
+    input.lastSeenAt,
+    boardStyle?.lastSeenAt,
+    input.updatedAt,
+    ...activity.map((item) => activityTimestamp(item))
+  );
+  const name =
+    String(
+      input.name || input.displayName || boardStyle?.displayName || username || "Board User"
+    ).trim() || username;
+
+  return {
+    id: input.id,
+    name,
+    username,
+    avatarUrl: publicOrbAvatarUrl(input.avatarUrl, boardStyle?.avatarDataUrl),
+    lastActiveLabel: formatFriendZoneLastActive(lastSeenAt),
+    relationshipState: deriveFriendZoneState(activity, input.updatedAt, lastSeenAt),
+  };
 }
 
 export function isFriendZoneState(value: unknown): value is FriendZoneState {

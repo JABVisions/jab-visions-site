@@ -1,13 +1,13 @@
-import { createClient } from "@supabase/supabase-js";
+import { cookies } from "next/headers";
+import { createServerClient } from "@supabase/ssr";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import type { FriendZoneOrbUser } from "@/lib/board/friendZoneSignals";
 import {
-  cleanFriendZoneUsername,
-  deriveFriendZoneState,
-  formatFriendZoneLastActive,
+  FRIEND_ZONE_ONLINE_MS,
+  mergeFriendZoneOrbs,
+  orbFromProfileLike,
   orbsFromActivityRows,
   parseFriendZoneBoardStyle,
-  publicOrbAvatarUrl,
-  scoreFriendZoneUser,
   type FriendZoneActivityRow,
 } from "@/lib/board/friendZoneOrbs";
 
@@ -23,28 +23,47 @@ type ProfileRow = {
   board_style?: unknown;
 };
 
+type PresenceRow = {
+  user_id: string;
+  username?: string | null;
+  display_name?: string | null;
+  avatar_url?: string | null;
+  last_seen_at?: string | null;
+  visible?: boolean | null;
+};
+
 const SOURCE_TIMEOUT_MS = 8000;
+
+function supabaseSession() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  if (!url || !anon) return null;
+  const cookieStore = cookies();
+  return createServerClient(url, anon, {
+    cookies: {
+      getAll: () => cookieStore.getAll(),
+      setAll: (cs) => {
+        try {
+          cs.forEach(({ name, value, options }) => cookieStore.set(name, value, options));
+        } catch {
+          // GET handlers may not persist refreshed auth cookies.
+        }
+      },
+    },
+  });
+}
 
 function supabaseReadable() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
   const service = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
   if (!url || !(service || anon)) return null;
-
   return createClient(url, service || anon!, {
     auth: {
       persistSession: false,
       autoRefreshToken: false,
     },
   });
-}
-
-function cleanName(row: ProfileRow, username: string) {
-  const boardStyle = parseFriendZoneBoardStyle(row.board_style);
-  const boardName = boardStyle?.displayName;
-  const displayName = typeof row.display_name === "string" ? row.display_name.trim() : "";
-  return String(boardName || displayName || username || "Board User").trim();
 }
 
 async function selectRows<T>(query: PromiseLike<{ data: T[] | null; error: unknown }>) {
@@ -63,37 +82,79 @@ async function selectRows<T>(query: PromiseLike<{ data: T[] | null; error: unkno
       error: result.error,
     };
   } catch (error) {
-    return { data: [], error };
+    return { data: [] as T[], error };
   } finally {
     if (timeoutId) clearTimeout(timeoutId);
   }
 }
 
+async function loadProfiles(client: { from: SupabaseClient["from"] } | null, limit: number) {
+  if (!client) return [] as ProfileRow[];
+  const { data } = await selectRows<ProfileRow>(
+    client
+      .from("profiles")
+      .select("id, username, display_name, avatar_url, updated_at, board_style")
+      .order("updated_at", { ascending: false })
+      .limit(Math.max(limit * 2, 24))
+  );
+  return data;
+}
+
+async function loadPresence(client: { from: SupabaseClient["from"] } | null) {
+  if (!client) return [] as PresenceRow[];
+  const since = new Date(Date.now() - FRIEND_ZONE_ONLINE_MS * 3).toISOString();
+  const { data, error } = await selectRows<PresenceRow>(
+    client
+      .from("board_presence")
+      .select("user_id, username, display_name, avatar_url, last_seen_at, visible")
+      .gte("last_seen_at", since)
+      .limit(80)
+  );
+  if (error) return [];
+  return data.filter((row) => row.visible !== false);
+}
+
 export async function GET(req: Request) {
-  const supabase = supabaseReadable();
-  if (!supabase) {
+  const sessionClient = supabaseSession();
+  const readable = supabaseReadable();
+  const db = readable || sessionClient;
+  if (!db) {
     return Response.json({ ok: false, items: [] });
   }
 
   const url = new URL(req.url);
   const limit = Math.max(1, Math.min(36, Number(url.searchParams.get("limit") || 18)));
 
-  const [{ data: profiles }, { data: activityRows }] = await Promise.all([
-    selectRows<ProfileRow>(
-      supabase
-        .from("profiles")
-        .select("id, username, display_name, avatar_url, updated_at, board_style")
-        .order("updated_at", { ascending: false })
-        .limit(Math.max(limit * 2, 24))
-    ),
-    selectRows<FriendZoneActivityRow>(
-      supabase
-        .from("board_activity")
-        .select("user_id, kind, created_at, meta")
-        .order("created_at", { ascending: false })
-        .limit(300)
-    ),
-  ]);
+  let currentUserId: string | null = null;
+  if (sessionClient) {
+    try {
+      const {
+        data: { user },
+      } = await sessionClient.auth.getUser();
+      currentUserId = user?.id ?? null;
+    } catch {
+      currentUserId = null;
+    }
+  }
+
+  const [{ data: activityRows }, sessionProfiles, readableProfiles, presenceRows] =
+    await Promise.all([
+      selectRows<FriendZoneActivityRow>(
+        db
+          .from("board_activity")
+          .select("user_id, kind, created_at, meta")
+          .order("created_at", { ascending: false })
+          .limit(300)
+      ),
+      loadProfiles(sessionClient, limit),
+      loadProfiles(readable && readable !== sessionClient ? readable : null, limit),
+      loadPresence(db),
+    ]);
+
+  const profilesById = new Map<string, ProfileRow>();
+  for (const row of [...readableProfiles, ...sessionProfiles]) {
+    if (row?.id) profilesById.set(row.id, row);
+  }
 
   const activityByUser = new Map<string, FriendZoneActivityRow[]>();
   for (const activity of (Array.isArray(activityRows) ? activityRows : []) as FriendZoneActivityRow[]) {
@@ -103,45 +164,60 @@ export async function GET(req: Request) {
     activityByUser.set(activity.user_id, list);
   }
 
-  const seen = new Set<string>();
-  const profileItems = (Array.isArray(profiles) ? profiles : [])
-    .filter((row) => {
-      const boardStyle = parseFriendZoneBoardStyle(row.board_style);
-      return !!row?.id && boardStyle?.visibility !== "private";
-    })
-    .map((row): FriendZoneOrbUser | null => {
-      const username = cleanFriendZoneUsername(
-        row.username,
-        `boarduser${String(row.id).slice(0, 6)}`
-      );
-      if (seen.has(username)) return null;
-      seen.add(username);
+  const presenceByUser = new Map<string, PresenceRow>();
+  for (const row of presenceRows) {
+    if (!row?.user_id) continue;
+    presenceByUser.set(row.user_id, row);
+  }
 
+  const profileItems = [...profilesById.values()]
+    .map((row) => {
+      const presence = presenceByUser.get(row.id);
       const boardStyle = parseFriendZoneBoardStyle(row.board_style);
-      const activity = activityByUser.get(row.id) ?? [];
-
-      return {
+      return orbFromProfileLike({
         id: row.id,
-        name: cleanName(row, username),
-        username,
-        avatarUrl: publicOrbAvatarUrl(row.avatar_url, boardStyle?.avatarDataUrl),
-        lastActiveLabel: formatFriendZoneLastActive(activity[0]?.created_at ?? row.updated_at),
-        relationshipState: deriveFriendZoneState(activity, row.updated_at),
-      };
+        username: row.username || presence?.username,
+        displayName: row.display_name || presence?.display_name,
+        avatarUrl: row.avatar_url || presence?.avatar_url,
+        updatedAt: row.updated_at,
+        lastSeenAt: presence?.last_seen_at || boardStyle?.lastSeenAt,
+        boardStyle,
+        activity: activityByUser.get(row.id) ?? [],
+      });
     })
-    .filter((item): item is FriendZoneOrbUser => !!item)
-    .sort((a, b) => scoreFriendZoneUser(b) - scoreFriendZoneUser(a));
+    .filter((item): item is FriendZoneOrbUser => !!item);
 
-  const excludeIds = new Set(profileItems.map((item) => item.id).filter(Boolean) as string[]);
+  const presenceItems = presenceRows
+    .filter((row) => row.user_id && !profilesById.has(row.user_id))
+    .map((row) =>
+      orbFromProfileLike({
+        id: row.user_id,
+        username: row.username,
+        displayName: row.display_name,
+        avatarUrl: row.avatar_url,
+        lastSeenAt: row.last_seen_at,
+        activity: activityByUser.get(row.user_id) ?? [],
+      })
+    )
+    .filter((item): item is FriendZoneOrbUser => !!item);
+
+  const excludeIds = new Set(
+    [...profileItems, ...presenceItems]
+      .map((item) => item.id)
+      .filter(Boolean) as string[]
+  );
+  if (currentUserId) excludeIds.add(currentUserId);
+
   const activityItems = orbsFromActivityRows(activityRows, {
+    currentUserId,
     excludeIds,
-    excludeUsernames: seen,
-    limit,
+    limit: Math.max(limit * 2, 24),
   });
 
-  const items = [...profileItems, ...activityItems]
-    .sort((a, b) => scoreFriendZoneUser(b) - scoreFriendZoneUser(a))
-    .slice(0, limit);
+  const items = mergeFriendZoneOrbs([presenceItems, profileItems, activityItems], {
+    currentUserId,
+    limit,
+  });
 
   return Response.json({ ok: true, items });
 }

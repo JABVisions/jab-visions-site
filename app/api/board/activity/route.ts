@@ -40,11 +40,12 @@ function cleanKind(value: unknown): BoardActivityKind {
 
 function normalizeActivityRow(row: any): BoardActivity | null {
   if (!row || typeof row !== "object") return null;
+  const meta = row.meta && typeof row.meta === "object" ? row.meta : {};
+  if (meta.presence === true || meta.source === "board_presence") return null;
   const body = String(row.body ?? row.text ?? row.content ?? "").trim();
   const title = String(row.title ?? "").trim();
   if (!body && !title) return null;
 
-  const meta = row.meta && typeof row.meta === "object" ? row.meta : {};
   const created =
     typeof row.created_at === "string" && row.created_at
       ? row.created_at

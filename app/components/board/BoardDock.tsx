@@ -18,7 +18,7 @@ import {
 } from "lucide-react";
 import FriendZoneOrb from "@/app/components/board/FriendZoneOrb";
 import type { FriendZoneState } from "@/lib/board/friendZoneSignals";
-import { loadBoardUserFriendZoneOrbs } from "@/lib/board/friendZoneUsers";
+import { beatFriendZonePresence, loadBoardUserFriendZoneOrbs } from "@/lib/board/friendZoneUsers";
 
 type Friend = {
   id: string;
@@ -213,9 +213,10 @@ export default function BoardDock() {
 
   useEffect(() => {
     let cancelled = false;
+    let presenceTimer: ReturnType<typeof setInterval> | undefined;
+    let orbsTimer: ReturnType<typeof setInterval> | undefined;
 
     async function loadBoardUsers() {
-      setFriendsLoading(true);
       const boardUsers = await loadBoardUserFriendZoneOrbs(18);
       if (!cancelled) {
         setFriends(boardUsers.length ? boardUsers.map(friendFromOrb) : readFriends());
@@ -223,10 +224,24 @@ export default function BoardDock() {
       }
     }
 
-    void loadBoardUsers();
+    async function syncFriendZone() {
+      await beatFriendZonePresence();
+      if (!cancelled) await loadBoardUsers();
+    }
+
+    setFriendsLoading(true);
+    void syncFriendZone();
+    presenceTimer = setInterval(() => {
+      void beatFriendZonePresence();
+    }, 45_000);
+    orbsTimer = setInterval(() => {
+      void loadBoardUsers();
+    }, 30_000);
 
     return () => {
       cancelled = true;
+      if (presenceTimer) clearInterval(presenceTimer);
+      if (orbsTimer) clearInterval(orbsTimer);
     };
   }, []);
 
