@@ -145,7 +145,7 @@ function createEmptyDropbookCover(): DropbookCover {
   return {
     id: `dropbook-cover-${Date.now()}`,
     bookColor: "#000000",
-    bookColorSet: false,
+    bookColorSet: true,
     complete: false,
   };
 }
@@ -1636,22 +1636,35 @@ export default function DropStudioStage({
 
   const dropbookShelfFull = dropbookPages.length >= DROPBOOK_MAX_PAGES;
 
-  const renderBookColorField = (className = "") => (
-    <div className={`dropbookCoverColorRow ${className}`.trim()}>
-      <span className="dropbookCoverColorLabel">Book cover color</span>
-      <label className="dropbookCoverColorField">
-        <input
-          type="color"
-          className="dropbookCoverColorPicker"
-          value={/^#[0-9a-fA-F]{6}$/.test(dropbookCoverBlankColor) ? dropbookCoverBlankColor : "#000000"}
-          aria-label="Choose book cover color"
-          onChange={(event) => pickBookColor(event.currentTarget.value)}
-        />
-        <span className="dropbookCoverColorValue">{dropbookCoverBlankColor.toUpperCase()}</span>
-        <span className="dropbookCoverColorChange">Change color</span>
-      </label>
-    </div>
-  );
+  const renderBookColorField = (className = "") => {
+    const isWheel = className.includes("Wheel");
+    return (
+      <div className={`dropbookCoverColorRow ${className}`.trim()}>
+        <span className="dropbookCoverColorLabel">Book cover color</span>
+        <label
+          className="dropbookCoverColorField"
+          style={isWheel ? ({ "--book-color": dropbookCoverBlankColor } as CSSProperties) : undefined}
+        >
+          <input
+            type="color"
+            className="dropbookCoverColorPicker"
+            value={/^#[0-9a-fA-F]{6}$/.test(dropbookCoverBlankColor) ? dropbookCoverBlankColor : "#000000"}
+            aria-label="Choose book cover color"
+            onChange={(event) => pickBookColor(event.currentTarget.value)}
+          />
+          {isWheel ? null : (
+            <>
+              <span className="dropbookCoverColorValue">{dropbookCoverBlankColor.toUpperCase()}</span>
+              <span className="dropbookCoverColorChange">Change color</span>
+            </>
+          )}
+        </label>
+        {isWheel ? (
+          <span className="dropbookCoverColorValue">{dropbookCoverBlankColor.toUpperCase()}</span>
+        ) : null}
+      </div>
+    );
+  };
 
   const renderCoverPhotoControls = () => (
     <div className="dropbookCoverPhotoRow">
