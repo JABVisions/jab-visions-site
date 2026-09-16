@@ -70,6 +70,33 @@ function spotifyEmbed(u: string): string | null {
   }
 }
 
+function appleMusicEmbed(u: string): string | null {
+  try {
+    const url = new URL(u);
+    const host = url.hostname.toLowerCase();
+    if (host === "embed.music.apple.com") return url.toString();
+    if (host !== "music.apple.com" && !host.endsWith(".music.apple.com")) return null;
+    const parts = url.pathname.split("/").filter(Boolean);
+    if (parts[0] === "embed") {
+      return `https://embed.music.apple.com/${parts.slice(1).join("/")}${url.search}`;
+    }
+    if (parts.length < 3) return null;
+    return `https://embed.music.apple.com${url.pathname}${url.search}`;
+  } catch {
+    return null;
+  }
+}
+
+function soundCloudEmbed(u: string): string | null {
+  try {
+    const url = new URL(u);
+    if (!url.hostname.toLowerCase().includes("soundcloud.com")) return null;
+    return `https://w.soundcloud.com/player/?url=${encodeURIComponent(url.toString())}&auto_play=false&visual=true`;
+  } catch {
+    return null;
+  }
+}
+
 function guessType(u: string): Preview["type"] {
   const h = host(u);
   if (h.includes("youtube.com") || h.includes("youtu.be")) return "youtube";
@@ -410,6 +437,34 @@ export async function GET(req: Request) {
       image: null,
       embedUrl: sp,
       type: "spotify",
+    };
+    return NextResponse.json(out, { status: 200 });
+  }
+
+  const appleMusic = appleMusicEmbed(raw);
+  if (appleMusic) {
+    const out: Preview = {
+      url: raw,
+      provider: "apple_music",
+      title: null,
+      description: null,
+      image: null,
+      embedUrl: appleMusic,
+      type: "link",
+    };
+    return NextResponse.json(out, { status: 200 });
+  }
+
+  const soundCloud = soundCloudEmbed(raw);
+  if (soundCloud) {
+    const out: Preview = {
+      url: raw,
+      provider: "soundcloud",
+      title: null,
+      description: null,
+      image: null,
+      embedUrl: soundCloud,
+      type: "link",
     };
     return NextResponse.json(out, { status: 200 });
   }

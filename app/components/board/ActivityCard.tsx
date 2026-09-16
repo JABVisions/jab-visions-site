@@ -45,7 +45,7 @@ import DescriptDropScreen from "./DescriptDropScreen";
 import VoiceDropSoundboard from "./VoiceDropSoundboard";
 import NewsDropMagazine from "./NewsDropMagazine";
 import DropbookSlideScreen from "./DropbookSlideScreen";
-import { isYouTubeDropUrl } from "@/lib/board/dropbookLink";
+import { isStreamingEmbedUrl, isYouTubeDropUrl } from "@/lib/board/dropbookLink";
 
 const EVT_DEPOSIT = "board:bucketBrain:deposit";
 const EVT_OPEN = "board:bucketBrain:open";
@@ -415,7 +415,7 @@ function toAppleMusicEmbed(url: string): string | null {
     const u = new URL(url);
     const host = u.hostname.toLowerCase();
     if (host === "embed.music.apple.com") return u.toString();
-    if (host !== "music.apple.com") return null;
+    if (host !== "music.apple.com" && !host.endsWith(".music.apple.com")) return null;
 
     const parts = u.pathname.split("/").filter(Boolean);
     if (parts[0] === "embed") {
@@ -658,8 +658,9 @@ function ActivityCard({
     mediaKind,
   });
   const isYouTubeHref = isYouTubeDropUrl(href);
+  const isStreamingHref = isStreamingEmbedUrl(href);
   const isAudioFileDrop =
-    !isYouTubeHref &&
+    !isStreamingHref &&
     (mediaKind === "audio" ||
     /^audio\//i.test(storedMime) ||
     /\.(?:mp3|wav|m4a|aac|ogg|flac)$/i.test(storedFileName) ||

@@ -149,7 +149,7 @@ export function parseAppleMusic(url: string) {
     const u = new URL(url);
     const host = u.hostname.toLowerCase();
     if (host === "embed.music.apple.com") return { embedUrl: url, label: "Apple Music" };
-    if (host !== "music.apple.com") return null;
+    if (host !== "music.apple.com" && !host.endsWith(".music.apple.com")) return null;
 
     const parts = u.pathname.split("/").filter(Boolean);
     if (parts[0] === "embed") {

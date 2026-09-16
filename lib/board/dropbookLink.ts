@@ -43,6 +43,17 @@ export function isYouTubeDropUrl(raw: string | null | undefined): boolean {
   return classifyDropbookLinkUrl(raw ?? "") === "youtube";
 }
 
+/** Apple Music / Spotify / SoundCloud share links — Music Drops, not uploaded audio. */
+export function isMusicServiceUrl(raw: string | null | undefined): boolean {
+  return classifyDropbookLinkUrl(raw ?? "") === "music";
+}
+
+/** Streaming links that should iframe-embed instead of playing as an audio file. */
+export function isStreamingEmbedUrl(raw: string | null | undefined): boolean {
+  const kind = classifyDropbookLinkUrl(raw ?? "");
+  return kind === "youtube" || kind === "music";
+}
+
 /** URL alone decides the Dropbook page kind — no mode picker. */
 export function classifyDropbookLinkUrl(raw: string): DropbookLinkKind | null {
   const url = normalizeRawUrl(raw);
@@ -59,7 +70,7 @@ export function classifyDropbookLinkUrl(raw: string): DropbookLinkKind | null {
   return "link";
 }
 
-function musicEmbedFor(url: string) {
+export function musicEmbedFor(url: string) {
   return toSpotifyEmbed(url) || toAppleMusicEmbed(url) || toSoundCloudEmbed(url) || undefined;
 }
 
