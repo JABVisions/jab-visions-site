@@ -297,12 +297,15 @@ export default function DropsBucket({
   selfUser = "me",
   statsOverride,
   isActive = true,
+  chrome = true,
 }: {
   title?: string;
   subtitle?: string;
   selfUser?: string;
   statsOverride?: BucketStatsOverride;
   isActive?: boolean;
+  /** When false, only the sonar overlay mounts (Drop Pad memory access). */
+  chrome?: boolean;
 }) {
   const [brain, setBrain] = useState<BucketBrainState>(EMPTY_BRAIN);
   const [active, setActive] = useState<BucketFolder>("pin");
@@ -561,6 +564,7 @@ export default function DropsBucket({
 
   return (
     <div className="bucket">
+      {chrome ? (
       <div className="shell">
         <div className="topRow">
           <div className="left">
@@ -806,6 +810,9 @@ export default function DropsBucket({
 
         {toast && <div className="toast">{toast}</div>}
       </div>
+      ) : toast ? (
+        <div className="toast">{toast}</div>
+      ) : null}
 
       {/* --------------------------- SONAR DOME OVERLAY --------------------------- */}
       {open && (

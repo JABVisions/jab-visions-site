@@ -2166,7 +2166,7 @@ export default function DropPadOS({
                   : activeSpace === "work"
                     ? "Your productive Board lives east of Home."
                     : activeSpace === "bucket-brain"
-                      ? "Board memory and contextual intelligence live below Home."
+                      ? "Ask, search Work Boards, and think with Visionary below Home."
                       : "The quiet edge of Drop Pad OS."
               : "Power on to summon the Drops menu."}
           </p>

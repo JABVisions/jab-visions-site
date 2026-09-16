@@ -4,6 +4,7 @@ import Image from "next/image";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 
 import { sampleBoardWhispers } from "@/app/components/board/BoardWhispers";
+import BucketBrainSpace from "@/app/components/board/bucketBrain/BucketBrainSpace";
 import DropsBucket from "@/app/components/board/DropsBucket";
 import { getLocalActivity, type BoardActivity } from "@/lib/board/activity";
 import { mergeActivityWithFeed } from "@/lib/board/feedActivity";
@@ -349,14 +350,12 @@ export default function DropPadSpatialWorld({
         <SpaceFrame space="bucket-brain" activeSpace={activeSpace} className="brainSpace">
           <div className="spaceScroll brainScroll" data-space-scroll>
             <div className="brainGlow" aria-hidden />
-            <div className="brainHeading">
-              <div className="spaceEyebrow">BELOW HOME</div>
-              <h3>Bucket Brain</h3>
-              <p>Board memory, resonance, waves, and contextual intelligence.</p>
-            </div>
+            <BucketBrainSpace
+              isActive={activeSpace === "bucket-brain"}
+              reducedMotion={reducedMotion}
+            />
             <DropsBucket
-              title="Bucket Brain"
-              subtitle="Your living memory layer inside Drop Pad OS."
+              chrome={false}
               isActive={activeSpace === "bucket-brain"}
             />
           </div>
