@@ -5,9 +5,10 @@ import { usePathname } from "next/navigation";
 import BoardDock from "@/app/components/board/BoardDock";
 import BoardUtilityHeader from "@/app/components/board/BoardUtilityHeader";
 import BoardDropEditModal from "@/app/components/board/BoardDropEditModal";
+import BoardClientErrorBoundary from "@/app/components/board/BoardClientErrorBoundary";
 
 export default function BoardLayout({ children }: { children: React.ReactNode }) {
-  const pathname = usePathname();
+  const pathname = usePathname() || "";
 
   // Work + Forums should be dark/focused
   const isDark =
@@ -28,14 +29,26 @@ export default function BoardLayout({ children }: { children: React.ReactNode })
 
   return (
     <div className={isDark ? "board-root board-root--dark" : "board-root board-root--light"}>
-      {!isAuthRoute && !isWelcomeRoute ? <BoardUtilityHeader /> : null}
+      {!isAuthRoute && !isWelcomeRoute ? (
+        <BoardClientErrorBoundary name="board-header" fallback={null}>
+          <BoardUtilityHeader />
+        </BoardClientErrorBoundary>
+      ) : null}
 
       {/* Page content */}
       <div className="board-slot">{children}</div>
 
       {/* ✅ Keep the Board dock available on the Board gate/welcome page too. */}
-      {!isAuthRoute ? <BoardDock /> : null}
-      {!isAuthRoute ? <BoardDropEditModal /> : null}
+      {!isAuthRoute ? (
+        <BoardClientErrorBoundary name="board-dock" fallback={null}>
+          <BoardDock />
+        </BoardClientErrorBoundary>
+      ) : null}
+      {!isAuthRoute ? (
+        <BoardClientErrorBoundary name="board-drop-edit" fallback={null}>
+          <BoardDropEditModal />
+        </BoardClientErrorBoundary>
+      ) : null}
 
       <style>{`
         .board-root {

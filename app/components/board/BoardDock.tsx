@@ -137,7 +137,11 @@ function readChat(): ChatMsg[] {
 }
 
 function writeChat(next: ChatMsg[]) {
-  localStorage.setItem(CHAT_KEY, JSON.stringify(next));
+  try {
+    localStorage.setItem(CHAT_KEY, JSON.stringify(next));
+  } catch {
+    // Safari private mode / quota
+  }
 }
 
 function threadIdForFriend(friendId: string) {
@@ -183,7 +187,7 @@ function ExploreIcon({
 }
 
 export default function BoardDock() {
-  const pathname = usePathname();
+  const pathname = usePathname() || "";
   const router = useRouter();
 
   const [friends, setFriends] = useState<Friend[]>([]);
@@ -295,7 +299,7 @@ export default function BoardDock() {
   const filteredFriends = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return friends;
-    return friends.filter((f) => f.name.toLowerCase().includes(q));
+    return friends.filter((f) => String(f.name || "").toLowerCase().includes(q));
   }, [friends, query]);
 
   const activeFriend = useMemo(() => {
@@ -539,7 +543,8 @@ export default function BoardDock() {
       </div>
 
       {/* ✅ Friend Zone overlay lives here (dock unchanged) */}
-      <div className="fz_nativeOverlay">
+      {drawerOpen ? (
+      <div className="fz_nativeOverlay isOpen">
         <div className="fz_overlay">
           <div
             className="fz_sheet"
@@ -583,7 +588,7 @@ export default function BoardDock() {
                   placeholder="Search friends…"
                 />
               </div>
-              <div className="fz_hintMini">Tap once to DM. Double tap to open profile board.</div>
+              <div className="fz_hintMini">Tap an orb to message. Open their board from the chat header.</div>
             </div>
 
             {/* Orbs row */}
@@ -666,10 +671,20 @@ export default function BoardDock() {
                       <div className="fz_avatar big" aria-hidden>
                         🙂
                       </div>
-                      <div>
-                        <div className="fz_chatName">{activeFriend.name}</div>
-                        <div className="fz_chatSub">Direct messages</div>
-                      </div>
+                        <div>
+                          <div className="fz_chatName">{activeFriend.name}</div>
+                          {activeFriend.username ? (
+                            <Link
+                              href={`/board/profile/${encodeURIComponent(activeFriend.username)}`}
+                              className="fz_chatSubLink"
+                              onClick={closeFriendZone}
+                            >
+                              Open @{activeFriend.username}'s board
+                            </Link>
+                          ) : (
+                            <div className="fz_chatSub">Direct messages</div>
+                          )}
+                        </div>
                     </div>
                     {dmStatus ? <div className="fz_dmStatus">{dmStatus}</div> : null}
                   </div>
@@ -725,6 +740,7 @@ export default function BoardDock() {
           </div>
         </div>
       </div>
+      ) : null}
 
       <style>{`
         /* ----------------------------- Dock styles (unchanged) ----------------------------- */
@@ -789,7 +805,7 @@ export default function BoardDock() {
         .fz_details { display: inline-flex; }
         .fz_details summary::-webkit-details-marker { display: none; }
         .fz_nativeOverlay { display: none; }
-        .bd_wrap:has(.fz_details[open]) + .fz_nativeOverlay { display: block; }
+        .fz_nativeOverlay.isOpen { display: block; }
         .bd_zoneBtn:hover { transform: translateY(-1px); filter: brightness(1.02); }
         .fz_details[open] .bd_zoneBtn,
         .bd_zoneBtn.open { box-shadow: 0 0 0 1px rgba(255,0,190,0.18), 0 0 24px rgba(255,0,190,0.10); }
@@ -1109,6 +1125,14 @@ export default function BoardDock() {
         .fz_chatSub{
           font-size: 11px;
           color: rgba(255,255,255,0.55);
+        }
+        .fz_chatSubLink{
+          display: inline-block;
+          margin-top: 2px;
+          font-size: 11px;
+          font-weight: 800;
+          color: rgba(0,255,150,0.86);
+          text-decoration: none;
         }
         .fz_dmStatus{
           max-width: 46%;

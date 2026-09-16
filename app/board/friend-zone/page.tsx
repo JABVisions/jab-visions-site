@@ -69,6 +69,7 @@ export default function FriendZonePage() {
               </p>
               <p className="mx-auto mt-2 max-w-lg text-sm font-semibold text-black/45">
                 Friend Zone is ready for live Board users once public profiles are available.
+                Nearby boards from the feed will appear here automatically.
               </p>
             </div>
           )}

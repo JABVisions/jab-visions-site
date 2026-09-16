@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import Navbar from "./Navbar";
 
 export default function SiteShell({ children }: { children: ReactNode }) {
-  const pathname = usePathname();
+  const pathname = usePathname() || "";
   const isBoardExperience =
     pathname === "/board" ||
     pathname.startsWith("/board/") ||

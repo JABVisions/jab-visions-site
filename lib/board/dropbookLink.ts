@@ -20,8 +20,8 @@ export type ResolvedDropbookLink = {
   chipLabel: string;
 };
 
-function normalizeRawUrl(raw: string) {
-  const trimmed = raw.trim();
+function normalizeRawUrl(raw: unknown) {
+  const trimmed = typeof raw === "string" ? raw.trim() : "";
   if (!trimmed) return "";
   try {
     const withProtocol = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
@@ -55,7 +55,7 @@ export function isStreamingEmbedUrl(raw: string | null | undefined): boolean {
 }
 
 /** URL alone decides the Dropbook page kind — no mode picker. */
-export function classifyDropbookLinkUrl(raw: string): DropbookLinkKind | null {
+export function classifyDropbookLinkUrl(raw: unknown): DropbookLinkKind | null {
   const url = normalizeRawUrl(raw);
   if (!url) return null;
   const host = hostOf(url);

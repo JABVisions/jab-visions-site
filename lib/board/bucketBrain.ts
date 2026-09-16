@@ -147,37 +147,47 @@ function pairKey(a: string, b: string) {
   return A < B ? `${A}::${B}` : `${B}::${A}`;
 }
 
-export function readBrain(): BucketBrainState {
-  if (typeof window === "undefined") {
-    return {
-      version: 3,
-      pass: [],
-      pin: [],
-      push: [],
-      waves: [],
-      mutuals: [],
-      updatedAt: now(),
-    };
-  }
-
-  const raw = window.localStorage.getItem(BUCKET_BRAIN_KEY);
-  const parsed = safeParse<Partial<BucketBrainState>>(raw, {});
-
+function emptyBrain(): BucketBrainState {
   return {
     version: 3,
-    pass: Array.isArray(parsed.pass) ? (parsed.pass as BucketEntry[]) : [],
-    pin: Array.isArray(parsed.pin) ? (parsed.pin as BucketEntry[]) : [],
-    push: Array.isArray(parsed.push) ? (parsed.push as BucketEntry[]) : [],
-    waves: Array.isArray(parsed.waves) ? (parsed.waves as WaveEntry[]) : [],
-    mutuals: Array.isArray(parsed.mutuals) ? (parsed.mutuals as MutualEntry[]) : [],
-    updatedAt: Number(parsed.updatedAt ?? now()),
+    pass: [],
+    pin: [],
+    push: [],
+    waves: [],
+    mutuals: [],
+    updatedAt: now(),
   };
+}
+
+export function readBrain(): BucketBrainState {
+  if (typeof window === "undefined") return emptyBrain();
+
+  try {
+    const raw = window.localStorage.getItem(BUCKET_BRAIN_KEY);
+    const parsed = safeParse<Partial<BucketBrainState>>(raw, {});
+
+    return {
+      version: 3,
+      pass: Array.isArray(parsed.pass) ? (parsed.pass as BucketEntry[]) : [],
+      pin: Array.isArray(parsed.pin) ? (parsed.pin as BucketEntry[]) : [],
+      push: Array.isArray(parsed.push) ? (parsed.push as BucketEntry[]) : [],
+      waves: Array.isArray(parsed.waves) ? (parsed.waves as WaveEntry[]) : [],
+      mutuals: Array.isArray(parsed.mutuals) ? (parsed.mutuals as MutualEntry[]) : [],
+      updatedAt: Number(parsed.updatedAt ?? now()),
+    };
+  } catch {
+    return emptyBrain();
+  }
 }
 
 export function writeBrain(next: BucketBrainState) {
   if (typeof window === "undefined") return;
-  window.localStorage.setItem(BUCKET_BRAIN_KEY, JSON.stringify(next));
-  window.dispatchEvent(new Event(EVT_UPDATED));
+  try {
+    window.localStorage.setItem(BUCKET_BRAIN_KEY, JSON.stringify(next));
+    window.dispatchEvent(new Event(EVT_UPDATED));
+  } catch {
+    // Safari private mode / quota — keep Bucket usable in-memory.
+  }
 }
 
 export function depositToBrain(

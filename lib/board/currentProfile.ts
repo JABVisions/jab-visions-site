@@ -57,8 +57,15 @@ export function readCurrentBoardIdentity(): BoardAuthorIdentity {
     };
   }
 
-  const profile = safeParse(window.localStorage.getItem(BOARD_PROFILE_STORAGE_KEY));
-  const rawOptions = safeParse(window.localStorage.getItem(BOARD_OPTIONS_STORAGE_KEY));
+  let profile: any = null;
+  let rawOptions: any = null;
+  try {
+    profile = safeParse(window.localStorage.getItem(BOARD_PROFILE_STORAGE_KEY));
+    rawOptions = safeParse(window.localStorage.getItem(BOARD_OPTIONS_STORAGE_KEY));
+  } catch {
+    profile = null;
+    rawOptions = null;
+  }
   const options = loadBoardOptionsSettings();
   const username = cleanText(rawOptions?.username ?? profile?.username).replace(/^@+/, "");
   const displayName =
