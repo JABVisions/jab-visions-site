@@ -563,14 +563,22 @@
     width: auto;
   }
 
-  /* Drop Studio's embedded Art Palette is a compact mobile control surface.
-     Use real grid tracks instead of flex wrapping so buttons cannot overlap. */
+  /* Half-screen left drawer: stack color wheel above swatches so controls fit.
+     Fullscreen restores the two-column art surface. */
   .toolsPalette {
     gap: 12px;
     padding: 2px 0 4px;
   }
 
   .toolsPalette .wheelRow {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 10px;
+  }
+
+  :global([data-palette-size="full"]) .toolsPalette .wheelRow {
     display: grid;
     grid-template-columns: minmax(92px, 0.8fr) minmax(150px, 1.2fr);
     align-items: center;
@@ -579,23 +587,34 @@
   }
 
   .toolsPalette .wheel {
-    width: clamp(92px, 27vw, 112px);
-    height: clamp(92px, 27vw, 112px);
+    width: 84px;
+    height: 84px;
     justify-self: center;
   }
 
+  :global([data-palette-size="full"]) .toolsPalette .wheel {
+    width: clamp(92px, 27vw, 112px);
+    height: clamp(92px, 27vw, 112px);
+  }
+
   .toolsPalette .wheelSide {
+    width: 100%;
     gap: 10px;
   }
 
   .toolsPalette .colors {
     display: grid;
-    grid-template-columns: repeat(4, minmax(28px, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 7px;
     justify-items: center;
   }
 
   .toolsPalette .swatch {
+    width: 26px;
+    height: 26px;
+  }
+
+  :global([data-palette-size="full"]) .toolsPalette .swatch {
     width: 30px;
     height: 30px;
   }
@@ -650,13 +669,8 @@
 }
 
 @media (max-width: 360px) {
-  .toolsPalette .wheelRow {
-    grid-template-columns: 1fr;
-    gap: 10px;
-  }
-
   .toolsPalette .wheel {
-    width: 96px;
-    height: 96px;
+    width: 76px;
+    height: 76px;
   }
 }
