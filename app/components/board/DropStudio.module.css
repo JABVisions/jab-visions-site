@@ -554,12 +554,11 @@
   pointer-events: auto;
 }
 
-/* Editing is a fit view: keep every edge of the captured photo/video visible.
-   Flatten bakes strokes onto the photo's own pixels, so published cards
-   never inherit this chip's letterbox. */
+/* Editing fills the monitor. Cover the chip so the photo uses the whole space;
+   flatten maps this same cover crop so published drops have no letterbox. */
 .previewInFrame .mediaLayer > img,
 .previewInFrame .mediaLayer > video {
-  object-fit: contain;
+  object-fit: cover;
   object-position: 50% 50%;
 }
 

@@ -294,9 +294,8 @@ function detectLetterboxCrop(image: HTMLImageElement) {
  * instantly. Flatten image-drop strokes into the actual upload before leaving
  * Drop Studio; Board storage intentionally removes large inline data URLs.
  *
- * The studio preview is object-fit: contain inside a 4:5 chip. Map the overlay
- * back onto the photo's own pixels (cropping any leftover letterbox) so the
- * published Vision Drop is the photo plus ink — no baked-in black bars.
+ * The studio monitor is object-fit: cover. Map the overlay onto that same
+ * cover crop so the published Vision Drop is edge-to-edge photo plus ink.
  */
 async function flattenArtLayerIntoImage(file: File, artOverlayUrl: string): Promise<File> {
   const fileUrl = URL.createObjectURL(file);
@@ -305,17 +304,22 @@ async function flattenArtLayerIntoImage(file: File, artOverlayUrl: string): Prom
       loadStudioImage(fileUrl),
       loadStudioImage(artOverlayUrl),
     ]);
-    const srcWidth = Math.max(1, base.naturalWidth);
-    const srcHeight = Math.max(1, base.naturalHeight);
-    const overlayWidth = Math.max(1, overlay.naturalWidth || srcWidth);
-    const overlayHeight = Math.max(1, overlay.naturalHeight || srcHeight);
+    const overlayWidth = Math.max(1, overlay.naturalWidth || base.naturalWidth);
+    const overlayHeight = Math.max(1, overlay.naturalHeight || base.naturalHeight);
     const crop = detectLetterboxCrop(base);
-    const rawWidth = Math.max(1, crop.sw);
-    const rawHeight = Math.max(1, crop.sh);
+    const photoW = Math.max(1, crop.sw);
+    const photoH = Math.max(1, crop.sh);
+
+    const coverScale = Math.max(overlayWidth / photoW, overlayHeight / photoH);
+    const visSx = Math.max(0, -(overlayWidth - photoW * coverScale) / 2 / coverScale);
+    const visSy = Math.max(0, -(overlayHeight - photoH * coverScale) / 2 / coverScale);
+    const visSw = Math.min(photoW - visSx, overlayWidth / coverScale);
+    const visSh = Math.min(photoH - visSy, overlayHeight / coverScale);
+
     const maxEdge = 2048;
-    const downscale = Math.min(1, maxEdge / Math.max(rawWidth, rawHeight));
-    const outWidth = Math.max(1, Math.round(rawWidth * downscale));
-    const outHeight = Math.max(1, Math.round(rawHeight * downscale));
+    const downscale = Math.min(1, maxEdge / Math.max(visSw, visSh));
+    const outWidth = Math.max(1, Math.round(visSw * downscale));
+    const outHeight = Math.max(1, Math.round(visSh * downscale));
 
     const canvas = document.createElement("canvas");
     canvas.width = outWidth;
@@ -325,36 +329,16 @@ async function flattenArtLayerIntoImage(file: File, artOverlayUrl: string): Prom
 
     context.drawImage(
       base,
-      crop.sx,
-      crop.sy,
-      rawWidth,
-      rawHeight,
+      crop.sx + visSx,
+      crop.sy + visSy,
+      visSw,
+      visSh,
       0,
       0,
       outWidth,
       outHeight
     );
-
-    const containScale = Math.min(overlayWidth / srcWidth, overlayHeight / srcHeight);
-    const containedWidth = srcWidth * containScale;
-    const containedHeight = srcHeight * containScale;
-    const overlayOriginX = (overlayWidth - containedWidth) / 2;
-    const overlayOriginY = (overlayHeight - containedHeight) / 2;
-    const overlaySx = overlayOriginX + (crop.sx / srcWidth) * containedWidth;
-    const overlaySy = overlayOriginY + (crop.sy / srcHeight) * containedHeight;
-    const overlaySw = (outWidth / srcWidth) * containedWidth;
-    const overlaySh = (outHeight / srcHeight) * containedHeight;
-    context.drawImage(
-      overlay,
-      overlaySx,
-      overlaySy,
-      overlaySw,
-      overlaySh,
-      0,
-      0,
-      outWidth,
-      outHeight
-    );
+    context.drawImage(overlay, 0, 0, overlayWidth, overlayHeight, 0, 0, outWidth, outHeight);
 
     const blob = await new Promise<Blob | null>((resolve) =>
       canvas.toBlob(resolve, "image/jpeg", 0.92)

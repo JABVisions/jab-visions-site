@@ -81,7 +81,49 @@ export default function DropChipWorkbench({
       <div className={styles.chipSlot}>
         <div className={styles.chipAssembly}>
           <div className={styles.chipFrame} data-frame={mediaFrame}>
-            <DropChipMonitor>{chip}</DropChipMonitor>
+            <DropChipMonitor
+              overlay={
+                !paletteOpen ? (
+                  <div className={styles.chipDock}>
+                    {onToggleFrame ? (
+                      <button
+                        type="button"
+                        className={styles.chipDockBtn}
+                        data-frame={mediaFrame}
+                        disabled={frameSpinning}
+                        onClick={handleToggleFrame}
+                        aria-label={
+                          mediaFrame === "landscape"
+                            ? "Switch to portrait frame"
+                            : "Switch to landscape frame"
+                        }
+                        title={mediaFrame === "landscape" ? "Portrait 4:5" : "Landscape 16:9"}
+                      >
+                        <FrameRotateIcon
+                          size={21}
+                          landscape={mediaFrame === "landscape"}
+                          spinning={frameSpinning}
+                          spinFromDeg={frameSpinFrom}
+                        />
+                      </button>
+                    ) : null}
+                    <button
+                      type="button"
+                      className={styles.chipDockBtn}
+                      onClick={() => setPaletteOpen(true)}
+                      aria-expanded={false}
+                      aria-controls="drop-studio-palette"
+                      aria-label="Open Palette"
+                      title="Open Palette"
+                    >
+                      <PaletteIcon size={21} />
+                    </button>
+                  </div>
+                ) : null
+              }
+            >
+              {chip}
+            </DropChipMonitor>
           </div>
 
           <aside
@@ -101,44 +143,6 @@ export default function DropChipWorkbench({
             </button>
             <div className={styles.paletteBody}>{deck}</div>
           </aside>
-
-          {!paletteOpen ? (
-            <div className={styles.chipDock}>
-              {onToggleFrame ? (
-                <button
-                  type="button"
-                  className={styles.chipDockBtn}
-                  data-frame={mediaFrame}
-                  disabled={frameSpinning}
-                  onClick={handleToggleFrame}
-                  aria-label={
-                    mediaFrame === "landscape"
-                      ? "Switch to portrait frame"
-                      : "Switch to landscape frame"
-                  }
-                  title={mediaFrame === "landscape" ? "Portrait 4:5" : "Landscape 16:9"}
-                >
-                  <FrameRotateIcon
-                    size={21}
-                    landscape={mediaFrame === "landscape"}
-                    spinning={frameSpinning}
-                    spinFromDeg={frameSpinFrom}
-                  />
-                </button>
-              ) : null}
-              <button
-                type="button"
-                className={styles.chipDockBtn}
-                onClick={() => setPaletteOpen(true)}
-                aria-expanded={false}
-                aria-controls="drop-studio-palette"
-                aria-label="Open Palette"
-                title="Open Palette"
-              >
-                <PaletteIcon size={21} />
-              </button>
-            </div>
-          ) : null}
         </div>
       </div>
     </div>

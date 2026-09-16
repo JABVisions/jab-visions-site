@@ -45,15 +45,19 @@
   container-type: size;
 }
 
-/* Monitor + right-side tool dock gutter — Palette toggle stays put when open. */
+/* Monitor + overlaid tool dock. The photo fills this frame; rotate/edit sit on it. */
 .chipAssembly {
   position: relative;
-  flex: 0 0 auto;
+  flex: 1 1 auto;
   box-sizing: border-box;
-  width: min(var(--drop-chip-max-w), 100%);
+  width: 100%;
+  height: 100%;
   max-width: 100%;
   max-height: 100%;
-  padding-right: var(--palette-gutter);
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  align-items: stretch;
 }
 
 .paletteOpen .chipAssembly {
@@ -70,12 +74,19 @@
 
 .chipFrame {
   position: relative;
+  flex: 1 1 auto;
   width: 100%;
+  height: 100%;
   max-height: 100%;
+  min-width: 0;
+  min-height: 0;
   aspect-ratio: var(--drop-chip-aspect, 4 / 5);
-  height: auto;
   --drop-chip-aspect: 4 / 5;
   contain: layout style;
+}
+
+.workbench .chipFrame {
+  aspect-ratio: auto;
 }
 
 .chipFrame[data-frame="landscape"] {
@@ -95,20 +106,13 @@
   }
 
   .workbench .chipAssembly {
-    width: min(
-      var(--drop-chip-max-w),
-      100cqw,
-      calc(80cqh + var(--palette-gutter))
-    );
+    width: 100%;
+    height: 100%;
     max-height: none;
   }
 
   .workbench .chipAssembly:has(.chipFrame[data-frame="landscape"]) {
-    width: min(
-      var(--drop-chip-max-w),
-      100cqw,
-      calc(177.7778cqh + var(--palette-gutter))
-    );
+    width: 100%;
   }
 
   .workbench .chipFrame {
@@ -174,20 +178,22 @@
   display: block;
 }
 
-/* Board signature — fixed right dock; hides while Palette drawer is open. */
+/* Over the photo, far right edge of the monitor — not in a side gutter. */
 .chipDock {
   position: absolute;
   top: 50%;
-  right: var(--palette-toggle-inset);
+  right: 12px;
   z-index: 12;
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 10px;
   transform: translateY(-50%);
+  pointer-events: none;
 }
 
 .chipDockBtn {
+  pointer-events: auto;
   width: var(--palette-toggle-size);
   height: var(--palette-toggle-size);
   margin: 0;

@@ -241,12 +241,9 @@ export default function BoardArtCanvas({
       const H = canvas.height;
       const iw0 = img.naturalWidth;
       const ih0 = img.naturalHeight;
-      // Mirror the on-screen fit so the sampled region lines up with the photo.
-      // Operating-table / overlay mode uses contain (same as Drop Studio).
-      const scale =
-        operatingTable || exportMode === "overlay"
-          ? Math.min(W / iw0, H / ih0)
-          : Math.max(W / iw0, H / ih0);
+      // Mirror the on-screen object-fit:cover mapping so the sampled region lines
+      // up exactly with what's displayed (studio monitor is cover-filled).
+      const scale = Math.max(W / iw0, H / ih0);
       const ox = (W - iw0 * scale) / 2;
       const oy = (H - ih0 * scale) / 2;
       const srcX = (sx - ox) / scale;
@@ -452,10 +449,7 @@ export default function BoardArtCanvas({
       const img = bgImgRef.current;
       const iw = img.naturalWidth;
       const ih = img.naturalHeight;
-      const scale =
-        operatingTable
-          ? Math.min(out.width / iw, out.height / ih)
-          : Math.max(out.width / iw, out.height / ih);
+      const scale = Math.max(out.width / iw, out.height / ih);
       const dw = iw * scale;
       const dh = ih * scale;
       ctx.drawImage(img, (out.width - dw) / 2, (out.height - dh) / 2, dw, dh);
