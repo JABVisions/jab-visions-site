@@ -16,7 +16,7 @@ export default function FriendZonePage() {
 
     async function loadOrbs() {
       await beatFriendZonePresence();
-      const boardUsers = await loadBoardUserFriendZoneOrbs(18);
+      const boardUsers = await loadBoardUserFriendZoneOrbs(36);
       if (!cancelled) {
         setOrbs(boardUsers);
         setLoading(false);

@@ -3,7 +3,6 @@ import { createServerClient } from "@supabase/ssr";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import type { FriendZoneOrbUser } from "@/lib/board/friendZoneSignals";
 import {
-  FRIEND_ZONE_ONLINE_MS,
   mergeFriendZoneOrbs,
   orbFromProfileLike,
   orbsFromActivityRows,
@@ -95,23 +94,42 @@ async function loadProfiles(client: { from: SupabaseClient["from"] } | null, lim
       .from("profiles")
       .select("id, username, display_name, avatar_url, updated_at, board_style")
       .order("updated_at", { ascending: false })
-      .limit(Math.max(limit * 2, 24))
+      .limit(Math.max(limit * 2, 80))
   );
   return data;
 }
 
+async function loadDirectoryRpc(client: { rpc?: (fn: string) => PromiseLike<{ data: unknown; error: unknown }> } | null) {
+  if (!client?.rpc) return [] as ProfileRow[];
+  try {
+    const { data, error } = await selectRows<ProfileRow & { last_seen_at?: string | null }>(
+      client.rpc("list_friend_zone_profiles") as PromiseLike<{
+        data: Array<ProfileRow & { last_seen_at?: string | null }> | null;
+        error: unknown;
+      }>
+    );
+    if (error) return [];
+    return data;
+  } catch {
+    return [];
+  }
+}
+
 async function loadPresence(client: { from: SupabaseClient["from"] } | null) {
   if (!client) return [] as PresenceRow[];
-  const since = new Date(Date.now() - FRIEND_ZONE_ONLINE_MS * 3).toISOString();
-  const { data, error } = await selectRows<PresenceRow>(
+  const { data } = await selectRows<PresenceRow>(
+    client
+      .from("board_orbit")
+      .select("user_id, username, display_name, avatar_url, last_seen_at, visible")
+      .limit(80)
+  );
+  const { data: legacy } = await selectRows<PresenceRow>(
     client
       .from("board_presence")
       .select("user_id, username, display_name, avatar_url, last_seen_at, visible")
-      .gte("last_seen_at", since)
       .limit(80)
   );
-  if (error) return [];
-  return data.filter((row) => row.visible !== false);
+  return [...data, ...legacy].filter((row) => row.visible !== false);
 }
 
 export async function GET(req: Request) {
@@ -123,7 +141,7 @@ export async function GET(req: Request) {
   }
 
   const url = new URL(req.url);
-  const limit = Math.max(1, Math.min(36, Number(url.searchParams.get("limit") || 18)));
+  const limit = Math.max(1, Math.min(80, Number(url.searchParams.get("limit") || 36)));
 
   let currentUserId: string | null = null;
   if (sessionClient) {
@@ -137,22 +155,28 @@ export async function GET(req: Request) {
     }
   }
 
-  const [{ data: activityRows }, sessionProfiles, readableProfiles, presenceRows] =
-    await Promise.all([
+  const [
+    { data: activityRows },
+    sessionProfiles,
+    readableProfiles,
+    rpcProfiles,
+    presenceRows,
+  ] = await Promise.all([
       selectRows<FriendZoneActivityRow>(
         db
           .from("board_activity")
           .select("user_id, kind, created_at, meta")
           .order("created_at", { ascending: false })
-          .limit(300)
+          .limit(500)
       ),
       loadProfiles(sessionClient, limit),
       loadProfiles(readable && readable !== sessionClient ? readable : null, limit),
+      loadDirectoryRpc(db),
       loadPresence(db),
     ]);
 
   const profilesById = new Map<string, ProfileRow>();
-  for (const row of [...readableProfiles, ...sessionProfiles]) {
+  for (const row of [...readableProfiles, ...sessionProfiles, ...rpcProfiles]) {
     if (row?.id) profilesById.set(row.id, row);
   }
 
@@ -180,7 +204,10 @@ export async function GET(req: Request) {
         displayName: row.display_name || presence?.display_name,
         avatarUrl: row.avatar_url || presence?.avatar_url,
         updatedAt: row.updated_at,
-        lastSeenAt: presence?.last_seen_at || boardStyle?.lastSeenAt,
+        lastSeenAt:
+          presence?.last_seen_at ||
+          (row as ProfileRow & { last_seen_at?: string }).last_seen_at ||
+          boardStyle?.lastSeenAt,
         boardStyle,
         activity: activityByUser.get(row.id) ?? [],
       });
@@ -211,7 +238,7 @@ export async function GET(req: Request) {
   const activityItems = orbsFromActivityRows(activityRows, {
     currentUserId,
     excludeIds,
-    limit: Math.max(limit * 2, 24),
+    limit: Math.max(limit * 2, 80),
   });
 
   const items = mergeFriendZoneOrbs([presenceItems, profileItems, activityItems], {
