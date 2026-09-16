@@ -35,6 +35,7 @@ import NewsDropMagazine from "./NewsDropMagazine";
 import DropbookSlideScreen from "./DropbookSlideScreen";
 import { isDropbookSlideFile } from "@/lib/board/dropbookSlides";
 import type { ResolvedDropbookLink } from "@/lib/board/dropbookLink";
+import { classifyDropbookLinkUrl } from "@/lib/board/dropbookLink";
 import { checkUploadSize, resolveUploadContentType } from "@/lib/board/uploadLimits";
 import {
   buildDropDownloadFilename,
@@ -1126,14 +1127,24 @@ export default function DropTile() {
     if (!normalized) return flash(setMsg, "Paste a valid link.", 1600);
 
     const t = title.trim() || "Untitled";
-    const { embedUrl, hostLabel } = makeEmbedByMode(mode, normalized);
+    const youtubeLink = classifyDropbookLinkUrl(normalized) === "youtube";
+    const savedType: DropType = youtubeLink
+      ? "YouTube"
+      : mode === "YouTube"
+        ? "YouTube"
+        : mode === "Music"
+          ? "Music"
+          : mode === "News"
+            ? "News"
+            : "Link";
+    const { embedUrl, hostLabel } = makeEmbedByMode(savedType, normalized);
 
-    if ((mode === "YouTube" || mode === "Music") && !embedUrl) {
+    if ((savedType === "YouTube" || savedType === "Music") && !embedUrl) {
       return flash(setMsg, "That link can’t be embedded. Try a different URL format.", 2000);
     }
 
     const preview =
-      mode === "Link" || mode === "News"
+      savedType === "Link" || savedType === "News"
         ? await fetchLinkPreview(normalized).catch(() => null)
         : null;
 
@@ -1141,18 +1152,11 @@ export default function DropTile() {
       {
         id: safeId(),
         title: t,
-        type:
-          mode === "YouTube"
-            ? "YouTube"
-            : mode === "Music"
-              ? "Music"
-              : mode === "News"
-                ? "News"
-                : "Link",
+        type: savedType,
         url: normalized,
         embedUrl: embedUrl ?? null,
         hostLabel,
-        headline: mode === "News" ? preview?.title ?? t : undefined,
+        headline: savedType === "News" ? preview?.title ?? t : undefined,
         previewTitle: preview?.title ?? undefined,
         previewDescription: preview?.description ?? undefined,
           previewImage: resolveLinkPreviewImage(normalized, preview?.image) ?? undefined,
@@ -2241,11 +2245,13 @@ export default function DropTile() {
             </div>
             <input
               className="drop-input"
-              placeholder="Or paste Spotify / Apple Music / SoundCloud / YouTube"
+              placeholder="Paste Spotify, Apple Music, or SoundCloud"
               value={url}
               onChange={(e) => {
-                setUrl(e.target.value);
+                const next = e.target.value;
+                setUrl(next);
                 if (e.target.value.trim()) setFile(null);
+                if (classifyDropbookLinkUrl(next) === "youtube") setMode("YouTube");
               }}
             />
             <textarea
