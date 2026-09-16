@@ -161,7 +161,9 @@ function normalizeIncoming(x: any): BoardActivity | null {
 }
 
 function isPrivateDropActivity(item: BoardActivity) {
-  return item.meta?.visibility === "private";
+  if (item.meta?.visibility === "private") return true;
+  if (item.meta?.presence === true || item.meta?.source === "board_presence") return true;
+  return false;
 }
 
 async function fetchSupabaseActivity(opts: {

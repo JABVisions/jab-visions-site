@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import FriendZoneOrb from "@/app/components/board/FriendZoneOrb";
 import type { FriendZoneOrbUser } from "@/lib/board/friendZoneSignals";
-import { loadBoardUserFriendZoneOrbs } from "@/lib/board/friendZoneUsers";
+import { beatFriendZonePresence, loadBoardUserFriendZoneOrbs } from "@/lib/board/friendZoneUsers";
 
 export default function FriendZonePage() {
   const [orbs, setOrbs] = useState<FriendZoneOrbUser[]>([]);
@@ -12,8 +12,10 @@ export default function FriendZonePage() {
 
   useEffect(() => {
     let cancelled = false;
+    let refreshTimer: ReturnType<typeof setInterval> | undefined;
 
     async function loadOrbs() {
+      await beatFriendZonePresence();
       const boardUsers = await loadBoardUserFriendZoneOrbs(18);
       if (!cancelled) {
         setOrbs(boardUsers);
@@ -22,9 +24,13 @@ export default function FriendZonePage() {
     }
 
     void loadOrbs();
+    refreshTimer = setInterval(() => {
+      void loadOrbs();
+    }, 30_000);
 
     return () => {
       cancelled = true;
+      if (refreshTimer) clearInterval(refreshTimer);
     };
   }, []);
 

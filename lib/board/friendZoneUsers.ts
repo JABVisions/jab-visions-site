@@ -2,11 +2,13 @@
 
 import { supabaseBrowser } from "@/lib/supabase/browser";
 import type { FriendZoneOrbUser, FriendZoneState } from "@/lib/board/friendZoneSignals";
+import { readCurrentBoardIdentity } from "@/lib/board/currentProfile";
+import { loadBoardOptionsSettings } from "@/lib/board/optionsSettings";
 import {
   cleanFriendZoneUsername,
-  deriveFriendZoneState,
-  formatFriendZoneLastActive,
   isFriendZoneState,
+  mergeFriendZoneOrbs,
+  orbFromProfileLike,
   orbsFromActivityRows,
   parseFriendZoneBoardStyle,
   publicOrbAvatarUrl,
@@ -172,6 +174,27 @@ async function loadOrbsFromActivityApi(
   }
 }
 
+export async function beatFriendZonePresence() {
+  try {
+    const settings = loadBoardOptionsSettings();
+    if (!settings.presenceOnline || settings.presenceScope === "hidden") return;
+    const identity = readCurrentBoardIdentity();
+    await fetch("/api/board/presence", {
+      method: "POST",
+      cache: "no-store",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        visible: true,
+        username: identity.username || undefined,
+        displayName: identity.displayName || settings.displayName || undefined,
+        avatarUrl: identity.avatar || undefined,
+      }),
+    });
+  } catch {
+    // Presence is best-effort; Friend Zone still loads from activity/profiles.
+  }
+}
+
 export async function loadBoardUserFriendZoneOrbs(limit = 18): Promise<FriendZoneOrbUser[]> {
   try {
     const supabase = supabaseBrowser();
@@ -179,76 +202,61 @@ export async function loadBoardUserFriendZoneOrbs(limit = 18): Promise<FriendZon
       data: { session },
     } = await supabase.auth.getSession();
     const currentUserId = session?.user?.id ?? null;
+    const sourceLimit = Math.max(limit * 2, 24);
 
-    const apiOrbs = await loadBoardUserOrbsFromApi(limit, currentUserId);
-    if (apiOrbs.length) return apiOrbs;
+    const [apiOrbs, profileResult, activityResult, activityOrbs] = await Promise.all([
+      loadBoardUserOrbsFromApi(sourceLimit, currentUserId),
+      withTimeout(
+        supabase
+          .from("profiles")
+          .select("id, username, display_name, avatar_url, updated_at, board_style")
+          .order("updated_at", { ascending: false })
+          .limit(sourceLimit),
+        { data: null, error: new Error("profiles timeout") } as any
+      ),
+      withTimeout(
+        supabase
+          .from("board_activity")
+          .select("user_id, kind, created_at, meta")
+          .order("created_at", { ascending: false })
+          .limit(300),
+        { data: [], error: null } as any
+      ),
+      loadOrbsFromActivityApi(sourceLimit, currentUserId),
+    ]);
 
-    const profileResult = await withTimeout(
-      supabase
-        .from("profiles")
-        .select("id, username, display_name, avatar_url, updated_at, board_style")
-        .order("updated_at", { ascending: false })
-        .limit(Math.max(limit * 2, 24)),
-      { data: null, error: new Error("profiles timeout") } as any
-    );
-    const { data: profiles, error: profileError } = profileResult;
-
-    if (!profileError && Array.isArray(profiles) && profiles.length) {
-      const publicProfiles = (profiles as ProfileRow[]).filter((row) => {
-        if (!row?.id || row.id === currentUserId) return false;
-        const boardStyle = parseFriendZoneBoardStyle(row.board_style);
-        return boardStyle?.visibility !== "private";
-      });
-
-      if (publicProfiles.length) {
-        const { data: activityRows } = await withTimeout(
-          supabase
-            .from("board_activity")
-            .select("user_id, kind, created_at, meta")
-            .order("created_at", { ascending: false })
-            .limit(300),
-          { data: [], error: null } as any
-        );
-
-        const activityByUser = new Map<string, FriendZoneActivityRow[]>();
-        for (const activity of (Array.isArray(activityRows) ? activityRows : []) as FriendZoneActivityRow[]) {
-          if (!activity?.user_id) continue;
-          const list = activityByUser.get(activity.user_id) ?? [];
-          list.push(activity);
-          activityByUser.set(activity.user_id, list);
-        }
-
-        const seen = new Set<string>();
-        const profileOrbs = publicProfiles
-          .map((row): FriendZoneOrbUser | null => {
-            const username = cleanFriendZoneUsername(
-              row.username,
-              `boarduser${String(row.id).slice(0, 6)}`
-            );
-            if (seen.has(username)) return null;
-            seen.add(username);
-
-            const boardStyle = parseFriendZoneBoardStyle(row.board_style);
-            const activity = activityByUser.get(row.id) ?? [];
-            return {
-              id: row.id,
-              name: cleanName(row, username),
-              username,
-              avatarUrl: publicOrbAvatarUrl(row.avatar_url, boardStyle?.avatarDataUrl),
-              lastActiveLabel: formatFriendZoneLastActive(activity[0]?.created_at ?? row.updated_at),
-              relationshipState: deriveFriendZoneState(activity, row.updated_at),
-            };
-          })
-          .filter((user): user is FriendZoneOrbUser => !!user)
-          .sort((a, b) => scoreFriendZoneUser(b) - scoreFriendZoneUser(a))
-          .slice(0, limit);
-
-        if (profileOrbs.length) return profileOrbs;
-      }
+    const activityByUser = new Map<string, FriendZoneActivityRow[]>();
+    for (const activity of (Array.isArray(activityResult?.data)
+      ? activityResult.data
+      : []) as FriendZoneActivityRow[]) {
+      if (!activity?.user_id) continue;
+      const list = activityByUser.get(activity.user_id) ?? [];
+      list.push(activity);
+      activityByUser.set(activity.user_id, list);
     }
 
-    const activityOrbs = await loadOrbsFromActivityApi(limit, currentUserId);
-    if (activityOrbs.length) return activityOrbs;
+    const profileOrbs = Array.isArray(profileResult?.data)
+      ? (profileResult.data as ProfileRow[])
+          .map((row) =>
+            orbFromProfileLike({
+              id: row.id,
+              username: row.username,
+              name: cleanName(row, cleanFriendZoneUsername(row.username, "")),
+              displayName: row.display_name,
+              avatarUrl: row.avatar_url,
+              updatedAt: row.updated_at,
+              boardStyle: row.board_style,
+              activity: activityByUser.get(row.id) ?? [],
+            })
+          )
+          .filter((user): user is FriendZoneOrbUser => !!user)
+      : [];
+
+    const merged = mergeFriendZoneOrbs([apiOrbs, profileOrbs, activityOrbs], {
+      currentUserId,
+      limit,
+    });
+    if (merged.length) return merged;
 
     return FALLBACK_FRIEND_ZONE_ORBS.slice(0, limit);
   } catch {
