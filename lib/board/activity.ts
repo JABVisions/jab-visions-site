@@ -85,14 +85,18 @@ function normalizeActivity(x: any): BoardActivity | null {
 
 export function getLocalActivity(): BoardActivity[] {
   if (typeof window === "undefined") return [];
-  const raw = localStorage.getItem(STORAGE_KEY);
-  const parsed = safeJsonParse<any[]>(raw, []);
-  const cleaned = parsed
-    .map(normalizeActivity)
-    .filter(Boolean) as BoardActivity[];
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    const parsed = safeJsonParse<any[]>(raw, []);
+    const cleaned = parsed
+      .map(normalizeActivity)
+      .filter(Boolean) as BoardActivity[];
 
-  cleaned.sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
-  return cleaned.slice(0, MAX_LOCAL);
+    cleaned.sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
+    return cleaned.slice(0, MAX_LOCAL);
+  } catch {
+    return [];
+  }
 }
 
 export function setLocalActivity(items: BoardActivity[]) {

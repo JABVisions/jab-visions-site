@@ -7,6 +7,7 @@ import DropConsole from "@/app/components/board/DropConsole";
 import DropsBucket from "@/app/components/board/DropsBucket";
 import ActivityCard from "@/app/components/board/ActivityCard";
 import BoardWhispers from "@/app/components/board/BoardWhispers";
+import BoardClientErrorBoundary from "@/app/components/board/BoardClientErrorBoundary";
 import { createBoardWhisper, type BoardWhisperEventType } from "@/lib/board/whispers";
 
 // Ambient whispers woven into the Activity Channel cadence — surfaced quietly
@@ -230,9 +231,13 @@ export default function HomeBoardFeedPage() {
   }, []);
 
   useEffect(() => {
-    installBucketBrainBridge();
-    seedForumsIfEmpty();
-    syncResolvedProjectsToStorage();
+    try {
+      installBucketBrainBridge();
+      seedForumsIfEmpty();
+      syncResolvedProjectsToStorage();
+    } catch {
+      // localStorage / bridge failures must not blank the feed
+    }
   }, []);
 
   useEffect(() => {
@@ -499,7 +504,9 @@ export default function HomeBoardFeedPage() {
             <div className="cards">
               {safeItems.flatMap((a, i) => {
                 const nodes = [
-                  <ActivityCard key={a.id} item={a} onRemove={removeItemFromFeed} />,
+                  <BoardClientErrorBoundary key={a.id} name={`activity-${a.id}`}>
+                    <ActivityCard item={a} onRemove={removeItemFromFeed} />
+                  </BoardClientErrorBoundary>,
                 ];
                 if ((i + 1) % FEED_WHISPER_EVERY === 0) {
                   const eventType =
@@ -524,10 +531,14 @@ export default function HomeBoardFeedPage() {
 
           <aside className="rightRail">
             <div className="dropConsoleSlot">
-              <DropConsole />
+              <BoardClientErrorBoundary name="drop-console">
+                <DropConsole />
+              </BoardClientErrorBoundary>
             </div>
             <div className="bucketSlot">
-              <DropsBucket />
+              <BoardClientErrorBoundary name="drops-bucket">
+                <DropsBucket />
+              </BoardClientErrorBoundary>
             </div>
           </aside>
         </div>

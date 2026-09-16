@@ -137,7 +137,11 @@ function readChat(): ChatMsg[] {
 }
 
 function writeChat(next: ChatMsg[]) {
-  localStorage.setItem(CHAT_KEY, JSON.stringify(next));
+  try {
+    localStorage.setItem(CHAT_KEY, JSON.stringify(next));
+  } catch {
+    // Safari private mode / quota
+  }
 }
 
 function threadIdForFriend(friendId: string) {
@@ -183,7 +187,7 @@ function ExploreIcon({
 }
 
 export default function BoardDock() {
-  const pathname = usePathname();
+  const pathname = usePathname() || "";
   const router = useRouter();
 
   const [friends, setFriends] = useState<Friend[]>([]);
@@ -295,7 +299,7 @@ export default function BoardDock() {
   const filteredFriends = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return friends;
-    return friends.filter((f) => f.name.toLowerCase().includes(q));
+    return friends.filter((f) => String(f.name || "").toLowerCase().includes(q));
   }, [friends, query]);
 
   const activeFriend = useMemo(() => {
@@ -539,7 +543,8 @@ export default function BoardDock() {
       </div>
 
       {/* ✅ Friend Zone overlay lives here (dock unchanged) */}
-      <div className="fz_nativeOverlay">
+      {drawerOpen ? (
+      <div className="fz_nativeOverlay isOpen">
         <div className="fz_overlay">
           <div
             className="fz_sheet"
@@ -583,7 +588,7 @@ export default function BoardDock() {
                   placeholder="Search friends…"
                 />
               </div>
-              <div className="fz_hintMini">Tap once to DM. Double tap to open profile board.</div>
+              <div className="fz_hintMini">Tap an orb to message. Open their board from the chat header.</div>
             </div>
 
             {/* Orbs row */}
@@ -666,10 +671,20 @@ export default function BoardDock() {
                       <div className="fz_avatar big" aria-hidden>
                         🙂
                       </div>
-                      <div>
-                        <div className="fz_chatName">{activeFriend.name}</div>
-                        <div className="fz_chatSub">Direct messages</div>
-                      </div>
+                        <div>
+                          <div className="fz_chatName">{activeFriend.name}</div>
+                          {activeFriend.username ? (
+                            <Link
+                              href={`/board/profile/${encodeURIComponent(activeFriend.username)}`}
+                              className="fz_chatSubLink"
+                              onClick={closeFriendZone}
+                            >
+                              Open @{activeFriend.username}'s board
+                            </Link>
+                          ) : (
+                            <div className="fz_chatSub">Direct messages</div>
+                          )}
+                        </div>
                     </div>
                     {dmStatus ? <div className="fz_dmStatus">{dmStatus}</div> : null}
                   </div>
@@ -725,10 +740,11 @@ export default function BoardDock() {
           </div>
         </div>
       </div>
+      ) : null}
 
       <style>{`
         /* ----------------------------- Dock styles (unchanged) ----------------------------- */
-        .bd_wrap { position: fixed; left: 0; right: 0; bottom: 0; z-index: 40; pointer-events: none; }
+        .bd_wrap { position: fixed; left: 0; right: 0; bottom: 0; z-index: 80; pointer-events: none; isolation: isolate; }
         .bd_shell {
           pointer-events: auto;
           width: min(1380px, calc(100% - 24px));
@@ -752,6 +768,7 @@ export default function BoardDock() {
           border: 1px solid rgba(0,0,0,0.10);
           white-space: nowrap;
           text-decoration: none;
+          flex: 0 0 auto;
           transition: transform 160ms ease, filter 160ms ease, box-shadow 160ms ease;
         }
         .bd_brand:hover { transform: translateY(-1px); filter: brightness(1.02); }
@@ -768,10 +785,15 @@ export default function BoardDock() {
           display: flex;
           align-items: center;
           gap: 8px;
-          flex: 1 0 auto;
+          flex: 1 1 auto;
           flex-wrap: nowrap;
-          min-width: max-content;
+          min-width: 0;
+          overflow-x: auto;
+          overflow-y: hidden;
+          -webkit-overflow-scrolling: touch;
+          scrollbar-width: none;
         }
+        .bd_nav::-webkit-scrollbar { display: none; }
 
         .bd_zoneBtn {
           border: 1px solid rgba(0,0,0,0.12);
@@ -782,14 +804,18 @@ export default function BoardDock() {
           align-items: center;
           gap: 8px;
           cursor: pointer;
+          position: relative;
+          z-index: 3;
+          pointer-events: auto;
+          touch-action: manipulation;
           transition: transform 160ms ease, filter 160ms ease, box-shadow 160ms ease;
           white-space: nowrap;
           list-style: none;
         }
-        .fz_details { display: inline-flex; }
+        .fz_details { display: inline-flex; flex: 0 0 auto; pointer-events: auto; position: relative; z-index: 4; }
         .fz_details summary::-webkit-details-marker { display: none; }
         .fz_nativeOverlay { display: none; }
-        .bd_wrap:has(.fz_details[open]) + .fz_nativeOverlay { display: block; }
+        .fz_nativeOverlay.isOpen { display: block; }
         .bd_zoneBtn:hover { transform: translateY(-1px); filter: brightness(1.02); }
         .fz_details[open] .bd_zoneBtn,
         .bd_zoneBtn.open { box-shadow: 0 0 0 1px rgba(255,0,190,0.18), 0 0 24px rgba(255,0,190,0.10); }
@@ -812,20 +838,24 @@ export default function BoardDock() {
             border-radius: 28px;
             flex-wrap: nowrap;
             justify-content: flex-start;
-            overflow-x: auto;
+            overflow-x: hidden;
             overflow-y: hidden;
-            -webkit-overflow-scrolling: touch;
-            scrollbar-width: none;
           }
-          .bd_shell::-webkit-scrollbar { display: none; }
-          .bd_nav { justify-content: flex-start; flex: 0 0 auto; }
+          .bd_nav {
+            justify-content: flex-start;
+            flex: 1 1 auto;
+            min-width: 0;
+          }
+          .bd_brandWord:not(.pink) { display: none; }
+          .bd_zoneLabel { display: none; }
+          .bd_pill.explore { flex: 0 0 auto; }
         }
 
         /* --------------------------- Friend Zone: bottom sheet --------------------------- */
         .fz_overlay{
           position: fixed;
           inset: 0;
-          z-index: 55;
+          z-index: 90;
           pointer-events: auto;
           background: radial-gradient(circle at 50% 100%, rgba(0,0,0,0.22), rgba(0,0,0,0.10) 40%, rgba(0,0,0,0.0) 70%);
         }
@@ -1109,6 +1139,14 @@ export default function BoardDock() {
         .fz_chatSub{
           font-size: 11px;
           color: rgba(255,255,255,0.55);
+        }
+        .fz_chatSubLink{
+          display: inline-block;
+          margin-top: 2px;
+          font-size: 11px;
+          font-weight: 800;
+          color: rgba(0,255,150,0.86);
+          text-decoration: none;
         }
         .fz_dmStatus{
           max-width: 46%;

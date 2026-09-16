@@ -23,7 +23,7 @@ function clsx(...parts: Array<string | false | null | undefined>) {
 }
 
 export default function Navbar() {
-  const pathname = usePathname();
+  const pathname = usePathname() || "";
   const [open, setOpen] = useState(false);
 
   useEffect(() => {

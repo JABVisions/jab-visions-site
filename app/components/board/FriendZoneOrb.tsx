@@ -22,6 +22,7 @@ function cleanUsername(username: unknown) {
 
 export default function FriendZoneOrb({ user }: Props) {
   const state = getFriendZoneState(user);
+  const stateClass = styles[state] || styles.fresh;
   const label = getRelationshipLabel(state);
   const description = getRelationshipDescription(state);
   const username = cleanUsername(user.username);
@@ -36,7 +37,7 @@ export default function FriendZoneOrb({ user }: Props) {
   return (
     <Link
       href={profileHref}
-      className={`${styles.orbCard} ${styles[state]}`}
+      className={`${styles.orbCard} ${stateClass}`}
       aria-label={`Open ${name}'s Board`}
       title={`Open ${name}'s Board`}
     >

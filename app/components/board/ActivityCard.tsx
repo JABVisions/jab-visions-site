@@ -550,8 +550,8 @@ function ActivityCard({
   // id-based ownership check (drops store the author's user_id as a uuid).
   const [currentAuthUserId, setCurrentAuthUserId] = useState("");
 
-  const title = item?.title || "Drop";
-  const body = (item as any)?.body || (item as any)?.text || "";
+  const title = metaString(item?.title) || "Drop";
+  const body = metaString((item as any)?.body, (item as any)?.text);
   const id = String((item as any)?.id || "");
   const timeLabel = formatDropTime((item as any)?.created_at);
 

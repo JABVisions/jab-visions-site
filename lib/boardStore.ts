@@ -85,7 +85,11 @@ function readJSON<T>(key: string): T | null {
 
 function writeJSON<T>(key: string, value: T) {
   if (typeof window === "undefined") return;
-  localStorage.setItem(key, JSON.stringify(value));
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    // Safari private mode / quota — keep the Board usable.
+  }
 }
 
 export function emit(name: string) {

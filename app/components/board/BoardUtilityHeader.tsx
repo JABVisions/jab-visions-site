@@ -60,7 +60,7 @@ function rgbaFromHex(hex: string, alpha: number) {
 }
 
 export default function BoardUtilityHeader() {
-  const pathname = usePathname();
+  const pathname = usePathname() || "";
   const [profile, setProfile] = useState<ProfilePayload>({
     displayName: "Board User",
     avatarDataUrl: null,
@@ -72,6 +72,7 @@ export default function BoardUtilityHeader() {
 
   useEffect(() => {
     const read = () => {
+      try {
       const legacyRaw =
         typeof window !== "undefined" ? localStorage.getItem(PROFILE_STORAGE_KEY) : null;
       const scopedKey = scopedStorageKey(PROFILE_STORAGE_KEY, userId);
@@ -122,6 +123,9 @@ export default function BoardUtilityHeader() {
       }));
       if (resolvedUsername) setUsername(resolvedUsername);
       setOptions(parsedOptions);
+      } catch {
+        // Safari private / blocked storage must not crash the Board chrome.
+      }
     };
 
     read();
