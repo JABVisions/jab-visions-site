@@ -100,7 +100,7 @@ import {
   type DropbookManifest,
   type DropbookSlide,
 } from "@/lib/board/dropbookSlides";
-import { resolveDropbookLink, type DropbookLinkKind } from "@/lib/board/dropbookLink";
+import { resolveDropbookLink, type DropbookLinkKind, type ResolvedDropbookLink } from "@/lib/board/dropbookLink";
 
 type CaptureMode = "photo" | "video" | "audio" | "art" | "descript";
 type FacingMode = "user" | "environment";
@@ -118,7 +118,7 @@ export type DropbookChip = {
   descriptDocId?: string;
   descriptTitle?: string;
   descriptPreview?: string;
-  /** Session-only link page (YouTube / music / web). Never auto-posts to Board. */
+  /** Session link page (YouTube / music / web) inside a Dropbook. */
   linkKind?: DropbookLinkKind;
   linkUrl?: string;
   linkEmbedUrl?: string;
@@ -445,6 +445,7 @@ export default function DropStudioStage({
   onChange,
   onComplete,
   onDescriptComplete,
+  onLinkComplete,
   onClose,
   studioDraftRef,
   allowedModes = DEFAULT_CAPTURE_MODES,
@@ -460,6 +461,8 @@ export default function DropStudioStage({
   onChange: (next: DropCustomization) => void;
   onComplete: (file: File, source: "capture" | "upload") => void | Promise<void>;
   onDescriptComplete?: (doc: DescriptDoc) => void | Promise<void>;
+  /** Standalone YouTube / music / web Link Drop — not a Dropbook page. */
+  onLinkComplete?: (link: ResolvedDropbookLink) => void | Promise<void>;
   onClose: () => void;
   /** Live studio customizations (frame/rotation/etc.) without parent re-renders. */
   studioDraftRef?: React.MutableRefObject<DropCustomization | undefined>;
@@ -1675,7 +1678,7 @@ export default function DropStudioStage({
         </button>
       ) : null}
       <span className="dropbookCoverPhotoHint">
-        Embeds inside the book color matte — draw over it in Edit Cover.
+        Sits inside the 4:5 cover matte — change the book color with the wheel.
       </span>
     </div>
   );
@@ -1872,10 +1875,7 @@ export default function DropStudioStage({
   }, [dropbookShelfFull, resetCreationSurface, flashSaveNote]);
 
   const beginDropbookSession = useCallback(() => {
-    // Activating a Dropbook must not discard or navigate away from the drop
-    // currently being captured/edited. The existing completion action will
-    // add that work as a page; Home is the explicit route to the book screen.
-    setDropbookCreating(true);
+    setDropbookCreating(false);
     setDropbookCover(createEmptyDropbookCover());
     setDropbookPages([]);
     dropbookPageFilesRef.current.clear();
@@ -1883,15 +1883,14 @@ export default function DropStudioStage({
     editingDropbookPageIdRef.current = null;
     setDropbookEditingDescriptDoc(null);
     dropbookPageSeqRef.current = 0;
-    setDropbookIntroPhase("workspace");
-    setDropbookEditingCover(false);
+    setDropbookIntroPhase("splash");
+    setDropbookEditingCover(true);
     setDropbookCoverMode("choose");
     setDropbookCoverBlankColor("#000000");
     clearDropbookCoverPhoto();
     setDropbookLinkBusy(false);
     setIsDropbookMode(true);
-    flashSaveNote("Dropbook ready — add this drop or open Home");
-  }, [clearDropbookCoverPhoto, flashSaveNote]);
+  }, [clearDropbookCoverPhoto]);
 
   const addDropbookLinkPage = useCallback(async () => {
     if (isDropbookMode && dropbookShelfFull) {
@@ -1911,9 +1910,27 @@ export default function DropStudioStage({
         flashSaveNote("That doesn't look like a usable link");
         return;
       }
-      // Link pages live in a Dropbook session only — never Board-publish alone.
       if (!isDropbookMode) {
-        beginDropbookSession();
+        if (!onLinkComplete) {
+          flashSaveNote("Couldn't post that link from here.");
+          return;
+        }
+        try {
+          await onLinkComplete(resolved);
+        } catch {
+          flashSaveNote("Couldn't post that link. Try again.");
+          return;
+        }
+        setDropbookLinkDraft("");
+        flashSaveNote(
+          resolved.kind === "youtube"
+            ? "YouTube Drop posted ✦"
+            : resolved.kind === "music"
+              ? "Music Drop posted ✦"
+              : "Link Drop posted ✦"
+        );
+        onClose();
+        return;
       }
       appendDropbookPage({
         label: resolved.chipLabel,
@@ -1939,11 +1956,12 @@ export default function DropStudioStage({
     }
   }, [
     appendDropbookPage,
-    beginDropbookSession,
     dropbookLinkDraft,
     dropbookShelfFull,
     flashSaveNote,
     isDropbookMode,
+    onClose,
+    onLinkComplete,
   ]);
 
   // Single source of truth for the editor preview URL — recreated whenever the file changes.
@@ -2301,9 +2319,13 @@ export default function DropStudioStage({
         <div className="dropbookCoverSlateBody">
           {opts?.children ? (
             opts.children
-          ) : dropbookCover.previewUrl ? (
+          ) : coverBlankBackgroundUrl || dropbookCover.previewUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
-            <img className="dropbookCoverSlatePreview" src={dropbookCover.previewUrl} alt="" />
+            <img
+              className="dropbookCoverSlatePreview"
+              src={coverBlankBackgroundUrl || dropbookCover.previewUrl}
+              alt=""
+            />
           ) : (
             <span className="dropbookCoverSlatePlus" aria-hidden>
               +
@@ -2557,7 +2579,11 @@ export default function DropStudioStage({
                     value={dropbookLinkDraft}
                     onChange={(event) => setDropbookLinkDraft(event.currentTarget.value)}
                     disabled={dropbookLinkBusy || (isDropbookMode && dropbookShelfFull)}
-                    aria-label="Paste YouTube, music, or web link for Dropbook"
+                    aria-label={
+                      isDropbookMode
+                        ? "Paste YouTube, music, or web link for Dropbook"
+                        : "Paste YouTube, music, or web link to post a Link Drop"
+                    }
                   />
                 </label>
                 <button
@@ -2569,7 +2595,7 @@ export default function DropStudioStage({
                     !dropbookLinkDraft.trim()
                   }
                 >
-                  {dropbookLinkBusy ? "…" : "Add →"}
+                  {dropbookLinkBusy ? "…" : isDropbookMode ? "Add →" : "Post →"}
                 </button>
               </form>
 
@@ -2760,36 +2786,6 @@ export default function DropStudioStage({
                   <h1 className="dropbookWordmark dropbookTitleHeroSplash">Dropbook</h1>
                 </div>
               ) : isDropbookMode &&
-                dropbookCreating &&
-                dropbookCoverMode === "blank" &&
-                dropbookEditingCover ? (
-                <div className="dropbookCoverEditor">
-                  <div className="dropbookCoverEditorHead">
-                    <button
-                      type="button"
-                      className="studioGhost dropbookCoverBack"
-                      onClick={() => {
-                        setDropbookCreating(false);
-                        setDropbookCoverMode("choose");
-                      }}
-                    >
-                      ← Cover options
-                    </button>
-                    <span className="dropbookCoverEditorTitle">Edit Cover</span>
-                  </div>
-                  {renderBookColorField()}
-                  {renderCoverPhotoControls()}
-                  <div className="dropbookCoverStage capMonitorHost">
-                    <BoardArtCanvas
-                      operatingTable
-                      layout="stack"
-                      backgroundImageUrl={coverBlankBackgroundUrl || undefined}
-                      saveLabel="Finish Book Cover →"
-                      onSave={commitCoverBlank}
-                    />
-                  </div>
-                </div>
-              ) : isDropbookMode &&
                 !dropbookCreating &&
                 dropbookEditingCover &&
                 dropbookCoverMode === "choose" ? (
@@ -2798,7 +2794,10 @@ export default function DropStudioStage({
                     <div className="dropbookCoverChooseHead">
                       <div className="dropbookMonitorLabel">Dropbook Cover</div>
                     </div>
-                    {renderBookColorField("dropbookCoverColorRowChoose")}
+                    <div className="dropbookCoverStageRow">
+                      {renderCoverSlate("stage")}
+                      {renderBookColorField("dropbookCoverColorRowWheel")}
+                    </div>
                     {renderCoverPhotoControls()}
                     <button
                       type="button"
@@ -2807,24 +2806,6 @@ export default function DropStudioStage({
                     >
                       Finish Book Cover →
                     </button>
-                    <div className="dropbookCoverChooseBtns">
-                      <button
-                        type="button"
-                        className="dropbookCoverChooseBtn"
-                        onClick={() => {
-                          setDropbookCoverMode("blank");
-                          setDropbookCreating(true);
-                        }}
-                      >
-                        <span className="dropbookCoverChooseGlyph" aria-hidden>
-                          🎨
-                        </span>
-                        <span className="dropbookCoverChooseTitle">Edit Cover</span>
-                        <span className="dropbookCoverChooseHint">
-                          Color · picture · draw · paint
-                        </span>
-                      </button>
-                    </div>
                   </div>
                 </div>
               ) : isDropbookMode && !dropbookCreating && dropbookIntroPhase === "workspace" ? (

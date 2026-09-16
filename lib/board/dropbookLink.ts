@@ -78,8 +78,8 @@ function chipLabelFor(kind: DropbookLinkKind, title: string) {
 }
 
 /**
- * Resolve a pasted URL into a Dropbook page payload.
- * Session-only — never posts a standalone Board Link Drop.
+ * Resolve a pasted URL into a YouTube / music / web link payload.
+ * Used for standalone Link Drops and Dropbook pages.
  */
 export async function resolveDropbookLink(raw: string): Promise<ResolvedDropbookLink | null> {
   const url = normalizeRawUrl(raw);

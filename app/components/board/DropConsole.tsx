@@ -22,6 +22,7 @@ import {
 } from "@/lib/board/dropFlavors";
 import { descriptDocToFile, type DescriptDoc } from "@/lib/board/descriptDocs";
 import { isDropbookSlideFile } from "@/lib/board/dropbookSlides";
+import type { ResolvedDropbookLink } from "@/lib/board/dropbookLink";
 import { checkUploadSize, resolveUploadContentType } from "@/lib/board/uploadLimits";
 
 import {
@@ -887,6 +888,93 @@ export default function DropConsole({
     }
   }
 
+  async function publishStudioLinkDrop(link: ResolvedDropbookLink) {
+    const flavor: DropFlavor =
+      link.kind === "youtube" ? "youtube" : link.kind === "music" ? "music" : "link";
+    const identity = readCurrentBoardIdentity();
+    const dropId = newId(flavor);
+    const titleText = link.title.trim() || `${DROP_FLAVOR_LABEL[flavor]} Drop`;
+    const bodyText = link.description?.trim() || `New ${DROP_FLAVOR_LABEL[flavor]} drop added to Board.`;
+    const preview = {
+      url: link.url,
+      provider: link.provider ?? null,
+      title: link.title,
+      description: link.description ?? null,
+      image: link.image ?? null,
+      embedUrl: link.embedUrl ?? null,
+      type: link.kind === "youtube" ? "video" : "link",
+    };
+
+    const res = await createActivity(sb, {
+      user_id: meId,
+      kind: "board_drop",
+      title: titleText,
+      body: bodyText,
+      href: link.url,
+      image_url: link.image ?? null,
+      meta: {
+        source: "drop_studio",
+        drop_flavor: flavor,
+        dropType: flavor,
+        dropId,
+        authorId: identity.id,
+        authorName: identity.displayName,
+        authorUsername: identity.username || null,
+        authorAvatar: identity.avatar || null,
+        authorGlow: identity.glow,
+        authorAuraIntensity: identity.auraIntensity,
+        preview,
+      },
+    });
+
+    await persistBoardDropToProfile({
+      id: dropId,
+      title: titleText,
+      type: profileDropType(flavor),
+      createdAt: Date.now(),
+      url: link.url,
+      embedUrl: link.embedUrl ?? null,
+      hostLabel: link.provider ?? null,
+      previewTitle: link.title,
+      previewDescription: link.description,
+      previewImage: link.image,
+      description: bodyText,
+    });
+
+    emitNewActivity({
+      id: res.activity.id,
+      created_at: res.activity.created_at,
+      user_id: res.activity.user_id,
+      kind: "board_drop",
+      title: titleText,
+      body: bodyText,
+      href: link.url,
+      image_url: link.image ?? null,
+      meta: {
+        source: "drop_studio",
+        drop_flavor: flavor,
+        dropType: flavor,
+        dropId,
+        preview,
+        authorId: identity.id,
+        authorName: identity.displayName,
+        authorUsername: identity.username || null,
+        authorAvatar: identity.avatar || null,
+      },
+    });
+    emitBoardDropSignal({
+      type: "drop_created",
+      dropId,
+      userId: meId,
+      title: titleText,
+      meta: { source: "drop_studio", dropType: flavor },
+    });
+    setDropFlavor(flavor);
+    setTitle(titleText);
+    setPostMsg("Dropped ✓");
+    window.setTimeout(() => setPostMsg(null), 1500);
+  }
+
   // -------------------------
   // SLEEP DOCK (does NOT overlay your buckets)
   // -------------------------
@@ -970,6 +1058,10 @@ export default function DropConsole({
           setTitle((current) => current.trim() || doc.title);
           if (plainText && !body.trim()) setBody(plainText);
           void uploadToBoardMedia(descriptDocToFile(doc), "capture");
+          setAnnounceStudioOpen(false);
+        }}
+        onLinkComplete={async (link) => {
+          await publishStudioLinkDrop(link);
           setAnnounceStudioOpen(false);
         }}
         onClose={() => setAnnounceStudioOpen(false)}
@@ -1186,6 +1278,7 @@ export default function DropConsole({
               setThoughtText={setThoughtText}
               thoughtVisibility={thoughtVisibility}
               setThoughtVisibility={setThoughtVisibility}
+              onLinkComplete={publishStudioLinkDrop}
             />
           ) : (
             <>
@@ -1712,6 +1805,7 @@ function BoardDropConsoleFields({
   setThoughtText,
   thoughtVisibility,
   setThoughtVisibility,
+  onLinkComplete,
 }: {
   setTitle: React.Dispatch<React.SetStateAction<string>>;
   dropFlavor: DropFlavor;
@@ -1741,6 +1835,7 @@ function BoardDropConsoleFields({
   setThoughtText: (value: string) => void;
   thoughtVisibility: "public" | "private";
   setThoughtVisibility: (value: "public" | "private") => void;
+  onLinkComplete?: (link: ResolvedDropbookLink) => void | Promise<void>;
 }) {
   const [studioOpen, setStudioOpen] = useState(false);
   const showUrlField =
@@ -1886,6 +1981,11 @@ function BoardDropConsoleFields({
           setTitle((current) => current.trim() || doc.title);
           setDocDesc(plainText);
           void uploadToBoardMedia(descriptDocToFile(doc), "capture");
+        }}
+        onLinkComplete={async (link) => {
+          if (!onLinkComplete) throw new Error("Could not post this link.");
+          await onLinkComplete(link);
+          setStudioOpen(false);
         }}
         onClose={() => setStudioOpen(false)}
       />

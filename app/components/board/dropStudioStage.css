@@ -449,6 +449,8 @@
   pointer-events: auto;
 }
 .dropbookShelfWrap {
+  position: relative;
+  z-index: 3;
   overflow: hidden;
   flex: 0 0 auto;
   max-height: 320px;
@@ -456,6 +458,12 @@
     max-height 420ms cubic-bezier(0.22, 1, 0.36, 1),
     opacity 320ms ease,
     margin 320ms ease;
+}
+.capMainDropbook:not(.capMainCreating):not(.capMainSplash) {
+  grid-template-rows: auto minmax(0, 1fr);
+}
+.capMainDropbook:not(.capMainCreating) .dropbookShelfWrap {
+  display: block;
 }
 .dropbookShelfZone {
   display: flex;
@@ -636,17 +644,20 @@
   filter: drop-shadow(0 0 16px rgba(255, 209, 45, 0.32));
 }
 .dropbookCoverWorkspace {
+  position: relative;
+  z-index: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: flex-start;
+  justify-content: center;
   width: 100%;
-  height: 100%;
+  height: auto;
+  max-height: 100%;
   min-height: 0;
   overflow-x: hidden;
   overflow-y: auto;
-  padding: clamp(8px, 2vh, 16px) clamp(16px, 4vw, 28px) clamp(16px, 4vw, 28px);
-  gap: 10px;
+  padding: 6px 12px 8px;
+  gap: 6px;
   scrollbar-width: none;
 }
 .dropbookCoverWorkspace::-webkit-scrollbar {
@@ -655,8 +666,15 @@
 .dropbookCoverChooseStack {
   display: grid;
   justify-items: center;
+  gap: 8px;
+  width: min(380px, 100%);
+}
+.dropbookCoverStageRow {
+  display: flex;
+  align-items: center;
+  justify-content: center;
   gap: 14px;
-  width: min(360px, 100%);
+  width: 100%;
 }
 .dropbookCoverChooseHead {
   display: grid;
@@ -813,10 +831,10 @@
   color: rgba(126, 226, 255, 0.72);
 }
 .dropbookCoverFinishBtn {
-  width: min(100%, 320px);
+  width: min(100%, 280px);
   border: 1px solid rgba(255, 209, 45, 0.5);
   border-radius: 999px;
-  padding: 11px 16px;
+  padding: 9px 14px;
   background: linear-gradient(120deg, rgba(255, 209, 45, 0.2), rgba(126, 226, 255, 0.12));
   color: rgba(255, 255, 255, 0.94);
   font-size: 10px;
@@ -829,6 +847,7 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
+  justify-content: center;
   gap: 8px;
 }
 .dropbookCoverPhotoBtn {
@@ -837,6 +856,7 @@
 }
 .dropbookCoverPhotoHint {
   flex: 1 1 100%;
+  text-align: center;
   font-size: 10px;
   line-height: 1.4;
   color: rgba(236, 255, 251, 0.55);
@@ -861,7 +881,18 @@
     box-shadow 180ms ease;
 }
 .dropbookCoverSlate.stage {
-  width: clamp(168px, 44vw, 248px);
+  width: min(200px, 44vw, 32vh);
+  flex: 0 0 auto;
+  border-radius: 22px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background:
+    radial-gradient(circle at 20% 0%, rgba(97, 255, 234, 0.13), transparent 35%),
+    radial-gradient(circle at 80% 100%, rgba(255, 128, 216, 0.13), transparent 35%),
+    #02070a;
+  box-shadow:
+    0 0 32px rgba(56, 239, 214, 0.16),
+    inset 0 0 34px rgba(255, 255, 255, 0.04),
+    0 10px 28px rgba(0, 0, 0, 0.35);
 }
 .dropbookCoverSlate.empty.outline {
   border-style: dashed;
@@ -888,6 +919,51 @@
 .dropbookCoverColorRowChoose {
   justify-content: center;
   width: 100%;
+}
+.dropbookCoverColorRowWheel {
+  flex: 0 0 auto;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: auto;
+  min-width: 0;
+}
+.dropbookCoverColorRowWheel .dropbookCoverColorLabel {
+  text-align: center;
+}
+.dropbookCoverColorRowWheel .dropbookCoverColorField {
+  width: 84px;
+  height: 84px;
+  min-width: 84px;
+  padding: 8px;
+  border-radius: 999px;
+  background:
+    conic-gradient(
+      from 90deg,
+      hsl(0, 100%, 60%),
+      hsl(60, 100%, 60%),
+      hsl(120, 100%, 60%),
+      hsl(180, 100%, 60%),
+      hsl(240, 100%, 60%),
+      hsl(300, 100%, 60%),
+      hsl(360, 100%, 60%)
+    );
+  box-shadow:
+    inset 0 0 0 2px rgba(255, 255, 255, 0.28),
+    0 0 18px rgba(255, 209, 45, 0.22);
+}
+.dropbookCoverColorRowWheel .dropbookCoverColorPicker {
+  width: 100%;
+  height: 100%;
+  border-radius: 999px;
+}
+.dropbookCoverColorRowWheel .dropbookCoverColorValue {
+  font-size: 10px;
+  letter-spacing: 0.08em;
+}
+.dropbookCoverColorRowWheel .dropbookCoverColorChange {
+  display: none;
 }
 .dropbookCoverSlate.shelf {
   flex: 0 0 auto;
