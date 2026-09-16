@@ -48,6 +48,20 @@ const CHAT_KEY = "jab_board_chat_v1";
 
 type FriendZoneOrbLike = Awaited<ReturnType<typeof loadBoardUserFriendZoneOrbs>>[number];
 
+function mergeDockFriends(live: Friend[], saved: Friend[]): Friend[] {
+  const byKey = new Map<string, Friend>();
+  for (const friend of [...saved, ...live]) {
+    const key = String(friend.username || friend.id || "")
+      .trim()
+      .toLowerCase()
+      .replace(/^@+/, "");
+    if (!key) continue;
+    const existing = byKey.get(key);
+    byKey.set(key, existing ? { ...existing, ...friend, name: friend.name || existing.name } : friend);
+  }
+  return [...byKey.values()];
+}
+
 function friendFromOrb(orb: FriendZoneOrbLike, index = 0): Friend {
   return {
     id: orb.id || `friend:${orb.username}`,
@@ -217,9 +231,11 @@ export default function BoardDock() {
     let orbsTimer: ReturnType<typeof setInterval> | undefined;
 
     async function loadBoardUsers() {
-      const boardUsers = await loadBoardUserFriendZoneOrbs(18);
+      const boardUsers = await loadBoardUserFriendZoneOrbs(36);
       if (!cancelled) {
-        setFriends(boardUsers.length ? boardUsers.map(friendFromOrb) : readFriends());
+        const live = boardUsers.map(friendFromOrb);
+        const next = mergeDockFriends(live, readFriends());
+        setFriends(next.length ? next : readFriends());
         setFriendsLoading(false);
       }
     }

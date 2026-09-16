@@ -1,6 +1,7 @@
 import { cookies } from "next/headers";
 import { createServerClient } from "@supabase/ssr";
 import { publicOrbAvatarUrl } from "@/lib/board/friendZoneOrbs";
+import { publishFriendZoneDirectory } from "@/lib/board/friendZoneDirectory";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -60,95 +61,42 @@ export async function POST(req: Request) {
     return Response.json({ ok: true, skipped: true });
   }
 
-  const lastSeenAt = new Date().toISOString();
   const username =
     cleanText(body.username, 24) ||
     cleanText(profile?.username, 24) ||
-    String(user.email || "").split("@")[0];
+    String(user.email || "")
+      .split("@")[0]
+      .replace(/[^a-z0-9_]/gi, "")
+      .slice(0, 24);
   const displayName =
     cleanText(body.displayName, 60) ||
     cleanText(profile?.display_name, 60) ||
     username ||
     "Board User";
   const avatarUrl = publicOrbAvatarUrl(body.avatarUrl, profile?.avatar_url);
+  const lastSeenAt = new Date().toISOString();
 
-  const nextStyle = {
-    ...existingStyle,
-    lastSeenAt,
-    presenceOnline: true,
-  };
-
-  await supabase
-    .from("profiles")
-    .upsert(
-      {
-        id: user.id,
-        username: profile?.username || username || null,
-        display_name: profile?.display_name || displayName,
-        avatar_url: profile?.avatar_url || (avatarUrl.startsWith("http") ? avatarUrl : null),
-        board_style: nextStyle,
-        updated_at: lastSeenAt,
+  await supabase.from("profiles").upsert(
+    {
+      id: user.id,
+      username: profile?.username || username || null,
+      display_name: profile?.display_name || displayName,
+      avatar_url: profile?.avatar_url || (avatarUrl.startsWith("http") ? avatarUrl : null),
+      board_style: {
+        ...existingStyle,
+        lastSeenAt,
+        presenceOnline: true,
       },
-      { onConflict: "id" }
-    );
+      updated_at: lastSeenAt,
+    },
+    { onConflict: "id" }
+  );
 
-  const presenceRow = {
-    user_id: user.id,
-    username: username || null,
-    display_name: displayName,
-    avatar_url: avatarUrl.startsWith("http") || avatarUrl.startsWith("/") ? avatarUrl : null,
-    last_seen_at: lastSeenAt,
-    visible: true,
-  };
-
-  const { error: presenceError } = await supabase.from("board_presence").upsert(presenceRow, {
-    onConflict: "user_id",
-  });
-
-  const presenceMeta = {
-    presence: true,
-    source: "board_presence",
-    lastSeenAt,
-    authorUsername: username,
-    authorName: displayName,
-    authorAvatar: avatarUrl,
-  };
-
-  if (presenceError) {
-    const { data: existing } = await supabase
-      .from("board_activity")
-      .select("id")
-      .eq("user_id", user.id)
-      .contains("meta", { presence: true })
-      .limit(1)
-      .maybeSingle();
-
-    if (existing?.id) {
-      await supabase
-        .from("board_activity")
-        .update({
-          created_at: lastSeenAt,
-          meta: presenceMeta,
-        })
-        .eq("id", existing.id)
-        .eq("user_id", user.id);
-    } else {
-      const payload = {
-        scope: "global",
-        user_id: user.id,
-        kind: "system",
-        title: "",
-        body: "",
-        href: null,
-        image_url: null,
-        meta: presenceMeta,
-      };
-      const { error: insertError } = await supabase.from("board_activity").insert(payload);
-      if (insertError) {
-        await supabase.from("board_activity").insert({ ...payload, kind: "status" });
-      }
-    }
-  }
+  await publishFriendZoneDirectory(supabase, user.id, {
+    username,
+    displayName,
+    avatarUrl,
+  }).catch(() => undefined);
 
   return Response.json({ ok: true, lastSeenAt });
 }

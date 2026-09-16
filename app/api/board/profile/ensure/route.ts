@@ -1,5 +1,6 @@
 import { cookies } from "next/headers";
 import { createServerClient } from "@supabase/ssr";
+import { publishFriendZoneDirectory } from "@/lib/board/friendZoneDirectory";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -213,6 +214,11 @@ export async function POST() {
   }
 
   if (!needsWrite) {
+    await publishFriendZoneDirectory(supabase, user.id, {
+      username: existing?.username || candidateUsername,
+      displayName: existing?.display_name || candidateDisplayName,
+      avatarUrl: existing?.avatar_url || candidateAvatar,
+    }).catch(() => undefined);
     return new Response(JSON.stringify({ ok: true, ensured: false }), {
       status: 200,
       headers: { "content-type": "application/json" },
@@ -229,6 +235,12 @@ export async function POST() {
       headers: { "content-type": "application/json" },
     });
   }
+
+  await publishFriendZoneDirectory(supabase, user.id, {
+    username: String(payload.username || existing?.username || candidateUsername || ""),
+    displayName: String(payload.display_name || existing?.display_name || candidateDisplayName || ""),
+    avatarUrl: String(payload.avatar_url || existing?.avatar_url || candidateAvatar || ""),
+  }).catch(() => undefined);
 
   return new Response(JSON.stringify({ ok: true, ensured: true }), {
     status: 200,
