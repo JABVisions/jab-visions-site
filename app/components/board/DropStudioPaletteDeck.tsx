@@ -72,7 +72,6 @@ export default function DropStudioPaletteDeck({
   return (
     <div className={styles.workbenchDock}>
       <div className={styles.workbenchPaletteScroll}>
-        <div className={styles.workbenchHead}>Palette</div>
         <ObjectToolToolbar tool={tool} onToolChange={onToolChange} />
         {drawer ? <div className={styles.workbenchDrawer}>{drawer}</div> : null}
         {artTools ? <div className={styles.workbenchArtTools}>{artTools}</div> : null}

@@ -1475,6 +1475,21 @@
   border-top: 1px solid rgba(255, 255, 255, 0.08);
   background: linear-gradient(180deg, rgba(9, 13, 19, 0.2), rgba(9, 13, 19, 0.9));
 }
+.capEdit:has(.capStudioHost) {
+  padding-bottom: 8px;
+  gap: 8px;
+}
+.capEdit:has(.capStudioHost) .editActions {
+  padding: 4px 0 max(2px, env(safe-area-inset-bottom));
+  border-top: 0;
+  background: transparent;
+  gap: 6px;
+}
+.capEdit:has(.capStudioHost) .studioDone {
+  flex: 1 1 100%;
+  width: 100%;
+  order: 0;
+}
 .saveNote {
   width: 100%;
   text-align: center;

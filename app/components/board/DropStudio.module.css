@@ -601,16 +601,23 @@
   box-shadow: inset 0 0 14px rgba(255, 255, 255, 0.04);
 }
 
+@container studio-palette (min-width: 280px) {
+  .workbenchTools {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
 .workbenchTools button {
   min-width: 0;
   width: 100%;
-  padding: 0.58rem 0.45rem;
+  min-height: 36px;
+  padding: 0.48rem 0.32rem;
   border-radius: 999px;
   border: 1px solid rgba(167, 244, 232, 0.22);
   background: rgba(255, 255, 255, 0.07);
   color: #e8fff8;
   font: inherit;
-  font-size: 0.64rem;
+  font-size: 0.58rem;
   font-weight: 950;
   letter-spacing: 0.07em;
   text-transform: uppercase;
@@ -622,6 +629,14 @@
     border-color 160ms ease,
     background 160ms ease,
     box-shadow 160ms ease;
+}
+
+@container studio-palette (min-width: 280px) {
+  .workbenchTools button {
+    min-height: 42px;
+    padding: 0.58rem 0.45rem;
+    font-size: 0.64rem;
+  }
 }
 
 .workbenchTools button:hover,
@@ -943,25 +958,12 @@
 @media (max-width: 640px) {
   .workbenchPaletteScroll {
     gap: 10px;
-    padding: 10px 10px 14px;
+    padding: 6px 8px 12px;
     scrollbar-gutter: stable;
   }
 
   .workbenchHead {
-    padding-right: 40px;
     font-size: 0.68rem;
-  }
-
-  .workbenchTools {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 7px;
-    padding: 7px;
-  }
-
-  .workbenchTools button {
-    min-height: 42px;
-    padding: 0.62rem 0.35rem;
-    font-size: 0.62rem;
   }
 
   .workbenchArtTools,

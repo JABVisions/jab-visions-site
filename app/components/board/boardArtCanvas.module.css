@@ -184,10 +184,18 @@
 }
 
 .toolsPalette .wheelRow {
-  flex-direction: row;
-  align-items: flex-start;
-  justify-content: center;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
   gap: 10px;
+}
+
+@container studio-palette (min-width: 280px) {
+  .toolsPalette .wheelRow {
+    flex-direction: row;
+    align-items: flex-start;
+    justify-content: center;
+  }
 }
 
 .toolsPalette .wheel {
@@ -266,8 +274,14 @@
 
 .toolsPalette .actions {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 5px;
+}
+
+@container studio-palette (min-width: 280px) {
+  .toolsPalette .actions {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
 }
 
 .toolsPalette .ghost,

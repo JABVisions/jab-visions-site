@@ -3396,12 +3396,6 @@ export default function DropStudioStage({
                       </div>
                       <div className="editActions">
                         {saveNote ? <span className="saveNote">{saveNote}</span> : null}
-                        <button type="button" className="studioGhost" onClick={saveToDevice}>
-                          ⬇ Save
-                        </button>
-                        <button type="button" className="studioGhost" onClick={() => void saveToDrafts(false)}>
-                          🗂 Drafts
-                        </button>
                         <button type="button" className="studioDone" onClick={done}>
                           {isDropbookMode
                             ? `Add ${mediaKind === "video" ? "Video" : "Vision"} to Dropbook →`

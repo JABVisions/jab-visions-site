@@ -1,12 +1,9 @@
-/* Drop Studio — full 4:5 chip with a right-side Palette workbench. */
+/* Drop Studio — full-bleed chip with a left-sliding Palette overlay. */
 
 .root {
   --drop-chip-max-w: 560px;
   --palette-toggle-size: 40px;
-  --palette-toggle-gap: calc(12px + 1cm);
-  --palette-toggle-inset: calc(3px + 1cm);
-  --palette-gutter: calc(var(--palette-toggle-size) + var(--palette-toggle-gap));
-  --palette-panel-w: 272px;
+  --palette-half: 50%;
 }
 
 .chipOnlyRoot,
@@ -58,18 +55,8 @@
   min-width: 0;
   display: flex;
   align-items: stretch;
-}
-
-.paletteOpen .chipAssembly {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) var(--palette-panel-w);
-  align-items: center;
-  gap: 12px;
-  padding-right: 0;
-}
-
-.paletteOpen .chipFrame {
-  align-self: center;
+  overflow: hidden;
+  border-radius: 22px;
 }
 
 .chipFrame {
@@ -117,22 +104,6 @@
 
   .workbench .chipFrame {
     max-height: none;
-  }
-
-  .workbench.paletteOpen .chipAssembly {
-    width: min(
-      var(--drop-chip-max-w),
-      100cqw,
-      calc(80cqh + var(--palette-panel-w) + 12px)
-    );
-  }
-
-  .workbench.paletteOpen .chipAssembly:has(.chipFrame[data-frame="landscape"]) {
-    width: min(
-      var(--drop-chip-max-w),
-      100cqw,
-      calc(177.7778cqh + var(--palette-panel-w) + 12px)
-    );
   }
 }
 
@@ -250,55 +221,78 @@
 .palettePanel {
   position: absolute;
   top: 0;
-  right: 0;
+  left: 0;
   bottom: 0;
-  z-index: 10;
-  width: var(--palette-panel-w);
+  z-index: 20;
+  width: var(--palette-half);
   max-width: 100%;
   display: flex;
   flex-direction: column;
   min-height: 0;
-  border-radius: 18px 22px 22px 18px;
+  border-radius: 22px 18px 18px 22px;
   border: 1px solid rgba(132, 244, 231, 0.34);
-  border-right: 0;
+  border-left: 0;
   background: linear-gradient(
     180deg,
-    rgba(8, 26, 33, 0.94) 0%,
+    rgba(8, 26, 33, 0.96) 0%,
     rgba(6, 10, 22, 0.98) 100%
   );
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.12),
-    -12px 0 32px rgba(53, 230, 211, 0.16);
+    16px 0 36px rgba(53, 230, 211, 0.16);
   overflow: hidden;
   pointer-events: none;
   opacity: 0;
-  transform: translateX(100%);
+  transform: translateX(-110%);
   transition:
     transform 320ms cubic-bezier(0.22, 0.61, 0.36, 1),
-    opacity 220ms ease;
+    opacity 220ms ease,
+    width 280ms cubic-bezier(0.22, 0.61, 0.36, 1),
+    border-radius 220ms ease;
 }
 
 .paletteOpen .palettePanel {
-  position: relative;
-  inset: auto;
-  grid-column: 2;
-  width: 100%;
-  height: 100%;
-  max-height: 100%;
   pointer-events: auto;
   opacity: 1;
   transform: translateX(0);
-  border-right: 1px solid rgba(132, 244, 231, 0.34);
-  border-radius: 18px 22px 22px 18px;
 }
 
+.paletteFull .palettePanel {
+  width: 100%;
+  border-radius: 22px;
+  border-left: 1px solid rgba(132, 244, 231, 0.34);
+}
+
+.palettePanelDragging {
+  transition: none;
+}
+
+.paletteChrome {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 22px 6px 14px;
+}
+
+.paletteChromeTitle {
+  font-size: 0.58rem;
+  font-weight: 950;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: #7ff5e7;
+  text-shadow: 0 0 12px rgba(110, 255, 234, 0.28);
+}
+
+.paletteChromeBtns {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.paletteExpand,
 .paletteClose {
-  position: absolute;
-  top: 5px;
-  right: 7px;
-  z-index: 3;
-  width: 25px;
-  height: 25px;
   display: grid;
   place-items: center;
   padding: 0;
@@ -306,14 +300,23 @@
   border: 1px solid rgba(132, 244, 231, 0.3);
   background: rgba(4, 14, 22, 0.82);
   color: rgba(220, 255, 248, 0.9);
-  font-size: 18px;
-  line-height: 1;
   cursor: pointer;
 }
 
-/* Art mode — slightly wider drawer for brush tools under object buttons. */
-.workbench:has([data-art-operating-host]) {
-  --palette-panel-w: 300px;
+.paletteExpand {
+  height: 28px;
+  padding: 0 10px;
+  font-size: 0.58rem;
+  font-weight: 950;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.paletteClose {
+  width: 28px;
+  height: 28px;
+  font-size: 18px;
+  line-height: 1;
 }
 
 .paletteBody {
@@ -323,71 +326,44 @@
   display: flex;
   flex-direction: column;
   gap: 0;
-  padding: 0;
+  padding: 0 16px 8px 6px;
   overflow: hidden;
+  container-type: inline-size;
+  container-name: studio-palette;
 }
 
 .workbench:has([data-art-operating-host]) .paletteBody {
-  padding: 2px 4px 6px;
+  padding: 0 16px 8px 4px;
 }
 
-@media (max-width: 720px) {
-  .root {
-    --palette-panel-w: 100%;
-  }
+.paletteHandle {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 4;
+  width: 18px;
+  display: grid;
+  place-items: center;
+  cursor: ew-resize;
+  touch-action: none;
+}
 
-  .workbench:has([data-art-operating-host]) {
-    --palette-panel-w: 100%;
-  }
+.paletteHandleGrip {
+  width: 4px;
+  height: 52px;
+  border-radius: 999px;
+  background: linear-gradient(
+    180deg,
+    rgba(127, 245, 231, 0.2),
+    rgba(127, 245, 231, 0.78),
+    rgba(127, 245, 231, 0.2)
+  );
+  box-shadow: 0 0 10px rgba(53, 230, 211, 0.35);
+}
 
-  /* A side dock leaves neither the canvas nor the controls enough room on a
-     phone. Keep both surfaces full-width and stack the Palette beneath the
-     chip so drawing proportions stay intact and every control remains usable. */
-  .workbench.paletteOpen .chipAssembly,
-  .workbench.paletteOpen .chipAssembly:has(.chipFrame[data-frame="landscape"]) {
-    width: 100%;
-    height: 100%;
-    max-height: 100%;
-    display: grid;
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: minmax(150px, 44%) minmax(0, 56%);
-    align-items: stretch;
-    gap: 8px;
-  }
-
-  .workbench.paletteOpen .chipFrame {
-    grid-column: 1;
-    grid-row: 1;
-    align-self: stretch;
-    justify-self: center;
-    width: auto;
-    height: 100%;
-    max-width: 100%;
-    min-height: 0;
-  }
-
-  .workbench.paletteOpen .palettePanel {
-    grid-column: 1;
-    grid-row: 2;
-    width: 100%;
-    height: 100%;
-    min-height: 0;
-    border: 1px solid rgba(132, 244, 231, 0.34);
-    border-radius: 18px;
-    box-shadow:
-      inset 0 1px 0 rgba(255, 255, 255, 0.12),
-      0 -8px 28px rgba(53, 230, 211, 0.12);
-  }
-
-  .paletteClose {
-    top: 8px;
-    right: 10px;
-    width: 34px;
-    height: 34px;
-    font-size: 22px;
-  }
-
-  .workbench:has([data-art-operating-host]) .paletteBody {
-    padding: 4px 6px 8px;
+@media (prefers-reduced-motion: reduce) {
+  .palettePanel {
+    transition: none;
   }
 }
