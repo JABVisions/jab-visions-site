@@ -744,7 +744,7 @@ export default function BoardDock() {
 
       <style>{`
         /* ----------------------------- Dock styles (unchanged) ----------------------------- */
-        .bd_wrap { position: fixed; left: 0; right: 0; bottom: 0; z-index: 40; pointer-events: none; }
+        .bd_wrap { position: fixed; left: 0; right: 0; bottom: 0; z-index: 80; pointer-events: none; isolation: isolate; }
         .bd_shell {
           pointer-events: auto;
           width: min(1380px, calc(100% - 24px));
@@ -768,6 +768,7 @@ export default function BoardDock() {
           border: 1px solid rgba(0,0,0,0.10);
           white-space: nowrap;
           text-decoration: none;
+          flex: 0 0 auto;
           transition: transform 160ms ease, filter 160ms ease, box-shadow 160ms ease;
         }
         .bd_brand:hover { transform: translateY(-1px); filter: brightness(1.02); }
@@ -784,10 +785,15 @@ export default function BoardDock() {
           display: flex;
           align-items: center;
           gap: 8px;
-          flex: 1 0 auto;
+          flex: 1 1 auto;
           flex-wrap: nowrap;
-          min-width: max-content;
+          min-width: 0;
+          overflow-x: auto;
+          overflow-y: hidden;
+          -webkit-overflow-scrolling: touch;
+          scrollbar-width: none;
         }
+        .bd_nav::-webkit-scrollbar { display: none; }
 
         .bd_zoneBtn {
           border: 1px solid rgba(0,0,0,0.12);
@@ -798,11 +804,15 @@ export default function BoardDock() {
           align-items: center;
           gap: 8px;
           cursor: pointer;
+          position: relative;
+          z-index: 3;
+          pointer-events: auto;
+          touch-action: manipulation;
           transition: transform 160ms ease, filter 160ms ease, box-shadow 160ms ease;
           white-space: nowrap;
           list-style: none;
         }
-        .fz_details { display: inline-flex; }
+        .fz_details { display: inline-flex; flex: 0 0 auto; pointer-events: auto; position: relative; z-index: 4; }
         .fz_details summary::-webkit-details-marker { display: none; }
         .fz_nativeOverlay { display: none; }
         .fz_nativeOverlay.isOpen { display: block; }
@@ -828,20 +838,24 @@ export default function BoardDock() {
             border-radius: 28px;
             flex-wrap: nowrap;
             justify-content: flex-start;
-            overflow-x: auto;
+            overflow-x: hidden;
             overflow-y: hidden;
-            -webkit-overflow-scrolling: touch;
-            scrollbar-width: none;
           }
-          .bd_shell::-webkit-scrollbar { display: none; }
-          .bd_nav { justify-content: flex-start; flex: 0 0 auto; }
+          .bd_nav {
+            justify-content: flex-start;
+            flex: 1 1 auto;
+            min-width: 0;
+          }
+          .bd_brandWord:not(.pink) { display: none; }
+          .bd_zoneLabel { display: none; }
+          .bd_pill.explore { flex: 0 0 auto; }
         }
 
         /* --------------------------- Friend Zone: bottom sheet --------------------------- */
         .fz_overlay{
           position: fixed;
           inset: 0;
-          z-index: 55;
+          z-index: 90;
           pointer-events: auto;
           background: radial-gradient(circle at 50% 100%, rgba(0,0,0,0.22), rgba(0,0,0,0.10) 40%, rgba(0,0,0,0.0) 70%);
         }
