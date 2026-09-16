@@ -371,7 +371,7 @@ export function toAppleMusicEmbed(rawUrl: string): string | null {
 
   const host = u.hostname.toLowerCase();
   if (host === "embed.music.apple.com") return u.toString();
-  if (host !== "music.apple.com") return null;
+  if (host !== "music.apple.com" && !host.endsWith(".music.apple.com")) return null;
 
   const parts = u.pathname.split("/").filter(Boolean);
   if (parts[0] === "embed") return `https://embed.music.apple.com/${parts.slice(1).join("/")}${u.search}`;

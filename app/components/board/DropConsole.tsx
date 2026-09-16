@@ -24,6 +24,7 @@ import { descriptDocToFile, type DescriptDoc } from "@/lib/board/descriptDocs";
 import { isDropbookSlideFile } from "@/lib/board/dropbookSlides";
 import type { ResolvedDropbookLink } from "@/lib/board/dropbookLink";
 import { classifyDropbookLinkUrl } from "@/lib/board/dropbookLink";
+import { makeEmbedByMode } from "@/lib/board/dropItem";
 import { checkUploadSize, resolveUploadContentType } from "@/lib/board/uploadLimits";
 
 import {
@@ -484,6 +485,13 @@ export default function DropConsole({
           ? compactDropCustomizations(dropCustomizations)
           : undefined;
       const attachMediaType = cleanAttach ? inferMediaType(cleanAttach) : null;
+      const uploadedAudio =
+        attachMediaType === "audio" ||
+        /\.(mp3|wav|m4a|aac|ogg|flac)$/i.test(uploadedFileName);
+      const musicEmbed =
+        savedFlavor === "music" && cleanAttach
+          ? makeEmbedByMode("Music", cleanAttach)
+          : null;
       const thoughtFormat =
         dropFlavor === "thought" ? thoughtFormatFromMedia(attachMediaType) : null;
       const isHtmlDocument =
@@ -568,6 +576,17 @@ export default function DropConsole({
       ) {
         preview = await fetchLinkPreview(cleanAttach);
       }
+      if (musicEmbed?.embedUrl) {
+        preview = {
+          url: preview?.url ?? cleanAttach,
+          provider: preview?.provider ?? musicEmbed.hostLabel ?? null,
+          title: preview?.title ?? null,
+          description: preview?.description ?? null,
+          image: preview?.image ?? null,
+          embedUrl: musicEmbed.embedUrl,
+          type: preview?.type ?? "music",
+        };
+      }
 
       // Announcement media: store as href so ActivityCard can embed
       const cleanAnnMedia = announceMediaUrl.trim() || null;
@@ -597,8 +616,8 @@ export default function DropConsole({
               type: profileDropType(savedFlavor),
               createdAt: Date.now(),
               url: cleanAttach || undefined,
-              embedUrl: preview?.embedUrl ?? null,
-              hostLabel: preview?.provider ?? null,
+              embedUrl: musicEmbed?.embedUrl ?? preview?.embedUrl ?? null,
+              hostLabel: musicEmbed?.hostLabel ?? preview?.provider ?? null,
               headline: dropFlavor === "news" ? preview?.title ?? cleanTitle ?? undefined : undefined,
               previewTitle: preview?.title ?? undefined,
               previewDescription: preview?.description ?? undefined,
@@ -612,7 +631,9 @@ export default function DropConsole({
               fileName: uploadedFileName || undefined,
               mediaKind:
                 savedFlavor === "music"
-                  ? "audio"
+                  ? uploadedAudio
+                    ? "audio"
+                    : undefined
                   : dropFlavor === "thought"
                     ? thoughtFormat === "voice"
                       ? "audio"
@@ -662,9 +683,13 @@ export default function DropConsole({
                 dropType: isDropbookSlide ? "dropbook" : savedFlavor,
                 dropId: boardDropId,
                 fileName: uploadedFileName || null,
+                embedUrl: musicEmbed?.embedUrl ?? preview?.embedUrl ?? null,
+                hostLabel: musicEmbed?.hostLabel ?? preview?.provider ?? null,
                 mediaKind:
                   savedFlavor === "music"
-                    ? "audio"
+                    ? uploadedAudio
+                      ? "audio"
+                      : null
                     : dropFlavor === "thought"
                     ? attachMediaType === "audio"
                       ? "audio"
@@ -756,9 +781,13 @@ export default function DropConsole({
                 dropType: isDropbookSlide ? "dropbook" : savedFlavor,
                 dropId: boardDropId,
                 fileName: uploadedFileName || null,
+                embedUrl: musicEmbed?.embedUrl ?? preview?.embedUrl ?? null,
+                hostLabel: musicEmbed?.hostLabel ?? preview?.provider ?? null,
                 mediaKind:
                   savedFlavor === "music"
-                    ? "audio"
+                    ? uploadedAudio
+                      ? "audio"
+                      : null
                     : dropFlavor === "thought"
                     ? attachMediaType === "audio"
                       ? "audio"

@@ -35,7 +35,7 @@ import NewsDropMagazine from "./NewsDropMagazine";
 import DropbookSlideScreen from "./DropbookSlideScreen";
 import { isDropbookSlideFile } from "@/lib/board/dropbookSlides";
 import type { ResolvedDropbookLink } from "@/lib/board/dropbookLink";
-import { classifyDropbookLinkUrl } from "@/lib/board/dropbookLink";
+import { classifyDropbookLinkUrl, isStreamingEmbedUrl, musicEmbedFor } from "@/lib/board/dropbookLink";
 import { checkUploadSize, resolveUploadContentType } from "@/lib/board/uploadLimits";
 import {
   buildDropDownloadFilename,
@@ -364,7 +364,7 @@ function toAppleMusicEmbed(rawUrl: string): string | null {
 
   const host = u.hostname.toLowerCase();
   if (host === "embed.music.apple.com") return u.toString();
-  if (host !== "music.apple.com") return null;
+  if (host !== "music.apple.com" && !host.endsWith(".music.apple.com")) return null;
 
   const parts = u.pathname.split("/").filter(Boolean);
   if (parts[0] === "embed") return `https://embed.music.apple.com/${parts.slice(1).join("/")}${u.search}`;
@@ -2303,9 +2303,11 @@ export default function DropTile() {
           </div>
         ) : (
           drops.map((d) => {
+            const streamingHref = isStreamingEmbedUrl(d.url);
+            const resolvedEmbedUrl = d.embedUrl || (d.url ? musicEmbedFor(d.url) : undefined);
             const isMedia = d.type === "Media";
-            const isAudioMusic = d.type === "Music" && d.mediaKind === "audio";
-            const isAudioDrop = d.mediaKind === "audio";
+            const isAudioMusic = d.type === "Music" && d.mediaKind === "audio" && !streamingHref;
+            const isAudioDrop = d.mediaKind === "audio" && !streamingHref;
             const isDoc = d.type === "Doc";
             const isDescriptDrop =
               d.fromDescript ||
@@ -2328,8 +2330,8 @@ export default function DropTile() {
             const isNews = d.type === "News";
             const isLinky = d.type === "Link";
 
-            const canEmbed = !!d.embedUrl;
-            const kind: EmbedKind = d.embedUrl ? embedKindFromUrl(d.embedUrl) : "generic";
+            const canEmbed = !!resolvedEmbedUrl;
+            const kind: EmbedKind = resolvedEmbedUrl ? embedKindFromUrl(resolvedEmbedUrl) : "generic";
 
             const fav = d.url ? faviconUrl(d.url) : null;
             const cover = d.url ? newsCoverUrl(d.url) : null;
@@ -2508,7 +2510,7 @@ export default function DropTile() {
                 ) : canEmbed ? (
                   <div className={`embed-shell ${kind}`}>
                     <iframe
-                      src={d.embedUrl!}
+                      src={resolvedEmbedUrl!}
                       title={d.title}
                       allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
                       allowFullScreen

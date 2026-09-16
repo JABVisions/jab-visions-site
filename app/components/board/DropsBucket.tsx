@@ -226,7 +226,7 @@ function toAppleMusicEmbed(url: string): string | null {
     const u = new URL(url);
     const host = u.hostname.toLowerCase();
     if (host === "embed.music.apple.com") return u.toString();
-    if (host !== "music.apple.com") return null;
+    if (host !== "music.apple.com" && !host.endsWith(".music.apple.com")) return null;
 
     const parts = u.pathname.split("/").filter(Boolean);
     if (parts[0] === "embed") {
@@ -1635,8 +1635,13 @@ function BucketDropCard({
   const storedMime = safeStr((rawMeta as any)?.mime) || safeStr((preview as any)?.mime);
   const storedFileName =
     safeStr((rawMeta as any)?.fileName) || safeStr((preview as any)?.fileName);
+  const isStreamingEmbed =
+    embed.kind === "youtube" ||
+    embed.kind === "spotify" ||
+    embed.kind === "apple_music" ||
+    embed.kind === "soundcloud";
   const isAudioDrop =
-    embed.kind !== "youtube" && (mediaKind === "audio" || embed.kind === "audio");
+    !isStreamingEmbed && (mediaKind === "audio" || embed.kind === "audio");
   const isVoiceDrop =
     isAudioDrop && /^(?:thought|voice)(?: drop| memo)?$/i.test(dropType);
   const showEmbed = !!embed.url && !embedFailed && embed.kind !== "none" && !isAudioDrop;

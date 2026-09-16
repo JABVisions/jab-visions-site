@@ -17,6 +17,7 @@ import { readPayDrops, type PayDrop } from "@/lib/board/paydrops";
 import { EVT_UPDATED, readBrain, sendWave } from "@/lib/board/bucketBrain";
 import { resolveLinkPreviewImage } from "@/lib/board/linkPreviewImages";
 import { DROPS_UPDATED_EVENT } from "@/lib/board/drops/storage";
+import { musicEmbedFor } from "@/lib/board/dropbookLink";
 import {
   normalizeDropCustomizations,
   type DropCustomization,
@@ -1396,7 +1397,7 @@ export default function BoardProfileHubPage() {
             ? meta.embedUrl
             : typeof preview?.embedUrl === "string"
               ? preview.embedUrl
-              : null,
+              : musicEmbedFor(href ?? "") ?? null,
         hostLabel: typeof meta?.hostLabel === "string" ? meta.hostLabel : undefined,
         previewTitle:
           typeof meta?.previewTitle === "string"

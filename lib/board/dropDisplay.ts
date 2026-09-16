@@ -77,7 +77,8 @@ export function canonicalDropType(
     embed.includes("soundcloud") ||
     embed.includes("music.apple") ||
     url.includes("spotify") ||
-    url.includes("soundcloud")
+    url.includes("soundcloud") ||
+    url.includes("music.apple")
   ) {
     return "Music";
   }

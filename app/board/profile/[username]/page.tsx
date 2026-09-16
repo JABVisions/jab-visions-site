@@ -32,6 +32,7 @@ import VoiceDropSoundboard from "@/app/components/board/VoiceDropSoundboard";
 import NewsDropMagazine from "@/app/components/board/NewsDropMagazine";
 import { isLegacyDescriptText } from "@/lib/board/descriptDocs";
 import { isDropbookSlideFile } from "@/lib/board/dropbookSlides";
+import { musicEmbedFor } from "@/lib/board/dropbookLink";
 import DropbookSlideScreen from "@/app/components/board/DropbookSlideScreen";
 
 const PROFILE_STORAGE_KEY = "jab_board_profile_v2";
@@ -1173,7 +1174,7 @@ export default function ProfileBoardViewPage({
             ? meta.embedUrl
             : typeof preview?.embedUrl === "string"
               ? preview.embedUrl
-              : null,
+              : musicEmbedFor(href ?? "") ?? null,
         hostLabel: typeof meta?.hostLabel === "string" ? meta.hostLabel : undefined,
         previewTitle:
           typeof meta?.previewTitle === "string"
@@ -1681,15 +1682,19 @@ export default function ProfileBoardViewPage({
                           ? `${drop.bucket}:${drop.storagePath}`
                           : "";
                       const signedUrl = signedKey ? signedUrlByKey[signedKey] : undefined;
+                      const streamingEmbed = musicEmbedFor(drop.url ?? "") || null;
+                      const resolvedEmbedUrl = drop.embedUrl || streamingEmbed;
                       const isMedia =
-                        drop.type === "Media" || drop.type === "Pay" || drop.mediaKind === "audio";
+                        drop.type === "Media" ||
+                        drop.type === "Pay" ||
+                        (drop.mediaKind === "audio" && !streamingEmbed);
                       const isSpotifyEmbed =
-                        typeof drop.embedUrl === "string" &&
-                        drop.embedUrl.includes("open.spotify.com/embed");
+                        typeof resolvedEmbedUrl === "string" &&
+                        resolvedEmbedUrl.includes("open.spotify.com/embed");
                       const isAppleMusicEmbed =
-                        typeof drop.embedUrl === "string" &&
-                        drop.embedUrl.includes("embed.music.apple.com");
-                      const embedHeight = getBoardDropEmbedHeight(drop.embedUrl);
+                        typeof resolvedEmbedUrl === "string" &&
+                        resolvedEmbedUrl.includes("embed.music.apple.com");
+                      const embedHeight = getBoardDropEmbedHeight(resolvedEmbedUrl);
                       const isLinkDrop = (drop.type === "Link" || drop.type === "News") && !!drop.url;
                       const linkCover = resolveLinkPreviewImage(
                         drop.url,
@@ -1776,13 +1781,13 @@ export default function ProfileBoardViewPage({
                               src={signedUrl || drop.url}
                               preview={drop.description}
                             />
-                          ) : drop.embedUrl ? (
+                          ) : resolvedEmbedUrl ? (
                             <div
                               className={`board-drop-embed ${isSpotifyEmbed ? "spotify" : ""} ${isAppleMusicEmbed ? "apple-music" : ""}`}
                               style={{ height: `${embedHeight}px` }}
                             >
                               <iframe
-                                src={drop.embedUrl}
+                                src={resolvedEmbedUrl}
                                 title={drop.title}
                                 width="100%"
                                 height={String(embedHeight)}
