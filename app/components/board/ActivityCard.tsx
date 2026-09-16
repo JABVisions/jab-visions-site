@@ -45,6 +45,7 @@ import DescriptDropScreen from "./DescriptDropScreen";
 import VoiceDropSoundboard from "./VoiceDropSoundboard";
 import NewsDropMagazine from "./NewsDropMagazine";
 import DropbookSlideScreen from "./DropbookSlideScreen";
+import { isYouTubeDropUrl } from "@/lib/board/dropbookLink";
 
 const EVT_DEPOSIT = "board:bucketBrain:deposit";
 const EVT_OPEN = "board:bucketBrain:open";
@@ -656,12 +657,14 @@ function ActivityCard({
     href,
     mediaKind,
   });
+  const isYouTubeHref = isYouTubeDropUrl(href);
   const isAudioFileDrop =
-    mediaKind === "audio" ||
+    !isYouTubeHref &&
+    (mediaKind === "audio" ||
     /^audio\//i.test(storedMime) ||
     /\.(?:mp3|wav|m4a|aac|ogg|flac)$/i.test(storedFileName) ||
     /\b(?:mp3|wav|m4a|aac|ogg|flac)\b/i.test(title) ||
-    guessMediaKind(href) === "audio";
+    guessMediaKind(href) === "audio");
   // The uploaded HTML file is the durable source of truth. Older Descript
   // shares could retain a Thought/Pay label when the studio handoff raced
   // React state, but they are still Descript documents and must use the
@@ -873,6 +876,7 @@ function ActivityCard({
 
   const kindLabel = useMemo(() => {
     if (isDropbookSlide) return "DROPBOOK";
+    if (isYouTubeHref) return formatDropKindLabel("youtube");
 
     const explicitDropKind = metaString(
       meta?.dropType,
@@ -889,7 +893,7 @@ function ActivityCard({
 
     const k = String((item as any)?.kind || (item as any)?.type || "drop");
     return formatDropKindLabel(k);
-  }, [item, meta, preview, isDropbookSlide]);
+  }, [item, meta, preview, isDropbookSlide, isYouTubeHref]);
   const isVoiceDrop =
     isAudioFileDrop && /\b(?:thought|voice)(?: drop| memo)?\b/i.test(kindLabel);
   const isNewsDrop = /\bnews(?: drop)?\b/i.test(kindLabel);

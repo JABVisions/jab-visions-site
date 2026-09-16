@@ -54,18 +54,23 @@ export function canonicalDropType(
     url?: string;
   }
 ): CanonicalDropType {
+  const embed = String(hints?.embedUrl ?? "").toLowerCase();
+  const url = String(hints?.url ?? "").toLowerCase();
+  if (
+    embed.includes("youtube") ||
+    embed.includes("youtu.be") ||
+    url.includes("youtube") ||
+    url.includes("youtu.be")
+  ) {
+    return "YouTube";
+  }
+
   const normalized = normalizeBoardDropType(raw);
   if (
     normalized &&
     CANONICAL_DROP_TYPES.includes(normalized as CanonicalDropType)
   ) {
     return normalized as CanonicalDropType;
-  }
-
-  const embed = String(hints?.embedUrl ?? "").toLowerCase();
-  const url = String(hints?.url ?? "").toLowerCase();
-  if (embed.includes("youtube") || embed.includes("youtu.be") || url.includes("youtube")) {
-    return "YouTube";
   }
   if (
     embed.includes("spotify") ||

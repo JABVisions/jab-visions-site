@@ -23,6 +23,7 @@ import {
 import { descriptDocToFile, type DescriptDoc } from "@/lib/board/descriptDocs";
 import { isDropbookSlideFile } from "@/lib/board/dropbookSlides";
 import type { ResolvedDropbookLink } from "@/lib/board/dropbookLink";
+import { classifyDropbookLinkUrl } from "@/lib/board/dropbookLink";
 import { checkUploadSize, resolveUploadContentType } from "@/lib/board/uploadLimits";
 
 import {
@@ -119,7 +120,7 @@ function attachmentPlaceholder(flavor: DropFlavor) {
     case "youtube":
       return "Paste YouTube link";
     case "music":
-      return "Paste Spotify / SoundCloud / YouTube Music link";
+      return "Paste Spotify, Apple Music, or SoundCloud";
     case "news":
       return "Paste article link";
     case "link":
@@ -460,6 +461,16 @@ export default function DropConsole({
         mode === "board_drop" && dropFlavor === "pay" && payProvider === "payment_link"
           ? payLink.trim() || attachUrl.trim() || null
           : attachUrl.trim() || null;
+      const linkKind = cleanAttach ? classifyDropbookLinkUrl(cleanAttach) : null;
+      const savedFlavor: DropFlavor =
+        dropFlavor === "thought" ||
+        dropFlavor === "pay" ||
+        dropFlavor === "doc" ||
+        dropFlavor === "media"
+          ? dropFlavor
+          : linkKind === "youtube"
+            ? "youtube"
+            : dropFlavor;
       const tags = parseTags(tagsInput);
       const payPriceCents = dropFlavor === "pay" ? parsePriceToCents(payPrice) : null;
       const boardDropDescription =
@@ -488,7 +499,7 @@ export default function DropConsole({
         isHtmlDocument;
       const storedBoardDropDescription = boardDropDescription;
       const identity = readCurrentBoardIdentity();
-      const boardDropId = mode === "board_drop" ? newId(dropFlavor) : null;
+      const boardDropId = mode === "board_drop" ? newId(savedFlavor) : null;
       const savedMediaCustomizations =
         boardDropId && mediaCustomizations
           ? await durableMediaCustomizations(mediaCustomizations, boardDropId)
@@ -507,7 +518,7 @@ export default function DropConsole({
             : storedBoardDropDescription
             ? storedBoardDropDescription
             : cleanTitle
-            ? `New ${dropFlavor} drop added to Board.`
+            ? `New ${savedFlavor} drop added to Board.`
             : "";
       }
 
@@ -582,8 +593,8 @@ export default function DropConsole({
         mode === "board_drop" && boardDropId
           ? persistBoardDropToProfile({
               id: boardDropId,
-              title: cleanTitle || preview?.title || `${profileDropType(dropFlavor)} Drop`,
-              type: profileDropType(dropFlavor),
+              title: cleanTitle || preview?.title || `${profileDropType(savedFlavor)} Drop`,
+              type: profileDropType(savedFlavor),
               createdAt: Date.now(),
               url: cleanAttach || undefined,
               embedUrl: preview?.embedUrl ?? null,
@@ -600,7 +611,7 @@ export default function DropConsole({
               description: storedBoardDropDescription || cleanBody || undefined,
               fileName: uploadedFileName || undefined,
               mediaKind:
-                dropFlavor === "music"
+                savedFlavor === "music"
                   ? "audio"
                   : dropFlavor === "thought"
                     ? thoughtFormat === "voice"
@@ -647,12 +658,12 @@ export default function DropConsole({
 
           ...(mode === "board_drop"
             ? {
-                drop_flavor: dropFlavor,
-                dropType: isDropbookSlide ? "dropbook" : dropFlavor,
+                drop_flavor: savedFlavor,
+                dropType: isDropbookSlide ? "dropbook" : savedFlavor,
                 dropId: boardDropId,
                 fileName: uploadedFileName || null,
                 mediaKind:
-                  dropFlavor === "music"
+                  savedFlavor === "music"
                     ? "audio"
                     : dropFlavor === "thought"
                     ? attachMediaType === "audio"
@@ -741,12 +752,12 @@ export default function DropConsole({
             tags,
           ...(mode === "board_drop"
             ? {
-                drop_flavor: dropFlavor,
-                dropType: isDropbookSlide ? "dropbook" : dropFlavor,
+                drop_flavor: savedFlavor,
+                dropType: isDropbookSlide ? "dropbook" : savedFlavor,
                 dropId: boardDropId,
                 fileName: uploadedFileName || null,
                 mediaKind:
-                  dropFlavor === "music"
+                  savedFlavor === "music"
                     ? "audio"
                     : dropFlavor === "thought"
                     ? attachMediaType === "audio"
@@ -2025,10 +2036,19 @@ function BoardDropConsoleFields({
         <div className="dcField">
           <input
             value={attachUrl}
-            onChange={(e) => setAttachUrl(e.target.value)}
+            onChange={(e) => {
+              const next = e.target.value;
+              setAttachUrl(next);
+              if (
+                (dropFlavor === "music" || dropFlavor === "link") &&
+                classifyDropbookLinkUrl(next) === "youtube"
+              ) {
+                setDropFlavor("youtube");
+              }
+            }}
             placeholder={
               dropFlavor === "music"
-                ? "Or paste Spotify / Apple Music / SoundCloud / YouTube"
+                ? "Paste Spotify, Apple Music, or SoundCloud"
                 : attachmentPlaceholder(dropFlavor)
             }
             className="dcInput"

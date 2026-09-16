@@ -39,6 +39,10 @@ function hostOf(url: string) {
   }
 }
 
+export function isYouTubeDropUrl(raw: string | null | undefined): boolean {
+  return classifyDropbookLinkUrl(raw ?? "") === "youtube";
+}
+
 /** URL alone decides the Dropbook page kind — no mode picker. */
 export function classifyDropbookLinkUrl(raw: string): DropbookLinkKind | null {
   const url = normalizeRawUrl(raw);

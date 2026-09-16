@@ -1635,7 +1635,8 @@ function BucketDropCard({
   const storedMime = safeStr((rawMeta as any)?.mime) || safeStr((preview as any)?.mime);
   const storedFileName =
     safeStr((rawMeta as any)?.fileName) || safeStr((preview as any)?.fileName);
-  const isAudioDrop = mediaKind === "audio" || embed.kind === "audio";
+  const isAudioDrop =
+    embed.kind !== "youtube" && (mediaKind === "audio" || embed.kind === "audio");
   const isVoiceDrop =
     isAudioDrop && /^(?:thought|voice)(?: drop| memo)?$/i.test(dropType);
   const showEmbed = !!embed.url && !embedFailed && embed.kind !== "none" && !isAudioDrop;
