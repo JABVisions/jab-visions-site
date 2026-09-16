@@ -34,6 +34,7 @@ import VoiceDropSoundboard from "./VoiceDropSoundboard";
 import NewsDropMagazine from "./NewsDropMagazine";
 import DropbookSlideScreen from "./DropbookSlideScreen";
 import { isDropbookSlideFile } from "@/lib/board/dropbookSlides";
+import type { ResolvedDropbookLink } from "@/lib/board/dropbookLink";
 import { checkUploadSize, resolveUploadContentType } from "@/lib/board/uploadLimits";
 import {
   buildDropDownloadFilename,
@@ -1170,6 +1171,40 @@ export default function DropTile() {
     setDropDesc("");
     setUrl("");
     flash(setMsg, "Added ✓", 1200);
+  }
+
+  async function addResolvedLinkDrop(link: ResolvedDropbookLink): Promise<boolean> {
+    const type: DropType =
+      link.kind === "youtube" ? "YouTube" : link.kind === "music" ? "Music" : "Link";
+    const hostLabel =
+      link.kind === "youtube"
+        ? "YOUTUBE"
+        : link.kind === "music"
+          ? (link.provider?.toUpperCase() || "MUSIC")
+          : link.provider?.toUpperCase() || hostLabelFromUrl(link.url);
+
+    const next: DropItem[] = [
+      {
+        id: safeId(),
+        title: link.title.trim() || "Untitled",
+        type,
+        url: link.url,
+        embedUrl: link.embedUrl ?? null,
+        hostLabel,
+        previewTitle: link.title || undefined,
+        previewDescription: link.description,
+        previewImage: resolveLinkPreviewImage(link.url, link.image) ?? undefined,
+        createdAt: Date.now(),
+      },
+      ...drops,
+    ];
+
+    if (!(await persistCreatedDrop(next, next[0]))) return false;
+    setTitle("");
+    setDropDesc("");
+    setUrl("");
+    setMode(type);
+    return true;
   }
 
   async function uploadFileToStorage(opts: {
@@ -2658,6 +2693,10 @@ export default function DropTile() {
           setDocDesc(plainText);
           setFile(descriptDocToFile(doc));
           setMediaSource("capture");
+        }}
+        onLinkComplete={async (link) => {
+          const saved = await addResolvedLinkDrop(link);
+          if (!saved) throw new Error("Could not save this Drop.");
         }}
         onClose={() => setStudioOpen(false)}
       />

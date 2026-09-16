@@ -31,7 +31,7 @@
 
 .empty {
   place-items: center;
-  grid-template-rows: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr) auto;
   border-style: dashed;
   border-color: rgba(126, 226, 255, 0.22);
   background:

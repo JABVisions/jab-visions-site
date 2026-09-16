@@ -14,6 +14,7 @@ import LazyDropStudioStage from "@/app/components/board/LazyDropStudioStage";
 import VoiceDropSoundboard from "@/app/components/board/VoiceDropSoundboard";
 import type { DropCustomization } from "@/lib/board/dropCustomizations";
 import { descriptDocToFile, type DescriptDoc } from "@/lib/board/descriptDocs";
+import type { ResolvedDropbookLink } from "@/lib/board/dropbookLink";
 
 type DropRoute =
   | "board"
@@ -1766,6 +1767,33 @@ export default function DropPadOS({
     triggerDropPlacedIndicator("SYSTEM: Drop sent. Choose its folders.");
   };
 
+  const saveDropStudioLink = async (link: ResolvedDropbookLink) => {
+    const now = Date.now();
+    const asset: AssetItem = {
+      id: uid(),
+      kind: link.kind,
+      title: link.title.trim() || "Link Drop",
+      description: link.description || "Created and sent from Drop Studio.",
+      createdAt: now,
+      payload: {
+        url: link.url,
+        embedUrl: link.embedUrl,
+        lifecycle: { phase: "sent", framedAt: now, sentAt: now },
+        library: { isAsset: false, isPortfolio: false },
+        origin: "drop-studio",
+      },
+    };
+
+    if (userId) {
+      setSyncing(true);
+      await withTimeout(upsertAssetToSupabase(sb, userId, asset), 8000).catch(() => ({ ok: false }));
+      setSyncing(false);
+    }
+
+    setSentDropReceipt({ asset, savingTo: null, inAssets: false, inPortfolio: false, error: null });
+    triggerDropPlacedIndicator("SYSTEM: Drop sent. Choose its folders.");
+  };
+
   const addSentDropToLibrary = async (library: "assets" | "portfolio") => {
     if (!sentDropReceipt || sentDropReceipt.savingTo) return;
     if (library === "assets" ? sentDropReceipt.inAssets : sentDropReceipt.inPortfolio) return;
@@ -2691,6 +2719,9 @@ export default function DropPadOS({
           return saveDropStudioFile(file);
         }}
         onDescriptComplete={(doc: DescriptDoc) => saveDropStudioFile(descriptDocToFile(doc))}
+        onLinkComplete={async (link) => {
+          await saveDropStudioLink(link);
+        }}
         onClose={() => setDropStudioOpen(false)}
       />
 
