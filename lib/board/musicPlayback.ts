@@ -35,7 +35,7 @@ export function parseBoardStorageFromUrl(
 ): { bucket: string; storagePath: string } | null {
   if (!url) return null;
   const match = url.match(
-    /\/storage\/v1\/object\/(?:public|sign|authenticated)\/([^/]+)\/([^?]+)/
+    /\/storage\/v1\/(?:object|render\/image)\/(?:public|sign|authenticated)\/([^/]+)\/([^?]+)/
   );
   if (!match) return null;
   return {

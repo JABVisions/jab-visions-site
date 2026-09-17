@@ -34,6 +34,13 @@ import { isLegacyDescriptText } from "@/lib/board/descriptDocs";
 import { isDropbookSlideFile } from "@/lib/board/dropbookSlides";
 import { musicEmbedFor } from "@/lib/board/dropbookLink";
 import DropbookSlideScreen from "@/app/components/board/DropbookSlideScreen";
+import {
+  dropDirectMediaUrl,
+  isSupabaseStorageHostLabel,
+  resolveDropPlaybackSrc,
+  storageCoordsFromDrop,
+} from "@/lib/board/dropDisplay";
+import { getCachedSignedMediaUrl } from "@/lib/board/signedMediaUrl";
 
 const PROFILE_STORAGE_KEY = "jab_board_profile_v2";
 const OPTIONS_STORAGE_KEY = "board.options.v1";
@@ -1042,7 +1049,8 @@ export default function ProfileBoardViewPage({
       if (!Array.isArray(input)) return [];
       return input
         .filter((x) => x && typeof x === "object")
-        .map((x: any): RemoteBoardDrop => ({
+        .map((x: any): RemoteBoardDrop => {
+          const item: RemoteBoardDrop = {
           id: String(x.id ?? ""),
           title: String(x.title ?? "Untitled"),
           type: (x.type as DropType) ?? "Link",
@@ -1079,7 +1087,18 @@ export default function ProfileBoardViewPage({
           customizations: normalizeDropCustomizations(x.customizations),
           fromDescript: x.fromDescript === true ? true : undefined,
           fromDropbook: x.fromDropbook === true ? true : undefined,
-        }))
+        };
+          const coords = storageCoordsFromDrop(item);
+          if (coords) {
+            item.bucket = coords.bucket;
+            item.storagePath = coords.storagePath;
+          }
+          if (!item.mediaUrl) {
+            const direct = dropDirectMediaUrl(item);
+            if (direct) item.mediaUrl = direct;
+          }
+          return item;
+        })
         .filter((item) => item.id);
     }
 
@@ -1194,7 +1213,9 @@ export default function ProfileBoardViewPage({
             ? meta.mediaUrl
             : typeof preview?.mediaUrl === "string"
               ? preview.mediaUrl
-              : undefined,
+              : typeof item.image_url === "string"
+                ? item.image_url
+                : href,
         bucket: typeof meta?.bucket === "string" ? meta.bucket : undefined,
         storagePath: typeof meta?.storagePath === "string" ? meta.storagePath : undefined,
         fileName: typeof meta?.fileName === "string" ? meta.fileName : undefined,
@@ -1355,23 +1376,17 @@ export default function ProfileBoardViewPage({
     let cancelled = false;
 
     async function hydrateSignedUrls() {
-      const supabase = supabaseBrowser();
       const next: Record<string, string> = {};
 
       for (const drop of boardDrops) {
-        if (!drop.bucket || !drop.storagePath) continue;
-        const key = `${drop.bucket}:${drop.storagePath}`;
+        const coords = storageCoordsFromDrop(drop);
+        if (!coords) continue;
+        const key = `${coords.bucket}:${coords.storagePath}`;
         if (signedUrlByKey[key]) continue;
 
-        const { data, error } = await supabase.storage
-          .from(drop.bucket)
-          .createSignedUrl(drop.storagePath, 60 * 45);
+        const resolvedUrl = await getCachedSignedMediaUrl(coords.bucket, coords.storagePath);
 
         if (cancelled) continue;
-        const publicUrl = supabase.storage
-          .from(drop.bucket)
-          .getPublicUrl(drop.storagePath).data.publicUrl;
-        const resolvedUrl = (!error && data?.signedUrl) || publicUrl;
         if (resolvedUrl) next[key] = resolvedUrl;
       }
 
@@ -1390,12 +1405,7 @@ export default function ProfileBoardViewPage({
   // link instead of staying stuck on a playback error.
   const refreshDropSignedUrl = useCallback(async (bucket?: string, path?: string) => {
     if (!bucket || !path) return;
-    const supabase = supabaseBrowser();
-    const { data, error } = await supabase.storage
-      .from(bucket)
-      .createSignedUrl(path, 60 * 45);
-    const publicUrl = supabase.storage.from(bucket).getPublicUrl(path).data.publicUrl;
-    const resolvedUrl = (!error && data?.signedUrl) || publicUrl;
+    const resolvedUrl = await getCachedSignedMediaUrl(bucket, path);
     if (!resolvedUrl) return;
     setSignedUrlByKey((prev) => ({ ...prev, [`${bucket}:${path}`]: resolvedUrl }));
   }, []);
@@ -1480,11 +1490,9 @@ export default function ProfileBoardViewPage({
       boardDrops
         .filter((drop) => (drop as DropItem & { visibility?: string }).visibility !== "private")
         .map((drop): BoardActivity => {
-          const storageKey =
-            drop.bucket && drop.storagePath ? `${drop.bucket}:${drop.storagePath}` : "";
+          const coords = storageCoordsFromDrop(drop);
           const mediaUrl =
-            (storageKey ? signedUrlByKey[storageKey] : undefined) ||
-            drop.mediaUrl;
+            resolveDropPlaybackSrc(drop, signedUrlByKey) || drop.mediaUrl;
           const href = drop.linkUrl || drop.url || drop.embedUrl || mediaUrl || null;
 
           return {
@@ -1502,8 +1510,9 @@ export default function ProfileBoardViewPage({
               dropId: drop.id,
               dropType: drop.type,
               mediaKind: drop.mediaKind ?? null,
-              bucket: drop.bucket ?? null,
-              storagePath: drop.storagePath ?? null,
+              mediaUrl: mediaUrl ?? null,
+              bucket: coords?.bucket ?? drop.bucket ?? null,
+              storagePath: coords?.storagePath ?? drop.storagePath ?? null,
               fileName: drop.fileName ?? null,
               previewImage: drop.previewImage ?? null,
               previewImages: drop.previewImages ?? null,
@@ -1677,11 +1686,9 @@ export default function ProfileBoardViewPage({
                 ) : boardDrops.length > 0 ? (
                   <div className="board-drop-stack">
                     {boardDrops.map((drop) => {
-                      const signedKey =
-                        drop.bucket && drop.storagePath
-                          ? `${drop.bucket}:${drop.storagePath}`
-                          : "";
-                      const signedUrl = signedKey ? signedUrlByKey[signedKey] : undefined;
+                      const storedMedia = storageCoordsFromDrop(drop);
+                      const signedUrl =
+                        resolveDropPlaybackSrc(drop, signedUrlByKey) || undefined;
                       const streamingEmbed = musicEmbedFor(drop.url ?? "") || null;
                       const resolvedEmbedUrl = drop.embedUrl || streamingEmbed;
                       const isMedia =
@@ -1731,7 +1738,7 @@ export default function ProfileBoardViewPage({
                               <span className="board-drop-badge">
                                 {isDropbookSlide ? "Dropbook" : displayDropType(drop.type)}
                               </span>
-                              {drop.hostLabel ? (
+                              {drop.hostLabel && !isSupabaseStorageHostLabel(drop.hostLabel) ? (
                                 <span className="board-drop-badge ghost">{drop.hostLabel}</span>
                               ) : null}
                               {drop.priceCents ? (
@@ -1763,7 +1770,10 @@ export default function ProfileBoardViewPage({
                                   title={drop.title}
                                   label={drop.type === "Thought" ? "VOICE DROP" : "AUDIO DROP"}
                                   onReload={() =>
-                                    refreshDropSignedUrl(drop.bucket, drop.storagePath)
+                                    refreshDropSignedUrl(
+                                      storedMedia?.bucket,
+                                      storedMedia?.storagePath
+                                    )
                                   }
                                 />
                               ) : drop.mediaKind === "video" ? (

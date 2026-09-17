@@ -22,6 +22,7 @@ import {
 import {
   canonicalDropType,
   resolveDropMediaKind,
+  storageCoordsFromDrop,
 } from "@/lib/board/dropDisplay";
 
 export type DropType =
@@ -536,6 +537,11 @@ export function normalizeDropItems(input: unknown, userId: string | null): DropI
       thoughtText: typeof x.thoughtText === "string" ? x.thoughtText : undefined,
       fromDescript: x.fromDescript === true ? true : undefined,
     };
+      const coords = storageCoordsFromDrop(base);
+      if (coords) {
+        base.bucket = coords.bucket;
+        base.storagePath = coords.storagePath;
+      }
       const resolvedKind = resolveDropMediaKind(base);
       if (resolvedKind) base.mediaKind = resolvedKind;
       return base;

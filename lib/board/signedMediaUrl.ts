@@ -15,10 +15,13 @@ export async function getCachedSignedMediaUrl(
 
   const supabase = supabaseBrowser();
   const { data, error } = await supabase.storage.from(bucket).createSignedUrl(path, 60 * 45);
-  const publicUrl = supabase.storage.from(bucket).getPublicUrl(path).data.publicUrl;
-  const url = (!error && data?.signedUrl) || publicUrl || "";
-  if (url) cache.set(key, { url, at: Date.now() });
-  return url;
+  if (!error && data?.signedUrl) {
+    cache.set(key, { url: data.signedUrl, at: Date.now() });
+    return data.signedUrl;
+  }
+  // Signing can fail on a private bucket before auth is ready. Don't cache the
+  // public fallback so the next pass can mint a real signed URL.
+  return supabase.storage.from(bucket).getPublicUrl(path).data.publicUrl || "";
 }
 
 export function invalidateSignedMediaUrl(bucket: string, path: string) {
