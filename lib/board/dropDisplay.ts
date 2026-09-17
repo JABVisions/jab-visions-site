@@ -342,13 +342,31 @@ export function dropDirectMediaUrl(drop: DropLike): string | null {
     if (!candidate?.trim()) continue;
     const value = candidate.trim();
     if (value.startsWith("blob:") || value.startsWith("data:")) return value;
-    if (parseBoardStorageFromUrl(value)) return value;
+    const publicStorage = toPublicBoardStorageUrl(value);
+    if (publicStorage) return publicStorage;
     const clean = extFromName(value);
     if (IMAGE_EXT.test(clean) || AUDIO_EXT.test(clean) || VIDEO_EXT.test(clean)) {
       return value;
     }
   }
   return null;
+}
+
+/** Rewrite signed/authenticated storage URLs to the durable public object URL. */
+export function toPublicBoardStorageUrl(url: string): string | null {
+  if (!parseBoardStorageFromUrl(url)) return null;
+  try {
+    const parsed = new URL(url);
+    parsed.pathname = parsed.pathname.replace(
+      /\/storage\/v1\/(?:object|render\/image)\/(?:sign|authenticated)\//,
+      (match) => match.replace(/\/(sign|authenticated)\//, "/public/")
+    );
+    parsed.search = "";
+    parsed.hash = "";
+    return parsed.toString();
+  } catch {
+    return url.split("?")[0] || null;
+  }
 }
 
 export function resolveDropPlaybackSrc(
