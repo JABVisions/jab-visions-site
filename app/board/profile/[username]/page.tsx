@@ -4,6 +4,8 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import ActivityCard from "@/app/components/board/ActivityCard";
+import ActivityFeed from "@/app/components/board/activity/ActivityFeed";
+import ActivityBadge from "@/app/components/board/activity/ActivityBadge";
 import DropsBucket from "@/app/components/board/DropsBucket";
 import ReactionRail from "@/app/components/board/ReactionRail";
 import {
@@ -14,7 +16,8 @@ import { dedupeActivity, mergeActivityWithFeed } from "@/lib/board/feedActivity"
 import { EVENTS, readFeed } from "@/lib/boardStore";
 import { openHostedPayDropCheckout } from "@/lib/board/payCheckout";
 import { readPayDrops, type PayDrop } from "@/lib/board/paydrops";
-import { EVT_UPDATED, readBrain, sendWave } from "@/lib/board/bucketBrain";
+import { EVT_UPDATED, readBrain } from "@/lib/board/bucketBrain";
+import { persistWave } from "@/lib/board/persistWave";
 import { resolveLinkPreviewImage } from "@/lib/board/linkPreviewImages";
 import {
   normalizeDropCustomizations,
@@ -623,7 +626,7 @@ export default function ProfileBoardViewPage({
       return;
     }
 
-    sendWave(selfUser, target);
+    void persistWave(selfUser, target);
     setOrbitState("requested");
     setWaveNotice(`Wave sent to @${target}.`);
     window.setTimeout(() => setWaveNotice(null), 1600);
@@ -1958,15 +1961,26 @@ export default function ProfileBoardViewPage({
                 </div>
               </section>
 
-              <section className="inner-tile profile-activity">
+              <section className="inner-tile profile-activity" id="activity-channel">
                 <div className="tile-head">
                   <div>
-                    <div className="tile-title">Activity Channel</div>
-                    <div className="tile-sub">Drops, signals, and soft Board Whispers moving through this profile.</div>
+                    <div className="tile-title">
+                      Activity Channel {selfUser && selfUser === routeKey ? <ActivityBadge tone="light" /> : null}
+                    </div>
+                    <div className="tile-sub">
+                      {selfUser && selfUser === routeKey
+                        ? "The same Board pulse as Drop Pad OS — Signals, Waves, Friendzone, comments, and messages."
+                        : "Drops, signals, and soft Board Whispers moving through this profile."}
+                    </div>
                   </div>
                 </div>
 
-                {activityChannelLoading ? (
+                {selfUser && selfUser === routeKey ? (
+                  <div className="recent-drops-stack activity-feed-stack">
+                    <BoardWhisper whisper={PROFILE_ACTIVITY_WHISPERS[0]} />
+                    <ActivityFeed variant="compact" />
+                  </div>
+                ) : activityChannelLoading ? (
                   <div className="note-card">
                     <div className="note-title">Loading Activity Channel…</div>
                     <div className="note-text">

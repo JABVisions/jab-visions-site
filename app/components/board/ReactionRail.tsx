@@ -9,6 +9,7 @@ import {
   type BucketMemoryDrop,
   readBrain,
 } from "@/lib/board/bucketBrain";
+import { persistReaction } from "@/lib/board/persistReaction";
 
 function clsx(...parts: Array<string | false | null | undefined>) {
   return parts.filter(Boolean).join(" ");
@@ -98,6 +99,16 @@ export default function ReactionRail({
 
     depositToBrain(folder, id, item);
     setSelected(folder);
+    void persistReaction({
+      activityId: id,
+      reaction: folder,
+      ownerUserId: item?.user_id ?? null,
+      dropId: String(item?.meta?.dropId || item?.id || id),
+      dropTitle: item?.title ?? null,
+      dropHref: item?.href ?? null,
+      dropImageUrl: item?.image_url ?? null,
+      dropType: typeof item?.meta?.dropType === "string" ? item.meta.dropType : null,
+    });
 
     // micro interaction
     setPulse(folder);

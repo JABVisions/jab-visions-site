@@ -10,6 +10,7 @@ import DropPadSpatialWorld, {
   type DropPadSpace,
   type SpatialLibraryDrop,
 } from "@/app/components/board/DropPadSpatialWorld";
+import ActivityBadge from "@/app/components/board/activity/ActivityBadge";
 import LazyDropStudioStage from "@/app/components/board/LazyDropStudioStage";
 import VoiceDropSoundboard from "@/app/components/board/VoiceDropSoundboard";
 import type { DropCustomization } from "@/lib/board/dropCustomizations";
@@ -2199,6 +2200,7 @@ export default function DropPadOS({
         <div className="flex items-center justify-between rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
           <div className="text-sm text-white/70 flex items-center gap-2">
             Space: <span className="text-white/90 font-medium">{activeSpace === "bucket-brain" ? "Bucket Brain" : activeSpace[0].toUpperCase() + activeSpace.slice(1)}</span>
+            <ActivityBadge />
             {dropPlacedPulse ? (
               <span className="relative inline-flex h-2 w-2">
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-lime-300 opacity-60" />

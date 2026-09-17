@@ -22,7 +22,6 @@ import {
   type BucketMemoryDrop,
   readBrain,
   writeBrain,
-  sendWave,
   simulateIncomingWave,
   getResonanceScore,
   waveBucketDrop,
@@ -30,6 +29,7 @@ import {
   EVT_UPDATED,
   EVT_OPEN,
 } from "@/lib/board/bucketBrain";
+import { persistWave } from "@/lib/board/persistWave";
 
 function clsx(...parts: Array<string | false | null | undefined>) {
   return parts.filter(Boolean).join(" ");
@@ -648,7 +648,7 @@ export default function DropsBucket({
                 type="button"
                 className="waveSend"
                 onClick={() => {
-                  sendWave(my, waveTo);
+                  void persistWave(my, waveTo);
                   setToast(`Wave sent to ${String(waveTo).trim().toLowerCase()} ✋`);
                 }}
               >

@@ -3,6 +3,8 @@
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import ActivityCard from "@/app/components/board/ActivityCard";
+import ActivityFeed from "@/app/components/board/activity/ActivityFeed";
+import ActivityBadge from "@/app/components/board/activity/ActivityBadge";
 import DropTile from "@/app/components/board/DropTile";
 import DropsBucket from "@/app/components/board/DropsBucket";
 import ReactionRail from "@/app/components/board/ReactionRail";
@@ -14,7 +16,8 @@ import { dedupeActivity, mergeActivityWithFeed } from "@/lib/board/feedActivity"
 import { EVENTS, readFeed } from "@/lib/boardStore";
 import { openHostedPayDropCheckout } from "@/lib/board/payCheckout";
 import { readPayDrops, type PayDrop } from "@/lib/board/paydrops";
-import { EVT_UPDATED, readBrain, sendWave } from "@/lib/board/bucketBrain";
+import { persistWave } from "@/lib/board/persistWave";
+import { EVT_UPDATED, readBrain } from "@/lib/board/bucketBrain";
 import { resolveLinkPreviewImage } from "@/lib/board/linkPreviewImages";
 import { DROPS_UPDATED_EVENT } from "@/lib/board/drops/storage";
 import { musicEmbedFor } from "@/lib/board/dropbookLink";
@@ -846,7 +849,7 @@ export default function BoardProfileHubPage() {
       return;
     }
 
-    sendWave(selfUser, target);
+    void persistWave(selfUser, target);
     setOrbitState("requested");
     setWaveNotice(`Wave sent to @${target}.`);
     window.setTimeout(() => setWaveNotice(null), 1600);
@@ -2300,55 +2303,21 @@ export default function BoardProfileHubPage() {
                 </div>
               </section>
 
-              <section className="inner-tile profile-activity">
+              <section className="inner-tile profile-activity" id="activity-channel">
                 <div className="tile-head">
                   <div>
-                    <div className="tile-title">Activity Channel</div>
-                    <div className="tile-sub">Drops, signals, and soft Board Whispers moving through this profile.</div>
+                    <div className="tile-title">Activity Channel <ActivityBadge tone="light" /></div>
+                    <div className="tile-sub">The same Board pulse as Drop Pad OS — Signals, Waves, Friendzone, comments, and messages.</div>
                   </div>
                   <Link href="/board/feed" className="tiny-cta">Open feed</Link>
                 </div>
 
-                {recentDropsLoading && boardDropsLoading && activityChannelItems.length === 0 ? (
-                  <div className="note-card">
-                    <div className="note-title">Loading Activity Channel…</div>
-                    <div className="note-text">
-                      Pulling live board activity into this profile preview.
-                    </div>
-                  </div>
-                ) : activityChannelItems.length > 0 ? (
-                  <div className="recent-drops-stack activity-feed-stack">
-                    {[...visitWhispers, PROFILE_ACTIVITY_WHISPERS[0]].map((whisper) => (
-                      <BoardWhisper key={whisper.id} whisper={whisper} />
-                    ))}
-
-                    {activityChannelItems.map((item, index) => {
-                      // Whisper derived from this drop's real activity, not a canned list.
-                      const whisper =
-                        index % 2 === 0 ? deriveActivityWhisper(item, String(index)) : null;
-
-                      return (
-                        <div key={item.id} className="activity-feed-entry">
-                          <ActivityCard item={item} compact hideAuthor />
-                          {whisper ? <BoardWhisper whisper={whisper} /> : null}
-                        </div>
-                      );
-                    })}
-                  </div>
-                ) : visitWhispers.length > 0 ? (
-                  <div className="recent-drops-stack activity-feed-stack">
-                    {visitWhispers.map((whisper) => (
-                      <BoardWhisper key={whisper.id} whisper={whisper} />
-                    ))}
-                  </div>
-                ) : (
-                  <div className="note-card">
-                    <div className="note-title">No activity yet.</div>
-                    <div className="note-text">
-                      Drops, signals, and whispers will show here as soon as they land.
-                    </div>
-                  </div>
-                )}
+                <div className="recent-drops-stack activity-feed-stack">
+                  {[...visitWhispers, PROFILE_ACTIVITY_WHISPERS[0]].map((whisper) => (
+                    <BoardWhisper key={whisper.id} whisper={whisper} />
+                  ))}
+                  <ActivityFeed variant="compact" />
+                </div>
               </section>
             </div>
 

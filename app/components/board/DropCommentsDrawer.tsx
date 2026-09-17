@@ -26,6 +26,7 @@ type Props = {
   canonicalDropId?: string;
   dropHref?: string;
   dropImageUrl?: string;
+  highlightCommentId?: string;
 };
 
 function readViewerIdentity() {
@@ -113,6 +114,7 @@ export default function DropCommentsDrawer({
   canonicalDropId,
   dropHref,
   dropImageUrl,
+  highlightCommentId,
 }: Props) {
   const [mounted, setMounted] = useState(false);
   const [comments, setComments] = useState<DropComment[]>([]);
@@ -148,6 +150,12 @@ export default function DropCommentsDrawer({
       window.removeEventListener("storage", sync as EventListener);
     };
   }, [dropId, open]);
+
+  useEffect(() => {
+    if (!open || !highlightCommentId) return;
+    const node = document.querySelector(`[data-comment-id="${highlightCommentId}"]`);
+    if (node instanceof HTMLElement) node.scrollIntoView({ block: "center", behavior: "smooth" });
+  }, [comments, highlightCommentId, open]);
 
   useEffect(() => {
     if (!open) return;
@@ -208,7 +216,16 @@ export default function DropCommentsDrawer({
             <div className={styles.empty}>No comments yet. Start the signal.</div>
           ) : (
             comments.map((comment) => (
-              <article className={styles.comment} key={comment.id}>
+              <article
+                className={`${styles.comment} ${
+                  highlightCommentId &&
+                  (comment.id === highlightCommentId || comment.remoteId === highlightCommentId)
+                    ? styles.commentHighlight
+                    : ""
+                }`}
+                key={comment.id}
+                data-comment-id={comment.remoteId || comment.id}
+              >
                 <div className={styles.avatar}>
                   {comment.avatarUrl ? <img src={comment.avatarUrl} alt="" /> : (comment.displayName || comment.username).slice(0, 1).toUpperCase()}
                 </div>

@@ -1,14 +1,13 @@
 "use client";
 
 import Image from "next/image";
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useRef, useState } from "react";
 
 import { sampleBoardWhispers } from "@/app/components/board/BoardWhispers";
 import DropsBucket from "@/app/components/board/DropsBucket";
 import BucketBrainSpace from "@/app/components/board/bucketBrain/BucketBrainSpace";
-import { getLocalActivity, type BoardActivity } from "@/lib/board/activity";
-import { mergeActivityWithFeed } from "@/lib/board/feedActivity";
-import { EVENTS, readFeed } from "@/lib/boardStore";
+import ActivityFeed from "@/app/components/board/activity/ActivityFeed";
+import ActivityBadge from "@/app/components/board/activity/ActivityBadge";
 
 export type DropPadSpace = "free" | "home" | "activity" | "work" | "bucket-brain";
 export type SpatialLibraryDrop = {
@@ -74,19 +73,6 @@ function scrollConsumesGesture(target: EventTarget | null, direction: Direction)
   return scroller.scrollLeft + scroller.clientWidth < scroller.scrollWidth - 2;
 }
 
-function isPrivateActivity(item: BoardActivity) {
-  const meta = item.meta && typeof item.meta === "object" ? item.meta : null;
-  return Boolean((meta as Record<string, unknown> | null)?.private);
-}
-
-function activityKindLabel(item: BoardActivity) {
-  if (item.kind === "board_drop") return "SIGNAL";
-  if (item.kind === "forum_post") return "CONVERSATION";
-  if (item.kind === "announcement") return "BROADCAST";
-  if (item.kind === "status") return "PRESENCE";
-  return "WHISPER";
-}
-
 function SpaceFrame({
   space,
   activeSpace,
@@ -145,28 +131,8 @@ export default function DropPadSpatialWorld({
 }) {
   const pointerStartRef = useRef<Point | null>(null);
   const touchStartRef = useRef<Point | null>(null);
-  const [activity, setActivity] = useState<BoardActivity[]>([]);
   const [workLibrary, setWorkLibrary] = useState<"assets" | "portfolio">("assets");
   const visibleWorkDrops = workLibrary === "assets" ? workAssets : workPortfolio;
-
-  useEffect(() => {
-    const refresh = () => {
-      const items = mergeActivityWithFeed(getLocalActivity(), readFeed())
-        .filter((item) => item && !isPrivateActivity(item))
-        .slice(0, 5);
-      setActivity(items);
-    };
-
-    refresh();
-    window.addEventListener(EVENTS.feedUpdated, refresh as EventListener);
-    window.addEventListener("board:activity:new", refresh as EventListener);
-    window.addEventListener("board:bucketBrain:updated", refresh as EventListener);
-    return () => {
-      window.removeEventListener(EVENTS.feedUpdated, refresh as EventListener);
-      window.removeEventListener("board:activity:new", refresh as EventListener);
-      window.removeEventListener("board:bucketBrain:updated", refresh as EventListener);
-    };
-  }, []);
 
   const move = useCallback(
     (direction: Direction, target?: EventTarget | null) => {
@@ -254,24 +220,19 @@ export default function DropPadSpatialWorld({
           <div className="spaceScroll activityScroll" data-space-scroll>
             <div className="activityMist" aria-hidden />
             <div className="spaceEyebrow">SIGNALS ABOVE HOME</div>
-            <div className="activityStream">
-              {activity.length ? (
-                activity.map((item, index) => (
-                  <article key={item.id} className={`signalNode signalNode${index % 5}`}>
-                    <span>{activityKindLabel(item)}</span>
-                    <strong>{item.title || item.body}</strong>
-                    {item.title && item.body ? <p>{item.body}</p> : null}
-                  </article>
-                ))
-              ) : (
-                sampleBoardWhispers.slice(0, 4).map((whisper, index) => (
-                  <p key={whisper.id} className={`whisperNode whisperNode${index % 4}`}>{whisper.text}</p>
-                ))
-              )}
-            </div>
             <div className="activityIdentity">
               <span>ACTIVITY CHANNEL</span>
-              <strong>Signals move through here.</strong>
+              <strong>The living pulse of Board.</strong>
+              <ActivityBadge />
+            </div>
+            <div className="activityStream">
+              <ActivityFeed variant="holographic" />
+              {sampleBoardWhispers.slice(0, 2).map((whisper, index) => (
+                <p key={whisper.id} className={`whisperNode whisperNode${index % 4}`}>
+                  <span>WHISPER</span>
+                  {whisper.text}
+                </p>
+              ))}
             </div>
           </div>
         </SpaceFrame>
@@ -420,24 +381,16 @@ export default function DropPadSpatialWorld({
           background: rgba(112,225,255,.08); filter: blur(64px);
         }
         .spaceEyebrow { position: relative; font-size: 10px; letter-spacing: .3em; color: rgba(220,245,255,.5); }
-        .activityStream { position: relative; display: grid; gap: 36px; margin-top: 38px; padding: 4px 10px 10px; }
-        .signalNode { width: min(78%, 330px); color: rgba(242,251,255,.82); text-shadow: 0 0 18px rgba(135,225,255,.16); }
-        .signalNode span { display: block; font-size: 8px; letter-spacing: .28em; color: rgba(156,231,255,.46); }
-        .signalNode strong { display: block; margin-top: 7px; font-size: 14px; line-height: 1.42; font-weight: 520; }
-        .signalNode p { margin: 6px 0 0; display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; font-size: 11px; line-height: 1.5; color: rgba(230,242,250,.44); }
-        .signalNode0 { justify-self: start; transform: translateX(4%); }
-        .signalNode1 { justify-self: end; transform: translateX(-3%); }
-        .signalNode2 { justify-self: center; width: min(64%, 280px); }
-        .signalNode3 { justify-self: start; transform: translateX(16%); }
-        .signalNode4 { justify-self: end; transform: translateX(-10%); }
+        .activityIdentity { position: relative; margin: 18px 0 0; padding: 4px 4px 10px; display: grid; gap: 8px; justify-items: start; }
+        .activityIdentity span { display: block; font-size: 11px; letter-spacing: .32em; color: rgba(145,230,255,.62); }
+        .activityIdentity strong { display: block; margin-top: 8px; font-size: 20px; font-weight: 550; }
+        .activityStream { position: relative; display: grid; gap: 28px; margin-top: 12px; padding: 4px 10px 10px; }
         .whisperNode { width: min(72%, 300px); margin: 0; font-size: 12px; line-height: 1.55; color: rgba(230,244,252,.54); text-shadow: 0 0 20px rgba(140,225,255,.2); }
+        .whisperNode span { display: block; margin-bottom: 6px; font-size: 8px; letter-spacing: .28em; color: rgba(156,231,255,.4); }
         .whisperNode0 { justify-self: start; }
         .whisperNode1 { justify-self: end; }
         .whisperNode2 { justify-self: center; transform: translateX(-8%); }
         .whisperNode3 { justify-self: end; transform: translateX(-12%); }
-        .activityIdentity { position: relative; margin-top: 48px; padding: 20px 4px 6px; border-top: 1px solid rgba(255,255,255,.1); }
-        .activityIdentity span { display: block; font-size: 11px; letter-spacing: .32em; color: rgba(145,230,255,.62); }
-        .activityIdentity strong { display: block; margin-top: 8px; font-size: 20px; font-weight: 550; }
         :global(.freeSpace) { touch-action: none; }
         .freeField { position: relative; display: grid; height: 100%; place-content: center; justify-items: center; padding: 28px; text-align: center; }
         .freeHalo { position: absolute; width: 260px; height: 260px; border-radius: 999px; background: rgba(170,255,70,.1); filter: blur(52px); }

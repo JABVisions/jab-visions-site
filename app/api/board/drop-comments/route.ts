@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { supabaseServer } from "@/lib/supabase/server";
+import { createBoardNotification } from "@/lib/board/createNotification";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -273,6 +274,31 @@ export async function POST(req: NextRequest) {
     if (ownerId && ownerId !== user.id) {
       const sourceMeta =
         activity?.meta && typeof activity.meta === "object" ? activity.meta : {};
+      await createBoardNotification(supabase, {
+        recipientId: ownerId,
+        actorId: user.id,
+        activityType: "comment",
+        entityType: "drop",
+        entityId: canonicalDropId || dropId,
+        dropId: canonicalDropId || dropId,
+        commentId: comment.remoteId || comment.id,
+        message: `${displayName || `@${username}`} commented on ${activity?.title || dropTitle}.`,
+        preview: text,
+        href: activity?.href || dropHref || null,
+        imageUrl: activity?.image_url || dropImageUrl || null,
+        metadata: {
+          actorName: displayName,
+          actorUsername: username,
+          actorAvatar: avatarUrl || null,
+          dropTitle: activity?.title || dropTitle,
+          commentId: comment.remoteId || comment.id,
+          commentDropId: dropId,
+          referencedDropId: canonicalDropId || sourceMeta.dropId || dropId,
+          mediaKind: sourceMeta.mediaKind ?? null,
+        },
+        priority: "medium",
+        actionRequired: false,
+      });
       await supabase.from("board_activity").insert({
         scope: "global",
         user_id: user.id,
