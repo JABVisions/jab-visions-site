@@ -1,13 +1,14 @@
 "use client";
 
-import Link from "next/link";
 import styles from "./bucketBrainSpace.module.css";
 import type { CreatorEntity, WorkBoardEntity } from "@/lib/board/brain/response";
 
 export default function WorkBoardPreviewCard({
   board,
+  onOpen,
 }: {
   board: WorkBoardEntity | CreatorEntity;
+  onOpen?: (board: WorkBoardEntity | CreatorEntity) => void;
 }) {
   const displayName = board.displayName?.trim() || board.username || "Board User";
   const initial = displayName.slice(0, 1).toUpperCase() || "B";
@@ -16,14 +17,14 @@ export default function WorkBoardPreviewCard({
   const boardLabel = "boardLabel" in board ? board.boardLabel : "Work Board";
   const bio = board.bio?.trim() || "";
   const previews = "previews" in board ? board.previews : [];
-  const href = board.href || `/board/profile/${encodeURIComponent(board.username)}`;
   const glow = "glowColor" in board ? board.glowColor : null;
 
   return (
-    <Link
+    <button
+      type="button"
       className={styles.card}
-      href={href}
       style={glow ? { boxShadow: `inset 0 1px 0 rgba(255,255,255,0.08), 0 0 22px ${glow}33` } : undefined}
+      onClick={() => onOpen?.(board)}
     >
       <div className={styles.cardTop}>
         {board.avatarUrl ? (
@@ -52,6 +53,6 @@ export default function WorkBoardPreviewCard({
         </div>
       ) : null}
       <span className={styles.open}>Open Work Board</span>
-    </Link>
+    </button>
   );
 }

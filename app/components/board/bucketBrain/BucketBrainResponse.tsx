@@ -33,7 +33,13 @@ function isBoardContent(entity: BucketBrainEntity): entity is BoardContentEntity
 }
 
 /** Mixed Bucket Brain response: Visionary text + Board entities in one stream. */
-export default function BucketBrainResponse({ entities }: { entities: BucketBrainEntity[] }) {
+export default function BucketBrainResponse({
+  entities,
+  onOpenWorkBoard,
+}: {
+  entities: BucketBrainEntity[];
+  onOpenWorkBoard?: (board: WorkBoardEntity | CreatorEntity) => void;
+}) {
   const visionary = entities.find(isVisionary);
   const notices = entities.filter(isNotice);
   const boards = [...entities.filter(isWorkBoard), ...entities.filter(isCreator)];
@@ -48,7 +54,7 @@ export default function BucketBrainResponse({ entities }: { entities: BucketBrai
           {notice.body}
         </div>
       ))}
-      <WorkBoardSearchResults boards={boards} />
+      <WorkBoardSearchResults boards={boards} onOpen={onOpenWorkBoard} />
       {content.length ? (
         <div className={styles.cards}>
           {content.map((item) => (

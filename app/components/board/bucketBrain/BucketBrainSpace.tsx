@@ -6,6 +6,8 @@ import type {
   BucketBrainEntity,
   BucketBrainIntent,
   BucketBrainPhase,
+  CreatorEntity,
+  WorkBoardEntity,
 } from "@/lib/board/brain/response";
 import { personalSearchNotice } from "@/lib/board/brain/personal";
 import { executeBucketBrainQuery } from "@/lib/board/brain/query";
@@ -13,6 +15,7 @@ import BucketBrainInput from "./BucketBrainInput";
 import BucketBrainOrb from "./BucketBrainOrb";
 import BucketBrainQuickActions from "./BucketBrainQuickActions";
 import BucketBrainResults from "./BucketBrainResults";
+import WorkBoardPreview from "./WorkBoardPreview";
 import styles from "./bucketBrainSpace.module.css";
 
 const STATUS: Record<BucketBrainPhase, string> = {
@@ -37,6 +40,7 @@ export default function BucketBrainSpace({
   const [status, setStatus] = useState(STATUS.idle);
   const [entities, setEntities] = useState<BucketBrainEntity[] | null>(null);
   const [error, setError] = useState("");
+  const [previewBoard, setPreviewBoard] = useState<WorkBoardEntity | null>(null);
   const requestRef = useRef(0);
   const abortRef = useRef<AbortController | null>(null);
 
@@ -105,6 +109,36 @@ export default function BucketBrainSpace({
     void runQuery(prompt, intent);
   }
 
+  function openPreview(board: WorkBoardEntity | CreatorEntity) {
+    setPreviewBoard(
+      board.kind === "work_board"
+        ? board
+        : {
+            kind: "work_board",
+            id: board.id,
+            username: board.username,
+            displayName: board.displayName,
+            profession: board.profession,
+            location: null,
+            bio: board.bio,
+            boardLabel: "Work Board",
+            avatarUrl: board.avatarUrl,
+            glowColor: null,
+            href: board.href,
+            previews: [],
+            score: board.score,
+          }
+    );
+  }
+
+  if (previewBoard) {
+    return (
+      <div className={styles.space}>
+        <WorkBoardPreview board={previewBoard} onClose={() => setPreviewBoard(null)} />
+      </div>
+    );
+  }
+
   return (
     <div className={styles.space}>
       <div className={styles.eyebrow}>BELOW HOME</div>
@@ -138,6 +172,7 @@ export default function BucketBrainSpace({
           entities={entities}
           emptyTitle={emptyCopy.title}
           emptyBody={emptyCopy.body}
+          onOpenWorkBoard={openPreview}
         />
       ) : null}
 
