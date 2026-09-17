@@ -2166,12 +2166,7 @@ export default function ProfileBoardViewPage({
 
         .profile-grid {
           display: grid;
-          grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.14fr);
-          grid-template-areas:
-            "identity aura"
-            "vision cover"
-            "board activity"
-            "friend-zone bucket";
+          grid-template-columns: minmax(280px, 0.95fr) minmax(340px, 1.2fr) minmax(280px, 0.95fr);
           gap: 16px;
           width: 100%;
           min-width: 0;
@@ -2180,48 +2175,23 @@ export default function ProfileBoardViewPage({
         .left-column,
         .center-column,
         .right-column {
-          display: contents;
+          display: grid;
+          gap: 16px;
+          align-content: start;
+          min-width: 0;
         }
 
-        .profile-identity { grid-area: identity; }
-        .profile-aura { grid-area: aura; }
-        .profile-vision { grid-area: vision; }
-        .profile-cover { grid-area: cover; }
-        .profile-board-drop { grid-area: board; }
-        .profile-activity { grid-area: activity; }
-        .profile-friend-zone { grid-area: friend-zone; }
-        .profile-bucket { grid-area: bucket; }
+        .profile-grid section {
+          min-width: 0;
+        }
 
-        .profile-grid > section,
         .inner-tile {
           min-width: 0;
-          max-width: 100%;
-        }
-
-        .inner-tile {
           border-radius: 28px;
           border: 1px solid rgba(0, 0, 0, 0.1);
           background: rgba(246, 240, 194, 0.92);
           padding: 16px;
-          overflow: hidden;
           box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.45);
-        }
-
-        .profile-board-drop :global(.drop-tile),
-        .profile-activity :global(article),
-        .activity-feed-stack,
-        .recent-drops-stack,
-        .board-drop-stack {
-          width: 100%;
-          max-width: 100%;
-          min-width: 0;
-          overflow: hidden;
-        }
-
-        .profile-grid img,
-        .profile-grid video,
-        .profile-grid iframe {
-          max-width: 100%;
         }
 
         .tile-head {
@@ -3061,18 +3031,31 @@ export default function ProfileBoardViewPage({
         }
 
         @media (max-width: 1180px) {
-          .poster-board {
-            padding: 12px;
+          .profile-grid {
+            grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+            grid-auto-flow: row dense;
           }
 
+          .center-column {
+            grid-column: 1 / -1;
+          }
+        }
+
+        @media (max-width: 980px) {
           .profile-grid {
-            grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.14fr);
-            gap: 12px;
+            grid-template-columns: minmax(0, 1fr);
+          }
+
+          .center-column {
+            grid-column: auto;
           }
         }
 
         @media (max-width: 720px) {
-          .profile-grid {
+          .profile-grid,
+          .left-column,
+          .center-column,
+          .right-column {
             gap: 8px;
           }
 
@@ -3086,11 +3069,6 @@ export default function ProfileBoardViewPage({
 
           .friend-zone-actions {
             grid-template-columns: 1fr;
-          }
-
-          .inner-tile {
-            padding: 12px;
-            border-radius: 22px;
           }
         }
       `}</style>
