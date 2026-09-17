@@ -1,0 +1,343 @@
+.preview {
+  position: relative;
+  display: grid;
+  gap: 14px;
+  width: min(100%, 720px);
+  min-width: 0;
+  padding: 2px 2px 20px;
+  color: rgba(236, 248, 255, 0.92);
+  text-align: left;
+  justify-self: center;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.back,
+.full {
+  border: 1px solid rgba(145, 230, 255, 0.22);
+  border-radius: 999px;
+  background: rgba(105, 220, 255, 0.08);
+  padding: 8px 14px;
+  color: rgba(230, 250, 255, 0.86);
+  font: inherit;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.back {
+  background: transparent;
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
+.status {
+  min-height: 1.1em;
+  font-size: 10px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: rgba(145, 230, 255, 0.62);
+  text-align: center;
+}
+
+.header {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  min-width: 0;
+  padding: 10px 4px 4px;
+}
+
+.avatar,
+.avatarFallback {
+  width: 52px;
+  height: 52px;
+  flex: none;
+  overflow: hidden;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+}
+
+.avatar {
+  object-fit: cover;
+  background: rgba(0, 0, 0, 0.35);
+}
+
+.avatarFallback {
+  display: grid;
+  place-items: center;
+  background: rgba(105, 220, 255, 0.16);
+  color: rgba(220, 250, 255, 0.9);
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.identity {
+  min-width: 0;
+}
+
+.kicker {
+  font-size: 9px;
+  letter-spacing: 0.28em;
+  text-transform: uppercase;
+  color: rgba(145, 230, 255, 0.5);
+}
+
+.name {
+  overflow: hidden;
+  margin-top: 3px;
+  color: rgba(240, 252, 255, 0.94);
+  font-size: 18px;
+  font-weight: 620;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.role {
+  margin-top: 3px;
+  color: rgba(145, 230, 255, 0.72);
+  font-size: 12px;
+}
+
+.bio {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  margin: 4px 0 0;
+  color: rgba(220, 238, 248, 0.55);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.nav {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+}
+
+.tab,
+.tabOn {
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.04);
+  padding: 8px 16px;
+  color: rgba(230, 246, 255, 0.68);
+  font: inherit;
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.tabOn {
+  border-color: rgba(163, 255, 120, 0.38);
+  background: rgba(163, 255, 120, 0.12);
+  color: rgba(236, 255, 230, 0.95);
+  box-shadow: 0 0 18px rgba(163, 255, 70, 0.12);
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(148px, 1fr));
+  gap: 10px;
+  min-width: 0;
+}
+
+.tile,
+.tilePortfolio {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid rgba(145, 230, 255, 0.16);
+  border-radius: 16px;
+  background: linear-gradient(160deg, rgba(120, 220, 255, 0.08), rgba(4, 10, 18, 0.28));
+  color: inherit;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+}
+
+.tilePortfolio {
+  border-color: rgba(163, 255, 120, 0.22);
+  box-shadow: 0 0 18px rgba(163, 255, 70, 0.08);
+}
+
+.thumb {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  overflow: hidden;
+  background: rgba(0, 8, 16, 0.45);
+  color: rgba(210, 240, 255, 0.7);
+  font-size: 22px;
+}
+
+.thumb img,
+.thumb video {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.tileCopy {
+  min-width: 0;
+  padding: 0 10px 10px;
+}
+
+.tileTitle {
+  overflow: hidden;
+  color: rgba(240, 252, 255, 0.9);
+  font-size: 12px;
+  font-weight: 620;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tileKind {
+  margin-top: 3px;
+  color: rgba(145, 230, 255, 0.58);
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.empty {
+  padding: 22px 10px;
+  color: rgba(210, 236, 250, 0.55);
+  font-size: 13px;
+  line-height: 1.5;
+  text-align: center;
+}
+
+.viewer {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgba(2, 8, 14, 0.62);
+}
+
+.viewerBackdrop {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  background: transparent;
+}
+
+.viewerPanel {
+  position: relative;
+  z-index: 1;
+  width: min(100%, 640px);
+  max-height: 86vh;
+  overflow: auto;
+  padding: 16px;
+  border: 1px solid rgba(145, 230, 255, 0.22);
+  border-radius: 24px;
+  background: linear-gradient(160deg, rgba(8, 22, 34, 0.94), rgba(4, 10, 18, 0.96));
+  box-shadow: 0 0 48px rgba(80, 210, 255, 0.12);
+}
+
+.viewerTop {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.viewerKicker {
+  font-size: 9px;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: rgba(145, 230, 255, 0.5);
+}
+
+.viewerTitle {
+  margin-top: 4px;
+  color: rgba(240, 252, 255, 0.94);
+  font-size: 16px;
+  font-weight: 650;
+}
+
+.media {
+  overflow: hidden;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(0, 0, 0, 0.28);
+}
+
+.media img,
+.media video,
+.media iframe {
+  display: block;
+  width: 100%;
+  max-height: 62vh;
+}
+
+.media iframe {
+  height: 220px;
+  border: 0;
+}
+
+.note,
+.linkBox {
+  padding: 14px;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(230, 244, 255, 0.8);
+  font-size: 14px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.linkBox a {
+  color: rgba(163, 255, 120, 0.9);
+}
+
+@media (max-width: 640px) {
+  .grid {
+    display: flex;
+    gap: 10px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding-bottom: 8px;
+    scroll-snap-type: x proximity;
+  }
+  .tile,
+  .tilePortfolio {
+    flex: 0 0 168px;
+    scroll-snap-align: start;
+  }
+  .full {
+    padding-inline: 10px;
+    letter-spacing: 0.08em;
+  }
+}
+
+@media (min-width: 900px) {
+  .grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tile,
+  .tabOn {
+    box-shadow: none;
+  }
+}

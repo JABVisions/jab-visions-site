@@ -6,14 +6,16 @@ import WorkBoardPreviewCard from "./WorkBoardPreviewCard";
 
 export default function WorkBoardSearchResults({
   boards,
+  onOpen,
 }: {
   boards: Array<WorkBoardEntity | CreatorEntity>;
+  onOpen?: (board: WorkBoardEntity | CreatorEntity) => void;
 }) {
   if (!boards.length) return null;
   return (
     <div className={styles.cards}>
       {boards.map((board) => (
-        <WorkBoardPreviewCard key={board.id} board={board} />
+        <WorkBoardPreviewCard key={board.id} board={board} onOpen={onOpen} />
       ))}
     </div>
   );
