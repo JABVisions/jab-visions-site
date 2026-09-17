@@ -5,6 +5,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 
 import { sampleBoardWhispers } from "@/app/components/board/BoardWhispers";
 import DropsBucket from "@/app/components/board/DropsBucket";
+import BucketBrainSpace from "@/app/components/board/bucketBrain/BucketBrainSpace";
 import { getLocalActivity, type BoardActivity } from "@/lib/board/activity";
 import { mergeActivityWithFeed } from "@/lib/board/feedActivity";
 import { EVENTS, readFeed } from "@/lib/boardStore";
@@ -349,16 +350,17 @@ export default function DropPadSpatialWorld({
         <SpaceFrame space="bucket-brain" activeSpace={activeSpace} className="brainSpace">
           <div className="spaceScroll brainScroll" data-space-scroll>
             <div className="brainGlow" aria-hidden />
-            <div className="brainHeading">
-              <div className="spaceEyebrow">BELOW HOME</div>
-              <h3>Bucket Brain</h3>
-              <p>Board memory, resonance, waves, and contextual intelligence.</p>
-            </div>
-            <DropsBucket
-              title="Bucket Brain"
-              subtitle="Your living memory layer inside Drop Pad OS."
+            <BucketBrainSpace
               isActive={activeSpace === "bucket-brain"}
+              reducedMotion={reducedMotion}
             />
+            <div className="brainMemory">
+              <DropsBucket
+                title="Bucket Brain Memory"
+                subtitle="PASS, PIN, and PUSH stay here — the living memory layer of Drop Pad OS."
+                isActive={activeSpace === "bucket-brain"}
+              />
+            </div>
           </div>
         </SpaceFrame>
       </div>
@@ -474,6 +476,13 @@ export default function DropPadSpatialWorld({
         :global(.brainScroll) { padding: 22px 14px 72px; }
         .brainGlow { position: absolute; left: 50%; top: 6%; width: 220px; height: 220px; transform: translateX(-50%); border-radius: 999px; pointer-events: none; background: rgba(70,235,255,.07); filter: blur(70px); }
         .brainHeading { position: relative; margin: 0 4px 20px; }
+        .brainMemory {
+          position: relative;
+          width: min(100%, 560px);
+          margin: 18px auto 0;
+          padding-top: 18px;
+          opacity: 0.92;
+        }
         .spaceStatus { position: absolute; z-index: 19; right: 12px; top: 12px; max-width: 44%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 9px; letter-spacing: .18em; text-transform: uppercase; color: rgba(255,255,255,.34); pointer-events: none; }
         @media (prefers-reduced-motion: reduce) {
           .dropPadSpatialWorld { transition-duration: 1ms !important; }
