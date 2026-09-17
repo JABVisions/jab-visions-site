@@ -76,6 +76,15 @@
   aspect-ratio: auto;
 }
 
+.workbench .chipAssembly {
+  border-radius: 0;
+}
+
+.workbench .dropChipMonitor {
+  border-radius: 0;
+  border: 0;
+}
+
 .chipFrame[data-frame="landscape"] {
   --drop-chip-aspect: 16 / 9;
 }

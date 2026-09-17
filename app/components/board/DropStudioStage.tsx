@@ -3374,27 +3374,44 @@ export default function DropStudioStage({
                       />
                     </div>
                   ) : (
-                    <>
-                      <div className="capStudioHost">
-                        <DropStudio
-                          mediaUrl={mediaUrl}
-                          mediaKind={mediaKind === "video" ? "video" : "image"}
-                          value={studioValue}
-                          onChange={handleStudioChange}
-                          hideHeader
-                          operatingTable
-                          onMediaError={handleMediaPreviewError}
-                        />
-                      </div>
-                      <div className="editActions">
-                        {saveNote ? <span className="saveNote">{saveNote}</span> : null}
-                        <button type="button" className="studioDone" onClick={done}>
-                          {isDropbookMode
-                            ? `Add ${mediaKind === "video" ? "Video" : "Vision"} to Dropbook →`
-                            : `Add ${mediaKind === "video" ? "Video" : "Vision"} to Drop →`}
-                        </button>
-                      </div>
-                    </>
+                    <div className="capStudioHost">
+                      <DropStudio
+                        mediaUrl={mediaUrl}
+                        mediaKind={mediaKind === "video" ? "video" : "image"}
+                        value={studioValue}
+                        onChange={handleStudioChange}
+                        hideHeader
+                        operatingTable
+                        onMediaError={handleMediaPreviewError}
+                      />
+                      {saveNote ? <span className="saveNote capStudioSaveNote">{saveNote}</span> : null}
+                      <button
+                        type="button"
+                        className="studioDoneCheck"
+                        onClick={done}
+                        aria-label={
+                          isDropbookMode
+                            ? `Add ${mediaKind === "video" ? "Video" : "Vision"} to Dropbook`
+                            : `Add ${mediaKind === "video" ? "Video" : "Vision"} to Drop`
+                        }
+                        title={
+                          isDropbookMode
+                            ? `Add ${mediaKind === "video" ? "Video" : "Vision"} to Dropbook`
+                            : `Add ${mediaKind === "video" ? "Video" : "Vision"} to Drop`
+                        }
+                      >
+                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                          <path
+                            d="M5.2 12.4 9.4 16.8 18.8 6.8"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2.6"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          />
+                        </svg>
+                      </button>
+                    </div>
                   )}
                 </div>
               )}
