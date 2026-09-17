@@ -6,7 +6,8 @@ import { Orbit, Radio } from "lucide-react";
 import StoreDropMarketplace from "@/app/components/board/StoreDropMarketplace";
 import DropPadOS from "@/app/components/board/DropPadOS.v3";
 import type { DropPadApp } from "@/app/components/board/DropPadOS";
-import { EVT_UPDATED, readBrain, sendWave } from "@/lib/board/bucketBrain";
+import { EVT_UPDATED, readBrain } from "@/lib/board/bucketBrain";
+import { persistWave } from "@/lib/board/persistWave";
 import { supabaseBrowser } from "@/lib/supabase/browser";
 
 const PROFILE_STORAGE_KEY = "jab_board_profile_v2";
@@ -416,7 +417,7 @@ export default function ExplorePage() {
       return;
     }
 
-    sendWave(selfUser, target);
+    void persistWave(selfUser, target);
     setWavedTo((current) => new Set([...current, target]));
     setWaveToast(`Wave sent to @${target}.`);
     window.setTimeout(() => setWaveToast(null), 1600);

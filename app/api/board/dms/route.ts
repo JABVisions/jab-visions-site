@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { supabaseServer } from "@/lib/supabase/server";
+import { createBoardNotification } from "@/lib/board/createNotification";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -185,6 +186,40 @@ export async function POST(req: NextRequest) {
     if (error) {
       return json(dmStorageError(error), 500);
     }
+
+    const { data: actorRow } = await supabase
+      .from("profiles")
+      .select("username, display_name, avatar_url, board_style")
+      .eq("id", user.id)
+      .maybeSingle();
+    const style =
+      actorRow?.board_style && typeof actorRow.board_style === "object"
+        ? actorRow.board_style
+        : {};
+    const actorName =
+      String(actorRow?.display_name || (style as any)?.displayName || "").trim() || "Someone";
+    const actorUsername = String(actorRow?.username || "").replace(/^@+/, "").toLowerCase();
+    const actorAvatar = String(actorRow?.avatar_url || (style as any)?.avatarUrl || "");
+
+    await createBoardNotification(supabase, {
+      recipientId,
+      actorId: user.id,
+      activityType: "dm",
+      entityType: "conversation",
+      entityId: user.id,
+      conversationId: `friend:${user.id}`,
+      message: `${actorName} sent you a message.`,
+      preview: text,
+      href: actorUsername ? `/board/profile/${actorUsername}` : null,
+      imageUrl: actorAvatar || null,
+      metadata: {
+        actorName,
+        actorUsername,
+        actorAvatar,
+      },
+      priority: "high",
+      actionRequired: true,
+    });
 
     return json({ ok: true, message: mapMessage(data as DirectMessageRow, user.id) });
   } catch (err) {

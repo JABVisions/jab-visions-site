@@ -19,6 +19,7 @@ import {
 import FriendZoneOrb from "@/app/components/board/FriendZoneOrb";
 import type { FriendZoneState } from "@/lib/board/friendZoneSignals";
 import { beatFriendZonePresence, loadBoardUserFriendZoneOrbs } from "@/lib/board/friendZoneUsers";
+import { BOARD_OPEN_FRIENDZONE_CHAT_EVENT } from "@/lib/board/notifications";
 
 type Friend = {
   id: string;
@@ -324,6 +325,50 @@ export default function BoardDock() {
       document.body.style.paddingBottom = "";
     };
   }, [drawerOpen]);
+
+  useEffect(() => {
+    function onOpenChat(event: Event) {
+      const detail = ((event as CustomEvent).detail || {}) as {
+        friendId?: string;
+        username?: string;
+        name?: string;
+        avatar?: string;
+      };
+      const friendId = String(detail.friendId || "").trim();
+      const username = String(detail.username || "")
+        .trim()
+        .replace(/^@+/, "")
+        .toLowerCase();
+      const match = friends.find(
+        (friend) =>
+          (friendId && friend.id === friendId) ||
+          (username && String(friend.username || "").toLowerCase() === username)
+      );
+      const nextFriend =
+        match ||
+        (friendId || username
+          ? {
+              id: friendId || `friend:${username}`,
+              name: String(detail.name || username || "Board User"),
+              username: username || undefined,
+              avatar: String(detail.avatar || "") || null,
+              addedAt: Date.now(),
+            }
+          : null);
+      if (!nextFriend) return;
+      if (!match) {
+        setFriends((current) => mergeDockFriends([nextFriend], current));
+      }
+      setActiveFriendId(nextFriend.id);
+      detailsRef.current?.setAttribute("open", "");
+      setDrawerOpen(true);
+    }
+
+    window.addEventListener(BOARD_OPEN_FRIENDZONE_CHAT_EVENT, onOpenChat as EventListener);
+    return () => {
+      window.removeEventListener(BOARD_OPEN_FRIENDZONE_CHAT_EVENT, onOpenChat as EventListener);
+    };
+  }, [friends]);
 
   const friendCount = friends.length;
 

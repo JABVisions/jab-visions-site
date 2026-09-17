@@ -6,6 +6,8 @@ import BoardDock from "@/app/components/board/BoardDock";
 import BoardUtilityHeader from "@/app/components/board/BoardUtilityHeader";
 import BoardDropEditModal from "@/app/components/board/BoardDropEditModal";
 import BoardClientErrorBoundary from "@/app/components/board/BoardClientErrorBoundary";
+import { ActivityProvider } from "@/app/components/board/activity/ActivityProvider";
+import ActivityNavigationHost from "@/app/components/board/activity/ActivityNavigationHost";
 
 export default function BoardLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname() || "";
@@ -28,7 +30,8 @@ export default function BoardLayout({ children }: { children: React.ReactNode })
   const isWelcomeRoute = pathname === "/board";
 
   return (
-    <div className={isDark ? "board-root board-root--dark" : "board-root board-root--light"}>
+    <ActivityProvider>
+      <div className={isDark ? "board-root board-root--dark" : "board-root board-root--light"}>
       {!isAuthRoute && !isWelcomeRoute ? (
         <BoardClientErrorBoundary name="board-header" fallback={null}>
           <BoardUtilityHeader />
@@ -49,6 +52,7 @@ export default function BoardLayout({ children }: { children: React.ReactNode })
           <BoardDropEditModal />
         </BoardClientErrorBoundary>
       ) : null}
+      {!isAuthRoute ? <ActivityNavigationHost /> : null}
 
       <style>{`
         .board-root {
@@ -79,6 +83,7 @@ export default function BoardLayout({ children }: { children: React.ReactNode })
           padding-bottom: 110px; /* space for BoardDock */
         }
       `}</style>
-    </div>
+      </div>
+    </ActivityProvider>
   );
 }

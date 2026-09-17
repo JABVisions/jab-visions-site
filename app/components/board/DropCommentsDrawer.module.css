@@ -105,6 +105,11 @@
   padding: 12px;
 }
 
+.commentHighlight {
+  border-color: rgba(141, 255, 231, 0.55);
+  box-shadow: 0 0 22px rgba(141, 255, 231, 0.18);
+}
+
 .avatar {
   width: 38px;
   height: 38px;
