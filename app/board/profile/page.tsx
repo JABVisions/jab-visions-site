@@ -48,6 +48,8 @@ import {
   writeLightweightLocalStorage,
 } from "@/lib/board/profileStorage";
 import { supabaseBrowser } from "@/lib/supabase/browser";
+import { dropDirectMediaUrl, resolveDropPlaybackSrc, storageCoordsFromDrop } from "@/lib/board/dropDisplay";
+import { getCachedSignedMediaUrl } from "@/lib/board/signedMediaUrl";
 
 const PROFILE_STORAGE_KEY = BOARD_PROFILE_STORAGE_KEY;
 const OPTIONS_STORAGE_KEY = "board.options.v1";
@@ -1267,7 +1269,8 @@ export default function BoardProfileHubPage() {
       if (!Array.isArray(input)) return [];
       return input
         .filter((x) => x && typeof x === "object")
-        .map((x: any): RemoteBoardDrop => ({
+        .map((x: any): RemoteBoardDrop => {
+          const item: RemoteBoardDrop = {
           id: String(x.id ?? ""),
           title: String(x.title ?? "Untitled"),
           type: (x.type as DropType) ?? "Link",
@@ -1302,7 +1305,18 @@ export default function BoardProfileHubPage() {
               ? x.payProvider
               : undefined,
           customizations: normalizeDropCustomizations(x.customizations),
-        }))
+        };
+          const coords = storageCoordsFromDrop(item);
+          if (coords) {
+            item.bucket = coords.bucket;
+            item.storagePath = coords.storagePath;
+          }
+          if (!item.mediaUrl) {
+            const direct = dropDirectMediaUrl(item);
+            if (direct) item.mediaUrl = direct;
+          }
+          return item;
+        })
         .filter((item) => item.id);
     }
 
@@ -1417,7 +1431,9 @@ export default function BoardProfileHubPage() {
             ? meta.mediaUrl
             : typeof preview?.mediaUrl === "string"
               ? preview.mediaUrl
-              : undefined,
+              : typeof item.image_url === "string"
+                ? item.image_url
+                : href,
         bucket: typeof meta?.bucket === "string" ? meta.bucket : undefined,
         storagePath: typeof meta?.storagePath === "string" ? meta.storagePath : undefined,
         fileName: typeof meta?.fileName === "string" ? meta.fileName : undefined,
@@ -1602,23 +1618,17 @@ export default function BoardProfileHubPage() {
     let cancelled = false;
 
     async function hydrateSignedUrls() {
-      const supabase = supabaseBrowser();
       const next: Record<string, string> = {};
 
       for (const drop of boardDrops) {
-        if (!drop.bucket || !drop.storagePath) continue;
-        const key = `${drop.bucket}:${drop.storagePath}`;
+        const coords = storageCoordsFromDrop(drop);
+        if (!coords) continue;
+        const key = `${coords.bucket}:${coords.storagePath}`;
         if (signedUrlByKey[key]) continue;
 
-        const { data, error } = await supabase.storage
-          .from(drop.bucket)
-          .createSignedUrl(drop.storagePath, 60 * 45);
+        const resolvedUrl = await getCachedSignedMediaUrl(coords.bucket, coords.storagePath);
 
         if (cancelled) continue;
-        const publicUrl = supabase.storage
-          .from(drop.bucket)
-          .getPublicUrl(drop.storagePath).data.publicUrl;
-        const resolvedUrl = (!error && data?.signedUrl) || publicUrl;
         if (resolvedUrl) next[key] = resolvedUrl;
       }
 
@@ -1717,13 +1727,9 @@ export default function BoardProfileHubPage() {
             (drop as DropItem & { visibility?: string }).visibility !== "private"
         )
         .map((drop): BoardActivity => {
-          const storageKey =
-            drop.bucket && drop.storagePath
-              ? `${drop.bucket}:${drop.storagePath}`
-              : "";
+          const coords = storageCoordsFromDrop(drop);
           const mediaUrl =
-            (storageKey ? signedUrlByKey[storageKey] : undefined) ||
-            drop.mediaUrl;
+            resolveDropPlaybackSrc(drop, signedUrlByKey) || drop.mediaUrl;
           const href =
             drop.linkUrl || drop.url || drop.embedUrl || mediaUrl || null;
 
@@ -1749,8 +1755,8 @@ export default function BoardProfileHubPage() {
               dropType: drop.type,
               mediaKind: drop.mediaKind ?? null,
               mediaUrl: mediaUrl ?? null,
-              bucket: drop.bucket ?? null,
-              storagePath: drop.storagePath ?? null,
+              bucket: coords?.bucket ?? drop.bucket ?? null,
+              storagePath: coords?.storagePath ?? drop.storagePath ?? null,
               fileName: drop.fileName ?? null,
               mime: drop.mime ?? null,
               previewImage: drop.previewImage ?? null,
@@ -2594,7 +2600,11 @@ export default function BoardProfileHubPage() {
           width: 100%;
           max-width: 100%;
           min-width: 0;
-          overflow: hidden;
+          overflow: visible;
+        }
+
+        .left-column :global(.drop-list) {
+          overflow: visible;
         }
 
         .tile-head {

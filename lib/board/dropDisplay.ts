@@ -217,7 +217,14 @@ export function secondaryAttachmentLabel(drop: DropLike): string | null {
   }
 
   const host = String(drop.hostLabel ?? "").trim();
-  if (host && host.toUpperCase() !== "LINK" && !labelsEquivalent(host, main)) return host;
+  if (
+    host &&
+    host.toUpperCase() !== "LINK" &&
+    !labelsEquivalent(host, main) &&
+    !isSupabaseStorageHostLabel(host)
+  ) {
+    return host;
+  }
 
   return null;
 }
@@ -296,13 +303,66 @@ export function studioSubcategoryFromMeta(meta: Record<string, unknown> | null |
 }
 
 export function storageCoordsFromDrop(drop: DropLike) {
-  if (drop.bucket?.trim() && drop.storagePath?.trim()) {
-    return { bucket: drop.bucket.trim(), storagePath: drop.storagePath.trim() };
+  const bucket = drop.bucket?.trim() || "";
+  let path = drop.storagePath?.trim() || "";
+
+  if (path) {
+    const parsedPath = parseBoardStorageFromUrl(path);
+    if (parsedPath) return parsedPath;
+    if (/^https?:\/\//i.test(path)) {
+      path = "";
+    } else {
+      try {
+        path = decodeURIComponent(path.split("?")[0].split("#")[0]);
+      } catch {
+        path = path.split("?")[0].split("#")[0];
+      }
+      path = path.replace(/^\/+/, "");
+      if (bucket && path.startsWith(`${bucket}/`)) {
+        path = path.slice(bucket.length + 1);
+      }
+    }
   }
+
+  if (bucket && path) {
+    return { bucket, storagePath: path };
+  }
+
   for (const url of [drop.mediaUrl, drop.url]) {
     if (!url) continue;
     const parsed = parseBoardStorageFromUrl(url);
     if (parsed) return parsed;
   }
   return null;
+}
+
+/** Direct file URL we can render before/without a fresh signed URL. */
+export function dropDirectMediaUrl(drop: DropLike): string | null {
+  for (const candidate of [drop.mediaUrl, drop.url]) {
+    if (!candidate?.trim()) continue;
+    const value = candidate.trim();
+    if (value.startsWith("blob:") || value.startsWith("data:")) return value;
+    if (parseBoardStorageFromUrl(value)) return value;
+    const clean = extFromName(value);
+    if (IMAGE_EXT.test(clean) || AUDIO_EXT.test(clean) || VIDEO_EXT.test(clean)) {
+      return value;
+    }
+  }
+  return null;
+}
+
+export function resolveDropPlaybackSrc(
+  drop: DropLike,
+  signedUrlByKey?: Record<string, string>
+): string | null {
+  const coords = storageCoordsFromDrop(drop);
+  if (coords && signedUrlByKey) {
+    const signed = signedUrlByKey[`${coords.bucket}:${coords.storagePath}`];
+    if (signed) return signed;
+  }
+  return dropDirectMediaUrl(drop);
+}
+
+export function isSupabaseStorageHostLabel(label?: string | null) {
+  return /supabase\.(co|in)/i.test(String(label ?? ""));
 }

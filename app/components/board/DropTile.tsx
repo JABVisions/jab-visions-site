@@ -37,6 +37,14 @@ import { isDropbookSlideFile } from "@/lib/board/dropbookSlides";
 import type { ResolvedDropbookLink } from "@/lib/board/dropbookLink";
 import { classifyDropbookLinkUrl, isStreamingEmbedUrl, musicEmbedFor } from "@/lib/board/dropbookLink";
 import { checkUploadSize, resolveUploadContentType } from "@/lib/board/uploadLimits";
+import { getCachedSignedMediaUrl, invalidateSignedMediaUrl } from "@/lib/board/signedMediaUrl";
+import {
+  isSupabaseStorageHostLabel,
+  resolveDropMediaKind,
+  resolveDropPlaybackSrc,
+  storageCoordsFromDrop,
+} from "@/lib/board/dropDisplay";
+import { parseBoardStorageFromUrl } from "@/lib/board/musicPlayback";
 import {
   buildDropDownloadFilename,
   classifyDropDownload,
@@ -96,6 +104,7 @@ export type DropItem = {
   fileSize?: number;
   mime?: string;
   mediaKind?: MediaKind;
+  mediaUrl?: string;
 
   priceCents?: number;
   description?: string;
@@ -447,7 +456,8 @@ function normalizeDropItems(input: unknown, userId: string | null): DropItem[] {
   const deletedIds = readDeletedDropIds(userId);
   return dedupeDropItems(input
     .filter((x) => x && typeof x === "object")
-    .map((x: any): DropItem => ({
+    .map((x: any): DropItem => {
+      const item: DropItem = {
       id: String(x.id ?? safeId()),
       title: String(x.title ?? "Untitled"),
       type: (x.type as DropType) ?? "Link",
@@ -469,6 +479,7 @@ function normalizeDropItems(input: unknown, userId: string | null): DropItem[] {
       fileSize: typeof x.fileSize === "number" ? x.fileSize : undefined,
       mime: typeof x.mime === "string" ? x.mime : undefined,
       mediaKind: toMediaKind(x.mediaKind),
+      mediaUrl: typeof x.mediaUrl === "string" ? x.mediaUrl : undefined,
       priceCents: typeof x.priceCents === "number" ? x.priceCents : undefined,
       description: typeof x.description === "string" ? x.description : undefined,
       linkUrl: typeof x.linkUrl === "string" ? x.linkUrl : undefined,
@@ -516,7 +527,19 @@ function normalizeDropItems(input: unknown, userId: string | null): DropItem[] {
           ? x.thoughtFormat
           : undefined,
       thoughtText: typeof x.thoughtText === "string" ? x.thoughtText : undefined,
-    }))
+    };
+      const coords = storageCoordsFromDrop(item);
+      if (coords) {
+        item.bucket = coords.bucket;
+        item.storagePath = coords.storagePath;
+      }
+      const resolvedKind = resolveDropMediaKind(item);
+      if (resolvedKind) item.mediaKind = resolvedKind;
+      if (!item.mediaUrl && item.url && parseBoardStorageFromUrl(item.url)) {
+        item.mediaUrl = item.url;
+      }
+      return item;
+    })
     .filter((d) => d.id && d.title && !deletedIds.includes(d.id)));
 }
 
@@ -931,12 +954,13 @@ export default function DropTile() {
             ? item.previewImage ?? null
           : null;
 
-      const href =
-        item.type === "Pay"
-          ? item.linkUrl ?? null
-          : item.type === "Doc" || item.type === "Media" || item.type === "Thought"
-            ? item.url ?? null
-            : item.url ?? null;
+      const storedHref =
+        item.url ||
+        (item.bucket && item.storagePath
+          ? await getSignedUrl(item.bucket, item.storagePath)
+          : null);
+
+      const href = item.type === "Pay" ? item.linkUrl ?? storedHref : storedHref;
 
       const body =
         item.type === "Thought"
@@ -1106,14 +1130,14 @@ export default function DropTile() {
     const key = `${bucket}:${path}`;
     if (!force && signedUrlRef.current[key]) return signedUrlRef.current[key];
 
-    const supabase = supabaseBrowser();
-    const { data, error } = await supabase.storage.from(bucket).createSignedUrl(path, expiresIn);
+    if (force) invalidateSignedMediaUrl(bucket, path);
+    const signedUrl = await getCachedSignedMediaUrl(bucket, path);
 
-    if (error || !data?.signedUrl) return null;
+    if (!signedUrl) return null;
 
-    signedUrlRef.current[key] = data.signedUrl;
-    setSignedUrlByKey((p) => ({ ...p, [key]: data.signedUrl }));
-    return data.signedUrl;
+    signedUrlRef.current[key] = signedUrl;
+    setSignedUrlByKey((p) => ({ ...p, [key]: signedUrl }));
+    return signedUrl;
   }
 
   /** Re-mint an expired signed URL so a stalled media player can recover. */
@@ -1248,6 +1272,16 @@ export default function DropTile() {
     return { bucket: opts.bucket, storagePath };
   }
 
+  function publicStorageUrl(bucket: string, path: string) {
+    try {
+      return (
+        supabaseBrowser().storage.from(bucket).getPublicUrl(path).data.publicUrl || undefined
+      );
+    } catch {
+      return undefined;
+    }
+  }
+
   async function durableCustomizationsForDrop(
     input: DropCustomization | undefined,
     dropId: string
@@ -1301,6 +1335,8 @@ export default function DropTile() {
         createdAt: Date.now(),
         bucket: up.bucket,
         storagePath: up.storagePath,
+        url: publicStorageUrl(up.bucket, up.storagePath),
+        mediaUrl: publicStorageUrl(up.bucket, up.storagePath),
         fileName: file.name,
         fileSize: file.size,
         mime: file.type,
@@ -1344,6 +1380,8 @@ export default function DropTile() {
         createdAt: Date.now(),
         bucket: up.bucket,
         storagePath: up.storagePath,
+        url: publicStorageUrl(up.bucket, up.storagePath),
+        mediaUrl: publicStorageUrl(up.bucket, up.storagePath),
         fileName: file.name,
         fileSize: file.size,
         mime: file.type || "audio/mpeg",
@@ -1380,6 +1418,8 @@ export default function DropTile() {
         createdAt: Date.now(),
         bucket: up.bucket,
         storagePath: up.storagePath,
+        url: publicStorageUrl(up.bucket, up.storagePath),
+        mediaUrl: publicStorageUrl(up.bucket, up.storagePath),
         fileName: file.name,
         fileSize: file.size,
         mime: file.type,
@@ -1434,6 +1474,8 @@ export default function DropTile() {
           ? {
               bucket: uploaded.bucket,
               storagePath: uploaded.storagePath,
+              url: publicStorageUrl(uploaded.bucket, uploaded.storagePath),
+              mediaUrl: publicStorageUrl(uploaded.bucket, uploaded.storagePath),
               fileName: file?.name,
               fileSize: file?.size,
               mime: file?.type,
@@ -1506,6 +1548,8 @@ export default function DropTile() {
         createdAt: Date.now(),
         bucket: up.bucket,
         storagePath: up.storagePath,
+        url: publicStorageUrl(up.bucket, up.storagePath),
+        mediaUrl: publicStorageUrl(up.bucket, up.storagePath),
         fileName: file.name,
         fileSize: file.size,
         mime: file.type,
@@ -1765,22 +1809,23 @@ export default function DropTile() {
     return drops.find((d) => d.id === viewerId) ?? null;
   }, [viewerOpen, viewerId, drops]);
 
-  const viewerSignedKey =
-    viewerDrop?.bucket && viewerDrop.storagePath ? `${viewerDrop.bucket}:${viewerDrop.storagePath}` : "";
-  const viewerSignedUrl = viewerSignedKey ? signedUrlByKey[viewerSignedKey] : undefined;
+  const viewerCoords = viewerDrop ? storageCoordsFromDrop(viewerDrop) : null;
+  const viewerSignedUrl =
+    (viewerDrop ? resolveDropPlaybackSrc(viewerDrop, signedUrlByKey) : null) || undefined;
 
   useEffect(() => {
     let cancelled = false;
 
     async function hydrateSignedUrls() {
-      const fileDrops = drops.filter((d) => d.bucket && d.storagePath);
+      const fileDrops = drops.filter((d) => storageCoordsFromDrop(d));
 
       for (const d of fileDrops) {
-        if (!d.bucket || !d.storagePath) continue;
-        const key = `${d.bucket}:${d.storagePath}`;
+        const coords = storageCoordsFromDrop(d);
+        if (!coords) continue;
+        const key = `${coords.bucket}:${coords.storagePath}`;
         if (signedUrlRef.current[key] || signedUrlByKey[key]) continue;
 
-        const url = await getSignedUrl(d.bucket, d.storagePath, 60 * 45);
+        const url = await getSignedUrl(coords.bucket, coords.storagePath, 60 * 45);
         if (cancelled) return;
         if (!url) continue;
       }
@@ -2339,8 +2384,16 @@ export default function DropTile() {
             const linkTitle = d.previewTitle || d.headline || d.title;
             const linkDescription = d.previewDescription;
 
-            const signedKey = d.bucket && d.storagePath ? `${d.bucket}:${d.storagePath}` : "";
-            const signedUrl = signedKey ? signedUrlByKey[signedKey] : undefined;
+            const signedUrl =
+              resolveDropPlaybackSrc(d, signedUrlByKey) || undefined;
+            const storedMedia = storageCoordsFromDrop(d);
+            const showHostLabel =
+              !!d.hostLabel && !isSupabaseStorageHostLabel(d.hostLabel);
+            const showOpenLink =
+              !!d.url &&
+              !isDropbookSlide &&
+              !parseBoardStorageFromUrl(d.url) &&
+              !storedMedia;
 
             return (
               <div key={d.id} className="drop-item">
@@ -2353,7 +2406,7 @@ export default function DropTile() {
                       canRemove
                       onRemove={() => removeDrop(d.id)}
                     />
-                    {d.hostLabel ? <span className="badge ghost">{d.hostLabel}</span> : null}
+                    {showHostLabel ? <span className="badge ghost">{d.hostLabel}</span> : null}
                     {isPay && d.priceCents ? (
                       <span className="badge ghost">{formatPriceFromCents(d.priceCents)}</span>
                     ) : null}
@@ -2368,7 +2421,7 @@ export default function DropTile() {
                   </div>
 
                   <div className="drop-actions">
-                    {d.url && !isDropbookSlide ? (
+                    {showOpenLink ? (
                       <a className="drop-open" href={d.url} target="_blank" rel="noreferrer">
                         OPEN
                       </a>
@@ -2453,7 +2506,9 @@ export default function DropTile() {
                       src={signedUrl}
                       title={d.title}
                       label={isThought ? "VOICE DROP" : "AUDIO DROP"}
-                      onReload={() => refreshSignedUrl(d.bucket, d.storagePath)}
+                      onReload={() =>
+                        refreshSignedUrl(storedMedia?.bucket, storedMedia?.storagePath)
+                      }
                     />
                   ) : (
                     <div className="audio-drop-card">
@@ -2617,40 +2672,37 @@ export default function DropTile() {
             </div>
 
             <div className="viewerBody">
-              {viewerDrop.bucket && viewerDrop.storagePath ? (
-                viewerSignedUrl || signedUrlByKey[viewerSignedKey] ? (
-                  viewerDrop.mediaKind === "audio" ? (
-                    <VoiceDropSoundboard
-                      src={(viewerSignedUrl || signedUrlByKey[viewerSignedKey])!}
-                      title={viewerDrop.title}
-                      label={viewerDrop.type === "Thought" ? "VOICE DROP" : "AUDIO DROP"}
-                      onReload={() =>
-                        refreshSignedUrl(viewerDrop.bucket, viewerDrop.storagePath)
-                      }
-                    />
-                  ) : viewerDrop.mediaKind === "video" ? (
-                    <div className="viewer-studio-frame">
-                      <video src={(viewerSignedUrl || signedUrlByKey[viewerSignedKey])!} controls autoPlay playsInline />
-                      <DropStudioOverlay customizations={viewerDrop.customizations} />
-                    </div>
-                  ) : (
-                    <div className="viewer-studio-frame">
-                      <img src={(viewerSignedUrl || signedUrlByKey[viewerSignedKey])!} alt={viewerDrop.title} />
-                      <DropStudioOverlay customizations={viewerDrop.customizations} />
-                    </div>
-                  )
+              {viewerSignedUrl ? (
+                viewerDrop.mediaKind === "audio" ? (
+                  <VoiceDropSoundboard
+                    src={viewerSignedUrl}
+                    title={viewerDrop.title}
+                    label={viewerDrop.type === "Thought" ? "VOICE DROP" : "AUDIO DROP"}
+                    onReload={() =>
+                      refreshSignedUrl(viewerCoords?.bucket, viewerCoords?.storagePath)
+                    }
+                  />
+                ) : viewerDrop.mediaKind === "video" ? (
+                  <div className="viewer-studio-frame">
+                    <video src={viewerSignedUrl} controls autoPlay playsInline />
+                    <DropStudioOverlay customizations={viewerDrop.customizations} />
+                  </div>
                 ) : (
-                  <div className="media-missing big">
-                    <div className="media-missing-title">Preparing preview…</div>
-                    <div className="media-missing-sub">
-                      If it doesn’t load after a refresh, check Storage policies.
-                    </div>
+                  <div className="viewer-studio-frame">
+                    <img src={viewerSignedUrl} alt={viewerDrop.title} />
+                    <DropStudioOverlay customizations={viewerDrop.customizations} />
                   </div>
                 )
               ) : (
                 <div className="media-missing big">
-                  <div className="media-missing-title">Vision media not available</div>
-                  <div className="media-missing-sub">Missing storage reference.</div>
+                  <div className="media-missing-title">
+                    {viewerCoords ? "Preparing preview…" : "Vision media not available"}
+                  </div>
+                  <div className="media-missing-sub">
+                    {viewerCoords
+                      ? "If it doesn’t load after a refresh, check Storage policies."
+                      : "Missing storage reference."}
+                  </div>
                 </div>
               )}
             </div>
@@ -2721,7 +2773,7 @@ export default function DropTile() {
           width: 100%;
           max-width: 100%;
           min-width: 0;
-          overflow: hidden;
+          overflow: visible;
           box-sizing: border-box;
         }
 
