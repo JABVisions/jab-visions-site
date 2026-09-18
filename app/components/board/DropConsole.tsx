@@ -221,6 +221,64 @@ function profileDropType(flavor: DropFlavor) {
 
 type DropConsoleVariant = "tile" | "bare";
 
+function DropConsoleSleepDock({ onWake }: { onWake: () => void }) {
+  return (
+    <div className="dock">
+      <div className="dockLeft">
+        <div className="dockTitle">DROP CONSOLE</div>
+        <div className="dockSub">Sleeping…</div>
+      </div>
+      <button type="button" className="dockWake" onClick={onWake}>
+        WAKE
+      </button>
+
+      <style>{`
+        .dock {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 12px;
+          border-radius: 20px;
+          padding: 12px 14px;
+          background: rgba(255, 255, 255, 0.92);
+          border: 1px solid rgba(0, 0, 0, 0.08);
+          box-shadow: 0 12px 30px rgba(0, 0, 0, 0.12);
+        }
+        .dockTitle {
+          font-size: 11px;
+          font-weight: 950;
+          letter-spacing: 0.22em;
+          text-transform: uppercase;
+          color: rgba(0, 170, 160, 1);
+        }
+        .dockSub {
+          margin-top: 6px;
+          font-size: 12px;
+          font-weight: 800;
+          color: rgba(0, 0, 0, 0.48);
+        }
+        .dockWake {
+          border-radius: 16px;
+          padding: 12px 14px;
+          font-size: 11px;
+          font-weight: 900;
+          letter-spacing: 0.08em;
+          text-transform: uppercase;
+          border: 1px solid rgba(0, 0, 0, 0.16);
+          background: rgba(0, 0, 0, 0.84);
+          color: rgba(200, 255, 230, 0.95);
+          cursor: pointer;
+          transition: transform 160ms ease, filter 160ms ease;
+        }
+        .dockWake:hover {
+          transform: translateY(-1px);
+          filter: brightness(1.02);
+        }
+      `}</style>
+    </div>
+  );
+}
+
 export default function DropConsole({
   variant = "tile",
 }: {
@@ -231,6 +289,7 @@ export default function DropConsole({
 
   // IMPORTANT: start asleep by default
   const [sleeping, setSleeping] = useState(true);
+  const [hasAwakened, setHasAwakened] = useState(false);
 
   const [mode, setMode] = useState<DropMode>("board_drop");
   const [dropFlavor, setDropFlavor] = useState<DropFlavor>("media");
@@ -290,6 +349,10 @@ export default function DropConsole({
         onOpen as EventListener
       );
   }, []);
+
+  useEffect(() => {
+    if (!sleeping) setHasAwakened(true);
+  }, [sleeping]);
 
   /* forums */
   useEffect(() => {
@@ -1018,63 +1081,8 @@ export default function DropConsole({
   // -------------------------
   // SLEEP DOCK (does NOT overlay your buckets)
   // -------------------------
-  if (sleeping) {
-    const dock = (
-      <div className="dock">
-        <div className="dockLeft">
-          <div className="dockTitle">DROP CONSOLE</div>
-          <div className="dockSub">Sleeping…</div>
-        </div>
-        <button type="button" className="dockWake" onClick={() => setSleeping(false)}>
-          WAKE
-        </button>
-
-        <style>{`
-          .dock {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            gap: 12px;
-            border-radius: 20px;
-            padding: 12px 14px;
-            background: rgba(255, 255, 255, 0.92);
-            border: 1px solid rgba(0, 0, 0, 0.08);
-            box-shadow: 0 12px 30px rgba(0, 0, 0, 0.12);
-          }
-          .dockTitle {
-            font-size: 11px;
-            font-weight: 950;
-            letter-spacing: 0.22em;
-            text-transform: uppercase;
-            color: rgba(0, 170, 160, 1);
-          }
-          .dockSub {
-            margin-top: 6px;
-            font-size: 12px;
-            font-weight: 800;
-            color: rgba(0, 0, 0, 0.48);
-          }
-        .dockWake {
-            border-radius: 16px;
-            padding: 12px 14px;
-            font-size: 11px;
-            font-weight: 900;
-            letter-spacing: 0.08em;
-            text-transform: uppercase;
-            border: 1px solid rgba(0, 0, 0, 0.16);
-            background: rgba(0, 0, 0, 0.84);
-            color: rgba(200, 255, 230, 0.95);
-            cursor: pointer;
-            transition: transform 160ms ease, filter 160ms ease;
-          }
-          .dockWake:hover {
-            transform: translateY(-1px);
-            filter: brightness(1.02);
-          }
-        `}</style>
-      </div>
-    );
-
+  if (sleeping && !hasAwakened) {
+    const dock = <DropConsoleSleepDock onWake={() => setSleeping(false)} />;
     if (variant === "bare") return dock;
     return <div style={{ width: "100%" }}>{dock}</div>;
   }
@@ -1784,36 +1792,49 @@ export default function DropConsole({
     </div>
   );
 
-  if (variant === "bare") return content;
+  const consoleBody =
+    variant === "bare" ? (
+      content
+    ) : (
+      <div className="dcTileWrap">
+        <div className="dcTileRim" aria-hidden />
+        {content}
 
-  return (
-    <div className="dcTileWrap">
-      <div className="dcTileRim" aria-hidden />
-      {content}
+        <style>{`
+          .dcTileWrap {
+            position: relative;
+            border-radius: 28px;
+            background: rgba(255, 255, 255, 0.92);
+            border: 1px solid rgba(0, 0, 0, 0.08);
+            box-shadow: 0 14px 40px rgba(0, 0, 0, 0.12);
+            overflow: hidden;
+          }
+          .dcTileRim {
+            pointer-events: none;
+            position: absolute;
+            inset: 0;
+            border-radius: 28px;
+            box-shadow: inset 0 2px 0 rgba(160, 220, 255, 0.65),
+              inset 0 0 0 1px rgba(160, 220, 255, 0.7),
+              inset 0 0 0 2px rgba(255, 255, 255, 0.7);
+            z-index: 0;
+          }
+          .dc { position: relative; z-index: 1; }
+        `}</style>
+      </div>
+    );
 
-      <style>{`
-        .dcTileWrap {
-          position: relative;
-          border-radius: 28px;
-          background: rgba(255, 255, 255, 0.92);
-          border: 1px solid rgba(0, 0, 0, 0.08);
-          box-shadow: 0 14px 40px rgba(0, 0, 0, 0.12);
-          overflow: hidden;
-        }
-        .dcTileRim {
-          pointer-events: none;
-          position: absolute;
-          inset: 0;
-          border-radius: 28px;
-          box-shadow: inset 0 2px 0 rgba(160, 220, 255, 0.65),
-            inset 0 0 0 1px rgba(160, 220, 255, 0.7),
-            inset 0 0 0 2px rgba(255, 255, 255, 0.7);
-          z-index: 0;
-        }
-        .dc { position: relative; z-index: 1; }
-      `}</style>
-    </div>
-  );
+  if (sleeping) {
+    const dock = <DropConsoleSleepDock onWake={() => setSleeping(false)} />;
+    return (
+      <>
+        {variant === "bare" ? dock : <div style={{ width: "100%" }}>{dock}</div>}
+        <div hidden>{consoleBody}</div>
+      </>
+    );
+  }
+
+  return consoleBody;
 }
 
 function BoardDropConsoleFields({
@@ -1932,7 +1953,10 @@ function BoardDropConsoleFields({
       {showFileLine ? (
         <div className="dcField">
           <div className="mediaActionRow" aria-label="Drop media actions">
-            {dropFlavor === "media" || dropFlavor === "thought" || dropFlavor === "pay" ? (
+            {dropFlavor === "media" ||
+            dropFlavor === "music" ||
+            dropFlavor === "thought" ||
+            dropFlavor === "pay" ? (
               <button
                 type="button"
                 className="mediaAction uploadAction"
@@ -1993,12 +2017,9 @@ function BoardDropConsoleFields({
       ) : null}
 
       <LazyDropStudioStage
-        open={
-          studioOpen &&
-          (dropFlavor === "media" || dropFlavor === "thought" || dropFlavor === "pay")
-        }
+        open={studioOpen}
         initialFile={null}
-        initialMode={dropFlavor === "thought" ? "audio" : "photo"}
+        initialMode={dropFlavor === "thought" || dropFlavor === "music" ? "audio" : "photo"}
         allowedModes={
           dropFlavor === "thought"
             ? ["audio", "art", "descript"]

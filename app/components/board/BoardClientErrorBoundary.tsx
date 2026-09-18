@@ -6,6 +6,7 @@ type Props = {
   children: React.ReactNode;
   fallback?: React.ReactNode;
   name?: string;
+  resetLabel?: string;
 };
 
 type State = {
@@ -29,7 +30,32 @@ export default class BoardClientErrorBoundary extends React.Component<Props, Sta
 
   render() {
     if (!this.state.error) return this.props.children;
-    if (this.props.fallback) return this.props.fallback;
+    const retry = this.props.resetLabel ? (
+      <button
+        type="button"
+        onClick={() => this.setState({ error: null })}
+        style={{
+          marginTop: 12,
+          borderRadius: 999,
+          border: "1px solid rgba(126, 226, 255, 0.45)",
+          background: "rgba(126, 226, 255, 0.14)",
+          color: "inherit",
+          fontWeight: 800,
+          padding: "8px 14px",
+          cursor: "pointer",
+        }}
+      >
+        {this.props.resetLabel}
+      </button>
+    ) : null;
+    if (this.props.fallback) {
+      return (
+        <>
+          {this.props.fallback}
+          {retry}
+        </>
+      );
+    }
     return (
       <div
         style={{
@@ -44,6 +70,7 @@ export default class BoardClientErrorBoundary extends React.Component<Props, Sta
         }}
       >
         This piece of the Board could not be shown. Everything else is still live.
+        {retry}
       </div>
     );
   }

@@ -1278,6 +1278,32 @@
   min-width: 0;
   overflow: hidden;
 }
+/* Voice Studio needs mixer width so the take isn't a tiny island in the dim. */
+.studioSheetVoice {
+  width: min(
+    980px,
+    calc(100vw - 16px - env(safe-area-inset-left) - env(safe-area-inset-right))
+  );
+  height: min(
+    920px,
+    calc(100dvh - 12px - env(safe-area-inset-top) - env(safe-area-inset-bottom))
+  );
+  max-height: calc(100dvh - 12px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+}
+.studioVoiceError {
+  margin: 18px 16px;
+  padding: 16px 18px;
+  border-radius: 16px;
+  border: 1px solid rgba(126, 226, 255, 0.28);
+  background: rgba(8, 16, 22, 0.72);
+  color: rgba(232, 251, 255, 0.88);
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1.45;
+}
+.studioVoiceError + button {
+  margin: 0 16px 18px;
+}
 /* Descript is text-heavy — give the monitor more width and prevent
    the right edge of lines from clipping beside the mode rail. */
 .studioSheetDescript {
