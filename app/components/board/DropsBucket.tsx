@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type { BoardActivity } from "@/lib/board/activity";
 import { getLocalActivity } from "@/lib/board/activity";
 import { mergeActivityWithFeed } from "@/lib/board/feedActivity";
@@ -320,6 +321,11 @@ export default function DropsBucket({
   const [userAuraColor, setUserAuraColor] = useState(fallbackAuraColor);
 
   const closeBtnRef = useRef<HTMLButtonElement | null>(null);
+  const [portalReady, setPortalReady] = useState(false);
+
+  useEffect(() => {
+    setPortalReady(true);
+  }, []);
 
   useEffect(() => {
     const onUpdated = () => {
@@ -807,13 +813,14 @@ export default function DropsBucket({
         {toast && <div className="toast">{toast}</div>}
       </div>
 
-      {/* --------------------------- SONAR DOME OVERLAY --------------------------- */}
-      {open && (
+      {/* Consciousness Compass pops out of Drop Pad frames via a body portal. */}
+      {portalReady && open
+        ? createPortal(
         <div
-          className="overlay"
+          className="overlay bucketCompassOverlay"
           role="dialog"
           aria-modal="true"
-          aria-label="Drops Bucket"
+          aria-label="Consciousness Compass"
           onMouseDown={(e) => {
             if (e.target === e.currentTarget) setOpen(false);
           }}
@@ -950,8 +957,10 @@ export default function DropsBucket({
               </div>
             ) : null}
           </div>
-        </div>
-      )}
+        </div>,
+            document.body
+          )
+        : null}
 
       {/* styles */}
       <style jsx>{`
@@ -1579,6 +1588,18 @@ export default function DropsBucket({
         }
         @media (max-width: 900px) { .domeTiles { grid-template-columns: 1fr; } }
       `}</style>
+      <style jsx global>{`
+        .bucketCompassOverlay {
+          position: fixed !important;
+          inset: 0 !important;
+          z-index: 40000 !important;
+          background: rgba(0, 0, 0, 0.56);
+          backdrop-filter: blur(12px);
+          display: grid;
+          place-items: center;
+          padding: 18px;
+        }
+      `}</style>
     </div>
   );
 }
@@ -1608,9 +1629,10 @@ function BucketDropCard({
     typeof preview?.bucket === "string" && preview.bucket ? preview.bucket : "";
   const previewStoragePath =
     typeof preview?.storagePath === "string" && preview.storagePath ? preview.storagePath : "";
-  const previewHref =
+    const previewHref =
     safeStr(item?.href) ||
     safeStr(item?.image_url) ||
+    safeStr((rawMeta as any)?.embedUrl) ||
     safeStr((rawMeta as any)?.mediaUrl) ||
     safeStr((rawMeta as any)?.announcement_media_url) ||
     safeStr((preview as any)?.embedUrl) ||
@@ -1626,7 +1648,13 @@ function BucketDropCard({
 
   const [embedFailed, setEmbedFailed] = useState(false);
   const [downloadBusy, setDownloadBusy] = useState(false);
-  const embed = useMemo(() => computeEmbed(href), [href]);
+  const embed = useMemo(() => {
+    const streaming =
+      safeStr((rawMeta as any)?.embedUrl) ||
+      safeStr((preview as any)?.embedUrl) ||
+      href;
+    return computeEmbed(streaming || href);
+  }, [href, rawMeta, preview]);
   const mediaKind = safeStr((rawMeta as any)?.mediaKind) || safeStr((preview as any)?.mediaKind);
   const dropType =
     safeStr((rawMeta as any)?.dropType) ||

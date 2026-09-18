@@ -96,14 +96,15 @@ export default function ReactionRail({
 
   const deposit = (folder: BucketFolder) => {
     if (!id) return;
+    const dropId = String(item?.meta?.dropId || item?.meta?.originalDropId || item?.id || id);
 
-    depositToBrain(folder, id, item);
+    depositToBrain(folder, dropId, item);
     setSelected(folder);
     void persistReaction({
       activityId: id,
       reaction: folder,
       ownerUserId: item?.user_id ?? null,
-      dropId: String(item?.meta?.dropId || item?.id || id),
+      dropId,
       dropTitle: item?.title ?? null,
       dropHref: item?.href ?? null,
       dropImageUrl: item?.image_url ?? null,

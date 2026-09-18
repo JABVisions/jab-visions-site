@@ -6,6 +6,7 @@ import BoardDock from "@/app/components/board/BoardDock";
 import BoardUtilityHeader from "@/app/components/board/BoardUtilityHeader";
 import BoardDropEditModal from "@/app/components/board/BoardDropEditModal";
 import BoardClientErrorBoundary from "@/app/components/board/BoardClientErrorBoundary";
+import BucketBrainBridge from "@/app/components/board/BucketBrainBridge";
 import { ActivityProvider } from "@/app/components/board/activity/ActivityProvider";
 import ActivityNavigationHost from "@/app/components/board/activity/ActivityNavigationHost";
 
@@ -31,6 +32,7 @@ export default function BoardLayout({ children }: { children: React.ReactNode })
 
   return (
     <ActivityProvider>
+      <BucketBrainBridge />
       <div className={isDark ? "board-root board-root--dark" : "board-root board-root--light"}>
       {!isAuthRoute && !isWelcomeRoute ? (
         <BoardClientErrorBoundary name="board-header" fallback={null}>

@@ -180,13 +180,76 @@ export function readBrain(): BucketBrainState {
   }
 }
 
+function compactMemoryMeta(meta: Record<string, any> | null | undefined) {
+  if (!meta || typeof meta !== "object") return null;
+  return {
+    dropId: meta.dropId ?? meta.originalDropId ?? null,
+    originalDropId: meta.originalDropId ?? null,
+    dropType: meta.dropType ?? meta.drop_flavor ?? null,
+    drop_flavor: meta.drop_flavor ?? null,
+    mediaKind: meta.mediaKind ?? null,
+    mediaUrl: meta.mediaUrl ?? null,
+    embedUrl: meta.embedUrl ?? null,
+    bucket: meta.bucket ?? null,
+    storagePath: meta.storagePath ?? null,
+    fileName: meta.fileName ?? null,
+    mime: meta.mime ?? null,
+    previewImage: meta.previewImage ?? null,
+    previewTitle: meta.previewTitle ?? null,
+    previewDescription: meta.previewDescription ?? null,
+    hostLabel: meta.hostLabel ?? null,
+    fromDescript: meta.fromDescript ?? null,
+    fromDropbook: meta.fromDropbook ?? null,
+    priceCents: meta.priceCents ?? null,
+    payProvider: meta.payProvider ?? null,
+    visibility: meta.visibility ?? null,
+    thoughtText: meta.thoughtText ?? null,
+    thoughtFormat: meta.thoughtFormat ?? null,
+    authorUsername: meta.authorUsername ?? null,
+    authorName: meta.authorName ?? null,
+  };
+}
+
+export function compactMemoryDrop(item?: BucketMemoryDrop | null): BucketMemoryDrop | null {
+  if (!item || typeof item !== "object") return null;
+  const meta = compactMemoryMeta(item.meta);
+  const href =
+    (typeof item.href === "string" && item.href) ||
+    (typeof meta?.embedUrl === "string" && meta.embedUrl) ||
+    (typeof meta?.mediaUrl === "string" && meta.mediaUrl) ||
+    null;
+  const body = typeof item.body === "string" ? item.body.slice(0, 4000) : item.body ?? null;
+  return {
+    id: String(item.id || meta?.dropId || ""),
+    created_at: item.created_at ?? null,
+    user_id: item.user_id ?? null,
+    kind: item.kind ?? "board_drop",
+    title: item.title ?? null,
+    body,
+    href,
+    image_url: item.image_url ?? null,
+    meta,
+  };
+}
+
 export function writeBrain(next: BucketBrainState) {
   if (typeof window === "undefined") return;
   try {
     window.localStorage.setItem(BUCKET_BRAIN_KEY, JSON.stringify(next));
     window.dispatchEvent(new Event(EVT_UPDATED));
   } catch {
-    // Safari private mode / quota — keep Bucket usable in-memory.
+    try {
+      const slim: BucketBrainState = {
+        ...next,
+        pass: next.pass.map((entry) => ({ ...entry, item: compactMemoryDrop(entry.item) })),
+        pin: next.pin.map((entry) => ({ ...entry, item: compactMemoryDrop(entry.item) })),
+        push: next.push.map((entry) => ({ ...entry, item: compactMemoryDrop(entry.item) })),
+      };
+      window.localStorage.setItem(BUCKET_BRAIN_KEY, JSON.stringify(slim));
+      window.dispatchEvent(new Event(EVT_UPDATED));
+    } catch {
+      // Safari private mode / quota — keep Bucket usable in-memory.
+    }
   }
 }
 
@@ -197,27 +260,46 @@ export function depositToBrain(
 ) {
   const t = now();
   const prev = readBrain();
-  const id = String(activityId);
+  const compactItem = compactMemoryDrop(item);
+  const canonicalId = String(
+    compactItem?.meta?.dropId || compactItem?.id || activityId || ""
+  );
+  if (!canonicalId) return;
+
   const previousEntry = (["pass", "pin", "push"] as BucketFolder[])
     .flatMap((key) => prev[key] ?? [])
-    .find((entry) => String(entry.activityId) === id);
+    .find((entry) => {
+      const entryId = String(entry.activityId);
+      const entryDropId = String(entry.item?.meta?.dropId || entry.item?.id || "");
+      return entryId === canonicalId || (entryDropId && entryDropId === canonicalId);
+    });
 
   const entry: BucketEntry = {
     ...previousEntry,
-    activityId: id,
+    activityId: canonicalId,
     savedAt: t,
-    ...(item ? { item: { ...(previousEntry?.item ?? {}), ...item } } : {}),
+    item: compactItem ?? previousEntry?.item ?? null,
+  };
+
+  const matchesId = (saved: BucketEntry) => {
+    const entryId = String(saved.activityId);
+    const entryDropId = String(saved.item?.meta?.dropId || saved.item?.id || "");
+    return (
+      entryId === canonicalId ||
+      entryId === String(activityId) ||
+      (entryDropId && (entryDropId === canonicalId || entryDropId === String(activityId)))
+    );
   };
 
   const next: BucketBrainState = {
     ...prev,
-    pass: prev.pass.filter((saved) => String(saved.activityId) !== id),
-    pin: prev.pin.filter((saved) => String(saved.activityId) !== id),
-    push: prev.push.filter((saved) => String(saved.activityId) !== id),
+    pass: prev.pass.filter((saved) => !matchesId(saved)),
+    pin: prev.pin.filter((saved) => !matchesId(saved)),
+    push: prev.push.filter((saved) => !matchesId(saved)),
     [folder]: sortBucketEntries(
       uniqBucketByActivityId([
         entry,
-        ...(prev[folder] ?? []).filter((saved) => String(saved.activityId) !== id),
+        ...(prev[folder] ?? []).filter((saved) => !matchesId(saved)),
       ]),
       folder
     ),
@@ -326,28 +408,34 @@ export function simulateIncomingWave(me: string, someone: string) {
   sendWave(someone, me);
 }
 
+let depositBridgeCount = 0;
+
+function onBucketDeposit(e: Event) {
+  const detail = ((e as CustomEvent).detail ?? {}) as {
+    folder?: BucketFolder;
+    activityId?: string;
+    item?: BucketMemoryDrop | null;
+  };
+  const folder = detail.folder;
+  const activityId = String(detail.activityId ?? "");
+  const item =
+    detail.item && typeof detail.item === "object" ? detail.item : null;
+  if (!folder || !activityId) return;
+  depositToBrain(folder, activityId, item);
+}
+
 export function installBucketDepositBridge() {
   if (typeof window === "undefined") return () => { };
-
-  const handler = (e: Event) => {
-    const ce = e as CustomEvent;
-    const detail = (ce?.detail ?? {}) as any;
-
-    const folder = detail.folder as BucketFolder;
-    const activityId = String(detail.activityId ?? "");
-    const item =
-      detail.item && typeof detail.item === "object"
-        ? (detail.item as BucketMemoryDrop)
-        : null;
-    if (!folder || !activityId) return;
-
-    depositToBrain(folder, activityId, item);
-  };
-
-  window.addEventListener(EVT_DEPOSIT, handler as EventListener);
+  if (depositBridgeCount === 0) {
+    window.addEventListener(EVT_DEPOSIT, onBucketDeposit as EventListener);
+  }
+  depositBridgeCount += 1;
 
   return () => {
-    window.removeEventListener(EVT_DEPOSIT, handler as EventListener);
+    depositBridgeCount = Math.max(0, depositBridgeCount - 1);
+    if (depositBridgeCount === 0) {
+      window.removeEventListener(EVT_DEPOSIT, onBucketDeposit as EventListener);
+    }
   };
 }
 
