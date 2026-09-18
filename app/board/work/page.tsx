@@ -228,7 +228,7 @@ export default function WorkPage() {
           z-index: 2;
         }
 
-        @media (max-width: 1279px) {
+        @media (max-width: 1199px) {
           .work-root .work-row {
             grid-template-columns: 360px minmax(0, 1fr) 190px;
           }
