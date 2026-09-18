@@ -7,14 +7,13 @@ import ActivityCard from "@/app/components/board/ActivityCard";
 import ActivityFeed from "@/app/components/board/activity/ActivityFeed";
 import ActivityBadge from "@/app/components/board/activity/ActivityBadge";
 import DropsBucket from "@/app/components/board/DropsBucket";
-import ReactionRail from "@/app/components/board/ReactionRail";
 import {
   getLocalActivity,
   type BoardActivity,
 } from "@/lib/board/activity";
+import { boardDropToActivity } from "@/lib/board/boardDropActivity";
 import { dedupeActivity, mergeActivityWithFeed } from "@/lib/board/feedActivity";
 import { EVENTS, readFeed } from "@/lib/boardStore";
-import { openHostedPayDropCheckout } from "@/lib/board/payCheckout";
 import { readPayDrops, type PayDrop } from "@/lib/board/paydrops";
 import { EVT_UPDATED, readBrain } from "@/lib/board/bucketBrain";
 import { persistWave } from "@/lib/board/persistWave";
@@ -29,18 +28,9 @@ import {
   type BoardWhisper as ProfileWhisper,
 } from "@/lib/board/whispers";
 import { supabaseBrowser } from "@/lib/supabase/browser";
-import DropStudioOverlay from "@/app/components/board/DropStudioOverlay";
-import DescriptDropScreen from "@/app/components/board/DescriptDropScreen";
-import VoiceDropSoundboard from "@/app/components/board/VoiceDropSoundboard";
-import NewsDropMagazine from "@/app/components/board/NewsDropMagazine";
-import { isLegacyDescriptText } from "@/lib/board/descriptDocs";
-import { isDropbookSlideFile } from "@/lib/board/dropbookSlides";
 import { musicEmbedFor } from "@/lib/board/dropbookLink";
-import DropbookSlideScreen from "@/app/components/board/DropbookSlideScreen";
-import { PayOnBoardButton } from "@/app/components/board/PayOnBoardButton";
 import {
   dropDirectMediaUrl,
-  isSupabaseStorageHostLabel,
   resolveDropPlaybackSrc,
   storageCoordsFromDrop,
 } from "@/lib/board/dropDisplay";
@@ -185,10 +175,6 @@ type DropType = "YouTube" | "Music" | "News" | "Link" | "Media" | "Pay" | "Doc" 
 type MediaKind = "image" | "video" | "audio";
 type PayProviderMode = "payment_link" | "stripe_connect" | "authorize_net_accept_hosted";
 
-function displayDropType(type: DropType) {
-  return type === "Media" ? "Vision" : type;
-}
-
 type DropItem = {
   id: string;
   title: string;
@@ -214,6 +200,9 @@ type DropItem = {
   linkUrl?: string;
   payProvider?: PayProviderMode;
   customizations?: DropCustomization;
+  visibility?: "public" | "private";
+  thoughtText?: string;
+  thoughtFormat?: "text" | "voice" | "doodle";
   fromDescript?: boolean;
   fromDropbook?: boolean;
 };
@@ -470,34 +459,6 @@ function clamp(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, n));
 }
 
-function formatPriceFromCents(cents?: number) {
-  if (!cents || cents <= 0) return "";
-  return `$${(cents / 100).toFixed(2)}`;
-}
-
-function newsCoverUrl(rawUrl: string): string | null {
-  const fallback = resolveLinkPreviewImage(rawUrl, null);
-  if (fallback) return fallback;
-
-  try {
-    const u = new URL(rawUrl);
-    return `https://image.thum.io/get/width/1200/crop/800/noanimate/${u.toString()}`;
-  } catch {
-    return null;
-  }
-}
-
-function getBoardDropEmbedHeight(embedUrl?: string | null) {
-  if (!embedUrl) return 220;
-  if (embedUrl.includes("embed.music.apple.com")) {
-    return embedUrl.includes("?i=") || embedUrl.includes("&i=") || embedUrl.includes("/song/")
-      ? 175
-      : 450;
-  }
-  if (!embedUrl.includes("open.spotify.com/embed")) return 220;
-  return 80;
-}
-
 export default function ProfileBoardViewPage({
   params,
 }: {
@@ -536,7 +497,6 @@ export default function ProfileBoardViewPage({
   const [boardDrops, setBoardDrops] = useState<DropItem[]>([]);
   const [boardDropsLoading, setBoardDropsLoading] = useState(true);
   const [signedUrlByKey, setSignedUrlByKey] = useState<Record<string, string>>({});
-  const [payCheckoutBusyId, setPayCheckoutBusyId] = useState<string | null>(null);
   const [orbitState, setOrbitState] = useState<"idle" | "requested" | "connected">("idle");
   const [bucketStats, setBucketStats] = useState<BucketStats | null>(null);
   const [remoteUserId, setRemoteUserId] = useState<string | null>(null);
@@ -1089,6 +1049,15 @@ export default function ProfileBoardViewPage({
               ? x.payProvider
               : undefined,
           customizations: normalizeDropCustomizations(x.customizations),
+          visibility:
+            x.visibility === "private" || x.visibility === "public"
+              ? x.visibility
+              : undefined,
+          thoughtText: typeof x.thoughtText === "string" ? x.thoughtText : undefined,
+          thoughtFormat:
+            x.thoughtFormat === "text" || x.thoughtFormat === "voice" || x.thoughtFormat === "doodle"
+              ? x.thoughtFormat
+              : undefined,
           fromDescript: x.fromDescript === true ? true : undefined,
           fromDropbook: x.fromDropbook === true ? true : undefined,
         };
@@ -1238,6 +1207,15 @@ export default function ProfileBoardViewPage({
         customizations: normalizeDropCustomizations(
           meta?.customizations ?? preview?.customizations
         ),
+        visibility: meta?.visibility === "private" ? "private" : "public",
+        thoughtText:
+          typeof meta?.thoughtText === "string" ? meta.thoughtText : undefined,
+        thoughtFormat:
+          meta?.thoughtFormat === "text" ||
+          meta?.thoughtFormat === "voice" ||
+          meta?.thoughtFormat === "doodle"
+            ? meta.thoughtFormat
+            : undefined,
       };
     }
 
@@ -1489,48 +1467,49 @@ export default function ProfileBoardViewPage({
       }),
     [recentDrops]
   );
+  const viewingOwnBoard = Boolean(selfUser && selfUser === routeKey);
   const currentBoardDropActivity = useMemo(
     () =>
       boardDrops
-        .filter((drop) => (drop as DropItem & { visibility?: string }).visibility !== "private")
-        .map((drop): BoardActivity => {
-          const coords = storageCoordsFromDrop(drop);
-          const mediaUrl =
-            resolveDropPlaybackSrc(drop, signedUrlByKey) || drop.mediaUrl;
-          const href = drop.linkUrl || drop.url || drop.embedUrl || mediaUrl || null;
-
-          return {
-            id: `current-profile-drop:${routeKey}:${drop.id}`,
-            created_at: new Date(drop.createdAt || Date.now()).toISOString(),
-            user_id: remoteUserId,
-            kind: "board_drop",
-            title: drop.title || "Board Drop",
-            body: drop.description || `New ${displayDropType(drop.type)} Drop added to Board.`,
-            href,
-            image_url:
-              drop.mediaKind === "image" ? mediaUrl || drop.previewImage || null : drop.previewImage || null,
-            meta: {
-              source: "profiles.board_style.boardDrops",
-              dropId: drop.id,
-              dropType: drop.type,
-              mediaKind: drop.mediaKind ?? null,
-              mediaUrl: mediaUrl ?? null,
-              bucket: coords?.bucket ?? drop.bucket ?? null,
-              storagePath: coords?.storagePath ?? drop.storagePath ?? null,
-              fileName: drop.fileName ?? null,
-              previewImage: drop.previewImage ?? null,
-              previewImages: drop.previewImages ?? null,
-              previewTitle: drop.previewTitle ?? null,
-              previewDescription: drop.previewDescription ?? null,
-              embedUrl: drop.embedUrl ?? null,
-              priceCents: drop.priceCents ?? null,
-              payProvider: drop.payProvider ?? null,
-              fromDescript: drop.fromDescript ?? null,
-              customizations: drop.customizations ?? null,
-            },
-          };
-        }),
+        .filter((drop) => drop.visibility !== "private")
+        .map((drop) =>
+          boardDropToActivity(drop, {
+            userId: remoteUserId,
+            activityId: `current-profile-drop:${routeKey}:${drop.id}`,
+            mediaUrl:
+              resolveDropPlaybackSrc(drop, signedUrlByKey) || drop.mediaUrl || null,
+          })
+        ),
     [boardDrops, remoteUserId, routeKey, signedUrlByKey]
+  );
+  const collectionBoardDropActivity = useMemo(
+    () =>
+      boardDrops
+        .filter((drop) => viewingOwnBoard || drop.visibility !== "private")
+        .map((drop) =>
+          boardDropToActivity(drop, {
+            userId: remoteUserId,
+            activityId: `profile-collection:${routeKey}:${drop.id}`,
+            mediaUrl:
+              resolveDropPlaybackSrc(drop, signedUrlByKey) || drop.mediaUrl || null,
+            author: {
+              username: routeKey,
+              displayName: profile.displayName,
+              avatarSrc: profile.avatarDataUrl,
+              glowColor: profile.glowColor,
+            },
+          })
+        ),
+    [
+      boardDrops,
+      viewingOwnBoard,
+      remoteUserId,
+      routeKey,
+      signedUrlByKey,
+      profile.displayName,
+      profile.avatarDataUrl,
+      profile.glowColor,
+    ]
   );
   const activityChannelItems = useMemo(
     () =>
@@ -1542,37 +1521,6 @@ export default function ProfileBoardViewPage({
   );
   const activityChannelLoading =
     recentDropsLoading && boardDropsLoading && activityChannelItems.length === 0;
-
-  async function openPayCheckout(drop: DropItem) {
-    if (drop.linkUrl) {
-      window.open(drop.linkUrl, "_blank", "noopener,noreferrer");
-      return;
-    }
-
-    const shouldUseHostedCheckout =
-      drop.payProvider === "authorize_net_accept_hosted" ||
-      (drop.type === "Pay" && !drop.linkUrl && !!drop.priceCents);
-
-    if (!shouldUseHostedCheckout) {
-      return;
-    }
-
-    try {
-      setPayCheckoutBusyId(drop.id);
-      await openHostedPayDropCheckout({
-        payDropId: drop.id,
-        title: drop.title,
-        description: drop.description,
-        amountCents: drop.priceCents ?? 0,
-      });
-    } catch (error) {
-      window.alert(
-        error instanceof Error ? error.message : "Could not open National Bankcard checkout."
-      );
-    } finally {
-      setPayCheckoutBusyId(null);
-    }
-  }
 
   return (
     <main className="min-h-screen board-bg text-black">
@@ -1687,239 +1635,11 @@ export default function ProfileBoardViewPage({
                       Pulling the saved drop collection from this board tile.
                     </div>
                   </div>
-                ) : boardDrops.length > 0 ? (
+                ) : collectionBoardDropActivity.length > 0 ? (
                   <div className="board-drop-stack">
-                    {boardDrops.map((drop) => {
-                      const storedMedia = storageCoordsFromDrop(drop);
-                      const signedUrl =
-                        resolveDropPlaybackSrc(drop, signedUrlByKey) || undefined;
-                      const streamingEmbed = musicEmbedFor(drop.url ?? "") || null;
-                      const resolvedEmbedUrl = drop.embedUrl || streamingEmbed;
-                      const isMedia =
-                        drop.type === "Media" ||
-                        drop.type === "Pay" ||
-                        (drop.mediaKind === "audio" && !streamingEmbed);
-                      const isSpotifyEmbed =
-                        typeof resolvedEmbedUrl === "string" &&
-                        resolvedEmbedUrl.includes("open.spotify.com/embed");
-                      const isAppleMusicEmbed =
-                        typeof resolvedEmbedUrl === "string" &&
-                        resolvedEmbedUrl.includes("embed.music.apple.com");
-                      const embedHeight = getBoardDropEmbedHeight(resolvedEmbedUrl);
-                      const isLinkDrop = (drop.type === "Link" || drop.type === "News") && !!drop.url;
-                      const linkCover = resolveLinkPreviewImage(
-                        drop.url,
-                        drop.previewImage || (drop.url ? newsCoverUrl(drop.url) : null)
-                      );
-                      const linkTitle = drop.previewTitle || drop.headline || drop.title;
-                      const linkLabel = drop.type === "News" ? "News Drop" : "Link Drop";
-                      const isDescriptDrop =
-                        drop.fromDescript ||
-                        drop.mime === "text/html" ||
-                        /\.html?$/i.test(drop.fileName ?? "") ||
-                        /\.html?(?:$|[?#])/i.test(drop.url ?? "") ||
-                        isLegacyDescriptText({
-                          dropType: drop.type,
-                          body: drop.description,
-                          href: drop.url,
-                          mediaKind: drop.mediaKind,
-                        });
-                      const isDropbookSlide =
-                        drop.fromDropbook === true ||
-                        isDropbookSlideFile({
-                          name: drop.fileName,
-                          type: drop.mime,
-                          url: drop.url,
-                        });
-
-                      return (
-                        <div key={drop.id} className="board-drop-item">
-                          <div className="board-drop-top">
-                            <div className="board-drop-title">
-                              {drop.type === "News" ? linkTitle : drop.title}
-                            </div>
-                            <div className="board-drop-badges">
-                              <span className="board-drop-badge">
-                                {isDropbookSlide ? "Dropbook" : displayDropType(drop.type)}
-                              </span>
-                              {drop.hostLabel && !isSupabaseStorageHostLabel(drop.hostLabel) ? (
-                                <span className="board-drop-badge ghost">{drop.hostLabel}</span>
-                              ) : null}
-                              {drop.priceCents ? (
-                                <span className="board-drop-badge ghost">
-                                  {formatPriceFromCents(drop.priceCents)}
-                                </span>
-                              ) : null}
-                            </div>
-                          </div>
-
-                          {isDropbookSlide ? (
-                            <DropbookSlideScreen
-                              title={drop.title}
-                              src={signedUrl || drop.url}
-                            />
-                          ) : isMedia && signedUrl ? (
-                            <div
-                              className={`board-drop-media-frame ${
-                                drop.mediaKind === "video"
-                                  ? "video"
-                                  : drop.mediaKind === "audio"
-                                    ? "audio"
-                                    : "image"
-                              }`}
-                            >
-                              {drop.mediaKind === "audio" ? (
-                                <VoiceDropSoundboard
-                                  src={signedUrl}
-                                  title={drop.title}
-                                  label={drop.type === "Thought" ? "VOICE DROP" : "AUDIO DROP"}
-                                  onReload={() =>
-                                    refreshDropSignedUrl(
-                                      storedMedia?.bucket,
-                                      storedMedia?.storagePath
-                                    )
-                                  }
-                                />
-                              ) : drop.mediaKind === "video" ? (
-                                <video className="board-drop-media" src={signedUrl} controls playsInline preload="metadata" />
-                              ) : (
-                                <img className="board-drop-media" src={signedUrl} alt={drop.title} />
-                              )}
-                              {drop.type === "Media" ? (
-                                <DropStudioOverlay customizations={drop.customizations} />
-                              ) : null}
-                            </div>
-                          ) : isDescriptDrop ? (
-                            <DescriptDropScreen
-                              title={drop.title}
-                              src={signedUrl || drop.url}
-                              preview={drop.description}
-                            />
-                          ) : resolvedEmbedUrl ? (
-                            <div
-                              className={`board-drop-embed ${isSpotifyEmbed ? "spotify" : ""} ${isAppleMusicEmbed ? "apple-music" : ""}`}
-                              style={{ height: `${embedHeight}px` }}
-                            >
-                              <iframe
-                                src={resolvedEmbedUrl}
-                                title={drop.title}
-                                width="100%"
-                                height={String(embedHeight)}
-                                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-                                allowFullScreen
-                                loading="lazy"
-                                scrolling="no"
-                                className={isSpotifyEmbed ? "spotify-frame" : undefined}
-                              />
-                            </div>
-                          ) : isLinkDrop && drop.type === "News" ? (
-                            <NewsDropMagazine
-                              url={drop.url!}
-                              headline={drop.headline || drop.previewTitle || drop.title}
-                              source={drop.hostLabel}
-                              description={drop.previewDescription}
-                              images={Array.from(new Set([
-                                ...(drop.previewImages ?? []),
-                                linkCover,
-                              ].filter((item): item is string => Boolean(item))))}
-                            />
-                          ) : isLinkDrop ? (
-                            <a className="board-link-preview" href={drop.url} target="_blank" rel="noreferrer">
-                              <div className="board-link-art">
-                                {linkCover ? (
-                                  <img
-                                    className="board-link-img"
-                                    src={linkCover}
-                                    alt=""
-                                    loading="lazy"
-                                    onError={(e) => {
-                                      (e.currentTarget as HTMLImageElement).style.display = "none";
-                                    }}
-                                  />
-                                ) : null}
-                                <div className="board-link-shade" />
-                                <div className="board-link-host">{drop.hostLabel ?? (drop.type === "News" ? "NEWS" : "LINK")}</div>
-                                <div className="board-link-copy">
-                                  <div className="board-link-label">{linkLabel}</div>
-                                  <div className="board-link-title">{linkTitle}</div>
-                                  {drop.previewDescription ? (
-                                    <div className="board-link-desc">{drop.previewDescription}</div>
-                                  ) : null}
-                                </div>
-                              </div>
-                              <div className="board-link-url">{drop.url}</div>
-                            </a>
-                          ) : null}
-
-                          {drop.description && !isDescriptDrop && !isDropbookSlide ? (
-                            <div className="board-drop-description">{drop.description}</div>
-                          ) : null}
-
-                          {drop.url || drop.linkUrl || drop.payProvider === "authorize_net_accept_hosted" || signedUrl ? (
-                            <div className="board-drop-links">
-                              {drop.url ? (
-                                <a href={drop.url} target="_blank" rel="noreferrer" className="board-drop-link">
-                                  Open source
-                                </a>
-                              ) : null}
-                              {drop.type === "Doc" && signedUrl ? (
-                                <a href={signedUrl} target="_blank" rel="noreferrer" className="board-drop-link">
-                                  Open doc
-                                </a>
-                              ) : null}
-                            </div>
-                          ) : null}
-
-                          {drop.type === "Pay" && (drop.linkUrl || drop.payProvider === "authorize_net_accept_hosted") ? (
-                            <PayOnBoardButton
-                              variant="collection"
-                              busy={payCheckoutBusyId === drop.id}
-                              onClick={() => void openPayCheckout(drop)}
-                            />
-                          ) : null}
-
-                          <div className="board-drop-rail">
-                            <ReactionRail
-                              activityId={`boarddrop:${routeKey}:${drop.id}`}
-                              size="sm"
-                              item={{
-                                id: `boarddrop:${routeKey}:${drop.id}`,
-                                created_at: new Date(
-                                  drop.createdAt || Date.now()
-                                ).toISOString(),
-                                user_id: null,
-                                kind: "board_drop",
-                                title: drop.title,
-                                body: drop.description || "",
-                                href:
-                                  signedUrl ||
-                                  drop.url ||
-                                  drop.linkUrl ||
-                                  drop.embedUrl ||
-                                  null,
-                                image_url:
-                                  drop.mediaKind === "image"
-                                    ? signedUrl || drop.previewImage || null
-                                    : drop.previewImage || null,
-                                meta: {
-                                  dropType: drop.type,
-                                  mediaKind: drop.mediaKind,
-                                  bucket: drop.bucket,
-                                  storagePath: drop.storagePath,
-                                  previewImage: drop.previewImage,
-                                  previewTitle: drop.previewTitle,
-                                  previewDescription: drop.previewDescription,
-                                  embedUrl: drop.embedUrl,
-                                  linkUrl: drop.linkUrl,
-                                  payProvider: drop.payProvider,
-                                  priceCents: drop.priceCents,
-                                },
-                              }}
-                            />
-                          </div>
-                        </div>
-                      );
-                    })}
+                    {collectionBoardDropActivity.map((item) => (
+                      <ActivityCard key={item.meta?.dropId || item.id} item={item} />
+                    ))}
                   </div>
                 ) : boardDropActivityFallback.length > 0 ? (
                   <div className="recent-drops-stack">
@@ -2504,7 +2224,7 @@ export default function ProfileBoardViewPage({
           width: 100%;
           max-width: 100%;
           min-width: 0;
-          overflow: hidden;
+          overflow: visible;
         }
 
         .board-drop-item {
