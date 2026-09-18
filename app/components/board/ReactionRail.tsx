@@ -79,8 +79,17 @@ export default function ReactionRail({
         return;
       }
       const brain = readBrain();
+      const dropId = String(item?.meta?.dropId || item?.meta?.originalDropId || item?.id || "");
       const match = (["pass", "pin", "push"] as BucketFolder[]).find((folder) =>
-        (brain[folder] ?? []).some((entry) => String(entry.activityId) === id)
+        (brain[folder] ?? []).some((entry) => {
+          const entryId = String(entry.activityId);
+          const entryDropId = String(entry.item?.meta?.dropId || entry.item?.id || "");
+          return (
+            entryId === id ||
+            entryDropId === id ||
+            (dropId && (entryId === dropId || entryDropId === dropId))
+          );
+        })
       );
       setSelected(match ?? null);
     };
@@ -92,7 +101,7 @@ export default function ReactionRail({
       window.removeEventListener(EVT_UPDATED, sync as EventListener);
       window.removeEventListener("storage", sync as EventListener);
     };
-  }, [id]);
+  }, [id, item?.id, item?.meta?.dropId, item?.meta?.originalDropId]);
 
   const deposit = (folder: BucketFolder) => {
     if (!id) return;
