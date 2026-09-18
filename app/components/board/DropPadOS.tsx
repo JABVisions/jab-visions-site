@@ -2163,7 +2163,7 @@ export default function DropPadOS({
               ? activeSpace === "home"
                 ? "Move through Board Spaces from the Home Orb."
                 : activeSpace === "activity"
-                  ? "A live waterfall of Board signals and whispers."
+                  ? "A rising stream of Board signals and whispers."
                   : activeSpace === "work"
                     ? "Your productive Board lives east of Home."
                     : activeSpace === "bucket-brain"
