@@ -239,6 +239,7 @@ export function creatorFromProfile(
     display_name?: string | null;
     bio?: string | null;
     avatar_url?: string | null;
+    avatar_path?: string | null;
     board_style?: unknown;
   },
   viewerId?: string | null
@@ -250,7 +251,13 @@ export function creatorFromProfile(
   const username = asString(row.username).toLowerCase().replace(/^@+/, "");
   if (!username) return null;
   const desk = workDeskFromStyle(boardStyle);
-  const avatar = publicOrbAvatarUrl(boardStyle?.avatarUrl, boardStyle?.avatarDataUrl, row.avatar_url);
+  const avatar = publicOrbAvatarUrl(
+    boardStyle?.avatarUrl,
+    boardStyle?.avatarDataUrl,
+    row.avatar_url,
+    row.avatar_path,
+    boardStyle?.avatarPath
+  );
   return {
     id: row.id,
     username,

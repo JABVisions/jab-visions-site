@@ -6,6 +6,7 @@ import {
   splitWorkBoardLibraries,
   type WorkBoardSection,
 } from "@/lib/board/brain/workBoardPreview";
+import { applySignedBoardAvatars, supabaseAvatarSigner } from "@/lib/board/signBoardAvatars";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -122,6 +123,7 @@ export async function GET(
   if (!creator) {
     return Response.json({ ok: false, error: "That Work Board is not available." }, { status: 200 });
   }
+  const [signedCreator] = await applySignedBoardAvatars(supabaseAvatarSigner(), [creator]);
 
   const style = profile?.board_style && typeof profile.board_style === "object"
     ? (profile.board_style as Record<string, unknown>)
@@ -149,7 +151,7 @@ export async function GET(
 
   return Response.json({
     ok: true,
-    creator,
+    creator: signedCreator,
     assets,
     portfolio,
     defaultSection,

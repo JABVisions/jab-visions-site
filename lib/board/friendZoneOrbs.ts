@@ -1,4 +1,5 @@
 import type { FriendZoneOrbUser, FriendZoneState } from "@/lib/board/friendZoneSignals";
+import { isSignedBoardAvatarUrl } from "./signBoardAvatars";
 
 export const DEFAULT_ORB_AVATAR = "/assets/board-welcome-mark.jpg";
 
@@ -79,13 +80,18 @@ function rewriteBoardStorageUrl(url: string) {
 export function publicUrlForAvatarPath(path: unknown) {
   const raw = typeof path === "string" ? path.trim() : "";
   if (!raw || raw.startsWith("data:")) return "";
+  // Private board-avatars 404 as /object/public; keep signed tokens intact.
+  if (isSignedBoardAvatarUrl(raw)) return raw;
+  if (/\/storage\/v1\/(?:object|render\/image)\/(?:sign|authenticated)\/board-avatars\//i.test(raw)) {
+    return raw;
+  }
   const rewritten = rewriteBoardStorageUrl(raw);
   if (rewritten) return rewritten;
   if (/^(https?:\/\/|\/)/i.test(raw)) return raw;
   const storagePath = raw.startsWith(`${AVATAR_BUCKET}/`)
     ? raw.slice(AVATAR_BUCKET.length + 1)
     : raw.replace(/^\/+/, "");
-  return supabasePublicObjectUrl(AVATAR_BUCKET, storagePath);
+  return supabasePublicObjectUrl(AVATAR_BUCKET, storagePath) || storagePath;
 }
 
 /** Hosted http(s) avatars only — iPhone Safari OOMs on giant data: URLs in the dock. */
@@ -95,7 +101,7 @@ export function publicOrbAvatarUrl(...values: unknown[]): string {
     const clean = value.trim();
     if (!clean) continue;
     if (clean.startsWith("data:")) continue;
-    if (clean.length > 4096) continue;
+    if (clean.length > 4096 && !isSignedBoardAvatarUrl(clean)) continue;
     const hosted = publicUrlForAvatarPath(clean);
     if (hosted) return hosted;
   }
@@ -222,13 +228,18 @@ function pickRicherOrb(current: FriendZoneOrbUser, incoming: FriendZoneOrbUser):
       ? winner.username
       : other.username || winner.username;
   const lastActiveLabel = preferOrbLabel(winner.lastActiveLabel, other.lastActiveLabel);
+  const winnerAvatar = winner.avatarUrl && winner.avatarUrl !== DEFAULT_ORB_AVATAR ? winner.avatarUrl : "";
+  const otherAvatar = other.avatarUrl && other.avatarUrl !== DEFAULT_ORB_AVATAR ? other.avatarUrl : "";
   return {
     ...winner,
     id: winner.id || other.id,
     name,
     username,
-    avatarUrl:
-      winner.avatarUrl && winner.avatarUrl !== DEFAULT_ORB_AVATAR ? winner.avatarUrl : other.avatarUrl,
+    avatarUrl: isSignedBoardAvatarUrl(winnerAvatar)
+      ? winnerAvatar
+      : isSignedBoardAvatarUrl(otherAvatar)
+        ? otherAvatar
+        : winnerAvatar || otherAvatar || winner.avatarUrl,
     lastActiveLabel,
     relationshipState:
       lastActiveLabel === "Active now"

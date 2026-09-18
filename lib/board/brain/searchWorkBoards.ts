@@ -8,6 +8,7 @@ export type PublicWorkBoardRow = {
   display_name: string | null;
   bio: string | null;
   avatar_url?: string | null;
+  avatar_path?: string | null;
   board_style?: Record<string, unknown> | string | null;
 };
 
@@ -150,7 +151,13 @@ export function matchWorkBoards(
     if (intent === "work_board_search" && !browsing && !desk.job && score < 16) continue;
 
     const glow = asString(boardStyle?.glowColor) || null;
-    const avatar = publicOrbAvatarUrl(boardStyle?.avatarUrl, boardStyle?.avatarDataUrl, row.avatar_url);
+    const avatar = publicOrbAvatarUrl(
+      boardStyle?.avatarUrl,
+      boardStyle?.avatarDataUrl,
+      row.avatar_url,
+      row.avatar_path,
+      boardStyle?.avatarPath
+    );
     const location = locationFromStyle(boardStyle);
 
     matched.push({

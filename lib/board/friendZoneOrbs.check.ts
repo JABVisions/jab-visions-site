@@ -105,6 +105,37 @@ assert(
   "the viewing user is excluded from Friend Zone"
 );
 
+const signedMerge = mergeFriendZoneOrbs(
+  [
+    [
+      {
+        id: "user-maya",
+        name: "Maya",
+        username: "maya",
+        avatarUrl:
+          "https://abc.supabase.co/storage/v1/object/sign/board-avatars/user-maya/avatar.jpg?token=keep-me",
+        lastActiveLabel: "2h ago",
+        relationshipState: "fresh",
+      },
+    ] satisfies FriendZoneOrbUser[],
+    [
+      {
+        id: "user-maya",
+        name: "Maya",
+        username: "maya",
+        avatarUrl: "https://abc.supabase.co/storage/v1/object/public/board-avatars/user-maya/avatar.jpg",
+        lastActiveLabel: "Active now",
+        relationshipState: "active",
+      },
+    ],
+  ],
+  { currentUserId: "viewer", limit: 18 }
+);
+assert(
+  signedMerge[0].avatarUrl.includes("token=keep-me"),
+  "signed avatar tokens survive Friend Zone merges"
+);
+
 assert(
   publicOrbAvatarUrl("data:image/png;base64,abc") === DEFAULT_ORB_AVATAR,
   "data URLs stay out of Friend Zone orbs"
@@ -113,13 +144,13 @@ assert(
   publicOrbAvatarUrl("https://cdn.example.com/maya.jpg") === "https://cdn.example.com/maya.jpg",
   "hosted avatar URLs pass through"
 );
-const rewritten = publicOrbAvatarUrl(
+const signedKept = publicOrbAvatarUrl(
   "https://abc.supabase.co/storage/v1/object/sign/board-avatars/user-1/avatar.jpg?token=secret"
 );
 assert(
-  rewritten.includes("/storage/v1/object/public/board-avatars/user-1/avatar.jpg") &&
-    !rewritten.includes("token="),
-  "signed avatar URLs become durable public URLs"
+  signedKept.includes("/storage/v1/object/sign/board-avatars/user-1/avatar.jpg") &&
+    signedKept.includes("token=secret"),
+  "signed avatar URLs keep their token"
 );
 
 process.env.NEXT_PUBLIC_SUPABASE_URL =

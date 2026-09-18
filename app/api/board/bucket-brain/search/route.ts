@@ -8,6 +8,7 @@ import {
   type ActivityPreviewRow,
   type PublicWorkBoardRow,
 } from "@/lib/board/brain/searchWorkBoards";
+import { applySignedBoardAvatars, supabaseAvatarSigner } from "@/lib/board/signBoardAvatars";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -143,7 +144,7 @@ export async function GET(req: Request) {
 
   return Response.json({
     ok: true,
-    items,
+    items: await applySignedBoardAvatars(supabaseAvatarSigner(), items),
     status:
       items.length > 0
         ? `Found ${items.length} Work Board${items.length === 1 ? "" : "s"}.`
