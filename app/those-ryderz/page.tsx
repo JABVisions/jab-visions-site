@@ -1,8 +1,15 @@
 'use client';
 
+import dynamic from 'next/dynamic';
 import Image from 'next/image';
+import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import Navbar from '../components/Navbar';
+
+const RaidGame = dynamic(() => import('../components/those-ryderz/RaidGame'), {
+  ssr: false,
+  loading: () => <div className="raid-loading">Booting raid signal…</div>,
+});
 
 const RYDERZ = [
   {
@@ -349,6 +356,26 @@ export default function ThoseRyderz() {
           )}
         </section>
 
+        <section className="game-tile" id="raid">
+          <div className="section-heading">
+            <div>
+              <p>RAID SIGNAL / 002</p>
+              <h2>Those Ryderz: Raid</h2>
+            </div>
+            <p className="section-intro">
+              A Marvel Rivals-styled, Call of Duty Zombies-like prototype. Pick a
+              Ryder and hold the overrun block against mind-controlled civilians.
+              Powers drain aura. When the meter hits empty you burn out — no
+              blades, no blink, just weaker melee until the signal crawls back.
+            </p>
+          </div>
+          <RaidGame layout="embed" />
+          <p className="raid-footnote">
+            <Link href="/those-ryderz/raid">Open fullscreen raid</Link>
+            <span>WASD move · mouse aim · click fire · F / RMB melee · E power</span>
+          </p>
+        </section>
+
         <section className="status-tile">
           <div className="status-copy">
             <p>Current Stage</p>
@@ -417,6 +444,7 @@ export default function ThoseRyderz() {
 
         .hero-tile,
         .character-tile,
+        .game-tile,
         .status-tile {
           position: relative;
           overflow: hidden;
@@ -431,6 +459,7 @@ export default function ThoseRyderz() {
 
         .hero-tile::before,
         .character-tile::before,
+        .game-tile::before,
         .status-tile::before {
           content: '';
           position: absolute;
@@ -607,8 +636,43 @@ export default function ThoseRyderz() {
           text-transform: uppercase;
         }
 
-        .character-tile {
+        .character-tile,
+        .game-tile {
           padding: 28px;
+        }
+
+        .raid-loading {
+          display: grid;
+          place-items: center;
+          min-height: 420px;
+          color: #77ffae;
+          font: 800 0.78rem/1.3 monospace;
+          letter-spacing: 0.16em;
+          text-transform: uppercase;
+        }
+
+        .raid-footnote {
+          position: relative;
+          z-index: 1;
+          display: flex;
+          flex-wrap: wrap;
+          align-items: center;
+          justify-content: space-between;
+          gap: 10px;
+          margin: 14px 0 0;
+          color: rgba(225, 241, 230, 0.55);
+          font: 700 0.62rem/1.4 monospace;
+          letter-spacing: 0.1em;
+          text-transform: uppercase;
+        }
+
+        .raid-footnote a {
+          color: #9effc4;
+          text-decoration: none;
+        }
+
+        .raid-footnote a:hover {
+          text-decoration: underline;
         }
 
         .section-heading {
@@ -1166,6 +1230,7 @@ export default function ThoseRyderz() {
 
           .hero-layout,
           .character-tile,
+          .game-tile,
           .status-tile {
             padding: 14px;
           }
