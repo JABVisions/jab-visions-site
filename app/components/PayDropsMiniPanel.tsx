@@ -8,6 +8,7 @@ import {
   type PayDrop,
 } from "@/lib/board/paydrops";
 import { openHostedPayDropCheckout } from "@/lib/board/payCheckout";
+import { PayOnBoardButton } from "@/app/components/board/PayOnBoardButton";
 import { supabaseBrowser } from "@/lib/supabase/browser";
 const PREF_MODE_KEY = "jab_board_dropconsole_mode"; // used only to preselect Pay on Feed
 
@@ -197,14 +198,11 @@ export default function PayDropsMiniPanel({
               </div>
 
               {d.checkoutUrl || d.provider === "authorize_net_accept_hosted" ? (
-                <button
-                  type="button"
+                <PayOnBoardButton
+                  variant="collection"
+                  busy={busyId === d.id}
                   onClick={() => void openCheckout(d)}
-                  disabled={busyId === d.id}
-                  className="mt-3 inline-flex rounded-full px-3 py-2 text-xs font-extrabold tracking-[0.12em] uppercase bg-white/70 border border-black/10 text-[rgba(255,0,190,0.9)] disabled:opacity-60 disabled:cursor-wait"
-                >
-                  {busyId === d.id ? "Opening..." : "Checkout →"}
-                </button>
+                />
               ) : null}
             </div>
           ))}

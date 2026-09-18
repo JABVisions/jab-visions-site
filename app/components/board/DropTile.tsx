@@ -33,6 +33,7 @@ import DescriptDropScreen from "./DescriptDropScreen";
 import VoiceDropSoundboard from "./VoiceDropSoundboard";
 import NewsDropMagazine from "./NewsDropMagazine";
 import DropbookSlideScreen from "./DropbookSlideScreen";
+import { PayOnBoardButton } from "./PayOnBoardButton";
 import { isDropbookSlideFile } from "@/lib/board/dropbookSlides";
 import type { ResolvedDropbookLink } from "@/lib/board/dropbookLink";
 import { classifyDropbookLinkUrl, isStreamingEmbedUrl, musicEmbedFor } from "@/lib/board/dropbookLink";
@@ -2427,17 +2428,6 @@ export default function DropTile() {
                       </a>
                     ) : null}
 
-                    {isPay ? (
-                      <button
-                        className="drop-mini"
-                        type="button"
-                        onClick={() => void openPayCheckout(d)}
-                        disabled={payCheckoutBusyId === d.id}
-                      >
-                        {payCheckoutBusyId === d.id ? "Opening…" : "Checkout →"}
-                      </button>
-                    ) : null}
-
                     {isDoc && signedUrl ? (
                       <button
                         className="drop-mini"
@@ -2643,6 +2633,16 @@ export default function DropTile() {
                 ) : null}
 
                 {isPay && d.description ? <div className="pay-desc">{d.description}</div> : null}
+
+                {isPay ? (
+                  <div className="pay-drop-footer">
+                    <PayOnBoardButton
+                      variant="collection"
+                      busy={payCheckoutBusyId === d.id}
+                      onClick={() => void openPayCheckout(d)}
+                    />
+                  </div>
+                ) : null}
               </div>
             );
           })
@@ -2709,14 +2709,10 @@ export default function DropTile() {
 
             {viewerDrop.type === "Pay" ? (
               <div className="viewerActions">
-                <button
-                  type="button"
-                  className="viewerCheckout"
+                <PayOnBoardButton
+                  busy={payCheckoutBusyId === viewerDrop.id}
                   onClick={() => void openPayCheckout(viewerDrop)}
-                  disabled={payCheckoutBusyId === viewerDrop.id}
-                >
-                  {payCheckoutBusyId === viewerDrop.id ? "Opening checkout…" : "Open checkout"}
-                </button>
+                />
               </div>
             ) : null}
 
@@ -3250,6 +3246,11 @@ export default function DropTile() {
           text-decoration: none;
         }
 
+        .drop-mini:disabled {
+          opacity: 0.58;
+          cursor: wait;
+        }
+
         .drop-badges {
           display: flex;
           gap: 8px;
@@ -3737,24 +3738,6 @@ export default function DropTile() {
           padding: 0 14px 10px;
           background: rgba(255, 255, 255, 0.32);
         }
-        .viewerCheckout {
-          width: 100%;
-          border: 1px solid rgba(0, 0, 0, 0.14);
-          border-radius: 16px;
-          background: rgba(0, 0, 0, 0.86);
-          color: rgba(200, 255, 230, 0.96);
-          padding: 12px 14px;
-          font-size: 12px;
-          font-weight: 950;
-          letter-spacing: 0.14em;
-          text-transform: uppercase;
-          cursor: pointer;
-        }
-        .viewerCheckout:disabled,
-        .drop-mini:disabled {
-          opacity: 0.58;
-          cursor: wait;
-        }
         .viewerHint {
           padding: 10px 14px 14px 14px;
           font-size: 12px;
@@ -3843,6 +3826,10 @@ export default function DropTile() {
           color: rgba(0, 0, 0, 0.6);
           line-height: 1.4;
           overflow-wrap: anywhere;
+        }
+
+        .pay-drop-footer {
+          margin-top: 10px;
         }
 
         .link-card {
