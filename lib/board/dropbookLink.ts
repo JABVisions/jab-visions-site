@@ -6,7 +6,7 @@ import {
   toYouTubeEmbed,
 } from "@/lib/board/dropItem";
 
-export type DropbookLinkKind = "youtube" | "music" | "link";
+export type DropbookLinkKind = "youtube" | "news" | "music" | "link";
 
 export type ResolvedDropbookLink = {
   kind: DropbookLinkKind;
@@ -19,6 +19,50 @@ export type ResolvedDropbookLink = {
   /** Short chip footer label */
   chipLabel: string;
 };
+
+const NEWS_HOSTS = new Set([
+  "nytimes.com",
+  "washingtonpost.com",
+  "bbc.com",
+  "bbc.co.uk",
+  "cnn.com",
+  "reuters.com",
+  "theguardian.com",
+  "apnews.com",
+  "npr.org",
+  "wsj.com",
+  "bloomberg.com",
+  "forbes.com",
+  "businessinsider.com",
+  "techcrunch.com",
+  "theverge.com",
+  "wired.com",
+  "politico.com",
+  "time.com",
+  "newsweek.com",
+  "usatoday.com",
+  "latimes.com",
+  "nbcnews.com",
+  "abcnews.go.com",
+  "cbsnews.com",
+  "foxnews.com",
+  "aljazeera.com",
+  "independent.co.uk",
+  "telegraph.co.uk",
+  "huffpost.com",
+  "axios.com",
+  "vox.com",
+  "slate.com",
+  "theatlantic.com",
+  "newyorker.com",
+  "economist.com",
+  "ft.com",
+  "cnbc.com",
+  "marketwatch.com",
+  "msnbc.com",
+  "news.yahoo.com",
+  "news.google.com",
+]);
 
 function normalizeRawUrl(raw: unknown) {
   const trimmed = typeof raw === "string" ? raw.trim() : "";
@@ -39,6 +83,29 @@ function hostOf(url: string) {
   }
 }
 
+function pathOf(url: string) {
+  try {
+    return new URL(url).pathname.toLowerCase();
+  } catch {
+    return "";
+  }
+}
+
+function isNewsHost(host: string) {
+  if (!host) return false;
+  if (NEWS_HOSTS.has(host)) return true;
+  if (host.startsWith("news.")) return true;
+  if (host.endsWith(".news")) return true;
+  for (const known of NEWS_HOSTS) {
+    if (host === known || host.endsWith(`.${known}`)) return true;
+  }
+  return false;
+}
+
+function isNewsPath(pathname: string) {
+  return /(^|\/)(news|article|articles|story|stories)(\/|$)/i.test(pathname);
+}
+
 export function isYouTubeDropUrl(raw: string | null | undefined): boolean {
   return classifyDropbookLinkUrl(raw ?? "") === "youtube";
 }
@@ -48,13 +115,17 @@ export function isMusicServiceUrl(raw: string | null | undefined): boolean {
   return classifyDropbookLinkUrl(raw ?? "") === "music";
 }
 
+export function isNewsDropUrl(raw: string | null | undefined): boolean {
+  return classifyDropbookLinkUrl(raw ?? "") === "news";
+}
+
 /** Streaming links that should iframe-embed instead of playing as an audio file. */
 export function isStreamingEmbedUrl(raw: string | null | undefined): boolean {
   const kind = classifyDropbookLinkUrl(raw ?? "");
   return kind === "youtube" || kind === "music";
 }
 
-/** URL alone decides the Dropbook page kind — no mode picker. */
+/** URL alone decides YouTube / News / Music / Link — no mode picker. */
 export function classifyDropbookLinkUrl(raw: unknown): DropbookLinkKind | null {
   const url = normalizeRawUrl(raw);
   if (!url) return null;
@@ -67,7 +138,21 @@ export function classifyDropbookLinkUrl(raw: unknown): DropbookLinkKind | null {
   ) {
     return "music";
   }
+  if (isNewsHost(host) || isNewsPath(pathOf(url))) return "news";
   return "link";
+}
+
+/**
+ * Live URL-field classification. Strong kinds (YouTube / News / Music) switch
+ * immediately; generic Link waits for a real domain so half-typed music URLs
+ * don't steal the flavor.
+ */
+export function classifiedStudioLinkKind(raw: unknown): DropbookLinkKind | null {
+  const kind = classifyDropbookLinkUrl(raw);
+  if (!kind) return null;
+  if (kind !== "link") return kind;
+  const host = hostOf(normalizeRawUrl(raw));
+  return host.includes(".") ? "link" : null;
 }
 
 export function musicEmbedFor(url: string) {
@@ -77,6 +162,7 @@ export function musicEmbedFor(url: string) {
 function defaultTitle(kind: DropbookLinkKind, url: string) {
   const host = hostOf(url);
   if (kind === "youtube") return "YouTube";
+  if (kind === "news") return host || "News";
   if (kind === "music") {
     if (host.includes("spotify")) return "Spotify";
     if (host.includes("apple")) return "Apple Music";
@@ -88,12 +174,13 @@ function defaultTitle(kind: DropbookLinkKind, url: string) {
 
 function chipLabelFor(kind: DropbookLinkKind, title: string) {
   if (kind === "youtube") return title.length > 18 ? "YouTube ▶" : `${title} ▶`;
+  if (kind === "news") return title.length > 18 ? "News 📰" : `${title} 📰`;
   if (kind === "music") return title.length > 18 ? "Song ♫" : `${title} ♫`;
   return title.length > 22 ? `${title.slice(0, 20)}…` : title;
 }
 
 /**
- * Resolve a pasted URL into a YouTube / music / web link payload.
+ * Resolve a pasted URL into a YouTube / news / music / web link payload.
  * Used for standalone Link Drops and Dropbook pages.
  */
 export async function resolveDropbookLink(raw: string): Promise<ResolvedDropbookLink | null> {
@@ -128,31 +215,25 @@ export async function resolveDropbookLink(raw: string): Promise<ResolvedDropbook
   };
 }
 
-/**
- * Standalone Studio LINK bar Posts always become YouTube Drops.
- * Keeps the original url/title/preview; forces kind + YouTube embed.
- * Dropbook shelf pages should keep classified kinds from resolveDropbookLink.
- */
-export function asStandaloneYouTubeDrop(link: ResolvedDropbookLink): ResolvedDropbookLink {
-  return {
-    ...link,
-    kind: "youtube",
-    embedUrl: toYouTubeEmbed(link.url) || undefined,
-    chipLabel: chipLabelFor("youtube", link.title),
-  };
-}
-
-/** Persist as a YouTube Drop when the bar forced youtube kind or the URL is YouTube. */
+/** Standalone Studio LINK bar Posts persist as the classified URL kind. */
 export function studioLinkPersistKind(link: ResolvedDropbookLink): DropbookLinkKind {
-  if (link.kind === "youtube" || isYouTubeDropUrl(link.url)) return "youtube";
-  if (link.kind === "music") return "music";
-  return "link";
+  return link.kind;
 }
 
-/** YouTube Drops always use toYouTubeEmbed; other kinds keep their resolved embed. */
+/** Dropbook slides have no news kind — news pages sit on a link slide. */
+export function dropbookSlideKindFor(
+  kind: DropbookLinkKind
+): "youtube" | "music" | "link" {
+  return kind === "youtube" || kind === "music" ? kind : "link";
+}
+
+/** YouTube / Music Drops use their platform embed; news and web links keep preview embeds. */
 export function studioLinkEmbedUrl(link: ResolvedDropbookLink): string | undefined {
-  if (studioLinkPersistKind(link) === "youtube") {
+  if (link.kind === "youtube") {
     return toYouTubeEmbed(link.url) || link.embedUrl || undefined;
+  }
+  if (link.kind === "music") {
+    return musicEmbedFor(link.url) || link.embedUrl || undefined;
   }
   return link.embedUrl;
 }

@@ -38,6 +38,7 @@ import ActivityCard from "./ActivityCard";
 import { isDropbookSlideFile } from "@/lib/board/dropbookSlides";
 import type { ResolvedDropbookLink } from "@/lib/board/dropbookLink";
 import {
+  classifiedStudioLinkKind,
   classifyDropbookLinkUrl,
   isStreamingEmbedUrl,
   musicEmbedFor,
@@ -1186,15 +1187,14 @@ export default function DropTile() {
     if (!normalized) return flash(setMsg, "Paste a valid link.", 1600);
 
     const t = title.trim() || "Untitled";
-    const youtubeLink = classifyDropbookLinkUrl(normalized) === "youtube";
-    const savedType: DropType = youtubeLink
-      ? "YouTube"
-      : mode === "YouTube"
+    const classified = classifyDropbookLinkUrl(normalized);
+    const savedType: DropType =
+      classified === "youtube"
         ? "YouTube"
-        : mode === "Music"
-          ? "Music"
-          : mode === "News"
-            ? "News"
+        : classified === "news"
+          ? "News"
+          : classified === "music"
+            ? "Music"
             : "Link";
     const { embedUrl, hostLabel } = makeEmbedByMode(savedType, normalized);
 
@@ -1239,13 +1239,21 @@ export default function DropTile() {
   async function addResolvedLinkDrop(link: ResolvedDropbookLink): Promise<boolean> {
     const persistKind = studioLinkPersistKind(link);
     const type: DropType =
-      persistKind === "youtube" ? "YouTube" : persistKind === "music" ? "Music" : "Link";
+      persistKind === "youtube"
+        ? "YouTube"
+        : persistKind === "news"
+          ? "News"
+          : persistKind === "music"
+            ? "Music"
+            : "Link";
     const hostLabel =
       persistKind === "youtube"
         ? "YOUTUBE"
-        : persistKind === "music"
-          ? (link.provider?.toUpperCase() || "MUSIC")
-          : link.provider?.toUpperCase() || hostLabelFromUrl(link.url);
+        : persistKind === "news"
+          ? (link.provider?.toUpperCase() || "NEWS")
+          : persistKind === "music"
+            ? (link.provider?.toUpperCase() || "MUSIC")
+            : link.provider?.toUpperCase() || hostLabelFromUrl(link.url);
 
     const next: DropItem[] = [
       {
@@ -1255,9 +1263,13 @@ export default function DropTile() {
         url: link.url,
         embedUrl: studioLinkEmbedUrl(link) ?? null,
         hostLabel,
+        headline: type === "News" ? link.title : undefined,
         previewTitle: link.title || undefined,
         previewDescription: link.description,
-        previewImage: resolveLinkPreviewImage(link.url, link.image) ?? undefined,
+        previewImage:
+          resolveLinkPreviewImage(link.url, link.image) ??
+          (type === "News" ? newsCoverUrl(link.url) : null) ??
+          undefined,
         createdAt: Date.now(),
       },
       ...drops,
@@ -2361,7 +2373,11 @@ export default function DropTile() {
                 const next = e.target.value;
                 setUrl(next);
                 if (e.target.value.trim()) setFile(null);
-                if (classifyDropbookLinkUrl(next) === "youtube") setMode("YouTube");
+                const classified = classifiedStudioLinkKind(next);
+                if (classified === "youtube") setMode("YouTube");
+                else if (classified === "news") setMode("News");
+                else if (classified === "music") setMode("Music");
+                else if (classified === "link") setMode("Link");
               }}
             />
             <textarea
@@ -2384,7 +2400,15 @@ export default function DropTile() {
                     : "Paste YouTube link"
               }
               value={url}
-              onChange={(e) => setUrl(e.target.value)}
+              onChange={(e) => {
+                const next = e.target.value;
+                setUrl(next);
+                const classified = classifiedStudioLinkKind(next);
+                if (classified === "youtube") setMode("YouTube");
+                else if (classified === "news") setMode("News");
+                else if (classified === "music") setMode("Music");
+                else if (classified === "link") setMode("Link");
+              }}
             />
             <textarea
               className="drop-textarea"

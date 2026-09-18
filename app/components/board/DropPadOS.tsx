@@ -1774,10 +1774,18 @@ export default function DropPadOS({
     const kind: AssetKind =
       persistKind === "youtube" ? "youtube" : persistKind === "music" ? "music" : "link";
     const now = Date.now();
+    const defaultTitle =
+      persistKind === "youtube"
+        ? "YouTube Drop"
+        : persistKind === "news"
+          ? "News Drop"
+          : persistKind === "music"
+            ? "Music Drop"
+            : "Link Drop";
     const asset: AssetItem = {
       id: uid(),
       kind,
-      title: link.title.trim() || (kind === "youtube" ? "YouTube Drop" : "Link Drop"),
+      title: link.title.trim() || defaultTitle,
       description: link.description || "Created and sent from Drop Studio.",
       createdAt: now,
       payload: {

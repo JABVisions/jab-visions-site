@@ -23,8 +23,13 @@ import {
 import { descriptDocToFile, type DescriptDoc } from "@/lib/board/descriptDocs";
 import { isDropbookSlideFile } from "@/lib/board/dropbookSlides";
 import type { ResolvedDropbookLink } from "@/lib/board/dropbookLink";
-import { classifyDropbookLinkUrl, studioLinkEmbedUrl, studioLinkPersistKind } from "@/lib/board/dropbookLink";
-import { makeEmbedByMode } from "@/lib/board/dropItem";
+import {
+  classifiedStudioLinkKind,
+  classifyDropbookLinkUrl,
+  studioLinkEmbedUrl,
+  studioLinkPersistKind,
+} from "@/lib/board/dropbookLink";
+import { makeEmbedByMode, newsCoverUrl } from "@/lib/board/dropItem";
 import { checkUploadSize, resolveUploadContentType } from "@/lib/board/uploadLimits";
 
 import {
@@ -469,8 +474,11 @@ export default function DropConsole({
         dropFlavor === "doc" ||
         dropFlavor === "media"
           ? dropFlavor
-          : linkKind === "youtube"
-            ? "youtube"
+          : linkKind === "youtube" ||
+              linkKind === "news" ||
+              linkKind === "music" ||
+              linkKind === "link"
+            ? linkKind
             : dropFlavor;
       const tags = parseTags(tagsInput);
       const payPriceCents = dropFlavor === "pay" ? parsePriceToCents(payPrice) : null;
@@ -618,7 +626,7 @@ export default function DropConsole({
               url: cleanAttach || undefined,
               embedUrl: musicEmbed?.embedUrl ?? preview?.embedUrl ?? null,
               hostLabel: musicEmbed?.hostLabel ?? preview?.provider ?? null,
-              headline: dropFlavor === "news" ? preview?.title ?? cleanTitle ?? undefined : undefined,
+              headline: savedFlavor === "news" ? preview?.title ?? cleanTitle ?? undefined : undefined,
               previewTitle: preview?.title ?? undefined,
               previewDescription: preview?.description ?? undefined,
               previewImage: preview?.image ?? undefined,
@@ -931,20 +939,30 @@ export default function DropConsole({
   async function publishStudioLinkDrop(link: ResolvedDropbookLink) {
     const persistKind = studioLinkPersistKind(link);
     const flavor: DropFlavor =
-      persistKind === "youtube" ? "youtube" : persistKind === "music" ? "music" : "link";
+      persistKind === "youtube"
+        ? "youtube"
+        : persistKind === "news"
+          ? "news"
+          : persistKind === "music"
+            ? "music"
+            : "link";
     const embedUrl = studioLinkEmbedUrl(link) ?? null;
     const identity = readCurrentBoardIdentity();
     const dropId = newId(flavor);
     const titleText = link.title.trim() || `${DROP_FLAVOR_LABEL[flavor]} Drop`;
     const bodyText = link.description?.trim() || `New ${DROP_FLAVOR_LABEL[flavor]} drop added to Board.`;
+    const previewImage =
+      persistKind === "news"
+        ? link.image ?? newsCoverUrl(link.url) ?? null
+        : link.image ?? null;
     const preview = {
       url: link.url,
       provider: link.provider ?? null,
       title: link.title,
       description: link.description ?? null,
-      image: link.image ?? null,
+      image: previewImage,
       embedUrl,
-      type: persistKind === "youtube" ? "video" : "link",
+      type: persistKind === "youtube" ? "video" : persistKind === "music" ? "music" : "link",
     };
 
     const res = await createActivity(sb, {
@@ -953,7 +971,7 @@ export default function DropConsole({
       title: titleText,
       body: bodyText,
       href: link.url,
-      image_url: link.image ?? null,
+      image_url: previewImage,
       meta: {
         source: "drop_studio",
         drop_flavor: flavor,
@@ -977,9 +995,10 @@ export default function DropConsole({
       url: link.url,
       embedUrl,
       hostLabel: link.provider ?? null,
+      headline: persistKind === "news" ? link.title : undefined,
       previewTitle: link.title,
       previewDescription: link.description,
-      previewImage: link.image,
+      previewImage,
       description: bodyText,
     });
 
@@ -991,7 +1010,7 @@ export default function DropConsole({
       title: titleText,
       body: bodyText,
       href: link.url,
-      image_url: link.image ?? null,
+      image_url: previewImage,
       meta: {
         source: "drop_studio",
         drop_flavor: flavor,
@@ -2070,11 +2089,15 @@ function BoardDropConsoleFields({
             onChange={(e) => {
               const next = e.target.value;
               setAttachUrl(next);
+              const classified = classifiedStudioLinkKind(next);
               if (
-                (dropFlavor === "music" || dropFlavor === "link") &&
-                classifyDropbookLinkUrl(next) === "youtube"
+                classified &&
+                (dropFlavor === "youtube" ||
+                  dropFlavor === "news" ||
+                  dropFlavor === "music" ||
+                  dropFlavor === "link")
               ) {
-                setDropFlavor("youtube");
+                setDropFlavor(classified);
               }
             }}
             placeholder={
