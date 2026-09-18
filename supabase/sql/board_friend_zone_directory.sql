@@ -30,6 +30,7 @@ as $$
       split_part(coalesce(u.email, 'Board User'), '@', 1)
     ) as display_name,
     coalesce(
+      nullif(p.board_style ->> 'avatarPath', ''),
       nullif(p.avatar_url, ''),
       nullif(p.board_style ->> 'avatarUrl', ''),
       case

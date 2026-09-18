@@ -23,14 +23,27 @@ const boards = matchWorkBoards(
         workDesk: { job: "Designer" },
       },
     },
+    {
+      id: "user-path-col",
+      username: "pathcol",
+      display_name: "Path Col",
+      bio: "Engineer",
+      avatar_url: null,
+      avatar_path: "user-path-col/avatar.jpg",
+      board_style: { workDesk: { job: "Engineer" } },
+    },
   ],
-  "designer"
+  "work boards"
 );
 
-assert(boards.length === 1, "work board search matches the designer");
+assert(boards.length === 2, "work board search matches avatarPath and avatar_path");
 assert(
-  boards[0].avatarUrl?.includes("user-maya/avatar-77.jpg"),
+  boards.find((board) => board.username === "maya")?.avatarUrl?.includes("user-maya/avatar-77.jpg"),
   "work board search uses profile avatarPath"
+);
+assert(
+  boards.find((board) => board.username === "pathcol")?.avatarUrl?.includes("user-path-col/avatar.jpg"),
+  "work board search uses profiles.avatar_path"
 );
 assert(boards[0].avatarUrl !== DEFAULT_ORB_AVATAR, "work board search does not drop avatarPath");
 
@@ -42,5 +55,17 @@ const creator = creatorFromProfile({
   board_style: { avatarPath: "user-maya/avatar-77.jpg", workDesk: { job: "Designer" } },
 });
 assert(creator?.avatarUrl?.includes("user-maya/avatar-77.jpg"), "work board preview uses avatarPath");
+
+const pathCreator = creatorFromProfile({
+  id: "user-path-col",
+  username: "pathcol",
+  display_name: "Path Col",
+  avatar_url: null,
+  avatar_path: "user-path-col/avatar.jpg",
+});
+assert(
+  pathCreator?.avatarUrl?.includes("user-path-col/avatar.jpg"),
+  "work board preview uses profiles.avatar_path"
+);
 
 console.log("work board avatar path checks passed");

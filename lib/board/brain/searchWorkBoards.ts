@@ -8,6 +8,7 @@ export type PublicWorkBoardRow = {
   display_name: string | null;
   bio: string | null;
   avatar_url?: string | null;
+  avatar_path?: string | null;
   board_style?: Record<string, unknown> | string | null;
 };
 
@@ -154,6 +155,7 @@ export function matchWorkBoards(
       boardStyle?.avatarUrl,
       boardStyle?.avatarDataUrl,
       row.avatar_url,
+      row.avatar_path,
       boardStyle?.avatarPath
     );
     const location = locationFromStyle(boardStyle);

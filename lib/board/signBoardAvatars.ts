@@ -33,7 +33,10 @@ export function supabaseAvatarSigner() {
   const anon =
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
     process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
-  const service = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const service =
+    process.env.SUPABASE_SERVICE_ROLE_KEY ||
+    process.env.SUPABASE_SECRET_KEY ||
+    process.env.SB_SECRET_KEY;
   if (!url || !(service || anon)) return null;
   return createClient(url, service || anon!, {
     auth: { persistSession: false, autoRefreshToken: false },
