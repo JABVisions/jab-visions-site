@@ -45,6 +45,7 @@ import DescriptDropScreen from "./DescriptDropScreen";
 import VoiceDropSoundboard from "./VoiceDropSoundboard";
 import NewsDropMagazine from "./NewsDropMagazine";
 import DropbookSlideScreen from "./DropbookSlideScreen";
+import { PayOnBoardButton } from "./PayOnBoardButton";
 import { isStreamingEmbedUrl, isYouTubeDropUrl } from "@/lib/board/dropbookLink";
 
 const EVT_DEPOSIT = "board:bucketBrain:deposit";
@@ -1440,19 +1441,6 @@ function ActivityCard({
         </div>
       ) : null}
 
-      {isPayDrop ? (
-        <div className="dropActions" aria-label="Pay Drop actions">
-          <button
-            type="button"
-            className="checkoutBtn"
-            onClick={openPayCheckout}
-            disabled={payCheckoutBusy}
-          >
-            {payCheckoutBusy ? "Opening..." : "Checkout ->"}
-          </button>
-        </div>
-      ) : null}
-
       {isDropbookSlide ? (
         <DropbookSlideScreen title={title} src={signedPreviewImage || href} />
       ) : isDescriptDrop ? (
@@ -1713,6 +1701,14 @@ function ActivityCard({
         >
           {href}
         </a>
+      ) : null}
+
+      {isPayDrop ? (
+        <PayOnBoardButton
+          variant={compact ? "collection" : "default"}
+          busy={payCheckoutBusy}
+          onClick={() => void openPayCheckout()}
+        />
       ) : null}
 
       {/* ✅ Reaction rail stays in card */}
@@ -2071,15 +2067,6 @@ function ActivityCard({
           line-height: 1.45;
         }
 
-        .dropActions {
-          margin-top: 12px;
-          display: flex;
-          justify-content: flex-start;
-          align-items: center;
-          gap: 10px;
-          flex-wrap: wrap;
-        }
-
         .ownerTools {
           margin-top: 10px;
           display: flex;
@@ -2140,31 +2127,6 @@ function ActivityCard({
           clip: rect(0, 0, 0, 0);
           white-space: nowrap;
           border: 0;
-        }
-
-        .checkoutBtn {
-          min-height: 36px;
-          border-radius: 999px;
-          padding: 9px 14px;
-          border: 1px solid rgba(0, 0, 0, 0.1);
-          background: rgba(255, 255, 255, 0.88);
-          color: rgba(0, 0, 0, 0.68);
-          font-size: 11px;
-          font-weight: 950;
-          letter-spacing: 0.02em;
-          cursor: pointer;
-          box-shadow: 0 10px 24px rgba(0, 0, 0, 0.08);
-          transition: transform 140ms ease, filter 140ms ease;
-        }
-
-        .checkoutBtn:hover:not(:disabled) {
-          transform: translateY(-1px);
-          filter: brightness(1.02);
-        }
-
-        .checkoutBtn:disabled {
-          cursor: wait;
-          opacity: 0.68;
         }
 
         /* embed */

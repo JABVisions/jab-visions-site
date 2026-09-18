@@ -37,6 +37,7 @@ import { isLegacyDescriptText } from "@/lib/board/descriptDocs";
 import { isDropbookSlideFile } from "@/lib/board/dropbookSlides";
 import { musicEmbedFor } from "@/lib/board/dropbookLink";
 import DropbookSlideScreen from "@/app/components/board/DropbookSlideScreen";
+import { PayOnBoardButton } from "@/app/components/board/PayOnBoardButton";
 import {
   dropDirectMediaUrl,
   isSupabaseStorageHostLabel,
@@ -1861,22 +1862,20 @@ export default function ProfileBoardViewPage({
                                   Open source
                                 </a>
                               ) : null}
-                              {drop.type === "Pay" && (drop.linkUrl || drop.payProvider === "authorize_net_accept_hosted") ? (
-                                <button
-                                  type="button"
-                                  className="board-drop-link"
-                                  onClick={() => void openPayCheckout(drop)}
-                                  disabled={payCheckoutBusyId === drop.id}
-                                >
-                                  {payCheckoutBusyId === drop.id ? "Opening..." : "Open checkout"}
-                                </button>
-                              ) : null}
                               {drop.type === "Doc" && signedUrl ? (
                                 <a href={signedUrl} target="_blank" rel="noreferrer" className="board-drop-link">
                                   Open doc
                                 </a>
                               ) : null}
                             </div>
+                          ) : null}
+
+                          {drop.type === "Pay" && (drop.linkUrl || drop.payProvider === "authorize_net_accept_hosted") ? (
+                            <PayOnBoardButton
+                              variant="collection"
+                              busy={payCheckoutBusyId === drop.id}
+                              onClick={() => void openPayCheckout(drop)}
+                            />
                           ) : null}
 
                           <div className="board-drop-rail">

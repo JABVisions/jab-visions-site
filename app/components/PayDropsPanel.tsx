@@ -7,6 +7,7 @@ import {
   type PayDrop,
 } from "@/lib/board/paydrops";
 import { openHostedPayDropCheckout } from "@/lib/board/payCheckout";
+import { PayOnBoardButton } from "@/app/components/board/PayOnBoardButton";
 import { supabaseBrowser } from "@/lib/supabase/browser";
 
 export default function PayDropsPanel() {
@@ -141,14 +142,11 @@ export default function PayDropsPanel() {
                 </div>
               </div>
               {drop.checkoutUrl || drop.provider === "authorize_net_accept_hosted" ? (
-                <button
-                  type="button"
+                <PayOnBoardButton
+                  variant="collection"
+                  busy={busyId === drop.id}
                   onClick={() => void openCheckout(drop)}
-                  disabled={busyId === drop.id}
-                  className="mt-3 rounded-full border border-black/10 bg-white/70 px-3 py-2 text-[11px] font-extrabold uppercase tracking-[0.14em] text-[rgba(255,0,190,0.88)] disabled:cursor-wait disabled:opacity-60"
-                >
-                  {busyId === drop.id ? "Opening..." : "Open checkout"}
-                </button>
+                />
               ) : null}
             </div>
           ))
