@@ -404,21 +404,24 @@ export function mergeNotificationLists(
   current: BoardNotification[],
   incoming: BoardNotification[]
 ) {
-  const byId = new Map<string, BoardNotification>();
+  const seenIds = new Set<string>();
+  const seenLegacy = new Set<string>();
+  const seenComments = new Set<string>();
+  const merged: BoardNotification[] = [];
+
   for (const item of [...incoming, ...current]) {
-    const existing = byId.get(item.id);
-    if (!existing) {
-      byId.set(item.id, item);
-      continue;
-    }
-    byId.set(item.id, {
-      ...existing,
-      ...item,
-      readAt: item.readAt ?? existing.readAt,
-      seenAt: item.seenAt ?? existing.seenAt,
-    });
+    const legacy = String(item.metadata?.legacyKey || "").trim();
+    const commentKey = item.commentId ? `comment:${item.commentId}` : "";
+    if (seenIds.has(item.id)) continue;
+    if (legacy && seenLegacy.has(legacy)) continue;
+    if (commentKey && seenComments.has(commentKey)) continue;
+    seenIds.add(item.id);
+    if (legacy) seenLegacy.add(legacy);
+    if (commentKey) seenComments.add(commentKey);
+    merged.push(item);
   }
-  return Array.from(byId.values()).sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
+
+  return merged.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
 }
 
 export function relativeActivityTime(iso: string) {

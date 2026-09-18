@@ -10,6 +10,14 @@ import React, {
   useState,
 } from "react";
 import { supabaseBrowser } from "@/lib/supabase/browser";
+import { getLocalActivity } from "@/lib/board/activity";
+import { readBrain } from "@/lib/board/bucketBrain";
+import { readCurrentBoardIdentity } from "@/lib/board/currentProfile";
+import { readAllDropComments } from "@/lib/board/dropComments";
+import {
+  notificationFromActivityRow,
+  notificationFromDropComment,
+} from "@/lib/board/legacyNotifications";
 import {
   BOARD_NOTIFICATIONS_UPDATED_EVENT,
   groupNotifications,
@@ -41,7 +49,149 @@ type ActivityContextValue = {
 
 const ActivityContext = createContext<ActivityContextValue | null>(null);
 
-const PAGE = 24;
+const PAGE = 40;
+
+function localOwnedDrops() {
+  const items: Array<{
+    id: string;
+    title?: string;
+    url?: string;
+    linkUrl?: string;
+    previewImage?: string;
+    mediaUrl?: string;
+  }> = [];
+  const ids = new Set<string>();
+  if (typeof window === "undefined") return { items, ids };
+  try {
+    for (let i = 0; i < window.localStorage.length; i += 1) {
+      const key = window.localStorage.key(i);
+      if (!key || (key !== "jab_board_drops_v2" && !key.startsWith("jab_board_drops_v2:"))) continue;
+      const parsed = JSON.parse(window.localStorage.getItem(key) || "[]");
+      if (!Array.isArray(parsed)) continue;
+      for (const drop of parsed) {
+        const id = String(drop?.id || "").trim();
+        if (!id || ids.has(id)) continue;
+        ids.add(id);
+        items.push(drop);
+      }
+    }
+  } catch {
+    return { items, ids };
+  }
+  return { items, ids };
+}
+
+function localHistoryNotifications(userId?: string | null): BoardNotification[] {
+  if (typeof window === "undefined") return [];
+  const me = readCurrentBoardIdentity().username.replace(/^@+/, "").toLowerCase();
+  const recipientId = userId || me;
+  if (!recipientId) return [];
+  const brain = readBrain();
+  const waves = (brain.waves ?? []).filter(
+    (wave) => String(wave.to || "").replace(/^@+/, "").toLowerCase() === me
+  );
+  const mutuals = (brain.mutuals ?? []).filter(
+    (entry) =>
+      String(entry.a || "").replace(/^@+/, "").toLowerCase() === me ||
+      String(entry.b || "").replace(/^@+/, "").toLowerCase() === me
+  );
+
+  const waveItems = waves.map((wave) => {
+    const createdAt = new Date(wave.createdAt).toISOString();
+    const from = String(wave.from || "").replace(/^@+/, "");
+    return mapNotificationRow({
+      id: `legacy-wave:${wave.id}`,
+      recipientUserId: recipientId,
+      actorUserId: null,
+      activityType: "wave",
+      entityType: "profile",
+      message: `${from || "Someone"} waved at you.`,
+      metadata: {
+        legacyKey: `wave:${wave.id}`,
+        actorName: from || "Someone",
+        actorUsername: from,
+      },
+      priority: "medium",
+      actionRequired: false,
+      createdAt,
+      readAt: createdAt,
+      seenAt: createdAt,
+    });
+  });
+
+  const mutualItems = mutuals.map((entry) => {
+    const createdAt = new Date(entry.createdAt).toISOString();
+    const other =
+      String(entry.a || "").replace(/^@+/, "").toLowerCase() === me
+        ? String(entry.b || "").replace(/^@+/, "")
+        : String(entry.a || "").replace(/^@+/, "");
+    return mapNotificationRow({
+      id: `legacy-mutual:${entry.id}`,
+      recipientUserId: recipientId,
+      actorUserId: null,
+      activityType: "friendzone_connected",
+      entityType: "profile",
+      message: `You and ${other || "a creator"} are now in each other's Friendzone.`,
+      metadata: {
+        legacyKey: `mutual:${entry.id}`,
+        actorName: other || "Someone",
+        actorUsername: other,
+      },
+      priority: "medium",
+      actionRequired: false,
+      createdAt,
+      readAt: createdAt,
+      seenAt: createdAt,
+    });
+  });
+
+  const activityItems = userId
+    ? getLocalActivity()
+        .map((row) => notificationFromActivityRow(row as Record<string, any>, userId))
+        .filter((item): item is BoardNotification => Boolean(item))
+    : [];
+
+  const localDrops = localOwnedDrops();
+  const commentItems = userId
+    ? readAllDropComments()
+        .filter((comment) => {
+          if (!localDrops.ids.has(comment.dropId)) return false;
+          if (comment.userId && comment.userId === userId) return false;
+          const username = String(comment.username || "").replace(/^@+/, "").toLowerCase();
+          return !me || username !== me;
+        })
+        .map((comment) => {
+          const drop = localDrops.items.find((item) => item.id === comment.dropId);
+          return notificationFromDropComment(
+            {
+              id: comment.remoteId || comment.id,
+              drop_id: comment.dropId,
+              user_id: comment.userId,
+              username: comment.username,
+              display_name: comment.displayName,
+              avatar_url: comment.avatarUrl,
+              body: comment.body,
+              created_at: comment.createdAt,
+            },
+            userId,
+            drop
+              ? {
+                  id: drop.id,
+                  title: drop.title || "Drop",
+                  href: drop.url || drop.linkUrl || null,
+                  imageUrl: drop.previewImage || drop.mediaUrl || null,
+                }
+              : { id: comment.dropId, title: "Drop" }
+          );
+        })
+        .filter((item): item is BoardNotification => Boolean(item))
+    : [];
+
+  return mergeNotificationLists(
+    [...waveItems, ...mutualItems].filter((item): item is BoardNotification => Boolean(item)),
+    [...activityItems, ...commentItems]
+  );
+}
 
 async function fetchPage(filter: ActivityFilter, before?: string | null) {
   const params = new URLSearchParams({
@@ -69,6 +219,8 @@ export function ActivityProvider({ children }: { children: React.ReactNode }) {
   const [userId, setUserId] = useState<string | null>(null);
   const filterRef = useRef(filter);
   filterRef.current = filter;
+  const userIdRef = useRef(userId);
+  userIdRef.current = userId;
 
   const applyPayload = useCallback(
     (payload: any, append: boolean) => {
@@ -79,8 +231,14 @@ export function ActivityProvider({ children }: { children: React.ReactNode }) {
         : [];
       setSetupRequired(Boolean(payload?.setupRequired));
       setHasMore(Boolean(payload?.nextCursor));
-      if (typeof payload?.unreadCount === "number") setUnreadCount(payload.unreadCount);
-      setItems((current) => (append ? mergeNotificationLists(current, next) : next));
+      setUnreadCount(typeof payload?.unreadCount === "number" ? payload.unreadCount : 0);
+      const withLocal = mergeNotificationLists(
+        localHistoryNotifications(userIdRef.current).filter((item) =>
+          matchesActivityFilter(item, filterRef.current)
+        ),
+        next
+      );
+      setItems((current) => (append ? mergeNotificationLists(current, withLocal) : withLocal));
     },
     []
   );

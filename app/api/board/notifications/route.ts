@@ -1,17 +1,20 @@
 import { NextRequest } from "next/server";
 import { supabaseServer } from "@/lib/supabase/server";
 import { isMissingNotificationsError } from "@/lib/board/createNotification";
+import { loadLegacyNotifications } from "@/lib/board/legacyNotifications";
 import {
   mapNotificationRow,
   matchesActivityFilter,
+  mergeNotificationLists,
   type ActivityFilter,
+  type BoardNotification,
 } from "@/lib/board/notifications";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const TABLE = "board_notifications";
-const PAGE_SIZE = 24;
+const PAGE_SIZE = 40;
 const MAX_PAGE = 60;
 
 function json(body: unknown, status = 200) {
@@ -81,6 +84,14 @@ export async function GET(req: NextRequest) {
   );
   const types = typesForFilter(filter);
 
+  if (!before) {
+    try {
+      await supabase.rpc("backfill_my_board_notifications");
+    } catch {
+      // Inbox still loads from live rows + leftover comments/DMs/Waves.
+    }
+  }
+
   let query = supabase
     .from(TABLE)
     .select(
@@ -104,16 +115,39 @@ export async function GET(req: NextRequest) {
 
   if (error) return json(storageError(error), 500);
 
-  const items = (data || [])
+  const persisted = (data || [])
     .map((row) => mapNotificationRow(row as Record<string, unknown>))
-    .filter((row): row is NonNullable<typeof row> => Boolean(row))
-    .filter((item) => matchesActivityFilter(item, filter));
+    .filter((row): row is BoardNotification => Boolean(row));
+
+  let legacy: BoardNotification[] = [];
+  try {
+    legacy = (await loadLegacyNotifications(supabase, user.id)).filter((item) =>
+      matchesActivityFilter(item, filter)
+    );
+  } catch {
+    legacy = [];
+  }
+
+  const merged = mergeNotificationLists(legacy, persisted).filter((item) =>
+    !before ? true : item.createdAt < before
+  );
+  const items = merged.slice(0, limit);
+  const extraUnread = legacy.filter((item) => {
+    if (item.readAt) return false;
+    const key = String(item.metadata?.legacyKey || "");
+    return !persisted.some(
+      (row) => row.id === item.id || (key && key === String(row.metadata?.legacyKey || ""))
+    );
+  }).length;
 
   return json({
     ok: true,
     items,
-    unreadCount: unread.count ?? items.filter((item) => !item.readAt).length,
-    nextCursor: items.length === limit ? items[items.length - 1]?.createdAt ?? null : null,
+    unreadCount: (unread.count ?? persisted.filter((item) => !item.readAt).length) + extraUnread,
+    nextCursor:
+      persisted.length === limit || merged.length > limit
+        ? items[items.length - 1]?.createdAt ?? null
+        : null,
     setupRequired: false,
   });
 }
@@ -135,6 +169,9 @@ export async function PATCH(req: NextRequest) {
     const ids = Array.isArray(body?.ids)
       ? body.ids.map((id: unknown) => String(id || "").trim()).filter(Boolean).slice(0, 80)
       : [];
+    const persistedIds = ids.filter((id: string) =>
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)
+    );
     const all = Boolean(body?.all);
     const now = new Date().toISOString();
 
@@ -148,7 +185,8 @@ export async function PATCH(req: NextRequest) {
     let query = supabase.from(TABLE).update(patch).eq("recipient_id", user.id);
     if (!all) {
       if (!ids.length) return json({ ok: false, message: "Missing notification ids." }, 400);
-      query = query.in("id", ids);
+      if (!persistedIds.length) return json({ ok: true, action, ids, all });
+      query = query.in("id", persistedIds);
     }
 
     const { error } = await query;

@@ -2,8 +2,10 @@ import {
   describeActivity,
   groupNotifications,
   matchesActivityFilter,
+  mergeNotificationLists,
   type BoardNotification,
 } from "./notifications";
+import { notificationFromActivityRow, notificationFromDropComment } from "./legacyNotifications";
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);
@@ -117,6 +119,90 @@ assert(
     })
   ) === "Maya waved at you.",
   "wave copy uses Board vocabulary"
+);
+
+const persistedComment = item({
+  id: "uuid-1",
+  activityType: "comment",
+  metadata: { legacyKey: "activity:old-1", actorName: "Alex", dropTitle: "Vision Drop" },
+});
+const legacyComment = item({
+  id: "legacy-activity:old-1",
+  activityType: "comment",
+  metadata: { legacyKey: "activity:old-1", actorName: "Alex", dropTitle: "Vision Drop" },
+});
+const mergedHistory = mergeNotificationLists([legacyComment], [persistedComment]);
+assert(mergedHistory.length === 1, "legacy and persisted copies of the same comment collapse");
+assert(mergedHistory[0].id === "uuid-1", "persisted notification wins over the legacy copy");
+
+const activityCopy = item({
+  id: "legacy-activity:act-9",
+  activityType: "comment",
+  commentId: "33333333-3333-4333-8333-333333333333",
+  metadata: { legacyKey: "activity:act-9", actorName: "Alex", dropTitle: "Vision Drop" },
+});
+const commentCopy = item({
+  id: "legacy-comment:33333333-3333-4333-8333-333333333333",
+  activityType: "comment",
+  commentId: "33333333-3333-4333-8333-333333333333",
+  createdAt: "2026-08-01T12:00:00.000Z",
+  metadata: { legacyKey: "drop_comment:33333333-3333-4333-8333-333333333333", actorName: "Alex" },
+});
+assert(
+  mergeNotificationLists([activityCopy], [commentCopy]).length === 1,
+  "the same historic comment from activity and the comments table collapses"
+);
+
+const historic = notificationFromActivityRow(
+  {
+    id: "act-77",
+    user_id: "11111111-1111-4111-8111-111111111111",
+    title: "Rina commented on Vision Drop",
+    body: "this is beautiful",
+    created_at: "2026-08-01T12:00:00.000Z",
+    meta: {
+      activityType: "drop_comment_received",
+      recipientUserId: "22222222-2222-4222-8222-222222222222",
+      authorName: "Rina",
+      dropTitle: "Vision Drop",
+      commentId: "33333333-3333-4333-8333-333333333333",
+    },
+  },
+  "22222222-2222-4222-8222-222222222222"
+);
+assert(historic?.activityType === "comment", "historic comment activity becomes a comment notification");
+assert(historic?.preview === "this is beautiful", "historic comment preview is preserved");
+assert(Boolean(historic?.readAt), "weeks-old historic items are marked read");
+
+const ownedComment = notificationFromDropComment(
+  {
+    id: "44444444-4444-4444-8444-444444444444",
+    drop_id: "drop-77",
+    user_id: "11111111-1111-4111-8111-111111111111",
+    username: "rina",
+    display_name: "Rina",
+    body: "still thinking about this",
+    created_at: "2026-08-02T12:00:00.000Z",
+  },
+  "22222222-2222-4222-8222-222222222222",
+  { id: "drop-77", title: "Vision Drop" }
+);
+assert(ownedComment?.activityType === "comment", "owned-drop comments become comment notifications");
+assert(ownedComment?.preview === "still thinking about this", "owned-drop comment preview is preserved");
+assert(Boolean(ownedComment?.readAt), "weeks-old owned-drop comments are marked read");
+assert(
+  notificationFromDropComment(
+    {
+      id: "self-comment",
+      drop_id: "drop-77",
+      user_id: "22222222-2222-4222-8222-222222222222",
+      body: "note to self",
+      created_at: "2026-08-02T12:00:00.000Z",
+    },
+    "22222222-2222-4222-8222-222222222222",
+    { id: "drop-77", title: "Vision Drop" }
+  ) === null,
+  "own comments on owned drops stay out of the inbox"
 );
 
 console.log("activity channel grouping checks passed");
