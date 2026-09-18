@@ -16,6 +16,11 @@ import {
   type FriendZoneActivityRow,
   type FriendZoneBoardStyle,
 } from "@/lib/board/friendZoneOrbs";
+import {
+  BOARD_AVATAR_BUCKET,
+  boardAvatarStoragePath,
+  isSignedBoardAvatarUrl,
+} from "@/lib/board/signBoardAvatars";
 
 type ProfileRow = {
   id: string;
@@ -119,6 +124,54 @@ function normalizeApiOrbs(input: unknown, currentUserId: string | null, limit: n
     .filter((item): item is FriendZoneOrbUser => !!item)
     .sort((a, b) => scoreFriendZoneUser(b) - scoreFriendZoneUser(a))
     .slice(0, limit);
+}
+
+async function hydrateFriendZoneAvatars(orbs: FriendZoneOrbUser[]): Promise<FriendZoneOrbUser[]> {
+  const pathByIndex = orbs.map((orb) =>
+    isSignedBoardAvatarUrl(orb.avatarUrl) ? "" : boardAvatarStoragePath(orb.avatarUrl) || ""
+  );
+  const unique = Array.from(new Set(pathByIndex.filter(Boolean)));
+  if (!unique.length) return orbs;
+
+  const signedByPath = new Map<string, string>();
+  try {
+    const supabase = supabaseBrowser();
+    const { data } = await supabase.storage
+      .from(BOARD_AVATAR_BUCKET)
+      .createSignedUrls(unique, 60 * 60 * 24 * 7);
+    for (const row of data || []) {
+      if (row?.path && row.signedUrl && !row.error) signedByPath.set(row.path, row.signedUrl);
+    }
+  } catch {
+    // Browser storage policies often cannot sign someone else's private avatar.
+  }
+
+  const missing = unique.filter((path) => !signedByPath.has(path));
+  if (missing.length) {
+    try {
+      const response = await fetch("/api/board/avatars", {
+        method: "POST",
+        cache: "no-store",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ paths: missing }),
+      });
+      if (response.ok) {
+        const payload = await response.json();
+        const urls = payload?.urls && typeof payload.urls === "object" ? payload.urls : {};
+        for (const [path, url] of Object.entries(urls)) {
+          if (typeof url === "string" && url.trim()) signedByPath.set(path, url.trim());
+        }
+      }
+    } catch {
+      // Leave the unsigned public URL; the orb already falls back on error.
+    }
+  }
+
+  if (!signedByPath.size) return orbs;
+  return orbs.map((orb, index) => {
+    const signed = pathByIndex[index] ? signedByPath.get(pathByIndex[index]) : "";
+    return signed ? { ...orb, avatarUrl: signed } : orb;
+  });
 }
 
 async function withTimeout<T>(promise: PromiseLike<T>, fallback: T): Promise<T> {
@@ -263,7 +316,7 @@ export async function loadBoardUserFriendZoneOrbs(limit = 36): Promise<FriendZon
       currentUserId,
       limit,
     });
-    if (merged.length) return merged;
+    if (merged.length) return hydrateFriendZoneAvatars(merged);
 
     return FALLBACK_FRIEND_ZONE_ORBS.slice(0, limit);
   } catch {

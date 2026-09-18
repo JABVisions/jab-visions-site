@@ -52,7 +52,6 @@ import {
 } from "@/lib/board/profileStorage";
 import { supabaseBrowser } from "@/lib/supabase/browser";
 import { dropDirectMediaUrl, resolveDropPlaybackSrc, storageCoordsFromDrop } from "@/lib/board/dropDisplay";
-import { publicUrlForAvatarPath } from "@/lib/board/friendZoneOrbs";
 import { getCachedSignedMediaUrl } from "@/lib/board/signedMediaUrl";
 
 const PROFILE_STORAGE_KEY = BOARD_PROFILE_STORAGE_KEY;
@@ -1912,9 +1911,7 @@ export default function BoardProfileHubPage() {
           }),
           ...(typeof patch.avatarPath === "string"
             ? {
-                avatar_url: patch.avatarPath
-                  ? publicUrlForAvatarPath(patch.avatarPath)
-                  : null,
+                avatar_url: patch.avatarPath || null,
               }
             : {}),
         })

@@ -250,7 +250,12 @@ export function creatorFromProfile(
   const username = asString(row.username).toLowerCase().replace(/^@+/, "");
   if (!username) return null;
   const desk = workDeskFromStyle(boardStyle);
-  const avatar = publicOrbAvatarUrl(boardStyle?.avatarUrl, boardStyle?.avatarDataUrl, row.avatar_url);
+  const avatar = publicOrbAvatarUrl(
+    boardStyle?.avatarUrl,
+    boardStyle?.avatarDataUrl,
+    row.avatar_url,
+    boardStyle?.avatarPath
+  );
   return {
     id: row.id,
     username,

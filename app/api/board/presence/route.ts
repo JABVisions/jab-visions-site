@@ -73,7 +73,12 @@ export async function POST(req: Request) {
     cleanText(profile?.display_name, 60) ||
     username ||
     "Board User";
-  const avatarUrl = publicOrbAvatarUrl(body.avatarUrl, profile?.avatar_url);
+  const avatarUrl = publicOrbAvatarUrl(
+    body.avatarUrl,
+    profile?.avatar_url,
+    existingStyle.avatarUrl,
+    existingStyle.avatarPath
+  );
   const lastSeenAt = new Date().toISOString();
 
   await supabase.from("profiles").upsert(
