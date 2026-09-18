@@ -205,4 +205,9 @@ assert(
   "own comments on owned drops stay out of the inbox"
 );
 
+const older = item({ id: "old", activityType: "comment", createdAt: "2026-08-01T12:00:00.000Z" });
+const newer = item({ id: "new", activityType: "comment", createdAt: "2026-09-18T12:00:00.000Z" });
+const chronological = [newer, older].sort((a, b) => (a.createdAt < b.createdAt ? -1 : 1));
+assert(chronological[0].id === "old" && chronological[1].id === "new", "rising stack is oldest-to-newest so column-reverse can place the latest at the top");
+
 console.log("activity channel grouping checks passed");

@@ -30,6 +30,10 @@ export default function ActivityFeed({
   } = useActivityChannel();
   const moreRef = useRef<HTMLButtonElement | null>(null);
   const compact = variant === "compact";
+  const chronological = grouped
+    .slice()
+    .sort((a, b) => (a.latest.createdAt < b.latest.createdAt ? -1 : 1));
+  const visibleGroups = compact ? chronological.slice().reverse() : chronological;
 
   useEffect(() => {
     void markSeen();
@@ -75,40 +79,55 @@ export default function ActivityFeed({
           The Channel is quiet. Waves, Signals, comments, and messages will appear here.
         </p>
       ) : (
-        grouped.map((group, index) => (
-          <ActivityItemCard
-            key={group.key}
-            group={group}
-            index={index}
-            compact={compact}
-            onOpen={() => {
-              void markRead(group.items.map((item) => item.id));
-              handleActivityNavigation(group.latest);
-              onOpened?.();
-            }}
-            onAcceptWave={() => {
-              const username = actorUsername(group.latest);
-              void persistWave("me", username, group.latest.actorUserId || undefined);
-              void markRead(group.items.map((item) => item.id));
-            }}
-            onDecline={() => {
-              void markRead(group.items.map((item) => item.id));
-            }}
-          />
-        ))
-      )}
+        <div className={compact ? styles.stack : styles.risingStack}>
+          {hasMore && !compact ? (
+            <button
+              ref={moreRef}
+              type="button"
+              className={styles.more}
+              onClick={() => void loadMore()}
+              disabled={loadingMore}
+            >
+              {loadingMore ? "Loading" : "Older activity"}
+            </button>
+          ) : null}
 
-      {hasMore ? (
-        <button
-          ref={moreRef}
-          type="button"
-          className={styles.more}
-          onClick={() => void loadMore()}
-          disabled={loadingMore}
-        >
-          {loadingMore ? "Loading" : "Older activity"}
-        </button>
-      ) : null}
+          {visibleGroups.map((group, index) => (
+            <ActivityItemCard
+              key={group.key}
+              group={group}
+              index={compact ? index : visibleGroups.length - 1 - index}
+              compact={compact}
+              rise={!compact}
+              onOpen={() => {
+                void markRead(group.items.map((item) => item.id));
+                handleActivityNavigation(group.latest);
+                onOpened?.();
+              }}
+              onAcceptWave={() => {
+                const username = actorUsername(group.latest);
+                void persistWave("me", username, group.latest.actorUserId || undefined);
+                void markRead(group.items.map((item) => item.id));
+              }}
+              onDecline={() => {
+                void markRead(group.items.map((item) => item.id));
+              }}
+            />
+          ))}
+
+          {hasMore && compact ? (
+            <button
+              ref={moreRef}
+              type="button"
+              className={styles.more}
+              onClick={() => void loadMore()}
+              disabled={loadingMore}
+            >
+              {loadingMore ? "Loading" : "Older activity"}
+            </button>
+          ) : null}
+        </div>
+      )}
     </div>
   );
 }

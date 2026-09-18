@@ -18,6 +18,7 @@ export default function ActivityItemCard({
   group,
   index = 0,
   compact = false,
+  rise = false,
   onOpen,
   onAcceptWave,
   onDecline,
@@ -25,6 +26,7 @@ export default function ActivityItemCard({
   group: GroupedActivity;
   index?: number;
   compact?: boolean;
+  rise?: boolean;
   onOpen: () => void;
   onAcceptWave?: () => void;
   onDecline?: () => void;
@@ -46,8 +48,10 @@ export default function ActivityItemCard({
         styles[item.activityType],
         unread ? styles.cardUnread : styles.cardRead,
         compact && styles.compact,
-        !compact && styles[`float${index % 5}` as "float0"]
+        !compact && styles[`float${index % 5}` as "float0"],
+        rise && styles.rise
       )}
+      style={rise ? { animationDelay: `${Math.min(index, 14) * 48}ms` } : undefined}
     >
       <button type="button" className={styles.avatar} onClick={onOpen} aria-label={copy}>
         {avatar ? (

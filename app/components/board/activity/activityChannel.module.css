@@ -4,8 +4,24 @@
 }
 
 .holographic {
-  gap: 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-height: min(68vh, 640px);
   padding: 4px 6px 12px;
+}
+
+.stack {
+  display: grid;
+  gap: 14px;
+}
+
+.risingStack {
+  flex: 1;
+  display: flex;
+  flex-direction: column-reverse;
+  justify-content: flex-end;
+  gap: 28px;
 }
 
 .filters {
@@ -186,6 +202,21 @@
   box-shadow: 0 0 12px rgba(142, 243, 255, 0.9);
 }
 
+.rise {
+  animation: riseIn 0.72s cubic-bezier(0.16, 0.84, 0.24, 1) both;
+}
+
+@keyframes riseIn {
+  from {
+    opacity: 0;
+    translate: 0 46px;
+  }
+  to {
+    opacity: 1;
+    translate: 0 0;
+  }
+}
+
 .signal { border-color: rgba(140, 220, 255, 0.28); background: linear-gradient(160deg, rgba(40, 90, 130, 0.3), rgba(8, 18, 30, 0.35)); }
 .reaction { border-color: rgba(255, 214, 90, 0.28); }
 .wave, .friendzone_request, .friendzone_connected { border-color: rgba(255, 79, 216, 0.28); }
@@ -274,5 +305,9 @@
 @media (prefers-reduced-motion: reduce) {
   .pulse {
     box-shadow: none;
+  }
+
+  .rise {
+    animation: none;
   }
 }
