@@ -406,14 +406,18 @@ export function mergeNotificationLists(
 ) {
   const seenIds = new Set<string>();
   const seenLegacy = new Set<string>();
+  const seenComments = new Set<string>();
   const merged: BoardNotification[] = [];
 
   for (const item of [...incoming, ...current]) {
     const legacy = String(item.metadata?.legacyKey || "").trim();
+    const commentKey = item.commentId ? `comment:${item.commentId}` : "";
     if (seenIds.has(item.id)) continue;
     if (legacy && seenLegacy.has(legacy)) continue;
+    if (commentKey && seenComments.has(commentKey)) continue;
     seenIds.add(item.id);
     if (legacy) seenLegacy.add(legacy);
+    if (commentKey) seenComments.add(commentKey);
     merged.push(item);
   }
 

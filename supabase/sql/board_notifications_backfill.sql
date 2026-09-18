@@ -4,10 +4,70 @@
 -- Run this in Supabase Dashboard -> SQL Editor after
 -- supabase/sql/board_notifications.sql.
 --
--- It copies:
---   * private comment / recipient board_activity rows
---   * drop comments on Drops the recipient owns
---   * direct messages sent to the recipient
+  -- Comments on Drops stored in the owner's profile collection.
+  begin
+  insert into public.board_notifications (
+    recipient_id,
+    actor_id,
+    activity_type,
+    entity_type,
+    entity_id,
+    drop_id,
+    comment_id,
+    message,
+    preview,
+    metadata,
+    priority,
+    action_required,
+    created_at,
+    read_at,
+    seen_at
+  )
+  select
+    owner.id,
+    commenter.id,
+    'comment',
+    'drop',
+    c.drop_id,
+    c.drop_id,
+    c.id,
+    coalesce(nullif(c.display_name, ''), '@' || coalesce(c.username, 'board')) || ' commented on ' || coalesce(nullif(drop_item->>'title', ''), 'Drop') || '.',
+    nullif(left(trim(c.body), 280), ''),
+    jsonb_build_object(
+      'legacyKey', 'drop_comment:' || c.id::text,
+      'legacySource', 'board_drop_comments',
+      'actorName', coalesce(nullif(c.display_name, ''), c.username, 'Someone'),
+      'actorUsername', coalesce(c.username, ''),
+      'actorAvatar', coalesce(c.avatar_url, ''),
+      'dropTitle', coalesce(nullif(drop_item->>'title', ''), 'Drop'),
+      'commentId', c.id::text,
+      'commentDropId', c.drop_id
+    ),
+    'medium'::public.board_notification_priority,
+    false,
+    c.created_at,
+    case when c.created_at < timezone('utc', now()) - interval '48 hours' then c.created_at else null end,
+    case when c.created_at < timezone('utc', now()) - interval '48 hours' then c.created_at else null end
+  from public.profiles owner
+  join lateral jsonb_array_elements(
+    case
+      when jsonb_typeof(owner.board_style->'boardDrops') = 'array'
+        then owner.board_style->'boardDrops'
+      else '[]'::jsonb
+    end
+  ) drop_item on true
+  join public.board_drop_comments c
+    on c.drop_id = drop_item->>'id'
+   and c.deleted_at is null
+  left join public.profiles commenter on commenter.id = c.user_id
+  where owner.id is distinct from c.user_id
+    and (p_recipient_id is null or owner.id = p_recipient_id)
+    and not exists (
+      select 1
+      from public.board_notifications existing
+      where existing.metadata->>'legacyKey' = 'drop_comment:' || c.id::text
+         or existing.comment_id = c.id
+    );
 --
 -- Original timestamps are preserved. Items older than 48 hours are marked
 -- read so the unread badge is not flooded with weeks of history.
@@ -249,6 +309,80 @@ begin
     and owner.user_id is distinct from c.user_id
     and (p_recipient_id is null or owner.user_id = p_recipient_id)
     and exists (select 1 from public.profiles r where r.id = owner.user_id)
+    and not exists (
+      select 1
+      from public.board_notifications existing
+      where existing.metadata->>'legacyKey' = 'drop_comment:' || c.id::text
+         or existing.comment_id = c.id
+    );
+
+  get diagnostics v_inserted = row_count;
+  v_count := v_count + v_inserted;
+  exception
+    when undefined_table then
+      v_inserted := 0;
+    when undefined_column then
+      v_inserted := 0;
+  end;
+
+  -- Comments on Drops stored in the owner's profile collection.
+  begin
+  insert into public.board_notifications (
+    recipient_id,
+    actor_id,
+    activity_type,
+    entity_type,
+    entity_id,
+    drop_id,
+    comment_id,
+    message,
+    preview,
+    metadata,
+    priority,
+    action_required,
+    created_at,
+    read_at,
+    seen_at
+  )
+  select
+    owner.id,
+    commenter.id,
+    'comment',
+    'drop',
+    c.drop_id,
+    c.drop_id,
+    c.id,
+    coalesce(nullif(c.display_name, ''), '@' || coalesce(c.username, 'board')) || ' commented on ' || coalesce(nullif(drop_item->>'title', ''), 'Drop') || '.',
+    nullif(left(trim(c.body), 280), ''),
+    jsonb_build_object(
+      'legacyKey', 'drop_comment:' || c.id::text,
+      'legacySource', 'board_drop_comments',
+      'actorName', coalesce(nullif(c.display_name, ''), c.username, 'Someone'),
+      'actorUsername', coalesce(c.username, ''),
+      'actorAvatar', coalesce(c.avatar_url, ''),
+      'dropTitle', coalesce(nullif(drop_item->>'title', ''), 'Drop'),
+      'commentId', c.id::text,
+      'commentDropId', c.drop_id
+    ),
+    'medium'::public.board_notification_priority,
+    false,
+    c.created_at,
+    case when c.created_at < timezone('utc', now()) - interval '48 hours' then c.created_at else null end,
+    case when c.created_at < timezone('utc', now()) - interval '48 hours' then c.created_at else null end
+  from public.profiles owner
+  join lateral jsonb_array_elements(
+    case
+      when jsonb_typeof(owner.board_style->'boardDrops') = 'array'
+        then owner.board_style->'boardDrops'
+      else '[]'::jsonb
+    end
+  ) drop_item on true
+  join public.board_drop_comments c
+    on c.drop_id = drop_item->>'id'
+   and c.deleted_at is null
+  left join public.profiles commenter on commenter.id = c.user_id
+  where owner.id is distinct from c.user_id
+    and (p_recipient_id is null or owner.id = p_recipient_id)
     and not exists (
       select 1
       from public.board_notifications existing

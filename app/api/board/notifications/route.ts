@@ -84,10 +84,12 @@ export async function GET(req: NextRequest) {
   );
   const types = typesForFilter(filter);
 
-  try {
-    await supabase.rpc("backfill_my_board_notifications");
-  } catch {
-    // Inbox still loads from live rows + legacy comments/DMs.
+  if (!before) {
+    try {
+      await supabase.rpc("backfill_my_board_notifications");
+    } catch {
+      // Inbox still loads from live rows + leftover comments/DMs/Waves.
+    }
   }
 
   let query = supabase
