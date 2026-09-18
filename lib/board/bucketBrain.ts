@@ -159,14 +159,52 @@ function emptyBrain(): BucketBrainState {
   };
 }
 
+export function isBucketCommentMemory(entry?: BucketEntry | null): boolean {
+  if (!entry || typeof entry !== "object") return false;
+  const id = String(entry.activityId || entry.item?.id || "");
+  const kind = String(entry.item?.kind || "");
+  const meta =
+    entry.item?.meta && typeof entry.item.meta === "object" ? entry.item.meta : {};
+  const source = String(meta.source || "");
+  const reaction = String(meta.reactionType || "");
+  return (
+    id.startsWith("comment:") ||
+    kind === "drop_comment" ||
+    source === "drop_comments" ||
+    reaction === "comment" ||
+    Boolean(meta.commentId)
+  );
+}
+
+function signalFolderEntries(entries: unknown): BucketEntry[] {
+  if (!Array.isArray(entries)) return [];
+  return (entries as BucketEntry[]).filter((entry) => !isBucketCommentMemory(entry));
+}
+
+function sanitizeBrainState(state: BucketBrainState): {
+  next: BucketBrainState;
+  changed: boolean;
+} {
+  const pass = signalFolderEntries(state.pass);
+  const pin = signalFolderEntries(state.pin);
+  const push = signalFolderEntries(state.push);
+  const changed =
+    pass.length !== (state.pass?.length ?? 0) ||
+    pin.length !== (state.pin?.length ?? 0) ||
+    push.length !== (state.push?.length ?? 0);
+  return {
+    next: { ...state, pass, pin, push },
+    changed,
+  };
+}
+
 export function readBrain(): BucketBrainState {
   if (typeof window === "undefined") return emptyBrain();
 
   try {
     const raw = window.localStorage.getItem(BUCKET_BRAIN_KEY);
     const parsed = safeParse<Partial<BucketBrainState>>(raw, {});
-
-    return {
+    const state: BucketBrainState = {
       version: 3,
       pass: Array.isArray(parsed.pass) ? (parsed.pass as BucketEntry[]) : [],
       pin: Array.isArray(parsed.pin) ? (parsed.pin as BucketEntry[]) : [],
@@ -175,8 +213,30 @@ export function readBrain(): BucketBrainState {
       mutuals: Array.isArray(parsed.mutuals) ? (parsed.mutuals as MutualEntry[]) : [],
       updatedAt: Number(parsed.updatedAt ?? now()),
     };
+    return sanitizeBrainState(state).next;
   } catch {
     return emptyBrain();
+  }
+}
+
+export function purgeCommentMemoryFromFolders() {
+  if (typeof window === "undefined") return;
+  try {
+    const raw = window.localStorage.getItem(BUCKET_BRAIN_KEY);
+    const parsed = safeParse<Partial<BucketBrainState>>(raw, {});
+    const state: BucketBrainState = {
+      version: 3,
+      pass: Array.isArray(parsed.pass) ? (parsed.pass as BucketEntry[]) : [],
+      pin: Array.isArray(parsed.pin) ? (parsed.pin as BucketEntry[]) : [],
+      push: Array.isArray(parsed.push) ? (parsed.push as BucketEntry[]) : [],
+      waves: Array.isArray(parsed.waves) ? (parsed.waves as WaveEntry[]) : [],
+      mutuals: Array.isArray(parsed.mutuals) ? (parsed.mutuals as MutualEntry[]) : [],
+      updatedAt: Number(parsed.updatedAt ?? now()),
+    };
+    const { next, changed } = sanitizeBrainState(state);
+    if (changed) writeBrain(next);
+  } catch {
+    // keep Bucket usable if storage is locked
   }
 }
 
@@ -234,16 +294,17 @@ export function compactMemoryDrop(item?: BucketMemoryDrop | null): BucketMemoryD
 
 export function writeBrain(next: BucketBrainState) {
   if (typeof window === "undefined") return;
+  const { next: clean } = sanitizeBrainState(next);
   try {
-    window.localStorage.setItem(BUCKET_BRAIN_KEY, JSON.stringify(next));
+    window.localStorage.setItem(BUCKET_BRAIN_KEY, JSON.stringify(clean));
     window.dispatchEvent(new Event(EVT_UPDATED));
   } catch {
     try {
       const slim: BucketBrainState = {
-        ...next,
-        pass: next.pass.map((entry) => ({ ...entry, item: compactMemoryDrop(entry.item) })),
-        pin: next.pin.map((entry) => ({ ...entry, item: compactMemoryDrop(entry.item) })),
-        push: next.push.map((entry) => ({ ...entry, item: compactMemoryDrop(entry.item) })),
+        ...clean,
+        pass: clean.pass.map((entry) => ({ ...entry, item: compactMemoryDrop(entry.item) })),
+        pin: clean.pin.map((entry) => ({ ...entry, item: compactMemoryDrop(entry.item) })),
+        push: clean.push.map((entry) => ({ ...entry, item: compactMemoryDrop(entry.item) })),
       };
       window.localStorage.setItem(BUCKET_BRAIN_KEY, JSON.stringify(slim));
       window.dispatchEvent(new Event(EVT_UPDATED));
@@ -269,6 +330,7 @@ export function depositToBrain(
   const previousEntry = (["pass", "pin", "push"] as BucketFolder[])
     .flatMap((key) => prev[key] ?? [])
     .find((entry) => {
+      if (isBucketCommentMemory(entry)) return false;
       const entryId = String(entry.activityId);
       const entryDropId = String(entry.item?.meta?.dropId || entry.item?.id || "");
       return entryId === canonicalId || (entryDropId && entryDropId === canonicalId);
@@ -428,6 +490,7 @@ export function installBucketDepositBridge() {
   if (typeof window === "undefined") return () => { };
   if (depositBridgeCount === 0) {
     window.addEventListener(EVT_DEPOSIT, onBucketDeposit as EventListener);
+    purgeCommentMemoryFromFolders();
   }
   depositBridgeCount += 1;
 
