@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type { BoardActivity } from "@/lib/board/activity";
 import { getLocalActivity } from "@/lib/board/activity";
 import { mergeActivityWithFeed } from "@/lib/board/feedActivity";
@@ -320,6 +321,11 @@ export default function DropsBucket({
   const [userAuraColor, setUserAuraColor] = useState(fallbackAuraColor);
 
   const closeBtnRef = useRef<HTMLButtonElement | null>(null);
+  const [portalReady, setPortalReady] = useState(false);
+
+  useEffect(() => {
+    setPortalReady(true);
+  }, []);
 
   useEffect(() => {
     const onUpdated = () => {
@@ -807,13 +813,14 @@ export default function DropsBucket({
         {toast && <div className="toast">{toast}</div>}
       </div>
 
-      {/* --------------------------- SONAR DOME OVERLAY --------------------------- */}
-      {open && (
+      {/* Consciousness Compass pops out of Drop Pad frames via a body portal. */}
+      {portalReady && open
+        ? createPortal(
         <div
-          className="overlay"
+          className="overlay bucketCompassOverlay"
           role="dialog"
           aria-modal="true"
-          aria-label="Drops Bucket"
+          aria-label="Consciousness Compass"
           onMouseDown={(e) => {
             if (e.target === e.currentTarget) setOpen(false);
           }}
@@ -950,8 +957,10 @@ export default function DropsBucket({
               </div>
             ) : null}
           </div>
-        </div>
-      )}
+        </div>,
+            document.body
+          )
+        : null}
 
       {/* styles */}
       <style jsx>{`
@@ -1372,19 +1381,21 @@ export default function DropsBucket({
           box-shadow: 0 12px 30px rgba(0,0,0,0.12);
         }
 
-        /* Overlay + Dome (same as your sonar styling, trimmed) */
-        .overlay {
-          position: fixed;
-          inset: 0;
-          z-index: 9999;
+      `}</style>
+      <style jsx global>{`
+        .bucketCompassOverlay {
+          position: fixed !important;
+          inset: 0 !important;
+          z-index: 40000 !important;
           background: rgba(0, 0, 0, 0.56);
           backdrop-filter: blur(12px);
           display: grid;
           place-items: center;
           padding: 18px;
+          pointer-events: auto;
+          isolation: isolate;
         }
-
-        .dome {
+        .bucketCompassOverlay .dome {
           width: min(1160px, 100%);
           max-height: min(86vh, 920px);
           overflow: hidden;
@@ -1398,9 +1409,8 @@ export default function DropsBucket({
           grid-template-rows: auto auto 1fr;
           gap: 12px;
         }
-
-        .sonar { position: absolute; inset: 0; z-index: 0; pointer-events: none; opacity: 0.95; }
-        .sonarRings {
+        .bucketCompassOverlay .sonar { position: absolute; inset: 0; z-index: 0; pointer-events: none; opacity: 0.95; }
+        .bucketCompassOverlay .sonarRings {
           position: absolute;
           inset: -40%;
           background:
@@ -1409,7 +1419,7 @@ export default function DropsBucket({
             radial-gradient(circle at center, rgba(0,0,0,0) 0%, rgba(120,255,240,0.06) 60%, rgba(0,0,0,0) 61%),
             radial-gradient(circle at center, rgba(0,0,0,0) 0%, rgba(120,255,240,0.05) 78%, rgba(0,0,0,0) 79%);
         }
-        .sonarSweep {
+        .bucketCompassOverlay .sonarSweep {
           position: absolute;
           left: 50%;
           top: 50%;
@@ -1418,11 +1428,11 @@ export default function DropsBucket({
           transform: translate(-50%, -50%);
           background: conic-gradient(from 0deg, rgba(0,0,0,0) 0deg, rgba(0,0,0,0) 300deg, rgba(120,255,240,0.08) 330deg, rgba(120,255,240,0.22) 348deg, rgba(120,255,240,0.0) 360deg);
           mask-image: radial-gradient(circle at center, rgba(0,0,0,1) 0%, rgba(0,0,0,0) 68%);
-          animation: sweep 2200ms linear infinite;
+          animation: bucketCompassSweep 2200ms linear infinite;
           opacity: 0.85;
         }
-        @keyframes sweep { 0% { transform: translate(-50%, -50%) rotate(0deg); } 100% { transform: translate(-50%, -50%) rotate(360deg); } }
-        .sonarBlips {
+        @keyframes bucketCompassSweep { 0% { transform: translate(-50%, -50%) rotate(0deg); } 100% { transform: translate(-50%, -50%) rotate(360deg); } }
+        .bucketCompassOverlay .sonarBlips {
           position: absolute;
           inset: 0;
           background:
@@ -1430,11 +1440,11 @@ export default function DropsBucket({
             radial-gradient(circle at 74% 42%, rgba(120,255,240,0.52) 0 2px, rgba(0,0,0,0) 3px),
             radial-gradient(circle at 62% 71%, rgba(120,255,240,0.35) 0 2px, rgba(0,0,0,0) 3px),
             radial-gradient(circle at 30% 78%, rgba(255,0,190,0.28) 0 2px, rgba(0,0,0,0) 3px);
-          animation: blip 1800ms ease-in-out infinite;
+          animation: bucketCompassBlip 1800ms ease-in-out infinite;
           opacity: 0.9;
         }
-        @keyframes blip { 0%, 100% { filter: brightness(0.85); opacity: 0.65; } 50% { filter: brightness(1.15); opacity: 0.95; } }
-        .sonarNoise {
+        @keyframes bucketCompassBlip { 0%, 100% { filter: brightness(0.85); opacity: 0.65; } 50% { filter: brightness(1.15); opacity: 0.95; } }
+        .bucketCompassOverlay .sonarNoise {
           position: absolute; inset: 0;
           background-image:
             linear-gradient(rgba(120,255,240,0.04) 1px, transparent 1px),
@@ -1443,15 +1453,15 @@ export default function DropsBucket({
           opacity: 0.20;
           mix-blend-mode: screen;
         }
-
-        .domeTop, .compass, .domeBody { position: relative; z-index: 1; }
-        .domeTop { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; padding: 10px 10px 2px; }
-        .domeKicker { font-size: 10px; font-weight: 950; letter-spacing: 0.24em; text-transform: uppercase; color: rgba(120, 255, 240, 0.85); }
-        .domeTitle { margin-top: 6px; font-size: 18px; font-weight: 950; letter-spacing: 0.06em; color: rgba(220, 255, 250, 0.92); }
-        .domeSub { margin-top: 6px; font-size: 12px; font-weight: 800; color: rgba(120, 255, 240, 0.68); max-width: 820px; }
-
-        .domeRight { display: inline-flex; gap: 10px; align-items: center; }
-        .clearBtn {
+        .bucketCompassOverlay .domeTop,
+        .bucketCompassOverlay .compass,
+        .bucketCompassOverlay .domeBody { position: relative; z-index: 1; }
+        .bucketCompassOverlay .domeTop { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; padding: 10px 10px 2px; }
+        .bucketCompassOverlay .domeKicker { font-size: 10px; font-weight: 950; letter-spacing: 0.24em; text-transform: uppercase; color: rgba(120, 255, 240, 0.85); }
+        .bucketCompassOverlay .domeTitle { margin-top: 6px; font-size: 18px; font-weight: 950; letter-spacing: 0.06em; color: rgba(220, 255, 250, 0.92); }
+        .bucketCompassOverlay .domeSub { margin-top: 6px; font-size: 12px; font-weight: 800; color: rgba(120, 255, 240, 0.68); max-width: 820px; }
+        .bucketCompassOverlay .domeRight { display: inline-flex; gap: 10px; align-items: center; }
+        .bucketCompassOverlay .clearBtn {
           border-radius: 999px; padding: 10px 12px; font-size: 10px; font-weight: 950;
           letter-spacing: 0.16em; text-transform: uppercase;
           border: 1px solid rgba(255, 0, 190, 0.22);
@@ -1459,7 +1469,7 @@ export default function DropsBucket({
           color: rgba(255, 215, 245, 0.92);
           cursor: pointer;
         }
-        .closeBtn {
+        .bucketCompassOverlay .closeBtn {
           width: 42px; height: 42px; border-radius: 999px;
           border: 1px solid rgba(120, 255, 240, 0.24);
           background: rgba(120, 255, 240, 0.10);
@@ -1467,57 +1477,55 @@ export default function DropsBucket({
           font-size: 18px; font-weight: 900;
           cursor: pointer;
         }
-
-        .compass {
+        .bucketCompassOverlay .compass {
           display: grid; gap: 10px; padding: 10px;
           border-radius: 22px;
           border: 1px solid rgba(120, 255, 240, 0.14);
           background: rgba(0, 0, 0, 0.26);
         }
-        .compassMeta {
+        .bucketCompassOverlay .compassMeta {
           display: flex; align-items: center; gap: 8px;
           color: rgba(120, 255, 240, 0.62);
           font-weight: 900; letter-spacing: 0.10em; text-transform: uppercase; font-size: 10px;
           opacity: 0.95;
         }
-        .compassChip {
+        .bucketCompassOverlay .compassChip {
           display: flex; align-items: center; justify-content: space-between; gap: 12px;
           border-radius: 999px; padding: 10px 12px;
           border: 1px solid rgba(120, 255, 240, 0.14);
           background: rgba(0, 0, 0, 0.20);
           cursor: pointer;
         }
-        .compassChip.on {
+        .bucketCompassOverlay .compassChip.on {
           border-color: rgba(120, 255, 240, 0.28);
           background: rgba(120, 255, 240, 0.10);
           box-shadow: 0 0 18px rgba(120, 255, 240, 0.10);
         }
-        .chipEmblem { width: 18px; height: 18px; display: grid; place-items: center; }
-        .chipLabel {
+        .bucketCompassOverlay .chipEmblem { width: 18px; height: 18px; display: grid; place-items: center; }
+        .bucketCompassOverlay .chipLabel {
           display: inline-flex; gap: 10px; align-items: baseline; flex: 1; justify-content: flex-start;
           color: rgba(220, 255, 250, 0.90);
           font-size: 11px; font-weight: 950; letter-spacing: 0.16em; text-transform: uppercase;
         }
-        .chipSub { color: rgba(120, 255, 240, 0.65); font-weight: 900; letter-spacing: 0.10em; font-size: 10px; }
-        .chipCount { color: rgba(255, 0, 190, 0.85); font-weight: 950; letter-spacing: 0.12em; font-size: 11px; }
-
-        .domeBody { overflow: auto; padding: 10px; }
-        .panelTitle {
+        .bucketCompassOverlay .chipSub { color: rgba(120, 255, 240, 0.65); font-weight: 900; letter-spacing: 0.10em; font-size: 10px; }
+        .bucketCompassOverlay .chipCount { color: rgba(255, 0, 190, 0.85); font-weight: 950; letter-spacing: 0.12em; font-size: 11px; }
+        .bucketCompassOverlay .domeBody { overflow: auto; padding: 10px; }
+        .bucketCompassOverlay .panelTitle {
           color: rgba(220, 255, 250, 0.92);
           font-weight: 950; letter-spacing: 0.14em; text-transform: uppercase; font-size: 12px;
           display: flex; align-items: baseline; gap: 10px; margin-bottom: 10px;
         }
-        .panelSub { color: rgba(120, 255, 240, 0.62); font-weight: 900; letter-spacing: 0.08em; font-size: 10px; opacity: 0.95; }
-        .domeTiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
-        .domeEmpty {
+        .bucketCompassOverlay .panelSub { color: rgba(120, 255, 240, 0.62); font-weight: 900; letter-spacing: 0.08em; font-size: 10px; opacity: 0.95; }
+        .bucketCompassOverlay .domeTiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+        .bucketCompassOverlay .domeEmpty {
           padding: 18px; border-radius: 18px;
           border: 1px solid rgba(120, 255, 240, 0.16);
           background: rgba(0, 0, 0, 0.22);
           color: rgba(120, 255, 240, 0.80);
           font-weight: 900; letter-spacing: 0.10em;
         }
-        .domeEmptyHint { margin-top: 10px; font-size: 12px; font-weight: 800; color: rgba(220, 255, 250, 0.72); letter-spacing: 0.04em; text-transform: none; opacity: 0.9; }
-        .memoryViewer {
+        .bucketCompassOverlay .domeEmptyHint { margin-top: 10px; font-size: 12px; font-weight: 800; color: rgba(220, 255, 250, 0.72); letter-spacing: 0.04em; text-transform: none; opacity: 0.9; }
+        .bucketCompassOverlay .memoryViewer {
           position: absolute;
           inset: 0;
           z-index: 4;
@@ -1525,13 +1533,13 @@ export default function DropsBucket({
           place-items: center;
           padding: 18px;
         }
-        .memoryViewerBackdrop {
+        .bucketCompassOverlay .memoryViewerBackdrop {
           position: absolute;
           inset: 0;
           background: rgba(0, 0, 0, 0.58);
           backdrop-filter: blur(8px);
         }
-        .memoryViewerPanel {
+        .bucketCompassOverlay .memoryViewerPanel {
           position: relative;
           z-index: 1;
           width: min(760px, 100%);
@@ -1543,7 +1551,7 @@ export default function DropsBucket({
           box-shadow: 0 30px 90px rgba(0, 0, 0, 0.58);
           padding: 14px;
         }
-        .memoryViewerTop {
+        .bucketCompassOverlay .memoryViewerTop {
           display: flex;
           align-items: flex-start;
           justify-content: space-between;
@@ -1551,21 +1559,21 @@ export default function DropsBucket({
           margin-bottom: 12px;
           padding: 4px 2px 0;
         }
-        .memoryViewerKicker {
+        .bucketCompassOverlay .memoryViewerKicker {
           color: rgba(120, 255, 240, 0.70);
           font-size: 10px;
           font-weight: 950;
           letter-spacing: 0.18em;
           text-transform: uppercase;
         }
-        .memoryViewerTitle {
+        .bucketCompassOverlay .memoryViewerTitle {
           margin-top: 5px;
           color: rgba(220, 255, 250, 0.94);
           font-size: 16px;
           font-weight: 950;
           letter-spacing: 0.04em;
         }
-        .memoryViewerClose {
+        .bucketCompassOverlay .memoryViewerClose {
           border-radius: 999px;
           border: 1px solid rgba(120, 255, 240, 0.24);
           background: rgba(120, 255, 240, 0.10);
@@ -1577,7 +1585,9 @@ export default function DropsBucket({
           letter-spacing: 0.14em;
           text-transform: uppercase;
         }
-        @media (max-width: 900px) { .domeTiles { grid-template-columns: 1fr; } }
+        @media (max-width: 900px) {
+          .bucketCompassOverlay .domeTiles { grid-template-columns: 1fr; }
+        }
       `}</style>
     </div>
   );
@@ -1608,9 +1618,10 @@ function BucketDropCard({
     typeof preview?.bucket === "string" && preview.bucket ? preview.bucket : "";
   const previewStoragePath =
     typeof preview?.storagePath === "string" && preview.storagePath ? preview.storagePath : "";
-  const previewHref =
+    const previewHref =
     safeStr(item?.href) ||
     safeStr(item?.image_url) ||
+    safeStr((rawMeta as any)?.embedUrl) ||
     safeStr((rawMeta as any)?.mediaUrl) ||
     safeStr((rawMeta as any)?.announcement_media_url) ||
     safeStr((preview as any)?.embedUrl) ||
@@ -1626,7 +1637,13 @@ function BucketDropCard({
 
   const [embedFailed, setEmbedFailed] = useState(false);
   const [downloadBusy, setDownloadBusy] = useState(false);
-  const embed = useMemo(() => computeEmbed(href), [href]);
+  const embed = useMemo(() => {
+    const streaming =
+      safeStr((rawMeta as any)?.embedUrl) ||
+      safeStr((preview as any)?.embedUrl) ||
+      href;
+    return computeEmbed(streaming || href);
+  }, [href, rawMeta, preview]);
   const mediaKind = safeStr((rawMeta as any)?.mediaKind) || safeStr((preview as any)?.mediaKind);
   const dropType =
     safeStr((rawMeta as any)?.dropType) ||

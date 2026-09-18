@@ -11,7 +11,8 @@ import {
   setLocalActivity,
   type BoardActivity,
 } from "@/lib/board/activity";
-import { readBrain } from "@/lib/board/bucketBrain";
+import { depositToBrain, readBrain } from "@/lib/board/bucketBrain";
+import { persistReaction } from "@/lib/board/persistReaction";
 import {
   findLocalDropByAnyId,
   loadDropForEdit,
@@ -58,7 +59,6 @@ import DropbookSlideScreen from "./DropbookSlideScreen";
 import { PayOnBoardButton } from "./PayOnBoardButton";
 import { isStreamingEmbedUrl, isYouTubeDropUrl } from "@/lib/board/dropbookLink";
 
-const EVT_DEPOSIT = "board:bucketBrain:deposit";
 const EVT_OPEN = "board:bucketBrain:open";
 const EVT_BUCKET_UPDATED = "board:bucketBrain:updated";
 const fallbackAuraColor = "#8ee7ff";
@@ -761,16 +761,24 @@ function ActivityCard({
   }, []);
 
   useEffect(() => {
+    const dropId = metaString(meta?.dropId, meta?.originalDropId);
     const syncReactionState = () => {
       const identity = readLocalProfileIdentity();
       setUserAuraColor(identity.glowColor || fallbackAuraColor);
-      if (!id) {
+      if (!id && !dropId) {
         setSelectedReaction(null);
         return;
       }
       const brain = readBrain();
       const selected = (["pass", "pin", "push"] as const).find((folder) =>
-        (brain[folder] ?? []).some((entry) => String(entry.activityId) === id)
+        (brain[folder] ?? []).some((entry) => {
+          const entryId = String(entry.activityId);
+          const entryDropId = String(entry.item?.meta?.dropId || entry.item?.id || "");
+          return (
+            (id && (entryId === id || entryDropId === id)) ||
+            (dropId && (entryId === dropId || entryDropId === dropId))
+          );
+        })
       );
       setSelectedReaction(selected ?? null);
     };
@@ -782,7 +790,7 @@ function ActivityCard({
       window.removeEventListener(EVT_BUCKET_UPDATED, syncReactionState as EventListener);
       window.removeEventListener("storage", syncReactionState as EventListener);
     };
-  }, [id]);
+  }, [id, meta?.dropId, meta?.originalDropId]);
 
   useEffect(() => {
     const syncCommentCount = () => setCommentCount(getDropCommentCount(id));
@@ -1117,14 +1125,52 @@ function ActivityCard({
   }
 
   function signal(folder: "pass" | "pin" | "push") {
-    if (!id) return;
+    const dropId = metaString(meta?.dropId, meta?.originalDropId);
+    const bucketId = dropId || id;
+    if (!bucketId) return;
     const currentUser = readLocalProfileIdentity();
+    const hrefForMemory =
+      href ||
+      metaString(meta?.embedUrl, meta?.mediaUrl, preview?.embedUrl, preview?.mediaUrl);
 
-    window.dispatchEvent(
-      new CustomEvent(EVT_DEPOSIT, {
-        detail: { folder, activityId: id, item },
-      })
-    );
+    depositToBrain(folder, bucketId, {
+      id: bucketId,
+      created_at: item?.created_at ?? null,
+      user_id: authorUserId || null,
+      kind: item?.kind ?? "board_drop",
+      title,
+      body,
+      href: hrefForMemory || null,
+      image_url: resolvedPreviewImage || item?.image_url || null,
+      meta: {
+        ...(meta && typeof meta === "object" ? meta : {}),
+        dropId: dropId || bucketId,
+        dropType: meta?.dropType ?? meta?.drop_flavor ?? kindLabel,
+        mediaKind: mediaKind || meta?.mediaKind || null,
+        mediaUrl: meta?.mediaUrl || signedPreviewImage || hrefForMemory || null,
+        embedUrl: meta?.embedUrl || null,
+        bucket: previewBucket || meta?.bucket || null,
+        storagePath: previewStoragePath || meta?.storagePath || null,
+        fileName: storedFileName || null,
+        mime: storedMime || null,
+      },
+    });
+
+    void persistReaction({
+      activityId: id || bucketId,
+      reaction: folder,
+      ownerUserId: authorUserId || null,
+      dropId: dropId || bucketId,
+      dropTitle: title,
+      dropHref: hrefForMemory || null,
+      dropImageUrl: resolvedPreviewImage || item?.image_url || null,
+      dropType:
+        typeof meta?.dropType === "string"
+          ? meta.dropType
+          : typeof meta?.drop_flavor === "string"
+            ? meta.drop_flavor
+            : null,
+    });
 
     setSelectedReaction(folder);
 
