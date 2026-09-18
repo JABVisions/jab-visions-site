@@ -7,6 +7,7 @@ import {
   orbFromProfileLike,
   orbsFromActivityRows,
   parseFriendZoneBoardStyle,
+  publicOrbAvatarUrl,
   type FriendZoneActivityRow,
 } from "@/lib/board/friendZoneOrbs";
 
@@ -132,6 +133,44 @@ async function loadPresence(client: { from: SupabaseClient["from"] } | null) {
   return [...data, ...legacy].filter((row) => row.visible !== false);
 }
 
+async function withReadableAvatarUrls(
+  client: SupabaseClient | null,
+  items: FriendZoneOrbUser[]
+): Promise<FriendZoneOrbUser[]> {
+  if (!client || !items.length) return items;
+  const pathByIndex = items.map((item) => {
+    const url = String(item.avatarUrl || "");
+    const match = url.match(/\/storage\/v1\/object\/(?:public|sign)\/board-avatars\/([^?]+)/i);
+    if (match?.[1]) {
+      try {
+        return decodeURIComponent(match[1]);
+      } catch {
+        return match[1];
+      }
+    }
+    if (url && !/^https?:\/\//i.test(url) && !url.startsWith("/") && !url.startsWith("data:")) {
+      return url.replace(/^board-avatars\//, "");
+    }
+    return "";
+  });
+  const unique = Array.from(new Set(pathByIndex.filter(Boolean)));
+  if (!unique.length) return items;
+  try {
+    const { data } = await client.storage.from("board-avatars").createSignedUrls(unique, 60 * 60 * 24 * 7);
+    const signedByPath = new Map<string, string>();
+    for (const row of data || []) {
+      if (row?.path && row.signedUrl && !row.error) signedByPath.set(row.path, row.signedUrl);
+    }
+    if (!signedByPath.size) return items;
+    return items.map((item, index) => {
+      const signed = pathByIndex[index] ? signedByPath.get(pathByIndex[index]) : "";
+      return signed ? { ...item, avatarUrl: signed } : item;
+    });
+  } catch {
+    return items;
+  }
+}
+
 export async function GET(req: Request) {
   const sessionClient = supabaseSession();
   const readable = supabaseReadable();
@@ -202,7 +241,13 @@ export async function GET(req: Request) {
         id: row.id,
         username: row.username || presence?.username,
         displayName: row.display_name || presence?.display_name,
-        avatarUrl: row.avatar_url || presence?.avatar_url,
+        avatarUrl: publicOrbAvatarUrl(
+          row.avatar_url,
+          presence?.avatar_url,
+          boardStyle?.avatarUrl,
+          boardStyle?.avatarDataUrl,
+          boardStyle?.avatarPath
+        ),
         updatedAt: row.updated_at,
         lastSeenAt:
           presence?.last_seen_at ||
@@ -246,5 +291,8 @@ export async function GET(req: Request) {
     limit,
   });
 
-  return Response.json({ ok: true, items });
+  return Response.json({
+    ok: true,
+    items: await withReadableAvatarUrls(db as SupabaseClient, items),
+  });
 }

@@ -31,6 +31,13 @@ as $$
     ) as display_name,
     coalesce(
       nullif(p.avatar_url, ''),
+      nullif(p.board_style ->> 'avatarUrl', ''),
+      case
+        when coalesce(p.board_style ->> 'avatarDataUrl', '') ~* '^https?://'
+          then p.board_style ->> 'avatarDataUrl'
+        else null
+      end,
+      nullif(p.board_style ->> 'avatarPath', ''),
       nullif(u.raw_user_meta_data ->> 'avatar_url', '')
     ) as avatar_url,
     coalesce(p.updated_at, u.last_sign_in_at, u.created_at) as updated_at,

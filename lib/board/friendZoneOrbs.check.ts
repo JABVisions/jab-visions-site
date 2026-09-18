@@ -1,9 +1,11 @@
 import {
+  DEFAULT_ORB_AVATAR,
   deriveFriendZoneState,
   formatFriendZoneLastActive,
   mergeFriendZoneOrbs,
   orbFromProfileLike,
   orbsFromActivityRows,
+  publicOrbAvatarUrl,
   type FriendZoneActivityRow,
 } from "./friendZoneOrbs";
 import type { FriendZoneOrbUser } from "./friendZoneSignals";
@@ -102,5 +104,34 @@ assert(
   !merged.some((orb) => orb.id === "viewer"),
   "the viewing user is excluded from Friend Zone"
 );
+
+assert(
+  publicOrbAvatarUrl("data:image/png;base64,abc") === DEFAULT_ORB_AVATAR,
+  "data URLs stay out of Friend Zone orbs"
+);
+assert(
+  publicOrbAvatarUrl("https://cdn.example.com/maya.jpg") === "https://cdn.example.com/maya.jpg",
+  "hosted avatar URLs pass through"
+);
+const rewritten = publicOrbAvatarUrl(
+  "https://abc.supabase.co/storage/v1/object/sign/board-avatars/user-1/avatar.jpg?token=secret"
+);
+assert(
+  rewritten.includes("/storage/v1/object/public/board-avatars/user-1/avatar.jpg") &&
+    !rewritten.includes("token="),
+  "signed avatar URLs become durable public URLs"
+);
+
+process.env.NEXT_PUBLIC_SUPABASE_URL =
+  process.env.NEXT_PUBLIC_SUPABASE_URL || "https://example.supabase.co";
+
+const pathOrb = orbFromProfileLike({
+  id: "user-maya",
+  username: "maya",
+  displayName: "Maya",
+  boardStyle: { avatarPath: "user-maya/avatar-77.jpg" },
+});
+assert(pathOrb?.avatarUrl.includes("user-maya/avatar-77.jpg"), "profile avatarPath becomes an orb photo");
+assert(pathOrb?.avatarUrl !== DEFAULT_ORB_AVATAR, "avatarPath does not fall back to the welcome mark");
 
 console.log("friend zone online orb checks passed");
