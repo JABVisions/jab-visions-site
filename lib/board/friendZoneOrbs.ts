@@ -7,6 +7,8 @@ export const FRIEND_ZONE_ONLINE_MS = 10 * 60 * 1000;
 export type FriendZoneBoardStyle = {
   displayName?: string;
   avatarDataUrl?: string | null;
+  avatarUrl?: string | null;
+  avatarPath?: string | null;
   visibility?: "public" | "private";
   lastSeenAt?: string | null;
   presenceOnline?: boolean;
@@ -49,6 +51,43 @@ export function parseFriendZoneBoardStyle(value: unknown): FriendZoneBoardStyle 
   return null;
 }
 
+const AVATAR_BUCKET = "board-avatars";
+
+function supabasePublicObjectUrl(bucket: string, path: string) {
+  const base = String(process.env.NEXT_PUBLIC_SUPABASE_URL || "").replace(/\/$/, "");
+  const clean = path.replace(/^\/+/, "").split("?")[0].split("#")[0];
+  if (!base || !clean) return "";
+  return `${base}/storage/v1/object/public/${bucket}/${clean}`;
+}
+
+function rewriteBoardStorageUrl(url: string) {
+  if (!url.includes("/storage/v1/")) return "";
+  try {
+    const parsed = new URL(url);
+    parsed.pathname = parsed.pathname.replace(
+      /\/storage\/v1\/(?:object|render\/image)\/(?:sign|authenticated)\//,
+      (match) => match.replace(/\/(sign|authenticated)\//, "/public/")
+    );
+    parsed.search = "";
+    parsed.hash = "";
+    return parsed.toString();
+  } catch {
+    return url.split("?")[0] || "";
+  }
+}
+
+export function publicUrlForAvatarPath(path: unknown) {
+  const raw = typeof path === "string" ? path.trim() : "";
+  if (!raw || raw.startsWith("data:")) return "";
+  const rewritten = rewriteBoardStorageUrl(raw);
+  if (rewritten) return rewritten;
+  if (/^(https?:\/\/|\/)/i.test(raw)) return raw;
+  const storagePath = raw.startsWith(`${AVATAR_BUCKET}/`)
+    ? raw.slice(AVATAR_BUCKET.length + 1)
+    : raw.replace(/^\/+/, "");
+  return supabasePublicObjectUrl(AVATAR_BUCKET, storagePath);
+}
+
 /** Hosted http(s) avatars only — iPhone Safari OOMs on giant data: URLs in the dock. */
 export function publicOrbAvatarUrl(...values: unknown[]): string {
   for (const value of values) {
@@ -56,8 +95,9 @@ export function publicOrbAvatarUrl(...values: unknown[]): string {
     const clean = value.trim();
     if (!clean) continue;
     if (clean.startsWith("data:")) continue;
-    if (clean.length > 2048) continue;
-    if (/^(https?:\/\/|\/)/i.test(clean)) return clean;
+    if (clean.length > 4096) continue;
+    const hosted = publicUrlForAvatarPath(clean);
+    if (hosted) return hosted;
   }
   return DEFAULT_ORB_AVATAR;
 }
@@ -345,7 +385,12 @@ export function orbFromProfileLike(input: {
     id: input.id,
     name,
     username,
-    avatarUrl: publicOrbAvatarUrl(input.avatarUrl, boardStyle?.avatarDataUrl),
+    avatarUrl: publicOrbAvatarUrl(
+      input.avatarUrl,
+      boardStyle?.avatarUrl,
+      boardStyle?.avatarDataUrl,
+      boardStyle?.avatarPath
+    ),
     lastActiveLabel: formatFriendZoneLastActive(lastSeenAt),
     relationshipState: deriveFriendZoneState(activity, input.updatedAt, lastSeenAt),
   };
