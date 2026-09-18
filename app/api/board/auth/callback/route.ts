@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { safeBoardNext } from "@/lib/supabase/boardPaths";
 import { createSupabaseRouteClient } from "@/lib/supabase/routeClient";
 
 export const runtime = "nodejs";
@@ -8,15 +9,12 @@ export async function GET(request: NextRequest) {
   const code = request.nextUrl.searchParams.get("code");
   const tokenHash = request.nextUrl.searchParams.get("token_hash");
   const requestedType = request.nextUrl.searchParams.get("type") || "email";
-  const requestedNext = request.nextUrl.searchParams.get("next") || "";
-  const next = requestedNext.startsWith("/board")
-    ? requestedNext
-    : "/board/profile";
+  const next = safeBoardNext(request.nextUrl.searchParams.get("next"), "/board/profile");
 
   try {
     if (!code && !tokenHash) throw new Error("Confirmation token is missing.");
 
-    const { supabase, applyCookies } = createSupabaseRouteClient();
+    const { supabase, applyCookies } = createSupabaseRouteClient(request);
     const allowedTypes = ["email", "signup", "invite", "magiclink"] as const;
     const type = allowedTypes.includes(requestedType as (typeof allowedTypes)[number])
       ? requestedType as (typeof allowedTypes)[number]
@@ -26,8 +24,13 @@ export async function GET(request: NextRequest) {
       : await supabase.auth.exchangeCodeForSession(code!);
     if (error) throw error;
 
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+
     return applyCookies(
-      NextResponse.redirect(new URL(next, request.nextUrl.origin))
+      NextResponse.redirect(new URL(next, request.nextUrl.origin)),
+      { keepSession: true, session }
     );
   } catch (error) {
     const destination = next === "/board/reset-password"

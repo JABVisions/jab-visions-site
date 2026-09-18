@@ -1,14 +1,16 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextRequest, NextResponse } from "next/server";
+import {
+  applyAuthCookies,
+  isBoardAuthRoute,
+  safeBoardNext,
+} from "@/lib/supabase/authCookies";
+import { getSupabasePublicConfig } from "@/lib/supabase/config";
 
 function isPublicBoardRoute(pathname: string) {
   if (
     pathname === "/board" ||
-    pathname === "/board/login" ||
-    pathname === "/board/forgot-password" ||
-    pathname === "/board/signup" ||
-    pathname === "/board/reset-password" ||
-    pathname === "/board/reset-password/confirm" ||
+    isBoardAuthRoute(pathname) ||
     pathname === "/board/onboarding" ||
     pathname === "/board/preview"
   ) {
@@ -18,68 +20,65 @@ function isPublicBoardRoute(pathname: string) {
   return /^\/board\/profile\/[^/]+$/.test(pathname);
 }
 
-export async function middleware(request: NextRequest) {
-  let response = NextResponse.next({
-    request: {
-      headers: request.headers,
-    },
+function copyCookies(from: NextResponse, to: NextResponse) {
+  from.cookies.getAll().forEach((cookie) => {
+    to.cookies.set(cookie);
   });
+  return to;
+}
 
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const supabaseAnonKey =
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
-    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
+export async function middleware(request: NextRequest) {
+  let response = NextResponse.next({ request });
+  const { url: supabaseUrl, key: supabaseAnonKey } = getSupabasePublicConfig();
 
   // Keep UI-only local development usable until a Supabase project is linked.
   if (!supabaseUrl || !supabaseAnonKey) {
     return response;
   }
 
-  if (isPublicBoardRoute(request.nextUrl.pathname)) {
-    return response;
-  }
-
-  const supabase = createServerClient(
-    supabaseUrl,
-    supabaseAnonKey,
-    {
-      cookies: {
-        getAll() {
-          return request.cookies.getAll();
-        },
-        setAll(cookiesToSet) {
-          cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value));
-          response = NextResponse.next({
-            request: {
-              headers: request.headers,
-            },
-          });
-          cookiesToSet.forEach(({ name, value, options }) => {
-            response.cookies.set(name, value, options);
-          });
-        },
+  const supabase = createServerClient(supabaseUrl, supabaseAnonKey, {
+    cookies: {
+      getAll() {
+        return request.cookies.getAll();
       },
-    }
-  );
+      setAll(cookiesToSet) {
+        cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value));
+        response = NextResponse.next({ request });
+        applyAuthCookies(response, cookiesToSet, request);
+      },
+    },
+  });
 
+  // Refresh the session before any redirect logic so Board can read the
+  // cookies that login/callback just wrote.
   const {
     data: { user },
   } = await supabase.auth.getUser();
 
-  if (!user) {
+  const pathname = request.nextUrl.pathname;
+
+  if (user && isBoardAuthRoute(pathname) && !pathname.startsWith("/board/reset-password")) {
+    const next = safeBoardNext(request.nextUrl.searchParams.get("next"));
+    return copyCookies(
+      response,
+      NextResponse.redirect(new URL(next, request.nextUrl.origin))
+    );
+  }
+
+  if (!user && !isPublicBoardRoute(pathname)) {
     const loginUrl = request.nextUrl.clone();
     loginUrl.pathname = "/board/login";
     loginUrl.search = "";
     loginUrl.searchParams.set(
       "next",
-      `${request.nextUrl.pathname}${request.nextUrl.search}`
+      safeBoardNext(`${pathname}${request.nextUrl.search}`, "/board/feed")
     );
-    return NextResponse.redirect(loginUrl);
+    return copyCookies(response, NextResponse.redirect(loginUrl));
   }
 
   return response;
 }
 
 export const config = {
-  matcher: ["/board/:path*"],
+  matcher: ["/board", "/board/:path*"],
 };

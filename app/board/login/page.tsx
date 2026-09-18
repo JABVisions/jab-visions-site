@@ -2,7 +2,8 @@
 
 import Link from "next/link";
 import { useState } from "react";
-import { isSupabaseConfigured } from "@/lib/supabase/browser";
+import { safeBoardNext } from "@/lib/supabase/boardPaths";
+import { isSupabaseConfigured, supabaseBrowser } from "@/lib/supabase/browser";
 
 export default function BoardLoginPage() {
   const authAvailable = isSupabaseConfigured();
@@ -41,6 +42,7 @@ export default function BoardLoginPage() {
     try {
       const response = await fetch("/api/board/auth/login", {
         method: "POST",
+        credentials: "include",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ email: email.trim(), password }),
       });
@@ -51,15 +53,21 @@ export default function BoardLoginPage() {
         return;
       }
 
-      await fetch("/api/board/profile/ensure", { method: "POST" }).catch(() => undefined);
+      if (result.access_token && result.refresh_token) {
+        await supabaseBrowser()
+          .auth.setSession({
+            access_token: String(result.access_token),
+            refresh_token: String(result.refresh_token),
+          })
+          .catch(() => undefined);
+      }
 
       setOk("Welcome back. Redirecting…");
       const next =
         typeof window !== "undefined"
           ? new URLSearchParams(window.location.search).get("next")
           : null;
-      const safeNext = next?.startsWith("/board") ? next : "/board/profile";
-      window.location.assign(safeNext);
+      window.location.assign(safeBoardNext(next, "/board/profile"));
       return;
     } catch (e: any) {
       setErr(e?.message || "Login failed. Please try again.");

@@ -1,9 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { isSupabaseConfigured } from "@/lib/supabase/browser";
+import { isSupabaseConfigured, supabaseBrowser } from "@/lib/supabase/browser";
 
 const MONTHS = [
   { value: "1", label: "January" },
@@ -70,7 +69,6 @@ function getAgeFromBirthDate(month: string, day: string, year: string) {
 }
 
 export default function BoardSignupPage() {
-  const router = useRouter();
   const authAvailable = isSupabaseConfigured();
 
   const [fullName, setFullName] = useState("");
@@ -157,6 +155,7 @@ export default function BoardSignupPage() {
     try {
       const response = await fetch("/api/board/auth/signup", {
         method: "POST",
+        credentials: "include",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           email: email.trim(),
@@ -193,9 +192,15 @@ export default function BoardSignupPage() {
       // session is allowed through the authenticated Board gate.
       if (result.hasSession) {
         setOk("Account created. Redirecting...");
-        await fetch("/api/board/profile/ensure", { method: "POST" }).catch(() => undefined);
-        router.replace("/board/work");
-        router.refresh();
+        if (result.access_token && result.refresh_token) {
+          await supabaseBrowser()
+            .auth.setSession({
+              access_token: String(result.access_token),
+              refresh_token: String(result.refresh_token),
+            })
+            .catch(() => undefined);
+        }
+        window.location.assign("/board/work");
       } else {
         setOk("Account created. Check your email to confirm your account, then log in.");
       }

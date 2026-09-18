@@ -13,7 +13,7 @@ export async function GET(request: NextRequest) {
       throw new Error("The password reset link is missing its confirmation token.");
     }
 
-    const { supabase, applyCookies } = createSupabaseRouteClient();
+    const { supabase, applyCookies } = createSupabaseRouteClient(request);
     const { error } = tokenHash
       ? await supabase.auth.verifyOtp({
           token_hash: tokenHash,
@@ -25,7 +25,8 @@ export async function GET(request: NextRequest) {
     return applyCookies(
       NextResponse.redirect(
         new URL("/board/reset-password", request.nextUrl.origin)
-      )
+      ),
+      { keepSession: true }
     );
   } catch (error) {
     const resetPassword = new URL(
