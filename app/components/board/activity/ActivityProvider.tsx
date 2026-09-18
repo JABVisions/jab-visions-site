@@ -10,6 +10,8 @@ import React, {
   useState,
 } from "react";
 import { supabaseBrowser } from "@/lib/supabase/browser";
+import { readBrain } from "@/lib/board/bucketBrain";
+import { readCurrentBoardIdentity } from "@/lib/board/currentProfile";
 import {
   BOARD_NOTIFICATIONS_UPDATED_EVENT,
   groupNotifications,
@@ -41,7 +43,75 @@ type ActivityContextValue = {
 
 const ActivityContext = createContext<ActivityContextValue | null>(null);
 
-const PAGE = 24;
+const PAGE = 40;
+
+function localHistoryNotifications(): BoardNotification[] {
+  if (typeof window === "undefined") return [];
+  const me = readCurrentBoardIdentity().username.replace(/^@+/, "").toLowerCase();
+  if (!me) return [];
+  const brain = readBrain();
+  const waves = (brain.waves ?? []).filter(
+    (wave) => String(wave.to || "").replace(/^@+/, "").toLowerCase() === me
+  );
+  const mutuals = (brain.mutuals ?? []).filter(
+    (entry) =>
+      String(entry.a || "").replace(/^@+/, "").toLowerCase() === me ||
+      String(entry.b || "").replace(/^@+/, "").toLowerCase() === me
+  );
+
+  const waveItems = waves.map((wave) => {
+    const createdAt = new Date(wave.createdAt).toISOString();
+    const from = String(wave.from || "").replace(/^@+/, "");
+    return mapNotificationRow({
+      id: `legacy-wave:${wave.id}`,
+      recipientUserId: me,
+      actorUserId: null,
+      activityType: "wave",
+      entityType: "profile",
+      message: `${from || "Someone"} waved at you.`,
+      metadata: {
+        legacyKey: `wave:${wave.id}`,
+        actorName: from || "Someone",
+        actorUsername: from,
+      },
+      priority: "medium",
+      actionRequired: false,
+      createdAt,
+      readAt: createdAt,
+      seenAt: createdAt,
+    });
+  });
+
+  const mutualItems = mutuals.map((entry) => {
+    const createdAt = new Date(entry.createdAt).toISOString();
+    const other =
+      String(entry.a || "").replace(/^@+/, "").toLowerCase() === me
+        ? String(entry.b || "").replace(/^@+/, "")
+        : String(entry.a || "").replace(/^@+/, "");
+    return mapNotificationRow({
+      id: `legacy-mutual:${entry.id}`,
+      recipientUserId: me,
+      actorUserId: null,
+      activityType: "friendzone_connected",
+      entityType: "profile",
+      message: `You and ${other || "a creator"} are now in each other's Friendzone.`,
+      metadata: {
+        legacyKey: `mutual:${entry.id}`,
+        actorName: other || "Someone",
+        actorUsername: other,
+      },
+      priority: "medium",
+      actionRequired: false,
+      createdAt,
+      readAt: createdAt,
+      seenAt: createdAt,
+    });
+  });
+
+  return [...waveItems, ...mutualItems].filter(
+    (item): item is BoardNotification => Boolean(item)
+  );
+}
 
 async function fetchPage(filter: ActivityFilter, before?: string | null) {
   const params = new URLSearchParams({
@@ -79,8 +149,14 @@ export function ActivityProvider({ children }: { children: React.ReactNode }) {
         : [];
       setSetupRequired(Boolean(payload?.setupRequired));
       setHasMore(Boolean(payload?.nextCursor));
-      if (typeof payload?.unreadCount === "number") setUnreadCount(payload.unreadCount);
-      setItems((current) => (append ? mergeNotificationLists(current, next) : next));
+      setUnreadCount(typeof payload?.unreadCount === "number" ? payload.unreadCount : 0);
+      const withLocal = mergeNotificationLists(
+        localHistoryNotifications().filter((item) =>
+          matchesActivityFilter(item, filterRef.current)
+        ),
+        next
+      );
+      setItems((current) => (append ? mergeNotificationLists(current, withLocal) : withLocal));
     },
     []
   );

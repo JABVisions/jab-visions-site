@@ -192,6 +192,10 @@ grant execute on function public.create_board_notification(
   uuid, text, uuid, text, text, text, uuid, text, text, text, text, text, text, text, jsonb, text, boolean, text
 ) to authenticated;
 
+create unique index if not exists board_notifications_legacy_key_idx
+  on public.board_notifications ((metadata->>'legacyKey'))
+  where metadata ? 'legacyKey';
+
 do $$
 begin
   if exists (select 1 from pg_publication where pubname = 'supabase_realtime') then
