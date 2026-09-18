@@ -34,7 +34,7 @@ export function PayOnBoardButton({
         <span className="payGemFacet payGemFacetB" aria-hidden />
         <span className="payGemPrism" aria-hidden />
         <span className="payGemShine" aria-hidden />
-        <span className="payGemLabel">{busy ? "Opening…" : "Pay on Board"}</span>
+        <span className="payGemLabel">{busy ? "Opening…" : "Pay"}</span>
       </button>
 
       <style jsx>{`
