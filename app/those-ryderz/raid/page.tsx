@@ -36,7 +36,7 @@ export default function ThoseRyderzRaidPage() {
         style={{
           position: 'fixed',
           inset: 0,
-          top: 96,
+          top: 132,
         }}
       >
         <RaidGame layout="page" />

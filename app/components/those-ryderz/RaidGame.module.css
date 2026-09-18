@@ -48,24 +48,25 @@
   left: 0;
   right: 0;
   display: flex;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 16px 18px;
   pointer-events: none;
 }
 
 .topHud {
   top: 0;
-  align-items: flex-start;
+  flex-direction: column;
+  gap: 10px;
+  padding: 0 0 8px;
 }
 
 .bottomHud {
   bottom: 0;
   align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 18px;
 }
 
 .chip,
-.barCard,
 .ability {
   pointer-events: none;
   border: 1px solid rgba(166, 255, 0, 0.28);
@@ -91,37 +92,62 @@
   letter-spacing: 0.04em;
 }
 
-.bars {
+.meterStack {
   display: grid;
-  gap: 8px;
-  min-width: min(340px, 46vw);
+  width: 100%;
+  gap: 0;
 }
 
-.barCard {
-  padding: 8px 10px 10px;
-  border-radius: 12px;
+.strip {
+  width: 100%;
+  padding: 5px 16px 7px;
+  background: rgba(3, 8, 10, 0.82);
+  backdrop-filter: blur(10px);
 }
 
-.barCard span {
+.hpStrip {
+  border-bottom: 1px solid rgba(255, 80, 110, 0.28);
+}
+
+.auraStrip {
+  border-bottom: 1px solid rgba(49, 255, 150, 0.22);
+}
+
+.strip span {
   display: flex;
   justify-content: space-between;
+  align-items: baseline;
   color: rgba(229, 246, 234, 0.55);
   font: 700 0.58rem/1.2 monospace;
   letter-spacing: 0.12em;
   text-transform: uppercase;
 }
 
+.strip em {
+  font-style: normal;
+  color: #f7fff9;
+}
+
 .track {
-  margin-top: 6px;
-  height: 10px;
+  margin-top: 4px;
   overflow: hidden;
-  border-radius: 999px;
+  border-radius: 2px;
   background: rgba(255, 255, 255, 0.08);
 }
 
-.barCard em {
-  font-style: normal;
-  color: #f7fff9;
+.hpStrip .track {
+  height: 16px;
+}
+
+.auraStrip .track {
+  height: 10px;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 0 16px;
 }
 
 .fill {
@@ -572,8 +598,7 @@
     height: 78vh;
   }
 
-  .roster,
-  .bars {
+  .roster {
     grid-template-columns: 1fr 1fr;
     min-width: 0;
   }
@@ -588,6 +613,15 @@
 
   .hint {
     display: none;
+  }
+
+  .hpStrip .track {
+    height: 14px;
+  }
+
+  .strip {
+    padding-left: 12px;
+    padding-right: 12px;
   }
 }
 

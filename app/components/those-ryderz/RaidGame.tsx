@@ -200,8 +200,8 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
       {playing && phase !== 'dead' && (
         <div className={styles.overlay} aria-hidden="true">
           <div className={styles.topHud}>
-            <div className={styles.bars}>
-              <div className={styles.barCard}>
+            <div className={styles.meterStack}>
+              <div className={`${styles.strip} ${styles.hpStrip}`}>
                 <span>
                   Vital
                   <em ref={hpLabel}>0 / 0</em>
@@ -210,7 +210,7 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
                   <div ref={hpFill} className={`${styles.fill} ${styles.hp}`} />
                 </div>
               </div>
-              <div className={styles.barCard}>
+              <div className={`${styles.strip} ${styles.auraStrip}`}>
                 <span>
                   Aura
                   <em ref={auraLabel}>0 / 0</em>
@@ -223,14 +223,16 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
                 </div>
               </div>
             </div>
-            <div className={styles.chip}>
-              Round <strong ref={roundRef}>0</strong>
-            </div>
-            <div className={styles.chip}>
-              Hosts <strong ref={remainingRef}>0</strong>
-            </div>
-            <div className={styles.chip}>
-              Signal pts <strong ref={pointsRef}>0</strong>
+            <div className={styles.chips}>
+              <div className={styles.chip}>
+                Round <strong ref={roundRef}>0</strong>
+              </div>
+              <div className={styles.chip}>
+                Hosts <strong ref={remainingRef}>0</strong>
+              </div>
+              <div className={styles.chip}>
+                Signal pts <strong ref={pointsRef}>0</strong>
+              </div>
             </div>
           </div>
 
