@@ -100,7 +100,12 @@ import {
   type DropbookManifest,
   type DropbookSlide,
 } from "@/lib/board/dropbookSlides";
-import { resolveDropbookLink, type DropbookLinkKind, type ResolvedDropbookLink } from "@/lib/board/dropbookLink";
+import {
+  dropbookSlideKindFor,
+  resolveDropbookLink,
+  type DropbookLinkKind,
+  type ResolvedDropbookLink,
+} from "@/lib/board/dropbookLink";
 
 type CaptureMode = "photo" | "video" | "audio" | "art" | "descript";
 type FacingMode = "user" | "environment";
@@ -118,7 +123,7 @@ export type DropbookChip = {
   descriptDocId?: string;
   descriptTitle?: string;
   descriptPreview?: string;
-  /** Session link page (YouTube / music / web) inside a Dropbook. */
+  /** Session link page (YouTube / News / Music / Link) inside a Dropbook. */
   linkKind?: DropbookLinkKind;
   linkUrl?: string;
   linkEmbedUrl?: string;
@@ -1363,9 +1368,11 @@ export default function DropStudioStage({
         flashSaveNote(
           chip.linkKind === "youtube"
             ? "YouTube page locked in this Dropbook"
-            : chip.linkKind === "music"
-              ? "Music page locked in this Dropbook"
-              : "Link page locked in this Dropbook"
+            : chip.linkKind === "news"
+              ? "News page locked in this Dropbook"
+              : chip.linkKind === "music"
+                ? "Music page locked in this Dropbook"
+                : "Link page locked in this Dropbook"
         );
         return;
       }
@@ -1806,7 +1813,7 @@ export default function DropStudioStage({
         if (page.linkKind && page.linkUrl) {
           slides.push({
             id: page.id,
-            kind: page.linkKind,
+            kind: dropbookSlideKindFor(page.linkKind),
             title: page.label || page.linkProvider || "Link",
             src: page.previewUrl,
             text: page.linkDescription,
@@ -1910,7 +1917,7 @@ export default function DropStudioStage({
     }
     const draft = dropbookLinkDraft.trim();
     if (!draft) {
-      flashSaveNote("Paste a YouTube, music, or web link");
+      flashSaveNote("Paste a YouTube, News, Music, or Link");
       return;
     }
 
@@ -1935,10 +1942,12 @@ export default function DropStudioStage({
         setDropbookLinkDraft("");
         flashSaveNote(
           resolved.kind === "youtube"
-            ? "YouTube Drop posted ✦"
-            : resolved.kind === "music"
-              ? "Music Drop posted ✦"
-              : "Link Drop posted ✦"
+            ? "YouTube Drop posted"
+            : resolved.kind === "news"
+              ? "News Drop posted"
+              : resolved.kind === "music"
+                ? "Music Drop posted"
+                : "Link Drop posted"
         );
         onClose();
         return;
@@ -1956,9 +1965,11 @@ export default function DropStudioStage({
       flashSaveNote(
         resolved.kind === "youtube"
           ? "YouTube page added to Dropbook ✦"
-          : resolved.kind === "music"
-            ? "Music page added to Dropbook ✦"
-            : "Link page added to Dropbook ✦"
+          : resolved.kind === "news"
+            ? "News page added to Dropbook ✦"
+            : resolved.kind === "music"
+              ? "Music page added to Dropbook ✦"
+              : "Link page added to Dropbook ✦"
       );
     } catch {
       flashSaveNote("Couldn't read that link. Try again.");
@@ -2586,14 +2597,14 @@ export default function DropStudioStage({
                     type="url"
                     inputMode="url"
                     autoComplete="url"
-                    placeholder="Paste YouTube, music, or web link"
+                    placeholder="Paste YouTube, News, Music, or Link"
                     value={dropbookLinkDraft}
                     onChange={(event) => setDropbookLinkDraft(event.currentTarget.value)}
                     disabled={dropbookLinkBusy || (isDropbookMode && dropbookShelfFull)}
                     aria-label={
                       isDropbookMode
-                        ? "Paste YouTube, music, or web link for Dropbook"
-                        : "Paste YouTube, music, or web link to post a Link Drop"
+                        ? "Paste YouTube, News, Music, or Link for Dropbook"
+                        : "Paste YouTube, News, Music, or Link to post a matching Drop"
                     }
                   />
                 </label>
@@ -2761,26 +2772,30 @@ export default function DropStudioStage({
                               <span className={chipStyles.modeGlyph} aria-hidden>
                                 {slot.linkKind === "youtube"
                                   ? "▶"
-                                  : slot.linkKind === "music"
-                                    ? "♫"
-                                    : slot.linkKind === "link"
-                                      ? "🔗"
-                                      : slot.mode
-                                        ? modeGlyph(slot.mode)
-                                        : "✦"}
+                                  : slot.linkKind === "news"
+                                    ? "📰"
+                                    : slot.linkKind === "music"
+                                      ? "♫"
+                                      : slot.linkKind === "link"
+                                        ? "🔗"
+                                        : slot.mode
+                                          ? modeGlyph(slot.mode)
+                                          : "✦"}
                               </span>
                             )}
                             <span className={chipStyles.footer}>
                               {slot.label ??
                                 (slot.linkKind === "youtube"
                                   ? "YouTube ▶"
-                                  : slot.linkKind === "music"
-                                    ? "Song ♫"
-                                    : slot.linkKind === "link"
-                                      ? "Link"
-                                      : slot.mode
-                                        ? modeLabel(slot.mode)
-                                        : "Drop")}
+                                  : slot.linkKind === "news"
+                                    ? "News 📰"
+                                    : slot.linkKind === "music"
+                                      ? "Song ♫"
+                                      : slot.linkKind === "link"
+                                        ? "Link"
+                                        : slot.mode
+                                          ? modeLabel(slot.mode)
+                                          : "Drop")}
                             </span>
                           </button>
                         )
