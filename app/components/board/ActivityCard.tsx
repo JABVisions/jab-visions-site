@@ -6,13 +6,23 @@ import { Eye, EyeOff, SlidersHorizontal } from "lucide-react";
 import {
   appendLocalActivity,
   getLocalActivity,
+  persistActivityEdit,
   removeLocalActivity,
   setLocalActivity,
   type BoardActivity,
 } from "@/lib/board/activity";
 import { readBrain } from "@/lib/board/bucketBrain";
-import { removeDropFromBoardStore } from "@/lib/board/boardDropEditStore";
-import { removeDrops as removeUniversalDrops } from "@/lib/board/drops/storage";
+import {
+  findLocalDropByAnyId,
+  loadDropForEdit,
+  persistDropEdit,
+  removeDropFromBoardStore,
+} from "@/lib/board/boardDropEditStore";
+import {
+  readDrops,
+  removeDrops as removeUniversalDrops,
+  writeDrops,
+} from "@/lib/board/drops/storage";
 import { resolveLinkPreviewImage } from "@/lib/board/linkPreviewImages";
 import { fetchLinkPreview } from "@/lib/board/linkPreview";
 import { openHostedPayDropCheckout } from "@/lib/board/payCheckout";
@@ -515,7 +525,10 @@ function ActivityCard({
   const [hydratedTitle, setHydratedTitle] = useState("");
   const [payCheckoutBusy, setPayCheckoutBusy] = useState(false);
   const [isRemovingDrop, setIsRemovingDrop] = useState(false);
-  const [dropHidden, setDropHidden] = useState(false);
+  const [dropPrivate, setDropPrivate] = useState(
+    () => item?.meta?.visibility === "private"
+  );
+  const [privacyBusy, setPrivacyBusy] = useState(false);
   const [selectedReaction, setSelectedReaction] = useState<"pass" | "pin" | "push" | null>(null);
   // Transient sonar burst when a drop's signal is amplified (Push).
   const [amplifyBurst, setAmplifyBurst] = useState(false);
@@ -693,8 +706,11 @@ function ActivityCard({
     !isStoredAudioDrop;
   useEffect(() => {
     setDropCustomizations(storedDropCustomizations);
-    setDropHidden(false);
   }, [id, storedCustomizationsKey]);
+
+  useEffect(() => {
+    setDropPrivate(meta?.visibility === "private");
+  }, [id, meta?.visibility]);
 
   useEffect(() => {
     const dropId = String(meta?.dropId || meta?.originalDropId || "");
@@ -706,6 +722,9 @@ function ActivityCard({
       const next = normalizeDropCustomizations(detail?.drop?.customizations);
       setDropCustomizations(next);
       setSignedPreviewNonce((tick) => tick + 1);
+      if (detail?.drop?.visibility === "private" || detail?.drop?.visibility === "public") {
+        setDropPrivate(detail.drop.visibility === "private");
+      }
     }
     window.addEventListener("board:drop:updated", onDropUpdated as EventListener);
     return () =>
@@ -1267,6 +1286,40 @@ function ActivityCard({
     window.setTimeout(() => setToast(null), 1200);
   }
 
+  async function toggleDropPrivacy() {
+    if (privacyBusy) return;
+    const nextVisibility: "public" | "private" = dropPrivate ? "public" : "private";
+    setDropPrivate(nextVisibility === "private");
+    setPrivacyBusy(true);
+    try {
+      const dropId = metaString(meta?.dropId, meta?.originalDropId);
+      const existing = findLocalDropByAnyId(dropId, id);
+      const loaded = existing ?? (dropId ? await loadDropForEdit(dropId) : null);
+      if (loaded) {
+        await persistDropEdit({ ...loaded, visibility: nextVisibility });
+      } else if (id) {
+        await persistActivityEdit(id, { meta: { visibility: nextVisibility } });
+      }
+      const universalId = dropId || id;
+      if (universalId) {
+        const current = readDrops();
+        if (current.some((drop) => drop.id === universalId)) {
+          writeDrops(
+            current.map((drop) =>
+              drop.id === universalId ? { ...drop, visibility: nextVisibility } : drop
+            )
+          );
+        }
+      }
+    } catch {
+      setDropPrivate(nextVisibility !== "private");
+      setToast("Could not update privacy");
+      window.setTimeout(() => setToast(null), 1400);
+    } finally {
+      setPrivacyBusy(false);
+    }
+  }
+
   function clampPan(value: number) {
     return Math.max(0, Math.min(100, value));
   }
@@ -1307,7 +1360,7 @@ function ActivityCard({
         compactSpotify && "compactSpotify",
         item?.kind === "announcement" && "announcementDrop",
         isPushed && "pushedDrop",
-        dropHidden && "dropHidden"
+        dropPrivate && "dropPrivate"
       )}
       style={
         {
@@ -1336,6 +1389,7 @@ function ActivityCard({
             {announcementVibeLabel ? (
               <span className="metaBadge vibeBadge">{announcementVibeLabel}</span>
             ) : null}
+            {dropPrivate ? <span className="metaBadge privateBadge">Private</span> : null}
             {badgeLabel ? <span className="metaBadge">{badgeLabel}</span> : null}
             {isPayDrop && priceLabel ? <span className="metaBadge">{priceLabel}</span> : null}
             {timeLabel ? <span className="metaBadge timeBadge">{timeLabel}</span> : null}
@@ -1425,18 +1479,19 @@ function ActivityCard({
           ) : null}
           <button
             type="button"
-            className={clsx("ownerToolBtn visibilityBtn", dropHidden && "active")}
-            onClick={() => setDropHidden((hidden) => !hidden)}
-            aria-pressed={dropHidden}
-            aria-label={dropHidden ? "Show entire drop" : "Hide entire drop"}
-            title={dropHidden ? "Show Drop" : "Hide Drop"}
+            className={clsx("ownerToolBtn visibilityBtn", dropPrivate && "active")}
+            onClick={() => void toggleDropPrivacy()}
+            disabled={privacyBusy}
+            aria-pressed={dropPrivate}
+            aria-label={dropPrivate ? "Make drop public" : "Make drop private"}
+            title={dropPrivate ? "Private — only you can see this drop" : "Public"}
           >
-            {dropHidden ? (
+            {dropPrivate ? (
               <EyeOff size={18} strokeWidth={2.5} aria-hidden />
             ) : (
               <Eye size={18} strokeWidth={2.5} aria-hidden />
             )}
-            <span className="srOnly">{dropHidden ? "Show Drop" : "Hide Drop"}</span>
+            <span className="srOnly">{dropPrivate ? "Make drop public" : "Make drop private"}</span>
           </button>
         </div>
       ) : null}
@@ -1817,37 +1872,51 @@ function ActivityCard({
           transition: background 180ms ease, border-color 180ms ease, box-shadow 180ms ease;
         }
 
-        .card.dropHidden {
-          min-height: 104px;
-          display: flex;
-          flex-direction: column;
-          justify-content: space-between;
+        .card.dropPrivate {
           background:
-            radial-gradient(circle at 82% 18%, rgba(139, 92, 255, 0.14), transparent 34%),
-            linear-gradient(145deg, #11131a, #050609);
-          border-color: rgba(139, 92, 255, 0.34);
+            radial-gradient(circle at 82% 18%, rgba(139, 92, 255, 0.18), transparent 34%),
+            linear-gradient(145deg, #16141c, #07070a);
+          border-color: rgba(139, 92, 255, 0.38);
+          color: rgba(236, 232, 255, 0.92);
           box-shadow:
             inset 0 1px 0 rgba(255, 255, 255, 0.05),
-            0 16px 40px rgba(0, 0, 0, 0.3);
+            0 16px 40px rgba(0, 0, 0, 0.32);
         }
 
-        .card.dropHidden::before {
-          content: "Hidden Drop";
-          display: block;
-          color: rgba(220, 211, 255, 0.76);
-          font-size: 11px;
-          font-weight: 950;
-          letter-spacing: 0.18em;
-          text-transform: uppercase;
+        .card.dropPrivate .title,
+        .card.dropPrivate .body,
+        .card.dropPrivate .authorHandle,
+        .card.dropPrivate .href,
+        .card.dropPrivate .embedNote,
+        .card.dropPrivate .embedLink.dim {
+          color: rgba(236, 232, 255, 0.88);
         }
 
-        .card.dropHidden > :not(.ownerTools):not(.toast):not(style) {
-          display: none !important;
+        .card.dropPrivate .kind,
+        .card.dropPrivate .metaBadge,
+        .card.dropPrivate .authorHandle,
+        .card.dropPrivate .ownerToolBtn,
+        .card.dropPrivate .rbtn {
+          background: rgba(255, 255, 255, 0.08);
+          border-color: rgba(255, 255, 255, 0.14);
+          color: rgba(220, 214, 255, 0.9);
         }
 
-        .card.dropHidden .ownerTools {
-          margin: 0;
-          justify-content: flex-end;
+        .card.dropPrivate .privateBadge {
+          color: #d8ccff;
+          border-color: rgba(139, 92, 255, 0.46);
+          background: rgba(139, 92, 255, 0.22);
+        }
+
+        .card.dropPrivate .ownerToolBtn.studioBtn {
+          color: #9ff3ee;
+          border-color: rgba(0, 166, 160, 0.38);
+        }
+
+        .card.dropPrivate .visibilityBtn.active {
+          color: #d8ccff;
+          border-color: rgba(139, 92, 255, 0.72);
+          background: rgba(139, 92, 255, 0.24);
         }
 
         .announcementDrop {
@@ -2115,6 +2184,11 @@ function ActivityCard({
           border-color: rgba(139, 92, 255, 0.62);
           background: rgba(139, 92, 255, 0.14);
           box-shadow: 0 0 18px rgba(139, 92, 255, 0.34);
+        }
+
+        .visibilityBtn:disabled {
+          opacity: 0.55;
+          cursor: wait;
         }
 
         .srOnly {

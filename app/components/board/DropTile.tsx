@@ -34,6 +34,7 @@ import VoiceDropSoundboard from "./VoiceDropSoundboard";
 import NewsDropMagazine from "./NewsDropMagazine";
 import DropbookSlideScreen from "./DropbookSlideScreen";
 import { PayOnBoardButton } from "./PayOnBoardButton";
+import ActivityCard from "./ActivityCard";
 import { isDropbookSlideFile } from "@/lib/board/dropbookSlides";
 import type { ResolvedDropbookLink } from "@/lib/board/dropbookLink";
 import { classifyDropbookLinkUrl, isStreamingEmbedUrl, musicEmbedFor } from "@/lib/board/dropbookLink";
@@ -53,6 +54,7 @@ import {
   downloadDropText,
   resolveDropDownloadExtension,
 } from "@/lib/board/dropDownload";
+import { boardDropToActivity } from "@/lib/board/boardDropActivity";
 
 type DropType =
   | "YouTube"
@@ -670,6 +672,28 @@ export default function DropTile() {
   }, [drops]);
 
   useEffect(() => {
+    function onDropUpdated(event: Event) {
+      const drop = (event as CustomEvent).detail?.drop;
+      if (!drop?.id) return;
+      setDrops((prev) =>
+        prev.map((item) => (item.id === drop.id ? { ...item, ...drop } : item))
+      );
+    }
+    function onDropRemoved(event: Event) {
+      const detail = (event as CustomEvent).detail ?? {};
+      const dropId = String(detail.dropId || detail.id || "");
+      if (!dropId) return;
+      setDrops((prev) => prev.filter((item) => item.id !== dropId));
+    }
+    window.addEventListener("board:drop:updated", onDropUpdated as EventListener);
+    window.addEventListener("board:drop:removed", onDropRemoved as EventListener);
+    return () => {
+      window.removeEventListener("board:drop:updated", onDropUpdated as EventListener);
+      window.removeEventListener("board:drop:removed", onDropRemoved as EventListener);
+    };
+  }, []);
+
+  useEffect(() => {
     const localAvatar = readLocalDropAvatar();
     setAvatarSrc(localAvatar.avatarSrc);
     setAvatarGlow(localAvatar.glowColor);
@@ -898,21 +922,25 @@ export default function DropTile() {
 
   async function syncBoardDropActivity(item: DropItem): Promise<"db" | "local"> {
     try {
-      if (item.type === "Thought" && item.visibility === "private") {
+      if (item.visibility === "private") {
+        const typeLabel = item.type === "Media" ? "Vision" : item.type;
         const localActivity: BoardActivity = {
-          id: `private_thought_${item.id}`,
+          id: `private_drop_${item.id}`,
           created_at: new Date(item.createdAt || Date.now()).toISOString(),
           user_id: userId,
           kind: "board_drop",
-          title: item.title || "Thought Drop",
-          body: item.thoughtText || item.description || "Private thought saved to Board.",
-          href: null,
-          image_url: null,
+          title: item.title || `${typeLabel} Drop`,
+          body:
+            item.type === "Thought"
+              ? item.thoughtText || item.description || "Private thought saved to Board."
+              : item.description || `Private ${typeLabel} Drop saved to Board.`,
+          href: item.url || item.linkUrl || item.embedUrl || null,
+          image_url: item.mediaKind === "image" ? item.mediaUrl || item.previewImage || null : null,
           meta: {
             source: "board_drop_tile",
             dropId: item.id,
-            dropType: "thought",
-            drop_flavor: "thought",
+            dropType: item.type,
+            drop_flavor: String(item.type).toLowerCase(),
             visibility: "private",
             thoughtText: item.thoughtText || null,
             thoughtFormat: item.thoughtFormat || "text",
@@ -932,10 +960,10 @@ export default function DropTile() {
         appendLocalActivity(localActivity);
         window.dispatchEvent(new StorageEvent("storage", { key: "jab_board_activity_v1" }));
         emitBoardDropSignal({
-          type: "thought_drop_created",
+          type: item.type === "Thought" ? "thought_drop_created" : "drop_created",
           dropId: item.id,
           userId,
-          title: item.title || "Thought Drop",
+          title: item.title || `${typeLabel} Drop`,
           meta: { visibility: "private", source: "board_drop_tile" },
         });
         return "local";
@@ -1004,7 +1032,7 @@ export default function DropTile() {
           previewImage: item.previewImage ?? null,
           previewImages: item.previewImages ?? null,
           description: item.description ?? null,
-          visibility: item.type === "Thought" ? item.visibility ?? "public" : "public",
+          visibility: item.visibility ?? "public",
           thoughtText: item.type === "Thought" ? item.thoughtText ?? body : null,
           thoughtFormat: item.type === "Thought" ? item.thoughtFormat ?? "text" : null,
           priceCents: item.priceCents ?? null,
@@ -1904,6 +1932,35 @@ export default function DropTile() {
         ? "image/*,audio/*,.mp3,.m4a,.wav,.aac,.ogg,.flac"
         : ".pdf,.doc,.docx,.txt,.rtf,.md,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain,text/markdown";
 
+  const collectionActivity = useMemo(
+    () =>
+      drops.map((drop) =>
+        boardDropToActivity(drop, {
+          userId,
+          activityId: `collection_${drop.id}`,
+          mediaUrl:
+            resolveDropPlaybackSrc(drop, signedUrlByKey) || drop.mediaUrl || null,
+          author: {
+            username,
+            displayName,
+            avatarSrc,
+            glowColor: avatarGlow,
+            auraIntensity: avatarAuraIntensity,
+          },
+        })
+      ),
+    [
+      drops,
+      userId,
+      signedUrlByKey,
+      username,
+      displayName,
+      avatarSrc,
+      avatarGlow,
+      avatarAuraIntensity,
+    ]
+  );
+
   return (
     <div className="inner-tile drop-tile">
       <div className="tile-head drop-tile-head">
@@ -2348,304 +2405,21 @@ export default function DropTile() {
             </div>
           </div>
         ) : (
-          drops.map((d) => {
-            const streamingHref = isStreamingEmbedUrl(d.url);
-            const resolvedEmbedUrl = d.embedUrl || (d.url ? musicEmbedFor(d.url) : undefined);
-            const isMedia = d.type === "Media";
-            const isAudioMusic = d.type === "Music" && d.mediaKind === "audio" && !streamingHref;
-            const isAudioDrop = d.mediaKind === "audio" && !streamingHref;
-            const isDoc = d.type === "Doc";
-            const isDescriptDrop =
-              d.fromDescript ||
-              d.mime === "text/html" ||
-              /\.html?$/i.test(d.fileName ?? "") ||
-              /\.html?(?:$|[?#])/i.test(d.url ?? "") ||
-              isLegacyDescriptText({
-                dropType: d.type,
-                body: d.thoughtText || d.description,
-                href: d.url,
-                mediaKind: d.mediaKind,
-              });
-            const isDropbookSlide = isDropbookSlideFile({
-              name: d.fileName,
-              type: d.mime,
-              url: d.url,
-            });
-            const isPay = d.type === "Pay";
-            const isThought = d.type === "Thought";
-            const isNews = d.type === "News";
-            const isLinky = d.type === "Link";
-
-            const canEmbed = !!resolvedEmbedUrl;
-            const kind: EmbedKind = resolvedEmbedUrl ? embedKindFromUrl(resolvedEmbedUrl) : "generic";
-
-            const fav = d.url ? faviconUrl(d.url) : null;
-            const cover = d.url ? newsCoverUrl(d.url) : null;
-            const linkCover = resolveLinkPreviewImage(d.url, d.previewImage || cover);
-            const linkTitle = d.previewTitle || d.headline || d.title;
-            const linkDescription = d.previewDescription;
-
-            const signedUrl =
-              resolveDropPlaybackSrc(d, signedUrlByKey) || undefined;
-            const storedMedia = storageCoordsFromDrop(d);
-            const showHostLabel =
-              !!d.hostLabel && !isSupabaseStorageHostLabel(d.hostLabel);
-            const showOpenLink =
-              !!d.url &&
-              !isDropbookSlide &&
-              !parseBoardStorageFromUrl(d.url) &&
-              !storedMedia;
-
-            return (
-              <div key={d.id} className="drop-item">
-                <div className="drop-titleTop">{isNews ? linkTitle : d.title}</div>
-
-                <div className="drop-metaRow">
-                  <div className="drop-badges">
-                    <RemovableDropBadge
-                      label={isDropbookSlide ? "DROPBOOK" : displayDropType(d.type).toUpperCase()}
-                      canRemove
-                      onRemove={() => removeDrop(d.id)}
-                    />
-                    {showHostLabel ? <span className="badge ghost">{d.hostLabel}</span> : null}
-                    {isPay && d.priceCents ? (
-                      <span className="badge ghost">{formatPriceFromCents(d.priceCents)}</span>
-                    ) : null}
-                    {d.badgeLabel ? <span className="badge ghost">{d.badgeLabel}</span> : null}
-                    {isThought ? (
-                      <span className="badge ghost">{(d.visibility ?? "public").toUpperCase()}</span>
-                    ) : null}
-                    {isThought && d.thoughtFormat ? (
-                      <span className="badge ghost">{d.thoughtFormat.toUpperCase()}</span>
-                    ) : null}
-                    {!isPay && d.fileName ? <span className="badge ghost">{d.fileName}</span> : null}
-                  </div>
-
-                  <div className="drop-actions">
-                    {showOpenLink ? (
-                      <a className="drop-open" href={d.url} target="_blank" rel="noreferrer">
-                        OPEN
-                      </a>
-                    ) : null}
-
-                    {isDoc && signedUrl ? (
-                      <button
-                        className="drop-mini"
-                        type="button"
-                        onClick={() => void downloadBoardDrop(d, signedUrl)}
-                        disabled={downloadBusyId === d.id}
-                      >
-                        {downloadBusyId === d.id ? "Downloading…" : "Download Drop"}
-                      </button>
-                    ) : null}
-
-                    {isMedia || isAudioMusic || (isThought && signedUrl) ? (
-                      <button className="drop-mini" onClick={() => openViewer(d.id)}>
-                        {isAudioMusic || d.mediaKind === "audio" ? "PLAY FULL" : "EXPAND"}
-                      </button>
-                    ) : null}
-
-                    {(isMedia ||
-                      isAudioDrop ||
-                      isDescriptDrop ||
-                      isDropbookSlide ||
-                      (isThought && (d.thoughtText || signedUrl))) &&
-                    !isPay &&
-                    !isDoc ? (
-                      <button
-                        className="drop-mini"
-                        type="button"
-                        onClick={() => void downloadBoardDrop(d, signedUrl)}
-                        disabled={downloadBusyId === d.id}
-                      >
-                        {downloadBusyId === d.id ? "Downloading…" : "Download Drop"}
-                      </button>
-                    ) : null}
-
-                    <button className="drop-mini" type="button" onClick={() => setCommentsDropId(d.id)}>
-                      Comment{commentCountByDrop[d.id] ? ` ${commentCountByDrop[d.id]}` : ""}
-                    </button>
-
-                    {!isMedia && !canEmbed && isLinky && d.url ? (
-                      <a className="drop-mini" href={d.url} target="_blank" rel="noreferrer">
-                        Open Link
-                      </a>
-                    ) : null}
-
-                    {(d.type === "YouTube" || kind === "youtube") && d.url ? (
-                      <a className="drop-mini" href={d.url} target="_blank" rel="noreferrer">
-                        Open Link
-                      </a>
-                    ) : null}
-                  </div>
-                </div>
-
-                {d.description && !isPay && !isDoc && !isDescriptDrop && !isDropbookSlide ? (
-                  <div className="drop-description">{d.description}</div>
-                ) : null}
-
-                {isThought && d.thoughtText && !isDescriptDrop && !isDropbookSlide ? (
-                  <div className="thought-body">{d.thoughtText}</div>
-                ) : null}
-
-                {isDropbookSlide ? (
-                  <DropbookSlideScreen title={d.title} src={signedUrl || d.url} />
-                ) : isAudioDrop ? (
-                  signedUrl ? (
-                    <VoiceDropSoundboard
-                      src={signedUrl}
-                      title={d.title}
-                      label={isThought ? "VOICE DROP" : "AUDIO DROP"}
-                      onReload={() =>
-                        refreshSignedUrl(storedMedia?.bucket, storedMedia?.storagePath)
-                      }
-                    />
-                  ) : (
-                    <div className="audio-drop-card">
-                      <div className="audio-drop-label">
-                        {isPay ? "PAY DROP AUDIO" : "FULL SONG"}
-                      </div>
-                      {signedUrl ? (
-                      <audio src={signedUrl} controls preload="metadata" />
-                      ) : (
-                        <div className="media-missing">
-                          <div className="media-missing-title">Audio preparing…</div>
-                          <div className="media-missing-sub">If this just uploaded, give it a moment.</div>
-                        </div>
-                      )}
-                    </div>
+          collectionActivity.map((item) => (
+            <ActivityCard
+              key={item.meta?.dropId || item.id}
+              item={item}
+              onRemove={(removedId) => {
+                setDrops((prev) =>
+                  prev.filter(
+                    (drop) =>
+                      drop.id !== removedId &&
+                      `collection_${drop.id}` !== removedId
                   )
-                ) : isThought && d.mediaKind === "image" ? (
-                  <div className="media-thumb natural-media thought-media-thumb" aria-label="Thought image preview">
-                    {signedUrl ? (
-                      <div className="drop-studio-media-frame">
-                        <img src={signedUrl} alt={d.title} />
-                        <DropStudioOverlay customizations={d.customizations} />
-                      </div>
-                    ) : (
-                      <div className="media-missing">
-                        <div className="media-missing-title">Thought image preparing…</div>
-                        <div className="media-missing-sub">If this just uploaded, give it a moment.</div>
-                      </div>
-                    )}
-                  </div>
-                ) : isMedia || isPay ? (
-                  <div
-                    className={`media-thumb ${isMedia ? "natural-media" : ""} ${isPay ? "pay-thumb" : ""}`}
-                    aria-label={isPay ? "Pay drop image" : "Vision drop preview"}
-                  >
-                    {signedUrl ? (
-                      <div className="drop-studio-media-frame">
-                        {d.mediaKind === "video" ? (
-                          <BoardFeedVideo src={signedUrl} />
-                        ) : (
-                          <img src={signedUrl} alt={d.title} />
-                        )}
-                        <DropStudioOverlay customizations={d.customizations} />
-                      </div>
-                    ) : (
-                      <div className="media-missing">
-                        <div className="media-missing-title">Vision media not available</div>
-                        <div className="media-missing-sub">
-                          If this just uploaded, refresh once. If it persists, check Storage policies.
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                ) : canEmbed ? (
-                  <div className={`embed-shell ${kind}`}>
-                    <iframe
-                      src={resolvedEmbedUrl!}
-                      title={d.title}
-                      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-                      allowFullScreen
-                      loading="lazy"
-                      referrerPolicy="strict-origin-when-cross-origin"
-                    />
-                  </div>
-                ) : isNews && d.url ? (
-                  <NewsDropMagazine
-                    url={d.url}
-                    headline={d.headline || d.previewTitle || d.title}
-                    source={d.hostLabel}
-                    description={d.previewDescription}
-                    images={Array.from(new Set([...(d.previewImages ?? []), linkCover].filter((item): item is string => Boolean(item))))}
-                  />
-                ) : isDescriptDrop ? (
-                  <DescriptDropScreen
-                    title={d.title}
-                    src={signedUrl || d.url}
-                    preview={d.thoughtText || d.description}
-                  />
-                ) : isDoc ? (
-                  <div className="doc-card">
-                    <div className="doc-row">
-                      <div className="doc-left">
-                        <div className="doc-name">{d.fileName ?? "Document"}</div>
-                        <div className="doc-meta">
-                          {d.fileSize ? `${Math.round(d.fileSize / 1024)} KB` : null}
-                          {d.mime ? ` • ${d.mime}` : null}
-                        </div>
-                      </div>
-                      {signedUrl ? (
-                        <a className="doc-open" href={signedUrl} target="_blank" rel="noreferrer">
-                          OPEN →
-                        </a>
-                      ) : (
-                        <span className="doc-wait">Preparing…</span>
-                      )}
-                    </div>
-
-                    {d.description ? <div className="doc-desc">{d.description}</div> : null}
-                  </div>
-                ) : d.url ? (
-                  <a className="link-card link-cover-card" href={d.url} target="_blank" rel="noreferrer">
-                    <div className="link-preview-art">
-                      {linkCover ? (
-                        <img
-                          className="link-preview-img"
-                          src={linkCover}
-                          alt=""
-                          loading="lazy"
-                          onError={(e) => {
-                            (e.currentTarget as HTMLImageElement).style.display = "none";
-                          }}
-                        />
-                      ) : null}
-                      <div className="link-preview-overlay" />
-                      <div className="link-preview-host">
-                        {fav ? <img className="newsFav" src={fav} alt="" /> : null}
-                        <span>{d.hostLabel ?? "LINK"}</span>
-                      </div>
-                      <div className="link-preview-copy">
-                        <div className="link-preview-label">Link Drop</div>
-                        <div className="link-preview-title">{linkTitle}</div>
-                        {linkDescription ? (
-                          <div className="link-preview-desc">{linkDescription}</div>
-                        ) : null}
-                      </div>
-                    </div>
-                    <div className="link-row">
-                      <div className="link-url">{d.url}</div>
-                      <span className="link-open">OPEN ORIGINAL →</span>
-                    </div>
-                  </a>
-                ) : null}
-
-                {isPay && d.description ? <div className="pay-desc">{d.description}</div> : null}
-
-                {isPay ? (
-                  <div className="pay-drop-footer">
-                    <PayOnBoardButton
-                      variant="collection"
-                      busy={payCheckoutBusyId === d.id}
-                      onClick={() => void openPayCheckout(d)}
-                    />
-                  </div>
-                ) : null}
-              </div>
-            );
-          })
+                );
+              }}
+            />
+          ))
         )}
       </div>
 
@@ -3162,7 +2936,7 @@ export default function DropTile() {
           width: 100%;
           max-width: 100%;
           min-width: 0;
-          overflow: hidden;
+          overflow: visible;
         }
 
         .drop-empty {

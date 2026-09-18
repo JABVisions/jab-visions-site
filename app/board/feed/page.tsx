@@ -160,10 +160,14 @@ function normalizeIncoming(x: any): BoardActivity | null {
   };
 }
 
-function isPrivateDropActivity(item: BoardActivity) {
-  if (item.meta?.visibility === "private") return true;
+function isHiddenPrivateDrop(item: BoardActivity, viewerId: string) {
   if (item.meta?.presence === true || item.meta?.source === "board_presence") return true;
-  return false;
+  if (item.meta?.visibility !== "private") return false;
+  if (!viewerId) return true;
+  return (
+    String(item.user_id || "") !== viewerId &&
+    String(item.meta?.recipientUserId || "") !== viewerId
+  );
 }
 
 async function fetchSupabaseActivity(opts: {
@@ -202,6 +206,7 @@ export default function HomeBoardFeedPage() {
 
   const [offset, setOffset] = useState(0);
   const [hasMore, setHasMore] = useState(true);
+  const [viewerUserId, setViewerUserId] = useState("");
 
   const kinds = useMemo<BoardActivityKind[] | undefined>(() => {
     return tab === "announcements" ? ["announcement"] : undefined;
@@ -233,6 +238,21 @@ export default function HomeBoardFeedPage() {
   }, []);
 
   useEffect(() => {
+    let alive = true;
+    void sb.auth
+      .getUser()
+      .then(({ data }) => {
+        if (alive) setViewerUserId(data.user?.id ?? "");
+      })
+      .catch(() => {
+        if (alive) setViewerUserId("");
+      });
+    return () => {
+      alive = false;
+    };
+  }, [sb]);
+
+  useEffect(() => {
     try {
       installBucketBrainBridge();
       seedForumsIfEmpty();
@@ -254,7 +274,7 @@ export default function HomeBoardFeedPage() {
         const scoped = (kinds?.length
           ? merged.filter((item) => kinds.includes(item.kind))
           : merged
-        ).filter((item) => !isPrivateDropActivity(item));
+        ).filter((item) => !isHiddenPrivateDrop(item, viewerUserId));
         setItems(
           (scoped.length ? scoped : visibleFallbackItems).slice(0, PAGE_SIZE)
         );
@@ -297,7 +317,7 @@ export default function HomeBoardFeedPage() {
         // Device-local caches are used only by syncFromLocal when this request fails.
         const nextItems = dedupeActivity(
           (cleaned.length ? cleaned : visibleFallbackItems).filter(
-            (item) => !isPrivateDropActivity(item)
+          (item) => !isHiddenPrivateDrop(item, viewerUserId)
           )
         );
 
@@ -328,13 +348,13 @@ export default function HomeBoardFeedPage() {
         onFeedUpdated as EventListener
       );
     };
-  }, [sb, tab, kinds]);
+  }, [sb, tab, kinds, viewerUserId]);
 
   useEffect(() => {
     const onNew = (e: any) => {
       const a = normalizeIncoming(e?.detail);
       if (!a) return;
-      if (isPrivateDropActivity(a)) return;
+      if (isHiddenPrivateDrop(a, viewerUserId)) return;
       if (tab === "announcements" && a.kind !== "announcement") return;
 
       setItems((prev) => {
@@ -346,8 +366,22 @@ export default function HomeBoardFeedPage() {
     const onUpdated = (e: any) => {
       const a = normalizeIncoming(e?.detail);
       if (!a) return;
-      if (isPrivateDropActivity(a)) return;
       if (tab === "announcements" && a.kind !== "announcement") return;
+      if (isHiddenPrivateDrop(a, viewerUserId)) {
+        setItems((prev) =>
+          prev.filter((p) => {
+            const meta = p.meta && typeof p.meta === "object" ? p.meta : null;
+            const nextMeta = a.meta && typeof a.meta === "object" ? a.meta : null;
+            return !(
+              p.id === a.id ||
+              (nextMeta?.dropId &&
+                (String(meta?.dropId || "") === String(nextMeta.dropId) ||
+                  String(meta?.originalDropId || "") === String(nextMeta.dropId)))
+            );
+          })
+        );
+        return;
+      }
 
       setItems((prev) => {
         const index = prev.findIndex((p) => {
@@ -414,6 +448,10 @@ export default function HomeBoardFeedPage() {
               mediaUrl: drop?.mediaUrl ?? meta?.mediaUrl ?? null,
               fileName: drop?.fileName ?? meta?.fileName ?? null,
               mime: drop?.mime ?? meta?.mime ?? null,
+              visibility:
+                drop?.visibility === "private" || drop?.visibility === "public"
+                  ? drop.visibility
+                  : meta?.visibility ?? "public",
               editedAt: Date.now(),
               preview: {
                 ...(meta?.preview && typeof meta.preview === "object" ? meta.preview : {}),
@@ -425,6 +463,7 @@ export default function HomeBoardFeedPage() {
             },
           };
         })
+        .filter((item) => !isHiddenPrivateDrop(item, viewerUserId))
       );
     };
 
@@ -436,7 +475,7 @@ export default function HomeBoardFeedPage() {
       window.removeEventListener("board:activity:updated", onUpdated as EventListener);
       window.removeEventListener("board:drop:updated", onDropUpdated as EventListener);
     };
-  }, [tab]);
+  }, [tab, viewerUserId]);
 
   useEffect(() => {
     const el = sentinelRef.current;
