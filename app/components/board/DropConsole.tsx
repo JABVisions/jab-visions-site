@@ -23,7 +23,7 @@ import {
 import { descriptDocToFile, type DescriptDoc } from "@/lib/board/descriptDocs";
 import { isDropbookSlideFile } from "@/lib/board/dropbookSlides";
 import type { ResolvedDropbookLink } from "@/lib/board/dropbookLink";
-import { classifyDropbookLinkUrl } from "@/lib/board/dropbookLink";
+import { classifyDropbookLinkUrl, studioLinkEmbedUrl, studioLinkPersistKind } from "@/lib/board/dropbookLink";
 import { makeEmbedByMode } from "@/lib/board/dropItem";
 import { checkUploadSize, resolveUploadContentType } from "@/lib/board/uploadLimits";
 
@@ -929,8 +929,10 @@ export default function DropConsole({
   }
 
   async function publishStudioLinkDrop(link: ResolvedDropbookLink) {
+    const persistKind = studioLinkPersistKind(link);
     const flavor: DropFlavor =
-      link.kind === "youtube" ? "youtube" : link.kind === "music" ? "music" : "link";
+      persistKind === "youtube" ? "youtube" : persistKind === "music" ? "music" : "link";
+    const embedUrl = studioLinkEmbedUrl(link) ?? null;
     const identity = readCurrentBoardIdentity();
     const dropId = newId(flavor);
     const titleText = link.title.trim() || `${DROP_FLAVOR_LABEL[flavor]} Drop`;
@@ -941,8 +943,8 @@ export default function DropConsole({
       title: link.title,
       description: link.description ?? null,
       image: link.image ?? null,
-      embedUrl: link.embedUrl ?? null,
-      type: link.kind === "youtube" ? "video" : "link",
+      embedUrl,
+      type: persistKind === "youtube" ? "video" : "link",
     };
 
     const res = await createActivity(sb, {
@@ -973,7 +975,7 @@ export default function DropConsole({
       type: profileDropType(flavor),
       createdAt: Date.now(),
       url: link.url,
-      embedUrl: link.embedUrl ?? null,
+      embedUrl,
       hostLabel: link.provider ?? null,
       previewTitle: link.title,
       previewDescription: link.description,

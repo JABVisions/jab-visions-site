@@ -100,7 +100,12 @@ import {
   type DropbookManifest,
   type DropbookSlide,
 } from "@/lib/board/dropbookSlides";
-import { resolveDropbookLink, type DropbookLinkKind, type ResolvedDropbookLink } from "@/lib/board/dropbookLink";
+import {
+  asStandaloneYouTubeDrop,
+  resolveDropbookLink,
+  type DropbookLinkKind,
+  type ResolvedDropbookLink,
+} from "@/lib/board/dropbookLink";
 
 type CaptureMode = "photo" | "video" | "audio" | "art" | "descript";
 type FacingMode = "user" | "environment";
@@ -1910,7 +1915,9 @@ export default function DropStudioStage({
     }
     const draft = dropbookLinkDraft.trim();
     if (!draft) {
-      flashSaveNote("Paste a YouTube, music, or web link");
+      flashSaveNote(
+        isDropbookMode ? "Paste a YouTube, music, or web link" : "Paste a YouTube link"
+      );
       return;
     }
 
@@ -1926,20 +1933,15 @@ export default function DropStudioStage({
           flashSaveNote("Couldn't post that link from here.");
           return;
         }
+        const youtubeDrop = asStandaloneYouTubeDrop(resolved);
         try {
-          await onLinkComplete(resolved);
+          await onLinkComplete(youtubeDrop);
         } catch {
           flashSaveNote("Couldn't post that link. Try again.");
           return;
         }
         setDropbookLinkDraft("");
-        flashSaveNote(
-          resolved.kind === "youtube"
-            ? "YouTube Drop posted ✦"
-            : resolved.kind === "music"
-              ? "Music Drop posted ✦"
-              : "Link Drop posted ✦"
-        );
+        flashSaveNote("YouTube Drop posted");
         onClose();
         return;
       }
@@ -2586,14 +2588,18 @@ export default function DropStudioStage({
                     type="url"
                     inputMode="url"
                     autoComplete="url"
-                    placeholder="Paste YouTube, music, or web link"
+                    placeholder={
+                      isDropbookMode
+                        ? "Paste YouTube, music, or web link"
+                        : "Paste a YouTube link"
+                    }
                     value={dropbookLinkDraft}
                     onChange={(event) => setDropbookLinkDraft(event.currentTarget.value)}
                     disabled={dropbookLinkBusy || (isDropbookMode && dropbookShelfFull)}
                     aria-label={
                       isDropbookMode
                         ? "Paste YouTube, music, or web link for Dropbook"
-                        : "Paste YouTube, music, or web link to post a Link Drop"
+                        : "Paste a YouTube link to post a YouTube Drop"
                     }
                   />
                 </label>

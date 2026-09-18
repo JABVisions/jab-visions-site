@@ -16,6 +16,7 @@ import VoiceDropSoundboard from "@/app/components/board/VoiceDropSoundboard";
 import type { DropCustomization } from "@/lib/board/dropCustomizations";
 import { descriptDocToFile, type DescriptDoc } from "@/lib/board/descriptDocs";
 import type { ResolvedDropbookLink } from "@/lib/board/dropbookLink";
+import { studioLinkEmbedUrl, studioLinkPersistKind } from "@/lib/board/dropbookLink";
 
 type DropRoute =
   | "board"
@@ -1769,16 +1770,19 @@ export default function DropPadOS({
   };
 
   const saveDropStudioLink = async (link: ResolvedDropbookLink) => {
+    const persistKind = studioLinkPersistKind(link);
+    const kind: AssetKind =
+      persistKind === "youtube" ? "youtube" : persistKind === "music" ? "music" : "link";
     const now = Date.now();
     const asset: AssetItem = {
       id: uid(),
-      kind: link.kind,
-      title: link.title.trim() || "Link Drop",
+      kind,
+      title: link.title.trim() || (kind === "youtube" ? "YouTube Drop" : "Link Drop"),
       description: link.description || "Created and sent from Drop Studio.",
       createdAt: now,
       payload: {
         url: link.url,
-        embedUrl: link.embedUrl,
+        embedUrl: studioLinkEmbedUrl(link),
         lifecycle: { phase: "sent", framedAt: now, sentAt: now },
         library: { isAsset: false, isPortfolio: false },
         origin: "drop-studio",

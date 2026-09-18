@@ -127,3 +127,32 @@ export async function resolveDropbookLink(raw: string): Promise<ResolvedDropbook
     chipLabel: chipLabelFor(kind, title),
   };
 }
+
+/**
+ * Standalone Studio LINK bar Posts always become YouTube Drops.
+ * Keeps the original url/title/preview; forces kind + YouTube embed.
+ * Dropbook shelf pages should keep classified kinds from resolveDropbookLink.
+ */
+export function asStandaloneYouTubeDrop(link: ResolvedDropbookLink): ResolvedDropbookLink {
+  return {
+    ...link,
+    kind: "youtube",
+    embedUrl: toYouTubeEmbed(link.url) || undefined,
+    chipLabel: chipLabelFor("youtube", link.title),
+  };
+}
+
+/** Persist as a YouTube Drop when the bar forced youtube kind or the URL is YouTube. */
+export function studioLinkPersistKind(link: ResolvedDropbookLink): DropbookLinkKind {
+  if (link.kind === "youtube" || isYouTubeDropUrl(link.url)) return "youtube";
+  if (link.kind === "music") return "music";
+  return "link";
+}
+
+/** YouTube Drops always use toYouTubeEmbed; other kinds keep their resolved embed. */
+export function studioLinkEmbedUrl(link: ResolvedDropbookLink): string | undefined {
+  if (studioLinkPersistKind(link) === "youtube") {
+    return toYouTubeEmbed(link.url) || link.embedUrl || undefined;
+  }
+  return link.embedUrl;
+}

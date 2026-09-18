@@ -37,7 +37,13 @@ import { PayOnBoardButton } from "./PayOnBoardButton";
 import ActivityCard from "./ActivityCard";
 import { isDropbookSlideFile } from "@/lib/board/dropbookSlides";
 import type { ResolvedDropbookLink } from "@/lib/board/dropbookLink";
-import { classifyDropbookLinkUrl, isStreamingEmbedUrl, musicEmbedFor } from "@/lib/board/dropbookLink";
+import {
+  classifyDropbookLinkUrl,
+  isStreamingEmbedUrl,
+  musicEmbedFor,
+  studioLinkEmbedUrl,
+  studioLinkPersistKind,
+} from "@/lib/board/dropbookLink";
 import { checkUploadSize, resolveUploadContentType } from "@/lib/board/uploadLimits";
 import { getCachedSignedMediaUrl, invalidateSignedMediaUrl } from "@/lib/board/signedMediaUrl";
 import {
@@ -1231,12 +1237,13 @@ export default function DropTile() {
   }
 
   async function addResolvedLinkDrop(link: ResolvedDropbookLink): Promise<boolean> {
+    const persistKind = studioLinkPersistKind(link);
     const type: DropType =
-      link.kind === "youtube" ? "YouTube" : link.kind === "music" ? "Music" : "Link";
+      persistKind === "youtube" ? "YouTube" : persistKind === "music" ? "Music" : "Link";
     const hostLabel =
-      link.kind === "youtube"
+      persistKind === "youtube"
         ? "YOUTUBE"
-        : link.kind === "music"
+        : persistKind === "music"
           ? (link.provider?.toUpperCase() || "MUSIC")
           : link.provider?.toUpperCase() || hostLabelFromUrl(link.url);
 
@@ -1246,7 +1253,7 @@ export default function DropTile() {
         title: link.title.trim() || "Untitled",
         type,
         url: link.url,
-        embedUrl: link.embedUrl ?? null,
+        embedUrl: studioLinkEmbedUrl(link) ?? null,
         hostLabel,
         previewTitle: link.title || undefined,
         previewDescription: link.description,
