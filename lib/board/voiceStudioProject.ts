@@ -1,7 +1,6 @@
 "use client";
 
 import {
-  applySessionSnapshot,
   snapshotSession,
   type AudioSession,
   type SessionEditSnapshot,
@@ -16,6 +15,7 @@ export type VoiceStudioClipFile = {
   key: string;
   name: string;
   type: string;
+  lastModified?: number;
   /** Legacy data-URL copies from early Voice Studio saves. */
   dataUrl?: string;
   /** Preferred: original clip bytes in IndexedDB. */
@@ -65,13 +65,18 @@ function dataUrlToFile(dataUrl: string, name: string, type: string): File | null
 }
 
 function clipFileFromStored(media: VoiceStudioClipFile, updatedAt: number): File | null {
+  const lastModified = media.lastModified || updatedAt;
   if (media.blob) {
     return new File([media.blob], media.name, {
       type: media.type || media.blob.type || "audio/wav",
-      lastModified: updatedAt,
+      lastModified,
     });
   }
-  if (media.dataUrl) return dataUrlToFile(media.dataUrl, media.name, media.type);
+  if (media.dataUrl) {
+    const file = dataUrlToFile(media.dataUrl, media.name, media.type);
+    if (!file) return null;
+    return new File([file], media.name, { type: file.type || media.type, lastModified });
+  }
   return null;
 }
 
@@ -160,7 +165,7 @@ function projectToSession(blob: VoiceStudioProjectBlob): AudioSession | null {
     })),
   };
   if (!sessionHasClips(shell)) return null;
-  return applySessionSnapshot(shell, blob.snapshot);
+  return shell;
 }
 
 /** Persist a multi-lane Voice Studio project alongside a Drop draft id. */
@@ -181,7 +186,8 @@ export async function saveVoiceStudioProject(
           key,
           name: clip.file.name,
           type: clip.file.type || "audio/wav",
-          blob: clip.file,
+          lastModified: clip.file.lastModified,
+          blob: clip.file.slice(0, clip.file.size, clip.file.type || "audio/wav"),
         });
       }
     }
@@ -203,7 +209,8 @@ export async function saveVoiceStudioProject(
     db.close();
     rememberActiveVoiceStudioDraft(draftId);
     return true;
-  } catch {
+  } catch (error) {
+    console.error("[VoiceStudio] auto-save failed", error);
     return false;
   }
 }

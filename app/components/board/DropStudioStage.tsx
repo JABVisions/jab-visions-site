@@ -1172,7 +1172,7 @@ export default function DropStudioStage({
       if (sessionHasClips(session) && session) {
         projectSaved = await saveVoiceStudioProject(draftIdRef.current, session);
       }
-      if (projectSaved || saved) {
+      if (projectSaved || (saved && !sessionHasClips(session))) {
         ensureVoiceStudioDraftCard(draftIdRef.current);
         rememberActiveVoiceStudioDraft(draftIdRef.current);
         lastSavedVoiceSignatureRef.current = voiceStudioEditSignature(session);
@@ -1180,11 +1180,21 @@ export default function DropStudioStage({
       }
       setVoiceAutoSaving(false);
       if (auto) {
-        if (!quiet && (saved || projectSaved)) flashSaveNote("Auto-saved to Drafts");
-        return saved || projectSaved;
+        if (!quiet && (projectSaved || (saved && !sessionHasClips(session)))) {
+          flashSaveNote("Auto-saved to Drafts");
+        } else if (!quiet && sessionHasClips(session) && !projectSaved) {
+          flashSaveNote("Couldn't auto-save this song");
+        }
+        return projectSaved || saved;
       }
-      flashSaveNote(saved || projectSaved ? "Saved to Drafts 🗂" : "Too large to save to Drafts");
-      return saved || projectSaved;
+      flashSaveNote(
+        projectSaved || saved
+          ? "Saved to Drafts 🗂"
+          : sessionHasClips(session)
+            ? "Couldn't auto-save this song"
+            : "Too large to save to Drafts"
+      );
+      return projectSaved || saved;
     },
     [flashSaveNote]
   );
