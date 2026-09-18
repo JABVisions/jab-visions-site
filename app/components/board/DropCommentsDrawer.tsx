@@ -9,12 +9,6 @@ import {
   syncDropComments,
   type DropComment,
 } from "@/lib/board/dropComments";
-import {
-  readBrain,
-  writeBrain,
-  type BucketEntry,
-  type BucketMemoryDrop,
-} from "@/lib/board/bucketBrain";
 import styles from "./DropCommentsDrawer.module.css";
 
 type Props = {
@@ -62,47 +56,6 @@ function formatTime(value: string) {
     hour: "numeric",
     minute: "2-digit",
   }).format(time);
-}
-
-function saveCommentToBucketBrain(comment: DropComment, dropTitle?: string) {
-  if (typeof window === "undefined") return;
-
-  const activityId = `comment:${comment.dropId}:${comment.remoteId || comment.id}`;
-  const item: BucketMemoryDrop = {
-    id: activityId,
-    created_at: comment.createdAt,
-    user_id: comment.userId ?? null,
-    kind: "drop_comment",
-    title: dropTitle ? `Comment on ${dropTitle}` : "Drop comment",
-    body: comment.body,
-    href: null,
-    image_url: comment.avatarUrl ?? null,
-    meta: {
-      dropId: comment.dropId,
-      commentId: comment.remoteId || comment.id,
-      reactionType: "comment",
-      source: "drop_comments",
-      username: comment.username,
-      displayName: comment.displayName,
-    },
-  };
-
-  const prev = readBrain();
-  const entry: BucketEntry = {
-    activityId,
-    savedAt: Date.now(),
-    item,
-  };
-  const nextPin = [
-    entry,
-    ...(prev.pin ?? []).filter((existing) => existing.activityId !== activityId),
-  ].slice(0, 240);
-
-  writeBrain({
-    ...prev,
-    pin: nextPin,
-    updatedAt: Date.now(),
-  });
 }
 
 export default function DropCommentsDrawer({
@@ -187,7 +140,6 @@ export default function DropCommentsDrawer({
       dropHref,
       dropImageUrl,
     });
-    saveCommentToBucketBrain(comment, dropTitle);
     setComments(readDropComments(dropId));
     setDraft("");
     setSyncNote(comment.remoteId ? "Comment synced to Supabase." : "Comment saved locally until Supabase is ready.");

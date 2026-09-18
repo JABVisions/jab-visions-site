@@ -26,6 +26,7 @@ import {
   simulateIncomingWave,
   getResonanceScore,
   waveBucketDrop,
+  isBucketCommentMemory,
   BUCKET_BRAIN_KEY,
   EVT_UPDATED,
   EVT_OPEN,
@@ -419,15 +420,16 @@ export default function DropsBucket({
       };
     }
     return {
-      pass: brain.pass.length,
-      pin: brain.pin.length,
-      push: brain.push.length,
+      pass: brain.pass.filter((entry) => !isBucketCommentMemory(entry)).length,
+      pin: brain.pin.filter((entry) => !isBucketCommentMemory(entry)).length,
+      push: brain.push.filter((entry) => !isBucketCommentMemory(entry)).length,
     };
   }, [brain, statsOverride]);
 
   const list = useMemo(() => {
     const raw = ((brain as any)[active] as BucketEntry[] | undefined) ?? [];
     return [...raw]
+      .filter((entry) => !isBucketCommentMemory(entry))
       .map((entry) => ({
         ...entry,
         resonanceScore: getResonanceScore(entry, active),
