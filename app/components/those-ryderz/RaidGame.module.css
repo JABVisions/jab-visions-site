@@ -257,8 +257,7 @@
 }
 
 .modal,
-.select,
-.lock {
+.select {
   position: absolute;
   inset: 0;
   z-index: 4;
@@ -267,6 +266,33 @@
   padding: 18px;
   background: rgba(3, 6, 8, 0.78);
   pointer-events: auto;
+}
+
+.lock {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  display: grid;
+  place-items: center;
+  place-content: center;
+  gap: 10px;
+  padding: 18px;
+  background: transparent;
+  pointer-events: none;
+}
+
+.lock button,
+.lock p {
+  pointer-events: auto;
+}
+
+.lock p {
+  max-width: 320px;
+  margin: 0;
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: rgba(4, 10, 8, 0.72);
+  text-align: center;
 }
 
 .select {
