@@ -11,11 +11,7 @@ import QuickActionsRemote, { type DropPadApp } from "@/app/components/board/Quic
 import DropPadOS from "@/app/components/board/DropPadOS.v3";
 
 import { supabaseBrowser } from "@/lib/supabase/browser";
-import {
-  readBoardProjects,
-  resolveBoardProjects,
-  writeBoardProjects,
-} from "@/lib/board/projects";
+import { syncResolvedProjectsToStorage } from "@/lib/board/projects";
 
 import { POWER_EVENT, readPower, togglePower, setPower } from "@/lib/board/powerBus";
 import { DROP_PAD_APP_EVENT, readDropPadApp, setDropPadApp } from "@/lib/board/dropPadNavBus";
@@ -92,12 +88,7 @@ export default function WorkPage() {
   useEffect(() => {
     if (typeof window === "undefined") return;
 
-    const stored = readBoardProjects();
-    const resolved = resolveBoardProjects();
-
-    if (resolved.length > stored.length) {
-      writeBoardProjects(resolved);
-    }
+    syncResolvedProjectsToStorage();
   }, []);
 
   const goHome = () => setDropPadApp("home");
