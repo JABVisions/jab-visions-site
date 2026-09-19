@@ -1,5 +1,6 @@
 'use client';
 
+import { ChevronLeft, ChevronRight } from 'lucide-react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -57,6 +58,8 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
   });
   const [intermissionLeft, setIntermissionLeft] = useState(0);
   const [coarse, setCoarse] = useState(false);
+  const [focus, setFocus] = useState(0);
+  const cardRefs = useRef<Array<HTMLButtonElement | null>>([]);
 
   const syncHud = useCallback((next: HudState) => {
     const prev = hudRef.current;
@@ -143,6 +146,38 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
     setPhase('playing');
     setPaused(false);
   };
+
+  const cycleFocus = useCallback((dir: number) => {
+    setFocus((index) => (index + dir + RYDER_ORDER.length) % RYDER_ORDER.length);
+  }, []);
+
+  useEffect(() => {
+    cardRefs.current[focus]?.scrollIntoView({
+      behavior: 'smooth',
+      inline: 'center',
+      block: 'nearest',
+    });
+  }, [focus]);
+
+  useEffect(() => {
+    if (selected) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'ArrowRight') {
+        e.preventDefault();
+        cycleFocus(1);
+      }
+      if (e.key === 'ArrowLeft') {
+        e.preventDefault();
+        cycleFocus(-1);
+      }
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        pick(RYDER_ORDER[focus]);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [selected, focus, cycleFocus]);
 
   const changeRyder = () => {
     engineRef.current?.dispose();
@@ -398,32 +433,80 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
                 melee until the signal crawls back.
               </span>
             </header>
-            <div className={styles.roster}>
-              {RYDER_ORDER.map((id) => {
-                const ryder = RYDERZ[id];
-                const colors = AURA[id];
-                return (
-                  <button
-                    key={id}
-                    type="button"
-                    className={styles.card}
-                    style={{ ['--aura' as string]: colors.aura, ['--aura-soft' as string]: colors.soft }}
-                    onClick={() => pick(id)}
-                  >
-                    <div className={styles.portrait}>
-                      <Image src={ryder.portrait} alt={ryder.name} fill unoptimized sizes="160px" />
-                    </div>
-                    <small>
-                      {ryder.role} · {ryder.title}
-                    </small>
-                    <h3>{ryder.name}</h3>
-                    <p>
-                      {ryder.weapon}. {ryder.ability.name}: {ryder.ability.description}
-                    </p>
-                  </button>
-                );
-              })}
+            <div className={styles.carousel}>
+              <button
+                type="button"
+                className={styles.carouselNav}
+                onClick={() => cycleFocus(-1)}
+                aria-label="Previous Ryder"
+              >
+                <ChevronLeft size={28} />
+              </button>
+              <div className={styles.viewport}>
+                <div className={styles.roster}>
+                  {RYDER_ORDER.map((id, index) => {
+                    const ryder = RYDERZ[id];
+                    const colors = AURA[id];
+                    const focused = index === focus;
+                    return (
+                      <button
+                        key={id}
+                        type="button"
+                        ref={(node) => {
+                          cardRefs.current[index] = node;
+                        }}
+                        className={`${styles.card} ${focused ? styles.cardFocused : ''}`}
+                        style={{ ['--aura' as string]: colors.aura, ['--aura-soft' as string]: colors.soft }}
+                        onClick={() => {
+                          if (focused) pick(id);
+                          else setFocus(index);
+                        }}
+                      >
+                        <div className={styles.portrait}>
+                          <Image src={ryder.portrait} alt={ryder.name} fill unoptimized sizes="220px" />
+                        </div>
+                        <small>
+                          {ryder.role} · {ryder.title}
+                        </small>
+                        <h3>{ryder.name}</h3>
+                        <p>
+                          {ryder.weapon}. {ryder.ability.name}: {ryder.ability.description}
+                        </p>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+              <button
+                type="button"
+                className={styles.carouselNav}
+                onClick={() => cycleFocus(1)}
+                aria-label="Next Ryder"
+              >
+                <ChevronRight size={28} />
+              </button>
             </div>
+            <div className={styles.dots} role="tablist" aria-label="Ryderz">
+              {RYDER_ORDER.map((id, index) => (
+                <button
+                  key={id}
+                  type="button"
+                  role="tab"
+                  aria-selected={index === focus}
+                  className={`${styles.dot} ${index === focus ? styles.dotActive : ''}`}
+                  style={{ ['--aura' as string]: AURA[id].aura }}
+                  onClick={() => setFocus(index)}
+                  aria-label={RYDERZ[id].name}
+                />
+              ))}
+            </div>
+            <button
+              type="button"
+              className={styles.dropIn}
+              onClick={() => pick(RYDER_ORDER[focus])}
+            >
+              Drop in as {RYDERZ[RYDER_ORDER[focus]].name}
+            </button>
           </div>
         </div>
       )}
