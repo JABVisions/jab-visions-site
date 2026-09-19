@@ -16,23 +16,6 @@ export const DROP_PAD_PROJECT_DROPS_STORAGE_KEYS: readonly string[] = [
 const PROJECT_KIND_RE =
   /^(project|project_drop|casting|casting_call|crew|crew_call|gig|audition)$/i;
 
-const MEDIA_OR_THOUGHT_KIND = new Set([
-  "media",
-  "music",
-  "youtube",
-  "link",
-  "doc",
-  "note",
-  "thought",
-  "vision_drop",
-  "music_drop",
-  "youtube_drop",
-  "doc_drop",
-  "link_drop",
-  "note_drop",
-  "work_thought",
-]);
-
 const ASSET_OR_PORTFOLIO_SOURCE_RE =
   /jab_drop_pad_assets|jab_drop_pad_portfolio|portfolio_drops|board_assets/i;
 
@@ -152,19 +135,12 @@ export function isStoredNotebookProject(project: {
   if (
     source === "work_board" ||
     source === "project_notebook" ||
-    source === "drop_pad_projects"
+    source === "drop_pad_projects" ||
+    source === "universal_drop"
   ) {
     return true;
   }
-  if (source === "universal_drop") return true;
-  if (projectType === "project" || projectType === "project_drop") return true;
   if (isDropPadProjectStorageKey(sourceRaw)) return true;
-
-  // Legacy project rooms in board-projects storage (no source stamp).
-  // Keep production-style types; drop media/feed leftovers.
-  if (!source && projectType && !MEDIA_OR_THOUGHT_KIND.has(projectType)) {
-    return true;
-  }
 
   return false;
 }

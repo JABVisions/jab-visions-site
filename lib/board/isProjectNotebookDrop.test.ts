@@ -162,4 +162,21 @@ assert(
   "work thoughts persisted into board projects must be pruned"
 );
 
+assert(
+  !isStoredNotebookProject({
+    id: "local_status_drop",
+    source: "board_drops_storage",
+    projectType: "Project",
+  }),
+  "generic board drops defaulting to projectType Project must be pruned"
+);
+
+assert(
+  !isStoredNotebookProject({
+    id: "uuid-board-drop",
+    projectType: "Project",
+  }),
+  "unsourced default Project tiles from the old greedy matcher must be pruned"
+);
+
 console.log("isProjectNotebookDrop tests passed");
