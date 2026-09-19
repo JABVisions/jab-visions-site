@@ -159,23 +159,37 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
   }, [focus]);
 
   useEffect(() => {
-    if (selected) return;
+    const isScrollKey = (e: KeyboardEvent) =>
+      e.code === 'ArrowUp' ||
+      e.code === 'ArrowDown' ||
+      e.code === 'ArrowLeft' ||
+      e.code === 'ArrowRight' ||
+      e.code === 'Space' ||
+      e.code === 'PageUp' ||
+      e.code === 'PageDown' ||
+      e.code === 'Home' ||
+      e.code === 'End';
+
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'ArrowRight') {
-        e.preventDefault();
-        cycleFocus(1);
+      const tag = (e.target as HTMLElement | null)?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+      if (!selected) {
+        if (e.key === 'ArrowRight') {
+          e.preventDefault();
+          cycleFocus(1);
+        } else if (e.key === 'ArrowLeft') {
+          e.preventDefault();
+          cycleFocus(-1);
+        } else if (isScrollKey(e)) {
+          e.preventDefault();
+        }
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          pick(RYDER_ORDER[focus]);
+        }
+        return;
       }
-      if (e.key === 'ArrowLeft') {
-        e.preventDefault();
-        cycleFocus(-1);
-      }
-      if (e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key === ' ') {
-        e.preventDefault();
-      }
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        pick(RYDER_ORDER[focus]);
-      }
+      if (isScrollKey(e)) e.preventDefault();
     };
     window.addEventListener('keydown', onKey, { capture: true });
     return () => window.removeEventListener('keydown', onKey, { capture: true });
