@@ -8,6 +8,7 @@ import {
   MAX_ALIVE_HOSTS,
   MELEE_ARC,
   MELEE_RANGE,
+  MOVE_KEYS,
   PLAYER_RADIUS,
   RYDERZ,
   composeRound,
@@ -15,6 +16,7 @@ import {
   roundScaling,
   upgradeCost,
   UPGRADES,
+  type AbilityId,
   type EnemyKind,
   type RyderId,
   type RyderSpec,
@@ -39,11 +41,13 @@ export interface HudState {
   aura: number;
   maxAura: number;
   burnout: boolean;
-  abilityName: string;
-  abilityReady: boolean;
-  abilityCooldown: number;
-  abilityDuration: number;
-  abilityMax: number;
+  moves: Array<{
+    key: string;
+    name: string;
+    ready: boolean;
+    cooldown: number;
+    duration: number;
+  }>;
   round: number;
   remaining: number;
   points: number;
@@ -76,6 +80,7 @@ interface Host {
   knock: THREE.Vector3;
   points: number;
   summon: number;
+  stun: number;
 }
 
 interface Bolt {
@@ -127,7 +132,7 @@ export class RaidEngine {
   private lookAcc = { x: 0, y: 0 };
   private fireHeld = false;
   private meleeQueued = false;
-  private abilityQueued = false;
+  private queuedMoves = [false, false, false];
   private pointerLocked = false;
 
   private spec: RyderSpec = RYDERZ.rubi;
@@ -144,8 +149,8 @@ export class RaidEngine {
   private fireCd = 0;
   private meleeCd = 0;
   private meleeT = 0;
-  private abilityCd = 0;
-  private abilityT = 0;
+  private moveCd = [0, 0, 0];
+  private moveT = [0, 0, 0];
   private iframes = 0;
   private anim = 0;
   private points = 0;
@@ -218,8 +223,9 @@ export class RaidEngine {
     this.fireCd = 0;
     this.meleeCd = 0;
     this.meleeT = 0;
-    this.abilityCd = 0;
-    this.abilityT = 0;
+    this.moveCd = [0, 0, 0];
+    this.moveT = [0, 0, 0];
+    this.queuedMoves = [false, false, false];
     this.iframes = 0;
     this.pos.set(9, 0, 11);
     this.yaw = Math.PI * 0.85;
@@ -273,8 +279,9 @@ export class RaidEngine {
     this.meleeQueued = true;
   }
 
-  queueAbility() {
-    this.abilityQueued = true;
+  queueAbility(slot = 1) {
+    const i = Math.max(0, Math.min(2, slot));
+    this.queuedMoves[i] = true;
   }
 
   buyUpgrade(id: UpgradeId) {
@@ -357,7 +364,9 @@ export class RaidEngine {
     const tag = (e.target as HTMLElement | null)?.tagName;
     if (tag === 'INPUT' || tag === 'TEXTAREA') return;
     this.keys.add(e.key.toLowerCase());
-    if (e.key === 'e' || e.key === 'E') this.abilityQueued = true;
+    if (e.key === 'q' || e.key === 'Q' || e.key === '1') this.queuedMoves[0] = true;
+    if (e.key === 'e' || e.key === 'E' || e.key === '2') this.queuedMoves[1] = true;
+    if (e.key === 'r' || e.key === 'R' || e.key === '3') this.queuedMoves[2] = true;
     if (e.key === 'f' || e.key === 'F' || e.code === 'Space') {
       e.preventDefault();
       this.meleeQueued = true;
@@ -408,12 +417,14 @@ export class RaidEngine {
 
     this.fireCd = Math.max(0, this.fireCd - dt);
     this.meleeCd = Math.max(0, this.meleeCd - dt);
-    this.abilityCd = Math.max(0, this.abilityCd - dt);
     this.iframes = Math.max(0, this.iframes - dt);
     if (this.meleeT > 0) this.meleeT = Math.max(0, this.meleeT - dt * 3.4);
-    if (this.abilityT > 0) {
-      this.abilityT = Math.max(0, this.abilityT - dt);
-      if (this.abilityT <= 0) this.endAbility();
+    for (let i = 0; i < 3; i += 1) {
+      this.moveCd[i] = Math.max(0, this.moveCd[i] - dt);
+      if (this.moveT[i] > 0) {
+        this.moveT[i] = Math.max(0, this.moveT[i] - dt);
+        if (this.moveT[i] <= 0) this.endMove(i);
+      }
     }
     if (this.bannerT > 0) {
       this.bannerT = Math.max(0, this.bannerT - dt);
@@ -422,9 +433,11 @@ export class RaidEngine {
 
     this.updateAura(dt);
     this.updatePlayerMove(dt, time);
-    if (this.abilityQueued) {
-      this.abilityQueued = false;
-      this.tryAbility();
+    for (let i = 0; i < 3; i += 1) {
+      if (this.queuedMoves[i]) {
+        this.queuedMoves[i] = false;
+        this.tryMove(i);
+      }
     }
     if (this.meleeQueued) {
       this.meleeQueued = false;
@@ -444,7 +457,7 @@ export class RaidEngine {
       this.spec.auraRegen +
       this.upgrades.capacity * 1.2 +
       (this.phase === 'intermission' ? 6 : 0);
-    const using = this.fireHeld || this.abilityT > 0;
+    const using = this.fireHeld || this.moveT.some((t) => t > 0);
     const rate = this.burnout ? regen * 0.42 : using ? regen * 0.18 : regen;
     this.aura = Math.min(this.maxAura, this.aura + rate * dt);
     if (this.burnout && this.aura >= this.maxAura * BURNOUT_RECOVERY) {
@@ -458,7 +471,6 @@ export class RaidEngine {
     if (this.aura <= 0.01) {
       this.aura = 0;
       this.burnout = true;
-      this.endAbility();
       this.particles.emit(this.muzzle(), 0x8899aa, 18, { speed: 4, size: 0.28, life: 0.45, up: 0.4 });
     }
   }
@@ -475,8 +487,8 @@ export class RaidEngine {
 
   private updatePlayerMove(dt: number, time: number) {
     if (!this.player) return;
-    const overdrive = this.spec.ability.id === 'overdrive' && this.abilityT > 0;
-    const phased = this.spec.ability.id === 'phase' && this.abilityT > 0;
+    const overdrive = this.isActive('overdrive');
+    const phased = this.isActive('phase');
     const speed = this.spec.speed * (overdrive ? 1.85 : 1) * (this.burnout ? 0.82 : 1);
 
     let x = this.moveAxis.x;
@@ -528,7 +540,7 @@ export class RaidEngine {
     else poseAim(this.player.humanoid, this.pitch);
 
     if (this.shield) {
-      this.shield.visible = this.spec.ability.id === 'forcefield' && this.abilityT > 0;
+      this.shield.visible = this.isActive('forcefield');
       this.shield.position.copy(this.pos).setY(1.1);
       this.shield.rotation.y = time * 1.4;
       const pulse = 1 + Math.sin(time * 8) * 0.04;
@@ -553,7 +565,7 @@ export class RaidEngine {
       this.spendAura(this.aura);
       return;
     }
-    const overdrive = this.spec.ability.id === 'overdrive' && this.abilityT > 0;
+    const overdrive = this.isActive('overdrive');
     const rate = this.spec.fireRate * (overdrive ? 1.85 : 1);
     this.fireCd = 1 / rate;
     this.spendAura(volleyCost);
@@ -607,19 +619,35 @@ export class RaidEngine {
     }
   }
 
-  private tryAbility() {
-    if (!this.player || this.burnout || this.abilityCd > 0 || this.abilityT > 0) return;
-    const cost = this.spec.ability.auraCost;
-    if (this.aura < cost) return;
-    this.spendAura(cost);
-    this.abilityCd = this.spec.ability.cooldown;
-    this.abilityT = this.spec.ability.duration;
-    const id = this.spec.ability.id;
-    if (id === 'duplicate') this.spawnClones();
+  private isActive(id: AbilityId) {
+    return this.spec.moves.some((move, i) => move.id === id && this.moveT[i] > 0);
+  }
+
+  private tryMove(slot: number) {
+    if (!this.player || this.burnout) return;
+    const move = this.spec.moves[slot];
+    if (!move || this.moveCd[slot] > 0) return;
+    if (move.duration > 0 && this.moveT[slot] > 0) return;
+    if (this.aura < move.auraCost) return;
+    this.spendAura(move.auraCost);
+    this.moveCd[slot] = move.cooldown;
+    this.moveT[slot] = move.duration;
+    const id = move.id;
+    if (id === 'bladeFan') this.fireSpread(5, 0.22, 1.2);
+    if (id === 'duplicate') this.spawnClones([-1, 1]);
+    if (id === 'envyPulse') this.pulse(6.6, 24, -8);
+    if (id === 'shockwave') this.pulse(6.2, 20, 11);
+    if (id === 'prideDash') this.prideDash();
+    if (id === 'cleave') this.cleave();
     if (id === 'blink') {
-      this.abilityT = 0;
+      this.moveT[slot] = 0;
       this.blink();
     }
+    if (id === 'greedSiphon') this.greedSiphon();
+    if (id === 'lift') this.liftHosts();
+    if (id === 'heartbreak') this.pulse(8.8, 38, 6);
+    if (id === 'decoy') this.spawnClones([0]);
+    if (id === 'dartStorm') this.fireSpread(10, 0.32, 0.85);
     this.particles.emit(this.pos.clone().setY(1.1), this.spec.color, 28, {
       speed: 9,
       size: 0.32,
@@ -628,10 +656,104 @@ export class RaidEngine {
     });
   }
 
-  private endAbility() {
-    this.abilityT = 0;
-    this.clearClones();
-    if (this.player) setHumanoidOpacity(this.player.humanoid, 1);
+  private endMove(slot: number) {
+    const id = this.spec.moves[slot]?.id;
+    this.moveT[slot] = 0;
+    if (id === 'duplicate' || id === 'decoy') this.clearClones();
+    if (id === 'phase' && this.player) setHumanoidOpacity(this.player.humanoid, 1);
+  }
+
+  private endAllMoves() {
+    for (let i = 0; i < 3; i += 1) this.endMove(i);
+  }
+
+  private fireSpread(count: number, spread: number, damageMul: number) {
+    this.lookDir(_look);
+    _right.set(Math.cos(this.yaw), 0, -Math.sin(this.yaw));
+    const origin = this.muzzle();
+    const dmg = this.shotDamage() * damageMul;
+    for (let i = 0; i < count; i += 1) {
+      const t = count === 1 ? 0 : i / (count - 1) - 0.5;
+      const dir = _tmp.copy(_look).addScaledVector(_right, t * spread * 6).normalize();
+      this.spawnBolt(origin, dir, dmg, true, this.spec.color, this.spec.projectileSpeed);
+    }
+  }
+
+  private pulse(radius: number, damage: number, knock: number) {
+    for (const host of [...this.hosts]) {
+      const dx = host.pos.x - this.pos.x;
+      const dz = host.pos.z - this.pos.z;
+      const dist = Math.hypot(dx, dz);
+      if (dist > radius + host.radius) continue;
+      _tmp.set(dx, 0, dz);
+      if (_tmp.lengthSq() < 0.0001) _tmp.set(Math.sin(this.yaw), 0, Math.cos(this.yaw));
+      _tmp.normalize();
+      this.hurtHost(host, damage, knock < 0 ? _tmp.multiplyScalar(-1) : _tmp);
+      host.knock.multiplyScalar(Math.abs(knock) / 8);
+    }
+  }
+
+  private prideDash() {
+    this.lookDir(_look);
+    _look.y = 0;
+    if (_look.lengthSq() < 0.01) _look.set(Math.sin(this.yaw), 0, Math.cos(this.yaw));
+    _look.normalize();
+    const hit = new Set<Host>();
+    for (let s = 0; s < 9; s += 0.55) {
+      this.pos.addScaledVector(_look, 0.55);
+      this.pos.x = clamp(this.pos.x, -BOUNDARY, BOUNDARY);
+      this.pos.z = clamp(this.pos.z, -BOUNDARY, BOUNDARY);
+      resolveCircle(this.pos, PLAYER_RADIUS, this.world.obstacles);
+      for (const host of this.hosts) {
+        if (hit.has(host)) continue;
+        const d = Math.hypot(host.pos.x - this.pos.x, host.pos.z - this.pos.z);
+        if (d < host.radius + 1.35) {
+          hit.add(host);
+          this.hurtHost(host, 26, _look);
+        }
+      }
+    }
+    this.iframes = Math.max(this.iframes, 0.28);
+  }
+
+  private cleave() {
+    this.meleeT = 1;
+    _fwd.set(Math.sin(this.yaw), 0, Math.cos(this.yaw));
+    const dmg = this.meleeDamage() * 1.45;
+    for (const host of this.hosts) {
+      const dx = host.pos.x - this.pos.x;
+      const dz = host.pos.z - this.pos.z;
+      const dist = Math.hypot(dx, dz);
+      if (dist > 3.5 + host.radius) continue;
+      const ang = Math.atan2(dx, dz);
+      let diff = ang - this.yaw;
+      while (diff > Math.PI) diff -= Math.PI * 2;
+      while (diff < -Math.PI) diff += Math.PI * 2;
+      if (Math.abs(diff) > 1.25) continue;
+      this.hurtHost(host, dmg, _fwd);
+    }
+  }
+
+  private greedSiphon() {
+    let stolen = 0;
+    for (const host of [...this.hosts]) {
+      const dist = Math.hypot(host.pos.x - this.pos.x, host.pos.z - this.pos.z);
+      if (dist > 5.4 + host.radius) continue;
+      _tmp.set(host.pos.x - this.pos.x, 0, host.pos.z - this.pos.z).normalize();
+      this.hurtHost(host, 18, _tmp);
+      stolen += 9;
+    }
+    this.aura = Math.min(this.maxAura, this.aura + stolen);
+    if (stolen > 0 && this.burnout && this.aura >= this.maxAura * BURNOUT_RECOVERY) {
+      this.burnout = false;
+    }
+  }
+
+  private liftHosts() {
+    for (const host of this.hosts) {
+      const dist = Math.hypot(host.pos.x - this.pos.x, host.pos.z - this.pos.z);
+      if (dist < 7.2 + host.radius) host.stun = Math.max(host.stun, 2.6);
+    }
   }
 
   private blink() {
@@ -661,9 +783,9 @@ export class RaidEngine {
     this.iframes = Math.max(this.iframes, 0.25);
   }
 
-  private spawnClones() {
+  private spawnClones(sides: number[] = [-1, 1]) {
     this.clearClones();
-    for (const side of [-1, 1]) {
+    for (const side of sides) {
       const fighter = buildRyder(this.spec, { clone: true });
       this.scene.add(fighter.humanoid.group);
       this.clones.push({ fighter, fireCd: 0.15, side });
@@ -772,12 +894,13 @@ export class RaidEngine {
       knock: new THREE.Vector3(),
       points: spec.points,
       summon: 6,
+      stun: 0,
     });
   }
 
   private updateHosts(dt: number, time: number) {
-    const phased = this.spec.ability.id === 'phase' && this.abilityT > 0;
-    const shielded = this.spec.ability.id === 'forcefield' && this.abilityT > 0;
+    const phased = this.isActive('phase');
+    const shielded = this.isActive('forcefield');
 
     for (let i = 0; i < this.hosts.length; i += 1) {
       for (let j = i + 1; j < this.hosts.length; j += 1) {
@@ -802,6 +925,16 @@ export class RaidEngine {
       host.hit = Math.max(0, host.hit - dt);
       host.knock.multiplyScalar(Math.max(0, 1 - dt * 6));
       host.anim += dt * (6 + host.speed);
+      host.stun = Math.max(0, host.stun - dt);
+
+      if (host.stun > 0) {
+        host.fighter.humanoid.group.position.copy(host.pos);
+        host.fighter.humanoid.group.position.y = Math.min(1.5, host.stun * 0.7);
+        animateHumanoid(host.fighter.humanoid, host.anim, 0.12, time);
+        if (host.hit > 0) flashEmissive(host.fighter.humanoid, 0xffffff, host.hit * 2.4);
+        else flashEmissive(host.fighter.humanoid, 0x66cfff, 0.45);
+        continue;
+      }
 
       let tx = this.pos.x;
       let tz = this.pos.z;
@@ -936,7 +1069,7 @@ export class RaidEngine {
   }
 
   private updateBolts(dt: number) {
-    const shielded = this.spec.ability.id === 'forcefield' && this.abilityT > 0;
+    const shielded = this.isActive('forcefield');
     for (let i = this.bolts.length - 1; i >= 0; i -= 1) {
       const bolt = this.bolts[i];
       bolt.life -= dt;
@@ -991,7 +1124,7 @@ export class RaidEngine {
   }
 
   private shotDamage() {
-    const phased = this.spec.ability.id === 'phase' && this.abilityT > 0;
+    const phased = this.isActive('phase');
     return this.spec.damage * (1 + 0.15 * this.upgrades.signal) * (phased ? 1.4 : 1);
   }
 
@@ -1061,11 +1194,13 @@ export class RaidEngine {
       aura: this.aura,
       maxAura: this.maxAura,
       burnout: this.burnout,
-      abilityName: this.spec.ability.name,
-      abilityReady: !this.burnout && this.abilityCd <= 0 && this.aura >= this.spec.ability.auraCost,
-      abilityCooldown: this.abilityCd,
-      abilityDuration: this.abilityT,
-      abilityMax: this.spec.ability.duration || this.spec.ability.cooldown,
+      moves: this.spec.moves.map((move, i) => ({
+        key: MOVE_KEYS[i],
+        name: move.name,
+        ready: !this.burnout && this.moveCd[i] <= 0 && this.aura >= move.auraCost,
+        cooldown: this.moveCd[i],
+        duration: this.moveT[i],
+      })),
       round: this.round,
       remaining: this.queue.length + this.hosts.length,
       points: this.points,

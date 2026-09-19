@@ -173,10 +173,38 @@
 }
 
 .ability {
-  min-width: 150px;
+  min-width: 118px;
   padding: 10px 12px;
   border-radius: 14px;
-  text-align: right;
+  text-align: left;
+}
+
+.moveRow {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.moveList {
+  display: grid;
+  gap: 4px;
+  margin: 2px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.moveList li {
+  color: rgba(228, 239, 232, 0.72);
+  font-size: 0.78rem;
+  line-height: 1.35;
+}
+
+.moveList strong {
+  margin-right: 6px;
+  color: var(--aura);
+  font: 800 0.62rem/1 monospace;
+  letter-spacing: 0.08em;
 }
 
 .ability b {

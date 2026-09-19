@@ -1,10 +1,30 @@
 export type RyderId = 'rubi' | 'leo' | 'aaron' | 'zoe' | 'keven';
 
-export type AbilityId = 'duplicate' | 'overdrive' | 'blink' | 'forcefield' | 'phase';
+export type AbilityId =
+  | 'bladeFan'
+  | 'duplicate'
+  | 'envyPulse'
+  | 'shockwave'
+  | 'overdrive'
+  | 'prideDash'
+  | 'cleave'
+  | 'blink'
+  | 'greedSiphon'
+  | 'lift'
+  | 'forcefield'
+  | 'heartbreak'
+  | 'decoy'
+  | 'phase'
+  | 'dartStorm';
+
+export type MoveKey = 'Q' | 'E' | 'R';
+
+export const MOVE_KEYS: MoveKey[] = ['Q', 'E', 'R'];
 
 export interface AbilitySpec {
   id: AbilityId;
   name: string;
+  key: MoveKey;
   description: string;
   auraCost: number;
   cooldown: number;
@@ -37,7 +57,7 @@ export interface RyderSpec {
   auraRegen: number;
   meleeDamage: number;
   meleeRate: number;
-  ability: AbilitySpec;
+  moves: [AbilitySpec, AbilitySpec, AbilitySpec];
 }
 
 export const ARENA_HALF = 30;
@@ -74,15 +94,36 @@ export const RYDERZ: Record<RyderId, RyderSpec> = {
     auraRegen: 7,
     meleeDamage: 26,
     meleeRate: 2.2,
-    ability: {
-      id: 'duplicate',
-      name: 'Duplication',
-      description:
-        'Split into two echo-selves for six seconds. They fight beside you and fire at the nearest host without draining your aura.',
-      auraCost: 38,
-      cooldown: 12,
-      duration: 6,
-    },
+    moves: [
+      {
+        id: 'bladeFan',
+        name: 'Light Blades',
+        key: 'Q',
+        description: 'Fan red light blades into a cone. Cheap, sharp, and fast.',
+        auraCost: 16,
+        cooldown: 4,
+        duration: 0,
+      },
+      {
+        id: 'duplicate',
+        name: 'Duplication',
+        key: 'E',
+        description:
+          'Split into two echo-selves for six seconds. They fight beside you without draining your aura.',
+        auraCost: 38,
+        cooldown: 12,
+        duration: 6,
+      },
+      {
+        id: 'envyPulse',
+        name: 'Envy Pulse',
+        key: 'R',
+        description: 'An empathic burst that wounds nearby hosts and yanks them toward you.',
+        auraCost: 32,
+        cooldown: 10,
+        duration: 0,
+      },
+    ],
   },
   leo: {
     id: 'leo',
@@ -107,15 +148,36 @@ export const RYDERZ: Record<RyderId, RyderSpec> = {
     auraRegen: 8,
     meleeDamage: 32,
     meleeRate: 3,
-    ability: {
-      id: 'overdrive',
-      name: 'Overdrive',
-      description:
-        'Kinetic burst. Near-double speed and fire rate for four seconds. Hosts you run through get launched.',
-      auraCost: 34,
-      cooldown: 10,
-      duration: 4,
-    },
+    moves: [
+      {
+        id: 'shockwave',
+        name: 'Kinetic Crack',
+        key: 'Q',
+        description: 'Stomp a shockwave that knocks hosts off their feet.',
+        auraCost: 18,
+        cooldown: 5,
+        duration: 0,
+      },
+      {
+        id: 'overdrive',
+        name: 'Overdrive',
+        key: 'E',
+        description:
+          'Kinetic burst. Near-double speed and fire rate for four seconds. Hosts you run through get launched.',
+        auraCost: 34,
+        cooldown: 10,
+        duration: 4,
+      },
+      {
+        id: 'prideDash',
+        name: 'Pride Rush',
+        key: 'R',
+        description: 'Dash through the line. Anything in the path eats a spiked knuckle.',
+        auraCost: 28,
+        cooldown: 8,
+        duration: 0,
+      },
+    ],
   },
   aaron: {
     id: 'aaron',
@@ -140,15 +202,36 @@ export const RYDERZ: Record<RyderId, RyderSpec> = {
     auraRegen: 6.5,
     meleeDamage: 40,
     meleeRate: 1.8,
-    ability: {
-      id: 'blink',
-      name: 'Shadow Step',
-      description:
-        'Teleport toward your aim. The shadow you leave behind detonates on arrival and staggers nearby hosts.',
-      auraCost: 24,
-      cooldown: 5,
-      duration: 0,
-    },
+    moves: [
+      {
+        id: 'cleave',
+        name: 'Axe Cleave',
+        key: 'Q',
+        description: 'A wide black-aura sweep. Hits everything in front of you.',
+        auraCost: 14,
+        cooldown: 3.5,
+        duration: 0,
+      },
+      {
+        id: 'blink',
+        name: 'Shadow Step',
+        key: 'E',
+        description:
+          'Teleport toward your aim. The shadow you leave behind detonates on arrival and staggers nearby hosts.',
+        auraCost: 24,
+        cooldown: 5,
+        duration: 0,
+      },
+      {
+        id: 'greedSiphon',
+        name: 'Greed Vault',
+        key: 'R',
+        description: 'Rip aura out of nearby hosts. They bleed. You refill.',
+        auraCost: 22,
+        cooldown: 9,
+        duration: 0,
+      },
+    ],
   },
   zoe: {
     id: 'zoe',
@@ -173,15 +256,36 @@ export const RYDERZ: Record<RyderId, RyderSpec> = {
     auraRegen: 7.5,
     meleeDamage: 22,
     meleeRate: 2.2,
-    ability: {
-      id: 'forcefield',
-      name: 'Force Field',
-      description:
-        'Raise a blue field for five seconds. It blocks every hit, burns incoming throws, and shoves hosts off you.',
-      auraCost: 42,
-      cooldown: 13,
-      duration: 5,
-    },
+    moves: [
+      {
+        id: 'lift',
+        name: 'Levitate',
+        key: 'Q',
+        description: 'Lift nearby hosts off the ground. They hang, helpless, for a few seconds.',
+        auraCost: 20,
+        cooldown: 7,
+        duration: 0,
+      },
+      {
+        id: 'forcefield',
+        name: 'Force Field',
+        key: 'E',
+        description:
+          'Raise a blue field for five seconds. It blocks every hit, burns incoming throws, and shoves hosts off you.',
+        auraCost: 42,
+        cooldown: 13,
+        duration: 5,
+      },
+      {
+        id: 'heartbreak',
+        name: 'Heartbreak',
+        key: 'R',
+        description: 'A wide blue detonation. Desire as a weapon.',
+        auraCost: 36,
+        cooldown: 12,
+        duration: 0,
+      },
+    ],
   },
   keven: {
     id: 'keven',
@@ -206,15 +310,36 @@ export const RYDERZ: Record<RyderId, RyderSpec> = {
     auraRegen: 7,
     meleeDamage: 24,
     meleeRate: 2.6,
-    ability: {
-      id: 'phase',
-      name: 'Phantom Phase',
-      description:
-        'Vanish for four and a half seconds. Hosts lose you, you slip through them, and your darts hit harder.',
-      auraCost: 36,
-      cooldown: 11,
-      duration: 4.5,
-    },
+    moves: [
+      {
+        id: 'decoy',
+        name: 'Afterimage',
+        key: 'Q',
+        description: 'Leave a pink phantom that fights for four seconds while you slip aside.',
+        auraCost: 18,
+        cooldown: 8,
+        duration: 4,
+      },
+      {
+        id: 'phase',
+        name: 'Phantom Phase',
+        key: 'E',
+        description:
+          'Vanish for four and a half seconds. Hosts lose you, you slip through them, and your darts hit harder.',
+        auraCost: 36,
+        cooldown: 11,
+        duration: 4.5,
+      },
+      {
+        id: 'dartStorm',
+        name: 'Dart Storm',
+        key: 'R',
+        description: 'A lazy rain of pink darts. Patience, then a lot of holes.',
+        auraCost: 30,
+        cooldown: 10,
+        duration: 0,
+      },
+    ],
   },
 };
 

@@ -35,7 +35,7 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
   const pointsRef = useRef<HTMLElement>(null);
   const remainingRef = useRef<HTMLElement>(null);
   const roundRef = useRef<HTMLElement>(null);
-  const abilityCd = useRef<HTMLSpanElement>(null);
+  const moveStatus = useRef<Array<HTMLSpanElement | null>>([null, null, null]);
   const nubRef = useRef<HTMLDivElement>(null);
   const lookLast = useRef<{ x: number; y: number; id: number } | null>(null);
 
@@ -46,8 +46,7 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
   const [banner, setBanner] = useState<HudState['banner']>(null);
   const [nearShop, setNearShop] = useState(false);
   const [locked, setLocked] = useState(false);
-  const [abilityReady, setAbilityReady] = useState(false);
-  const [abilityName, setAbilityName] = useState('Ability');
+  const [moveReady, setMoveReady] = useState([false, false, false]);
   const [points, setPoints] = useState(0);
   const [upgrades, setUpgrades] = useState<HudState['upgrades']>({
     capacity: 0,
@@ -75,15 +74,17 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
     if (pointsRef.current) pointsRef.current.textContent = String(next.points);
     if (remainingRef.current) remainingRef.current.textContent = String(next.remaining);
     if (roundRef.current) roundRef.current.textContent = String(next.round);
-    if (abilityCd.current) {
-      abilityCd.current.textContent = next.burnout
+    next.moves.forEach((move, i) => {
+      const el = moveStatus.current[i];
+      if (!el) return;
+      el.textContent = next.burnout
         ? 'NO AURA'
-        : next.abilityDuration > 0
-          ? `ACTIVE ${next.abilityDuration.toFixed(1)}s`
-          : next.abilityCooldown > 0
-            ? `${next.abilityCooldown.toFixed(1)}s`
-            : 'E  READY';
-    }
+        : move.duration > 0
+          ? `ACTIVE ${move.duration.toFixed(1)}s`
+          : move.cooldown > 0
+            ? `${move.cooldown.toFixed(1)}s`
+            : `${move.key}  READY`;
+    });
     if (
       !prev ||
       prev.phase !== next.phase ||
@@ -91,17 +92,15 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
       prev.burnout !== next.burnout ||
       prev.nearShop !== next.nearShop ||
       prev.pointerLocked !== next.pointerLocked ||
-      prev.abilityReady !== next.abilityReady ||
       prev.banner?.title !== next.banner?.title ||
-      prev.abilityName !== next.abilityName
+      prev.moves.some((m, i) => m.ready !== next.moves[i]?.ready || m.name !== next.moves[i]?.name)
     ) {
       setPhase(next.phase);
       setPaused(next.paused);
       setBurnout(next.burnout);
       setNearShop(next.nearShop);
       setLocked(next.pointerLocked);
-      setAbilityReady(next.abilityReady);
-      setAbilityName(next.abilityName);
+      setMoveReady(next.moves.map((m) => m.ready));
       setBanner(next.banner);
       setUpgrades(next.upgrades);
     }
@@ -284,12 +283,25 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
 
           <div className={styles.bottomHud}>
             <p className={styles.hint}>
-              WASD move · Mouse aim · Click fire · F / RMB melee · E ability · Esc pause
+              WASD move · Mouse aim · Click fire · F / RMB melee · Q E R moves · Esc pause
               {phase === 'intermission' ? ' · Hold the spire to buy strength' : ''}
             </p>
-            <div className={`${styles.ability} ${abilityReady ? styles.ready : ''}`}>
-              <span ref={abilityCd}>E</span>
-              <b>{abilityName}</b>
+            <div className={styles.moveRow}>
+              {(selected ? RYDERZ[selected].moves : []).map((move, i) => (
+                <div
+                  key={move.id}
+                  className={`${styles.ability} ${moveReady[i] ? styles.ready : ''}`}
+                >
+                  <span
+                    ref={(node) => {
+                      moveStatus.current[i] = node;
+                    }}
+                  >
+                    {move.key}
+                  </span>
+                  <b>{move.name}</b>
+                </div>
+              ))}
             </div>
           </div>
         </div>
@@ -340,8 +352,14 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
               <button type="button" onClick={() => engineRef.current?.queueMelee()}>
                 FIST
               </button>
-              <button type="button" onClick={() => engineRef.current?.queueAbility()}>
-                PWR
+              <button type="button" onClick={() => engineRef.current?.queueAbility(0)}>
+                Q
+              </button>
+              <button type="button" onClick={() => engineRef.current?.queueAbility(1)}>
+                E
+              </button>
+              <button type="button" onClick={() => engineRef.current?.queueAbility(2)}>
+                R
               </button>
             </div>
           </>
@@ -469,9 +487,13 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
                           {ryder.role} · {ryder.title}
                         </small>
                         <h3>{ryder.name}</h3>
-                        <p>
-                          {ryder.weapon}. {ryder.ability.name}: {ryder.ability.description}
-                        </p>
+                        <ul className={styles.moveList}>
+                          {ryder.moves.map((move) => (
+                            <li key={move.id}>
+                              <strong>{move.key}</strong> {move.name}
+                            </li>
+                          ))}
+                        </ul>
                       </button>
                     );
                   })}
