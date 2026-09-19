@@ -169,13 +169,16 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
         e.preventDefault();
         cycleFocus(-1);
       }
+      if (e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key === ' ') {
+        e.preventDefault();
+      }
       if (e.key === 'Enter') {
         e.preventDefault();
         pick(RYDER_ORDER[focus]);
       }
     };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    window.addEventListener('keydown', onKey, { capture: true });
+    return () => window.removeEventListener('keydown', onKey, { capture: true });
   }, [selected, focus, cycleFocus]);
 
   const changeRyder = () => {

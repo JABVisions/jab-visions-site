@@ -331,8 +331,8 @@ export class RaidEngine {
     this.onMouseUp = this.onMouseUp.bind(this);
     this.onPointerLock = this.onPointerLock.bind(this);
     this.onResize = this.onResize.bind(this);
-    window.addEventListener('keydown', this.onKeyDown);
-    window.addEventListener('keyup', this.onKeyUp);
+    window.addEventListener('keydown', this.onKeyDown, { capture: true });
+    window.addEventListener('keyup', this.onKeyUp, { capture: true });
     window.addEventListener('mousemove', this.onMouseMove);
     this.canvas.addEventListener('mousedown', this.onMouseDown);
     window.addEventListener('mouseup', this.onMouseUp);
@@ -342,8 +342,8 @@ export class RaidEngine {
   }
 
   private unbind() {
-    window.removeEventListener('keydown', this.onKeyDown);
-    window.removeEventListener('keyup', this.onKeyUp);
+    window.removeEventListener('keydown', this.onKeyDown, { capture: true });
+    window.removeEventListener('keyup', this.onKeyUp, { capture: true });
     window.removeEventListener('mousemove', this.onMouseMove);
     this.canvas.removeEventListener('mousedown', this.onMouseDown);
     window.removeEventListener('mouseup', this.onMouseUp);
@@ -363,12 +363,25 @@ export class RaidEngine {
   private onKeyDown = (e: KeyboardEvent) => {
     const tag = (e.target as HTMLElement | null)?.tagName;
     if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+    const code = e.code;
+    if (
+      code === 'ArrowUp' ||
+      code === 'ArrowDown' ||
+      code === 'ArrowLeft' ||
+      code === 'ArrowRight' ||
+      code === 'Space' ||
+      code === 'PageUp' ||
+      code === 'PageDown' ||
+      code === 'Home' ||
+      code === 'End'
+    ) {
+      e.preventDefault();
+    }
     this.keys.add(e.key.toLowerCase());
     if (e.key === 'q' || e.key === 'Q' || e.key === '1') this.queuedMoves[0] = true;
     if (e.key === 'e' || e.key === 'E' || e.key === '2') this.queuedMoves[1] = true;
     if (e.key === 'r' || e.key === 'R' || e.key === '3') this.queuedMoves[2] = true;
     if (e.key === 'f' || e.key === 'F' || e.code === 'Space') {
-      e.preventDefault();
       this.meleeQueued = true;
     }
     if (e.key === 'Escape') this.setPaused(true);
