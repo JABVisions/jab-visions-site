@@ -37,7 +37,8 @@ const LINES = [
   { hue: 150, alpha: 0.32, scale: 0.64, offset: 0, phase: 14 },
 ];
 
-const POINTS = 168;
+const POINTS = 80;
+const METER_FFT = 256;
 
 /** Map analyser time-domain samples into a pointy waveform that tracks voice energy. */
 function sampleTimeDomainWave(data: Uint8Array, points: number, gain = 1): number[] {
@@ -127,7 +128,7 @@ export default function VocalVisualizer({
       micCtxRef.current = null;
     };
 
-    if (state !== "recording" || !stream || typeof window === "undefined") {
+    if (externalAnalyser || state !== "recording" || !stream || typeof window === "undefined") {
       teardown();
       return;
     }
@@ -141,7 +142,7 @@ export default function VocalVisualizer({
       const ac = new AC();
       const src = ac.createMediaStreamSource(stream);
       const analyser = ac.createAnalyser();
-      analyser.fftSize = 2048;
+      analyser.fftSize = METER_FFT;
       analyser.smoothingTimeConstant = 0.42;
       src.connect(analyser);
       micCtxRef.current = ac;
@@ -154,7 +155,7 @@ export default function VocalVisualizer({
     }
 
     return teardown;
-  }, [state, stream]);
+  }, [state, stream, externalAnalyser]);
 
   // Live playback analysis — waveform follows the actual voice in the clip.
   useEffect(() => {
@@ -163,7 +164,7 @@ export default function VocalVisualizer({
       playbackDataRef.current = null;
     };
 
-    if (state !== "playback" || typeof window === "undefined" || disableTap) {
+    if (externalAnalyser || state !== "playback" || typeof window === "undefined" || disableTap) {
       clearPlaybackRefs();
       return;
     }
@@ -185,7 +186,7 @@ export default function VocalVisualizer({
         const ctx = new AC();
         const source = ctx.createMediaElementSource(el);
         const analyser = ctx.createAnalyser();
-        analyser.fftSize = 2048;
+        analyser.fftSize = METER_FFT;
         analyser.smoothingTimeConstant = 0.28;
         source.connect(analyser);
         analyser.connect(ctx.destination);
@@ -201,7 +202,7 @@ export default function VocalVisualizer({
     }
 
     return clearPlaybackRefs;
-  }, [state, playbackAudioRef, disableTap]);
+  }, [state, playbackAudioRef, disableTap, externalAnalyser]);
 
   // Draw loop — reads live mic or playback analysers when available.
   useEffect(() => {
@@ -212,9 +213,20 @@ export default function VocalVisualizer({
     const dpr = Math.min(typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1, 2);
 
     let running = true;
+    let frame = 0;
 
     const draw = () => {
       if (!running) return;
+      frame += 1;
+      const currentState = stateRef.current;
+      const live =
+        currentState === "recording" ||
+        currentState === "playback" ||
+        Boolean(externalAnalyserRef.current);
+      if (!live && frame % 4 !== 0) {
+        rafRef.current = requestAnimationFrame(draw);
+        return;
+      }
       const cssW = Math.max(1, canvas.clientWidth);
       const cssH = Math.max(1, canvas.clientHeight);
       const needW = Math.round(cssW * dpr);
@@ -225,7 +237,6 @@ export default function VocalVisualizer({
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       }
 
-      const currentState = stateRef.current;
       const cfg = configFor(currentState);
       const t = performance.now() / 1000;
 
@@ -293,8 +304,8 @@ export default function VocalVisualizer({
         const alpha = Math.max(0.14, Math.min(0.95, line.alpha * (0.42 + level * 2.1)));
         ctx.strokeStyle = `hsla(${line.hue}, 100%, 68%, ${alpha})`;
         ctx.lineWidth = 1.6;
-        ctx.shadowColor = `hsla(${line.hue}, 100%, 64%, 0.8)`;
-        ctx.shadowBlur = 7;
+        ctx.shadowColor = live ? `hsla(${line.hue}, 100%, 64%, 0.55)` : "transparent";
+        ctx.shadowBlur = live ? 3 : 0;
         ctx.stroke();
       }
 

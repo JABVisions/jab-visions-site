@@ -33,6 +33,7 @@ export {
   redoHistory,
   snapshotSession,
   undoHistory,
+  SESSION_HISTORY_LIMIT,
   type SessionHistory,
 } from "./history";
 export { readStudioLatencyMs, writeStudioLatencyMs, STUDIO_LATENCY_MAX_MS } from "./latency";

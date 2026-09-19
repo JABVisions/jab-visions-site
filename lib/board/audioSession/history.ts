@@ -89,7 +89,14 @@ export function createSessionHistory(): SessionHistory {
   return { past: [], future: [] };
 }
 
-export function pushHistory(history: SessionHistory, session: AudioSession, limit = 40): SessionHistory {
+/** Keep undo shallow so long mix sessions do not accumulate dozens of snapshots. */
+export const SESSION_HISTORY_LIMIT = 8;
+
+export function pushHistory(
+  history: SessionHistory,
+  session: AudioSession,
+  limit = SESSION_HISTORY_LIMIT
+): SessionHistory {
   return {
     past: [...history.past, snapshotSession(session)].slice(-limit),
     future: [],
@@ -106,7 +113,7 @@ export function undoHistory(
   return {
     history: {
       past,
-      future: [snapshotSession(session), ...history.future].slice(0, 40),
+      future: [snapshotSession(session), ...history.future].slice(0, SESSION_HISTORY_LIMIT),
     },
     session: applySessionSnapshot(session, snapshot),
   };
@@ -121,7 +128,7 @@ export function redoHistory(
   const snapshot = future.shift()!;
   return {
     history: {
-      past: [...history.past, snapshotSession(session)].slice(-40),
+      past: [...history.past, snapshotSession(session)].slice(-SESSION_HISTORY_LIMIT),
       future,
     },
     session: applySessionSnapshot(session, snapshot),

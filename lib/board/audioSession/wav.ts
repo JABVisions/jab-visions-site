@@ -3,7 +3,8 @@ import {
   MissingAudioObjectError,
 } from "./clipMedia";
 
-const DECODE_TIMEOUT_MS = 12_000;
+/** Long beats need more than 12s on older phones — a timeout used to abort mid-session. */
+export const DECODE_TIMEOUT_MS = 45_000;
 
 export function withAudioTimeout<T>(promise: Promise<T>, timeoutMs: number, stage: string) {
   let timeoutId: ReturnType<typeof setTimeout> | undefined;
@@ -82,8 +83,20 @@ export async function decodeAudioFile(file: File, context: BaseAudioContext): Pr
     throw new MissingAudioObjectError(file.name);
   }
   try {
-    return await withAudioTimeout(context.decodeAudioData(bytes.slice(0)), DECODE_TIMEOUT_MS, "decode");
+    // decodeAudioData detaches the buffer — File.arrayBuffer() already copied
+    // from disk, so a second slice() just doubled peak RAM on every Play.
+    return await withAudioTimeout(context.decodeAudioData(bytes), DECODE_TIMEOUT_MS, "decode");
   } catch (error) {
-    throw asPlayableAudioError(error, file.name);
+    try {
+      const retry = await file.arrayBuffer();
+      if (!retry.byteLength) throw error;
+      return await withAudioTimeout(
+        context.decodeAudioData(retry.slice(0)),
+        DECODE_TIMEOUT_MS,
+        "decode"
+      );
+    } catch {
+      throw asPlayableAudioError(error, file.name);
+    }
   }
 }

@@ -688,7 +688,7 @@ export default function DropStudioStage({
     studioCountInTimerRef.current.forEach((id) => window.clearTimeout(id));
     studioCountInTimerRef.current = [];
     setStudioCountIn(null);
-    studioEngineRef.current?.stop();
+    studioEngineRef.current?.stop({ cancel: true });
     setStudioPlaying(false);
     setStudioLaneAnalysers({});
   };
@@ -704,6 +704,7 @@ export default function DropStudioStage({
               try {
                 const from = session.loop?.inMs ?? 0;
                 const analysers = await engine.play(session, from);
+                if (!analysers) return;
                 setStudioLaneAnalysers(analysers);
                 setStudioPlaying(true);
                 setAudioSession((current) =>
@@ -837,6 +838,7 @@ export default function DropStudioStage({
     try {
       const fromMs = audioSession.playheadMs || 0;
       const analysers = await studioEngine().play(audioSession, fromMs);
+      if (!analysers) return;
       setStudioLaneAnalysers(analysers);
       setStudioPlaying(true);
     } catch (reason) {
@@ -865,24 +867,24 @@ export default function DropStudioStage({
     return () => window.clearInterval(tick);
   }, [recording, adlibRecording]);
 
-  // Keep timeline playhead synced during live playback.
+  // Keep timeline playhead synced during live playback — interval, not rAF.
+  // 60fps setState on this stage is enough to get Safari to kill the tab.
   useEffect(() => {
     if (!studioPlaying || recording || adlibRecording) return;
-    let frame = 0;
     const tick = () => {
       const engine = studioEngineRef.current;
       if (engine?.isPlaying) {
         const ms = engine.getPlayheadMs();
         setAudioSession((current) =>
-          current && Math.abs(current.playheadMs - ms) > 30
+          current && Math.abs(current.playheadMs - ms) > 160
             ? { ...current, playheadMs: ms }
             : current
         );
       }
-      frame = window.requestAnimationFrame(tick);
     };
-    frame = window.requestAnimationFrame(tick);
-    return () => window.cancelAnimationFrame(frame);
+    tick();
+    const timer = window.setInterval(tick, 250);
+    return () => window.clearInterval(timer);
   }, [studioPlaying, recording, adlibRecording]);
 
   const commitAdlibTake = useCallback(
@@ -982,6 +984,7 @@ export default function DropStudioStage({
           ),
         };
         const analysers = await studioEngine().play(soloSession, soloSession.playheadMs);
+        if (!analysers) return;
         setStudioLaneAnalysers(analysers);
         setStudioPlaying(true);
       } catch (reason) {
@@ -1115,6 +1118,12 @@ export default function DropStudioStage({
           setStudioMicStream(null);
           return;
         }
+        if (!analysers) {
+          take.dispose();
+          studioTakeRef.current = null;
+          setStudioMicStream(null);
+          return;
+        }
         if (!take.isRecording()) {
           studioEngine().stop();
           take.dispose();
@@ -1241,24 +1250,39 @@ export default function DropStudioStage({
   );
 
   persistVoiceProjectRef.current = () => {
-    if (!sessionHasClips(audioSessionRef.current)) return;
+    const session = audioSessionRef.current;
+    if (!sessionHasClips(session)) return;
+    if (voiceStudioEditSignature(session) === lastSavedVoiceSignatureRef.current) return;
     void saveToDrafts(true, true);
   };
 
   useEffect(() => {
     const persistVoiceProject = () => {
-      if (!sessionHasClips(audioSessionRef.current)) return;
+      const session = audioSessionRef.current;
+      if (!sessionHasClips(session)) return;
+      if (voiceStudioEditSignature(session) === lastSavedVoiceSignatureRef.current) return;
       void saveToDrafts(true, true);
     };
+    const resumeMixer = () => {
+      void studioEngineRef.current?.resumeContext();
+    };
     const onVisibility = () => {
-      if (document.visibilityState === "hidden") persistVoiceProject();
+      if (document.visibilityState === "hidden") {
+        persistVoiceProject();
+        return;
+      }
+      resumeMixer();
     };
     window.addEventListener("pagehide", persistVoiceProject);
     window.addEventListener("beforeunload", persistVoiceProject);
+    window.addEventListener("pageshow", resumeMixer);
+    window.addEventListener("pointerdown", resumeMixer, { passive: true });
     document.addEventListener("visibilitychange", onVisibility);
     return () => {
       window.removeEventListener("pagehide", persistVoiceProject);
       window.removeEventListener("beforeunload", persistVoiceProject);
+      window.removeEventListener("pageshow", resumeMixer);
+      window.removeEventListener("pointerdown", resumeMixer);
       document.removeEventListener("visibilitychange", onVisibility);
     };
   }, [saveToDrafts]);
@@ -1268,12 +1292,13 @@ export default function DropStudioStage({
 
   useEffect(() => {
     if (!voiceHasClips) return;
+    if (studioPlaying || recording || adlibRecording) return;
     if (voiceProjectSignature === lastSavedVoiceSignatureRef.current) return;
     const timer = window.setTimeout(() => {
       void saveToDrafts(true, true);
-    }, 800);
+    }, 2000);
     return () => window.clearTimeout(timer);
-  }, [voiceHasClips, voiceProjectSignature, saveToDrafts]);
+  }, [voiceHasClips, voiceProjectSignature, saveToDrafts, studioPlaying, recording, adlibRecording]);
 
   useEffect(() => {
     if (voiceStudioOpen) {
@@ -1301,7 +1326,7 @@ export default function DropStudioStage({
     studioCountInTimerRef.current.forEach((id) => window.clearTimeout(id));
     studioCountInTimerRef.current = [];
     setStudioCountIn(null);
-    studioEngineRef.current?.stop();
+    studioEngineRef.current?.stop({ cancel: true });
     setStudioPlaying(false);
     setStudioLaneAnalysers({});
     setStudioMicStream(null);
