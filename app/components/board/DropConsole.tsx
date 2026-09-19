@@ -42,6 +42,7 @@ import {
 } from "@/lib/boardStore";
 import LazyDropStudioStage from "./LazyDropStudioStage";
 import BoardClientErrorBoundary from "./BoardClientErrorBoundary";
+import { DropPrivacyButton } from "./DropPrivacyButton";
 
 /* -------------------------------------------------------------------------- */
 /* utils */
@@ -181,7 +182,7 @@ function uploadLabelForFlavor(flavor: DropFlavor) {
   if (flavor === "music") return "Upload audio for full song playback";
   if (flavor === "doc") return "Upload doc (PDF/DOC/TXT/MD)";
   if (flavor === "pay") return "Upload or capture request context";
-  if (flavor === "thought") return "Optional voice memo or doodle/image";
+  if (flavor === "thought") return "Open Drop Studio for a voice memo or doodle";
   return "Upload photo or video";
 }
 
@@ -309,7 +310,7 @@ export default function DropConsole({
   const [dropDesc, setDropDesc] = useState("");
   const [mediaSource, setMediaSource] = useState<"upload" | "capture" | null>(null);
   const [thoughtText, setThoughtText] = useState("");
-  const [thoughtVisibility, setThoughtVisibility] = useState<"public" | "private">("public");
+  const [dropVisibility, setDropVisibility] = useState<"public" | "private">("public");
 
   const [tagsInput, setTagsInput] = useState("");
   const [payProvider, setPayProvider] =
@@ -764,7 +765,7 @@ export default function DropConsole({
               mediaSource: mediaSource ?? undefined,
               fromDescript: fromDescript || undefined,
               fromDropbook: isDropbookSlide || undefined,
-              visibility: dropFlavor === "thought" ? thoughtVisibility : "public",
+              visibility: dropVisibility,
               thoughtText: dropFlavor === "thought" ? thoughtText.trim() || cleanBody : undefined,
               thoughtFormat: dropFlavor === "thought" ? thoughtFormat : undefined,
               priceCents: dropFlavor === "pay" ? payPriceCents ?? undefined : undefined,
@@ -825,7 +826,7 @@ export default function DropConsole({
                     : null,
                 customizations: savedMediaCustomizations ?? null,
                 description: storedBoardDropDescription || null,
-                visibility: dropFlavor === "thought" ? thoughtVisibility : "public",
+                visibility: dropVisibility,
                 thoughtText: dropFlavor === "thought" ? thoughtText.trim() || cleanBody : null,
                 thoughtFormat,
                 authorId: identity.id,
@@ -923,7 +924,7 @@ export default function DropConsole({
                     : null,
                 customizations: savedMediaCustomizations ?? null,
                 description: storedBoardDropDescription || null,
-                visibility: dropFlavor === "thought" ? thoughtVisibility : "public",
+                visibility: dropVisibility,
                 thoughtText: dropFlavor === "thought" ? thoughtText.trim() || cleanBody : null,
                 thoughtFormat,
                 authorId: identity.id,
@@ -973,7 +974,7 @@ export default function DropConsole({
 
       if (mode === "board_drop" && dropFlavor === "thought") {
         const dropId = boardDropId ?? newId("thought");
-        if (thoughtVisibility === "public") {
+        if (dropVisibility === "public") {
           pushDrop({
             id: dropId,
             type: "thought",
@@ -988,7 +989,7 @@ export default function DropConsole({
                   ? "image"
                   : undefined,
             description: boardDropDescription || undefined,
-            visibility: thoughtVisibility,
+            visibility: dropVisibility,
             thoughtFormat: thoughtFormat ?? "text",
             thoughtText: thoughtText.trim() || cleanBody,
             authorId: identity.id,
@@ -1011,7 +1012,7 @@ export default function DropConsole({
           userId: meId,
           title: cleanTitle || "Thought Drop",
           meta: {
-            visibility: thoughtVisibility,
+            visibility: dropVisibility,
             thoughtFormat,
             source: "drop_console",
           },
@@ -1025,7 +1026,7 @@ export default function DropConsole({
       setDropCustomizations({});
       setDropDesc("");
       setThoughtText("");
-      setThoughtVisibility("public");
+      setDropVisibility("public");
       setMediaSource(null);
       setTagsInput("");
       setAnnounceMediaUrl("");
@@ -1086,6 +1087,7 @@ export default function DropConsole({
         drop_flavor: flavor,
         dropType: flavor,
         dropId,
+        visibility: dropVisibility,
         authorId: identity.id,
         authorName: identity.displayName,
         authorUsername: identity.username || null,
@@ -1109,6 +1111,7 @@ export default function DropConsole({
       previewDescription: link.description,
       previewImage,
       description: bodyText,
+      visibility: dropVisibility,
     });
 
     emitNewActivity({
@@ -1125,6 +1128,7 @@ export default function DropConsole({
         drop_flavor: flavor,
         dropType: flavor,
         dropId,
+        visibility: dropVisibility,
         preview,
         authorId: identity.id,
         authorName: identity.displayName,
@@ -1137,11 +1141,12 @@ export default function DropConsole({
       dropId,
       userId: meId,
       title: titleText,
-      meta: { source: "drop_studio", dropType: flavor },
+      meta: { source: "drop_studio", dropType: flavor, visibility: dropVisibility },
     });
     setDropFlavor(flavor);
     setTitle(titleText);
-    setPostMsg("Dropped ✓");
+    setDropVisibility("public");
+    setPostMsg(dropVisibility === "private" ? "Private drop saved ✓" : "Dropped ✓");
     window.setTimeout(() => setPostMsg(null), 1500);
   }
 
@@ -1244,7 +1249,6 @@ export default function DropConsole({
                       setPayProvider("stripe_connect");
                     }
                     if (t !== "doc") setDocDesc("");
-                    if (t !== "thought") setThoughtVisibility("public");
                   }}
                 >
                   <span>{DROP_FLAVOR_LABEL[t].toUpperCase()}</span>
@@ -1391,8 +1395,8 @@ export default function DropConsole({
               setCustomizations={setDropCustomizations}
               thoughtText={thoughtText}
               setThoughtText={setThoughtText}
-              thoughtVisibility={thoughtVisibility}
-              setThoughtVisibility={setThoughtVisibility}
+              dropVisibility={dropVisibility}
+              setDropVisibility={setDropVisibility}
               onLinkComplete={publishStudioLinkDrop}
             />
           ) : (
@@ -1655,6 +1659,7 @@ export default function DropConsole({
         .mediaActionRow {
           display: flex;
           flex-wrap: wrap;
+          align-items: center;
           gap: 8px;
           margin-top: 10px;
         }
@@ -1927,8 +1932,8 @@ function BoardDropConsoleFields({
   setCustomizations,
   thoughtText,
   setThoughtText,
-  thoughtVisibility,
-  setThoughtVisibility,
+  dropVisibility,
+  setDropVisibility,
   onLinkComplete,
 }: {
   setTitle: React.Dispatch<React.SetStateAction<string>>;
@@ -1957,8 +1962,8 @@ function BoardDropConsoleFields({
   setCustomizations: (value: DropCustomization) => void;
   thoughtText: string;
   setThoughtText: (value: string) => void;
-  thoughtVisibility: "public" | "private";
-  setThoughtVisibility: (value: "public" | "private") => void;
+  dropVisibility: "public" | "private";
+  setDropVisibility: (value: "public" | "private") => void;
   onLinkComplete?: (link: ResolvedDropbookLink) => void | Promise<void>;
 }) {
   const [studioOpen, setStudioOpen] = useState(false);
@@ -2010,25 +2015,6 @@ function BoardDropConsoleFields({
         onClose={() => setStudioOpen(false)}
       />
       <BoardClientErrorBoundary name="drop-console-fields" resetLabel="Try Drop Console again">
-      {dropFlavor === "thought" ? (
-        <div className="payProviderRow">
-          <button
-            type="button"
-            className={clsx("providerChip", thoughtVisibility === "public" && "on")}
-            onClick={() => setThoughtVisibility("public")}
-          >
-            Public
-          </button>
-          <button
-            type="button"
-            className={clsx("providerChip", thoughtVisibility === "private" && "on")}
-            onClick={() => setThoughtVisibility("private")}
-          >
-            Private
-          </button>
-        </div>
-      ) : null}
-
       {dropFlavor === "pay" ? (
         <div className="payProviderRow">
           <button
@@ -2048,22 +2034,22 @@ function BoardDropConsoleFields({
         </div>
       ) : null}
 
-      {showFileLine ? (
+      {showFileLine || showUrlField ? (
         <div className="dcField">
           <div className="mediaActionRow" aria-label="Drop media actions">
-            {dropFlavor === "media" ||
-            dropFlavor === "music" ||
-            dropFlavor === "thought" ||
-            dropFlavor === "pay" ? (
-              <button
-                type="button"
-                className="mediaAction uploadAction"
-                onClick={() => setStudioOpen(true)}
-              >
-                Open Drop Studio
-              </button>
-            ) : null}
-            {dropFlavor !== "media" ? (
+            <DropPrivacyButton visibility={dropVisibility} onChange={setDropVisibility} />
+            <button
+              type="button"
+              className="mediaAction uploadAction"
+              onClick={() => setStudioOpen(true)}
+            >
+              Open Drop Studio
+            </button>
+            {dropFlavor !== "media" &&
+            dropFlavor !== "thought" &&
+            dropFlavor !== "youtube" &&
+            dropFlavor !== "news" &&
+            dropFlavor !== "link" ? (
               <label
                 className={clsx("mediaAction", "uploadAction", uploading && "busy")}
               >
@@ -2082,24 +2068,28 @@ function BoardDropConsoleFields({
               </label>
             ) : null}
           </div>
-          <div className="fileMeta fileStatus">
-            {uploadedFileName ? (
-              <span className="fileName">{uploadedFileName}</span>
-            ) : (
-              <span className="fileName dim">{uploadLabelForFlavor(dropFlavor)}</span>
-            )}
-            {uploading ? <span className="fileSize">Uploading...</span> : null}
-          </div>
-          {dropFlavor === "media" || dropFlavor === "thought" || dropFlavor === "pay" ? (
-            <div className="captureHelp">
-              {dropFlavor === "pay"
-                ? "Open Drop Studio or attach context for this payment request."
-                : dropFlavor === "thought"
-                  ? "Open Drop Studio for Voice, Art, or Descript."
-                  : "Open the editor to design this media drop."}
-            </div>
+          {showFileLine ? (
+            <>
+              <div className="fileMeta fileStatus">
+                {uploadedFileName ? (
+                  <span className="fileName">{uploadedFileName}</span>
+                ) : (
+                  <span className="fileName dim">{uploadLabelForFlavor(dropFlavor)}</span>
+                )}
+                {uploading ? <span className="fileSize">Uploading...</span> : null}
+              </div>
+              {dropFlavor === "media" || dropFlavor === "thought" || dropFlavor === "pay" ? (
+                <div className="captureHelp">
+                  {dropFlavor === "pay"
+                    ? "Open Drop Studio or attach context for this payment request."
+                    : dropFlavor === "thought"
+                      ? "Open Drop Studio for Voice, Art, or Descript. The eye sets Public or Private."
+                      : "Open the editor to design this media drop."}
+                </div>
+              ) : null}
+              {uploadErr ? <div className="dcErr">{uploadErr}</div> : null}
+            </>
           ) : null}
-          {uploadErr ? <div className="dcErr">{uploadErr}</div> : null}
         </div>
       ) : null}
 
@@ -2125,7 +2115,7 @@ function BoardDropConsoleFields({
               rows={3}
             />
             <div className="dcFieldHelp">
-              Voice memo or doodle/image is optional. Private thoughts stay out of the Community Feed.
+              Voice memo or doodle/image is optional in Drop Studio. Private drops stay out of the Community Feed.
             </div>
           </div>
 

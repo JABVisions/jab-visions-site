@@ -35,6 +35,7 @@ import NewsDropMagazine from "./NewsDropMagazine";
 import DropbookSlideScreen from "./DropbookSlideScreen";
 import { PayOnBoardButton } from "./PayOnBoardButton";
 import ActivityCard from "./ActivityCard";
+import { DropPrivacyButton } from "./DropPrivacyButton";
 import { isDropbookSlideFile } from "@/lib/board/dropbookSlides";
 import type { ResolvedDropbookLink } from "@/lib/board/dropbookLink";
 import {
@@ -620,7 +621,7 @@ export default function DropTile() {
   const [payProvider, setPayProvider] = useState<PayProviderMode>("stripe_connect");
   const [docDesc, setDocDesc] = useState("");
   const [thoughtText, setThoughtText] = useState("");
-  const [thoughtVisibility, setThoughtVisibility] = useState<"public" | "private">("public");
+  const [dropVisibility, setDropVisibility] = useState<"public" | "private">("public");
   const [drops, setDrops] = useState<DropItem[]>([]);
   const [viewerOpen, setViewerOpen] = useState(false);
   const [viewerId, setViewerId] = useState<string | null>(null);
@@ -1212,6 +1213,7 @@ export default function DropTile() {
             .filter((image): image is string => Boolean(image))
             .slice(0, 4),
         description: dropDesc.trim() || undefined,
+        visibility: dropVisibility,
         createdAt: Date.now(),
       },
       ...drops,
@@ -1221,7 +1223,8 @@ export default function DropTile() {
     setTitle("");
     setDropDesc("");
     setUrl("");
-    flash(setMsg, "Added ✓", 1200);
+    setDropVisibility("public");
+    flash(setMsg, dropVisibility === "private" ? "Private drop saved ✓" : "Added ✓", 1200);
   }
 
   async function addResolvedLinkDrop(link: ResolvedDropbookLink): Promise<boolean> {
@@ -1258,6 +1261,7 @@ export default function DropTile() {
           resolveLinkPreviewImage(link.url, link.image) ??
           (type === "News" ? newsCoverUrl(link.url) : null) ??
           undefined,
+        visibility: dropVisibility,
         createdAt: Date.now(),
       },
       ...drops,
@@ -1267,6 +1271,7 @@ export default function DropTile() {
     setTitle("");
     setDropDesc("");
     setUrl("");
+    setDropVisibility("public");
     setMode(type);
     return true;
   }
@@ -1378,6 +1383,7 @@ export default function DropTile() {
         mime: file.type,
         mediaKind: isVideo ? "video" : "image",
         description: dropDesc.trim() || undefined,
+        visibility: dropVisibility,
         mediaSource: mediaSource ?? "upload",
         badgeLabel: mediaSource === "capture" ? "Captured on Board" : undefined,
         ...(customizations ? { customizations } : {}),
@@ -1391,7 +1397,8 @@ export default function DropTile() {
     setFile(null);
     setMediaSource(null);
     setDropCustomizations({});
-    flash(setMsg, "Vision Drop added ✓", 1400);
+    setDropVisibility("public");
+    flash(setMsg, dropVisibility === "private" ? "Private drop saved ✓" : "Vision Drop added ✓", 1400);
   }
 
   async function addMusicFileDrop() {
@@ -1424,6 +1431,7 @@ export default function DropTile() {
         mediaKind: "audio",
         hostLabel: "AUDIO FILE",
         description: dropDesc.trim() || undefined,
+        visibility: dropVisibility,
       },
       ...drops,
     ];
@@ -1433,7 +1441,8 @@ export default function DropTile() {
     setDropDesc("");
     setFile(null);
     setUrl("");
-    flash(setMsg, "Music file added ✓", 1400);
+    setDropVisibility("public");
+    flash(setMsg, dropVisibility === "private" ? "Private drop saved ✓" : "Music file added ✓", 1400);
   }
 
   async function addDocDrop() {
@@ -1460,6 +1469,7 @@ export default function DropTile() {
         fileSize: file.size,
         mime: file.type,
         description: docDesc.trim() || undefined,
+        visibility: dropVisibility,
         fromDescript: fromDescript || undefined,
         mediaSource: fromDescript ? "capture" : "upload",
       },
@@ -1471,7 +1481,8 @@ export default function DropTile() {
     setFile(null);
     setDocDesc("");
     setMediaSource(null);
-    flash(setMsg, "Doc added ✓", 1400);
+    setDropVisibility("public");
+    flash(setMsg, dropVisibility === "private" ? "Private drop saved ✓" : "Doc added ✓", 1400);
   }
 
   async function addThoughtDrop() {
@@ -1521,7 +1532,7 @@ export default function DropTile() {
             }
           : {}),
         description: cleanDesc || undefined,
-        visibility: thoughtVisibility,
+        visibility: dropVisibility,
         thoughtFormat,
         thoughtText: cleanThought || undefined,
         ...(customizations ? { customizations } : {}),
@@ -1533,11 +1544,11 @@ export default function DropTile() {
     setTitle("");
     setDropDesc("");
     setThoughtText("");
-    setThoughtVisibility("public");
+    setDropVisibility("public");
     setFile(null);
     setMediaSource(null);
     setDropCustomizations({});
-    flash(setMsg, thoughtVisibility === "private" ? "Private thought saved ✓" : "Thought dropped ✓", 1400);
+    flash(setMsg, dropVisibility === "private" ? "Private thought saved ✓" : "Thought dropped ✓", 1400);
   }
 
   async function addPayDrop() {
@@ -1602,6 +1613,7 @@ export default function DropTile() {
         recipientUsername,
         recipientDisplayName,
         recipientStripeAccountId,
+        visibility: dropVisibility,
         ...(customizations ? { customizations } : {}),
       },
       ...drops,
@@ -1650,7 +1662,8 @@ export default function DropTile() {
     setPayProvider("stripe_connect");
     setMediaSource(null);
     setDropCustomizations({});
-    flash(setMsg, "Pay drop added ✓", 1400);
+    setDropVisibility("public");
+    flash(setMsg, dropVisibility === "private" ? "Private drop saved ✓" : "Pay drop added ✓", 1400);
   }
 
   function addDrop() {
@@ -1968,6 +1981,41 @@ export default function DropTile() {
     ]
   );
 
+  function studioLaunchRow(
+    showUpload: boolean,
+    onPickedFile?: (file: File | null) => void
+  ) {
+    return (
+      <div className="capture-actions" aria-label="Drop Studio actions">
+        <DropPrivacyButton visibility={dropVisibility} onChange={setDropVisibility} />
+        <button
+          type="button"
+          className="capture-action upload-action"
+          onClick={() => setStudioOpen(true)}
+        >
+          Open Drop Studio
+        </button>
+        {showUpload ? (
+          <label className="capture-action upload-action">
+            Upload
+            <input
+              className="file-input"
+              type="file"
+              accept={fileAccept}
+              onChange={(e) => {
+                const next = e.currentTarget.files?.[0] ?? null;
+                setFile(next);
+                setMediaSource(next ? "upload" : null);
+                onPickedFile?.(next);
+                e.currentTarget.value = "";
+              }}
+            />
+          </label>
+        ) : null}
+      </div>
+    );
+  }
+
   return (
     <div className="inner-tile drop-tile">
       <div className="tile-head drop-tile-head">
@@ -2024,7 +2072,6 @@ export default function DropTile() {
               setDropDesc("");
               if (m !== "Thought") {
                 setThoughtText("");
-                setThoughtVisibility("public");
               }
 
               if (m !== "Pay") {
@@ -2069,27 +2116,7 @@ export default function DropTile() {
             </div>
 
             <div className="drop-file-control">
-              <div className="capture-actions">
-                <button
-                  type="button"
-                  className="capture-action upload-action"
-                  onClick={() => setStudioOpen(true)}
-                >
-                  Open Drop Studio
-                </button>
-                <label className="capture-action upload-action">
-                  Upload
-                  <input
-                    className="file-input"
-                    type="file"
-                    accept={fileAccept}
-                    onChange={(e) => {
-                      setFile(e.target.files?.[0] ?? null);
-                      setMediaSource(e.target.files?.[0] ? "upload" : null);
-                    }}
-                  />
-                </label>
-              </div>
+              {studioLaunchRow(true)}
               <div className="file-meta file-status">
                 {file ? (
                   <>
@@ -2154,15 +2181,7 @@ export default function DropTile() {
         ) : mode === "Doc" ? (
           <>
             <div className="drop-file-control">
-              <label className="capture-action upload-action">
-                Upload
-                <input
-                  className="file-input"
-                  type="file"
-                  accept={fileAccept}
-                  onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-                />
-              </label>
+              {studioLaunchRow(true)}
               <div className="file-meta file-status">
                 {file ? (
                   <>
@@ -2185,28 +2204,7 @@ export default function DropTile() {
           </>
         ) : mode === "Media" ? (
           <div className="media-capture-field">
-            <div className="capture-actions" aria-label="Vision Drop Studio action">
-              <button
-                type="button"
-                className="capture-action upload-action"
-                onClick={() => setStudioOpen(true)}
-              >
-                Open Drop Studio
-              </button>
-              <label className="capture-action upload-action">
-                Upload
-                <input
-                  className="file-input"
-                  type="file"
-                  accept={fileAccept}
-                  onChange={(e) => {
-                    setFile(e.currentTarget.files?.[0] ?? null);
-                    setMediaSource(e.currentTarget.files?.[0] ? "upload" : null);
-                    e.currentTarget.value = "";
-                  }}
-                />
-              </label>
-            </div>
+            {studioLaunchRow(true)}
             <div className="file-meta file-status">
               {file ? (
                 <>
@@ -2240,23 +2238,6 @@ export default function DropTile() {
           </div>
         ) : mode === "Thought" ? (
           <div className="thought-field">
-            <div className="pay-provider-row">
-              <button
-                type="button"
-                className={`provider-chip ${thoughtVisibility === "public" ? "on" : ""}`}
-                onClick={() => setThoughtVisibility("public")}
-              >
-                Public
-              </button>
-              <button
-                type="button"
-                className={`provider-chip ${thoughtVisibility === "private" ? "on" : ""}`}
-                onClick={() => setThoughtVisibility("private")}
-              >
-                Private
-              </button>
-            </div>
-
             <textarea
               className="drop-textarea thought-input"
               placeholder="Catch the thought before it leaves..."
@@ -2266,28 +2247,7 @@ export default function DropTile() {
             />
 
             <div className="drop-file-control">
-              <div className="capture-actions">
-                <button
-                  type="button"
-                  className="capture-action upload-action"
-                  onClick={() => setStudioOpen(true)}
-                >
-                  Open Drop Studio
-                </button>
-                <label className="capture-action upload-action">
-                  Upload
-                  <input
-                    className="file-input"
-                    type="file"
-                    accept={fileAccept}
-                    onChange={(e) => {
-                      setFile(e.currentTarget.files?.[0] ?? null);
-                      setMediaSource(e.currentTarget.files?.[0] ? "upload" : null);
-                      e.currentTarget.value = "";
-                    }}
-                  />
-                </label>
-              </div>
+              {studioLaunchRow(false)}
               <div className="file-meta file-status">
                 {file ? (
                   <>
@@ -2323,25 +2283,15 @@ export default function DropTile() {
             />
 
             <div className="capture-help">
-              Public thoughts can enter the Community Feed. Private thoughts stay in your Activity Channel.
+              The eye sets Public or Private. Public thoughts can enter the Community Feed. Private stays in your Activity Channel.
             </div>
           </div>
         ) : mode === "Music" ? (
           <>
             <div className="drop-file-control">
-              <label className="capture-action upload-action">
-                Upload
-                <input
-                  className="file-input"
-                  type="file"
-                  accept={fileAccept}
-                  onChange={(e) => {
-                    setFile(e.target.files?.[0] ?? null);
-                    setMediaSource(e.target.files?.[0] ? "upload" : null);
-                    if (e.target.files?.[0]) setUrl("");
-                  }}
-                />
-              </label>
+              {studioLaunchRow(true, (next) => {
+                if (next) setUrl("");
+              })}
               <div className="file-meta file-status">
                 {file ? (
                   <>
@@ -2378,6 +2328,7 @@ export default function DropTile() {
           </>
         ) : showUrlField ? (
           <>
+            {studioLaunchRow(false)}
             <input
               className="drop-input"
               placeholder={
@@ -2772,6 +2723,7 @@ export default function DropTile() {
         .capture-actions {
           display: flex;
           flex-wrap: wrap;
+          align-items: center;
           gap: 8px;
         }
         .capture-action {
