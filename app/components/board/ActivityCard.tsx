@@ -58,6 +58,7 @@ import NewsDropMagazine from "./NewsDropMagazine";
 import DropbookSlideScreen from "./DropbookSlideScreen";
 import { PayOnBoardButton } from "./PayOnBoardButton";
 import { isStreamingEmbedUrl, isYouTubeDropUrl } from "@/lib/board/dropbookLink";
+import { isSoundCloudUrl, toSoundCloudEmbed } from "@/lib/board/soundCloudEmbed";
 
 const EVT_OPEN = "board:bucketBrain:open";
 const EVT_BUCKET_UPDATED = "board:bucketBrain:updated";
@@ -441,54 +442,27 @@ function toAppleMusicEmbed(url: string): string | null {
 }
 
 /**
- * ✅ FIX: only treat URLs as SoundCloud if they are actually SoundCloud domains.
+ * SoundCloud widget URLs are built in lib/board/soundCloudEmbed so a nested
+ * player link or share URL cannot dump "not a valid SoundCloud URL".
  */
-function toSoundCloudEmbed(url: string): string | null {
-  try {
-    const u = new URL(url);
-    const host = u.hostname.toLowerCase();
-
-    const isSC =
-      host === "soundcloud.com" ||
-      host.endsWith(".soundcloud.com") ||
-      host === "snd.sc" ||
-      host.endsWith(".snd.sc") ||
-      host === "on.soundcloud.com" ||
-      host.endsWith(".on.soundcloud.com");
-
-    if (!isSC) return null;
-
-    return `https://w.soundcloud.com/player/?url=${encodeURIComponent(
-      url
-    )}&auto_play=false&visual=true`;
-  } catch {
-    return null;
-  }
-}
-
-function computeEmbed(href: string): { kind: EmbedKind; url: string } {
-  if (!href) return { kind: "none", url: "" };
+function computeEmbed(href: string, storedEmbed?: string): { kind: EmbedKind; url: string } {
+  if (!href && !storedEmbed) return { kind: "none", url: "" };
 
   const origin =
     typeof window !== "undefined" ? window.location.origin : undefined;
 
-  // 1) YouTube
   const yt = toYouTubeEmbed(href, origin);
   if (yt) return { kind: "youtube", url: yt };
 
-  // 2) Spotify
   const sp = toSpotifyEmbed(href);
   if (sp) return { kind: "spotify", url: sp };
 
-  // 3) Apple Music
   const am = toAppleMusicEmbed(href);
   if (am) return { kind: "apple_music", url: am };
 
-  // 4) SoundCloud (ONLY if soundcloud hostname)
-  const sc = toSoundCloudEmbed(href);
+  const sc = toSoundCloudEmbed(storedEmbed || href) || toSoundCloudEmbed(href);
   if (sc) return { kind: "soundcloud", url: sc };
 
-  // 5) Vision/media files (image/video/audio)
   const mk = guessMediaKind(href);
   if (mk !== "none") return { kind: mk, url: href };
 
@@ -514,6 +488,7 @@ function ActivityCard({
 }: Props) {
   const [toast, setToast] = useState<string | null>(null);
   const [embedFailed, setEmbedFailed] = useState(false);
+  const [resolvedSoundCloud, setResolvedSoundCloud] = useState("");
   const [downloadBusy, setDownloadBusy] = useState(false);
   const [signedPreviewImage, setSignedPreviewImage] = useState<string>("");
   // Bumped to re-mint the storage signed URL after it expires.
@@ -578,6 +553,7 @@ function ActivityCard({
   const rawMeta = (item as any)?.meta;
   const meta = rawMeta && typeof rawMeta === "object" ? rawMeta : null;
   const preview = meta?.preview ?? meta ?? null;
+  const storedSoundCloudEmbed = metaString(meta?.embedUrl, preview?.embedUrl);
   const storedDropCustomizations = normalizeDropCustomizations(
     meta?.customizations ?? preview?.customizations
   );
@@ -943,7 +919,13 @@ function ActivityCard({
     priceCents > 0;
   const priceLabel = formatPriceFromCents(priceCents);
 
-  const embed = useMemo(() => computeEmbed(href), [href]);
+  const embed = useMemo(() => {
+    const base = computeEmbed(href, storedSoundCloudEmbed);
+    if (base.kind === "soundcloud" && resolvedSoundCloud) {
+      return { kind: "soundcloud" as const, url: resolvedSoundCloud };
+    }
+    return base;
+  }, [href, storedSoundCloudEmbed, resolvedSoundCloud]);
   const studioMediaUrl =
     resolvedPreviewImage ||
     (embed.kind === "image" || embed.kind === "video" ? embed.url : "");
@@ -1015,6 +997,24 @@ function ActivityCard({
     preview?.images,
     preview?.previewImages,
   ]);
+  useEffect(() => {
+    const raw = storedSoundCloudEmbed || href;
+    if (!isSoundCloudUrl(raw)) {
+      setResolvedSoundCloud("");
+      return;
+    }
+    let cancelled = false;
+    fetchLinkPreview(raw)
+      .then((preview) => {
+        if (cancelled) return;
+        const next = preview?.embedUrl?.trim() || "";
+        if (next && isSoundCloudUrl(next)) setResolvedSoundCloud(next);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [href, storedSoundCloudEmbed]);
   const attachmentLabel =
     embed.kind === "spotify"
       ? "Play full track in Spotify"
@@ -1598,9 +1598,12 @@ function ActivityCard({
               title={`embed-${embed.kind}-${id}`}
               src={embed.url}
               loading="lazy"
+              scrolling={embed.kind === "soundcloud" ? "no" : undefined}
               allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
               allowFullScreen
-              referrerPolicy="strict-origin-when-cross-origin"
+              referrerPolicy={
+                embed.kind === "soundcloud" ? undefined : "strict-origin-when-cross-origin"
+              }
               onError={() => setEmbedFailed(true)}
             />
           )}

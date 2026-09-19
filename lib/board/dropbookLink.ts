@@ -134,7 +134,9 @@ export function classifyDropbookLinkUrl(raw: unknown): DropbookLinkKind | null {
   if (
     host.includes("spotify.com") ||
     host.includes("music.apple.com") ||
-    host.includes("soundcloud.com")
+    host.includes("soundcloud.com") ||
+    host === "snd.sc" ||
+    host.endsWith(".snd.sc")
   ) {
     return "music";
   }
