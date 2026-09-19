@@ -27,7 +27,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { supabase, applyCookies } = createSupabaseRouteClient();
+    const { supabase, applyCookies } = createSupabaseRouteClient(request);
     const { data: existingProfile } = await supabase
       .from("profiles")
       .select("id")
@@ -62,7 +62,13 @@ export async function POST(request: NextRequest) {
     }
 
     return applyCookies(
-      NextResponse.json({ ok: true, hasSession: Boolean(data.session) })
+      NextResponse.json({
+        ok: true,
+        hasSession: Boolean(data.session),
+        access_token: data.session?.access_token || null,
+        refresh_token: data.session?.refresh_token || null,
+      }),
+      { keepSession: Boolean(data.session), session: data.session }
     );
   } catch (error) {
     return NextResponse.json(

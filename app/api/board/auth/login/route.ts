@@ -20,7 +20,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { supabase, applyCookies } = createSupabaseRouteClient();
+    const { supabase, applyCookies } = createSupabaseRouteClient(request);
     const { data, error } = await supabase.auth.signInWithPassword({
       email,
       password,
@@ -35,7 +35,18 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    return applyCookies(NextResponse.json({ ok: true }));
+    // getUser() waits out the GoTrue initialize/SIGNED_OUT race so the
+    // session cookie is not wiped before we copy it onto the response.
+    await supabase.auth.getUser().catch(() => undefined);
+
+    return applyCookies(
+      NextResponse.json({
+        ok: true,
+        access_token: data.session.access_token,
+        refresh_token: data.session.refresh_token,
+      }),
+      { keepSession: true, session: data.session }
+    );
   } catch (error) {
     return NextResponse.json(
       {
