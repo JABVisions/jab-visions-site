@@ -526,45 +526,21 @@ export default function ProjectCenter() {
     });
   };
 
-  const createProjectFromDrop = async (drop: ProjectDrop) => {
+  const createProjectFromDrop = (drop: ProjectDrop) => {
     const next = projectFromDrop(drop);
     const cover = persistableProjectCover(next.media);
     const coverUrl = persistableImageUrl(cover?.src);
     const nowIso = new Date(next.createdAt).toISOString();
     const identity = readCurrentBoardIdentity();
-    let profileName = hostProfileName;
-    let profileUsername = identity.username;
-    try {
-      const sb = supabaseBrowser();
-      const { data: auth } = await sb.auth.getUser();
-      if (auth.user?.id) {
-        const { data: profile } = await sb
-          .from("profiles")
-          .select("display_name, username, board_style")
-          .eq("id", auth.user.id)
-          .maybeSingle();
-        const style =
-          profile?.board_style && typeof profile.board_style === "object"
-            ? (profile.board_style as Record<string, any>)
-            : {};
-        profileName = pickProjectHostName(
-          profile?.display_name,
-          style.displayName,
-          profile?.username,
-          profileName
-        );
-        profileUsername = String(profile?.username || profileUsername).replace(/^@+/, "");
-      }
-    } catch {
-      // Keep the local identity if profiles cannot be read.
-    }
-    const authorName = pickProjectHostName(
-      next.contactName,
-      profileName,
-      next.authorName,
-      identity.displayName
-    ) || next.contactName;
-    const authorUsername = profileUsername || identity.username || next.authorUsername || "";
+    const authorName =
+      pickProjectHostName(
+        next.contactName,
+        hostProfileName,
+        next.authorName,
+        identity.displayName
+      ) || next.contactName;
+    const authorUsername =
+      identity.username || next.authorUsername || "";
     const authorAvatar = identity.avatar || next.authorAvatar || "";
     const authorGlow = identity.glow || next.authorGlow || "#FF4FD8";
     const authorAuraIntensity = identity.auraIntensity ?? next.authorAuraIntensity;
@@ -609,7 +585,6 @@ export default function ProjectCenter() {
         authorAuraIntensity,
         ownerUsername: authorUsername,
         ownerLabel: authorName,
-        // Future backend fields for casting/gig database + Pay Drops routing.
         productionTitle: next.productionTitle || next.title,
         roleTitle: next.roleTitle || null,
         department: next.department || null,
@@ -628,147 +603,172 @@ export default function ProjectCenter() {
       },
     };
 
-    addDrop({
-      type: "status",
-      title: `Project Drop: ${next.title}`,
-      text:
-        next.logline ||
-        `${next.contactName || "Host"} opened a new project room on BOARD.`,
-      authorId: currentUserId || identity.id,
-      authorName,
-      href: "/board/work",
-      meta: {
-        kind: "project_drop",
-        cardStyle: "project_drop",
-        dropType: "project",
-        projectId: next.id,
-        projectType: next.projectType,
-        status: next.status,
-        description: next.logline,
-        goal: next.goal || null,
-        milestone: next.milestone || null,
-        source: "work_board",
+    try {
+      addDrop({
+        type: "status",
+        title: `Project Drop: ${next.title}`,
+        text:
+          next.logline ||
+          `${next.contactName || "Host"} opened a new project room on BOARD.`,
         authorId: currentUserId || identity.id,
         authorName,
-        authorUsername,
-        authorAvatar,
-        authorGlow,
-        authorAuraIntensity,
-        ownerUsername: authorUsername,
-        ownerLabel: authorName,
-      },
-    });
-    pushDrop({
-      id: projectCommentDropId(next.id),
-      type: "project",
-      title: `Project Drop: ${next.title}`,
-      createdAt: next.createdAt,
-      url: "/board/work",
-      description:
-        next.logline ||
-        `${next.contactName || "Host"} opened a new project room on BOARD.`,
-      tags: [
-        "project",
-        next.projectType,
-        statusLabel(next.status),
-        next.location,
-      ].filter(Boolean),
-      authorId: currentUserId || identity.id,
-      authorName,
-      authorUsername,
-      authorAvatar,
-      authorGlow,
-      authorAuraIntensity,
-      imageUrl: coverUrl || undefined,
-      mediaUrl: coverUrl || cover?.src,
-      mediaKind: cover?.kind,
-      projectId: next.id,
-      projectType: next.projectType,
-      projectStatus: next.status,
-      goal: next.goal,
-      milestone: next.milestone,
-      source: "work_board",
-      origin: "project_notebook",
-      meta: {
-        kind: "project_drop",
-        cardStyle: "project_drop",
-        dropType: "project",
-        projectId: next.id,
-        projectType: next.projectType,
-        status: next.status,
-        location: next.location || null,
-        rolesNeeded: next.rolesNeeded || null,
-        startDate: next.startDate || null,
-        endDate: next.endDate || null,
-        unionStatus: next.unionStatus || null,
-        compensationType: next.compensationType || null,
-        rate: next.rate || null,
-        contactName: next.contactName || null,
-        contactEmail: next.contactEmail || null,
-        description: next.logline || null,
-        notes: next.notes || null,
-        goal: next.goal || null,
-        milestone: next.milestone || null,
-        source: "work_board",
-        media: cover || null,
-        bucket: cover?.bucket || null,
-        storagePath: cover?.storagePath || null,
-        previewImage: coverUrl,
-        authorId: currentUserId || identity.id,
-        authorName,
-        authorUsername,
-        authorAvatar,
-        authorGlow,
-        authorAuraIntensity,
-        signalSeed: {
-          type: "project_drop_created",
+        href: "/board/work",
+        meta: {
+          kind: "project_drop",
+          cardStyle: "project_drop",
+          dropType: "project",
           projectId: next.id,
-        },
-      },
-    });
-    appendLocalActivity(activity);
-    window.dispatchEvent(new CustomEvent("board:activity:new", { detail: activity }));
-    emitBoardDropSignal({
-      type: "project_drop_created",
-      dropId: projectCommentDropId(next.id),
-      projectId: next.id,
-      userId: currentUserId || identity.id,
-      title: next.title,
-      meta: {
-        projectType: next.projectType,
-        status: next.status,
-        source: "work_board",
-      },
-    });
-    void (async () => {
-      try {
-        const sb = supabaseBrowser();
-        const { data } = await sb.auth.getUser();
-        const userId = data.user?.id;
-        if (!userId) return;
-        await createActivity(sb, {
-          user_id: userId,
-          kind: activity.kind,
-          title: activity.title,
-          body: activity.body,
-          href: activity.href,
-          image_url: activity.image_url,
-          meta: activity.meta,
-        });
-        await persistProjectDropToProfile(sb, userId, {
-          ...next,
+          projectType: next.projectType,
+          status: next.status,
+          description: next.logline,
+          goal: next.goal || null,
+          milestone: next.milestone || null,
+          source: "work_board",
+          authorId: currentUserId || identity.id,
           authorName,
           authorUsername,
-          contactName: authorName,
-        });
-      } catch {
-        // Keep the local project notebook even if remote activity sync fails.
-      }
-    })();
+          authorAvatar,
+          authorGlow,
+          authorAuraIntensity,
+          ownerUsername: authorUsername,
+          ownerLabel: authorName,
+        },
+      });
+    } catch {
+      // Feed write is best-effort; the notebook tile still posts.
+    }
+
+    try {
+      pushDrop({
+        id: projectCommentDropId(next.id),
+        type: "project",
+        title: `Project Drop: ${next.title}`,
+        createdAt: next.createdAt,
+        url: "/board/work",
+        description:
+          next.logline ||
+          `${next.contactName || "Host"} opened a new project room on BOARD.`,
+        tags: [
+          "project",
+          next.projectType,
+          statusLabel(next.status),
+          next.location,
+        ].filter(Boolean),
+        authorId: currentUserId || identity.id,
+        authorName,
+        authorUsername,
+        authorAvatar,
+        authorGlow,
+        authorAuraIntensity,
+        imageUrl: coverUrl || undefined,
+        mediaUrl: coverUrl || cover?.src,
+        mediaKind: cover?.kind,
+        projectId: next.id,
+        projectType: next.projectType,
+        projectStatus: next.status,
+        goal: next.goal,
+        milestone: next.milestone,
+        source: "work_board",
+        origin: "project_notebook",
+        meta: {
+          kind: "project_drop",
+          cardStyle: "project_drop",
+          dropType: "project",
+          projectId: next.id,
+          projectType: next.projectType,
+          status: next.status,
+          location: next.location || null,
+          rolesNeeded: next.rolesNeeded || null,
+          startDate: next.startDate || null,
+          endDate: next.endDate || null,
+          unionStatus: next.unionStatus || null,
+          compensationType: next.compensationType || null,
+          rate: next.rate || null,
+          contactName: next.contactName || null,
+          contactEmail: next.contactEmail || null,
+          description: next.logline || null,
+          notes: next.notes || null,
+          goal: next.goal || null,
+          milestone: next.milestone || null,
+          source: "work_board",
+          media: cover || null,
+          bucket: cover?.bucket || null,
+          storagePath: cover?.storagePath || null,
+          previewImage: coverUrl,
+          authorId: currentUserId || identity.id,
+          authorName,
+          authorUsername,
+          authorAvatar,
+          authorGlow,
+          authorAuraIntensity,
+          signalSeed: {
+            type: "project_drop_created",
+            projectId: next.id,
+          },
+        },
+      });
+    } catch {
+      // Universal drop write is best-effort.
+    }
+
+    try {
+      appendLocalActivity(activity);
+      window.dispatchEvent(new CustomEvent("board:activity:new", { detail: activity }));
+      emitBoardDropSignal({
+        type: "project_drop_created",
+        dropId: projectCommentDropId(next.id),
+        projectId: next.id,
+        userId: currentUserId || identity.id,
+        title: next.title,
+        meta: {
+          projectType: next.projectType,
+          status: next.status,
+          source: "work_board",
+        },
+      });
+    } catch {
+      // Activity fan-out is best-effort.
+    }
 
     commitProjects((prev) => [next, ...prev]);
     setActiveProjectId(next.id);
     setCreateOpen(false);
+
+    void (async () => {
+      try {
+        const sb = supabaseBrowser();
+        const auth = await Promise.race([
+          sb.auth.getUser(),
+          new Promise<{ data: { user: null } }>((resolve) =>
+            window.setTimeout(() => resolve({ data: { user: null } }), 4_000)
+          ),
+        ]);
+        const userId = auth.data.user?.id || currentUserId;
+        if (!userId) return;
+        await Promise.race([
+          (async () => {
+            await createActivity(sb, {
+              user_id: userId,
+              kind: activity.kind,
+              title: activity.title,
+              body: activity.body,
+              href: activity.href,
+              image_url: activity.image_url,
+              meta: activity.meta,
+            });
+            await persistProjectDropToProfile(sb, userId, {
+              ...next,
+              authorName,
+              authorUsername,
+              contactName: authorName,
+            });
+          })(),
+          new Promise<void>((resolve) => window.setTimeout(resolve, 12_000)),
+        ]);
+      } catch {
+        // Keep the local project notebook even if remote activity sync fails.
+      }
+    })();
   };
 
   const createWorkThoughtDrop = () => {

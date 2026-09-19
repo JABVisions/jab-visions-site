@@ -177,11 +177,13 @@ export default function ProjectDropMenu({
   const [mediaBucket, setMediaBucket] = useState("");
   const [mediaStoragePath, setMediaStoragePath] = useState("");
   const [mediaUploading, setMediaUploading] = useState(false);
+  const [publishing, setPublishing] = useState(false);
   const mediaFileRef = useRef<File | null>(null);
   const previewObjectUrlRef = useRef<string>("");
   const coverRef = useRef({ bucket: "", path: "", url: "" });
   const uploadPromiseRef = useRef<Promise<void> | null>(null);
   const uploadGenerationRef = useRef(0);
+  const publishingRef = useRef(false);
 
   function revokePreviewObjectUrl() {
     if (previewObjectUrlRef.current) {
@@ -275,6 +277,8 @@ export default function ProjectDropMenu({
     setMediaBucket("");
     setMediaStoragePath("");
     setMediaUploading(false);
+    setPublishing(false);
+    publishingRef.current = false;
     revokePreviewObjectUrl();
     mediaFileRef.current = null;
     coverRef.current = { bucket: "", path: "", url: "" };
@@ -372,6 +376,7 @@ export default function ProjectDropMenu({
   }
 
   async function handleCreate() {
+    if (publishingRef.current) return;
     setError(null);
 
     const v = validate();
@@ -380,10 +385,13 @@ export default function ProjectDropMenu({
       return;
     }
 
+    publishingRef.current = true;
+    setPublishing(true);
+
     if (!coverRef.current.path && uploadPromiseRef.current) {
       await Promise.race([
         uploadPromiseRef.current,
-        new Promise<void>((resolve) => window.setTimeout(resolve, 8_000)),
+        new Promise<void>((resolve) => window.setTimeout(resolve, 3_000)),
       ]);
     }
 
@@ -431,10 +439,15 @@ export default function ProjectDropMenu({
       createdAt: Date.now(),
     };
 
-    // ✅ This is the key: call onCreate reliably
-    await Promise.resolve(onCreate(drop));
+    try {
+      onCreate(drop);
+    } catch {
+      setError("Couldn’t post that Project Drop. Try Submit again.");
+      publishingRef.current = false;
+      setPublishing(false);
+      return;
+    }
 
-    // Close + reset
     onClose();
     resetAll();
   }
@@ -485,9 +498,10 @@ export default function ProjectDropMenu({
             <div className="flex flex-wrap items-center justify-end gap-2">
               <button
                 type="submit"
-                className="rounded-2xl border border-lime-300/30 bg-lime-400/20 px-4 py-2 text-sm font-semibold text-lime-50 hover:bg-lime-400/25 transition"
+                disabled={publishing}
+                className="rounded-2xl border border-lime-300/30 bg-lime-400/20 px-4 py-2 text-sm font-semibold text-lime-50 hover:bg-lime-400/25 transition disabled:opacity-60"
               >
-                Publish to Community
+                {publishing ? "Posting…" : "Publish to Community"}
               </button>
               <button
                 type="button"
@@ -833,9 +847,10 @@ export default function ProjectDropMenu({
 
             <button
               type="submit"
-              className="rounded-2xl border border-lime-300/30 bg-lime-400/20 px-5 py-2.5 text-sm font-semibold text-lime-50 hover:bg-lime-400/25 transition"
+              disabled={publishing}
+              className="rounded-2xl border border-lime-300/30 bg-lime-400/20 px-5 py-2.5 text-sm font-semibold text-lime-50 hover:bg-lime-400/25 transition disabled:opacity-60"
             >
-              Submit Project Drop to Community
+              {publishing ? "Posting…" : "Submit Project Drop to Community"}
             </button>
             </div>
           </div>
