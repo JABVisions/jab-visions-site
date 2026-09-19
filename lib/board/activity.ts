@@ -45,11 +45,15 @@ export type CreateActivityInput = {
 const STORAGE_KEY = "jab_board_activity_v1";
 const MAX_LOCAL = 120;
 
-function persistableImageUrl(value: unknown): string | null {
+export function persistableMediaUrl(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const src = value.trim();
   if (!src || src.startsWith("data:") || src.startsWith("blob:")) return null;
   return src;
+}
+
+function persistableImageUrl(value: unknown): string | null {
+  return persistableMediaUrl(value);
 }
 
 function safeJsonParse<T>(raw: string | null, fallback: T): T {
@@ -84,8 +88,8 @@ function normalizeActivity(x: any): BoardActivity | null {
     kind,
     title: x.title ?? null,
     body,
-    href: x.href ?? null,
-    image_url: x.image_url ?? null,
+    href: persistableMediaUrl(x.href),
+    image_url: persistableImageUrl(x.image_url),
     meta: x.meta && typeof x.meta === "object" ? x.meta : null,
   };
 }
@@ -545,7 +549,7 @@ export async function createActivity(
     kind: input.kind,
     title: input.title ?? null,
     body: input.body,
-    href: input.href ?? null,
+    href: persistableMediaUrl(input.href),
     image_url: persistableImageUrl(input.image_url),
     meta: input.meta ?? null,
   };
@@ -562,7 +566,7 @@ export async function createActivity(
         kind: input.kind,
         title: input.title,
         body: input.body,
-        href: input.href,
+        href: persistableMediaUrl(input.href),
         image_url: persistableImageUrl(input.image_url),
         meta: input.meta,
       })

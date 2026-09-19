@@ -343,6 +343,10 @@ type EmbedKind =
   | "audio"
   | "none";
 
+function isEphemeralHref(href: string) {
+  return /^(blob:|data:)/i.test(href.trim());
+}
+
 function isExternalHref(href: string) {
   return /^https?:\/\//i.test(href);
 }
@@ -545,11 +549,12 @@ function ActivityCard({
   const timeLabel = formatDropTime((item as any)?.created_at);
 
   // Be tolerant: href can be stored a few ways depending on older drops
-  const href =
+  const rawHref =
     (typeof (item as any)?.href === "string" && (item as any).href) ||
     (typeof (item as any)?.url === "string" && (item as any).url) ||
     (typeof (item as any)?.link === "string" && (item as any).link) ||
     "";
+  const href = rawHref && !isEphemeralHref(rawHref) ? rawHref : "";
   const rawMeta = (item as any)?.meta;
   const meta = rawMeta && typeof rawMeta === "object" ? rawMeta : null;
   const preview = meta?.preview ?? meta ?? null;
@@ -1722,6 +1727,10 @@ function ActivityCard({
           label={isVoiceDrop ? "VOICE DROP" : "AUDIO DROP"}
           onReload={refreshSignedMedia}
         />
+      ) : !showEmbed && !isDescriptDrop && !isDropbookSlide && isAudioFileDrop ? (
+        <div className="mediaMissing" role="status">
+          This Voice Studio mix did not upload to Board. Open Drop Studio and Mix to Drop again from drafts.
+        </div>
       ) : null}
 
       {!showEmbed &&
@@ -2470,6 +2479,17 @@ function ActivityCard({
           overflow: hidden;
           border-radius: 16px;
           background: rgba(0, 0, 0, 0.06);
+        }
+        .mediaMissing {
+          margin-top: 12px;
+          padding: 12px 14px;
+          border-radius: 16px;
+          font-size: 13px;
+          font-weight: 700;
+          line-height: 1.4;
+          color: rgba(80, 40, 90, 0.86);
+          background: rgba(238, 230, 255, 0.72);
+          border: 1px solid rgba(120, 60, 160, 0.18);
         }
 
         .imageMediaFrame {

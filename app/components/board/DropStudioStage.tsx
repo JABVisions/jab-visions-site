@@ -2533,14 +2533,25 @@ export default function DropStudioStage({
 
     const completedCustomizations = writeStudioDraft(completionValue);
     onChange(completedCustomizations);
+    const isAudioMix = file.type.startsWith("audio/") || /\.(mp3|wav|m4a|aac|ogg|flac)$/i.test(file.name);
+    if (isAudioMix) {
+      setProcessingVocal(true);
+      flashSaveNote("Saving mix to Board…");
+    }
     try {
-      await withAudioTimeout(Promise.resolve(onComplete(file, source)), 12_000, "complete");
+      await withAudioTimeout(
+        Promise.resolve(onComplete(file, source)),
+        isAudioMix ? 90_000 : 20_000,
+        "complete"
+      );
     } catch (error) {
       console.error("[DropStudioStage] completion failed", error);
       flashSaveNote("Couldn't save this Drop. It's in Drafts — ✕ to leave.");
       persistVoiceProjectRef.current();
+      setProcessingVocal(false);
       return;
     }
+    setProcessingVocal(false);
     clearLiveVoiceStudio();
     setVoiceStudioOpen(false);
     setAudioSession(null);

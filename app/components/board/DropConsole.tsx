@@ -197,13 +197,22 @@ function emitNewActivity(payload: any) {
   }
 }
 
-function inferMediaType(url: string) {
-  const u = url.toLowerCase();
+function inferMediaType(url: string, fileName = "") {
+  const u = `${url} ${fileName}`.toLowerCase();
   if (/\.(png|jpg|jpeg|gif|webp|avif|svg|bmp|tif|tiff|heic|heif)(\?|$)/i.test(u)) return "image";
   if (/\.(mp4|webm|mov|m4v)(\?|$)/i.test(u)) return "video";
   if (/\.(mp3|wav|m4a|aac|ogg|flac)(\?|$)/i.test(u)) return "audio";
-  if (/\/storage\/v1\/object\/public\/board-media\//i.test(u)) return "image";
+  if (/\/storage\/v1\/object\/public\/board-media\//i.test(u) && /\.(mp3|wav|m4a|aac|ogg|flac)/i.test(fileName)) {
+    return "audio";
+  }
+  if (/\/storage\/v1\/object\/public\/board-media\//i.test(url.toLowerCase())) return "image";
   return "link";
+}
+
+function durableAttachUrl(url: string | null | undefined) {
+  const src = typeof url === "string" ? url.trim() : "";
+  if (!src || src.startsWith("blob:") || src.startsWith("data:")) return null;
+  return src;
 }
 
 function thoughtFormatFromMedia(mediaType: string | null) {
@@ -336,6 +345,12 @@ export default function DropConsole({
   const [uploading, setUploading] = useState(false);
   const [uploadErr, setUploadErr] = useState<string | null>(null);
   const localPreviewUrlRef = useRef("");
+  const pendingMediaFileRef = useRef<File | null>(null);
+  const [mediaPreviewUrl, setMediaPreviewUrl] = useState("");
+  const [attachedStorage, setAttachedStorage] = useState<{
+    bucket: string;
+    storagePath: string;
+  } | null>(null);
 
   const [posting, setPosting] = useState(false);
   const [postMsg, setPostMsg] = useState<string | null>(null);
@@ -365,7 +380,7 @@ export default function DropConsole({
 
   useEffect(() => {
     if (!posting) return;
-    const timer = window.setTimeout(() => setPosting(false), 15_000);
+    const timer = window.setTimeout(() => setPosting(false), 120_000);
     return () => window.clearTimeout(timer);
   }, [posting]);
 
@@ -420,15 +435,17 @@ export default function DropConsole({
     const tooLarge = checkUploadSize(file);
     if (tooLarge) {
       setUploadErr(tooLarge);
-      return;
+      return null;
     }
 
+    pendingMediaFileRef.current = file;
     if (localPreviewUrlRef.current) {
       URL.revokeObjectURL(localPreviewUrlRef.current);
       localPreviewUrlRef.current = "";
     }
     const localUrl = URL.createObjectURL(file);
     localPreviewUrlRef.current = localUrl;
+    setMediaPreviewUrl(localUrl);
 
     setUploading(true);
     if (mode === "announcement") {
@@ -436,7 +453,6 @@ export default function DropConsole({
       setAnnounceMediaName(file.name);
     }
     if (mode === "board_drop") {
-      setAttachUrl(localUrl);
       setUploadedFileName(file.name);
       setMediaSource(source);
       if (dropFlavor === "media") setDropCustomizations({});
@@ -448,11 +464,11 @@ export default function DropConsole({
         bucket,
         folder: `uploads/${meId ?? "demo"}`,
       });
-      if (!uploaded) {
-        setUploadErr("File is attached on this device. Retry if it does not stay on Board.");
-        return;
+      const url = durableAttachUrl(uploaded?.publicUrl) || durableAttachUrl(uploaded?.signedUrl);
+      if (!uploaded || !url) {
+        setUploadErr("The mix is on this device, but it has not uploaded to Board yet. Keep this screen open and try again.");
+        return null;
       }
-      const url = uploaded.signedUrl || uploaded.publicUrl;
       if (mode === "announcement") {
         setAnnounceMediaUrl(url);
         setAnnounceMediaName(file.name);
@@ -461,17 +477,22 @@ export default function DropConsole({
         setAttachUrl(url);
         setUploadedFileName(file.name);
         setMediaSource(source);
+        setAttachedStorage({ bucket: uploaded.bucket, storagePath: uploaded.storagePath });
       }
+      pendingMediaFileRef.current = null;
       if (localPreviewUrlRef.current) {
         URL.revokeObjectURL(localPreviewUrlRef.current);
         localPreviewUrlRef.current = "";
       }
+      setMediaPreviewUrl("");
       setPostMsg("Media attached ✓");
       window.setTimeout(() => setPostMsg(null), 1500);
+      return url;
     } catch (e: any) {
       setUploadErr(
-        e?.message || "Upload failed. The file is still attached on this device."
+        e?.message || "Upload failed. Keep this screen open — the mix is still on this device."
       );
+      return null;
     } finally {
       setUploading(false);
     }
@@ -570,10 +591,20 @@ export default function DropConsole({
 
       const cleanTitle = title.trim() || null;
       let cleanBody = body.trim();
+      let durableAttach = durableAttachUrl(attachUrl);
+      if (!durableAttach && pendingMediaFileRef.current) {
+        durableAttach = await uploadToBoardMedia(
+          pendingMediaFileRef.current,
+          mediaSource ?? "capture"
+        );
+        if (!durableAttach) {
+          throw new Error("The Voice Studio mix is still uploading. Wait for Media attached ✓, then drop.");
+        }
+      }
       const cleanAttach =
         mode === "board_drop" && dropFlavor === "pay" && payProvider === "payment_link"
-          ? payLink.trim() || attachUrl.trim() || null
-          : attachUrl.trim() || null;
+          ? payLink.trim() || durableAttach || null
+          : durableAttach;
       const linkKind = cleanAttach ? classifyDropbookLinkUrl(cleanAttach) : null;
       const savedFlavor: DropFlavor =
         dropFlavor === "thought" ||
@@ -599,7 +630,7 @@ export default function DropConsole({
         mode === "board_drop" && dropFlavor === "media"
           ? compactDropCustomizations(dropCustomizations)
           : undefined;
-      const attachMediaType = cleanAttach ? inferMediaType(cleanAttach) : null;
+      const attachMediaType = cleanAttach ? inferMediaType(cleanAttach, uploadedFileName) : null;
       const uploadedAudio =
         attachMediaType === "audio" ||
         /\.(mp3|wav|m4a|aac|ogg|flac)$/i.test(uploadedFileName);
@@ -608,7 +639,11 @@ export default function DropConsole({
           ? makeEmbedByMode("Music", cleanAttach)
           : null;
       const thoughtFormat =
-        dropFlavor === "thought" ? thoughtFormatFromMedia(attachMediaType) : null;
+        dropFlavor === "thought"
+          ? uploadedAudio
+            ? "voice"
+            : thoughtFormatFromMedia(attachMediaType)
+          : null;
       const isHtmlDocument =
         /\.html?$/i.test(uploadedFileName) ||
         /\.html?(?:$|[?#])/i.test(cleanAttach ?? "");
@@ -704,7 +739,7 @@ export default function DropConsole({
       }
 
       // Announcement media: store as href so ActivityCard can embed
-      const cleanAnnMedia = announceMediaUrl.trim() || null;
+      const cleanAnnMedia = durableAttachUrl(announceMediaUrl);
       const annMediaType = cleanAnnMedia ? inferMediaType(cleanAnnMedia) : null;
 
       const resolvedHref =
@@ -744,6 +779,9 @@ export default function DropConsole({
                   : undefined,
               description: storedBoardDropDescription || cleanBody || undefined,
               fileName: uploadedFileName || undefined,
+              bucket: attachedStorage?.bucket,
+              storagePath: attachedStorage?.storagePath,
+              mediaUrl: cleanAttach || undefined,
               mediaKind:
                 savedFlavor === "music"
                   ? uploadedAudio
@@ -798,6 +836,9 @@ export default function DropConsole({
                 dropType: isDropbookSlide ? "dropbook" : savedFlavor,
                 dropId: boardDropId,
                 fileName: uploadedFileName || null,
+                bucket: attachedStorage?.bucket ?? null,
+                storagePath: attachedStorage?.storagePath ?? null,
+                mediaUrl: cleanAttach || null,
                 embedUrl: musicEmbed?.embedUrl ?? preview?.embedUrl ?? null,
                 hostLabel: musicEmbed?.hostLabel ?? preview?.provider ?? null,
                 mediaKind:
@@ -806,7 +847,7 @@ export default function DropConsole({
                       ? "audio"
                       : null
                     : dropFlavor === "thought"
-                    ? attachMediaType === "audio"
+                    ? uploadedAudio
                       ? "audio"
                       : attachMediaType === "image"
                         ? "image"
@@ -896,6 +937,9 @@ export default function DropConsole({
                 dropType: isDropbookSlide ? "dropbook" : savedFlavor,
                 dropId: boardDropId,
                 fileName: uploadedFileName || null,
+                bucket: attachedStorage?.bucket ?? null,
+                storagePath: attachedStorage?.storagePath ?? null,
+                mediaUrl: cleanAttach || null,
                 embedUrl: musicEmbed?.embedUrl ?? preview?.embedUrl ?? null,
                 hostLabel: musicEmbed?.hostLabel ?? preview?.provider ?? null,
                 mediaKind:
@@ -904,7 +948,7 @@ export default function DropConsole({
                       ? "audio"
                       : null
                     : dropFlavor === "thought"
-                    ? attachMediaType === "audio"
+                    ? uploadedAudio
                       ? "audio"
                       : attachMediaType === "image"
                         ? "image"
@@ -1023,6 +1067,9 @@ export default function DropConsole({
       setBody("");
       setAttachUrl("");
       setUploadedFileName("");
+      setAttachedStorage(null);
+      setMediaPreviewUrl("");
+      pendingMediaFileRef.current = null;
       setDropCustomizations({});
       setDropDesc("");
       setThoughtText("");
@@ -1170,7 +1217,8 @@ export default function DropConsole({
         value={announceCustomizations}
         onChange={setAnnounceCustomizations}
         onComplete={async (file) => {
-          void uploadToBoardMedia(file, "capture");
+          const url = await uploadToBoardMedia(file, "capture");
+          if (!url) throw new Error("Couldn't upload this mix. Try Mix to Drop again.");
           setAnnounceStudioOpen(false);
         }}
         onDescriptComplete={async (doc: DescriptDoc) => {
@@ -1238,6 +1286,9 @@ export default function DropConsole({
                     setDropFlavor(t);
                     setAttachUrl("");
                     setUploadedFileName("");
+                    setAttachedStorage(null);
+                    setMediaPreviewUrl("");
+                    pendingMediaFileRef.current = null;
                     setDropDesc("");
                     setThoughtText("");
                     setMediaSource(null);
@@ -1374,6 +1425,7 @@ export default function DropConsole({
               setDropFlavor={setDropFlavor}
               attachUrl={attachUrl}
               setAttachUrl={setAttachUrl}
+              mediaPreviewUrl={mediaPreviewUrl}
               uploadedFileName={uploadedFileName}
               uploading={uploading}
               uploadErr={uploadErr}
@@ -1450,8 +1502,8 @@ export default function DropConsole({
               </div>
             </div>
 
-            <button type="submit" disabled={posting} className="dcSubmit">
-              {posting ? "Dropping…" : "Add a Drop"}
+            <button type="submit" disabled={posting || uploading} className="dcSubmit">
+              {uploading ? "Uploading mix…" : posting ? "Dropping…" : "Add a Drop"}
             </button>
           </div>
         </form>
@@ -1911,6 +1963,7 @@ function BoardDropConsoleFields({
   setDropFlavor,
   attachUrl,
   setAttachUrl,
+  mediaPreviewUrl,
   uploadedFileName,
   uploading,
   uploadErr,
@@ -1941,10 +1994,11 @@ function BoardDropConsoleFields({
   setDropFlavor: (value: DropFlavor) => void;
   attachUrl: string;
   setAttachUrl: (value: string) => void;
+  mediaPreviewUrl: string;
   uploadedFileName: string;
   uploading: boolean;
   uploadErr: string | null;
-  uploadToBoardMedia: (file: File, source?: "upload" | "capture") => void;
+  uploadToBoardMedia: (file: File, source?: "upload" | "capture") => Promise<string | null>;
   dropDesc: string;
   setDropDesc: (value: string) => void;
   mediaSource: "upload" | "capture" | null;
@@ -1998,14 +2052,16 @@ function BoardDropConsoleFields({
             setTitle((current) => current.trim() || "Dropbook");
             setDropDesc("");
           }
-          void uploadToBoardMedia(file, "capture");
+          const url = await uploadToBoardMedia(file, "capture");
+          if (!url) throw new Error("Couldn't upload this mix. Try Mix to Drop again.");
         }}
         onDescriptComplete={async (doc: DescriptDoc) => {
           const plainText = doc.plainText.trim();
           setDropFlavor("doc");
           setTitle((current) => current.trim() || doc.title);
           setDocDesc(plainText);
-          void uploadToBoardMedia(descriptDocToFile(doc), "capture");
+          const url = await uploadToBoardMedia(descriptDocToFile(doc), "capture");
+          if (!url) throw new Error("Couldn't upload this document. Try again.");
         }}
         onLinkComplete={async (link) => {
           if (!onLinkComplete) throw new Error("Could not post this link.");
@@ -2093,12 +2149,12 @@ function BoardDropConsoleFields({
         </div>
       ) : null}
 
-      {dropFlavor === "pay" && attachUrl ? (
+      {dropFlavor === "pay" && (mediaPreviewUrl || attachUrl) ? (
         <div className="consoleMediaPreview">
-          {inferMediaType(attachUrl) === "video" || /\.(mp4|webm|mov|m4v)$/i.test(uploadedFileName) ? (
-            <video src={attachUrl} controls playsInline />
+          {inferMediaType(attachUrl || mediaPreviewUrl, uploadedFileName) === "video" || /\.(mp4|webm|mov|m4v)$/i.test(uploadedFileName) ? (
+            <video src={mediaPreviewUrl || attachUrl} controls playsInline />
           ) : (
-            <img src={attachUrl} alt="Pay Drop request context" />
+            <img src={mediaPreviewUrl || attachUrl} alt="Pay Drop request context" />
           )}
           {mediaSource === "capture" ? <span>Captured on Board</span> : null}
         </div>
@@ -2119,16 +2175,19 @@ function BoardDropConsoleFields({
             </div>
           </div>
 
-          {attachUrl ? (
+          {(mediaPreviewUrl || attachUrl) ? (
             <div className="thoughtAttachmentPreview">
-              {inferMediaType(attachUrl) === "audio" ||
+              {inferMediaType(attachUrl || mediaPreviewUrl, uploadedFileName) === "audio" ||
               /\.(mp3|wav|m4a|aac|ogg|flac)$/i.test(uploadedFileName) ? (
-                <audio src={attachUrl} controls preload="metadata" />
+                <audio src={mediaPreviewUrl || attachUrl} controls preload="metadata" />
               ) : (
-                <img src={attachUrl} alt="Thought attachment" />
+                <img src={mediaPreviewUrl || attachUrl} alt="Thought attachment" />
               )}
               <span>
-                {inferMediaType(attachUrl) === "audio" ? "Voice memo thought" : "Doodle/image thought"}
+                {inferMediaType(attachUrl || mediaPreviewUrl, uploadedFileName) === "audio" ||
+                /\.(mp3|wav|m4a|aac|ogg|flac)$/i.test(uploadedFileName)
+                  ? "Voice memo thought"
+                  : "Doodle/image thought"}
               </span>
             </div>
           ) : null}
