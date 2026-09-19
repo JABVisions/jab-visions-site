@@ -4,7 +4,7 @@ import { createSupabaseRouteClient } from "@/lib/supabase/routeClient";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const maxDuration = 30;
+export const maxDuration = 60;
 
 function jsonError(status: number, message: string) {
   return NextResponse.json({ ok: false, message }, { status });

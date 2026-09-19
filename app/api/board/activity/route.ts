@@ -1,6 +1,6 @@
 import { cookies } from "next/headers";
 import { createServerClient } from "@supabase/ssr";
-import type { BoardActivity, BoardActivityKind } from "@/lib/board/activity";
+import { persistableMediaUrl, type BoardActivity, type BoardActivityKind } from "@/lib/board/activity";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -58,7 +58,7 @@ function normalizeActivityRow(row: any): BoardActivity | null {
     kind: cleanKind(row.kind),
     title: title || null,
     body: body || title || "Board Drop",
-    href: row.href ?? row.url ?? row.link_url ?? null,
+    href: persistableMediaUrl(row.href ?? row.url ?? row.link_url),
     image_url:
       row.image_url ??
       row.imageUrl ??
@@ -90,7 +90,7 @@ function normalizeLegacyBoardDrop(row: any): BoardActivity | null {
     kind: "board_drop",
     title,
     body: text || "Board Drop",
-    href: row.href ?? row.url ?? row.link_url ?? null,
+    href: persistableMediaUrl(row.href ?? row.url ?? row.link_url),
     image_url:
       row.image_url ??
       row.imageUrl ??
@@ -121,7 +121,7 @@ function normalizePostRow(row: any, source: string): BoardActivity | null {
     kind: "status",
     title: row.title ? String(row.title) : "Board Post",
     body: body || "New Board post.",
-    href: row.href ?? null,
+    href: persistableMediaUrl(row.href),
     image_url: row.image_url ?? row.imageUrl ?? null,
     meta: { source },
   };

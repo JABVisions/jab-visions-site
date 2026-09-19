@@ -2,8 +2,8 @@ import { BUCKET_DOCS, BUCKET_MEDIA } from "@/lib/board/dropItem";
 import { checkUploadSize, resolveUploadContentType } from "@/lib/board/uploadLimits";
 import { supabaseBrowser } from "@/lib/supabase/browser";
 
-export const BOARD_MEDIA_UPLOAD_TIMEOUT_MS = 12_000;
-export const BOARD_MEDIA_READ_TIMEOUT_MS = 5_000;
+export const BOARD_MEDIA_UPLOAD_TIMEOUT_MS = 55_000;
+export const BOARD_MEDIA_READ_TIMEOUT_MS = 12_000;
 const COPY_BYTES_LIMIT = 8 * 1024 * 1024;
 
 export type BoardMediaUploadResult = {
