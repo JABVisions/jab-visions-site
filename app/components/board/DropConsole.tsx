@@ -2,7 +2,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { supabaseBrowser } from "@/lib/supabase/browser";
 
 import { createActivity, type BoardActivityKind } from "@/lib/board/activity";
@@ -30,7 +30,8 @@ import {
   studioLinkPersistKind,
 } from "@/lib/board/dropbookLink";
 import { makeEmbedByMode, newsCoverUrl } from "@/lib/board/dropItem";
-import { checkUploadSize, resolveUploadContentType } from "@/lib/board/uploadLimits";
+import { uploadBoardMediaFile } from "@/lib/board/boardMediaUpload";
+import { checkUploadSize } from "@/lib/board/uploadLimits";
 
 import {
   createThread,
@@ -332,6 +333,7 @@ export default function DropConsole({
 
   const [uploading, setUploading] = useState(false);
   const [uploadErr, setUploadErr] = useState<string | null>(null);
+  const localPreviewUrlRef = useRef("");
 
   const [posting, setPosting] = useState(false);
   const [postMsg, setPostMsg] = useState<string | null>(null);
@@ -358,6 +360,18 @@ export default function DropConsole({
   useEffect(() => {
     if (!sleeping) setHasAwakened(true);
   }, [sleeping]);
+
+  useEffect(() => {
+    if (!posting) return;
+    const timer = window.setTimeout(() => setPosting(false), 15_000);
+    return () => window.clearTimeout(timer);
+  }, [posting]);
+
+  useEffect(() => {
+    return () => {
+      if (localPreviewUrlRef.current) URL.revokeObjectURL(localPreviewUrlRef.current);
+    };
+  }, []);
 
   /* forums */
   useEffect(() => {
@@ -407,28 +421,36 @@ export default function DropConsole({
       return;
     }
 
+    if (localPreviewUrlRef.current) {
+      URL.revokeObjectURL(localPreviewUrlRef.current);
+      localPreviewUrlRef.current = "";
+    }
+    const localUrl = URL.createObjectURL(file);
+    localPreviewUrlRef.current = localUrl;
+
     setUploading(true);
+    if (mode === "announcement") {
+      setAnnounceMediaUrl(localUrl);
+      setAnnounceMediaName(file.name);
+    }
+    if (mode === "board_drop") {
+      setAttachUrl(localUrl);
+      setUploadedFileName(file.name);
+      setMediaSource(source);
+      if (dropFlavor === "media") setDropCustomizations({});
+    }
 
     try {
-      const ext = (file.name.split(".").pop() || "bin").toLowerCase();
       const bucket = mode === "board_drop" && dropFlavor === "doc" ? "board-docs" : "board-media";
-      const path = `uploads/${meId ?? "demo"}/${Date.now()}_${Math.random()
-        .toString(16)
-        .slice(2)}.${ext}`;
-
-      const { error } = await sb.storage
-        .from(bucket)
-        .upload(path, file, {
-          cacheControl: "3600",
-          upsert: false,
-          contentType: resolveUploadContentType(file),
-        });
-
-      if (error) throw error;
-
-      const pub = sb.storage.from(bucket).getPublicUrl(path);
-      const url = pub.data.publicUrl;
-
+      const uploaded = await uploadBoardMediaFile(file, {
+        bucket,
+        folder: `uploads/${meId ?? "demo"}`,
+      });
+      if (!uploaded) {
+        setUploadErr("File is attached on this device. Retry if it does not stay on Board.");
+        return;
+      }
+      const url = uploaded.signedUrl || uploaded.publicUrl;
       if (mode === "announcement") {
         setAnnounceMediaUrl(url);
         setAnnounceMediaName(file.name);
@@ -437,14 +459,16 @@ export default function DropConsole({
         setAttachUrl(url);
         setUploadedFileName(file.name);
         setMediaSource(source);
-        if (dropFlavor === "media") setDropCustomizations({});
       }
-
+      if (localPreviewUrlRef.current) {
+        URL.revokeObjectURL(localPreviewUrlRef.current);
+        localPreviewUrlRef.current = "";
+      }
       setPostMsg("Media attached ✓");
       window.setTimeout(() => setPostMsg(null), 1500);
     } catch (e: any) {
       setUploadErr(
-        e?.message || "Upload failed. Check board-media bucket + policies."
+        e?.message || "Upload failed. The file is still attached on this device."
       );
     } finally {
       setUploading(false);
@@ -453,13 +477,19 @@ export default function DropConsole({
 
   async function persistBoardDropToProfile(drop: Record<string, unknown>): Promise<boolean> {
     try {
-      const { data: auth, error: authError } = await sb.auth.getUser();
-      if (authError || !auth.user?.id) return false;
+      const auth = await Promise.race([
+        sb.auth.getUser(),
+        new Promise<{ data: { user: null }; error: null }>((resolve) =>
+          window.setTimeout(() => resolve({ data: { user: null }, error: null }), 4_000)
+        ),
+      ]);
+      const { data, error: authError } = auth;
+      if (authError || !data.user?.id) return false;
 
       const { data: profile, error: profileError } = await sb
         .from("profiles")
         .select("board_style")
-        .eq("id", auth.user.id)
+        .eq("id", data.user.id)
         .maybeSingle();
       if (profileError) throw profileError;
 
@@ -479,7 +509,7 @@ export default function DropConsole({
       const { data: updatedProfile, error: updateError } = await sb
         .from("profiles")
         .update({ board_style: { ...boardStyle, boardDrops } })
-        .eq("id", auth.user.id)
+        .eq("id", data.user.id)
         .select("id")
         .maybeSingle();
       if (updateError) throw updateError;
@@ -497,22 +527,34 @@ export default function DropConsole({
   ): Promise<DropCustomization | undefined> {
     const overlay = input?.artOverlayUrl;
     if (!overlay?.startsWith("data:image/")) return input;
-    const { data: auth } = await sb.auth.getUser();
-    if (!auth.user?.id) throw new Error("Sign in to save the editable art layer.");
+    try {
+      const auth = await Promise.race([
+        sb.auth.getUser(),
+        new Promise<{ data: { user: null } }>((resolve) =>
+          window.setTimeout(() => resolve({ data: { user: null } }), 4_000)
+        ),
+      ]);
+      if (!auth.data.user?.id) return input;
 
-    const response = await fetch(overlay);
-    const blob = await response.blob();
-    const extension = blob.type.includes("webp") ? "webp" : "png";
-    const path = `${auth.user.id}/${dropId}-art-layer/${Date.now()}-art-layer.${extension}`;
-    const { error } = await sb.storage.from("board-media").upload(path, blob, {
-      upsert: true,
-      contentType: blob.type || "image/png",
-      cacheControl: "3600",
-    });
-    if (error) throw error;
-    const publicUrl = sb.storage.from("board-media").getPublicUrl(path).data.publicUrl;
-    if (!publicUrl) throw new Error("Couldn't resolve the editable art layer.");
-    return { ...input, artOverlayUrl: publicUrl };
+      const response = await fetch(overlay);
+      const blob = await response.blob();
+      const extension = blob.type.includes("webp") ? "webp" : "png";
+      const path = `${auth.data.user.id}/${dropId}-art-layer/${Date.now()}-art-layer.${extension}`;
+      const upload = uploadBoardMediaFile(
+        new File([blob], `art-layer.${extension}`, { type: blob.type || "image/png" }),
+        { bucket: "board-media", folder: `${auth.data.user.id}/${dropId}-art-layer` }
+      );
+      const uploaded = await Promise.race([
+        upload,
+        new Promise<null>((resolve) => window.setTimeout(() => resolve(null), 12_000)),
+      ]);
+      if (!uploaded) return input;
+      const publicUrl = uploaded.signedUrl || uploaded.publicUrl;
+      if (!publicUrl) return input;
+      return { ...input, artOverlayUrl: publicUrl };
+    } catch {
+      return input;
+    }
   }
 
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
@@ -916,7 +958,10 @@ export default function DropConsole({
         },
       });
 
-      const boardDropSavedToProfile = await boardDropProfileSave;
+      const boardDropSavedToProfile = await Promise.race([
+        boardDropProfileSave,
+        new Promise<boolean>((resolve) => window.setTimeout(() => resolve(false), 8_000)),
+      ]);
       if (
         mode === "board_drop" &&
         res.source !== "db" &&
