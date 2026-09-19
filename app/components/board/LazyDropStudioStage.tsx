@@ -115,9 +115,14 @@ function DropStudioLoading() {
   );
 }
 
-/** Mount Drop Studio only while open — lazy chunk avoids loading the stage on every Board page. */
+/** Mount Drop Studio while open, and keep a live Voice Studio session mounted
+ *  after the overlay hides so mid-song bounce does not destroy clip Files. */
 export default function LazyDropStudioStage({ open, onClose, ...rest }: DropStudioStageProps) {
   const [chunkKey, setChunkKey] = useState(0);
+  const [held, setHeld] = useState(open);
+  useEffect(() => {
+    if (open) setHeld(true);
+  }, [open]);
   // Always release the page scroll when the studio closes or unmounts abruptly
   // (e.g. save + close without running DropStudioStage's close handler).
   useEffect(() => {
@@ -132,11 +137,11 @@ export default function LazyDropStudioStage({ open, onClose, ...rest }: DropStud
     };
   }, [open]);
 
-  if (!open) return null;
+  if (!open && !held) return null;
   return (
     <DropStudioChunkErrorBoundary onReset={() => setChunkKey((key) => key + 1)}>
-      <Suspense fallback={<DropStudioLoading />}>
-        <DropStudioStageLazy key={chunkKey} open onClose={onClose} {...rest} />
+      <Suspense fallback={open ? <DropStudioLoading /> : null}>
+        <DropStudioStageLazy key={chunkKey} open={open} onClose={onClose} {...rest} />
       </Suspense>
     </DropStudioChunkErrorBoundary>
   );

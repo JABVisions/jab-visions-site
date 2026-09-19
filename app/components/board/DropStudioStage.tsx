@@ -54,6 +54,7 @@ import VoicePresets from "./VoicePresets";
 import VoiceStudioSession from "./VoiceStudioSession";
 import {
   AudioSessionEngine,
+  adoptAudioFile,
   createAudioSession,
   createSessionHistory,
   decodeAudioFile,
@@ -62,6 +63,8 @@ import {
   duplicateClip,
   getAudioContextConstructor,
   moveAdlibTrack,
+  playableAudioMessage,
+  MissingAudioObjectError,
   pushHistory,
   readStudioLatencyMs,
   redoHistory,
@@ -88,6 +91,11 @@ import {
   type SessionHistory,
   type StudioTakeCapture,
 } from "@/lib/board/audioSession";
+import {
+  clearLiveVoiceStudio,
+  peekLiveVoiceStudio,
+  rememberLiveVoiceStudio,
+} from "@/lib/board/voiceStudioLiveHold";
 import {
   renderVoicePresetFile,
   type VoicePresetKey,
@@ -633,6 +641,16 @@ export default function DropStudioStage({
     sessionHistoryRef.current = sessionHistory;
   }, [sessionHistory]);
 
+  useEffect(() => {
+    if (!sessionHasClips(audioSession) || !audioSession) return;
+    rememberLiveVoiceStudio({
+      draftId: draftIdRef.current,
+      session: audioSession,
+      history: sessionHistoryRef.current,
+      voiceStudioOpen: true,
+    });
+  }, [audioSession, voiceStudioOpen]);
+
   const pushSessionEdit = useCallback((mutator: (session: AudioSession) => AudioSession) => {
     setAudioSession((current) => {
       if (!current) return current;
@@ -708,6 +726,19 @@ export default function DropStudioStage({
       return next;
     });
     setVoiceStudioOpen(true);
+    const live = peekLiveVoiceStudio();
+    if (live && sessionHasClips(live.session)) {
+      setAudioSession((current) => {
+        if (current && sessionHasClips(current) && current.id === live.session.id) return current;
+        draftIdRef.current = live.draftId || draftIdRef.current;
+        sessionHistoryRef.current = live.history;
+        setSessionHistory(live.history);
+        rememberActiveVoiceStudioDraft(draftIdRef.current);
+        return live.session;
+      });
+      lastSavedVoiceSignatureRef.current = voiceStudioEditSignature(live.session);
+      return;
+    }
     void (async () => {
       const restored = await loadLatestVoiceStudioProject();
       if (!restored) return;
@@ -759,19 +790,28 @@ export default function DropStudioStage({
 
   const setStudioInstrumental = useCallback((file: File) => {
     setError("");
-    setAudioSession((current) => {
-      const next = upsertLaneFromFile(current ?? createAudioSession(), "instrumental", file);
-      audioSessionRef.current = next;
-      return next;
-    });
-    flashSaveNote("Instrumental loaded — tap + on Vocals or Record to sing over it");
-    persistVoiceProjectRef.current();
     void (async () => {
+      let owned: File;
+      try {
+        owned = await adoptAudioFile(file);
+      } catch (reason) {
+        setError(playableAudioMessage(reason, file.name));
+        return;
+      }
+      const next = upsertLaneFromFile(
+        audioSessionRef.current ?? createAudioSession(),
+        "instrumental",
+        owned
+      );
+      audioSessionRef.current = next;
+      setAudioSession(next);
+      flashSaveNote("Instrumental loaded — tap + on Vocals or Record to sing over it");
+      persistVoiceProjectRef.current();
       try {
         const Constructor = getAudioContextConstructor();
         if (!Constructor) return;
         const ctx = new Constructor();
-        const decoded = await decodeAudioFile(file, ctx);
+        const decoded = await decodeAudioFile(owned, ctx);
         await ctx.close().catch(() => undefined);
         setAudioSession((current) => {
           if (!current) return current;
@@ -782,7 +822,7 @@ export default function DropStudioStage({
               return {
                 ...track,
                 clips: track.clips.map((clip) =>
-                  clip.file === file || clip.file.name === file.name
+                  clip.file === owned || clip.file.name === owned.name
                     ? { ...clip, decoded }
                     : clip
                 ),
@@ -792,9 +832,8 @@ export default function DropStudioStage({
         });
       } catch (reason) {
         setError(
-          reason instanceof Error
-            ? reason.message
-            : "Couldn't read that instrumental. Try WAV/MP3."
+          playableAudioMessage(reason, owned.name) ||
+            "Couldn't read that instrumental. Try WAV/MP3."
         );
       }
     })();
@@ -809,9 +848,14 @@ export default function DropStudioStage({
       setStudioLaneAnalysers(analysers);
       setStudioPlaying(true);
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Couldn't play this session.");
+      setError(playableAudioMessage(reason));
       setStudioLaneAnalysers({});
       setStudioPlaying(false);
+      return;
+    }
+    const missing = studioEngine().consumeMissingClipNames();
+    if (missing.length) {
+      setError(new MissingAudioObjectError(missing[0]).message);
     }
   }, [audioSession]);
 
@@ -949,7 +993,7 @@ export default function DropStudioStage({
         setStudioLaneAnalysers(analysers);
         setStudioPlaying(true);
       } catch (reason) {
-        setError(reason instanceof Error ? reason.message : "Couldn't preview that ad-lib.");
+        setError(playableAudioMessage(reason, track.label || track.clips[0]?.name));
       }
     },
     [audioSession]
@@ -976,7 +1020,7 @@ export default function DropStudioStage({
       window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
       flashSaveNote(`Previewing ${preset}`);
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Couldn't preview that preset.");
+      setError(playableAudioMessage(reason));
     } finally {
       setPresetPreviewing(false);
     }
@@ -1376,17 +1420,39 @@ export default function DropStudioStage({
   // while a Dropbook build session is already in progress.
   useEffect(() => {
     if (!open) {
-      wasStudioOpenRef.current = false;
+      persistVoiceProjectRef.current();
+      haltStudioTransport();
       stopCamera();
       document.body.style.overflow = "";
+      if (!sessionHasClips(audioSessionRef.current) && !peekLiveVoiceStudio()) {
+        wasStudioOpenRef.current = false;
+      }
       return;
     }
 
+    const live = peekLiveVoiceStudio();
     const freshOpen = !wasStudioOpenRef.current;
     wasStudioOpenRef.current = true;
     document.body.style.overflow = "hidden";
 
     if (!freshOpen) return;
+
+    if (sessionHasClips(audioSessionRef.current) || (live && sessionHasClips(live.session))) {
+      if (live && !sessionHasClips(audioSessionRef.current)) {
+        draftIdRef.current = live.draftId || draftIdRef.current;
+        audioSessionRef.current = live.session;
+        setAudioSession(live.session);
+        sessionHistoryRef.current = live.history;
+        setSessionHistory(live.history);
+        setVoiceStudioOpen(true);
+        setMode("audio");
+        setPhase("edit");
+        rememberActiveVoiceStudioDraft(draftIdRef.current);
+        lastSavedVoiceSignatureRef.current = voiceStudioEditSignature(live.session);
+        flashSaveNote("Voice Studio is still live");
+      }
+      return;
+    }
 
     const initialStudio = compactDropCustomizations(value) ?? {};
     setStudioValue(initialStudio);
@@ -2431,6 +2497,11 @@ export default function DropStudioStage({
     onChange(completedCustomizations);
     try {
       await onComplete(file, source);
+      clearLiveVoiceStudio();
+      setVoiceStudioOpen(false);
+      setAudioSession(null);
+      audioSessionRef.current = null;
+      wasStudioOpenRef.current = false;
       onClose();
     } catch (error) {
       console.error("[DropStudioStage] completion failed", error);
@@ -3170,14 +3241,22 @@ export default function DropStudioStage({
                       onCollapse={collapseVoiceStudio}
                       onNotice={flashSaveNote}
                       onAdlibUpload={(file) => {
-                        const offsetMs = audioSession.playheadMs || 0;
-                        pushSessionEdit((current) =>
-                          upsertLaneFromFile(current, "adlib", file, {
-                            offsetMs,
-                            name: file.name.replace(/\.[^.]+$/, "") || "Ad-Lib",
-                          })
-                        );
-                        flashSaveNote("Ad-lib uploaded");
+                        void (async () => {
+                          try {
+                            const owned = await adoptAudioFile(file);
+                            const offsetMs = audioSessionRef.current?.playheadMs || 0;
+                            pushSessionEdit((current) =>
+                              upsertLaneFromFile(current, "adlib", owned, {
+                                offsetMs,
+                                name: owned.name.replace(/\.[^.]+$/, "") || "Ad-Lib",
+                              })
+                            );
+                            flashSaveNote("Ad-lib uploaded");
+                            window.setTimeout(() => persistVoiceProjectRef.current(), 50);
+                          } catch (reason) {
+                            setError(playableAudioMessage(reason, file.name));
+                          }
+                        })();
                       }}
                       onAdlibRecord={() => void startAdlibRecord()}
                       onAdlibStopRecord={stopAdlibRecord}

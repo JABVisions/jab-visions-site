@@ -1,6 +1,7 @@
 import { sessionFromVocalAndInstrumental } from "./session";
 import { audibleTracks, clipPlayableMs, clipMixStartMs, trackEndMs } from "./timeline";
 import type { AudioSession, SessionTrack, TrackClip } from "./types";
+import { isMissingAudioObjectError } from "./clipMedia";
 import { decodeAudioFile, getAudioContextConstructor, withAudioTimeout } from "./wav";
 
 const DECODE_TIMEOUT_MS = 12_000;
@@ -43,11 +44,16 @@ async function hydrateClipBuffers(session: AudioSession) {
     for (const track of session.tracks) {
       for (const clip of track.clips) {
         if (clip.decoded) continue;
-        clip.decoded = await withAudioTimeout(
-          decodeAudioFile(clip.file, ctx),
-          DECODE_TIMEOUT_MS,
-          "decode"
-        );
+        try {
+          clip.decoded = await withAudioTimeout(
+            decodeAudioFile(clip.file, ctx),
+            DECODE_TIMEOUT_MS,
+            "decode"
+          );
+        } catch (error) {
+          if (isMissingAudioObjectError(error) || clip.file.size === 0) continue;
+          throw error;
+        }
       }
     }
   } finally {

@@ -1,3 +1,8 @@
+import {
+  asPlayableAudioError,
+  isMissingAudioObjectError,
+  MissingAudioObjectError,
+} from "./clipMedia";
 import { connectScheduledClip } from "./graph";
 import { scheduleSession, sessionDurationMs } from "./timeline";
 import type { AudioSession, LaneKind, TrackMix } from "./types";
@@ -21,9 +26,16 @@ export class AudioSessionEngine {
   private onEnded: (() => void) | null = null;
   private playOriginMs = 0;
   private playStartedAt = 0;
+  private missingClipNames: string[] = [];
 
   get isPlaying() {
     return this.playing;
+  }
+
+  consumeMissingClipNames() {
+    const names = this.missingClipNames;
+    this.missingClipNames = [];
+    return names;
   }
 
   /** Estimated playhead while transport is running. */
@@ -126,16 +138,28 @@ export class AudioSessionEngine {
   async play(session: AudioSession, fromMs = session.playheadMs) {
     this.stop();
     const ctx = await this.context();
+    const missing: string[] = [];
     for (const track of session.tracks) {
       for (const clip of track.clips) {
-        // Always decode into this live context — buffers from a closed preload
-        // context can fail silently on some browsers.
-        clip.decoded = await decodeAudioFile(clip.file, ctx);
-        if (!clip.sourceDurationMs && clip.decoded) {
-          clip.sourceDurationMs = clip.decoded.duration * 1000;
+        try {
+          // Always decode into this live context — buffers from a closed preload
+          // context can fail silently on some browsers.
+          clip.decoded = await decodeAudioFile(clip.file, ctx);
+          if (!clip.sourceDurationMs && clip.decoded) {
+            clip.sourceDurationMs = clip.decoded.duration * 1000;
+          }
+        } catch (error) {
+          clip.decoded = undefined;
+          const label = clip.name || clip.file.name || "clip";
+          if (isMissingAudioObjectError(error) || clip.file.size === 0) {
+            missing.push(label);
+            continue;
+          }
+          throw asPlayableAudioError(error, label);
         }
       }
     }
+    this.missingClipNames = missing;
 
     const shifted: AudioSession = {
       ...session,
@@ -177,6 +201,8 @@ export class AudioSessionEngine {
         this.playStartedAt = 0;
         this.onEnded?.();
       }, remaining + 80);
+    } else if (missing.length) {
+      throw new MissingAudioObjectError(missing[0]);
     }
 
     return this.getAnalysers();

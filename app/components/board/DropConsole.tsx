@@ -1845,17 +1845,13 @@ export default function DropConsole({
       </div>
     );
 
-  if (sleeping) {
-    const dock = <DropConsoleSleepDock onWake={() => setSleeping(false)} />;
-    return (
-      <>
-        {variant === "bare" ? dock : <div style={{ width: "100%" }}>{dock}</div>}
-        <div hidden>{consoleBody}</div>
-      </>
-    );
-  }
-
-  return consoleBody;
+  const dock = <DropConsoleSleepDock onWake={() => setSleeping(false)} />;
+  return (
+    <>
+      {sleeping ? (variant === "bare" ? dock : <div style={{ width: "100%" }}>{dock}</div>) : null}
+      <div hidden={sleeping}>{consoleBody}</div>
+    </>
+  );
 }
 
 function BoardDropConsoleFields({

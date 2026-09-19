@@ -1,3 +1,8 @@
+import {
+  asPlayableAudioError,
+  MissingAudioObjectError,
+} from "./clipMedia";
+
 const DECODE_TIMEOUT_MS = 12_000;
 
 export function withAudioTimeout<T>(promise: Promise<T>, timeoutMs: number, stage: string) {
@@ -67,6 +72,18 @@ export function wavFileFromBuffer(buffer: AudioBuffer, name: string) {
 }
 
 export async function decodeAudioFile(file: File, context: BaseAudioContext): Promise<AudioBuffer> {
-  const bytes = await file.arrayBuffer();
-  return withAudioTimeout(context.decodeAudioData(bytes.slice(0)), DECODE_TIMEOUT_MS, "decode");
+  let bytes: ArrayBuffer;
+  try {
+    bytes = await file.arrayBuffer();
+  } catch (error) {
+    throw asPlayableAudioError(error, file.name);
+  }
+  if (!bytes.byteLength) {
+    throw new MissingAudioObjectError(file.name);
+  }
+  try {
+    return await withAudioTimeout(context.decodeAudioData(bytes.slice(0)), DECODE_TIMEOUT_MS, "decode");
+  } catch (error) {
+    throw asPlayableAudioError(error, file.name);
+  }
 }

@@ -2,6 +2,7 @@
 
 import { useRef, useState } from "react";
 import type { SessionTrack } from "@/lib/board/audioSession";
+import { adoptAudioFile } from "@/lib/board/audioSession";
 import styles from "./voiceStudioSession.module.css";
 
 const STARTER_PADS = [
@@ -74,8 +75,20 @@ export default function VoiceStudioAdlibBar({
               hidden
               onChange={(event) => {
                 const file = event.currentTarget.files?.[0];
-                event.currentTarget.value = "";
-                if (file) onUpload(file);
+                const input = event.currentTarget;
+                if (!file) {
+                  input.value = "";
+                  return;
+                }
+                void (async () => {
+                  try {
+                    onUpload(await adoptAudioFile(file));
+                  } catch {
+                    onUpload(file);
+                  } finally {
+                    input.value = "";
+                  }
+                })();
               }}
             />
           </div>
