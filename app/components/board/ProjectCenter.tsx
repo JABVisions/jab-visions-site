@@ -17,6 +17,7 @@ import {
   BOARD_PROJECTS_UPDATED_EVENT,
   configureBoardProjectsStorage,
   createBoardProject,
+  mergeProjectRecord,
   syncRemoteProjectActivitiesToStorage,
   syncResolvedProjectsToStorage,
   statusLabel,
@@ -25,7 +26,15 @@ import {
   type ProjectRoomPost,
   writeBoardProjects,
 } from "@/lib/board/projects";
+import ProjectCoverImage from "@/app/components/board/projects/ProjectCoverImage";
 import { DROP_PAD_PROJECT_DROPS_STORAGE_KEYS, isStoredNotebookProject } from "@/lib/board/isProjectNotebookDrop";
+import {
+  persistableProjectCover,
+  resolveProjectCover,
+  resolveProjectEndDate,
+  resolveProjectLocation,
+  resolveProjectStartDate,
+} from "@/lib/board/projectCover";
 import { pushDrop, readDrops, writeDrops } from "@/lib/board/drops/storage";
 import { readCurrentBoardIdentity } from "@/lib/board/currentProfile";
 import { emitBoardDropSignal } from "@/lib/board/dropSignals";
@@ -45,10 +54,15 @@ type DropPadProjectDrop = {
   createdAt: number;
   payload?: {
     mediaUrl?: string;
-    mediaType?: "image";
+    mediaType?: "image" | "video";
     embedUrl?: string;
     url?: string;
     text?: string;
+    bucket?: string;
+    storagePath?: string;
+    location?: string;
+    startDate?: string;
+    endDate?: string;
   };
 };
 
@@ -130,6 +144,11 @@ function readDropPadProjectDrops(): DropPadProjectDrop[] {
                 embedUrl: item?.embedUrl,
                 url: item?.url,
                 text: item?.text,
+                bucket: item?.bucket ?? item?.payload?.bucket,
+                storagePath: item?.storagePath ?? item?.payload?.storagePath,
+                location: item?.location ?? item?.payload?.location,
+                startDate: item?.startDate ?? item?.payload?.startDate,
+                endDate: item?.endDate ?? item?.payload?.endDate,
               };
 
         drops.push({
@@ -162,11 +181,11 @@ function readDropPadProjectDrops(): DropPadProjectDrop[] {
 }
 
 function projectFromDropPadProjectDrop(drop: DropPadProjectDrop): BoardProject {
-  const mediaUrl =
-    drop.payload?.mediaType === "image" && drop.payload.mediaUrl
-      ? drop.payload.mediaUrl
-      : undefined;
   const body = drop.payload?.text || drop.description || "";
+  const cover = resolveProjectCover(drop, drop.payload?.mediaUrl || null);
+  const location = resolveProjectLocation(drop);
+  const startDate = resolveProjectStartDate(drop);
+  const endDate = resolveProjectEndDate(drop);
 
   return {
     id: `droppad_${drop.id}`,
@@ -176,8 +195,9 @@ function projectFromDropPadProjectDrop(drop: DropPadProjectDrop): BoardProject {
     logline: body,
     projectType: kindLabel(drop.kind),
     status: "casting",
-    location: "",
-    startDate: "",
+    location,
+    startDate,
+    endDate: endDate || undefined,
     unionStatus: "Negotiable",
     compensationType: "Negotiable",
     rolesNeeded: body,
@@ -185,7 +205,7 @@ function projectFromDropPadProjectDrop(drop: DropPadProjectDrop): BoardProject {
     contactEmail: "",
     notes: body || undefined,
     source: "drop_pad_projects",
-    media: mediaUrl ? { kind: "image", src: mediaUrl } : undefined,
+    media: cover,
     invites: [],
     roomPosts: [
       {
@@ -199,22 +219,15 @@ function projectFromDropPadProjectDrop(drop: DropPadProjectDrop): BoardProject {
 }
 
 function DropPadProjectDropCard({ drop }: { drop: DropPadProjectDrop }) {
-  const mediaUrl =
-    drop.payload?.mediaType === "image" ? drop.payload.mediaUrl : undefined;
+  const cover = resolveProjectCover(drop, drop.payload?.mediaUrl || null);
   const externalUrl = drop.payload?.url;
   const body = drop.payload?.text || drop.description;
 
   return (
     <div className="overflow-hidden rounded-[28px] border border-white/10 bg-white/[0.04] shadow-[0_16px_44px_rgba(0,0,0,0.24)]">
-      {mediaUrl ? (
-        <div className="bg-black/30 p-3">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={mediaUrl}
-            alt={drop.title}
-            className="max-h-72 w-full rounded-2xl object-contain"
-            loading="lazy"
-          />
+      {cover ? (
+        <div className="relative h-56 bg-black/30">
+          <ProjectCoverImage media={cover} title={drop.title} className="object-cover" />
         </div>
       ) : null}
 
@@ -346,7 +359,7 @@ export default function ProjectCenter() {
     for (const drop of localProjectDrops) {
       const project = projectFromDropPadProjectDrop(drop);
       const existing = merged.get(project.id);
-      merged.set(project.id, existing ? { ...project, ...existing } : project);
+      merged.set(project.id, existing ? mergeProjectRecord(existing, project) : project);
     }
 
     const next = Array.from(merged.values()).sort((a, b) => b.updatedAt - a.updatedAt);
@@ -500,6 +513,11 @@ export default function ProjectCenter() {
 
   const createProjectFromDrop = (drop: ProjectDrop) => {
     const next = projectFromDrop(drop);
+    const cover = persistableProjectCover(next.media);
+    const coverUrl =
+      cover?.src && !cover.src.startsWith("data:") && !cover.src.startsWith("blob:")
+        ? cover.src
+        : null;
     const nowIso = new Date(next.createdAt).toISOString();
     const identity = readCurrentBoardIdentity();
     const authorName = identity.displayName || next.authorName || next.contactName || "Project Host";
@@ -517,7 +535,7 @@ export default function ProjectCenter() {
         next.logline ||
         `${next.contactName || "Host"} is planning a ${next.projectType.toLowerCase()} project.`,
       href: "/board/work",
-      image_url: next.media?.kind === "image" ? next.media.src : null,
+      image_url: coverUrl,
       meta: {
         cardStyle: "project_drop",
         projectId: next.id,
@@ -536,6 +554,10 @@ export default function ProjectCenter() {
         goal: next.goal || null,
         milestone: next.milestone || null,
         source: "work_board",
+        media: cover || null,
+        bucket: cover?.bucket || null,
+        storagePath: cover?.storagePath || null,
+        previewImage: coverUrl,
         authorId: currentUserId || identity.id,
         authorName,
         authorUsername,
@@ -614,9 +636,9 @@ export default function ProjectCenter() {
       authorAvatar,
       authorGlow,
       authorAuraIntensity,
-      imageUrl: next.media?.kind === "image" ? next.media.src : undefined,
-      mediaUrl: next.media?.src,
-      mediaKind: next.media?.kind,
+      imageUrl: coverUrl || undefined,
+      mediaUrl: coverUrl || cover?.src,
+      mediaKind: cover?.kind,
       projectId: next.id,
       projectType: next.projectType,
       projectStatus: next.status,
@@ -645,6 +667,10 @@ export default function ProjectCenter() {
         goal: next.goal || null,
         milestone: next.milestone || null,
         source: "work_board",
+        media: cover || null,
+        bucket: cover?.bucket || null,
+        storagePath: cover?.storagePath || null,
+        previewImage: coverUrl,
         authorId: currentUserId || identity.id,
         authorName,
         authorUsername,
@@ -904,10 +930,6 @@ export default function ProjectCenter() {
   );
 
   const allProjectDropCount = projectTiles.length + dropPadProjectDrops.length;
-  const universalProjectDropCount = useMemo(() => {
-    if (typeof window === "undefined") return 0;
-    return readDrops().filter((drop) => drop.type === "project").length;
-  }, [projects, dropPadProjectDrops]);
 
   if (!activeProject) {
     return (
@@ -990,10 +1012,6 @@ export default function ProjectCenter() {
           />
 
           <div className="p-5">
-            <div className="mb-4 rounded-2xl border border-white/10 bg-black/25 px-4 py-3 text-xs text-white/45">
-              Sources: {projectTiles.length} notebook projects · {dropPadProjectDrops.length} Drop Pad project drops · {universalProjectDropCount} legacy project drops
-            </div>
-
             {allProjectDropCount === 0 ? (
               <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-6 text-sm text-white/65">
                 No projects yet. Start with a Project Drop and it will become a live project tile here.
@@ -1046,21 +1064,11 @@ export default function ProjectCenter() {
                         </button>
                       </div>
                       {project.media ? (
-                        project.media.kind === "image" ? (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img
-                            src={project.media.src}
-                            alt={project.title}
-                            className="h-full w-full object-cover"
-                          />
-                        ) : (
-                          <video
-                            src={project.media.src}
-                            className="h-full w-full object-cover"
-                            muted
-                            playsInline
-                          />
-                        )
+                        <ProjectCoverImage
+                          media={project.media}
+                          title={project.title}
+                          className="object-cover"
+                        />
                       ) : (
                         <div className="flex h-full items-center justify-center bg-[radial-gradient(circle_at_top_left,rgba(244,114,182,0.18),transparent_45%),radial-gradient(circle_at_bottom_right,rgba(96,165,250,0.16),transparent_48%),linear-gradient(180deg,rgba(12,12,20,0.92),rgba(4,4,8,0.98))]">
                           <div className="rounded-full border border-white/10 bg-white/5 px-4 py-2 text-[11px] tracking-[0.28em] text-white/55">
@@ -1088,6 +1096,15 @@ export default function ProjectCenter() {
                       <div className="mt-3 line-clamp-3 text-sm leading-6 text-white/65">
                         {project.logline || "Add a logline to pitch the project."}
                       </div>
+
+                      {project.rolesNeeded ? (
+                        <div className="mt-3 text-sm text-white/70">
+                          <span className="text-[11px] uppercase tracking-[0.18em] text-white/40">
+                            Roles{" "}
+                          </span>
+                          {project.rolesNeeded}
+                        </div>
+                      ) : null}
 
                       {project.goal || project.milestone ? (
                         <div className="mt-4 grid gap-2 rounded-2xl border border-lime-200/10 bg-lime-300/[0.06] p-3 text-xs text-lime-50/72">
@@ -1191,6 +1208,15 @@ export default function ProjectCenter() {
         />
 
         <div className="p-5 space-y-4">
+          {activeProject.media ? (
+            <div className="relative h-56 overflow-hidden rounded-3xl border border-white/10 bg-black/30 md:h-72">
+              <ProjectCoverImage
+                media={activeProject.media}
+                title={activeProject.title}
+                className="object-cover"
+              />
+            </div>
+          ) : null}
           <div className="grid gap-4 lg:grid-cols-[1.2fr_0.8fr]">
             <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-4">
               <div className="text-xs tracking-[0.30em] text-white/45">PROJECT DROP</div>
