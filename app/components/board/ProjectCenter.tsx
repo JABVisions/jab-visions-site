@@ -17,8 +17,6 @@ import {
   BOARD_PROJECTS_UPDATED_EVENT,
   configureBoardProjectsStorage,
   createBoardProject,
-  readBoardProjects,
-  resolveBoardProjects,
   syncRemoteProjectActivitiesToStorage,
   syncResolvedProjectsToStorage,
   statusLabel,
@@ -27,6 +25,7 @@ import {
   type ProjectRoomPost,
   writeBoardProjects,
 } from "@/lib/board/projects";
+import { DROP_PAD_PROJECT_DROPS_STORAGE_KEYS, isStoredNotebookProject } from "@/lib/board/isProjectNotebookDrop";
 import { pushDrop, readDrops, writeDrops } from "@/lib/board/drops/storage";
 import { readCurrentBoardIdentity } from "@/lib/board/currentProfile";
 import { emitBoardDropSignal } from "@/lib/board/dropSignals";
@@ -35,12 +34,7 @@ function clsx(...parts: Array<string | false | null | undefined>) {
   return parts.filter(Boolean).join(" ");
 }
 
-const PROJECT_DROPS_STORAGE_KEY = "jab_drop_pad_project_drops_v1";
-const PROJECT_DROPS_STORAGE_KEYS = [
-  PROJECT_DROPS_STORAGE_KEY,
-  "jab_drop_pad_project_drops",
-  "jab_drop_pad_projects_v1",
-];
+const PROJECT_DROPS_STORAGE_KEYS = [...DROP_PAD_PROJECT_DROPS_STORAGE_KEYS];
 const PROJECT_DROPS_UPDATED_EVENT = "board:project-drops:updated";
 
 type DropPadProjectDrop = {
@@ -190,6 +184,7 @@ function projectFromDropPadProjectDrop(drop: DropPadProjectDrop): BoardProject {
     contactName: "Project Host",
     contactEmail: "",
     notes: body || undefined,
+    source: "drop_pad_projects",
     media: mediaUrl ? { kind: "image", src: mediaUrl } : undefined,
     invites: [],
     roomPosts: [
@@ -902,7 +897,9 @@ export default function ProjectCenter() {
 
   const projectTiles = useMemo(
     () =>
-      [...projects].sort((a, b) => b.updatedAt - a.updatedAt),
+      [...projects]
+        .filter((project) => isStoredNotebookProject(project))
+        .sort((a, b) => b.updatedAt - a.updatedAt),
     [projects]
   );
 

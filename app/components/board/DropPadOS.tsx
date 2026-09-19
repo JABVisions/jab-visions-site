@@ -88,6 +88,7 @@ type AssetItem = {
     lifecycle?: DropLifecycle;
     library?: DropLibraryState;
     origin?: "drop-studio" | "board-drop";
+    destination?: DropDestination;
   };
 };
 
@@ -1691,21 +1692,28 @@ export default function DropPadOS({
     destination: DropDestination,
     displayedDestination: DropDestination = destination
   ) => {
+    const stamped: AssetItem = {
+      ...asset,
+      payload: {
+        ...asset.payload,
+        destination,
+      },
+    };
     let savedLocally = false;
     if (destination === "portfolio") {
-      savedLocally = syncPortfolioDropsLocal([asset, ...portfolioDrops]);
+      savedLocally = syncPortfolioDropsLocal([stamped, ...portfolioDrops]);
     } else if (destination === "projects") {
-      savedLocally = syncProjectDropsLocal([asset, ...projectDrops]);
+      savedLocally = syncProjectDropsLocal([stamped, ...projectDrops]);
       window.dispatchEvent(new CustomEvent(PROJECT_DROPS_UPDATED_EVENT));
     } else {
-      const next = [asset, ...assets];
+      const next = [stamped, ...assets];
       savedLocally = syncAssetsLocal(next);
     }
 
     let savedRemotely = false;
     if (userId && destination === "assets") {
       setSyncing(true);
-      const result = await withTimeout(upsertAssetToSupabase(sb, userId, asset), 8000).catch(() => ({ ok: false }));
+      const result = await withTimeout(upsertAssetToSupabase(sb, userId, stamped), 8000).catch(() => ({ ok: false }));
       savedRemotely = result.ok;
       setSyncing(false);
     }
