@@ -16,6 +16,7 @@ import VoiceDropSoundboard from "@/app/components/board/VoiceDropSoundboard";
 import type { DropCustomization } from "@/lib/board/dropCustomizations";
 import { descriptDocToFile, type DescriptDoc } from "@/lib/board/descriptDocs";
 import type { ResolvedDropbookLink } from "@/lib/board/dropbookLink";
+import { studioLinkEmbedUrl, studioLinkPersistKind } from "@/lib/board/dropbookLink";
 
 type DropRoute =
   | "board"
@@ -87,6 +88,7 @@ type AssetItem = {
     lifecycle?: DropLifecycle;
     library?: DropLibraryState;
     origin?: "drop-studio" | "board-drop";
+    destination?: DropDestination;
   };
 };
 
@@ -1690,21 +1692,28 @@ export default function DropPadOS({
     destination: DropDestination,
     displayedDestination: DropDestination = destination
   ) => {
+    const stamped: AssetItem = {
+      ...asset,
+      payload: {
+        ...asset.payload,
+        destination,
+      },
+    };
     let savedLocally = false;
     if (destination === "portfolio") {
-      savedLocally = syncPortfolioDropsLocal([asset, ...portfolioDrops]);
+      savedLocally = syncPortfolioDropsLocal([stamped, ...portfolioDrops]);
     } else if (destination === "projects") {
-      savedLocally = syncProjectDropsLocal([asset, ...projectDrops]);
+      savedLocally = syncProjectDropsLocal([stamped, ...projectDrops]);
       window.dispatchEvent(new CustomEvent(PROJECT_DROPS_UPDATED_EVENT));
     } else {
-      const next = [asset, ...assets];
+      const next = [stamped, ...assets];
       savedLocally = syncAssetsLocal(next);
     }
 
     let savedRemotely = false;
     if (userId && destination === "assets") {
       setSyncing(true);
-      const result = await withTimeout(upsertAssetToSupabase(sb, userId, asset), 8000).catch(() => ({ ok: false }));
+      const result = await withTimeout(upsertAssetToSupabase(sb, userId, stamped), 8000).catch(() => ({ ok: false }));
       savedRemotely = result.ok;
       setSyncing(false);
     }
@@ -1769,16 +1778,27 @@ export default function DropPadOS({
   };
 
   const saveDropStudioLink = async (link: ResolvedDropbookLink) => {
+    const persistKind = studioLinkPersistKind(link);
+    const kind: AssetKind =
+      persistKind === "youtube" ? "youtube" : persistKind === "music" ? "music" : "link";
     const now = Date.now();
+    const defaultTitle =
+      persistKind === "youtube"
+        ? "YouTube Drop"
+        : persistKind === "news"
+          ? "News Drop"
+          : persistKind === "music"
+            ? "Music Drop"
+            : "Link Drop";
     const asset: AssetItem = {
       id: uid(),
-      kind: link.kind,
-      title: link.title.trim() || "Link Drop",
+      kind,
+      title: link.title.trim() || defaultTitle,
       description: link.description || "Created and sent from Drop Studio.",
       createdAt: now,
       payload: {
         url: link.url,
-        embedUrl: link.embedUrl,
+        embedUrl: studioLinkEmbedUrl(link),
         lifecycle: { phase: "sent", framedAt: now, sentAt: now },
         library: { isAsset: false, isPortfolio: false },
         origin: "drop-studio",

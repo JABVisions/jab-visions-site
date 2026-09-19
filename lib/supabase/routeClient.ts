@@ -1,25 +1,22 @@
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
+import {
+  applyAuthCookies,
+  type PendingAuthCookie,
+  withPrivateAuthHeaders,
+} from "@/lib/supabase/authCookies";
+import { getSupabasePublicConfig } from "@/lib/supabase/config";
 
-type PendingCookie = {
-  name: string;
-  value: string;
-  options?: Record<string, unknown>;
-};
-
-export function createSupabaseRouteClient() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const key =
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
-    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
+export function createSupabaseRouteClient(request?: NextRequest) {
+  const { url, key } = getSupabasePublicConfig();
 
   if (!url || !key) {
     throw new Error("Supabase is not configured.");
   }
 
   const cookieStore = cookies();
-  const pendingCookies: PendingCookie[] = [];
+  const pendingCookies: PendingAuthCookie[] = [];
   const supabase = createServerClient(url, key, {
     cookies: {
       getAll() {
@@ -31,14 +28,19 @@ export function createSupabaseRouteClient() {
     },
   });
 
-  function applyCookies(response: NextResponse) {
-    pendingCookies.forEach(({ name, value, options }) => {
-      response.cookies.set(name, value, options);
+  function applyCookies(
+    response: NextResponse,
+    extras?: { keepSession?: boolean; session?: unknown }
+  ) {
+    applyAuthCookies(response, pendingCookies, request, {
+      keepSession: extras?.keepSession,
+      session: extras?.session,
+      supabaseUrl: url,
     });
-    return response;
+    return withPrivateAuthHeaders(response);
   }
 
-  return { supabase, applyCookies };
+  return { supabase, applyCookies, supabaseUrl: url };
 }
 
 export function boardAuthErrorMessage(error: unknown, fallback: string) {

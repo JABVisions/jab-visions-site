@@ -4,17 +4,17 @@ import { getLocalActivity, type BoardActivity } from "@/lib/board/activity";
 import { readCurrentBoardIdentity } from "@/lib/board/currentProfile";
 import { readDrops, type UniversalDrop } from "@/lib/board/drops/storage";
 import { readFeed, type FeedDrop } from "@/lib/boardStore";
+import {
+  DROP_PAD_PROJECT_DROPS_STORAGE_KEYS,
+  isExplicitProjectDropRecord,
+  isStoredNotebookProject,
+} from "@/lib/board/isProjectNotebookDrop";
 
 export const BOARD_PROJECTS_STORAGE_KEY = "jab_board_projects_v2";
 export const BOARD_PROJECTS_UPDATED_EVENT = "board:projects:updated";
 const LEGACY_BOARD_PROJECTS_STORAGE_KEYS = [
   "jab_board_projects_v1",
   "jab_board_projects",
-];
-const DROP_PAD_PROJECT_DROPS_STORAGE_KEYS = [
-  "jab_drop_pad_project_drops_v1",
-  "jab_drop_pad_project_drops",
-  "jab_drop_pad_projects_v1",
 ];
 const SEEDED_PROJECT_CONTACT_EMAIL = "casting@jabvisions.com";
 let activeProjectsUserId: string | null = null;
@@ -202,34 +202,9 @@ function allKnownProjectStorageKeys() {
   return Array.from(keys);
 }
 
-function textLooksProject(value: unknown) {
-  return /\b(project(\s+drop)?|casting|crew\s+call|gig|audition|work|production|those\s+ryderz|ryderz)\b/i.test(
-    String(value ?? "")
-  );
-}
-
 function kindLooksProject(value: unknown) {
-  return /^(project|project_drop|casting|casting_call|crew|crew_call|gig|audition|work|production)$/i.test(
+  return /^(project|project_drop|casting|casting_call|crew|crew_call|gig|audition)$/i.test(
     String(value ?? "").trim().replace(/[\s-]+/g, "_")
-  );
-}
-
-function metaLooksProject(meta: Record<string, any> | null | undefined) {
-  if (!meta) return false;
-  const tags = Array.isArray(meta.tags) ? meta.tags.join(" ") : "";
-  return (
-    kindLooksProject(meta.kind) ||
-    kindLooksProject(meta.cardStyle) ||
-    kindLooksProject(meta.dropType) ||
-    kindLooksProject(meta.drop_type) ||
-    kindLooksProject(meta.type) ||
-    textLooksProject(meta.projectType) ||
-    textLooksProject(meta.productionTitle) ||
-    textLooksProject(meta.roleTitle) ||
-    textLooksProject(meta.description) ||
-    textLooksProject(meta.notes) ||
-    textLooksProject(tags) ||
-    typeof meta.projectId === "string"
   );
 }
 
@@ -358,14 +333,16 @@ function projectFromActivity(item: BoardActivity): BoardProject | null {
   const meta = item.meta ?? {};
   if (isSeededOrDemoProjectValue(item)) return null;
 
-  const isProjectDrop =
-    metaLooksProject(meta) ||
-    kindLooksProject(item.kind) ||
-    /^Project Drop:\s*/i.test(item.title ?? "") ||
-    textLooksProject(item.title) ||
-    textLooksProject(item.body);
-
-  if (!isProjectDrop) return null;
+  if (
+    !isExplicitProjectDropRecord({
+      ...item,
+      type: item.kind,
+      meta,
+    }) &&
+    !kindLooksProject(item.kind)
+  ) {
+    return null;
+  }
 
   const rawTitle =
     stripProjectPrefix(item.title ?? "") ||
@@ -453,10 +430,11 @@ function projectFromFeed(drop: FeedDrop): BoardProject | null {
   if (isSeededOrDemoProjectValue(drop)) return null;
 
   if (
-    !metaLooksProject(meta) &&
-    !/^Project Drop:\s*/i.test(drop.title ?? "") &&
-    !textLooksProject(drop.title) &&
-    !textLooksProject(drop.text)
+    !isExplicitProjectDropRecord({
+      ...drop,
+      type: (meta as any)?.dropType ?? (meta as any)?.kind ?? drop.type,
+      meta,
+    })
   ) {
     return null;
   }
@@ -483,6 +461,17 @@ function projectFromFeed(drop: FeedDrop): BoardProject | null {
 function projectFromUniversalDrop(drop: UniversalDrop): BoardProject | null {
   if (isSeededOrDemoProjectValue(drop)) return null;
   if (drop.type !== "project") return null;
+  if (
+    !isExplicitProjectDropRecord({
+      ...drop,
+      type: drop.type,
+      meta: drop.meta,
+      origin: drop.origin,
+      source: drop.source,
+    })
+  ) {
+    return null;
+  }
 
   const meta = drop.meta ?? {};
   const createdAt = safeTime(drop.createdAt);
@@ -623,118 +612,10 @@ function projectFromDropPadProjectDrop(value: any): BoardProject | null {
     authorAvatar:
       typeof value.authorAvatar === "string" ? value.authorAvatar : undefined,
     authorGlow: typeof value.authorGlow === "string" ? value.authorGlow : undefined,
+    source: "drop_pad_projects",
     invites: [],
     roomPosts: seedRoomPosts(title, String(value.authorName ?? value.contactName ?? "Project Host")),
   };
-}
-
-function projectFromLooseStoredDrop(value: any, storageKey: string): BoardProject | null {
-  if (!value || typeof value !== "object") return null;
-  if (isSeededOrDemoProjectValue(value)) return null;
-
-  const title = String(value.title ?? value.name ?? value.previewTitle ?? "").trim();
-  const description = String(
-    value.logline ??
-      value.description ??
-      value.body ??
-      value.text ??
-      value.previewDescription ??
-      ""
-  ).trim();
-  const meta =
-    value.meta && typeof value.meta === "object"
-      ? value.meta
-      : value.payload && typeof value.payload === "object"
-        ? value.payload
-        : {};
-  const looksProject =
-    metaLooksProject(meta) ||
-    kindLooksProject(value.type) ||
-    kindLooksProject(value.kind) ||
-    kindLooksProject(value.cardStyle) ||
-    kindLooksProject(value.dropType) ||
-    /^Project Drop:\s*/i.test(title) ||
-    textLooksProject(title) ||
-    textLooksProject(description);
-
-  if (!title || !looksProject) return null;
-
-  const createdAt = safeTime(value.createdAt ?? value.created_at ?? value.updatedAt);
-  const id = String(value.id ?? value.projectId ?? `${storageKey}_${title}_${createdAt}`);
-  const image =
-    (typeof value.previewImage === "string" && value.previewImage) ||
-    (typeof value.image_url === "string" && value.image_url) ||
-    (typeof value.imageUrl === "string" && value.imageUrl) ||
-    (typeof meta?.previewImage === "string" && meta.previewImage) ||
-    (typeof meta?.preview?.image === "string" && meta.preview.image) ||
-    (typeof meta?.mediaUrl === "string" && meta.mediaUrl) ||
-    "";
-
-  return {
-    id: `loose_${id}`,
-    createdAt,
-    updatedAt: safeTime(value.updatedAt, createdAt),
-    title: stripProjectPrefix(title) || title,
-    logline: description,
-    projectType:
-      String(value.projectType ?? meta?.projectType ?? value.type ?? meta?.dropType ?? "Project")
-        .replace(/_/g, " ")
-        .trim() || "Project",
-    status: "casting",
-    location: String(value.location ?? meta?.location ?? ""),
-    startDate: String(value.startDate ?? meta?.startDate ?? ""),
-    unionStatus: String(value.unionStatus ?? meta?.unionStatus ?? "Negotiable"),
-    compensationType: String(value.compensationType ?? meta?.compensationType ?? "Negotiable"),
-    rate: typeof value.rate === "string" ? value.rate : typeof meta?.rate === "string" ? meta.rate : undefined,
-    rolesNeeded: String(value.rolesNeeded ?? meta?.rolesNeeded ?? description),
-    contactName: String(value.contactName ?? meta?.contactName ?? meta?.ownerLabel ?? "Project Host"),
-    contactEmail: String(value.contactEmail ?? meta?.contactEmail ?? ""),
-    notes: String(value.notes ?? meta?.notes ?? value.url ?? value.href ?? "").trim() || undefined,
-    goal: String(value.goal ?? meta?.goal ?? "").trim() || undefined,
-    milestone: String(value.milestone ?? meta?.milestone ?? "").trim() || undefined,
-    source: String(value.source ?? meta?.source ?? storageKey ?? "").trim() || undefined,
-    media: image ? { kind: "image", src: image } : undefined,
-    authorId: String(value.authorId ?? meta?.authorId ?? value.user_id ?? "").trim() || undefined,
-    authorName:
-      String(value.authorName ?? meta?.authorName ?? meta?.ownerLabel ?? "").trim() || undefined,
-    authorUsername:
-      String(value.authorUsername ?? meta?.authorUsername ?? meta?.ownerUsername ?? "").trim().replace(/^@+/, "") || undefined,
-    authorAvatar:
-      String(value.authorAvatar ?? meta?.authorAvatar ?? meta?.avatarDataUrl ?? "").trim() || undefined,
-    authorGlow:
-      String(value.authorGlow ?? meta?.authorGlow ?? meta?.glowColor ?? "").trim() || undefined,
-    invites: [],
-    roomPosts: seedRoomPosts(title, "Project Host"),
-  };
-}
-
-function readLooseProjectDropsFromStorage(): BoardProject[] {
-  if (typeof window === "undefined") return [];
-
-  const projects: BoardProject[] = [];
-  try {
-    for (let index = 0; index < localStorage.length; index += 1) {
-      const key = localStorage.key(index);
-      if (!key || !/drop|project|activity|feed|board/i.test(key)) continue;
-      const raw = localStorage.getItem(key);
-      if (!raw) continue;
-      const parsed = JSON.parse(raw);
-      const items = Array.isArray(parsed)
-        ? parsed
-        : parsed && typeof parsed === "object"
-          ? Object.values(parsed)
-          : [];
-
-      for (const item of items) {
-        const project = projectFromLooseStoredDrop(item, key);
-        if (project) projects.push(project);
-      }
-    }
-  } catch {
-    return projects;
-  }
-
-  return projects;
 }
 
 function readDropPadProjectProjects(): BoardProject[] {
@@ -844,7 +725,8 @@ export function readBoardProjects(): BoardProject[] {
         };
       })
       .filter((value): value is BoardProject => Boolean(value))
-      .filter((project) => !isSeededOrDemoProject(project));
+      .filter((project) => !isSeededOrDemoProject(project))
+      .filter((project) => isStoredNotebookProject(project));
 
     const merged = new Map<string, BoardProject>();
     for (const project of normalized) {
@@ -867,11 +749,6 @@ export function resolveBoardProjects(): BoardProject[] {
   }
 
   for (const project of readDropPadProjectProjects()) {
-    const existing = merged.get(project.id);
-    merged.set(project.id, existing ? mergeProjectRecord(existing, project) : project);
-  }
-
-  for (const project of readLooseProjectDropsFromStorage()) {
     const existing = merged.get(project.id);
     merged.set(project.id, existing ? mergeProjectRecord(existing, project) : project);
   }
@@ -899,24 +776,25 @@ export function resolveBoardProjects(): BoardProject[] {
 
   return Array.from(merged.values())
     .filter((project) => !isSeededOrDemoProject(project))
+    .filter((project) => isStoredNotebookProject(project))
     .sort((a, b) => b.updatedAt - a.updatedAt);
 }
 
 export function syncResolvedProjectsToStorage() {
   const stored = readBoardProjects();
   const resolved = resolveBoardProjects();
-
   const storedIds = new Set(stored.map((project) => project.id));
-  const needsBackfill =
-    resolved.length > stored.length ||
-    resolved.some((project) => !storedIds.has(project.id));
+  const resolvedIds = new Set(resolved.map((project) => project.id));
+  const changed =
+    stored.length !== resolved.length ||
+    resolved.some((project) => !storedIds.has(project.id)) ||
+    stored.some((project) => !resolvedIds.has(project.id));
 
-  if (needsBackfill && resolved.length > 0) {
+  if (changed) {
     writeBoardProjects(resolved);
-    return resolved;
   }
 
-  return stored.length > 0 ? stored : resolved;
+  return resolved;
 }
 
 export async function syncRemoteProjectActivitiesToStorage(sb: any) {
@@ -939,13 +817,21 @@ export async function syncRemoteProjectActivitiesToStorage(sb: any) {
       merged.set(project.id, existing ? mergeProjectRecord(existing, project) : project);
     }
 
-    const next = Array.from(merged.values()).sort((a, b) => b.updatedAt - a.updatedAt);
-    if (next.length > stored.length) {
+    const next = Array.from(merged.values())
+      .filter((project) => isStoredNotebookProject(project))
+      .sort((a, b) => b.updatedAt - a.updatedAt);
+    const storedIds = new Set(stored.map((project) => project.id));
+    const nextIds = new Set(next.map((project) => project.id));
+    const changed =
+      next.length !== stored.length ||
+      next.some((project) => !storedIds.has(project.id)) ||
+      stored.some((project) => !nextIds.has(project.id));
+    if (changed) {
       writeBoardProjects(next);
       return next;
     }
 
-    return stored.length > 0 ? stored : next;
+    return stored;
   } catch {
     return syncResolvedProjectsToStorage();
   }
@@ -953,7 +839,9 @@ export async function syncRemoteProjectActivitiesToStorage(sb: any) {
 
 export function writeBoardProjects(items: BoardProject[]) {
   const key = scopedProjectsKey();
-  const realItems = items.filter((project) => !isSeededOrDemoProject(project));
+  const realItems = items.filter(
+    (project) => !isSeededOrDemoProject(project) && isStoredNotebookProject(project)
+  );
   try {
     localStorage.setItem(key, JSON.stringify(realItems));
     if (key !== BOARD_PROJECTS_STORAGE_KEY) {

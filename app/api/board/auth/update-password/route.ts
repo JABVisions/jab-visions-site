@@ -58,7 +58,7 @@ export async function POST(request: NextRequest) {
       return resetRedirect(request, "error", "Passwords do not match.", email);
     }
 
-    const { supabase, applyCookies } = createSupabaseRouteClient();
+    const { supabase, applyCookies } = createSupabaseRouteClient(request);
     const {
       data: { user },
     } = await supabase.auth.getUser();

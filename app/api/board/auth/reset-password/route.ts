@@ -49,7 +49,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { supabase, applyCookies } = createSupabaseRouteClient();
+    const { supabase, applyCookies } = createSupabaseRouteClient(request);
     // Recovery emails land inside the reset-password flow. The confirmation
     // route exchanges Supabase's one-time code, stores the recovery session,
     // and then forwards the user to the new-password form.

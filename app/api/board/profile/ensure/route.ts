@@ -7,19 +7,23 @@ export const dynamic = "force-dynamic";
 
 function supabaseServer() {
   const cookieStore = cookies();
-  return createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        getAll: () => cookieStore.getAll(),
-        setAll: (cs) =>
-          cs.forEach(({ name, value, options }) =>
-            cookieStore.set(name, value, options)
-          ),
-      },
-    }
-  );
+  const key =
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
+    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
+    "";
+  return createServerClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, key, {
+    cookies: {
+      getAll: () => cookieStore.getAll(),
+      setAll: (cs) =>
+        cs.forEach(({ name, value, options }) => {
+          try {
+            cookieStore.set(name, value, options);
+          } catch {
+            // Next.js may reject cookie writes after the response starts.
+          }
+        }),
+    },
+  });
 }
 
 function titleCase(input: string) {
