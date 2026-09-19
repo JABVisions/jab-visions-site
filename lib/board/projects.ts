@@ -9,6 +9,15 @@ import {
   isExplicitProjectDropRecord,
   isStoredNotebookProject,
 } from "@/lib/board/isProjectNotebookDrop";
+import {
+  mergeProjectCover,
+  persistableProjectCover,
+  resolveProjectCover,
+  resolveProjectEndDate,
+  resolveProjectLocation,
+  resolveProjectStartDate,
+  type ProjectCoverMedia,
+} from "@/lib/board/projectCover";
 
 export const BOARD_PROJECTS_STORAGE_KEY = "jab_board_projects_v2";
 export const BOARD_PROJECTS_UPDATED_EVENT = "board:projects:updated";
@@ -42,9 +51,7 @@ export type ProjectStatus =
   | "post"
   | "released";
 
-export type ProjectMedia =
-  | { kind: "image"; src: string }
-  | { kind: "video"; src: string };
+export type ProjectMedia = ProjectCoverMedia;
 
 export type ProjectInvite = {
   id: string;
@@ -166,16 +173,65 @@ function normalizeRoomPost(value: any): ProjectRoomPost | null {
   };
 }
 
+function toPersistedProject(project: BoardProject): BoardProject {
+  return {
+    ...project,
+    media: persistableProjectCover(project.media),
+  };
+}
+
+function durableProjectForStorage(project: BoardProject): BoardProject {
+  const media = persistableProjectCover(project.media);
+  if (!media?.src?.startsWith("data:")) {
+    return { ...project, media };
+  }
+  if (media.storagePath) {
+    return { ...project, media: { ...media, src: "" } };
+  }
+  return {
+    ...project,
+    media: undefined,
+    notes: project.notes
+      ? `${project.notes}\n\n[Local image omitted to fit browser storage.]`
+      : "[Local image omitted to fit browser storage.]",
+  };
+}
+
 function sanitizeProjectsForStorage(items: BoardProject[]) {
-  return items.map((project) => {
-    if (!project.media?.src?.startsWith("data:")) return project;
-    return {
-      ...project,
-      media: undefined,
-      notes: project.notes
-        ? `${project.notes}\n\n[Local image omitted to fit browser storage.]`
-        : "[Local image omitted to fit browser storage.]",
-    };
+  return items.map(durableProjectForStorage);
+}
+
+function projectPersistSignature(project: BoardProject) {
+  const media = persistableProjectCover(project.media);
+  return [
+    project.id,
+    project.title,
+    project.logline,
+    project.location,
+    project.startDate,
+    project.endDate || "",
+    project.rolesNeeded,
+    project.unionStatus,
+    project.compensationType,
+    media?.kind || "",
+    media?.storagePath || "",
+    media?.src?.startsWith("data:") ? "data" : media?.src || "",
+    String(project.invites?.length ?? 0),
+    String(project.roomPosts?.length ?? 0),
+  ].join("\0");
+}
+
+function projectsNeedPersist(stored: BoardProject[], resolved: BoardProject[]) {
+  if (stored.length !== resolved.length) return true;
+  const storedIds = new Set(stored.map((project) => project.id));
+  const resolvedIds = new Set(resolved.map((project) => project.id));
+  if ([...resolvedIds].some((id) => !storedIds.has(id))) return true;
+  if ([...storedIds].some((id) => !resolvedIds.has(id))) return true;
+
+  const storedById = new Map(stored.map((project) => [project.id, project]));
+  return resolved.some((project) => {
+    const existing = storedById.get(project.id);
+    return !existing || projectPersistSignature(existing) !== projectPersistSignature(project);
   });
 }
 
@@ -238,37 +294,7 @@ function isSeededOrDemoProject(project: BoardProject) {
   return isSeededOrDemoProjectValue(project);
 }
 
-function resolveProjectImage(meta: Record<string, any> | null | undefined, itemImageUrl?: string | null) {
-  if (typeof itemImageUrl === "string" && itemImageUrl) {
-    return itemImageUrl;
-  }
-  if (!meta) return null;
-
-  if (
-    meta.media &&
-    meta.media.kind === "image" &&
-    typeof meta.media.src === "string" &&
-    meta.media.src
-  ) {
-    return meta.media.src;
-  }
-
-  if (
-    meta.preview &&
-    typeof meta.preview.image === "string" &&
-    meta.preview.image
-  ) {
-    return meta.preview.image;
-  }
-
-  if (typeof meta.image_url === "string" && meta.image_url) {
-    return meta.image_url;
-  }
-
-  return null;
-}
-
-function mergeProjectRecord(
+export function mergeProjectRecord(
   base: BoardProject,
   incoming: BoardProject
 ): BoardProject {
@@ -298,7 +324,7 @@ function mergeProjectRecord(
     goal: base.goal || incoming.goal,
     milestone: base.milestone || incoming.milestone,
     source: base.source || incoming.source,
-    media: base.media ?? incoming.media,
+    media: mergeProjectCover(base.media, incoming.media),
     authorId: base.authorId || incoming.authorId,
     authorName: base.authorName || incoming.authorName,
     authorUsername: base.authorUsername || incoming.authorUsername,
@@ -357,7 +383,7 @@ function projectFromActivity(item: BoardActivity): BoardProject | null {
       : typeof meta.contactName === "string" && meta.contactName.trim()
         ? meta.contactName.trim()
       : "Project Host";
-  const resolvedImage = resolveProjectImage(meta, item.image_url);
+  const resolvedCover = resolveProjectCover({ ...item, meta }, item.image_url);
   const authorName = String(meta.authorName ?? meta.ownerLabel ?? contactName).trim();
   const authorUsername = String(meta.authorUsername ?? meta.ownerUsername ?? meta.username ?? "")
     .trim()
@@ -379,9 +405,9 @@ function projectFromActivity(item: BoardActivity): BoardProject | null {
         : "Project",
     status:
       normalizeProjectStatus(meta.status),
-    location: typeof meta.location === "string" ? meta.location : "",
-    startDate: typeof meta.startDate === "string" ? meta.startDate : "",
-    endDate: typeof meta.endDate === "string" ? meta.endDate : undefined,
+    location: resolveProjectLocation({ ...item, meta }),
+    startDate: resolveProjectStartDate({ ...item, meta }),
+    endDate: resolveProjectEndDate({ ...item, meta }) || undefined,
     unionStatus: typeof meta.unionStatus === "string" ? meta.unionStatus : "Negotiable",
     compensationType:
       typeof meta.compensationType === "string" ? meta.compensationType : "Negotiable",
@@ -393,7 +419,7 @@ function projectFromActivity(item: BoardActivity): BoardProject | null {
     goal: typeof meta.goal === "string" ? meta.goal : undefined,
     milestone: typeof meta.milestone === "string" ? meta.milestone : undefined,
     source: typeof meta.source === "string" ? meta.source : undefined,
-    media: resolvedImage ? { kind: "image", src: resolvedImage } : undefined,
+    media: resolvedCover,
     authorId: String(item.user_id ?? meta.authorId ?? "").trim() || undefined,
     authorName: authorName || undefined,
     authorUsername: authorUsername || undefined,
@@ -447,7 +473,7 @@ function projectFromFeed(drop: FeedDrop): BoardProject | null {
     title: drop.title,
     body: drop.text,
     href: drop.href ?? null,
-    image_url: resolveProjectImage(meta),
+    image_url: resolveProjectCover({ ...drop, meta })?.src ?? null,
     meta: {
       authorName: drop.authorName,
       authorId: drop.authorId,
@@ -481,11 +507,7 @@ function projectFromUniversalDrop(drop: UniversalDrop): BoardProject | null {
     (typeof meta.description === "string" ? meta.description : "") ||
     "";
   const identity = readCurrentBoardIdentity();
-  const image =
-    drop.imageUrl ||
-    (drop.mediaKind === "image" ? drop.mediaUrl : "") ||
-    (typeof meta.imageUrl === "string" ? meta.imageUrl : "") ||
-    "";
+  const cover = resolveProjectCover(drop, drop.imageUrl || drop.mediaUrl || null);
   const authorName =
     drop.authorName ||
     (typeof meta.authorName === "string" ? meta.authorName : "") ||
@@ -506,9 +528,9 @@ function projectFromUniversalDrop(drop: UniversalDrop): BoardProject | null {
       (typeof meta.projectType === "string" ? meta.projectType : "") ||
       "Project",
     status: normalizeProjectStatus(drop.projectStatus || meta.status),
-    location: typeof meta.location === "string" ? meta.location : "",
-    startDate: typeof meta.startDate === "string" ? meta.startDate : "",
-    endDate: typeof meta.endDate === "string" ? meta.endDate : undefined,
+    location: resolveProjectLocation(drop),
+    startDate: resolveProjectStartDate(drop),
+    endDate: resolveProjectEndDate(drop) || undefined,
     unionStatus: typeof meta.unionStatus === "string" ? meta.unionStatus : "Negotiable",
     compensationType:
       typeof meta.compensationType === "string" ? meta.compensationType : "Negotiable",
@@ -527,7 +549,7 @@ function projectFromUniversalDrop(drop: UniversalDrop): BoardProject | null {
     milestone:
       drop.milestone || (typeof meta.milestone === "string" ? meta.milestone : undefined),
     source: drop.source || (typeof meta.source === "string" ? meta.source : "universal_drop"),
-    media: image ? { kind: "image", src: image } : undefined,
+    media: cover,
     authorId:
       drop.authorId ||
       (typeof meta.authorId === "string" ? meta.authorId : "") ||
@@ -580,10 +602,12 @@ function projectFromDropPadProjectDrop(value: any): BoardProject | null {
     typeof payload?.text === "string" && payload.text.trim()
       ? payload.text
       : description;
-  const mediaUrl =
-    payload?.mediaType === "image" && typeof payload.mediaUrl === "string"
-      ? payload.mediaUrl
-      : "";
+  const cover = resolveProjectCover({ ...value, payload });
+  const location = resolveProjectLocation({ ...value, payload });
+  const startDate = resolveProjectStartDate({ ...value, payload });
+  const endDate = resolveProjectEndDate({ ...value, payload });
+  const projectType =
+    String(value.projectType ?? payload?.projectType ?? "").trim() || "Project Drop";
 
   return {
     id: `droppad_${id}`,
@@ -591,20 +615,21 @@ function projectFromDropPadProjectDrop(value: any): BoardProject | null {
     updatedAt: createdAt,
     title,
     logline: body,
-    projectType: "Project Drop",
-    status: "casting",
-    location: "",
-    startDate: "",
-    unionStatus: "Negotiable",
-    compensationType: "Negotiable",
-    rolesNeeded: body,
-    contactName: String(value.authorName ?? value.contactName ?? "Project Host"),
-    contactEmail: "",
+    projectType,
+    status: normalizeProjectStatus(value.status ?? payload?.status),
+    location,
+    startDate,
+    endDate: endDate || undefined,
+    unionStatus: String(value.unionStatus ?? payload?.unionStatus ?? "Negotiable"),
+    compensationType: String(value.compensationType ?? payload?.compensationType ?? "Negotiable"),
+    rolesNeeded: String(value.rolesNeeded ?? payload?.rolesNeeded ?? body),
+    contactName: String(value.authorName ?? value.contactName ?? payload?.contactName ?? "Project Host"),
+    contactEmail: String(value.contactEmail ?? payload?.contactEmail ?? ""),
     notes:
       body ||
       (typeof payload?.url === "string" ? payload.url : undefined) ||
       (typeof payload?.embedUrl === "string" ? payload.embedUrl : undefined),
-    media: mediaUrl ? { kind: "image", src: mediaUrl } : undefined,
+    media: cover,
     authorName:
       typeof value.authorName === "string" ? value.authorName : undefined,
     authorUsername:
@@ -669,9 +694,9 @@ export function readBoardProjects(): BoardProject[] {
           logline: String(value?.logline ?? ""),
           projectType: String(value?.projectType ?? value?.type ?? "Project"),
           status: normalizeProjectStatus(value?.status),
-          location: String(value?.location ?? ""),
-          startDate: String(value?.startDate ?? ""),
-          endDate: typeof value?.endDate === "string" ? value.endDate : undefined,
+          location: resolveProjectLocation(value) || String(value?.location ?? ""),
+          startDate: resolveProjectStartDate(value) || String(value?.startDate ?? ""),
+          endDate: resolveProjectEndDate(value) || (typeof value?.endDate === "string" ? value.endDate : undefined),
           unionStatus: String(value?.unionStatus ?? value?.union ?? "Non-Union"),
           compensationType: String(value?.compensationType ?? "Negotiable"),
           rate: typeof value?.rate === "string" ? value.rate : undefined,
@@ -682,12 +707,7 @@ export function readBoardProjects(): BoardProject[] {
           goal: typeof value?.goal === "string" ? value.goal : undefined,
           milestone: typeof value?.milestone === "string" ? value.milestone : undefined,
           source: typeof value?.source === "string" ? value.source : undefined,
-          media:
-            value?.media &&
-            (value.media.kind === "image" || value.media.kind === "video") &&
-            typeof value.media.src === "string"
-              ? { kind: value.media.kind, src: value.media.src }
-              : undefined,
+          media: resolveProjectCover(value),
           authorId: typeof value?.authorId === "string" ? value.authorId : undefined,
           authorName: typeof value?.authorName === "string" ? value.authorName : undefined,
           authorUsername:
@@ -783,14 +803,8 @@ export function resolveBoardProjects(): BoardProject[] {
 export function syncResolvedProjectsToStorage() {
   const stored = readBoardProjects();
   const resolved = resolveBoardProjects();
-  const storedIds = new Set(stored.map((project) => project.id));
-  const resolvedIds = new Set(resolved.map((project) => project.id));
-  const changed =
-    stored.length !== resolved.length ||
-    resolved.some((project) => !storedIds.has(project.id)) ||
-    stored.some((project) => !resolvedIds.has(project.id));
 
-  if (changed) {
+  if (projectsNeedPersist(stored, resolved)) {
     writeBoardProjects(resolved);
   }
 
@@ -820,18 +834,12 @@ export async function syncRemoteProjectActivitiesToStorage(sb: any) {
     const next = Array.from(merged.values())
       .filter((project) => isStoredNotebookProject(project))
       .sort((a, b) => b.updatedAt - a.updatedAt);
-    const storedIds = new Set(stored.map((project) => project.id));
-    const nextIds = new Set(next.map((project) => project.id));
-    const changed =
-      next.length !== stored.length ||
-      next.some((project) => !storedIds.has(project.id)) ||
-      stored.some((project) => !nextIds.has(project.id));
-    if (changed) {
+    if (projectsNeedPersist(stored, next)) {
       writeBoardProjects(next);
       return next;
     }
 
-    return stored;
+    return next;
   } catch {
     return syncResolvedProjectsToStorage();
   }
@@ -839,9 +847,11 @@ export async function syncRemoteProjectActivitiesToStorage(sb: any) {
 
 export function writeBoardProjects(items: BoardProject[]) {
   const key = scopedProjectsKey();
-  const realItems = items.filter(
-    (project) => !isSeededOrDemoProject(project) && isStoredNotebookProject(project)
-  );
+  const realItems = items
+    .filter(
+      (project) => !isSeededOrDemoProject(project) && isStoredNotebookProject(project)
+    )
+    .map(toPersistedProject);
   try {
     localStorage.setItem(key, JSON.stringify(realItems));
     if (key !== BOARD_PROJECTS_STORAGE_KEY) {

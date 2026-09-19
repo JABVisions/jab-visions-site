@@ -1,6 +1,9 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { uploadDropMedia } from "@/lib/board/boardDropEditStore";
+import { parseBoardStorageFromUrl } from "@/lib/board/musicPlayback";
+import { supabaseBrowser } from "@/lib/supabase/browser";
 
 function clsx(...parts: Array<string | false | null | undefined>) {
   return parts.filter(Boolean).join(" ");
@@ -40,9 +43,12 @@ async function fileToDataUrl(
 }
 
 /** Media shown in the Project Drop thumbnail */
-export type ProjectMedia =
-  | { kind: "image"; src: string }
-  | { kind: "video"; src: string };
+export type ProjectMedia = {
+  kind: "image" | "video";
+  src: string;
+  bucket?: string;
+  storagePath?: string;
+};
 
 export type ProjectDrop = {
   id: string;
@@ -113,7 +119,7 @@ export default function ProjectDropMenu({
 }: {
   open: boolean;
   onClose: () => void;
-  onCreate: (drop: ProjectDrop) => void;
+  onCreate: (drop: ProjectDrop) => void | Promise<void>;
 }) {
   const [error, setError] = useState<string | null>(null);
 
@@ -148,12 +154,21 @@ export default function ProjectDropMenu({
   const [mediaKind, setMediaKind] = useState<ProjectMedia["kind"]>("image");
   const [mediaUrl, setMediaUrl] = useState("");
   const [mediaDataUrl, setMediaDataUrl] = useState<string>("");
+  const [mediaBucket, setMediaBucket] = useState("");
+  const [mediaStoragePath, setMediaStoragePath] = useState("");
+  const [mediaUploading, setMediaUploading] = useState(false);
+  const mediaFileRef = useRef<File | null>(null);
 
   const mediaPreview = useMemo(() => {
     const src = mediaDataUrl || mediaUrl;
-    if (!src) return null;
-    return { kind: mediaKind, src } as ProjectMedia;
-  }, [mediaDataUrl, mediaUrl, mediaKind]);
+    if (!src && !mediaStoragePath) return null;
+    return {
+      kind: mediaKind,
+      src: src || "",
+      ...(mediaBucket ? { bucket: mediaBucket } : {}),
+      ...(mediaStoragePath ? { storagePath: mediaStoragePath } : {}),
+    } as ProjectMedia;
+  }, [mediaDataUrl, mediaUrl, mediaKind, mediaBucket, mediaStoragePath]);
 
   // Reset when opening (fresh slate)
   useEffect(() => {
@@ -187,6 +202,10 @@ export default function ProjectDropMenu({
     setMediaKind("image");
     setMediaUrl("");
     setMediaDataUrl("");
+    setMediaBucket("");
+    setMediaStoragePath("");
+    setMediaUploading(false);
+    mediaFileRef.current = null;
   }
 
   async function onPickFile(file: File | null) {
@@ -212,6 +231,9 @@ export default function ProjectDropMenu({
 
     setMediaKind(isVideo ? "video" : "image");
     setMediaUrl(""); // prefer uploaded file if provided
+    setMediaBucket("");
+    setMediaStoragePath("");
+    mediaFileRef.current = file;
 
     const dataUrl = await fileToDataUrl(file, {
       maxWidth: 1600,
@@ -225,6 +247,25 @@ export default function ProjectDropMenu({
     }
 
     setMediaDataUrl(dataUrl);
+
+    setMediaUploading(true);
+    try {
+      const uploaded = await uploadDropMedia(file, `project-cover-${Date.now()}`);
+      if (uploaded) {
+        const publicUrl =
+          supabaseBrowser().storage.from(uploaded.bucket).getPublicUrl(uploaded.storagePath)
+            .data.publicUrl || "";
+        setMediaBucket(uploaded.bucket);
+        setMediaStoragePath(uploaded.storagePath);
+        setMediaUrl(publicUrl);
+      } else {
+        setError("Picture saved on this device only. Sign in so the cover can upload to Board.");
+      }
+    } catch {
+      setError("Picture attached locally. The cover upload can retry when you publish.");
+    } finally {
+      setMediaUploading(false);
+    }
   }
 
   function validate(): string | null {
@@ -237,6 +278,7 @@ export default function ProjectDropMenu({
     if (!rolesNeeded.trim()) return "Roles Needed is required.";
     if (!contactName.trim()) return "Contact name is required.";
     if (!contactEmail.trim()) return "Contact email is required.";
+    if (mediaUploading) return "Wait for the cover photo to finish uploading.";
 
     // super light email check
     if (!/^\S+@\S+\.\S+$/.test(contactEmail.trim()))
@@ -245,13 +287,41 @@ export default function ProjectDropMenu({
     return null;
   }
 
-  function handleCreate() {
+  async function handleCreate() {
     setError(null);
 
     const v = validate();
     if (v) {
       setError(v);
       return;
+    }
+
+    let coverBucket = mediaBucket;
+    let coverPath = mediaStoragePath;
+    let coverUrl = mediaUrl;
+
+    if (!coverPath && mediaFileRef.current) {
+      setMediaUploading(true);
+      try {
+        const uploaded = await uploadDropMedia(
+          mediaFileRef.current,
+          `project-cover-${Date.now()}`
+        );
+        if (uploaded) {
+          coverBucket = uploaded.bucket;
+          coverPath = uploaded.storagePath;
+          coverUrl =
+            supabaseBrowser().storage.from(uploaded.bucket).getPublicUrl(uploaded.storagePath)
+              .data.publicUrl || coverUrl;
+          setMediaBucket(coverBucket);
+          setMediaStoragePath(coverPath);
+          setMediaUrl(coverUrl);
+        }
+      } catch {
+        // Fall through to local preview if the retry cannot reach storage.
+      } finally {
+        setMediaUploading(false);
+      }
     }
 
     const id =
@@ -282,13 +352,20 @@ export default function ProjectDropMenu({
       notes: notes.trim() ? notes.trim() : undefined,
       goal: goal.trim() ? goal.trim() : undefined,
       milestone: milestone.trim() ? milestone.trim() : undefined,
-      media: mediaPreview ?? undefined,
+      media: coverPath
+        ? {
+            kind: mediaKind,
+            src: coverUrl || mediaDataUrl || "",
+            bucket: coverBucket || undefined,
+            storagePath: coverPath,
+          }
+        : mediaPreview ?? undefined,
 
       createdAt: Date.now(),
     };
 
     // ✅ This is the key: call onCreate reliably
-    onCreate(drop);
+    await Promise.resolve(onCreate(drop));
 
     // Close + reset
     onClose();
@@ -568,6 +645,9 @@ export default function ProjectDropMenu({
                   onChange={(e) => {
                     setMediaUrl(e.target.value);
                     if (e.target.value.trim()) setMediaDataUrl("");
+                    const parsed = parseBoardStorageFromUrl(e.target.value.trim());
+                    setMediaBucket(parsed?.bucket || "");
+                    setMediaStoragePath(parsed?.storagePath || "");
                   }}
                   placeholder="https://..."
                   className={inputClass}
@@ -587,7 +667,13 @@ export default function ProjectDropMenu({
                   />
                 </label>
                 <div className="mt-2 min-h-5 max-w-full truncate text-xs font-semibold text-white/55">
-                  {mediaDataUrl ? "Media attached from this device." : "Select image or video from this device."}
+                  {mediaUploading
+                    ? "Uploading cover to Board..."
+                    : mediaStoragePath
+                      ? "Cover uploaded to Board."
+                      : mediaDataUrl
+                        ? "Media attached from this device."
+                        : "Select image or video from this device."}
                 </div>
               </Field>
 
@@ -620,6 +706,8 @@ export default function ProjectDropMenu({
                     onClick={() => {
                       setMediaUrl("");
                       setMediaDataUrl("");
+                      setMediaBucket("");
+                      setMediaStoragePath("");
                     }}
                     className="mt-2 text-xs text-white/70 hover:text-white underline"
                   >
