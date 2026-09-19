@@ -5,6 +5,12 @@ import {
   type AudioSession,
   type SessionEditSnapshot,
 } from "@/lib/board/audioSession";
+import {
+  clipFileKey,
+  placeholderClipFile,
+  readClipBytes,
+  toArrayBuffer,
+} from "@/lib/board/audioSession/clipMedia";
 
 const DB_NAME = "jab_voice_studio_projects_v1";
 const STORE = "projects";
@@ -18,8 +24,10 @@ export type VoiceStudioClipFile = {
   lastModified?: number;
   /** Legacy data-URL copies from early Voice Studio saves. */
   dataUrl?: string;
-  /** Preferred: original clip bytes in IndexedDB. */
+  /** Legacy Blob copies — Safari often cannot read these after reload. */
   blob?: Blob;
+  /** Preferred: raw clip bytes. Survives Safari IndexedDB blob detach. */
+  bytes?: ArrayBuffer;
 };
 
 export type VoiceStudioProjectBlob = {
@@ -30,7 +38,7 @@ export type VoiceStudioProjectBlob = {
 };
 
 function fileKey(file: File) {
-  return `${file.name}:${file.size}:${file.lastModified}`;
+  return clipFileKey(file);
 }
 
 function openDb(): Promise<IDBDatabase> {
@@ -64,13 +72,24 @@ function dataUrlToFile(dataUrl: string, name: string, type: string): File | null
   }
 }
 
-function clipFileFromStored(media: VoiceStudioClipFile, updatedAt: number): File | null {
+export async function clipFileFromStored(
+  media: VoiceStudioClipFile,
+  updatedAt: number
+): Promise<File | null> {
   const lastModified = media.lastModified || updatedAt;
+  const type = media.type || "audio/wav";
+  const fromBytes = toArrayBuffer(media.bytes);
+  if (fromBytes) {
+    return new File([fromBytes.slice(0)], media.name, { type, lastModified });
+  }
   if (media.blob) {
-    return new File([media.blob], media.name, {
-      type: media.type || media.blob.type || "audio/wav",
-      lastModified,
-    });
+    const bytes = await readClipBytes(media.blob);
+    if (bytes) {
+      return new File([bytes], media.name, {
+        type: media.type || media.blob.type || "audio/wav",
+        lastModified,
+      });
+    }
   }
   if (media.dataUrl) {
     const file = dataUrlToFile(media.dataUrl, media.name, media.type);
@@ -129,40 +148,71 @@ export function sessionHasClips(session: AudioSession | null | undefined): boole
   return Boolean(session?.tracks.some((track) => track.clips.length > 0));
 }
 
-function projectToSession(blob: VoiceStudioProjectBlob): AudioSession | null {
-  if (!blob?.snapshot || !blob.files?.length) return null;
+/** Copy every clip into durable ArrayBuffers keyed the same way as the edit snapshot. */
+export async function serializeVoiceStudioClipFiles(
+  session: AudioSession
+): Promise<VoiceStudioClipFile[]> {
+  const files: VoiceStudioClipFile[] = [];
+  const seen = new Set<string>();
+  for (const track of session.tracks) {
+    for (const clip of track.clips) {
+      const key = fileKey(clip.file);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const bytes = await readClipBytes(clip.file);
+      if (!bytes) continue;
+      files.push({
+        key,
+        name: clip.file.name,
+        type: clip.file.type || "audio/wav",
+        lastModified: clip.file.lastModified,
+        bytes,
+      });
+    }
+  }
+  return files;
+}
+
+export async function sessionFromVoiceStudioProject(
+  blob: VoiceStudioProjectBlob
+): Promise<AudioSession | null> {
+  if (!blob?.snapshot) return null;
   const shell: AudioSession = {
     id: `session-restore-${blob.draftId}`,
     sampleRate: 48_000,
     playheadMs: blob.snapshot.playheadMs ?? 0,
     loop: blob.snapshot.loop,
-    tracks: blob.snapshot.tracks.map((track) => ({
-      id: track.id,
-      kind: track.kind,
-      label: track.label,
-      latencyMs: track.latencyMs,
-      mix: track.mix,
-      clips: track.clips
-        .map((clip) => {
-          const media = blob.files.find((file) => file.key === clip.fileKey);
-          if (!media) return null;
-          const file = clipFileFromStored(media, blob.updatedAt);
-          if (!file) return null;
-          return {
-            id: clip.id,
-            name: clip.name,
-            file,
-            offsetMs: clip.offsetMs,
-            trimInMs: clip.trimInMs,
-            trimOutMs: clip.trimOutMs,
-            sourceDurationMs: clip.sourceDurationMs,
-            volume: clip.volume,
-            fadeInMs: clip.fadeInMs,
-            fadeOutMs: clip.fadeOutMs,
-          };
-        })
-        .filter((clip): clip is NonNullable<typeof clip> => Boolean(clip)),
-    })),
+    tracks: await Promise.all(
+      blob.snapshot.tracks.map(async (track) => ({
+        id: track.id,
+        kind: track.kind,
+        label: track.label,
+        latencyMs: track.latencyMs,
+        mix: track.mix,
+        clips: await Promise.all(
+          track.clips.map(async (clip) => {
+            const media = blob.files?.find((file) => file.key === clip.fileKey);
+            const file = media
+              ? await clipFileFromStored(media, blob.updatedAt)
+              : null;
+            return {
+              id: clip.id,
+              name: clip.name,
+              file:
+                file ??
+                placeholderClipFile(clip.name || media?.name || "clip.wav", blob.updatedAt),
+              offsetMs: clip.offsetMs,
+              trimInMs: clip.trimInMs,
+              trimOutMs: clip.trimOutMs,
+              sourceDurationMs: clip.sourceDurationMs,
+              volume: clip.volume,
+              fadeInMs: clip.fadeInMs,
+              fadeOutMs: clip.fadeOutMs,
+            };
+          })
+        ),
+      }))
+    ),
   };
   if (!sessionHasClips(shell)) return null;
   return shell;
@@ -175,22 +225,7 @@ export async function saveVoiceStudioProject(
 ): Promise<boolean> {
   if (!draftId || !sessionHasClips(session)) return false;
   try {
-    const files: VoiceStudioClipFile[] = [];
-    const seen = new Set<string>();
-    for (const track of session.tracks) {
-      for (const clip of track.clips) {
-        const key = fileKey(clip.file);
-        if (seen.has(key)) continue;
-        seen.add(key);
-        files.push({
-          key,
-          name: clip.file.name,
-          type: clip.file.type || "audio/wav",
-          lastModified: clip.file.lastModified,
-          blob: clip.file.slice(0, clip.file.size, clip.file.type || "audio/wav"),
-        });
-      }
-    }
+    const files = await serializeVoiceStudioClipFiles(session);
     if (!files.length) return false;
 
     const blob: VoiceStudioProjectBlob = {
@@ -227,7 +262,7 @@ export async function loadVoiceStudioProject(draftId: string): Promise<AudioSess
       request.onerror = () => reject(request.error ?? new Error("project load failed"));
     });
     db.close();
-    return blob ? projectToSession(blob) : null;
+    return blob ? sessionFromVoiceStudioProject(blob) : null;
   } catch {
     return null;
   }
@@ -254,7 +289,7 @@ export async function loadLatestVoiceStudioProject(): Promise<{
     db.close();
     const newest = [...rows].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))[0];
     if (!newest) return null;
-    const session = projectToSession(newest);
+    const session = await sessionFromVoiceStudioProject(newest);
     if (!session) return null;
     return { draftId: newest.draftId, session };
   } catch {

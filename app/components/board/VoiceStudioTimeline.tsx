@@ -2,7 +2,7 @@
 
 import { useRef, useState } from "react";
 import type { AudioSession, SessionTrack } from "@/lib/board/audioSession";
-import { clipPlayableMs, sessionDurationMs } from "@/lib/board/audioSession";
+import { adoptAudioFile, clipPlayableMs, sessionDurationMs } from "@/lib/board/audioSession";
 import styles from "./voiceStudioSession.module.css";
 
 const LANE_LABEL_WIDTH = 78;
@@ -114,8 +114,20 @@ export default function VoiceStudioTimeline({
             hidden
             onChange={(event) => {
               const file = event.currentTarget.files?.[0];
-              event.currentTarget.value = "";
-              if (file) onAdlibUpload(file);
+              const input = event.currentTarget;
+              if (!file) {
+                input.value = "";
+                return;
+              }
+              void (async () => {
+                try {
+                  onAdlibUpload(await adoptAudioFile(file));
+                } catch {
+                  onAdlibUpload(file);
+                } finally {
+                  input.value = "";
+                }
+              })();
             }}
           />
           <label>

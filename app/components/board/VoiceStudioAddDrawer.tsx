@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { getDropSignedUrl } from "@/lib/board/boardDropEditStore";
 import { readBestLocalDropItems, type DropItem } from "@/lib/board/dropItem";
 import { checkUploadSize } from "@/lib/board/uploadLimits";
+import { adoptAudioFile } from "@/lib/board/audioSession";
 import styles from "./voiceStudioSession.module.css";
 
 export default function VoiceStudioAddDrawer({
@@ -98,15 +99,28 @@ export default function VoiceStudioAddDrawer({
                 hidden
                 onChange={(event) => {
                   const file = event.currentTarget.files?.[0];
-                  event.currentTarget.value = "";
-                  if (!file) return;
+                  const input = event.currentTarget;
+                  if (!file) {
+                    input.value = "";
+                    return;
+                  }
                   const tooLarge = checkUploadSize(file);
                   if (tooLarge) {
                     onNotice(tooLarge);
+                    input.value = "";
                     return;
                   }
-                  onFile(file);
-                  setOpen(false);
+                  void (async () => {
+                    try {
+                      onFile(await adoptAudioFile(file));
+                      setOpen(false);
+                    } catch {
+                      onFile(file);
+                      setOpen(false);
+                    } finally {
+                      input.value = "";
+                    }
+                  })();
                 }}
               />
             </label>
