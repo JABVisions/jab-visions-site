@@ -610,6 +610,7 @@ export default function DropStudioStage({
   const persistVoiceProjectRef = useRef<() => void>(() => {});
   const lastSavedVoiceSignatureRef = useRef("");
   const wasVoiceStudioOpenRef = useRef(false);
+  const mixAbortRef = useRef(false);
   const [voiceAutoSaveAt, setVoiceAutoSaveAt] = useState(0);
   const [voiceAutoSaving, setVoiceAutoSaving] = useState(false);
 
@@ -642,17 +643,28 @@ export default function DropStudioStage({
   }, []);
 
   const requestCloseStudio = useCallback(() => {
+    mixAbortRef.current = true;
     persistVoiceProjectRef.current();
-    if (recording || adlibRecording || processingVocal) {
-      flashSaveNote("Finish this take first.");
-      return;
-    }
-    if (sessionHasClips(audioSession) || liveVoiceHoldHasClips()) {
-      flashSaveNote("Stay in Voice Studio — mix this song first.");
-      return;
-    }
+    studioCountInTimerRef.current.forEach((id) => window.clearTimeout(id));
+    studioCountInTimerRef.current = [];
+    setStudioCountIn(null);
+    studioEngineRef.current?.stop({ cancel: true });
+    studioTakeRef.current?.dispose();
+    studioTakeRef.current = null;
+    adlibTakeRef.current?.dispose();
+    adlibTakeRef.current = null;
+    setStudioPlaying(false);
+    setStudioLaneAnalysers({});
+    setStudioMicStream(null);
+    setRecording(false);
+    setAdlibRecording(false);
+    setProcessingVocal(false);
+    setVoiceStudioOpen(false);
+    setAudioSession(null);
+    audioSessionRef.current = null;
+    clearLiveVoiceStudio();
     handleClose();
-  }, [adlibRecording, audioSession, flashSaveNote, handleClose, processingVocal, recording]);
+  }, [handleClose]);
 
   useEffect(() => {
     audioSessionRef.current = audioSession;
@@ -696,13 +708,16 @@ export default function DropStudioStage({
 
   const mixLiveSession = async (session: AudioSession) => {
     haltStudioTransport();
+    mixAbortRef.current = false;
     const engine = studioEngine();
+    const shouldAbort = () => mixAbortRef.current;
     return withAudioTimeout(
       (async () => {
         await engine.hydrateSession(session);
-        return renderSessionFile(session, await engine.ensureContext());
+        if (shouldAbort()) throw new Error("Audio session mix aborted");
+        return renderSessionFile(session, await engine.ensureContext(), shouldAbort);
       })(),
-      25_000,
+      20_000,
       "mix"
     );
   };
@@ -794,14 +809,10 @@ export default function DropStudioStage({
   }, [flashSaveNote, voicePreset]);
 
   const collapseVoiceStudio = useCallback(() => {
-    if (audioSession && sessionHasLane(audioSession, "instrumental")) {
-      flashSaveNote("Keep Studio open to mix the instrumental.");
-      return;
-    }
     persistVoiceProjectRef.current();
     haltStudioTransport();
     setVoiceStudioOpen(false);
-  }, [audioSession, flashSaveNote]);
+  }, []);
 
   const removeStudioLane = useCallback(
     (kind: LaneKind) => {
@@ -2407,8 +2418,14 @@ export default function DropStudioStage({
       setStudioValue(completionValue);
     }
 
-    let file = fileRef.current;
-    if (!file) return;
+    let file =
+      fileRef.current ??
+      audioSession?.tracks.flatMap((track) => track.clips).find((clip) => clip.file?.size)?.file ??
+      null;
+    if (!file) {
+      flashSaveNote("Record or add audio before mixing.");
+      return;
+    }
 
     if (file.type.startsWith("image/") && completionValue.artOverlayUrl) {
       flashSaveNote("Rendering Art Palette drawing…");
@@ -2425,7 +2442,6 @@ export default function DropStudioStage({
     }
 
     if (file.type.startsWith("audio/")) {
-      const originalFile = file;
       setProcessingVocal(true);
       flashSaveNote(
         audioSession &&
@@ -2462,9 +2478,10 @@ export default function DropStudioStage({
         }
       } catch (error) {
         console.error("[DropStudioStage] vocal enhancement failed", error);
-        file = originalFile;
-        fileRef.current = originalFile;
-        flashSaveNote("Mix timed out — using the original voice.");
+        const message = error instanceof Error ? error.message : "";
+        if (/aborted/i.test(message)) return;
+        flashSaveNote("Couldn't mix this song — try Mix to Drop again, or ✕ to leave.");
+        return;
       } finally {
         setProcessingVocal(false);
       }
@@ -2517,17 +2534,19 @@ export default function DropStudioStage({
     const completedCustomizations = writeStudioDraft(completionValue);
     onChange(completedCustomizations);
     try {
-      await onComplete(file, source);
-      clearLiveVoiceStudio();
-      setVoiceStudioOpen(false);
-      setAudioSession(null);
-      audioSessionRef.current = null;
-      wasStudioOpenRef.current = false;
-      onClose();
+      await withAudioTimeout(Promise.resolve(onComplete(file, source)), 12_000, "complete");
     } catch (error) {
       console.error("[DropStudioStage] completion failed", error);
-      flashSaveNote("Couldn't save this Drop. Try again.");
+      flashSaveNote("Couldn't save this Drop. It's in Drafts — ✕ to leave.");
+      persistVoiceProjectRef.current();
+      return;
     }
+    clearLiveVoiceStudio();
+    setVoiceStudioOpen(false);
+    setAudioSession(null);
+    audioSessionRef.current = null;
+    wasStudioOpenRef.current = false;
+    onClose();
   }
 
   if (typeof document === "undefined") return null;
@@ -2765,7 +2784,7 @@ export default function DropStudioStage({
               type="button"
               className="studioGhost"
               onClick={requestCloseStudio}
-              aria-label={voiceMixerLocked ? "Voice Studio is still mixing" : "Close Drop Studio"}
+              aria-label="Close Drop Studio"
             >
               ✕
             </button>

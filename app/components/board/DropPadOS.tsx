@@ -1729,7 +1729,9 @@ export default function DropPadOS({
       const uploaded = await uploadMediaToSupabaseStorage(sb, userId, file);
       if (uploaded.ok) mediaUrl = uploaded.publicUrl;
     }
-    if (!mediaUrl) mediaUrl = await readFileAsDataUrl(file).catch(() => "");
+    if (!mediaUrl && file.size < 4_000_000) {
+      mediaUrl = await readFileAsDataUrl(file).catch(() => "");
+    }
     if (!mediaUrl) throw new Error("Drop Studio file could not be read or uploaded");
 
     const mediaType: NonNullable<AssetItem["payload"]>["mediaType"] = file.type.startsWith("image/")

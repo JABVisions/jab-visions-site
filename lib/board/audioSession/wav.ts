@@ -75,7 +75,7 @@ export function wavFileFromBuffer(buffer: AudioBuffer, name: string) {
 export async function decodeAudioFile(file: File, context: BaseAudioContext): Promise<AudioBuffer> {
   let bytes: ArrayBuffer;
   try {
-    bytes = await file.arrayBuffer();
+    bytes = await withAudioTimeout(file.arrayBuffer(), 12_000, "read");
   } catch (error) {
     throw asPlayableAudioError(error, file.name);
   }
@@ -88,7 +88,7 @@ export async function decodeAudioFile(file: File, context: BaseAudioContext): Pr
     return await withAudioTimeout(context.decodeAudioData(bytes), DECODE_TIMEOUT_MS, "decode");
   } catch (error) {
     try {
-      const retry = await file.arrayBuffer();
+      const retry = await withAudioTimeout(file.arrayBuffer(), 12_000, "read");
       if (!retry.byteLength) throw error;
       return await withAudioTimeout(
         context.decodeAudioData(retry.slice(0)),
