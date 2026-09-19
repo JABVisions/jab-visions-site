@@ -18,6 +18,10 @@ export function peekLiveVoiceStudio(): VoiceStudioLiveHold | null {
   return hold;
 }
 
+export function liveVoiceHoldHasClips() {
+  return Boolean(hold?.session.tracks.some((track) => track.clips.length > 0));
+}
+
 export function clearLiveVoiceStudio() {
   hold = null;
 }

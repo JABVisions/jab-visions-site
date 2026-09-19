@@ -57,11 +57,9 @@ import {
   adoptAudioFile,
   createAudioSession,
   createSessionHistory,
-  decodeAudioFile,
   defaultAlteration,
   duplicateAdlibTrack,
   duplicateClip,
-  getAudioContextConstructor,
   moveAdlibTrack,
   playableAudioMessage,
   MissingAudioObjectError,
@@ -93,6 +91,7 @@ import {
 } from "@/lib/board/audioSession";
 import {
   clearLiveVoiceStudio,
+  liveVoiceHoldHasClips,
   peekLiveVoiceStudio,
   rememberLiveVoiceStudio,
 } from "@/lib/board/voiceStudioLiveHold";
@@ -626,11 +625,33 @@ export default function DropStudioStage({
     adlibRecording ||
     processingVocal;
 
+  const voiceMixerLocked =
+    recording ||
+    adlibRecording ||
+    processingVocal ||
+    sessionHasClips(audioSession) ||
+    liveVoiceHoldHasClips();
+
+  const keepMixerMounted = voiceSessionActive || voiceMixerLocked;
+
   const flashSaveNote = useCallback((message: string) => {
     setSaveNote(message);
     if (saveNoteTimerRef.current) window.clearTimeout(saveNoteTimerRef.current);
     saveNoteTimerRef.current = window.setTimeout(() => setSaveNote(""), 2600);
   }, []);
+
+  const requestCloseStudio = useCallback(() => {
+    persistVoiceProjectRef.current();
+    if (recording || adlibRecording || processingVocal) {
+      flashSaveNote("Finish this take first.");
+      return;
+    }
+    if (sessionHasClips(audioSession) || liveVoiceHoldHasClips()) {
+      flashSaveNote("Stay in Voice Studio — mix this song first.");
+      return;
+    }
+    handleClose();
+  }, [adlibRecording, audioSession, flashSaveNote, handleClose, processingVocal, recording]);
 
   useEffect(() => {
     audioSessionRef.current = audioSession;
@@ -807,35 +828,6 @@ export default function DropStudioStage({
       setAudioSession(next);
       flashSaveNote("Instrumental loaded — tap + on Vocals or Record to sing over it");
       persistVoiceProjectRef.current();
-      try {
-        const Constructor = getAudioContextConstructor();
-        if (!Constructor) return;
-        const ctx = new Constructor();
-        const decoded = await decodeAudioFile(owned, ctx);
-        await ctx.close().catch(() => undefined);
-        setAudioSession((current) => {
-          if (!current) return current;
-          return {
-            ...current,
-            tracks: current.tracks.map((track) => {
-              if (track.kind !== "instrumental") return track;
-              return {
-                ...track,
-                clips: track.clips.map((clip) =>
-                  clip.file === owned || clip.file.name === owned.name
-                    ? { ...clip, decoded }
-                    : clip
-                ),
-              };
-            }),
-          };
-        });
-      } catch (reason) {
-        setError(
-          playableAudioMessage(reason, owned.name) ||
-            "Couldn't read that instrumental. Try WAV/MP3."
-        );
-      }
     })();
   }, [flashSaveNote]);
 
@@ -1254,7 +1246,6 @@ export default function DropStudioStage({
   };
 
   useEffect(() => {
-    if (!open) return;
     const persistVoiceProject = () => {
       if (!sessionHasClips(audioSessionRef.current)) return;
       void saveToDrafts(true, true);
@@ -1263,24 +1254,26 @@ export default function DropStudioStage({
       if (document.visibilityState === "hidden") persistVoiceProject();
     };
     window.addEventListener("pagehide", persistVoiceProject);
+    window.addEventListener("beforeunload", persistVoiceProject);
     document.addEventListener("visibilitychange", onVisibility);
     return () => {
       window.removeEventListener("pagehide", persistVoiceProject);
+      window.removeEventListener("beforeunload", persistVoiceProject);
       document.removeEventListener("visibilitychange", onVisibility);
     };
-  }, [open, saveToDrafts]);
+  }, [saveToDrafts]);
 
   const voiceProjectSignature = voiceStudioEditSignature(audioSession);
   const voiceHasClips = sessionHasClips(audioSession);
 
   useEffect(() => {
-    if (!open || !voiceStudioOpen || !voiceHasClips) return;
+    if (!voiceHasClips) return;
     if (voiceProjectSignature === lastSavedVoiceSignatureRef.current) return;
     const timer = window.setTimeout(() => {
       void saveToDrafts(true, true);
     }, 800);
     return () => window.clearTimeout(timer);
-  }, [open, voiceStudioOpen, voiceHasClips, voiceProjectSignature, saveToDrafts]);
+  }, [voiceHasClips, voiceProjectSignature, saveToDrafts]);
 
   useEffect(() => {
     if (voiceStudioOpen) {
@@ -1421,10 +1414,14 @@ export default function DropStudioStage({
   useEffect(() => {
     if (!open) {
       persistVoiceProjectRef.current();
+      document.body.style.overflow = "";
+      if (sessionHasClips(audioSessionRef.current) || liveVoiceHoldHasClips()) {
+        haltStudioTransport();
+        return;
+      }
       haltStudioTransport();
       stopCamera();
-      document.body.style.overflow = "";
-      if (!sessionHasClips(audioSessionRef.current) && !peekLiveVoiceStudio()) {
+      if (!peekLiveVoiceStudio()) {
         wasStudioOpenRef.current = false;
       }
       return;
@@ -1531,31 +1528,16 @@ export default function DropStudioStage({
   }, [open, phase, facing, mode, startCamera, stopCamera]);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open && !keepMixerMounted) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
-      if (recording || adlibRecording || processingVocal || voiceStudioOpen || audioSession) {
-        e.preventDefault();
-        e.stopPropagation();
-        if (recording || adlibRecording || processingVocal) {
-          flashSaveNote("Finish this take first.");
-        }
-        return;
-      }
-      handleClose();
+      e.preventDefault();
+      e.stopPropagation();
+      requestCloseStudio();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [
-    open,
-    handleClose,
-    recording,
-    adlibRecording,
-    processingVocal,
-    voiceStudioOpen,
-    audioSession,
-    flashSaveNote,
-  ]);
+  }, [open, keepMixerMounted, requestCloseStudio]);
 
   const selectDropbookChip = useCallback(
     (chipId: string) => {
@@ -2189,7 +2171,7 @@ export default function DropStudioStage({
 
   // Single source of truth for the editor preview URL — recreated whenever the file changes.
   useEffect(() => {
-    if (!open || phase !== "edit" || !fileRef.current) {
+    if ((!open && !keepMixerMounted) || phase !== "edit" || !fileRef.current) {
       return;
     }
 
@@ -2201,7 +2183,7 @@ export default function DropStudioStage({
     return () => {
       URL.revokeObjectURL(url);
     };
-  }, [open, phase, mediaFileTick]);
+  }, [open, keepMixerMounted, phase, mediaFileTick]);
 
   function commitBlob(blob: Blob, kind: "image" | "video" | "audio", src: "capture" | "upload") {
     const type =
@@ -2509,7 +2491,8 @@ export default function DropStudioStage({
     }
   }
 
-  if (!open || typeof document === "undefined") return null;
+  if (typeof document === "undefined") return null;
+  if (!open && !keepMixerMounted) return null;
 
   const isDropbookHomeScreen =
     isDropbookMode &&
@@ -2680,14 +2663,14 @@ export default function DropStudioStage({
 
   return createPortal(
     <div
-      className="studioStage"
+      className={`studioStage ${open ? "" : "studioStageHeld"}`.trim()}
       role="dialog"
-      aria-modal="true"
+      aria-modal={open ? "true" : undefined}
+      aria-hidden={open ? undefined : true}
       aria-label="Drop Studio"
       onPointerDown={(e) => {
         if (e.target !== e.currentTarget) return;
-        if (voiceSessionActive) return;
-        handleClose();
+        requestCloseStudio();
       }}
     >
       <div
@@ -2742,14 +2725,8 @@ export default function DropStudioStage({
             <button
               type="button"
               className="studioGhost"
-              onClick={() => {
-                if (recording || adlibRecording || processingVocal) {
-                  flashSaveNote("Finish this take first.");
-                  return;
-                }
-                handleClose();
-              }}
-              aria-label="Close Drop Studio"
+              onClick={requestCloseStudio}
+              aria-label={voiceMixerLocked ? "Voice Studio is still mixing" : "Close Drop Studio"}
             >
               ✕
             </button>
@@ -3131,6 +3108,7 @@ export default function DropStudioStage({
                     <BoardClientErrorBoundary
                       name="voice-studio"
                       resetLabel="Try Voice Studio again"
+                      resetKey={audioSession.id}
                       fallback={
                         <div className="studioVoiceError">
                           Voice Studio hit a snag. Your song is still in this Drop Studio — try Play or Record again.

@@ -1,8 +1,4 @@
-import {
-  asPlayableAudioError,
-  isMissingAudioObjectError,
-  MissingAudioObjectError,
-} from "./clipMedia";
+import { MissingAudioObjectError } from "./clipMedia";
 import { connectScheduledClip } from "./graph";
 import { scheduleSession, sessionDurationMs } from "./timeline";
 import type { AudioSession, LaneKind, TrackMix } from "./types";
@@ -148,14 +144,10 @@ export class AudioSessionEngine {
           if (!clip.sourceDurationMs && clip.decoded) {
             clip.sourceDurationMs = clip.decoded.duration * 1000;
           }
-        } catch (error) {
+        } catch {
           clip.decoded = undefined;
-          const label = clip.name || clip.file.name || "clip";
-          if (isMissingAudioObjectError(error) || clip.file.size === 0) {
-            missing.push(label);
-            continue;
-          }
-          throw asPlayableAudioError(error, label);
+          missing.push(clip.name || clip.file.name || "clip");
+          continue;
         }
       }
     }

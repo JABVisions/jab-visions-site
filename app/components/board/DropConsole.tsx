@@ -41,6 +41,7 @@ import {
   type BoardUser,
 } from "@/lib/boardStore";
 import LazyDropStudioStage from "./LazyDropStudioStage";
+import BoardClientErrorBoundary from "./BoardClientErrorBoundary";
 
 /* -------------------------------------------------------------------------- */
 /* utils */
@@ -1974,6 +1975,41 @@ function BoardDropConsoleFields({
 
   return (
     <>
+      <LazyDropStudioStage
+        open={studioOpen}
+        initialFile={null}
+        initialMode={dropFlavor === "thought" || dropFlavor === "music" ? "audio" : "photo"}
+        allowedModes={
+          dropFlavor === "thought"
+            ? ["audio", "art", "descript"]
+            : ["photo", "video", "audio", "art", "descript"]
+        }
+        descriptDestination="doc"
+        value={customizations}
+        onChange={setCustomizations}
+        onComplete={async (file) => {
+          if (isDropbookSlideFile({ name: file.name, type: file.type })) {
+            setDropFlavor("media");
+            setTitle((current) => current.trim() || "Dropbook");
+            setDropDesc("");
+          }
+          void uploadToBoardMedia(file, "capture");
+        }}
+        onDescriptComplete={async (doc: DescriptDoc) => {
+          const plainText = doc.plainText.trim();
+          setDropFlavor("doc");
+          setTitle((current) => current.trim() || doc.title);
+          setDocDesc(plainText);
+          void uploadToBoardMedia(descriptDocToFile(doc), "capture");
+        }}
+        onLinkComplete={async (link) => {
+          if (!onLinkComplete) throw new Error("Could not post this link.");
+          await onLinkComplete(link);
+          setStudioOpen(false);
+        }}
+        onClose={() => setStudioOpen(false)}
+      />
+      <BoardClientErrorBoundary name="drop-console-fields" resetLabel="Try Drop Console again">
       {dropFlavor === "thought" ? (
         <div className="payProviderRow">
           <button
@@ -2077,41 +2113,6 @@ function BoardDropConsoleFields({
           {mediaSource === "capture" ? <span>Captured on Board</span> : null}
         </div>
       ) : null}
-
-      <LazyDropStudioStage
-        open={studioOpen}
-        initialFile={null}
-        initialMode={dropFlavor === "thought" || dropFlavor === "music" ? "audio" : "photo"}
-        allowedModes={
-          dropFlavor === "thought"
-            ? ["audio", "art", "descript"]
-            : ["photo", "video", "audio", "art", "descript"]
-        }
-        descriptDestination="doc"
-        value={customizations}
-        onChange={setCustomizations}
-        onComplete={async (file) => {
-          if (isDropbookSlideFile({ name: file.name, type: file.type })) {
-            setDropFlavor("media");
-            setTitle((current) => current.trim() || "Dropbook");
-            setDropDesc("");
-          }
-          void uploadToBoardMedia(file, "capture");
-        }}
-        onDescriptComplete={async (doc: DescriptDoc) => {
-          const plainText = doc.plainText.trim();
-          setDropFlavor("doc");
-          setTitle((current) => current.trim() || doc.title);
-          setDocDesc(plainText);
-          void uploadToBoardMedia(descriptDocToFile(doc), "capture");
-        }}
-        onLinkComplete={async (link) => {
-          if (!onLinkComplete) throw new Error("Could not post this link.");
-          await onLinkComplete(link);
-          setStudioOpen(false);
-        }}
-        onClose={() => setStudioOpen(false)}
-      />
 
       {dropFlavor === "thought" ? (
         <>
@@ -2239,6 +2240,7 @@ function BoardDropConsoleFields({
           />
         </div>
       ) : null}
+      </BoardClientErrorBoundary>
     </>
   );
 }

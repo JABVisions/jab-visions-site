@@ -1,10 +1,8 @@
 import { sessionFromVocalAndInstrumental } from "./session";
 import { audibleTracks, clipPlayableMs, clipMixStartMs, trackEndMs } from "./timeline";
 import type { AudioSession, SessionTrack, TrackClip } from "./types";
-import { isMissingAudioObjectError } from "./clipMedia";
-import { decodeAudioFile, getAudioContextConstructor, withAudioTimeout } from "./wav";
+import { decodeAudioFile, getAudioContextConstructor } from "./wav";
 
-const DECODE_TIMEOUT_MS = 12_000;
 const TAKE_TAIL_MS = 320;
 const MIX_MAX_MS = 240_000;
 
@@ -29,35 +27,17 @@ export function mixTakeDurationMs(session: AudioSession) {
   return Math.min(MIX_MAX_MS, Math.max(1, longest));
 }
 
-async function hydrateClipBuffers(session: AudioSession) {
-  const Constructor = getAudioContextConstructor();
-  if (!Constructor) throw new Error("Web Audio is unavailable in this browser.");
-
-  const missing = session.tracks.some((track) =>
-    track.clips.some((clip) => !clip.decoded && clip.file)
-  );
-  if (!missing) return;
-
-  const ctx = new Constructor();
-  try {
-    if (ctx.state === "suspended") await ctx.resume().catch(() => undefined);
-    for (const track of session.tracks) {
-      for (const clip of track.clips) {
-        if (clip.decoded) continue;
-        try {
-          clip.decoded = await withAudioTimeout(
-            decodeAudioFile(clip.file, ctx),
-            DECODE_TIMEOUT_MS,
-            "decode"
-          );
-        } catch (error) {
-          if (isMissingAudioObjectError(error) || clip.file.size === 0) continue;
-          throw error;
-        }
+async function hydrateClipBuffers(session: AudioSession, ctx: BaseAudioContext) {
+  for (const track of session.tracks) {
+    for (const clip of track.clips) {
+      try {
+        // Always re-decode in this mix context. Buffers from a closed Safari
+        // AudioContext can fail silently during Mix to Drop.
+        clip.decoded = await decodeAudioFile(clip.file, ctx);
+      } catch {
+        clip.decoded = undefined;
       }
     }
-  } finally {
-    void ctx.close().catch(() => undefined);
   }
 }
 
@@ -167,33 +147,42 @@ function floatStereoToWav(left: Float32Array, right: Float32Array, sampleRate: n
  * Avoids OfflineAudioContext + preset convolution over a full song, which froze the UI.
  */
 export async function renderSessionFile(session: AudioSession): Promise<File> {
-  await hydrateClipBuffers(session);
-  await yieldUi();
+  const Constructor = getAudioContextConstructor();
+  if (!Constructor) throw new Error("Web Audio is unavailable in this browser.");
 
-  const mixMs = mixTakeDurationMs(session);
-  const tracks = audibleTracks(session);
-  if (!tracks.length) throw new Error("This Studio session has no audible audio.");
+  const ctx = new Constructor();
+  try {
+    if (ctx.state === "suspended") await ctx.resume().catch(() => undefined);
+    await hydrateClipBuffers(session, ctx);
+    await yieldUi();
 
-  const sampleRate =
-    tracks.flatMap((track) => track.clips.map((clip) => clip.decoded?.sampleRate ?? 0)).find((rate) => rate > 0) ||
-    session.sampleRate ||
-    48_000;
-  const frames = Math.max(1, Math.ceil((mixMs / 1000) * sampleRate));
-  const left = new Float32Array(frames);
-  const right = new Float32Array(frames);
+    const mixMs = mixTakeDurationMs(session);
+    const tracks = audibleTracks(session);
+    if (!tracks.length) throw new Error("This Studio session has no audible audio.");
 
-  for (const track of tracks) {
-    for (const clip of track.clips) {
-      overlayClip(left, right, sampleRate, clip, track, mixMs);
+    const sampleRate =
+      tracks.flatMap((track) => track.clips.map((clip) => clip.decoded?.sampleRate ?? 0)).find((rate) => rate > 0) ||
+      session.sampleRate ||
+      48_000;
+    const frames = Math.max(1, Math.ceil((mixMs / 1000) * sampleRate));
+    const left = new Float32Array(frames);
+    const right = new Float32Array(frames);
+
+    for (const track of tracks) {
+      for (const clip of track.clips) {
+        overlayClip(left, right, sampleRate, clip, track, mixMs);
+      }
     }
-  }
 
-  await yieldUi();
-  const wav = floatStereoToWav(left, right, sampleRate);
-  return new File([wav], `studio-mix-${Date.now()}.wav`, {
-    type: "audio/wav",
-    lastModified: Date.now(),
-  });
+    await yieldUi();
+    const wav = floatStereoToWav(left, right, sampleRate);
+    return new File([wav], `studio-mix-${Date.now()}.wav`, {
+      type: "audio/wav",
+      lastModified: Date.now(),
+    });
+  } finally {
+    void ctx.close().catch(() => undefined);
+  }
 }
 
 /** Phase 1 debug hook: bounce a vocal + beat to one wav with no UI. */
