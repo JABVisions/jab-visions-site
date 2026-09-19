@@ -1,7 +1,6 @@
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { uploadDropMedia } from "@/lib/board/boardDropEditStore";
 import {
   BOARD_IMAGE_MIN_LONG_EDGE,
   isHeicFile,
@@ -9,8 +8,8 @@ import {
   PROJECT_COVER_MAX_LONG_EDGE,
 } from "@/lib/board/imageQuality";
 import { parseBoardStorageFromUrl } from "@/lib/board/musicPlayback";
+import { uploadProjectCover } from "@/lib/board/projectCoverUpload";
 import { checkUploadSize } from "@/lib/board/uploadLimits";
-import { supabaseBrowser } from "@/lib/supabase/browser";
 
 function clsx(...parts: Array<string | false | null | undefined>) {
   return parts.filter(Boolean).join(" ");
@@ -180,6 +179,9 @@ export default function ProjectDropMenu({
   const [mediaUploading, setMediaUploading] = useState(false);
   const mediaFileRef = useRef<File | null>(null);
   const previewObjectUrlRef = useRef<string>("");
+  const coverRef = useRef({ bucket: "", path: "", url: "" });
+  const uploadPromiseRef = useRef<Promise<void> | null>(null);
+  const uploadGenerationRef = useRef(0);
 
   function revokePreviewObjectUrl() {
     if (previewObjectUrlRef.current) {
@@ -221,6 +223,34 @@ export default function ProjectDropMenu({
     };
   }, []);
 
+  useEffect(() => {
+    if (!mediaUploading) return;
+    const timer = window.setTimeout(() => setMediaUploading(false), 10_000);
+    return () => window.clearTimeout(timer);
+  }, [mediaUploading]);
+
+  function rememberCover(next: { bucket?: string; path?: string; url?: string }) {
+    coverRef.current = {
+      bucket: next.bucket || "",
+      path: next.path || "",
+      url: next.url || "",
+    };
+    setMediaBucket(coverRef.current.bucket);
+    setMediaStoragePath(coverRef.current.path);
+    setMediaUrl(coverRef.current.url);
+  }
+
+  async function sendCoverToBoard(file: File, generation: number) {
+    const uploaded = await uploadProjectCover(file);
+    if (generation !== uploadGenerationRef.current) return;
+    if (!uploaded) return;
+    rememberCover({
+      bucket: uploaded.bucket,
+      path: uploaded.storagePath,
+      url: uploaded.imageUrl,
+    });
+  }
+
   function resetAll() {
     setError(null);
     setTitle("");
@@ -247,15 +277,22 @@ export default function ProjectDropMenu({
     setMediaUploading(false);
     revokePreviewObjectUrl();
     mediaFileRef.current = null;
+    coverRef.current = { bucket: "", path: "", url: "" };
+    uploadPromiseRef.current = null;
+    uploadGenerationRef.current += 1;
   }
 
   async function onPickFile(file: File | null) {
     setError(null);
+    uploadGenerationRef.current += 1;
+    const generation = uploadGenerationRef.current;
+    rememberCover({});
     if (!file) {
       revokePreviewObjectUrl();
       setMediaDataUrl("");
       mediaFileRef.current = null;
       setMediaUploading(false);
+      uploadPromiseRef.current = null;
       return;
     }
 
@@ -282,47 +319,40 @@ export default function ProjectDropMenu({
     }
 
     setMediaKind("image");
-    setMediaUrl("");
-    setMediaBucket("");
-    setMediaStoragePath("");
-    setMediaUploading(true);
     mediaFileRef.current = file;
+    setPreviewFromFile(file);
+    setMediaUploading(true);
 
-    try {
-      const prepared = await prepareBoardImageFile(file, {
-        minLongEdge: BOARD_IMAGE_MIN_LONG_EDGE,
-        maxLongEdge: PROJECT_COVER_MAX_LONG_EDGE,
-      });
-      mediaFileRef.current = prepared;
-      setPreviewFromFile(prepared);
-
-      const uploaded = await uploadDropMedia(prepared, `project-cover-${Date.now()}`);
-      if (uploaded) {
-        const publicUrl =
-          supabaseBrowser().storage.from(uploaded.bucket).getPublicUrl(uploaded.storagePath)
-            .data.publicUrl || "";
-        setMediaBucket(uploaded.bucket);
-        setMediaStoragePath(uploaded.storagePath);
-        setMediaUrl(publicUrl);
-      } else {
-        setError("Cover is attached on this device. Retry the upload, or publish and Board will try again.");
+    const job = (async () => {
+      try {
+        const prepared = await prepareBoardImageFile(file, {
+          minLongEdge: BOARD_IMAGE_MIN_LONG_EDGE,
+          maxLongEdge: PROJECT_COVER_MAX_LONG_EDGE,
+        });
+        if (generation !== uploadGenerationRef.current) return;
+        mediaFileRef.current = prepared;
+        setPreviewFromFile(prepared);
+        await sendCoverToBoard(prepared, generation);
+      } catch {
+        if (generation !== uploadGenerationRef.current) return;
+        const fallback = await fileToDataUrl(file, {
+          maxWidth: PROJECT_COVER_MAX_LONG_EDGE,
+          maxHeight: PROJECT_COVER_MAX_LONG_EDGE,
+          quality: 0.84,
+        }).catch(() => "");
+        if (fallback) {
+          revokePreviewObjectUrl();
+          setMediaDataUrl(fallback);
+        } else if (!mediaDataUrl) {
+          setError("Couldn’t read that file. Try a different photo.");
+        }
+      } finally {
+        if (generation !== uploadGenerationRef.current) return;
+        setMediaUploading(false);
+        uploadPromiseRef.current = null;
       }
-    } catch {
-      const fallback = await fileToDataUrl(file, {
-        maxWidth: PROJECT_COVER_MAX_LONG_EDGE,
-        maxHeight: PROJECT_COVER_MAX_LONG_EDGE,
-        quality: 0.84,
-      }).catch(() => "");
-      if (fallback) {
-        revokePreviewObjectUrl();
-        setMediaDataUrl(fallback);
-        setError("Cover is attached on this device. The Board upload can retry when you publish.");
-      } else {
-        setError("Couldn’t read that file. Try a different photo.");
-      }
-    } finally {
-      setMediaUploading(false);
-    }
+    })();
+    uploadPromiseRef.current = job;
   }
 
   function validate(): string | null {
@@ -335,9 +365,6 @@ export default function ProjectDropMenu({
     if (!rolesNeeded.trim()) return "Roles Needed is required.";
     if (!contactName.trim()) return "Contact name is required.";
     if (!contactEmail.trim()) return "Contact email is required.";
-    if (mediaUploading) return "Wait for the cover photo to finish uploading.";
-
-    // super light email check
     if (!/^\S+@\S+\.\S+$/.test(contactEmail.trim()))
       return "Contact email looks invalid.";
 
@@ -353,33 +380,16 @@ export default function ProjectDropMenu({
       return;
     }
 
-    let coverBucket = mediaBucket;
-    let coverPath = mediaStoragePath;
-    let coverUrl = mediaUrl;
-
-    if (!coverPath && mediaFileRef.current) {
-      setMediaUploading(true);
-      try {
-        const uploaded = await uploadDropMedia(
-          mediaFileRef.current,
-          `project-cover-${Date.now()}`
-        );
-        if (uploaded) {
-          coverBucket = uploaded.bucket;
-          coverPath = uploaded.storagePath;
-          coverUrl =
-            supabaseBrowser().storage.from(uploaded.bucket).getPublicUrl(uploaded.storagePath)
-              .data.publicUrl || coverUrl;
-          setMediaBucket(coverBucket);
-          setMediaStoragePath(coverPath);
-          setMediaUrl(coverUrl);
-        }
-      } catch {
-        // Fall through to local preview if the retry cannot reach storage.
-      } finally {
-        setMediaUploading(false);
-      }
+    if (!coverRef.current.path && uploadPromiseRef.current) {
+      await Promise.race([
+        uploadPromiseRef.current,
+        new Promise<void>((resolve) => window.setTimeout(resolve, 8_000)),
+      ]);
     }
+
+    const coverBucket = coverRef.current.bucket || mediaBucket;
+    const coverPath = coverRef.current.path || mediaStoragePath;
+    const coverUrl = coverRef.current.url || mediaUrl;
 
     const id =
       (globalThis.crypto as any)?.randomUUID?.() ??
@@ -699,13 +709,20 @@ export default function ProjectDropMenu({
               <Field label="Paste Media URL (optional)">
                 <input
                   value={mediaUrl}
-                  onChange={(e) => {
-                    setMediaUrl(e.target.value);
-                    if (e.target.value.trim()) setMediaDataUrl("");
-                    const parsed = parseBoardStorageFromUrl(e.target.value.trim());
-                    setMediaBucket(parsed?.bucket || "");
-                    setMediaStoragePath(parsed?.storagePath || "");
-                  }}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      setMediaUrl(value);
+                      if (value.trim()) {
+                        revokePreviewObjectUrl();
+                        setMediaDataUrl("");
+                      }
+                      const parsed = parseBoardStorageFromUrl(value.trim());
+                      rememberCover({
+                        bucket: parsed?.bucket || "",
+                        path: parsed?.storagePath || "",
+                        url: value,
+                      });
+                    }}
                   placeholder="https://..."
                   className={inputClass}
                 />
@@ -724,17 +741,16 @@ export default function ProjectDropMenu({
                       e.target.value = "";
                       void onPickFile(next);
                     }}
-                    disabled={mediaUploading}
                     className="sr-only"
                   />
                 </label>
                 <div className="mt-2 min-h-5 max-w-full truncate text-xs font-semibold text-white/55">
-                  {mediaUploading
-                    ? mediaDataUrl
-                      ? "Uploading cover to Board..."
-                      : "Preparing photo..."
-                    : mediaStoragePath
-                      ? "Cover uploaded to Board."
+                  {mediaStoragePath
+                    ? "Cover uploaded to Board."
+                    : mediaUploading
+                      ? mediaDataUrl
+                        ? "Cover attached. Sending to Board…"
+                        : "Preparing photo..."
                       : mediaDataUrl
                         ? "Media attached from this device."
                         : "Select image or video from this device."}
@@ -768,12 +784,13 @@ export default function ProjectDropMenu({
                   <button
                     type="button"
                     onClick={() => {
+                      uploadGenerationRef.current += 1;
+                      uploadPromiseRef.current = null;
                       revokePreviewObjectUrl();
-                      setMediaUrl("");
                       setMediaDataUrl("");
-                      setMediaBucket("");
-                      setMediaStoragePath("");
                       mediaFileRef.current = null;
+                      rememberCover({});
+                      setMediaUploading(false);
                     }}
                     className="mt-2 text-xs text-white/70 hover:text-white underline"
                   >
