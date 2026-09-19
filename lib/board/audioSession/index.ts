@@ -71,7 +71,7 @@ export {
   type TrackClip,
   type TrackMix,
 } from "./types";
-export { audioBufferToWav, decodeAudioFile, getAudioContextConstructor, wavFileFromBuffer } from "./wav";
+export { audioBufferToWav, decodeAudioFile, getAudioContextConstructor, wavFileFromBuffer, withAudioTimeout } from "./wav";
 export {
   adoptAudioFile,
   asPlayableAudioError,

@@ -6,6 +6,7 @@ import {
   createTrackFromFile,
   scheduleClip,
   sessionDurationMs,
+  mixTakeDurationMs,
   sessionFromVocalAndInstrumental,
 } from "./index";
 import type { SessionTrack, TrackClip } from "./types";
@@ -75,6 +76,11 @@ function run() {
   assert(pair.tracks.length === 2, "helper should create two lanes");
   assert(pair.tracks[0].kind === "vocal" && pair.tracks[0].mix.preset === "clean", "vocal defaults to clean");
   assert(pair.tracks[1].kind === "instrumental" && pair.tracks[1].mix.preset === "none", "beat stays dry");
+
+  const vocalTake = track("vocal", [clipWithDuration(2)]);
+  const longBeat = track("instrumental", [clipWithDuration(30)]);
+  const mixSession = { ...createAudioSession(), tracks: [vocalTake, longBeat] };
+  assert(mixTakeDurationMs(mixSession) === 2320, "mix to drop should follow the vocal take, not the beat");
 
   console.log("audioSession timeline checks passed");
 }

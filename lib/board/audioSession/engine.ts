@@ -2,7 +2,7 @@ import { clipFileKey, MissingAudioObjectError } from "./clipMedia";
 import { connectScheduledClip } from "./graph";
 import { scheduleSession, sessionDurationMs } from "./timeline";
 import type { AudioSession, LaneKind, TrackClip, TrackMix } from "./types";
-import { decodeAudioFile, getAudioContextConstructor } from "./wav";
+import { decodeAudioFile, getAudioContextConstructor, withAudioTimeout } from "./wav";
 
 /** Time-domain meters don't need 2048 bins — that analyser buffer is ~8× the RAM. */
 const LANE_ANALYSER_FFT = 256;
@@ -110,7 +110,7 @@ export class AudioSessionEngine {
       };
     }
     if (this.ctx.state === "suspended") {
-      await this.ctx.resume();
+      await withAudioTimeout(this.ctx.resume(), 2_500, "resume").catch(() => undefined);
     }
     return this.ctx;
   }
@@ -124,7 +124,24 @@ export class AudioSessionEngine {
   async resumeContext() {
     if (!this.ctx || this.ctx.state === "closed") return;
     if (this.ctx.state === "suspended") {
-      await this.ctx.resume().catch(() => undefined);
+      await withAudioTimeout(this.ctx.resume(), 2_500, "resume").catch(() => undefined);
+    }
+  }
+
+  /** Decode every clip into the live mixer context — Mix to Drop must not open a second one. */
+  async hydrateSession(session: AudioSession) {
+    const ctx = await this.context();
+    for (const track of session.tracks) {
+      for (const clip of track.clips) {
+        try {
+          await this.decodeClip(clip, ctx);
+          if (!clip.sourceDurationMs && clip.decoded) {
+            clip.sourceDurationMs = clip.decoded.duration * 1000;
+          }
+        } catch {
+          clip.decoded = undefined;
+        }
+      }
     }
   }
 

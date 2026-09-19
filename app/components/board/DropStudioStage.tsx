@@ -76,6 +76,7 @@ import {
   sessionHasLane,
   splitClipAtPlayhead,
   studioAudioExtension,
+  withAudioTimeout,
   createStudioTakeCapture,
   getMusicMicStream,
   undoHistory,
@@ -693,6 +694,19 @@ export default function DropStudioStage({
     setStudioLaneAnalysers({});
   };
 
+  const mixLiveSession = async (session: AudioSession) => {
+    haltStudioTransport();
+    const engine = studioEngine();
+    return withAudioTimeout(
+      (async () => {
+        await engine.hydrateSession(session);
+        return renderSessionFile(session, await engine.ensureContext());
+      })(),
+      25_000,
+      "mix"
+    );
+  };
+
   const studioEngine = () => {
     if (!studioEngineRef.current) {
       const engine = new AudioSessionEngine();
@@ -1163,7 +1177,7 @@ export default function DropStudioStage({
       setProcessingVocal(true);
       try {
         if (audioSession && sessionHasLane(audioSession, "instrumental")) {
-          file = await renderSessionFile({
+          file = await mixLiveSession({
             ...audioSession,
             tracks: audioSession.tracks.map((track) =>
               track.kind === "vocal"
@@ -1179,7 +1193,7 @@ export default function DropStudioStage({
           audioSession &&
           (sessionHasLane(audioSession, "adlib") || sessionHasLane(audioSession, "fx"))
         ) {
-          file = await renderSessionFile(audioSession);
+          file = await mixLiveSession(audioSession);
         } else {
           file = await renderVoicePresetFile(file, voicePreset);
         }
@@ -2432,7 +2446,7 @@ export default function DropStudioStage({
             sessionHasLane(audioSession, "adlib") ||
             sessionHasLane(audioSession, "fx"))
         ) {
-          const mixed = await renderSessionFile({
+          const mixed = await mixLiveSession({
             ...audioSession,
             tracks: audioSession.tracks.map((track) =>
               track.kind === "vocal" ? { ...track, latencyMs: studioLatencyMs } : track
