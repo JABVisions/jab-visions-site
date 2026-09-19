@@ -18,6 +18,7 @@ import {
   configureBoardProjectsStorage,
   createBoardProject,
   mergeProjectRecord,
+  persistProjectDropToProfile,
   syncRemoteProjectActivitiesToStorage,
   syncResolvedProjectsToStorage,
   statusLabel,
@@ -29,7 +30,9 @@ import {
 import ProjectCoverImage from "@/app/components/board/projects/ProjectCoverImage";
 import { DROP_PAD_PROJECT_DROPS_STORAGE_KEYS, isStoredNotebookProject } from "@/lib/board/isProjectNotebookDrop";
 import {
+  persistableImageUrl,
   persistableProjectCover,
+  pickProjectHostName,
   resolveProjectCover,
   resolveProjectEndDate,
   resolveProjectLocation,
@@ -336,6 +339,7 @@ export default function ProjectCenter() {
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [hostProfileName, setHostProfileName] = useState("");
   const [inviteDraft, setInviteDraft] = useState({
     name: "",
     handle: "",
@@ -395,10 +399,21 @@ export default function ProjectCenter() {
         if (userId) {
           const { data: profile } = await sb
             .from("profiles")
-            .select("username")
+            .select("username, display_name, board_style")
             .eq("id", userId)
             .maybeSingle();
           username = String(profile?.username || "").toLowerCase();
+          const style =
+            profile?.board_style && typeof profile.board_style === "object"
+              ? (profile.board_style as Record<string, any>)
+              : {};
+          setHostProfileName(
+            pickProjectHostName(
+              profile?.display_name,
+              style.displayName,
+              profile?.username
+            )
+          );
         }
         configureBoardProjectsStorage(userId, username === "johnandy");
       } catch {
@@ -511,17 +526,45 @@ export default function ProjectCenter() {
     });
   };
 
-  const createProjectFromDrop = (drop: ProjectDrop) => {
+  const createProjectFromDrop = async (drop: ProjectDrop) => {
     const next = projectFromDrop(drop);
     const cover = persistableProjectCover(next.media);
-    const coverUrl =
-      cover?.src && !cover.src.startsWith("data:") && !cover.src.startsWith("blob:")
-        ? cover.src
-        : null;
+    const coverUrl = persistableImageUrl(cover?.src);
     const nowIso = new Date(next.createdAt).toISOString();
     const identity = readCurrentBoardIdentity();
-    const authorName = identity.displayName || next.authorName || next.contactName || "Project Host";
-    const authorUsername = identity.username || next.authorUsername || "";
+    let profileName = hostProfileName;
+    let profileUsername = identity.username;
+    try {
+      const sb = supabaseBrowser();
+      const { data: auth } = await sb.auth.getUser();
+      if (auth.user?.id) {
+        const { data: profile } = await sb
+          .from("profiles")
+          .select("display_name, username, board_style")
+          .eq("id", auth.user.id)
+          .maybeSingle();
+        const style =
+          profile?.board_style && typeof profile.board_style === "object"
+            ? (profile.board_style as Record<string, any>)
+            : {};
+        profileName = pickProjectHostName(
+          profile?.display_name,
+          style.displayName,
+          profile?.username,
+          profileName
+        );
+        profileUsername = String(profile?.username || profileUsername).replace(/^@+/, "");
+      }
+    } catch {
+      // Keep the local identity if profiles cannot be read.
+    }
+    const authorName = pickProjectHostName(
+      next.contactName,
+      profileName,
+      next.authorName,
+      identity.displayName
+    ) || next.contactName;
+    const authorUsername = profileUsername || identity.username || next.authorUsername || "";
     const authorAvatar = identity.avatar || next.authorAvatar || "";
     const authorGlow = identity.glow || next.authorGlow || "#FF4FD8";
     const authorAuraIntensity = identity.auraIntensity ?? next.authorAuraIntensity;
@@ -711,6 +754,12 @@ export default function ProjectCenter() {
           href: activity.href,
           image_url: activity.image_url,
           meta: activity.meta,
+        });
+        await persistProjectDropToProfile(sb, userId, {
+          ...next,
+          authorName,
+          authorUsername,
+          contactName: authorName,
         });
       } catch {
         // Keep the local project notebook even if remote activity sync fails.
@@ -1160,6 +1209,7 @@ export default function ProjectCenter() {
           open={createOpen}
           onClose={() => setCreateOpen(false)}
           onCreate={createProjectFromDrop}
+          defaultHostName={hostProfileName}
         />
         <DropCommentsDrawer
           open={Boolean(commentsProject)}
@@ -1298,7 +1348,10 @@ export default function ProjectCenter() {
               <div className="mt-3 space-y-3 text-sm text-white/72">
                 <div>
                   <div className="text-xs text-white/42">Host</div>
-                  <div className="mt-1 text-white/86">{activeProject.contactName}</div>
+                  <div className="mt-1 text-white/86">
+                    {pickProjectHostName(activeProject.contactName, activeProject.authorName) ||
+                      activeProject.contactName}
+                  </div>
                 </div>
                 <div>
                   <div className="text-xs text-white/42">Contact Email</div>
@@ -1483,6 +1536,7 @@ export default function ProjectCenter() {
         open={createOpen}
         onClose={() => setCreateOpen(false)}
         onCreate={createProjectFromDrop}
+        defaultHostName={hostProfileName}
       />
       <DropCommentsDrawer
         open={Boolean(commentsProject)}

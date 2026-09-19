@@ -116,10 +116,12 @@ export default function ProjectDropMenu({
   open,
   onClose,
   onCreate,
+  defaultHostName,
 }: {
   open: boolean;
   onClose: () => void;
   onCreate: (drop: ProjectDrop) => void | Promise<void>;
+  defaultHostName?: string;
 }) {
   const [error, setError] = useState<string | null>(null);
 
@@ -174,12 +176,10 @@ export default function ProjectDropMenu({
   useEffect(() => {
     if (!open) return;
     setError(null);
-
-    // optional: leave fields as-is if you prefer; for now we keep what you typed
-    // If you want "always clear", uncomment the next line:
-    // resetAll();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
+    setContactName((current) =>
+      current.trim() ? current : (defaultHostName || "").trim()
+    );
+  }, [open, defaultHostName]);
 
   function resetAll() {
     setError(null);

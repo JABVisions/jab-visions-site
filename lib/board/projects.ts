@@ -11,7 +11,9 @@ import {
 } from "@/lib/board/isProjectNotebookDrop";
 import {
   mergeProjectCover,
+  persistableImageUrl,
   persistableProjectCover,
+  pickProjectHostName,
   resolveProjectCover,
   resolveProjectEndDate,
   resolveProjectLocation,
@@ -315,10 +317,7 @@ export function mergeProjectRecord(
         : incoming.compensationType,
     rate: base.rate || incoming.rate,
     rolesNeeded: base.rolesNeeded || incoming.rolesNeeded,
-    contactName:
-      base.contactName && base.contactName !== "Project Host"
-        ? base.contactName
-        : incoming.contactName,
+    contactName: pickProjectHostName(base.contactName, incoming.contactName) || incoming.contactName || base.contactName,
     contactEmail: base.contactEmail || incoming.contactEmail,
     notes: base.notes || incoming.notes,
     goal: base.goal || incoming.goal,
@@ -326,7 +325,7 @@ export function mergeProjectRecord(
     source: base.source || incoming.source,
     media: mergeProjectCover(base.media, incoming.media),
     authorId: base.authorId || incoming.authorId,
-    authorName: base.authorName || incoming.authorName,
+    authorName: pickProjectHostName(base.authorName, incoming.authorName) || incoming.authorName || base.authorName,
     authorUsername: base.authorUsername || incoming.authorUsername,
     authorAvatar: base.authorAvatar || incoming.authorAvatar,
     authorGlow: base.authorGlow || incoming.authorGlow,
@@ -375,16 +374,18 @@ function projectFromActivity(item: BoardActivity): BoardProject | null {
     (typeof meta.preview?.title === "string" ? meta.preview.title : "");
   const title = rawTitle || "Untitled Project";
   const createdAt = safeTime(item.created_at);
-  const contactName =
-    typeof meta.authorName === "string" && meta.authorName.trim()
-      ? meta.authorName.trim()
-      : typeof meta.ownerLabel === "string" && meta.ownerLabel.trim()
-        ? meta.ownerLabel.trim()
-      : typeof meta.contactName === "string" && meta.contactName.trim()
-        ? meta.contactName.trim()
-      : "Project Host";
-  const resolvedCover = resolveProjectCover({ ...item, meta }, item.image_url);
-  const authorName = String(meta.authorName ?? meta.ownerLabel ?? contactName).trim();
+  const contactName = pickProjectHostName(
+    meta.contactName,
+    meta.ownerLabel,
+    meta.authorName,
+    meta.displayName
+  ) || "Project Host";
+  const resolvedCover = resolveProjectCover({ ...item, meta }, persistableImageUrl(item.image_url));
+  const authorName = pickProjectHostName(
+    meta.authorName,
+    meta.ownerLabel,
+    contactName
+  );
   const authorUsername = String(meta.authorUsername ?? meta.ownerUsername ?? meta.username ?? "")
     .trim()
     .replace(/^@+/, "");
@@ -813,18 +814,32 @@ export function syncResolvedProjectsToStorage() {
 
 export async function syncRemoteProjectActivitiesToStorage(sb: any) {
   try {
-    const { data, error } = await sb
-      .from("board_activity")
-      .select("*")
-      .order("created_at", { ascending: false })
-      .limit(200);
+    let remoteActivities: BoardActivity[] = [];
+    if (typeof fetch === "function") {
+      const response = await fetch("/api/board/projects", { cache: "no-store" });
+      if (response.ok) {
+        const payload = await response.json();
+        if (Array.isArray(payload?.activities)) {
+          remoteActivities = payload.activities;
+        }
+      }
+    }
 
-    if (error || !Array.isArray(data)) return syncResolvedProjectsToStorage();
+    if (!remoteActivities.length) {
+      const { data, error } = await sb
+        .from("board_activity")
+        .select("*")
+        .order("created_at", { ascending: false })
+        .limit(400);
+      if (!error && Array.isArray(data)) {
+        remoteActivities = data as BoardActivity[];
+      }
+    }
 
     const stored = syncResolvedProjectsToStorage();
     const merged = new Map(stored.map((project) => [project.id, project]));
 
-    for (const item of data) {
+    for (const item of remoteActivities) {
       const project = projectFromActivity(item as BoardActivity);
       if (!project) continue;
       const existing = merged.get(project.id);
@@ -887,15 +902,18 @@ export function createBoardProject(
   input: Omit<BoardProject, "id" | "createdAt" | "updatedAt" | "invites" | "roomPosts">
 ): BoardProject {
   const now = Date.now();
-  const contactName = input.contactName.trim() || "Host";
+  const contactName = pickProjectHostName(input.contactName) || input.contactName.trim() || "Host";
   const identity = readCurrentBoardIdentity();
+  const authorName =
+    pickProjectHostName(input.authorName, contactName, identity.displayName) || contactName;
   return {
     ...input,
     id: uid("project"),
     createdAt: now,
     updatedAt: now,
+    contactName,
     authorId: input.authorId || identity.id,
-    authorName: input.authorName || identity.displayName,
+    authorName,
     authorUsername: input.authorUsername || identity.username,
     authorAvatar: input.authorAvatar || identity.avatar,
     authorGlow: input.authorGlow || identity.glow,
@@ -903,6 +921,88 @@ export function createBoardProject(
     invites: [],
     roomPosts: seedRoomPosts(input.title, contactName),
   };
+}
+
+export async function persistProjectDropToProfile(
+  sb: any,
+  userId: string,
+  project: BoardProject
+): Promise<void> {
+  const cover = persistableProjectCover(project.media);
+  const coverUrl = persistableImageUrl(cover?.src);
+  const dropId = `project_drop_${project.id}`;
+  const { data: profile } = await sb
+    .from("profiles")
+    .select("board_style, display_name, username")
+    .eq("id", userId)
+    .maybeSingle();
+  const currentStyle =
+    profile?.board_style && typeof profile.board_style === "object"
+      ? profile.board_style
+      : {};
+  const existing = Array.isArray(currentStyle.boardDrops) ? currentStyle.boardDrops : [];
+  const hostName = pickProjectHostName(
+    project.contactName,
+    project.authorName,
+    profile?.display_name,
+    profile?.username
+  );
+  const row = {
+    id: dropId,
+    type: "Project",
+    title: project.title,
+    createdAt: project.createdAt,
+    updatedAt: Date.now(),
+    description: project.logline,
+    previewImage: coverUrl,
+    imageUrl: coverUrl,
+    mediaUrl: coverUrl,
+    mediaKind: cover?.kind,
+    bucket: cover?.bucket,
+    storagePath: cover?.storagePath,
+    media: cover,
+    location: project.location,
+    startDate: project.startDate,
+    endDate: project.endDate,
+    rolesNeeded: project.rolesNeeded,
+    contactName: hostName || project.contactName,
+    contactEmail: project.contactEmail,
+    projectType: project.projectType,
+    projectStatus: project.status,
+    status: project.status,
+    authorName: hostName || project.authorName,
+    authorId: project.authorId || userId,
+    authorUsername: project.authorUsername || profile?.username,
+    origin: "project_notebook",
+    source: "work_board",
+    meta: {
+      cardStyle: "project_drop",
+      dropType: "project",
+      projectId: project.id,
+      location: project.location,
+      startDate: project.startDate,
+      endDate: project.endDate,
+      rolesNeeded: project.rolesNeeded,
+      contactName: hostName || project.contactName,
+      contactEmail: project.contactEmail,
+      unionStatus: project.unionStatus,
+      compensationType: project.compensationType,
+      source: "work_board",
+      media: cover,
+      bucket: cover?.bucket,
+      storagePath: cover?.storagePath,
+    },
+  };
+  const nextDrops = [row, ...existing.filter((item: any) => String(item?.id ?? "") !== dropId)];
+  await sb
+    .from("profiles")
+    .update({
+      board_style: {
+        ...currentStyle,
+        boardDrops: nextDrops,
+      },
+    })
+    .eq("id", userId);
 }
 
 export function statusLabel(status: ProjectStatus) {
