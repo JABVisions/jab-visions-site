@@ -37,6 +37,15 @@
   color: rgba(232, 251, 255, 0.62);
 }
 
+.autoSave {
+  margin-left: auto;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgba(150, 255, 240, 0.78);
+}
+
 .headphones {
   display: grid;
   gap: 8px;

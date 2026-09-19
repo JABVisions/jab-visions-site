@@ -46,8 +46,9 @@ import {
   compactDropCustomizations,
   type DropCustomization,
 } from "@/lib/board/dropCustomizations";
-import { saveDropDraft, draftToFile, type DropDraft } from "@/lib/board/dropDrafts";
+import { saveDropDraft, draftToFile, ensureVoiceStudioDraftCard, type DropDraft } from "@/lib/board/dropDrafts";
 import DropDraftsDrawer from "./DropDraftsDrawer";
+import BoardClientErrorBoundary from "./BoardClientErrorBoundary";
 import VocalVisualizer from "./VocalVisualizer";
 import VoicePresets from "./VoicePresets";
 import VoiceStudioSession from "./VoiceStudioSession";
@@ -92,8 +93,12 @@ import {
   type VoicePresetKey,
 } from "@/lib/board/voicePresetAudio";
 import {
+  loadLatestVoiceStudioProject,
   loadVoiceStudioProject,
+  rememberActiveVoiceStudioDraft,
   saveVoiceStudioProject,
+  sessionHasClips,
+  voiceStudioEditSignature,
 } from "@/lib/board/voiceStudioProject";
 import {
   DROPBOOK_MIME,
@@ -594,10 +599,24 @@ export default function DropStudioStage({
     [writeStudioDraft]
   );
 
+  const persistVoiceProjectRef = useRef<() => void>(() => {});
+  const lastSavedVoiceSignatureRef = useRef("");
+  const wasVoiceStudioOpenRef = useRef(false);
+  const [voiceAutoSaveAt, setVoiceAutoSaveAt] = useState(0);
+  const [voiceAutoSaving, setVoiceAutoSaving] = useState(false);
+
   const handleClose = useCallback(() => {
+    persistVoiceProjectRef.current();
     flushStudioValue();
     onClose();
   }, [flushStudioValue, onClose]);
+
+  const voiceSessionActive =
+    voiceStudioOpen ||
+    Boolean(audioSession) ||
+    recording ||
+    adlibRecording ||
+    processingVocal;
 
   const flashSaveNote = useCallback((message: string) => {
     setSaveNote(message);
@@ -620,7 +639,9 @@ export default function DropStudioStage({
       const nextHistory = pushHistory(sessionHistoryRef.current, current);
       sessionHistoryRef.current = nextHistory;
       setSessionHistory(nextHistory);
-      return mutator(current);
+      const next = mutator(current);
+      audioSessionRef.current = next;
+      return next;
     });
   }, []);
 
@@ -687,13 +708,30 @@ export default function DropStudioStage({
       return next;
     });
     setVoiceStudioOpen(true);
-  }, [voicePreset]);
+    void (async () => {
+      const restored = await loadLatestVoiceStudioProject();
+      if (!restored) return;
+      let didRestore = false;
+      setAudioSession((current) => {
+        if (sessionHasClips(current)) return current;
+        didRestore = true;
+        draftIdRef.current = restored.draftId;
+        rememberActiveVoiceStudioDraft(restored.draftId);
+        return restored.session;
+      });
+      if (!didRestore) return;
+      lastSavedVoiceSignatureRef.current = voiceStudioEditSignature(restored.session);
+      setVoiceAutoSaveAt(Date.now());
+      flashSaveNote("Voice Studio project restored");
+    })();
+  }, [flashSaveNote, voicePreset]);
 
   const collapseVoiceStudio = useCallback(() => {
     if (audioSession && sessionHasLane(audioSession, "instrumental")) {
       flashSaveNote("Keep Studio open to mix the instrumental.");
       return;
     }
+    persistVoiceProjectRef.current();
     haltStudioTransport();
     setVoiceStudioOpen(false);
   }, [audioSession, flashSaveNote]);
@@ -721,10 +759,13 @@ export default function DropStudioStage({
 
   const setStudioInstrumental = useCallback((file: File) => {
     setError("");
-    setAudioSession((current) =>
-      upsertLaneFromFile(current ?? createAudioSession(), "instrumental", file)
-    );
+    setAudioSession((current) => {
+      const next = upsertLaneFromFile(current ?? createAudioSession(), "instrumental", file);
+      audioSessionRef.current = next;
+      return next;
+    });
     flashSaveNote("Instrumental loaded — tap + on Vocals or Record to sing over it");
+    persistVoiceProjectRef.current();
     void (async () => {
       try {
         const Constructor = getAudioContextConstructor();
@@ -836,6 +877,7 @@ export default function DropStudioStage({
         })
       );
       flashSaveNote("Ad-lib lane added");
+      persistVoiceProjectRef.current();
     },
     [flashSaveNote, pushSessionEdit]
   );
@@ -975,15 +1017,18 @@ export default function DropStudioStage({
       setMediaKind("audio");
       setSource("capture");
       setPhase("edit");
-      setAudioSession((current) =>
-        upsertLaneFromFile(current ?? session, "vocal", file, {
+      setAudioSession((current) => {
+        const next = upsertLaneFromFile(current ?? session, "vocal", file, {
           offsetMs: 0,
           latencyMs: studioLatencyMs,
           mix: { preset: voicePreset },
-        })
-      );
+        });
+        audioSessionRef.current = next;
+        return next;
+      });
       syncMediaPreview();
-      flashSaveNote(hasBeat ? "Vocal locked to the beat" : "Vocal take ready");
+      flashSaveNote(hasBeat ? "Vocal locked to the beat · auto-saved" : "Vocal take ready · auto-saved");
+      persistVoiceProjectRef.current();
     },
     [flashSaveNote, studioLatencyMs, voicePreset]
   );
@@ -1113,24 +1158,94 @@ export default function DropStudioStage({
   }, [audioSession, flashSaveNote, studioLatencyMs, voicePreset]);
 
   const saveToDrafts = useCallback(
-    async (auto = false) => {
-      const file = fileRef.current;
-      if (!file) return;
+    async (auto = false, quiet = false) => {
+      const session = audioSessionRef.current;
+      const file =
+        fileRef.current ??
+        session?.tracks.flatMap((track) => track.clips).find((clip) => clip.file)?.file;
+      if (!file && !sessionHasClips(session)) return false;
       if (!draftIdRef.current) {
         draftIdRef.current = `draft_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
       }
-      const saved = await saveDropDraft(file, draftIdRef.current);
-      if (saved && audioSessionRef.current && audioSessionRef.current.tracks.length > 0) {
-        await saveVoiceStudioProject(draftIdRef.current, audioSessionRef.current);
+      if (!quiet) setVoiceAutoSaving(true);
+      else if (auto) setVoiceAutoSaving(true);
+      let saved = false;
+      if (file) {
+        saved = Boolean(await saveDropDraft(file, draftIdRef.current));
       }
+      let projectSaved = false;
+      if (sessionHasClips(session) && session) {
+        projectSaved = await saveVoiceStudioProject(draftIdRef.current, session);
+      }
+      if (projectSaved || (saved && !sessionHasClips(session))) {
+        ensureVoiceStudioDraftCard(draftIdRef.current);
+        rememberActiveVoiceStudioDraft(draftIdRef.current);
+        lastSavedVoiceSignatureRef.current = voiceStudioEditSignature(session);
+        setVoiceAutoSaveAt(Date.now());
+      }
+      setVoiceAutoSaving(false);
       if (auto) {
-        if (saved) flashSaveNote("Auto-saved to Drafts");
-        return;
+        if (!quiet && (projectSaved || (saved && !sessionHasClips(session)))) {
+          flashSaveNote("Auto-saved to Drafts");
+        } else if (!quiet && sessionHasClips(session) && !projectSaved) {
+          flashSaveNote("Couldn't auto-save this song");
+        }
+        return projectSaved || saved;
       }
-      flashSaveNote(saved ? "Saved to Drafts 🗂" : "Too large to save to Drafts");
+      flashSaveNote(
+        projectSaved || saved
+          ? "Saved to Drafts 🗂"
+          : sessionHasClips(session)
+            ? "Couldn't auto-save this song"
+            : "Too large to save to Drafts"
+      );
+      return projectSaved || saved;
     },
     [flashSaveNote]
   );
+
+  persistVoiceProjectRef.current = () => {
+    if (!sessionHasClips(audioSessionRef.current)) return;
+    void saveToDrafts(true, true);
+  };
+
+  useEffect(() => {
+    if (!open) return;
+    const persistVoiceProject = () => {
+      if (!sessionHasClips(audioSessionRef.current)) return;
+      void saveToDrafts(true, true);
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === "hidden") persistVoiceProject();
+    };
+    window.addEventListener("pagehide", persistVoiceProject);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      window.removeEventListener("pagehide", persistVoiceProject);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [open, saveToDrafts]);
+
+  const voiceProjectSignature = voiceStudioEditSignature(audioSession);
+  const voiceHasClips = sessionHasClips(audioSession);
+
+  useEffect(() => {
+    if (!open || !voiceStudioOpen || !voiceHasClips) return;
+    if (voiceProjectSignature === lastSavedVoiceSignatureRef.current) return;
+    const timer = window.setTimeout(() => {
+      void saveToDrafts(true, true);
+    }, 800);
+    return () => window.clearTimeout(timer);
+  }, [open, voiceStudioOpen, voiceHasClips, voiceProjectSignature, saveToDrafts]);
+
+  useEffect(() => {
+    if (voiceStudioOpen) {
+      wasVoiceStudioOpenRef.current = true;
+      return;
+    }
+    if (wasVoiceStudioOpenRef.current) persistVoiceProjectRef.current();
+    wasVoiceStudioOpenRef.current = false;
+  }, [voiceStudioOpen]);
 
   const syncMediaPreview = useCallback(() => {
     previewErrorRetriesRef.current = 0;
@@ -1204,6 +1319,9 @@ export default function DropStudioStage({
             const preset = vocal?.mix.preset;
             if (preset && preset !== "none") setVoicePreset(preset);
             flashSaveNote("Voice Studio project restored");
+            rememberActiveVoiceStudioDraft(draft.id);
+            lastSavedVoiceSignatureRef.current = voiceStudioEditSignature(project);
+            setVoiceAutoSaveAt(Date.now());
             return;
           }
           setAudioSession(
@@ -1350,11 +1468,28 @@ export default function DropStudioStage({
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
+      if (recording || adlibRecording || processingVocal || voiceStudioOpen || audioSession) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (recording || adlibRecording || processingVocal) {
+          flashSaveNote("Finish this take first.");
+        }
+        return;
+      }
       handleClose();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [open, handleClose]);
+  }, [
+    open,
+    handleClose,
+    recording,
+    adlibRecording,
+    processingVocal,
+    voiceStudioOpen,
+    audioSession,
+    flashSaveNote,
+  ]);
 
   const selectDropbookChip = useCallback(
     (chipId: string) => {
@@ -2133,6 +2268,10 @@ export default function DropStudioStage({
   }
 
   function retake() {
+    if (voiceSessionActive) {
+      flashSaveNote("Finish this song in Voice Studio first.");
+      return;
+    }
     fileRef.current = null;
     urlRef.current = "";
     setDrawOpen(false);
@@ -2474,11 +2613,18 @@ export default function DropStudioStage({
       role="dialog"
       aria-modal="true"
       aria-label="Drop Studio"
-      onMouseDown={(e) => {
-        if (e.target === e.currentTarget) handleClose();
+      onPointerDown={(e) => {
+        if (e.target !== e.currentTarget) return;
+        if (voiceSessionActive) return;
+        handleClose();
       }}
     >
-      <div className={`studioSheet ${mode === "descript" ? "studioSheetDescript" : ""}`}>
+      <div
+        className={`studioSheet ${mode === "descript" ? "studioSheetDescript" : ""} ${
+          voiceStudioOpen ? "studioSheetVoice" : ""
+        }`}
+        onPointerDown={(e) => e.stopPropagation()}
+      >
         <div className="studioBar">
           <div className="studioBarLeft">
             <div className="studioBrand">
@@ -2517,12 +2663,23 @@ export default function DropStudioStage({
             >
               🗂 Drafts
             </button>
-            {phase === "edit" && mode !== "descript" ? (
+            {phase === "edit" && mode !== "descript" && !voiceSessionActive ? (
               <button type="button" className="studioGhost" onClick={retake}>
                 Retake
               </button>
             ) : null}
-            <button type="button" className="studioGhost" onClick={handleClose} aria-label="Close Drop Studio">
+            <button
+              type="button"
+              className="studioGhost"
+              onClick={() => {
+                if (recording || adlibRecording || processingVocal) {
+                  flashSaveNote("Finish this take first.");
+                  return;
+                }
+                handleClose();
+              }}
+              aria-label="Close Drop Studio"
+            >
               ✕
             </button>
           </div>
@@ -2545,6 +2702,10 @@ export default function DropStudioStage({
                       }`}
                       onClick={() => {
                         if (!enabled) return;
+                        if (voiceSessionActive && m !== mode) {
+                          flashSaveNote("Finish this song in Voice Studio first.");
+                          return;
+                        }
                         if (isDropbookMode) {
                           if (dropbookShelfFull) {
                             flashSaveNote("Dropbook holds up to 3 drops plus your cover");
@@ -2564,7 +2725,13 @@ export default function DropStudioStage({
                         if (phase === "edit" && mode !== "descript") retake();
                         setMode(m);
                       }}
-                      disabled={recording || !enabled}
+                      disabled={
+                        recording ||
+                        adlibRecording ||
+                        processingVocal ||
+                        !enabled ||
+                        (voiceSessionActive && m !== mode)
+                      }
                       title={
                         enabled
                           ? modeLabel(m)
@@ -2890,8 +3057,29 @@ export default function DropStudioStage({
               ) : voiceStudioOpen && mode === "audio" && audioSession ? (
                 <div className="capEdit">
                   <div className="capEditScroll">
+                    <BoardClientErrorBoundary
+                      name="voice-studio"
+                      resetLabel="Try Voice Studio again"
+                      fallback={
+                        <div className="studioVoiceError">
+                          Voice Studio hit a snag. Your song is still in this Drop Studio — try Play or Record again.
+                        </div>
+                      }
+                    >
                     <VoiceStudioSession
                       session={audioSession}
+                      autoSaveLabel={
+                        recording || adlibRecording
+                          ? ""
+                          : voiceAutoSaving
+                            ? "Saving…"
+                            : voiceAutoSaveAt
+                              ? `Auto-saved ${new Date(voiceAutoSaveAt).toLocaleTimeString(undefined, {
+                                  hour: "numeric",
+                                  minute: "2-digit",
+                                })}`
+                              : "Auto-save on"
+                      }
                       recording={recording}
                       playing={studioPlaying}
                       countIn={studioCountIn}
@@ -3098,6 +3286,7 @@ export default function DropStudioStage({
                         });
                       }}
                     />
+                    </BoardClientErrorBoundary>
                   </div>
                   <div className="editActions">
                     {saveNote ? <span className="saveNote">{saveNote}</span> : null}

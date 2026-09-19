@@ -5,6 +5,7 @@ import {
   lazy,
   Suspense,
   useEffect,
+  useState,
   type ComponentProps,
   type ReactNode,
 } from "react";
@@ -116,6 +117,7 @@ function DropStudioLoading() {
 
 /** Mount Drop Studio only while open — lazy chunk avoids loading the stage on every Board page. */
 export default function LazyDropStudioStage({ open, onClose, ...rest }: DropStudioStageProps) {
+  const [chunkKey, setChunkKey] = useState(0);
   // Always release the page scroll when the studio closes or unmounts abruptly
   // (e.g. save + close without running DropStudioStage's close handler).
   useEffect(() => {
@@ -132,9 +134,9 @@ export default function LazyDropStudioStage({ open, onClose, ...rest }: DropStud
 
   if (!open) return null;
   return (
-    <DropStudioChunkErrorBoundary onReset={onClose}>
+    <DropStudioChunkErrorBoundary onReset={() => setChunkKey((key) => key + 1)}>
       <Suspense fallback={<DropStudioLoading />}>
-        <DropStudioStageLazy open onClose={onClose} {...rest} />
+        <DropStudioStageLazy key={chunkKey} open onClose={onClose} {...rest} />
       </Suspense>
     </DropStudioChunkErrorBoundary>
   );

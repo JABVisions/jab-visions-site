@@ -2527,9 +2527,9 @@ export default function DropTile() {
       ) : null}
 
       <LazyDropStudioStage
-        open={studioOpen && (mode === "Media" || mode === "Thought" || mode === "Pay")}
+        open={studioOpen}
         initialFile={file}
-        initialMode={mode === "Thought" ? "audio" : "photo"}
+        initialMode={mode === "Thought" || mode === "Music" ? "audio" : "photo"}
         allowedModes={
           mode === "Thought"
             ? ["audio", "art", "descript"]

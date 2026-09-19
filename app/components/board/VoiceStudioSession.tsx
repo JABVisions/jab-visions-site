@@ -141,6 +141,7 @@ function LaneRow({
 
 export default function VoiceStudioSession({
   session,
+  autoSaveLabel = "",
   recording,
   playing,
   countIn,
@@ -192,6 +193,7 @@ export default function VoiceStudioSession({
   onLoopChange,
 }: {
   session: AudioSession;
+  autoSaveLabel?: string;
   recording: boolean;
   playing: boolean;
   countIn: number | null;
@@ -304,6 +306,7 @@ export default function VoiceStudioSession({
     <div className={styles.session}>
       <div className={styles.head}>
         <span className={styles.brand}>VOICE STUDIO</span>
+        {autoSaveLabel ? <span className={styles.autoSave}>{autoSaveLabel}</span> : null}
         <span className={styles.clock}>
           {recording || countingIn
             ? `REC ${clock(recordElapsedMs)}`
