@@ -4,10 +4,15 @@ import type { AudioSession, SessionTrack, TrackClip } from "./types";
 import { decodeAudioFile, getAudioContextConstructor, withAudioTimeout } from "./wav";
 
 const TAKE_TAIL_MS = 320;
-const MIX_MAX_MS = 240_000;
-const MIX_RENDER_TIMEOUT_MS = 25_000;
+const MIX_MAX_MS = 120_000;
+const MIX_RENDER_TIMEOUT_MS = 20_000;
 const MIX_RESUME_TIMEOUT_MS = 2_000;
-const OVERLAY_YIELD_FRAMES = 48_000;
+const MIX_SAMPLE_RATE_MAX = 24_000;
+const OVERLAY_YIELD_FRAMES = 24_000;
+
+function throwIfAborted(shouldAbort?: () => boolean) {
+  if (shouldAbort?.()) throw new Error("Audio session mix aborted");
+}
 
 function yieldUi() {
   return new Promise<void>((resolve) => {
@@ -100,6 +105,9 @@ function overlayRange(
   const fadeInFrames = Math.floor((fadeInMs / 1000) * destRate);
   const fadeOutFrames = Math.floor((fadeOutMs / 1000) * destRate);
   const sameRate = Math.abs(srcRate - destRate) < 0.5;
+  const ratio = destRate > 0 ? srcRate / destRate : 1;
+  const step = Math.round(ratio);
+  const integerStep = !sameRate && step >= 1 && Math.abs(ratio - step) < 0.001;
   const srcOffset = Math.floor(srcStart * srcRate);
   const end = Math.min(frames, fromFrame + frameCount);
 
@@ -110,6 +118,10 @@ function overlayRange(
     let r: number;
     if (sameRate) {
       const srcIndex = Math.min(ch0.length - 1, Math.max(0, srcOffset + i));
+      l = ch0[srcIndex] ?? 0;
+      r = ch1[srcIndex] ?? 0;
+    } else if (integerStep) {
+      const srcIndex = Math.min(ch0.length - 1, Math.max(0, srcOffset + i * step));
       l = ch0[srcIndex] ?? 0;
       r = ch1[srcIndex] ?? 0;
     } else {
@@ -154,16 +166,23 @@ async function overlayClip(
   destRate: number,
   clip: TrackClip,
   track: SessionTrack,
-  mixLengthMs: number
+  mixLengthMs: number,
+  shouldAbort?: () => boolean
 ) {
   const frames = clipOverlayFrames(clip, track, destRate, mixLengthMs);
   for (let from = 0; from < frames; from += OVERLAY_YIELD_FRAMES) {
+    throwIfAborted(shouldAbort);
     overlayRange(destL, destR, destRate, clip, track, mixLengthMs, from, OVERLAY_YIELD_FRAMES);
     if (from + OVERLAY_YIELD_FRAMES < frames) await yieldUi();
   }
 }
 
-function floatStereoToWav(left: Float32Array, right: Float32Array, sampleRate: number) {
+async function floatStereoToWav(
+  left: Float32Array,
+  right: Float32Array,
+  sampleRate: number,
+  shouldAbort?: () => boolean
+) {
   const frames = left.length;
   const channels = 2;
   const bytesPerSample = 2;
@@ -191,6 +210,10 @@ function floatStereoToWav(left: Float32Array, right: Float32Array, sampleRate: n
 
   let offset = 44;
   for (let frame = 0; frame < frames; frame += 1) {
+    if (frame > 0 && frame % OVERLAY_YIELD_FRAMES === 0) {
+      throwIfAborted(shouldAbort);
+      await yieldUi();
+    }
     const l = Math.max(-1, Math.min(1, left[frame] ?? 0));
     const r = Math.max(-1, Math.min(1, right[frame] ?? 0));
     view.setInt16(offset, l < 0 ? l * 0x8000 : l * 0x7fff, true);
@@ -201,7 +224,12 @@ function floatStereoToWav(left: Float32Array, right: Float32Array, sampleRate: n
   return output;
 }
 
-async function bounceSession(session: AudioSession, decodeCtx?: BaseAudioContext) {
+async function bounceSession(
+  session: AudioSession,
+  decodeCtx?: BaseAudioContext,
+  shouldAbort?: () => boolean
+) {
+  throwIfAborted(shouldAbort);
   const needsDecode = session.tracks.some((track) =>
     track.clips.some((clip) => !decodedBufferUsable(clip.decoded))
   );
@@ -220,6 +248,7 @@ async function bounceSession(session: AudioSession, decodeCtx?: BaseAudioContext
         }
         ctx = created;
       }
+      throwIfAborted(shouldAbort);
       await hydrateClipBuffers(session, ctx);
       await yieldUi();
     }
@@ -228,22 +257,23 @@ async function bounceSession(session: AudioSession, decodeCtx?: BaseAudioContext
     const tracks = audibleTracks(session);
     if (!tracks.length) throw new Error("This Studio session has no audible audio.");
 
-    const sampleRate =
+    const nativeRate =
       tracks.flatMap((track) => track.clips.map((clip) => clip.decoded?.sampleRate ?? 0)).find((rate) => rate > 0) ||
       session.sampleRate ||
       48_000;
+    const sampleRate = Math.min(MIX_SAMPLE_RATE_MAX, nativeRate);
     const frames = Math.max(1, Math.ceil((mixMs / 1000) * sampleRate));
     const left = new Float32Array(frames);
     const right = new Float32Array(frames);
 
     for (const track of tracks) {
       for (const clip of track.clips) {
-        await overlayClip(left, right, sampleRate, clip, track, mixMs);
+        await overlayClip(left, right, sampleRate, clip, track, mixMs, shouldAbort);
       }
     }
 
     await yieldUi();
-    const wav = floatStereoToWav(left, right, sampleRate);
+    const wav = await floatStereoToWav(left, right, sampleRate, shouldAbort);
     return new File([wav], `studio-mix-${Date.now()}.wav`, {
       type: "audio/wav",
       lastModified: Date.now(),
@@ -258,8 +288,12 @@ async function bounceSession(session: AudioSession, decodeCtx?: BaseAudioContext
  * Uses the live mixer context when provided so Safari never opens a second
  * AudioContext (that resume() can hang forever).
  */
-export async function renderSessionFile(session: AudioSession, decodeCtx?: BaseAudioContext): Promise<File> {
-  return withAudioTimeout(bounceSession(session, decodeCtx), MIX_RENDER_TIMEOUT_MS, "mix");
+export async function renderSessionFile(
+  session: AudioSession,
+  decodeCtx?: BaseAudioContext,
+  shouldAbort?: () => boolean
+): Promise<File> {
+  return withAudioTimeout(bounceSession(session, decodeCtx, shouldAbort), MIX_RENDER_TIMEOUT_MS, "mix");
 }
 
 /** Phase 1 debug hook: bounce a vocal + beat to one wav with no UI. */
