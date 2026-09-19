@@ -4,6 +4,7 @@ import {
   createAudioSession,
   createSessionHistory,
   isMissingAudioObjectError,
+  isUnreadableClipError,
   playableAudioMessage,
   snapshotSession,
   upsertLaneFromFile,
@@ -16,6 +17,7 @@ import {
 } from "./voiceStudioProject";
 import {
   clearLiveVoiceStudio,
+  liveVoiceHoldHasClips,
   peekLiveVoiceStudio,
   rememberLiveVoiceStudio,
 } from "./voiceStudioLiveHold";
@@ -32,6 +34,14 @@ async function run() {
   assert(
     /soundboard clip could not be loaded/i.test(playableAudioMessage(safariErr)),
     "missing-object errors should map to a recoverable studio message"
+  );
+  const encodingErr = Object.assign(new Error("Unable to decode audio data"), {
+    name: "EncodingError",
+  });
+  assert(isUnreadableClipError(encodingErr), "decode failures should be skippable");
+  assert(
+    /soundboard clip could not be loaded/i.test(playableAudioMessage(encodingErr)),
+    "unreadable clips should map to a recoverable studio message"
   );
 
   const bytes = new Uint8Array([82, 73, 70, 70, 1, 2, 3, 4, 5, 6]);
@@ -106,8 +116,10 @@ async function run() {
     voiceStudioOpen: true,
   });
   assert(peekLiveVoiceStudio()?.draftId === "draft_live", "live hold should remember the mixer");
+  assert(liveVoiceHoldHasClips(), "live hold should report clips while the mixer is held");
   clearLiveVoiceStudio();
   assert(peekLiveVoiceStudio() === null, "live hold should clear after mix-to-drop");
+  assert(!liveVoiceHoldHasClips(), "live hold should be empty after mix-to-drop");
 
   console.log("voice studio soundboard persist/restore checks passed");
 }

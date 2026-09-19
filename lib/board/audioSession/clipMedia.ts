@@ -1,6 +1,8 @@
 /** Safari / WebKit: reading a detached File or IndexedDB Blob throws this. */
 const MISSING_OBJECT_RE =
   /object can ?not be found|requested file could not be read|blob.*not found|notreadableerror/i;
+const UNREADABLE_CLIP_RE =
+  /unable to decode|encodingerror|decode audio data|notsupportederror|encoding error/i;
 
 export class MissingAudioObjectError extends Error {
   constructor(clipName?: string) {
@@ -32,9 +34,30 @@ export function isMissingAudioObjectError(error: unknown): boolean {
   return name === "NotFoundError" || name === "NotReadableError" || MISSING_OBJECT_RE.test(message);
 }
 
+/** One bad/corrupt clip must not dump the whole Voice Studio mixer. */
+export function isUnreadableClipError(error: unknown): boolean {
+  if (isMissingAudioObjectError(error)) return true;
+  const record = error as { name?: unknown; message?: unknown };
+  const name =
+    error instanceof Error
+      ? error.name
+      : typeof record?.name === "string"
+        ? record.name
+        : "";
+  const message =
+    error instanceof Error
+      ? error.message
+      : typeof record?.message === "string"
+        ? record.message
+        : String(error);
+  return name === "EncodingError" || name === "NotSupportedError" || UNREADABLE_CLIP_RE.test(message);
+}
+
 export function asPlayableAudioError(error: unknown, clipName?: string): Error {
   if (error instanceof MissingAudioObjectError) return error;
-  if (isMissingAudioObjectError(error)) return new MissingAudioObjectError(clipName);
+  if (isMissingAudioObjectError(error) || isUnreadableClipError(error)) {
+    return new MissingAudioObjectError(clipName);
+  }
   if (error instanceof Error) return error;
   return new Error("Couldn't play this session.");
 }

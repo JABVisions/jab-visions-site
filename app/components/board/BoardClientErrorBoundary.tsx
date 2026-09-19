@@ -7,6 +7,8 @@ type Props = {
   fallback?: React.ReactNode;
   name?: string;
   resetLabel?: string;
+  /** Clear a caught error when the wrapped surface remounts onto a new session. */
+  resetKey?: string | number;
 };
 
 type State = {
@@ -26,6 +28,12 @@ export default class BoardClientErrorBoundary extends React.Component<Props, Sta
 
   componentDidCatch(error: Error) {
     console.error(`[Board] ${this.props.name || "client"} crashed`, error);
+  }
+
+  componentDidUpdate(prevProps: Props) {
+    if (this.state.error && this.props.resetKey !== prevProps.resetKey) {
+      this.setState({ error: null });
+    }
   }
 
   render() {

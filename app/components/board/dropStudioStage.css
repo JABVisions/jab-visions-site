@@ -16,6 +16,11 @@
     rgba(6, 10, 16, 0.72);
   backdrop-filter: blur(12px);
 }
+.studioStageHeld {
+  visibility: hidden;
+  pointer-events: none;
+  opacity: 0;
+}
 .studioSheet {
   width: min(560px, calc(100vw - 20px));
   /* Size against the dynamic viewport minus the safe-area padding the

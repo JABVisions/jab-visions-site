@@ -76,6 +76,7 @@ export {
   asPlayableAudioError,
   clipFileKey,
   isMissingAudioObjectError,
+  isUnreadableClipError,
   MissingAudioObjectError,
   placeholderClipFile,
   playableAudioMessage,
