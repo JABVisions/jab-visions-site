@@ -1,5 +1,10 @@
 import { NextResponse } from "next/server";
 import { resolveLinkPreviewImage } from "@/lib/board/linkPreviewImages";
+import {
+  isSoundCloudUrl,
+  resolveSoundCloudEmbed,
+  toSoundCloudEmbed,
+} from "@/lib/board/soundCloudEmbed";
 
 export const runtime = "nodejs";
 
@@ -82,16 +87,6 @@ function appleMusicEmbed(u: string): string | null {
     }
     if (parts.length < 3) return null;
     return `https://embed.music.apple.com${url.pathname}${url.search}`;
-  } catch {
-    return null;
-  }
-}
-
-function soundCloudEmbed(u: string): string | null {
-  try {
-    const url = new URL(u);
-    if (!url.hostname.toLowerCase().includes("soundcloud.com")) return null;
-    return `https://w.soundcloud.com/player/?url=${encodeURIComponent(url.toString())}&auto_play=false&visual=true`;
   } catch {
     return null;
   }
@@ -455,15 +450,16 @@ export async function GET(req: Request) {
     return NextResponse.json(out, { status: 200 });
   }
 
-  const soundCloud = soundCloudEmbed(raw);
-  if (soundCloud) {
+  if (isSoundCloudUrl(raw)) {
+    const embedUrl =
+      (await resolveSoundCloudEmbed(raw).catch(() => null)) || toSoundCloudEmbed(raw);
     const out: Preview = {
       url: raw,
       provider: "soundcloud",
       title: null,
       description: null,
       image: null,
-      embedUrl: soundCloud,
+      embedUrl,
       type: "link",
     };
     return NextResponse.json(out, { status: 200 });

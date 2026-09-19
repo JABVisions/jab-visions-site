@@ -133,7 +133,11 @@ export default function DropbookSlideScreen({
             allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
             allowFullScreen
             loading="lazy"
-            referrerPolicy="strict-origin-when-cross-origin"
+            referrerPolicy={
+              slide.embedUrl.includes("soundcloud.com")
+                ? undefined
+                : "strict-origin-when-cross-origin"
+            }
           />
           <div className="dropbookSlideEmbedMeta">
             <span>

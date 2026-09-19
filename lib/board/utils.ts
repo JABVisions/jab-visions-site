@@ -1,6 +1,7 @@
 import { AssetKind, DropRoute } from "./types";
 import { type ClassValue, clsx } from "clsx";
 import { twMerge } from "tailwind-merge";
+import { toSoundCloudEmbed } from "@/lib/board/soundCloudEmbed";
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -134,14 +135,8 @@ export function parseSpotify(url: string) {
 }
 
 export function parseSoundCloud(url: string) {
-  try {
-    const u = new URL(url);
-    if (!u.hostname.includes("soundcloud.com") && !u.hostname.includes("snd.sc")) return null;
-    const embedUrl = `https://w.soundcloud.com/player/?url=${encodeURIComponent(url)}`;
-    return { embedUrl, label: "SoundCloud" };
-  } catch {
-    return null;
-  }
+  const embedUrl = toSoundCloudEmbed(url);
+  return embedUrl ? { embedUrl, label: "SoundCloud" } : null;
 }
 
 export function parseAppleMusic(url: string) {

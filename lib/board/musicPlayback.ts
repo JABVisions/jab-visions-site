@@ -15,6 +15,8 @@ export function isStreamingMusicUrl(url: string): boolean {
     return (
       host.includes("spotify.com") ||
       host.includes("soundcloud.com") ||
+      host === "snd.sc" ||
+      host.endsWith(".snd.sc") ||
       host.includes("music.apple.com") ||
       host.includes("youtube.com") ||
       host.includes("youtu.be")

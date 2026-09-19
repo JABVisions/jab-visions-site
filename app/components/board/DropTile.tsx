@@ -62,6 +62,7 @@ import {
   resolveDropDownloadExtension,
 } from "@/lib/board/dropDownload";
 import { boardDropToActivity } from "@/lib/board/boardDropActivity";
+import { toSoundCloudEmbed } from "@/lib/board/soundCloudEmbed";
 
 type DropType =
   | "YouTube"
@@ -358,19 +359,6 @@ function toSpotifyEmbed(rawUrl: string): string | null {
   if (!allowed.has(type) || !id) return null;
 
   return `https://open.spotify.com/embed/${type}/${id}`;
-}
-
-function toSoundCloudEmbed(rawUrl: string): string | null {
-  let u: URL;
-  try {
-    u = new URL(rawUrl);
-  } catch {
-    return null;
-  }
-  if (!u.hostname.toLowerCase().includes("soundcloud.com")) return null;
-
-  const encoded = encodeURIComponent(u.toString());
-  return `https://w.soundcloud.com/player/?url=${encoded}&auto_play=false&hide_related=false&show_comments=true&show_user=true&show_reposts=false&visual=true`;
 }
 
 function toAppleMusicEmbed(rawUrl: string): string | null {

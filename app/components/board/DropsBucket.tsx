@@ -32,6 +32,8 @@ import {
   EVT_OPEN,
 } from "@/lib/board/bucketBrain";
 import { persistWave } from "@/lib/board/persistWave";
+import { isSoundCloudUrl, toSoundCloudEmbed } from "@/lib/board/soundCloudEmbed";
+import { fetchLinkPreview } from "@/lib/board/linkPreview";
 
 function clsx(...parts: Array<string | false | null | undefined>) {
   return parts.filter(Boolean).join(" ");
@@ -237,26 +239,6 @@ function toAppleMusicEmbed(url: string): string | null {
     if (parts.length < 3) return null;
 
     return `https://embed.music.apple.com${u.pathname}${u.search}`;
-  } catch {
-    return null;
-  }
-}
-
-function toSoundCloudEmbed(url: string): string | null {
-  try {
-    const u = new URL(url);
-    const host = u.hostname.toLowerCase();
-    const isSC =
-      host === "soundcloud.com" ||
-      host.endsWith(".soundcloud.com") ||
-      host === "snd.sc" ||
-      host.endsWith(".snd.sc") ||
-      host === "on.soundcloud.com" ||
-      host.endsWith(".on.soundcloud.com");
-
-    if (!isSC) return null;
-
-    return `https://w.soundcloud.com/player/?url=${encodeURIComponent(url)}&auto_play=false&visual=true`;
   } catch {
     return null;
   }
@@ -1639,12 +1621,38 @@ function BucketDropCard({
 
   const [embedFailed, setEmbedFailed] = useState(false);
   const [downloadBusy, setDownloadBusy] = useState(false);
+  const [resolvedSoundCloud, setResolvedSoundCloud] = useState("");
   const embed = useMemo(() => {
     const streaming =
       safeStr((rawMeta as any)?.embedUrl) ||
       safeStr((preview as any)?.embedUrl) ||
       href;
-    return computeEmbed(streaming || href);
+    const base = computeEmbed(streaming || href);
+    if (base.kind === "soundcloud" && resolvedSoundCloud) {
+      return { kind: "soundcloud" as const, url: resolvedSoundCloud };
+    }
+    return base;
+  }, [href, rawMeta, preview, resolvedSoundCloud]);
+  useEffect(() => {
+    const raw =
+      safeStr((rawMeta as any)?.embedUrl) ||
+      safeStr((preview as any)?.embedUrl) ||
+      href;
+    if (!isSoundCloudUrl(raw)) {
+      setResolvedSoundCloud("");
+      return;
+    }
+    let cancelled = false;
+    fetchLinkPreview(raw)
+      .then((previewResult) => {
+        if (cancelled) return;
+        const next = previewResult?.embedUrl?.trim() || "";
+        if (next && isSoundCloudUrl(next)) setResolvedSoundCloud(next);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
   }, [href, rawMeta, preview]);
   const mediaKind = safeStr((rawMeta as any)?.mediaKind) || safeStr((preview as any)?.mediaKind);
   const dropType =
@@ -1859,9 +1867,12 @@ function BucketDropCard({
               title={`bucket-embed-${embed.kind}-${entry.activityId}`}
               src={embed.url}
               loading="lazy"
+              scrolling={embed.kind === "soundcloud" ? "no" : undefined}
               allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
               allowFullScreen
-              referrerPolicy="strict-origin-when-cross-origin"
+              referrerPolicy={
+                embed.kind === "soundcloud" ? undefined : "strict-origin-when-cross-origin"
+              }
               onError={() => setEmbedFailed(true)}
             />
           )}

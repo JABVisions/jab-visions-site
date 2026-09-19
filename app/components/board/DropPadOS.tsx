@@ -17,6 +17,7 @@ import type { DropCustomization } from "@/lib/board/dropCustomizations";
 import { descriptDocToFile, type DescriptDoc } from "@/lib/board/descriptDocs";
 import type { ResolvedDropbookLink } from "@/lib/board/dropbookLink";
 import { studioLinkEmbedUrl, studioLinkPersistKind } from "@/lib/board/dropbookLink";
+import { toSoundCloudEmbed } from "@/lib/board/soundCloudEmbed";
 
 type DropRoute =
   | "board"
@@ -402,14 +403,8 @@ function parseSpotify(url: string) {
 }
 
 function parseSoundCloud(url: string) {
-  try {
-    const u = new URL(url);
-    if (!u.hostname.includes("soundcloud.com") && !u.hostname.includes("snd.sc")) return null;
-    const embedUrl = `https://w.soundcloud.com/player/?url=${encodeURIComponent(url)}`;
-    return { embedUrl, label: "SoundCloud" };
-  } catch {
-    return null;
-  }
+  const embedUrl = toSoundCloudEmbed(url);
+  return embedUrl ? { embedUrl, label: "SoundCloud" } : null;
 }
 
 function parseAppleMusic(url: string) {

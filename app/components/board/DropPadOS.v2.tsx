@@ -10,6 +10,7 @@ import React, {
 } from "react";
 import { supabaseBrowser } from "@/lib/supabase/browser";
 import WorkCallsList, { type WorkCallItem } from "@/app/components/board/WorkCallsList";
+import { toSoundCloudEmbed } from "@/lib/board/soundCloudEmbed";
 
 type DropRoute = "board" | "assets" | "projects" | "portfolio" | "workcalls";
 type ScreenMode = "menu" | "screen";
@@ -360,14 +361,8 @@ function parseSpotify(url: string) {
 }
 
 function parseSoundCloud(url: string) {
-  try {
-    const u = new URL(url);
-    if (!u.hostname.includes("soundcloud.com") && !u.hostname.includes("snd.sc")) return null;
-    const embedUrl = `https://w.soundcloud.com/player/?url=${encodeURIComponent(url)}`;
-    return { embedUrl, label: "SoundCloud" };
-  } catch {
-    return null;
-  }
+  const embedUrl = toSoundCloudEmbed(url);
+  return embedUrl ? { embedUrl, label: "SoundCloud" } : null;
 }
 
 function buildMusicEmbed(rawUrl: string) {
