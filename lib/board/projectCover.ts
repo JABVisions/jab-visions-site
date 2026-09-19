@@ -65,10 +65,37 @@ export function resolveProjectFieldString(value: unknown, keys: string[]): strin
   for (const record of nestedProjectRecords(value)) {
     for (const key of keys) {
       const found = firstNonEmptyString(record[key]);
-      if (found) return found;
+      if (!found) continue;
+      if (/^(tbd|n\/a|na|unknown|none)$/i.test(found)) continue;
+      return found;
     }
   }
   return "";
+}
+
+export function isPlaceholderPersonName(value: unknown): boolean {
+  const name = firstNonEmptyString(value).toLowerCase();
+  return (
+    !name ||
+    name === "board user" ||
+    name === "board-user" ||
+    name === "project host" ||
+    name === "host"
+  );
+}
+
+export function pickProjectHostName(...values: unknown[]): string {
+  for (const value of values) {
+    const name = firstNonEmptyString(value);
+    if (name && !isPlaceholderPersonName(name)) return name;
+  }
+  return firstNonEmptyString(...values);
+}
+
+export function persistableImageUrl(value: unknown): string | null {
+  const src = firstNonEmptyString(value);
+  if (!src || src.startsWith("data:") || src.startsWith("blob:")) return null;
+  return src;
 }
 
 export function projectCoverCoords(

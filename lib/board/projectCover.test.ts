@@ -1,6 +1,7 @@
 import {
   mergeProjectCover,
   persistableProjectCover,
+  pickProjectHostName,
   resolveProjectCover,
   resolveProjectLocation,
   resolveProjectStartDate,
@@ -62,6 +63,15 @@ assert(
     meta: {},
   }) === "2026-09-20",
   "start date should resolve from the project record"
+);
+assert(
+  resolveProjectLocation({ meta: { location: "TBD" } }) === "",
+  "TBD should not count as a real location"
+);
+
+assert(
+  pickProjectHostName("Board User", "John Andy") === "John Andy",
+  "placeholder Board User should lose to a real host name"
 );
 
 console.log("projectCover tests passed");

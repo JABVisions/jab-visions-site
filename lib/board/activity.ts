@@ -45,6 +45,13 @@ export type CreateActivityInput = {
 const STORAGE_KEY = "jab_board_activity_v1";
 const MAX_LOCAL = 120;
 
+function persistableImageUrl(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const src = value.trim();
+  if (!src || src.startsWith("data:") || src.startsWith("blob:")) return null;
+  return src;
+}
+
 function safeJsonParse<T>(raw: string | null, fallback: T): T {
   if (!raw) return fallback;
   try {
@@ -539,7 +546,7 @@ export async function createActivity(
     title: input.title ?? null,
     body: input.body,
     href: input.href ?? null,
-    image_url: input.image_url ?? null,
+    image_url: persistableImageUrl(input.image_url),
     meta: input.meta ?? null,
   };
 
@@ -556,7 +563,7 @@ export async function createActivity(
         title: input.title,
         body: input.body,
         href: input.href,
-        image_url: input.image_url,
+        image_url: persistableImageUrl(input.image_url),
         meta: input.meta,
       })
       .select("*")

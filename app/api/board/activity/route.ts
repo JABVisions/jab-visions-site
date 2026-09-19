@@ -174,10 +174,23 @@ function normalizeProfileBoardDrop(row: any): BoardActivity[] {
         drop.mediaUrl.trim()
           ? drop.mediaUrl
           : "") ||
+        (typeof drop.imageUrl === "string" && drop.imageUrl.trim()
+          ? drop.imageUrl
+          : "") ||
         (type === "Media" && drop.mediaKind === "image" && typeof drop.url === "string"
           ? drop.url
           : "") ||
+        (typeof drop.meta?.previewImage === "string" ? drop.meta.previewImage : "") ||
         "";
+      const dropMeta =
+        drop.meta && typeof drop.meta === "object" && !Array.isArray(drop.meta)
+          ? drop.meta
+          : {};
+      const hostName =
+        (typeof drop.contactName === "string" && drop.contactName.trim()) ||
+        (typeof dropMeta.contactName === "string" && dropMeta.contactName.trim()) ||
+        (typeof drop.authorName === "string" && drop.authorName.trim()) ||
+        ownerLabel;
       const href =
         (type === "Pay" && typeof drop.linkUrl === "string" && drop.linkUrl.trim()) ||
         (typeof drop.mediaUrl === "string" && drop.mediaUrl.trim()) ||
@@ -196,12 +209,23 @@ function normalizeProfileBoardDrop(row: any): BoardActivity[] {
         href,
         image_url: previewImage || null,
         meta: {
-          source: "profiles.board_style.boardDrops",
-          kind: isProjectDrop ? "project_drop" : null,
-          cardStyle: isProjectDrop ? "project_drop" : null,
+          ...dropMeta,
+          source: dropMeta.source || "profiles.board_style.boardDrops",
+          kind: isProjectDrop ? "project_drop" : dropMeta.kind ?? null,
+          cardStyle: isProjectDrop ? "project_drop" : dropMeta.cardStyle ?? null,
           dropId: id,
-          dropType: type,
-          projectId: isProjectDrop ? id : null,
+          dropType: isProjectDrop ? "project" : type,
+          projectId: isProjectDrop ? (dropMeta.projectId || id) : dropMeta.projectId ?? null,
+          projectType: drop.projectType ?? dropMeta.projectType ?? (isProjectDrop ? type : null),
+          location: drop.location ?? dropMeta.location ?? null,
+          startDate: drop.startDate ?? dropMeta.startDate ?? null,
+          endDate: drop.endDate ?? dropMeta.endDate ?? null,
+          rolesNeeded: drop.rolesNeeded ?? dropMeta.rolesNeeded ?? null,
+          contactName: hostName,
+          contactEmail: drop.contactEmail ?? dropMeta.contactEmail ?? null,
+          unionStatus: drop.unionStatus ?? dropMeta.unionStatus ?? null,
+          compensationType: drop.compensationType ?? dropMeta.compensationType ?? null,
+          status: drop.projectStatus ?? drop.status ?? dropMeta.status ?? null,
           hostLabel: drop.hostLabel ?? null,
           embedUrl: drop.embedUrl ?? null,
           previewTitle: drop.previewTitle ?? null,
@@ -210,15 +234,18 @@ function normalizeProfileBoardDrop(row: any): BoardActivity[] {
           previewImages: Array.isArray(drop.previewImages) ? drop.previewImages.slice(0, 4) : null,
           priceCents: typeof drop.priceCents === "number" ? drop.priceCents : null,
           payProvider: drop.payProvider ?? null,
-          mediaKind: drop.mediaKind ?? null,
-          mediaUrl: drop.mediaUrl ?? null,
-          storagePath: drop.storagePath ?? null,
-          bucket: drop.bucket ?? null,
+          mediaKind: drop.mediaKind ?? dropMeta.mediaKind ?? drop.media?.kind ?? null,
+          mediaUrl: drop.mediaUrl ?? drop.media?.src ?? null,
+          storagePath: drop.storagePath ?? dropMeta.storagePath ?? drop.media?.storagePath ?? null,
+          bucket: drop.bucket ?? dropMeta.bucket ?? drop.media?.bucket ?? null,
           fileName: drop.fileName ?? null,
           fromDescript: drop.fromDescript === true ? true : null,
           customizations: drop.customizations ?? null,
           ownerUsername,
           ownerLabel,
+          authorName: hostName,
+          authorUsername: ownerUsername,
+          media: drop.media ?? dropMeta.media ?? null,
           preview: {
             image: previewImage || null,
             images: Array.isArray(drop.previewImages) ? drop.previewImages.slice(0, 4) : null,
