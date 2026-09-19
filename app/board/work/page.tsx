@@ -158,6 +158,7 @@ export default function WorkPage() {
               onNavigate={(app) => setDropPadApp(app)}
               subtitle="Drop Pad OS"
               title="DROP PAD OS"
+              maxScreenPx={470}
             />
           </div>
         </div>
@@ -169,43 +170,41 @@ export default function WorkPage() {
           padding: 22px 18px;
         }
 
-        .work-row {
+        .work-root .work-row {
           max-width: 1760px;
+          width: 100%;
           margin: 0 auto;
           display: grid;
           gap: 16px;
           align-items: stretch;
-          grid-template-columns: 360px minmax(420px, 1fr) 190px minmax(520px, 1.15fr);
+          grid-template-columns: 360px minmax(0, 1fr) 190px minmax(380px, 1.15fr);
         }
 
-        .panel {
+        .work-root .panel {
+          min-width: 0;
           border-radius: 18px;
           overflow: hidden;
           background: rgba(12, 12, 12, 0.88);
           box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
         }
 
-        .desk {
+        .work-root .desk {
           min-height: 740px;
-          order: 1;
         }
 
-        .notebook {
+        .work-root .notebook {
           min-height: 740px;
-          min-width: 0;
-          order: 2;
         }
 
-        .qar {
+        .work-root .qar {
           min-height: 740px;
           display: grid;
           place-items: start center;
           padding: 10px;
           overflow: visible;
-          order: 3;
         }
 
-        .qar-shell {
+        .work-root .qar-shell {
           width: 100%;
           max-width: 170px;
           height: 560px;
@@ -213,74 +212,62 @@ export default function WorkPage() {
           place-items: center;
         }
 
-        .droppad {
+        .work-root .droppad {
           min-height: 740px;
-          min-width: 0;
           display: grid;
           place-items: start center;
           padding: 10px;
-          overflow: visible;
-          order: 4;
         }
 
-        .droppad-shell {
+        .work-root .droppad-shell {
           width: 100%;
           max-width: 430px;
           height: 700px;
-          overflow: visible;
+          overflow: hidden;
           position: relative;
           z-index: 2;
         }
 
-        @media (max-width: 1360px) {
-          .work-row {
-            grid-template-columns: 360px minmax(420px, 1fr) 190px;
+        @media (max-width: 1199px) {
+          .work-root .work-row {
+            grid-template-columns: 360px minmax(0, 1fr) 190px;
           }
-          .droppad {
-            order: 2;
-          }
-          .notebook {
-            order: 3;
-          }
-          .qar {
-            order: 4;
-          }
-          .droppad {
+          .work-root .droppad {
             grid-column: 1 / -1;
             min-height: 760px;
           }
-          .droppad-shell {
+          .work-root .droppad-shell {
             max-width: 520px;
           }
         }
 
         @media (max-width: 980px) {
-          .work-row {
+          .work-root .work-row {
             grid-template-columns: 1fr;
           }
-          .desk {
+          .work-root .desk {
             order: 1;
           }
-          .droppad {
+          .work-root .droppad {
             order: 2;
           }
-          .qar {
+          .work-root .qar {
             order: 3;
           }
-          .notebook {
+          .work-root .notebook {
             order: 4;
           }
-          .desk,
-          .notebook,
-          .qar,
-          .droppad {
+          .work-root .desk,
+          .work-root .notebook,
+          .work-root .qar,
+          .work-root .droppad {
             min-height: unset;
           }
-          .qar-shell {
+          .work-root .qar-shell {
             max-width: 430px;
             height: auto;
           }
-          .droppad-shell {
+          .work-root .droppad-shell {
             max-width: 520px;
             height: 720px;
           }
