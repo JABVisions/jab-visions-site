@@ -2,7 +2,14 @@
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { uploadDropMedia } from "@/lib/board/boardDropEditStore";
+import {
+  BOARD_IMAGE_MIN_LONG_EDGE,
+  isHeicFile,
+  prepareBoardImageFile,
+  PROJECT_COVER_MAX_LONG_EDGE,
+} from "@/lib/board/imageQuality";
 import { parseBoardStorageFromUrl } from "@/lib/board/musicPlayback";
+import { checkUploadSize } from "@/lib/board/uploadLimits";
 import { supabaseBrowser } from "@/lib/supabase/browser";
 
 function clsx(...parts: Array<string | false | null | undefined>) {
@@ -17,13 +24,25 @@ async function fileToDataUrl(
     const reader = new FileReader();
     reader.onload = () => resolve(typeof reader.result === "string" ? reader.result : "");
     reader.onerror = () => reject(new Error("Could not read that file."));
+    const timer = window.setTimeout(() => {
+      reader.abort();
+      reject(new Error("Could not read that file."));
+    }, 8_000);
+    reader.onloadend = () => window.clearTimeout(timer);
     reader.readAsDataURL(file);
   });
 
   const image = await new Promise<HTMLImageElement>((resolve, reject) => {
     const img = new Image();
-    img.onload = () => resolve(img);
-    img.onerror = () => reject(new Error("That image could not be opened."));
+    const timer = window.setTimeout(() => reject(new Error("That image could not be opened.")), 8_000);
+    img.onload = () => {
+      window.clearTimeout(timer);
+      resolve(img);
+    };
+    img.onerror = () => {
+      window.clearTimeout(timer);
+      reject(new Error("That image could not be opened."));
+    };
     img.src = source;
   });
 
@@ -160,6 +179,21 @@ export default function ProjectDropMenu({
   const [mediaStoragePath, setMediaStoragePath] = useState("");
   const [mediaUploading, setMediaUploading] = useState(false);
   const mediaFileRef = useRef<File | null>(null);
+  const previewObjectUrlRef = useRef<string>("");
+
+  function revokePreviewObjectUrl() {
+    if (previewObjectUrlRef.current) {
+      URL.revokeObjectURL(previewObjectUrlRef.current);
+      previewObjectUrlRef.current = "";
+    }
+  }
+
+  function setPreviewFromFile(file: File) {
+    revokePreviewObjectUrl();
+    const url = URL.createObjectURL(file);
+    previewObjectUrlRef.current = url;
+    setMediaDataUrl(url);
+  }
 
   const mediaPreview = useMemo(() => {
     const src = mediaDataUrl || mediaUrl;
@@ -180,6 +214,12 @@ export default function ProjectDropMenu({
       current.trim() ? current : (defaultHostName || "").trim()
     );
   }, [open, defaultHostName]);
+
+  useEffect(() => {
+    return () => {
+      revokePreviewObjectUrl();
+    };
+  }, []);
 
   function resetAll() {
     setError(null);
@@ -205,19 +245,25 @@ export default function ProjectDropMenu({
     setMediaBucket("");
     setMediaStoragePath("");
     setMediaUploading(false);
+    revokePreviewObjectUrl();
     mediaFileRef.current = null;
   }
 
   async function onPickFile(file: File | null) {
     setError(null);
     if (!file) {
+      revokePreviewObjectUrl();
       setMediaDataUrl("");
+      mediaFileRef.current = null;
+      setMediaUploading(false);
       return;
     }
 
-    // Light guardrails
-    const isImage = file.type.startsWith("image/");
-    const isVideo = file.type.startsWith("video/");
+    const isImage =
+      file.type.startsWith("image/") ||
+      isHeicFile(file) ||
+      /\.(png|jpe?g|gif|webp|avif)$/i.test(file.name);
+    const isVideo = file.type.startsWith("video/") || /\.(mp4|webm|mov|m4v)$/i.test(file.name);
 
     if (!isVideo && !isImage) {
       setError("Please upload an image or video file.");
@@ -229,28 +275,28 @@ export default function ProjectDropMenu({
       return;
     }
 
-    setMediaKind(isVideo ? "video" : "image");
-    setMediaUrl(""); // prefer uploaded file if provided
-    setMediaBucket("");
-    setMediaStoragePath("");
-    mediaFileRef.current = file;
-
-    const dataUrl = await fileToDataUrl(file, {
-      maxWidth: 1600,
-      maxHeight: 1600,
-      quality: 0.84,
-    }).catch(() => "");
-
-    if (!dataUrl) {
-      setError("Couldn’t read that file. Try a different one.");
+    const sizeError = checkUploadSize(file, "image");
+    if (sizeError) {
+      setError(sizeError);
       return;
     }
 
-    setMediaDataUrl(dataUrl);
-
+    setMediaKind("image");
+    setMediaUrl("");
+    setMediaBucket("");
+    setMediaStoragePath("");
     setMediaUploading(true);
+    mediaFileRef.current = file;
+
     try {
-      const uploaded = await uploadDropMedia(file, `project-cover-${Date.now()}`);
+      const prepared = await prepareBoardImageFile(file, {
+        minLongEdge: BOARD_IMAGE_MIN_LONG_EDGE,
+        maxLongEdge: PROJECT_COVER_MAX_LONG_EDGE,
+      });
+      mediaFileRef.current = prepared;
+      setPreviewFromFile(prepared);
+
+      const uploaded = await uploadDropMedia(prepared, `project-cover-${Date.now()}`);
       if (uploaded) {
         const publicUrl =
           supabaseBrowser().storage.from(uploaded.bucket).getPublicUrl(uploaded.storagePath)
@@ -259,10 +305,21 @@ export default function ProjectDropMenu({
         setMediaStoragePath(uploaded.storagePath);
         setMediaUrl(publicUrl);
       } else {
-        setError("Picture saved on this device only. Sign in so the cover can upload to Board.");
+        setError("Cover is attached on this device. Retry the upload, or publish and Board will try again.");
       }
     } catch {
-      setError("Picture attached locally. The cover upload can retry when you publish.");
+      const fallback = await fileToDataUrl(file, {
+        maxWidth: PROJECT_COVER_MAX_LONG_EDGE,
+        maxHeight: PROJECT_COVER_MAX_LONG_EDGE,
+        quality: 0.84,
+      }).catch(() => "");
+      if (fallback) {
+        revokePreviewObjectUrl();
+        setMediaDataUrl(fallback);
+        setError("Cover is attached on this device. The Board upload can retry when you publish.");
+      } else {
+        setError("Couldn’t read that file. Try a different photo.");
+      }
     } finally {
       setMediaUploading(false);
     }
@@ -658,17 +715,24 @@ export default function ProjectDropMenu({
             <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3 items-end">
               <Field label="Upload File (optional)">
                 <label className="inline-flex w-fit cursor-pointer items-center justify-center rounded-full border border-cyan-200/25 bg-cyan-100/10 px-4 py-2 text-[11px] font-black uppercase tracking-[0.16em] text-cyan-50 shadow-[0_0_18px_rgba(103,232,249,0.10)] transition hover:-translate-y-0.5 hover:bg-cyan-100/15">
-                  Upload
+                  {mediaUploading ? "Uploading" : "Upload"}
                   <input
                     type="file"
-                    accept="image/*,video/*"
-                    onChange={(e) => onPickFile(e.target.files?.[0] ?? null)}
+                    accept="image/*,image/heic,image/heif,.heic,.heif,video/*"
+                    onChange={(e) => {
+                      const next = e.target.files?.[0] ?? null;
+                      e.target.value = "";
+                      void onPickFile(next);
+                    }}
+                    disabled={mediaUploading}
                     className="sr-only"
                   />
                 </label>
                 <div className="mt-2 min-h-5 max-w-full truncate text-xs font-semibold text-white/55">
                   {mediaUploading
-                    ? "Uploading cover to Board..."
+                    ? mediaDataUrl
+                      ? "Uploading cover to Board..."
+                      : "Preparing photo..."
                     : mediaStoragePath
                       ? "Cover uploaded to Board."
                       : mediaDataUrl
@@ -704,10 +768,12 @@ export default function ProjectDropMenu({
                   <button
                     type="button"
                     onClick={() => {
+                      revokePreviewObjectUrl();
                       setMediaUrl("");
                       setMediaDataUrl("");
                       setMediaBucket("");
                       setMediaStoragePath("");
+                      mediaFileRef.current = null;
                     }}
                     className="mt-2 text-xs text-white/70 hover:text-white underline"
                   >

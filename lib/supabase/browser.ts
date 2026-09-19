@@ -22,7 +22,7 @@ export function isSupabaseConfigured() {
 
 async function runWithBrowserAuthLock<T>(
   name: string,
-  _acquireTimeout: number,
+  acquireTimeout: number,
   fn: () => Promise<T>
 ): Promise<T> {
   const previous = authLocks.get(name) ?? Promise.resolve();
@@ -39,7 +39,14 @@ async function runWithBrowserAuthLock<T>(
       .then(() => current)
   );
 
-  await previous.catch(() => undefined);
+  const waitMs =
+    Number.isFinite(acquireTimeout) && acquireTimeout > 0 ? acquireTimeout : 8_000;
+  await Promise.race([
+    previous.catch(() => undefined),
+    new Promise<void>((resolve) => {
+      setTimeout(resolve, waitMs);
+    }),
+  ]);
 
   try {
     return await fn();

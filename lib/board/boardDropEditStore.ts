@@ -6,7 +6,7 @@
 
 import { supabaseBrowser } from "@/lib/supabase/browser";
 import { syncActivitiesForDropEdit } from "@/lib/board/activity";
-import { ensureImageFileMinResolution } from "@/lib/board/imageQuality";
+import { ensureImageFileMinResolution, isHeicFile } from "@/lib/board/imageQuality";
 import { checkUploadSize, resolveUploadContentType } from "@/lib/board/uploadLimits";
 import type { DropItem } from "@/lib/board/dropItem";
 import { rememberDeletedDropId } from "@/lib/board/dropItem";
@@ -198,40 +198,85 @@ function sanitizeFileName(name: string) {
   return name.replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/-+/g, "-").slice(0, 120) || "drop-media";
 }
 
+const SESSION_TIMEOUT_MS = 4_000;
+const IMAGE_PREPARE_TIMEOUT_MS = 18_000;
+const STORAGE_UPLOAD_TIMEOUT_MS = 20_000;
+const DROP_MEDIA_UPLOAD_TIMEOUT_MS =
+  SESSION_TIMEOUT_MS + IMAGE_PREPARE_TIMEOUT_MS + STORAGE_UPLOAD_TIMEOUT_MS + 2_000;
+
+function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => reject(new Error(message)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => {
+    if (timeoutId) clearTimeout(timeoutId);
+  });
+}
+
+function alreadyPreparedJpeg(file: File) {
+  return file.type === "image/jpeg" && file.size > 0 && file.size <= 6 * 1024 * 1024;
+}
+
 /** Upload replacement media for an existing drop. Returns the new storage path. */
 export async function uploadDropMedia(
   file: File,
   dropId: string
 ): Promise<{ bucket: string; storagePath: string } | null> {
-  const supabase = supabaseBrowser();
-  const { data } = await supabase.auth.getSession();
-  const userId = data.session?.user?.id;
-  if (!userId) return null;
+  try {
+    return await withTimeout(
+      (async () => {
+        const supabase = supabaseBrowser();
+        const { data } = await withTimeout(
+          supabase.auth.getSession(),
+          SESSION_TIMEOUT_MS,
+          "Sign-in check timed out."
+        );
+        const userId = data.session?.user?.id;
+        if (!userId) return null;
 
-  const uploadFile =
-    file.type.startsWith("image/") &&
-    file.type !== "image/gif" &&
-    file.type !== "image/svg+xml"
-      ? await ensureImageFileMinResolution(file)
-      : file;
+        const skipPrepare =
+          alreadyPreparedJpeg(file) ||
+          file.type === "image/gif" ||
+          file.type === "image/svg+xml" ||
+          (!file.type.startsWith("image/") && !isHeicFile(file));
+        const uploadFile = skipPrepare
+          ? file
+          : await withTimeout(
+              ensureImageFileMinResolution(file),
+              IMAGE_PREPARE_TIMEOUT_MS,
+              "Photo prepare timed out."
+            );
 
-  const sizeError = checkUploadSize(uploadFile);
-  if (sizeError) {
-    console.error("Drop media upload rejected:", sizeError);
-    return null;
-  }
+        const sizeError = checkUploadSize(uploadFile);
+        if (sizeError) {
+          console.error("Drop media upload rejected:", sizeError);
+          return null;
+        }
 
-  const storagePath = `${userId}/${dropId}/${Date.now()}-${sanitizeFileName(uploadFile.name)}`;
-  const { error } = await supabase.storage.from(BOARD_MEDIA_BUCKET).upload(storagePath, uploadFile, {
-    upsert: true,
-    contentType: resolveUploadContentType(uploadFile),
-    cacheControl: "3600",
-  });
-  if (error) {
+        const storagePath = `${userId}/${dropId}/${Date.now()}-${sanitizeFileName(uploadFile.name)}`;
+        const { error } = await withTimeout(
+          supabase.storage.from(BOARD_MEDIA_BUCKET).upload(storagePath, uploadFile, {
+            upsert: true,
+            contentType: resolveUploadContentType(uploadFile),
+            cacheControl: "3600",
+          }),
+          STORAGE_UPLOAD_TIMEOUT_MS,
+          "Cover upload timed out."
+        );
+        if (error) {
+          console.error("Drop media upload failed:", error);
+          return null;
+        }
+        return { bucket: BOARD_MEDIA_BUCKET, storagePath };
+      })(),
+      DROP_MEDIA_UPLOAD_TIMEOUT_MS,
+      "Cover upload timed out."
+    );
+  } catch (error) {
     console.error("Drop media upload failed:", error);
     return null;
   }
-  return { bucket: BOARD_MEDIA_BUCKET, storagePath };
 }
 
 /**
