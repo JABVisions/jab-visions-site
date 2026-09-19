@@ -1296,7 +1296,7 @@ export default function DropStudioStage({
     if (voiceProjectSignature === lastSavedVoiceSignatureRef.current) return;
     const timer = window.setTimeout(() => {
       void saveToDrafts(true, true);
-    }, 4000);
+    }, 2000);
     return () => window.clearTimeout(timer);
   }, [voiceHasClips, voiceProjectSignature, saveToDrafts, studioPlaying, recording, adlibRecording]);
 
