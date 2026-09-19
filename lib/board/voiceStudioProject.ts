@@ -16,6 +16,10 @@ const DB_NAME = "jab_voice_studio_projects_v1";
 const STORE = "projects";
 const DB_VERSION = 1;
 const ACTIVE_DRAFT_KEY = "jab_voice_studio_active_draft_v1";
+const MAX_CACHED_CLIP_BYTES = 24;
+
+/** Reuse clip ArrayBuffers across autosaves so Play doesn't fight IDB for RAM. */
+const serializedClipBytes = new Map<string, ArrayBuffer>();
 
 export type VoiceStudioClipFile = {
   key: string;
@@ -159,8 +163,13 @@ export async function serializeVoiceStudioClipFiles(
       const key = fileKey(clip.file);
       if (seen.has(key)) continue;
       seen.add(key);
-      const bytes = await readClipBytes(clip.file);
-      if (!bytes) continue;
+      let bytes = serializedClipBytes.get(key);
+      if (!bytes || bytes.byteLength === 0) {
+        const fresh = await readClipBytes(clip.file);
+        if (!fresh) continue;
+        serializedClipBytes.set(key, fresh);
+        bytes = fresh;
+      }
       files.push({
         key,
         name: clip.file.name,
@@ -169,6 +178,14 @@ export async function serializeVoiceStudioClipFiles(
         bytes,
       });
     }
+  }
+  for (const key of [...serializedClipBytes.keys()]) {
+    if (!seen.has(key)) serializedClipBytes.delete(key);
+  }
+  while (serializedClipBytes.size > MAX_CACHED_CLIP_BYTES) {
+    const oldest = serializedClipBytes.keys().next().value;
+    if (!oldest) break;
+    serializedClipBytes.delete(oldest);
   }
   return files;
 }

@@ -6,6 +6,8 @@ import {
   isMissingAudioObjectError,
   isUnreadableClipError,
   playableAudioMessage,
+  pushHistory,
+  SESSION_HISTORY_LIMIT,
   snapshotSession,
   upsertLaneFromFile,
 } from "./audioSession";
@@ -120,6 +122,22 @@ async function run() {
   clearLiveVoiceStudio();
   assert(peekLiveVoiceStudio() === null, "live hold should clear after mix-to-drop");
   assert(!liveVoiceHoldHasClips(), "live hold should be empty after mix-to-drop");
+
+  const again = await serializeVoiceStudioClipFiles(session);
+  assert(again.length === files.length, "serialize should reuse clip keys on a second pass");
+  assert(
+    again.every((file) => file.bytes && file.bytes.byteLength > 0),
+    "cached serialize should still persist ArrayBuffers"
+  );
+
+  assert(SESSION_HISTORY_LIMIT <= 8, "undo history should stay shallow during long sessions");
+  let history = createSessionHistory();
+  let walking = session;
+  for (let i = 0; i < 12; i += 1) {
+    history = pushHistory(history, walking);
+    walking = { ...walking, playheadMs: i * 100 };
+  }
+  assert(history.past.length <= SESSION_HISTORY_LIMIT, "pushHistory should cap undo snapshots");
 
   console.log("voice studio soundboard persist/restore checks passed");
 }

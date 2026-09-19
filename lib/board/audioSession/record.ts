@@ -49,26 +49,23 @@ export function cloneStreamForMeter(stream: MediaStream) {
   return new MediaStream(tracks);
 }
 
-function normalizeChunks(chunks: Float32Array[], peak: number): Float32Array[] {
-  if (!chunks.length || peak < 0.0008) return chunks;
-  if (peak >= STUDIO_TAKE_TARGET_PEAK) return chunks;
+function normalizeTake(samples: Float32Array, peak: number): Float32Array {
+  if (!samples.length || peak < 0.0008) return samples;
+  if (peak >= STUDIO_TAKE_TARGET_PEAK) return samples;
   const gain = Math.min(STUDIO_TAKE_MAX_NORMALIZE, STUDIO_TAKE_TARGET_PEAK / peak);
-  if (gain <= 1.05) return chunks;
-  return chunks.map((chunk) => {
-    const out = new Float32Array(chunk.length);
-    for (let i = 0; i < chunk.length; i += 1) {
-      const sample = (chunk[i] ?? 0) * gain;
-      // Soft knee into ±1 so boosts don't brick-wall as hard.
-      if (sample > 1) out[i] = 1;
-      else if (sample < -1) out[i] = -1;
-      else out[i] = sample;
-    }
-    return out;
-  });
+  if (gain <= 1.05) return samples;
+  const out = new Float32Array(samples.length);
+  for (let i = 0; i < samples.length; i += 1) {
+    const sample = (samples[i] ?? 0) * gain;
+    if (sample > 1) out[i] = 1;
+    else if (sample < -1) out[i] = -1;
+    else out[i] = sample;
+  }
+  return out;
 }
 
-function floatChunksToWavBlob(chunks: Float32Array[], sampleRate: number): Blob {
-  const frames = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
+function floatToWavBlob(samples: Float32Array, sampleRate: number): Blob {
+  const frames = samples.length;
   if (!frames) return new Blob([], { type: "audio/wav" });
 
   const channels = 1;
@@ -96,12 +93,10 @@ function floatChunksToWavBlob(chunks: Float32Array[], sampleRate: number): Blob 
   view.setUint32(40, dataLength, true);
 
   let offset = 44;
-  for (const chunk of chunks) {
-    for (let i = 0; i < chunk.length; i += 1) {
-      const sample = Math.max(-1, Math.min(1, chunk[i] ?? 0));
-      view.setInt16(offset, sample < 0 ? sample * 0x8000 : sample * 0x7fff, true);
-      offset += bytesPerSample;
-    }
+  for (let i = 0; i < frames; i += 1) {
+    const sample = Math.max(-1, Math.min(1, samples[i] ?? 0));
+    view.setInt16(offset, sample < 0 ? sample * 0x8000 : sample * 0x7fff, true);
+    offset += bytesPerSample;
   }
   return new Blob([output], { type: "audio/wav" });
 }
@@ -131,18 +126,19 @@ export function createStudioTakeCapture(
   inputGain.gain.value = STUDIO_MIC_INPUT_GAIN;
 
   const analyser = ctx.createAnalyser();
-  analyser.fftSize = 2048;
+  analyser.fftSize = 256;
   analyser.smoothingTimeConstant = 0.42;
 
   // ScriptProcessor is deprecated but is the reliable cross-browser path for
   // PCM capture while another graph is playing through the same context.
   // It MUST be connected to destination (even muted) or Chrome skips callbacks.
-  const bufferSize = 4096;
+  const bufferSize = 8192;
   const processor = ctx.createScriptProcessor(bufferSize, 1, 1);
   const mute = ctx.createGain();
   mute.gain.value = 0;
 
-  const chunks: Float32Array[] = [];
+  let captured = new Float32Array(Math.max(1, Math.floor(ctx.sampleRate * 8)));
+  let capturedLength = 0;
   let armed = false;
   let disposed = false;
   let peak = 0;
@@ -150,11 +146,16 @@ export function createStudioTakeCapture(
   processor.onaudioprocess = (event) => {
     if (!armed || disposed) return;
     const input = event.inputBuffer.getChannelData(0);
-    const copy = new Float32Array(input.length);
-    copy.set(input);
-    chunks.push(copy);
-    for (let i = 0; i < copy.length; i += 1) {
-      const v = Math.abs(copy[i] ?? 0);
+    const nextLen = capturedLength + input.length;
+    if (nextLen > captured.length) {
+      const grown = new Float32Array(Math.max(nextLen, captured.length * 2));
+      grown.set(captured.subarray(0, capturedLength));
+      captured = grown;
+    }
+    captured.set(input, capturedLength);
+    capturedLength = nextLen;
+    for (let i = 0; i < input.length; i += 1) {
+      const v = Math.abs(input[i] ?? 0);
       if (v > peak) peak = v;
     }
   };
@@ -173,7 +174,7 @@ export function createStudioTakeCapture(
       if (disposed) return;
       armed = true;
       peak = 0;
-      chunks.length = 0;
+      capturedLength = 0;
     },
     isRecording() {
       return armed && !disposed;
@@ -183,8 +184,11 @@ export function createStudioTakeCapture(
     },
     stop() {
       armed = false;
-      const normalized = normalizeChunks(chunks, peak);
-      return floatChunksToWavBlob(normalized, ctx.sampleRate);
+      const samples = capturedLength
+        ? captured.subarray(0, capturedLength)
+        : new Float32Array(0);
+      const normalized = normalizeTake(samples, peak);
+      return floatToWavBlob(normalized, ctx.sampleRate);
     },
     dispose() {
       if (disposed) return;

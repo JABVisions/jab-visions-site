@@ -1,8 +1,11 @@
-import { MissingAudioObjectError } from "./clipMedia";
+import { clipFileKey, MissingAudioObjectError } from "./clipMedia";
 import { connectScheduledClip } from "./graph";
 import { scheduleSession, sessionDurationMs } from "./timeline";
-import type { AudioSession, LaneKind, TrackMix } from "./types";
+import type { AudioSession, LaneKind, TrackClip, TrackMix } from "./types";
 import { decodeAudioFile, getAudioContextConstructor } from "./wav";
+
+/** Time-domain meters don't need 2048 bins — that analyser buffer is ~8× the RAM. */
+const LANE_ANALYSER_FFT = 256;
 
 /**
  * Live transport for a session. Exposes per-lane AnalyserNodes so the Studio
@@ -23,6 +26,9 @@ export class AudioSessionEngine {
   private playOriginMs = 0;
   private playStartedAt = 0;
   private missingClipNames: string[] = [];
+  private playGeneration = 0;
+  private decodedByKey = new Map<string, AudioBuffer>();
+  private decodedCtx: AudioContext | null = null;
 
   get isPlaying() {
     return this.playing;
@@ -93,6 +99,15 @@ export class AudioSessionEngine {
     if (!Constructor) throw new Error("Web Audio is unavailable in this browser.");
     if (!this.ctx || this.ctx.state === "closed") {
       this.ctx = new Constructor();
+      this.ctx.onstatechange = () => {
+        if (
+          this.ctx?.state === "suspended" &&
+          typeof document !== "undefined" &&
+          document.visibilityState === "visible"
+        ) {
+          void this.ctx.resume().catch(() => undefined);
+        }
+      };
     }
     if (this.ctx.state === "suspended") {
       await this.ctx.resume();
@@ -105,13 +120,57 @@ export class AudioSessionEngine {
     return this.context();
   }
 
+  /** iOS Safari suspends the mixer when the tab hides — wake it on return. */
+  async resumeContext() {
+    if (!this.ctx || this.ctx.state === "closed") return;
+    if (this.ctx.state === "suspended") {
+      await this.ctx.resume().catch(() => undefined);
+    }
+  }
+
+  private async decodeClip(clip: TrackClip, ctx: AudioContext) {
+    if (this.decodedCtx !== ctx) {
+      this.decodedByKey.clear();
+      this.decodedCtx = ctx;
+    }
+    const key = clipFileKey(clip.file);
+    const cached = this.decodedByKey.get(key);
+    if (cached && cached.length > 0) {
+      clip.decoded = cached;
+      return;
+    }
+    const buffer = await decodeAudioFile(clip.file, ctx);
+    this.decodedByKey.set(key, buffer);
+    clip.decoded = buffer;
+  }
+
+  private pruneBuses(liveTrackIds: Set<string>) {
+    for (const id of [...this.laneGains.keys()]) {
+      if (liveTrackIds.has(id)) continue;
+      try {
+        this.laneGains.get(id)?.disconnect();
+      } catch {
+        // already disconnected
+      }
+      try {
+        this.analysers.get(id)?.disconnect();
+      } catch {
+        // already disconnected
+      }
+      this.laneGains.delete(id);
+      this.analysers.delete(id);
+      this.laneMix.delete(id);
+      this.trackKinds.delete(id);
+    }
+  }
+
   private busFor(trackId: string, kind: LaneKind, ctx: AudioContext, mix: TrackMix) {
     let gain = this.laneGains.get(trackId);
     let analyser = this.analysers.get(trackId);
     if (!gain || !analyser) {
       gain = ctx.createGain();
       analyser = ctx.createAnalyser();
-      analyser.fftSize = 2048;
+      analyser.fftSize = LANE_ANALYSER_FFT;
       analyser.smoothingTimeConstant = 0.35;
       gain.connect(analyser);
       analyser.connect(ctx.destination);
@@ -132,15 +191,16 @@ export class AudioSessionEngine {
   }
 
   async play(session: AudioSession, fromMs = session.playheadMs) {
+    const generation = ++this.playGeneration;
     this.stop();
     const ctx = await this.context();
+    if (generation !== this.playGeneration) return null;
+    this.pruneBuses(new Set(session.tracks.map((track) => track.id)));
     const missing: string[] = [];
     for (const track of session.tracks) {
       for (const clip of track.clips) {
         try {
-          // Always decode into this live context — buffers from a closed preload
-          // context can fail silently on some browsers.
-          clip.decoded = await decodeAudioFile(clip.file, ctx);
+          await this.decodeClip(clip, ctx);
           if (!clip.sourceDurationMs && clip.decoded) {
             clip.sourceDurationMs = clip.decoded.duration * 1000;
           }
@@ -149,9 +209,11 @@ export class AudioSessionEngine {
           missing.push(clip.name || clip.file.name || "clip");
           continue;
         }
+        if (generation !== this.playGeneration) return null;
       }
     }
     this.missingClipNames = missing;
+    if (generation !== this.playGeneration) return null;
 
     const shifted: AudioSession = {
       ...session,
@@ -213,7 +275,8 @@ export class AudioSessionEngine {
     return this.play(backing, fromMs);
   }
 
-  stop() {
+  stop(opts?: { cancel?: boolean }) {
+    if (opts?.cancel) this.playGeneration += 1;
     this.clearEndTimer();
     for (const source of this.sources) {
       try {
@@ -228,6 +291,11 @@ export class AudioSessionEngine {
       }
     }
     this.sources = [];
+    this.playing = false;
+    this.playStartedAt = 0;
+  }
+
+  private disconnectBuses() {
     this.laneGains.forEach((gain) => {
       try {
         gain.disconnect();
@@ -246,12 +314,14 @@ export class AudioSessionEngine {
     this.analysers.clear();
     this.laneMix.clear();
     this.trackKinds.clear();
-    this.playing = false;
-    this.playStartedAt = 0;
   }
 
   dispose() {
+    this.playGeneration += 1;
     this.stop();
+    this.disconnectBuses();
+    this.decodedByKey.clear();
+    this.decodedCtx = null;
     this.onEnded = null;
     if (this.ctx && this.ctx.state !== "closed") {
       void this.ctx.close().catch(() => undefined);

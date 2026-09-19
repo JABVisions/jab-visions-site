@@ -30,9 +30,15 @@ export function mixTakeDurationMs(session: AudioSession) {
 async function hydrateClipBuffers(session: AudioSession, ctx: BaseAudioContext) {
   for (const track of session.tracks) {
     for (const clip of track.clips) {
+      if (clip.decoded && clip.decoded.length > 0) {
+        try {
+          void clip.decoded.getChannelData(0);
+          continue;
+        } catch {
+          clip.decoded = undefined;
+        }
+      }
       try {
-        // Always re-decode in this mix context. Buffers from a closed Safari
-        // AudioContext can fail silently during Mix to Drop.
         clip.decoded = await decodeAudioFile(clip.file, ctx);
       } catch {
         clip.decoded = undefined;
