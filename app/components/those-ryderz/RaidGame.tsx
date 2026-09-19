@@ -80,10 +80,10 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
       el.textContent = next.burnout
         ? 'NO AURA'
         : move.duration > 0
-          ? `ACTIVE ${move.duration.toFixed(1)}s`
-          : move.cooldown > 0
-            ? `${move.cooldown.toFixed(1)}s`
-            : `${move.key}  READY`;
+          ? 'ON'
+          : move.ready
+            ? `${move.key}  READY`
+            : 'LOW';
     });
     if (
       !prev ||

@@ -421,10 +421,6 @@ export class RaidEngine {
     if (this.meleeT > 0) this.meleeT = Math.max(0, this.meleeT - dt * 3.4);
     for (let i = 0; i < 3; i += 1) {
       this.moveCd[i] = Math.max(0, this.moveCd[i] - dt);
-      if (this.moveT[i] > 0) {
-        this.moveT[i] = Math.max(0, this.moveT[i] - dt);
-        if (this.moveT[i] <= 0) this.endMove(i);
-      }
     }
     if (this.bannerT > 0) {
       this.bannerT = Math.max(0, this.bannerT - dt);
@@ -453,16 +449,26 @@ export class RaidEngine {
   }
 
   private updateAura(dt: number) {
-    const regen =
-      this.spec.auraRegen +
-      this.upgrades.capacity * 1.2 +
-      (this.phase === 'intermission' ? 6 : 0);
-    const using = this.fireHeld || this.moveT.some((t) => t > 0);
-    const rate = this.burnout ? regen * 0.42 : using ? regen * 0.18 : regen;
-    this.aura = Math.min(this.maxAura, this.aura + rate * dt);
-    if (this.burnout && this.aura >= this.maxAura * BURNOUT_RECOVERY) {
-      this.burnout = false;
+    let drain = 0;
+    for (let i = 0; i < 3; i += 1) {
+      if (this.moveT[i] > 0) drain += this.spec.moves[i].drain;
     }
+    if (drain > 0) {
+      this.spendAura(drain * dt);
+      if (this.burnout || this.aura <= 0) this.endAllMoves();
+    } else {
+      const regen =
+        this.spec.auraRegen +
+        this.upgrades.capacity * 1.2 +
+        (this.phase === 'intermission' ? 8 : 0);
+      const using = this.fireHeld;
+      const rate = this.burnout ? regen * 0.5 : using ? regen * 0.12 : regen;
+      this.aura = Math.min(this.maxAura, this.aura + rate * dt);
+      if (this.burnout && this.aura >= this.maxAura * BURNOUT_RECOVERY) {
+        this.burnout = false;
+      }
+    }
+    if (this.isActive('lift')) this.liftHosts(0.4);
     this.syncWeaponGlow();
   }
 
@@ -627,32 +633,44 @@ export class RaidEngine {
     if (!this.player || this.burnout) return;
     const move = this.spec.moves[slot];
     if (!move || this.moveCd[slot] > 0) return;
-    if (move.duration > 0 && this.moveT[slot] > 0) return;
+    this.moveCd[slot] = 0.16;
+
+    if (move.drain > 0) {
+      if (this.moveT[slot] > 0) {
+        this.endMove(slot);
+        return;
+      }
+      if (this.aura < 2) return;
+      this.moveT[slot] = 1;
+      if (move.id === 'duplicate') this.spawnClones([-1, 1]);
+      if (move.id === 'decoy') this.spawnClones([0]);
+      if (move.id === 'lift') this.liftHosts(2.2);
+      this.particles.emit(this.pos.clone().setY(1.1), this.spec.color, 22, {
+        speed: 8,
+        size: 0.3,
+        life: 0.45,
+        up: 1,
+      });
+      return;
+    }
+
     if (this.aura < move.auraCost) return;
     this.spendAura(move.auraCost);
-    this.moveCd[slot] = move.cooldown;
-    this.moveT[slot] = move.duration;
     const id = move.id;
     if (id === 'bladeFan') this.fireSpread(5, 0.22, 1.2);
-    if (id === 'duplicate') this.spawnClones([-1, 1]);
     if (id === 'envyPulse') this.pulse(6.6, 24, -8);
     if (id === 'shockwave') this.pulse(6.2, 20, 11);
     if (id === 'prideDash') this.prideDash();
     if (id === 'cleave') this.cleave();
-    if (id === 'blink') {
-      this.moveT[slot] = 0;
-      this.blink();
-    }
+    if (id === 'blink') this.blink();
     if (id === 'greedSiphon') this.greedSiphon();
-    if (id === 'lift') this.liftHosts();
     if (id === 'heartbreak') this.pulse(8.8, 38, 6);
-    if (id === 'decoy') this.spawnClones([0]);
     if (id === 'dartStorm') this.fireSpread(10, 0.32, 0.85);
-    this.particles.emit(this.pos.clone().setY(1.1), this.spec.color, 28, {
-      speed: 9,
-      size: 0.32,
-      life: 0.5,
-      up: 1,
+    this.particles.emit(this.pos.clone().setY(1.1), this.spec.color, 18, {
+      speed: 8,
+      size: 0.28,
+      life: 0.4,
+      up: 0.8,
     });
   }
 
@@ -749,10 +767,10 @@ export class RaidEngine {
     }
   }
 
-  private liftHosts() {
+  private liftHosts(hold = 2.6) {
     for (const host of this.hosts) {
       const dist = Math.hypot(host.pos.x - this.pos.x, host.pos.z - this.pos.z);
-      if (dist < 7.2 + host.radius) host.stun = Math.max(host.stun, 2.6);
+      if (dist < 7.2 + host.radius) host.stun = Math.max(host.stun, hold);
     }
   }
 
@@ -1197,8 +1215,11 @@ export class RaidEngine {
       moves: this.spec.moves.map((move, i) => ({
         key: MOVE_KEYS[i],
         name: move.name,
-        ready: !this.burnout && this.moveCd[i] <= 0 && this.aura >= move.auraCost,
-        cooldown: this.moveCd[i],
+        ready:
+          !this.burnout &&
+          (this.moveT[i] > 0 ||
+            (move.drain > 0 ? this.aura > 1 : this.aura >= move.auraCost)),
+        cooldown: 0,
         duration: this.moveT[i],
       })),
       round: this.round,
