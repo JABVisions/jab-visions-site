@@ -14,6 +14,7 @@ import {
   projectRoomPostHasMedia,
   projectRoomPostIsVideo,
   projectRoomPostStorageCoords,
+  PROJECT_ROOM_CLOUD_SYNC_TIMEOUT_MS,
   projectRoomStudioSaveKey,
   projectRoomVideoLoadError,
   projectRoomVideoPlaybackType,
@@ -22,6 +23,7 @@ import {
   stripUnplayableProjectRoomVideos,
   runProjectRoomStudioSaveOnce,
   viewerCanPostToProjectRoom,
+  withDeadline,
 } from "./projectRoomDrop";
 import { mergeProjectRecord, reconcileProjectsWithLive, type BoardProject } from "./projects";
 
@@ -474,6 +476,38 @@ void (async () => {
     retryRuns += 1;
   });
   assert(retryRuns === 2, `failed studio save must upload again, ran ${retryRuns} times`);
+
+  assert(
+    PROJECT_ROOM_CLOUD_SYNC_TIMEOUT_MS <= 4_000 && PROJECT_ROOM_CLOUD_SYNC_TIMEOUT_MS >= 2_000,
+    "cloud persist/activity must time out in seconds so studio can close"
+  );
+  const hangKey = projectRoomStudioSaveKey("project_keep_me", {
+    name: "persist-hang.mp4",
+    size: 62 * 1024 * 1024,
+    lastModified: 3,
+  });
+  let committed = false;
+  const started = Date.now();
+  await runProjectRoomStudioSaveOnce(hangKey, async () => {
+    committed = true;
+    await withDeadline(new Promise<void>(() => {}), 40, undefined);
+  });
+  assert(committed, "room Drop commits before persist/activity");
+  assert(
+    Date.now() - started < 1_000,
+    "a hung persist/activity promise cannot block studio close"
+  );
+  let secondHang = 0;
+  await runProjectRoomStudioSaveOnce(hangKey, async () => {
+    secondHang += 1;
+  });
+  assert(secondHang === 0, "retry after a posted tape must not clone the room Drop");
+
+  const timed = await withDeadline(Promise.resolve("saved"), 50, "timeout");
+  assert(timed === "saved", "finished persist wins the deadline race");
+  const missed = await withDeadline(new Promise<string>(() => {}), 20, "timeout");
+  assert(missed === "timeout", "hung persist resolves to the deadline fallback");
+
   console.log("projectRoomDrop.test.ts: ok");
 })().catch((error) => {
   console.error(error);

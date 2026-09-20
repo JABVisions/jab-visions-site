@@ -47,6 +47,22 @@ function uid(prefix: string) {
 const inflightStudioSaves = new Map<string, Promise<void>>();
 const finishedStudioSaves = new Set<string>();
 
+/** Persist + activity must not block studio close after a verified room Drop. */
+export const PROJECT_ROOM_CLOUD_SYNC_TIMEOUT_MS = 4_000;
+
+export function withDeadline<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
+  const guarded = Promise.resolve(promise).then(
+    (value) => ({ ok: true as const, value }),
+    () => ({ ok: false as const, value: fallback })
+  );
+  return Promise.race([
+    guarded.then((result) => (result.ok ? result.value : fallback)),
+    new Promise<T>((resolve) => {
+      setTimeout(() => resolve(fallback), Math.max(0, ms));
+    }),
+  ]);
+}
+
 export function projectRoomStudioSaveKey(
   projectId: string,
   file: { name?: string; size?: number; lastModified?: number }

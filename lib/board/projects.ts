@@ -1238,21 +1238,31 @@ export function notebookProjectsOwnedByViewer(
   });
 }
 
+const PERSIST_PROJECT_LIST_TIMEOUT_MS = 8_000;
+
 export async function persistProjectListToAccount(projects: BoardProject[]): Promise<boolean> {
   if (!projects.length) return false;
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    try {
-      const userId = await getCurrentUserId();
-      if (userId) {
-        await persistProjectListToProfile(supabaseBrowser(), userId, projects);
-        return true;
+  const work = (async () => {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        const userId = await getCurrentUserId();
+        if (userId) {
+          await persistProjectListToProfile(supabaseBrowser(), userId, projects);
+          return true;
+        }
+      } catch {
+        // Retry, then fall through to the cookie-based API write.
       }
-    } catch {
-      // Retry, then fall through to the cookie-based API write.
+      await new Promise((resolve) => setTimeout(resolve, 500 * (attempt + 1)));
     }
-    await new Promise((resolve) => setTimeout(resolve, 500 * (attempt + 1)));
-  }
-  return persistLocalProjectsViaApi(projects);
+    return persistLocalProjectsViaApi(projects);
+  })();
+  return Promise.race([
+    work.catch(() => false),
+    new Promise<boolean>((resolve) => {
+      setTimeout(() => resolve(false), PERSIST_PROJECT_LIST_TIMEOUT_MS);
+    }),
+  ]);
 }
 
 export function statusLabel(status: ProjectStatus) {

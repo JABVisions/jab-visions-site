@@ -175,6 +175,11 @@ assert(
   "progress stays under 100% until the object is signed"
 );
 assert(
+  progressBytesUntilVerified(Math.floor(0.995 * 62 * 1024 * 1024), 62 * 1024 * 1024, false)
+    .percent === 99,
+  "99.5% bytes must not round to 100% or studio treats success as Board-did-not-close"
+);
+assert(
   progressBytesUntilVerified(62 * 1024 * 1024, 62 * 1024 * 1024, true).percent === 100,
   "verified objects can close at 100%"
 );

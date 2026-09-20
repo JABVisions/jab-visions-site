@@ -71,6 +71,19 @@ export function studioCompleteTimeoutMs(bytes: number, isAudioMix = false): numb
 /** After the tape hits 100%, Drop Studio must unstick instead of looping on Almost done. */
 export const STUDIO_BYTES_DONE_UNSTICK_MS = 8_000;
 
+/** Legacy overlay copy. Bytes-done unstick must complete/close, never show this as a failure. */
+export const STUDIO_BYTES_DONE_CLOSE_MESSAGE =
+  "Upload finished but Board did not close. Stay on this screen and try again.";
+
+export function isStudioBytesDoneCloseMessage(message: string): boolean {
+  return /upload finished but board did not close/i.test(String(message || ""));
+}
+
+/** After verified 100%, studio must post + close — not reject into the overlay. */
+export function studioBytesDoneUnstickAction(): "complete" {
+  return "complete";
+}
+
 export type UploadKind = keyof typeof UPLOAD_LIMITS;
 
 export function uploadKindForFile(file: {
