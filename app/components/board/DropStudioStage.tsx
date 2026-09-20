@@ -50,6 +50,7 @@ import {
   fileWithResolvedContentType,
   resolveUploadContentType,
   studioMediaKindForFile,
+  studioCompleteTimeoutMs,
 } from "@/lib/board/uploadLimits";
 import { saveDropDraft, draftToFile, ensureVoiceStudioDraftCard, type DropDraft } from "@/lib/board/dropDrafts";
 import DropDraftsDrawer from "./DropDraftsDrawer";
@@ -2539,9 +2540,11 @@ export default function DropStudioStage({
       flashSaveNote("Saving mix to Board…");
     }
     try {
+      // Project Room audition tapes (and other large media) share the upload
+      // budget — a 20s cap parked valid files in Drafts before onComplete finished.
       await withAudioTimeout(
         Promise.resolve(onComplete(file, source)),
-        isAudioMix ? 90_000 : 20_000,
+        studioCompleteTimeoutMs(file.size, isAudioMix),
         "complete"
       );
     } catch (error) {

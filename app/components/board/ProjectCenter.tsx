@@ -9,6 +9,7 @@ import { supabaseBrowser } from "@/lib/supabase/browser";
 import {
   appendLocalActivity,
   createActivity,
+  getLocalActivity,
   removeLocalActivity,
   type BoardActivity,
 } from "@/lib/board/activity";
@@ -47,19 +48,15 @@ import { readCurrentBoardIdentity } from "@/lib/board/currentProfile";
 import { emitBoardDropSignal } from "@/lib/board/dropSignals";
 import LazyDropStudioStage from "@/app/components/board/LazyDropStudioStage";
 import type { DropCustomization } from "@/lib/board/dropCustomizations";
-import {
-  BOARD_IMAGE_MIN_LONG_EDGE,
-  prepareBoardImageFile,
-  PROJECT_COVER_MAX_LONG_EDGE,
-} from "@/lib/board/imageQuality";
-import { uploadProjectCover } from "@/lib/board/projectCoverUpload";
 import { uploadBoardMediaFile } from "@/lib/board/boardMediaUpload";
+import { boardProjectPatchFromDrop } from "@/lib/board/projectDropEdit";
 import {
-  boardProjectPatchFromDrop,
-  isProjectStudioVideoFile,
-  projectCoverFromUpload,
-  projectMediaFromStudioUpload,
-} from "@/lib/board/projectDropEdit";
+  applyProjectRoomActivitiesToProjects,
+  applyProjectRoomDropToProject,
+  buildProjectRoomDrop,
+  projectRoomMediaKindForFile,
+  viewerCanPostToProjectRoom,
+} from "@/lib/board/projectRoomDrop";
 
 function clsx(...parts: Array<string | false | null | undefined>) {
   return parts.filter(Boolean).join(" ");
@@ -400,7 +397,10 @@ export default function ProjectCenter() {
       merged.set(project.id, existing ? mergeProjectRecord(existing, project) : project);
     }
 
-    const next = Array.from(merged.values()).sort((a, b) => b.updatedAt - a.updatedAt);
+    const next = applyProjectRoomActivitiesToProjects(
+      Array.from(merged.values()).sort((a, b) => b.updatedAt - a.updatedAt),
+      getLocalActivity()
+    );
     const resolvedIds = new Set(resolved.map((project) => project.id));
     if (
       localProjectDrops.length > 0 ||
@@ -981,50 +981,124 @@ export default function ProjectCenter() {
     setStudioOpen(true);
   }
 
-  async function applyStudioMediaToProject(project: BoardProject, file: File) {
-    const isVideo = isProjectStudioVideoFile(file);
-    const isImage = file.type.startsWith("image/") || /\.(png|jpe?g|gif|webp|avif|heic)$/i.test(file.name);
-    if (!isVideo && !isImage) {
-      setStudioMessage("Drop Studio can add a photo, video, or art cover.");
+  async function saveProjectRoomStudioDrop(project: BoardProject, file: File) {
+    const identity = readCurrentBoardIdentity();
+    const viewer = {
+      id: currentUserId || identity.id,
+      displayName: identity.displayName,
+      username: identity.username,
+    };
+    if (
+      !viewerCanPostToProjectRoom(project, viewer, { viewing: true })
+    ) {
+      setStudioMessage("Join this project room to add a Drop.");
+      window.setTimeout(() => setStudioMessage(null), 2200);
+      throw new Error("not in project room");
+    }
+
+    const mediaKind = projectRoomMediaKindForFile(file);
+    if (!mediaKind) {
+      setStudioMessage("Drop Studio can add a photo, video, or art drop to this room.");
       window.setTimeout(() => setStudioMessage(null), 2200);
       throw new Error("unsupported project media");
     }
-    setStudioMessage(isVideo ? "Uploading video…" : "Uploading cover…");
+
+    setStudioMessage(mediaKind === "video" ? "Uploading video…" : "Uploading drop…");
     try {
-      if (isVideo) {
-        const uploaded = await uploadBoardMediaFile(file, { folder: "project-media" });
-        if (!uploaded) throw new Error("upload failed");
-        updateProject(project.id, {
-          media: projectMediaFromStudioUpload({
-            kind: "video",
-            src: uploaded.signedUrl || uploaded.publicUrl,
-            bucket: uploaded.bucket,
-            storagePath: uploaded.storagePath,
-          }),
-        });
-      } else {
-        const prepared = await prepareBoardImageFile(file, {
-          minLongEdge: BOARD_IMAGE_MIN_LONG_EDGE,
-          maxLongEdge: PROJECT_COVER_MAX_LONG_EDGE,
-        }).catch(() => file);
-        const uploaded = await uploadProjectCover(prepared);
-        if (!uploaded) throw new Error("upload failed");
-        const cover = persistableProjectCover(projectCoverFromUpload(uploaded)) ?? projectCoverFromUpload(uploaded);
-        updateProject(project.id, {
-          media: projectMediaFromStudioUpload({
-            kind: cover.kind === "video" ? "video" : "image",
-            src: cover.src,
-            bucket: cover.bucket,
-            storagePath: cover.storagePath,
-          }),
-        });
+      const uploaded = await uploadBoardMediaFile(file, { folder: "project-media" });
+      if (!uploaded) throw new Error("upload failed");
+      const mediaUrl = uploaded.signedUrl || uploaded.publicUrl;
+      if (!mediaUrl) throw new Error("upload failed");
+
+      const built = buildProjectRoomDrop({
+        project,
+        media: {
+          kind: mediaKind,
+          src: mediaUrl,
+          bucket: uploaded.bucket,
+          storagePath: uploaded.storagePath,
+        },
+        author: {
+          id: currentUserId || identity.id,
+          displayName: identity.displayName,
+          username: identity.username,
+          avatar: identity.avatar,
+          glow: identity.glow,
+          auraIntensity: identity.auraIntensity,
+        },
+        fileName: file.name,
+      });
+
+      let saved: BoardProject | null = null;
+      commitProjects((prev) =>
+        prev.map((item) => {
+          if (item.id !== project.id) return item;
+          saved = applyProjectRoomDropToProject(item, built);
+          return saved;
+        })
+      );
+      if (!saved) {
+        saved = applyProjectRoomDropToProject(project, built);
+        commitProjects((prev) => [saved as BoardProject, ...prev]);
       }
-      setStudioMessage("Media saved to this project.");
+
+      try {
+        pushDrop(built.drop);
+      } catch {
+        // Universal drop write is best-effort; the room post still lands.
+      }
+
+      try {
+        appendLocalActivity(built.activity);
+        window.dispatchEvent(
+          new CustomEvent("board:activity:new", { detail: built.activity })
+        );
+        emitBoardDropSignal(built.signal);
+      } catch {
+        // Activity fan-out is best-effort after the room drop is local.
+      }
+
+      setStudioMessage("Drop saved to this project room.");
       window.setTimeout(() => setStudioMessage(null), 1800);
-    } catch {
-      setStudioMessage("Couldn’t save that media. Try again.");
+
+      void (async () => {
+        try {
+          const owned = notebookProjectsOwnedByViewer(
+            [saved as BoardProject],
+            currentUserId
+          );
+          await persistProjectListToAccount(
+            owned.length ? owned : [saved as BoardProject]
+          );
+          const sb = supabaseBrowser();
+          const userId = currentUserId || identity.id;
+          await Promise.race([
+            createActivity(sb, {
+              user_id: userId,
+              kind: built.activity.kind,
+              title: built.activity.title,
+              body: built.activity.body,
+              href: built.activity.href,
+              image_url: built.activity.image_url,
+              meta: built.activity.meta,
+            }),
+            new Promise<void>((resolve) => window.setTimeout(resolve, 4_000)),
+          ]);
+        } catch {
+          // Keep the local room drop even if remote activity sync fails.
+        }
+      })();
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        (error.message === "unsupported project media" ||
+          error.message === "not in project room")
+      ) {
+        throw error;
+      }
+      setStudioMessage("Couldn’t save that Drop. Try again.");
       window.setTimeout(() => setStudioMessage(null), 2200);
-      throw new Error("Couldn’t save project media.");
+      throw new Error("Couldn’t save project room drop.");
     }
   }
 
@@ -1111,12 +1185,28 @@ export default function ProjectCenter() {
     if (!activeProject) return;
     const text = roomDraft.trim();
     if (!text) return;
+    const identity = readCurrentBoardIdentity();
+    if (
+      !viewerCanPostToProjectRoom(
+        activeProject,
+        {
+          id: currentUserId || identity.id,
+          displayName: identity.displayName,
+          username: identity.username,
+        },
+        { viewing: true }
+      )
+    ) {
+      return;
+    }
 
     const post: ProjectRoomPost = {
       id: uid("post"),
-      authorName: activeProject.contactName || "Host",
+      authorName: identity.displayName || activeProject.contactName || "Host",
+      authorId: currentUserId || identity.id,
       text,
       createdAt: Date.now(),
+      projectId: activeProject.id,
     };
 
     updateProject(activeProject.id, {
@@ -1163,8 +1253,10 @@ export default function ProjectCenter() {
             (studioProject && projects.find((project) => project.id === studioProject.id)) ||
             studioProject ||
             activeProject;
-          if (!target) return;
-          await applyStudioMediaToProject(target, file);
+          if (!target) {
+            throw new Error("No project room is open.");
+          }
+          await saveProjectRoomStudioDrop(target, file);
           setStudioOpen(false);
           setStudioProject(null);
         }}
@@ -1778,6 +1870,24 @@ export default function ProjectCenter() {
                     <div className="mt-2 whitespace-pre-wrap text-sm text-white/68">
                       {post.text}
                     </div>
+                    {post.mediaUrl ? (
+                      post.mediaKind === "video" ? (
+                        <video
+                          className="mt-3 max-h-64 w-full rounded-2xl border border-white/10 bg-black/40 object-cover"
+                          src={post.mediaUrl}
+                          controls
+                          playsInline
+                          preload="metadata"
+                        />
+                      ) : (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          className="mt-3 max-h-64 w-full rounded-2xl border border-white/10 bg-black/40 object-cover"
+                          src={post.mediaUrl}
+                          alt=""
+                        />
+                      )
+                    ) : null}
                   </div>
                 ))}
               </div>

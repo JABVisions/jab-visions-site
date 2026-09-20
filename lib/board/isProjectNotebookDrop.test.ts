@@ -92,6 +92,23 @@ assert(
   "work thoughts must not count as project drops"
 );
 
+assert(
+  !isExplicitProjectDropRecord({
+    id: "project_room_tape_1",
+    kind: "board_drop",
+    title: "Those Ryderz — Audition tape",
+    body: "Zoe posted an audition tape in Those Ryderz.",
+    meta: {
+      origin: "project_room",
+      cardStyle: "project_room_drop",
+      dropType: "video",
+      projectId: "project_keep_me",
+      signalSeed: { type: "project_room_drop_created", projectId: "project_keep_me" },
+    },
+  }),
+  "project room media drops must not mint a new project room"
+);
+
 // Genuine project drops
 assert(
   isExplicitProjectDropRecord({

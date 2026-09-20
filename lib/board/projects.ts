@@ -11,6 +11,10 @@ import {
   notebookSourceForProjectRecord,
 } from "@/lib/board/isProjectNotebookDrop";
 import {
+  applyProjectRoomActivitiesToProjects,
+  mergeRoomPosts,
+} from "@/lib/board/projectRoomDrop";
+import {
   mergeProjectCover,
   persistableImageUrl,
   persistableProjectCover,
@@ -78,8 +82,15 @@ export type ProjectInvite = {
 export type ProjectRoomPost = {
   id: string;
   authorName: string;
+  authorId?: string;
   text: string;
   createdAt: number;
+  mediaUrl?: string;
+  mediaKind?: "image" | "video";
+  bucket?: string;
+  storagePath?: string;
+  dropId?: string;
+  projectId?: string;
 };
 
 export type BoardProject = {
@@ -173,15 +184,36 @@ function normalizeInvite(value: any): ProjectInvite | null {
   };
 }
 
+function persistableRoomMediaUrl(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const src = value.trim();
+  if (!src || src.startsWith("data:") || src.startsWith("blob:")) return undefined;
+  return src;
+}
+
 function normalizeRoomPost(value: any): ProjectRoomPost | null {
   if (!value || typeof value !== "object") return null;
   const text = String(value.text ?? "").trim();
-  if (!text) return null;
+  const mediaUrl = persistableRoomMediaUrl(value.mediaUrl ?? value.src);
+  if (!text && !mediaUrl) return null;
+  const mediaKind =
+    value.mediaKind === "video" || value.kind === "video"
+      ? "video"
+      : value.mediaKind === "image" || value.kind === "image"
+        ? "image"
+        : undefined;
   return {
     id: String(value.id ?? uid("post")),
     authorName: String(value.authorName ?? "Host"),
-    text,
+    authorId: typeof value.authorId === "string" ? value.authorId : undefined,
+    text: text || (mediaKind === "video" ? "Posted a video drop." : "Posted a photo drop."),
     createdAt: safeTime(value.createdAt),
+    mediaUrl,
+    mediaKind,
+    bucket: typeof value.bucket === "string" ? value.bucket : undefined,
+    storagePath: typeof value.storagePath === "string" ? value.storagePath : undefined,
+    dropId: typeof value.dropId === "string" ? value.dropId : undefined,
+    projectId: typeof value.projectId === "string" ? value.projectId : undefined,
   };
 }
 
@@ -356,10 +388,7 @@ export function mergeProjectRecord(
       Array.isArray(base.invites) && base.invites.length > 0
         ? base.invites
         : incoming.invites,
-    roomPosts:
-      Array.isArray(base.roomPosts) && base.roomPosts.length > 0
-        ? base.roomPosts
-        : incoming.roomPosts,
+    roomPosts: mergeRoomPosts(base.roomPosts, incoming.roomPosts),
     updatedAt: Math.max(safeTime(base.updatedAt), safeTime(incoming.updatedAt)),
   };
 }
@@ -878,7 +907,12 @@ export async function syncRemoteProjectActivitiesToStorage(sb: any) {
       merged.set(project.id, existing ? mergeProjectRecord(existing, project) : project);
     }
 
-    const next = Array.from(merged.values())
+    const withRoomDrops = applyProjectRoomActivitiesToProjects(
+      Array.from(merged.values()),
+      remoteActivities as BoardActivity[]
+    );
+
+    const next = withRoomDrops
       .filter((project) => isStoredNotebookProject(project))
       .sort((a, b) => b.updatedAt - a.updatedAt);
     if (!next.length && stored.length) {

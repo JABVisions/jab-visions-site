@@ -7,6 +7,7 @@ import {
   studioMediaKindForFile,
   uploadKindForFile,
   uploadTimeoutMsForBytes,
+  studioCompleteTimeoutMs,
   resolveUploadContentType,
 } from "./uploadLimits";
 
@@ -50,5 +51,13 @@ assert(formatBytes(25 * 1024 * 1024) === "25MB", "25MB formats as MB");
 assert(uploadTimeoutMsForBytes(1024 * 1024) === 180_000, "tiny files still get a 3-minute floor");
 assert(uploadTimeoutMsForBytes(600 * 1024 * 1024) === 20 * 60_000, "600MB gets 20 minutes");
 assert(uploadTimeoutMsForBytes(4 * 1024 * 1024 * 1024) === 60 * 60_000, "4GB is capped at 60 minutes");
+assert(
+  studioCompleteTimeoutMs(80 * 1024 * 1024) > 20_000,
+  "Project Room video complete must outlive the old 20s Drafts timeout"
+);
+assert(
+  studioCompleteTimeoutMs(4 * 1024 * 1024 * 1024) === 60 * 60_000 + 15_000,
+  "4GB audition tapes get the full upload budget plus a close buffer"
+);
 
 console.log("uploadLimits.check.ts ok");

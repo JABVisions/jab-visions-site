@@ -118,6 +118,14 @@ export function isExplicitProjectDropRecord(value: unknown): boolean {
     return false;
   }
 
+  if (
+    origin === "project_room" ||
+    normalizeProjectToken(meta.cardStyle) === "project_room_drop" ||
+    String(meta.signalSeed?.type ?? "") === "project_room_drop_created"
+  ) {
+    return false;
+  }
+
   if (destination === "projects") return true;
   if (origin === "project_notebook") return true;
   if (isDropPadProjectStorageKey(item.storageKey || meta.storageKey || source)) {
