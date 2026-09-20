@@ -52,7 +52,7 @@ import { emitBoardDropSignal } from "@/lib/board/dropSignals";
 import LazyDropStudioStage from "@/app/components/board/LazyDropStudioStage";
 import ActivityCard from "@/app/components/board/ActivityCard";
 import type { DropCustomization } from "@/lib/board/dropCustomizations";
-import { uploadBoardMediaFile, explainBoardMediaUploadError, preferredCommitPlaybackUrl, canCommitBoardMediaPlayback, guessUploadBytes } from "@/lib/board/boardMediaUpload";
+import { uploadBoardMediaFile, explainBoardMediaUploadError, isBoardStorageLimitMessage, preferredCommitPlaybackUrl, canCommitBoardMediaPlayback, guessUploadBytes } from "@/lib/board/boardMediaUpload";
 import type { BoardUploadProgressHandler } from "@/lib/board/uploadProgress";
 import { preparingUploadProgress } from "@/lib/board/uploadProgress";
 import { boardProjectPatchFromDrop } from "@/lib/board/projectDropEdit";
@@ -1297,7 +1297,10 @@ export default function ProjectCenter() {
           throw error;
         }
         setStudioMessage(message);
-        window.setTimeout(() => setStudioMessage(null), 2800);
+        window.setTimeout(
+          () => setStudioMessage(null),
+          isBoardStorageLimitMessage(message) ? 12_000 : 2800
+        );
         throw new Error(message);
       }
     });

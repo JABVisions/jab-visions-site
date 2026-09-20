@@ -2,6 +2,10 @@ import { BUCKET_MEDIA } from "./dropItem";
 import {
   explainBoardMediaUploadError,
   isStoragePayloadTooLargeError,
+  isLikelyBoardStorageLimitFailure,
+  isBoardStorageLimitMessage,
+  boardMediaStorageLimitMessage,
+  BOARD_MEDIA_LIMIT_SQL_PATH,
   parseBoardMediaUploadResponse,
   prefersDirectStorageUpload,
   shouldSkipServerlessMediaUpload,
@@ -15,6 +19,7 @@ import {
   SIGNED_PLAYBACK_TIMEOUT_MS,
   START_UPLOAD_STALL_MS,
   acceptXhrOutcome,
+  xhrIndicatesPayloadTooLarge,
   isMissingObjectUploadError,
   BoardMediaUploadError,
   type BoardMediaUploadOptions,
@@ -116,14 +121,60 @@ assert(
   ),
   "a 413 substring in a storage path is not a size limit"
 );
+const tape65 = { size: 64.9 * 1024 * 1024, type: "video/mp4", name: "audition.mp4" };
+const limit65 = explainBoardMediaUploadError(new Error("Payload too large"), tape65);
+assert(isBoardStorageLimitMessage(limit65), "413 under 4GB must say Board storage limit");
+assert(limit65.includes(BOARD_MEDIA_LIMIT_SQL_PATH), "413 under 4GB must point at the SQL script");
+assert(limit65.toLowerCase().includes("storage") && limit65.toLowerCase().includes("4gb"), "413 under 4GB must mention Storage Settings 4GB");
+assert(!limit65.toLowerCase().includes("shorter take"), "64.9MB is not over the 4GB app cap and must not ask for a shorter take");
+assert(!limit65.toLowerCase().includes("couldn't save this video to board storage"), "vague couldn't-save copy hid the 50MB Supabase cap");
 assert(
-  explainBoardMediaUploadError(new Error("Payload too large"), { size: 64.9 * 1024 * 1024 }).includes(
-    "Board storage"
-  ) &&
-    !explainBoardMediaUploadError(new Error("Payload too large"), { size: 64.9 * 1024 * 1024 }).includes(
-      "shorter take"
-    ),
-  "64.9MB is not over the 4GB app cap and must not ask for a shorter take"
+  isLikelyBoardStorageLimitFailure(new Error("Payload too large"), tape65),
+  "a 65MB 413 is a Board storage limit, not a shorter-take"
+);
+assert(
+  xhrIndicatesPayloadTooLarge(
+    0,
+    '{"statusCode":"413","error":"Payload too large","message":"The object exceeded the maximum allowed size"}'
+  ),
+  "iPhone XHR status 0 with a 413 body is still a storage limit"
+);
+assert(
+  !xhrIndicatesPayloadTooLarge(0, ""),
+  "empty status-0 body is not assumed to be 413"
+);
+const missing65 = explainBoardMediaUploadError(
+  new BoardMediaUploadError("This video didn't finish saving to Board storage. Try uploading it again.", "missing"),
+  tape65
+);
+assert(
+  isBoardStorageLimitMessage(missing65),
+  "iPhone status-0 + missing object on a 65MB tape is the 50MB Storage Settings cap"
+);
+assert(
+  isLikelyBoardStorageLimitFailure(
+    new BoardMediaUploadError("This video didn't finish saving to Board storage. Try uploading it again.", "missing"),
+    tape65
+  ),
+  "missing 65MB objects after PUT must raise the limit instead of looping transports"
+);
+assert(
+  !isLikelyBoardStorageLimitFailure(
+    new BoardMediaUploadError("This video didn't finish saving to Board storage. Try uploading it again.", "missing"),
+    { size: 2 * 1024 * 1024, type: "video/mp4" }
+  ),
+  "a missing 2MB object is not blamed on the 50MB cap"
+);
+assert(
+  explainBoardMediaUploadError(
+    new BoardMediaUploadError("This video didn't finish saving to Board storage. Try uploading it again.", "missing"),
+    { size: 2 * 1024 * 1024, type: "video/mp4" }
+  ).includes("didn't finish saving"),
+  "small missing objects keep the retry copy"
+);
+assert(
+  /65MB/.test(boardMediaStorageLimitMessage(tape65)),
+  "limit copy names the tape size so the 50MB cap is obvious"
 );
 assert(
   explainBoardMediaUploadError(new Error("Payload too large"), {

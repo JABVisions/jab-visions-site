@@ -1,8 +1,13 @@
 -- Raise Board media buckets to the 4GB app video cap.
 -- Paste THIS SCRIPT into the Supabase SQL Editor (Dashboard -> SQL -> New query).
 -- Default bucket file_size_limit is 50MB, which 413s a 64.9MB iPhone tape.
--- Also check Dashboard -> Storage -> Settings and set the global max file size
--- to at least 4GB if this project still 413s after this script.
+--
+-- REQUIRED in addition to this script:
+--   Dashboard -> Storage -> Settings (or Project Settings -> Storage)
+--   set the GLOBAL max file size / FILE_SIZE_LIMIT to at least 4GB.
+-- The RPC below only updates storage.buckets.file_size_limit. Hosted Supabase
+-- still 413s a 65MB Project Room tape when the project-wide Storage Settings
+-- cap stays at 50MB. This script cannot change that global gateway limit.
 
 update storage.buckets
 set file_size_limit = 4294967296

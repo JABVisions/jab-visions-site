@@ -2,6 +2,7 @@ import { Upload } from "tus-js-client";
 import { BUCKET_DOCS, BUCKET_MEDIA } from "@/lib/board/dropItem";
 import {
   SERVERLESS_UPLOAD_BODY_LIMIT,
+  SUPABASE_DEFAULT_FILE_SIZE_LIMIT,
   TUS_CHUNK_SIZE,
   TUS_UPLOAD_THRESHOLD,
   DIRECT_STORAGE_UPLOAD_MAX_BYTES,
@@ -142,6 +143,49 @@ export function isStoragePayloadTooLargeError(error: unknown): boolean {
   );
 }
 
+export const BOARD_MEDIA_LIMIT_SQL_PATH = "supabase/sql/board_media_file_size_limit.sql";
+
+export const BOARD_MEDIA_STORAGE_LIMIT_MESSAGE =
+  "Board storage limit. This video is under the 4GB app cap — Supabase Storage is still rejecting files over ~50MB. Paste supabase/sql/board_media_file_size_limit.sql in the SQL Editor, and set Storage → Settings global max file size to at least 4GB.";
+
+export function boardMediaStorageLimitMessage(file?: {
+  size?: number;
+  type?: string;
+  name?: string;
+}): string {
+  const bytes =
+    typeof file?.size === "number" && Number.isFinite(file.size) && file.size > 0 ? file.size : 0;
+  if (bytes > 0) {
+    return `Board storage limit. This ${formatBytes(bytes)} video is under the 4GB app cap — Supabase Storage is still rejecting files over ~50MB. Paste ${BOARD_MEDIA_LIMIT_SQL_PATH} in the SQL Editor, and set Storage → Settings global max file size to at least 4GB.`;
+  }
+  return BOARD_MEDIA_STORAGE_LIMIT_MESSAGE;
+}
+
+export function isBoardStorageLimitMessage(message: string): boolean {
+  return /board storage limit/i.test(String(message || ""));
+}
+
+function uploadBytes(file?: { size?: number }): number {
+  return typeof file?.size === "number" && Number.isFinite(file.size) && file.size > 0
+    ? file.size
+    : 0;
+}
+
+/**
+ * 413 under the 4GB app cap, or a missing object after a 50MB+ PUT.
+ * iPhone Safari often hides the 413 as XHR status 0 at 100%, then
+ * `createSignedUrl` 404s and used to say "couldn't save to Board storage."
+ */
+export function isLikelyBoardStorageLimitFailure(
+  error: unknown,
+  file?: { size?: number; type?: string; name?: string }
+): boolean {
+  const bytes = uploadBytes(file);
+  if (bytes > UPLOAD_LIMITS.video) return false;
+  if (isStoragePayloadTooLargeError(error)) return true;
+  return bytes > SUPABASE_DEFAULT_FILE_SIZE_LIMIT && isMissingObjectUploadError(error);
+}
+
 export function isUnauthorizedUploadError(error: unknown): boolean {
   const lower = storageErrorText(error).toLowerCase();
   return /row-level security|not allowed|unauthorized|jwt|42501|403|401|access denied|invalid compact jws|expired/.test(
@@ -164,7 +208,7 @@ export function explainBoardMediaUploadError(
     if (bytes > UPLOAD_LIMITS.video) {
       return `That video is ${formatBytes(bytes)} — the limit is ${formatBytes(UPLOAD_LIMITS.video)}.`;
     }
-    return "Couldn't save this video to Board storage. Stay on this screen and try again.";
+    return boardMediaStorageLimitMessage(file);
   }
   if (
     /couldn.?t start this video upload|did not start|sign-in check timed out|session check timed out/.test(
@@ -185,6 +229,9 @@ export function explainBoardMediaUploadError(
     return "Sign in to upload this video.";
   }
   if (isMissingObjectUploadError(error) || /didn.?t finish saving/.test(lower)) {
+    if (isLikelyBoardStorageLimitFailure(error, file)) {
+      return boardMediaStorageLimitMessage(file);
+    }
     return "This video didn't finish saving to Board storage. Stay on this screen and try again.";
   }
   if (/could not read|notreadable|empty file/.test(lower)) {
@@ -552,6 +599,14 @@ function xhrSend(opts: {
   });
 }
 
+export function xhrIndicatesPayloadTooLarge(status: number, text: string): boolean {
+  return isStoragePayloadTooLargeError({
+    status,
+    statusCode: status,
+    message: text,
+  });
+}
+
 function throwIfFailedStatus(status: number, text: string): void {
   if (status >= 200 && status < 300) return;
   let message = text.trim() || `Board storage ${status}`;
@@ -564,7 +619,9 @@ function throwIfFailedStatus(status: number, text: string): void {
   } catch (error) {
     if (error instanceof BoardMediaUploadError) throw error;
   }
-  if (status === 413) throw new BoardMediaUploadError("Payload too large", "storage");
+  if (status === 413 || xhrIndicatesPayloadTooLarge(status, text)) {
+    throw new BoardMediaUploadError("Payload too large", "storage");
+  }
   if (status === 401 || status === 403) {
     throw new BoardMediaUploadError(message || `Upload failed (${status})`, "auth");
   }
@@ -576,6 +633,10 @@ async function playbackAfterXhrWrite(
   bucket: string,
   storagePath: string
 ): Promise<BoardMediaUploadResult> {
+  // iPhone often reports status 0 at 100% while the body is still a 413 JSON.
+  if (xhrIndicatesPayloadTooLarge(uploaded.status, uploaded.text)) {
+    throw new BoardMediaUploadError("Payload too large", "storage");
+  }
   if (uploaded.verified || uploaded.status >= 400) {
     throwIfFailedStatus(uploaded.status, uploaded.text);
   }
@@ -917,12 +978,7 @@ async function runUploadAttempts(
       return await attempt();
     } catch (error) {
       lastError = error;
-      if (isMissingObjectUploadError(error)) {
-        missingRetries += 1;
-        if (missingRetries > 1) break;
-        continue;
-      }
-      if (isStoragePayloadTooLargeError(error) && (file.size <= 0 || file.size <= UPLOAD_LIMITS.video)) {
+      if (isLikelyBoardStorageLimitFailure(error, file)) {
         mediaLimitRaise = null;
         await requestBoardMediaLimitRaise();
         try {
@@ -930,7 +986,15 @@ async function runUploadAttempts(
         } catch (retryError) {
           lastError = retryError;
         }
-      } else if (isUnauthorizedUploadError(error)) {
+        // Same 65MB tape will 413 on signed/tus too. Stop the PUT loop.
+        break;
+      }
+      if (isMissingObjectUploadError(error)) {
+        missingRetries += 1;
+        if (missingRetries > 1) break;
+        continue;
+      }
+      if (isUnauthorizedUploadError(error)) {
         try {
           await requireUploadSession();
         } catch {

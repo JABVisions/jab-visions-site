@@ -30,6 +30,12 @@ export const UPLOAD_LIMITS = {
   avatar: 10 * MB,
 } as const;
 
+/**
+ * Hosted Supabase default `FILE_SIZE_LIMIT` / bucket `file_size_limit`.
+ * A 65MB Project Room tape 413s here even when the app cap is 4GB.
+ */
+export const SUPABASE_DEFAULT_FILE_SIZE_LIMIT = 50 * MB;
+
 /** Vercel serverless incoming body cap. Larger files must not go through FormData APIs. */
 export const SERVERLESS_UPLOAD_BODY_LIMIT = 4 * MB;
 

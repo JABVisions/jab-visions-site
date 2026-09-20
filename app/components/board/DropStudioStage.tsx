@@ -57,7 +57,7 @@ import {
 } from "@/lib/board/uploadLimits";
 import type { BoardUploadProgress, BoardUploadProgressHandler } from "@/lib/board/uploadProgress";
 import { preparingUploadProgress, studioVisibleUploadProgress } from "@/lib/board/uploadProgress";
-import { guessUploadBytes } from "@/lib/board/boardMediaUpload";
+import { guessUploadBytes, isBoardStorageLimitMessage } from "@/lib/board/boardMediaUpload";
 import { saveDropDraft, draftToFile, ensureVoiceStudioDraftCard, type DropDraft } from "@/lib/board/dropDrafts";
 import DropDraftsDrawer from "./DropDraftsDrawer";
 import BoardClientErrorBoundary from "./BoardClientErrorBoundary";
@@ -2637,7 +2637,8 @@ export default function DropStudioStage({
       flashSaveNote(
         message && !isStudioCap
           ? message
-          : "Couldn't save this Drop. It's in Drafts — ✕ to leave."
+          : "Couldn't save this Drop. It's in Drafts — ✕ to leave.",
+        Boolean(message && isBoardStorageLimitMessage(message))
       );
       persistVoiceProjectRef.current();
     } finally {
