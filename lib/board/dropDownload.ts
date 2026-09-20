@@ -180,25 +180,48 @@ export function classifyDropDownload(opts: {
   return "none";
 }
 
-function triggerBlobDownload(blob: Blob, filename: string) {
-  const objectUrl = URL.createObjectURL(blob);
+function isIosSafari() {
+  if (typeof navigator === "undefined") return false;
+  return /iP(hone|ad|od)/.test(navigator.userAgent);
+}
+
+function triggerAnchorDownload(url: string, filename: string, opts?: { openTab?: boolean }) {
   const anchor = document.createElement("a");
-  anchor.href = objectUrl;
+  anchor.href = url;
   anchor.download = filename;
   anchor.rel = "noopener";
+  if (opts?.openTab) anchor.target = "_blank";
   document.body.appendChild(anchor);
   anchor.click();
   anchor.remove();
+}
+
+function triggerBlobDownload(blob: Blob, filename: string) {
+  const objectUrl = URL.createObjectURL(blob);
+  triggerAnchorDownload(objectUrl, filename);
   window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1500);
 }
 
+/** iPhone Safari often ignores blob `download`; open the signed file instead. */
+export function openOrDownloadUrl(url: string, filename: string): void {
+  triggerAnchorDownload(url, filename, { openTab: isIosSafari() });
+}
+
 export async function downloadDropFromUrl(url: string, filename: string): Promise<void> {
-  const response = await fetch(url, { mode: "cors" });
-  if (!response.ok) {
-    throw new Error(`Download failed (${response.status})`);
+  if (isIosSafari()) {
+    openOrDownloadUrl(url, filename);
+    return;
   }
-  const blob = await response.blob();
-  triggerBlobDownload(blob, filename);
+  try {
+    const response = await fetch(url, { mode: "cors" });
+    if (!response.ok) {
+      throw new Error(`Download failed (${response.status})`);
+    }
+    const blob = await response.blob();
+    triggerBlobDownload(blob, filename);
+  } catch {
+    openOrDownloadUrl(url, filename);
+  }
 }
 
 export function downloadDropText(text: string, filename: string): void {

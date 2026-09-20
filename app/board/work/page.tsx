@@ -11,6 +11,7 @@ import QuickActionsRemote, { type DropPadApp } from "@/app/components/board/Quic
 import DropPadOS from "@/app/components/board/DropPadOS.v3";
 
 import { supabaseBrowser } from "@/lib/supabase/browser";
+import { rememberBoardUploadSession } from "@/lib/board/boardUploadSession";
 
 import { POWER_EVENT, readPower, togglePower, setPower } from "@/lib/board/powerBus";
 import { DROP_PAD_APP_EVENT, readDropPadApp, setDropPadApp } from "@/lib/board/dropPadNavBus";
@@ -57,10 +58,15 @@ export default function WorkPage() {
     const run = async () => {
       try {
         // Hydrate session cookies on first load, but don't let auth boot block the Work board.
-        await Promise.race([
+        const warmed = await Promise.race([
           sb.auth.getSession(),
           new Promise((resolve) => window.setTimeout(resolve, 2500)),
         ]);
+        if (warmed && typeof warmed === "object" && "data" in warmed) {
+          rememberBoardUploadSession(
+            (warmed as { data?: { session?: unknown } }).data?.session
+          );
+        }
       } catch (error) {
         console.error("Supabase session warmup failed on Work board.", error);
       } finally {
@@ -72,7 +78,8 @@ export default function WorkPage() {
 
     run();
 
-    const { data: sub } = sb.auth.onAuthStateChange(() => {
+    const { data: sub } = sb.auth.onAuthStateChange((_event, session) => {
+      rememberBoardUploadSession(session);
       if (!cancelled) {
         // Session changes are handled by child components that need auth.
       }

@@ -48,6 +48,7 @@ import {
 } from "@/lib/board/dropbookLink";
 import { checkUploadSize } from "@/lib/board/uploadLimits";
 import { uploadBoardMediaFile, explainBoardMediaUploadError } from "@/lib/board/boardMediaUpload";
+import { resolveBoardUploadSession } from "@/lib/board/boardUploadSession";
 import type { BoardUploadProgress } from "@/lib/board/uploadProgress";
 import BoardUploadProgressBar from "./BoardUploadProgressBar";
 import { getCachedSignedMediaUrl, invalidateSignedMediaUrl } from "@/lib/board/signedMediaUrl";
@@ -1160,10 +1161,12 @@ export default function DropTile() {
   }, [mode]);
 
   async function requireSession() {
-    const supabase = supabaseBrowser();
-    const { data } = await supabase.auth.getSession();
-    if (!data.session?.user?.id) return null;
-    return { supabase, userId: data.session.user.id };
+    try {
+      const session = await resolveBoardUploadSession();
+      return { supabase: supabaseBrowser(), userId: session.user.id };
+    } catch {
+      return null;
+    }
   }
 
   async function getSignedUrl(
@@ -1303,7 +1306,7 @@ export default function DropTile() {
   }): Promise<{ bucket: string; storagePath: string } | null> {
     const sess = await requireSession();
     if (!sess) {
-      flash(setMsg, "You must be logged in to upload.", 2000);
+        flash(setMsg, "Sign in to upload this video.", 2000);
       return null;
     }
 

@@ -54,16 +54,24 @@ const committedRoomPostGuard = new Map<
   { posts: ProjectRoomPost[]; until: number }
 >();
 
+const removedRoomPostGuard = new Map<string, { keys: Set<string>; until: number }>();
+
 export function rememberCommittedRoomPosts(
   projectId: string,
   posts: ProjectRoomPost[] | null | undefined
 ) {
   const id = String(projectId || "").trim();
   if (!id) return;
-  const keep = (posts ?? []).filter(
-    (post) => projectRoomPostHasMedia(post) || Boolean(String(post.dropId || "").trim())
+  const keep = filterRemovedRoomPosts(
+    id,
+    (posts ?? []).filter(
+      (post) => projectRoomPostHasMedia(post) || Boolean(String(post.dropId || "").trim())
+    )
   );
-  if (!keep.length) return;
+  if (!keep.length) {
+    committedRoomPostGuard.delete(id);
+    return;
+  }
   const existing = committedRoomPostGuard.get(id);
   committedRoomPostGuard.set(id, {
     posts: mergeRoomPosts(existing?.posts, keep),
@@ -73,25 +81,121 @@ export function rememberCommittedRoomPosts(
 
 export function forgetCommittedRoomPosts(projectId: string) {
   committedRoomPostGuard.delete(String(projectId || "").trim());
+  removedRoomPostGuard.delete(String(projectId || "").trim());
+}
+
+export function rememberRemovedRoomPost(
+  projectId: string,
+  post: {
+    id?: string | null;
+    dropId?: string | null;
+    mediaUrl?: string | null;
+    bucket?: string | null;
+    storagePath?: string | null;
+    text?: string | null;
+  }
+) {
+  const id = String(projectId || "").trim();
+  const key = roomPostIdentityKey(post);
+  if (!id || !key) return;
+  const existing = removedRoomPostGuard.get(id) ?? {
+    keys: new Set<string>(),
+    until: 0,
+  };
+  existing.keys.add(key);
+  existing.until = Date.now() + COMMITTED_ROOM_POST_GUARD_MS;
+  removedRoomPostGuard.set(id, existing);
+  const guarded = committedRoomPostGuard.get(id);
+  if (guarded) {
+    const remaining = guarded.posts.filter((item) => roomPostIdentityKey(item) !== key);
+    if (!remaining.length) committedRoomPostGuard.delete(id);
+    else committedRoomPostGuard.set(id, { ...guarded, posts: remaining });
+  }
+}
+
+export function filterRemovedRoomPosts<T extends {
+  id?: string | null;
+  dropId?: string | null;
+  mediaUrl?: string | null;
+  bucket?: string | null;
+  storagePath?: string | null;
+  text?: string | null;
+}>(
+  projectId: string,
+  posts: T[] | null | undefined
+): T[] {
+  const list = Array.isArray(posts) ? posts : [];
+  const id = String(projectId || "").trim();
+  const tomb = removedRoomPostGuard.get(id);
+  if (!tomb) return list;
+  if (Date.now() > tomb.until) {
+    removedRoomPostGuard.delete(id);
+    return list;
+  }
+  return list.filter((post) => {
+    const key = roomPostIdentityKey(post);
+    return !key || !tomb.keys.has(key);
+  });
+}
+
+export function roomPostMatches(
+  post: {
+    id?: string | null;
+    dropId?: string | null;
+  },
+  key: string
+): boolean {
+  const needle = String(key || "").trim();
+  if (!needle) return false;
+  return String(post.id || "").trim() === needle || String(post.dropId || "").trim() === needle;
+}
+
+export function removeProjectRoomPost(
+  project: BoardProject,
+  postKey: string
+): { project: BoardProject; removed: ProjectRoomPost | null } {
+  const needle = String(postKey || "").trim();
+  const posts = Array.isArray(project.roomPosts) ? project.roomPosts : [];
+  const removed = posts.find((post) => roomPostMatches(post, needle)) ?? null;
+  if (!removed) return { project, removed: null };
+  rememberRemovedRoomPost(project.id, removed);
+  const remaining = filterRemovedRoomPosts(
+    project.id,
+    posts.filter((post) => !roomPostMatches(post, needle))
+  );
+  return {
+    project: {
+      ...project,
+      roomPosts: remaining,
+      updatedAt: Date.now(),
+    },
+    removed,
+  };
 }
 
 export function applyCommittedRoomPostGuard(
   projects: BoardProject[] | null | undefined
 ): BoardProject[] {
   const list = Array.isArray(projects) ? projects : [];
-  if (!committedRoomPostGuard.size) return list;
   const now = Date.now();
   for (const [id, entry] of committedRoomPostGuard) {
     if (now > entry.until) committedRoomPostGuard.delete(id);
   }
-  if (!committedRoomPostGuard.size) return list;
+  for (const [id, entry] of removedRoomPostGuard) {
+    if (now > entry.until) removedRoomPostGuard.delete(id);
+  }
+  if (!committedRoomPostGuard.size && !removedRoomPostGuard.size) return list;
   return list.map((project) => {
     const guarded = committedRoomPostGuard.get(project.id);
-    if (!guarded?.posts.length) return project;
-    return {
-      ...project,
-      roomPosts: mergeRoomPosts(project.roomPosts, guarded.posts),
-    };
+    const merged = guarded?.posts.length
+      ? {
+          ...project,
+          roomPosts: mergeRoomPosts(project.roomPosts, guarded.posts),
+        }
+      : project;
+    const roomPosts = filterRemovedRoomPosts(project.id, merged.roomPosts);
+    if (roomPosts === merged.roomPosts) return merged;
+    return { ...merged, roomPosts };
   });
 }
 
@@ -636,6 +740,73 @@ export function isProjectRoomDropActivity(item: {
     cardStyle === PROJECT_ROOM_DROP_CARD ||
     signalType === PROJECT_ROOM_DROP_SIGNAL
   );
+}
+
+export function activityFromProjectRoomPost(
+  post: ProjectRoomPost,
+  project?: Pick<BoardProject, "id" | "title"> | null
+): BoardActivity {
+  const createdAt = Number.isFinite(post.createdAt) ? post.createdAt : Date.now();
+  const dropId = String(post.dropId || post.id || "").trim();
+  const mediaUrl = persistableProjectRoomMediaUrl(post.mediaUrl) || "";
+  const coords = projectRoomPostStorageCoords(post);
+  const kind: ProjectRoomDropMediaKind =
+    post.mediaKind === "video" || projectRoomPostIsVideo(post) ? "video" : "image";
+  const title = projectRoomDropTitle(
+    project?.title || "Project",
+    kind,
+    coords?.storagePath
+  );
+  const body =
+    post.text ||
+    projectRoomDropBody(
+      project?.title || "this project",
+      post.authorName || "Someone",
+      kind,
+      coords?.storagePath
+    );
+  return {
+    id: dropId ? `project_room_${dropId}` : `project_room_${post.id}`,
+    created_at: new Date(createdAt).toISOString(),
+    user_id: post.authorId || null,
+    kind: "board_drop",
+    title,
+    body,
+    href: mediaUrl || null,
+    image_url: kind === "image" ? mediaUrl || null : null,
+    meta: {
+      cardStyle: PROJECT_ROOM_DROP_CARD,
+      origin: PROJECT_ROOM_DROP_ORIGIN,
+      source: "work_board",
+      projectId: post.projectId || project?.id || null,
+      dropId: dropId || post.id,
+      dropType: kind === "video" ? "video" : "media",
+      drop_flavor: kind === "video" ? "video" : "media",
+      mediaKind: kind,
+      mediaUrl: mediaUrl || null,
+      bucket: coords?.bucket || post.bucket || null,
+      storagePath: coords?.storagePath || post.storagePath || null,
+      authorId: post.authorId || null,
+      authorName: post.authorName || null,
+      fileName: coords?.storagePath?.split("/").pop() || null,
+      signalSeed: {
+        type: PROJECT_ROOM_DROP_SIGNAL,
+        projectId: post.projectId || project?.id || null,
+        dropId: dropId || post.id,
+      },
+    },
+  };
+}
+
+export function projectRoomDropDownloadKind(
+  post: ProjectRoomPost
+): "image" | "video" | "audio" | "file" | "none" {
+  if (projectRoomPostIsVideo(post)) return "video";
+  if (post.mediaKind === "image") return "image";
+  const src = String(post.storagePath || post.mediaUrl || "");
+  if (/\.(mp3|wav|m4a|aac|ogg|flac)(\?|#|$)/i.test(src)) return "audio";
+  if (projectRoomPostHasMedia(post)) return "file";
+  return "none";
 }
 
 export function projectRoomPostFromActivity(

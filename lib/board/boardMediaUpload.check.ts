@@ -91,6 +91,18 @@ assert(
   "RLS failures ask for sign-in, not connection"
 );
 assert(
+  explainBoardMediaUploadError(new Error("Sign-in check timed out.")).includes("start this video upload"),
+  "a hung getSession is not reported as signed-out"
+);
+assert(
+  !explainBoardMediaUploadError(new Error("Sign-in check timed out.")).toLowerCase().includes("sign in to upload"),
+  "session-check timeout must not tell a logged-in room to sign in"
+);
+assert(
+  explainBoardMediaUploadError(new Error("You must be signed in to upload to Board")).includes("Sign in to upload"),
+  "explicit signed-out copy stays signed-out"
+);
+assert(
   isStoragePayloadTooLargeError(
     new Error('tus: unexpected response (method: POST, response code: 413, response text: Payload too large)')
   ),

@@ -45,16 +45,19 @@ import {
   resolveProjectStartDate,
 } from "@/lib/board/projectCover";
 import { getCurrentUserId, loadAllLocalDrops } from "@/lib/board/boardDropEditStore";
+import { rememberBoardUploadSession } from "@/lib/board/boardUploadSession";
 import { pushDrop, readDrops, writeDrops } from "@/lib/board/drops/storage";
 import { readCurrentBoardIdentity } from "@/lib/board/currentProfile";
 import { emitBoardDropSignal } from "@/lib/board/dropSignals";
 import LazyDropStudioStage from "@/app/components/board/LazyDropStudioStage";
+import ActivityCard from "@/app/components/board/ActivityCard";
 import type { DropCustomization } from "@/lib/board/dropCustomizations";
 import { uploadBoardMediaFile, explainBoardMediaUploadError, preferredCommitPlaybackUrl, canCommitBoardMediaPlayback, guessUploadBytes } from "@/lib/board/boardMediaUpload";
 import type { BoardUploadProgressHandler } from "@/lib/board/uploadProgress";
 import { preparingUploadProgress } from "@/lib/board/uploadProgress";
 import { boardProjectPatchFromDrop } from "@/lib/board/projectDropEdit";
 import {
+  activityFromProjectRoomPost,
   applyProjectRoomActivitiesToProjects,
   buildProjectRoomDrop,
   commitProjectRoomDrop,
@@ -70,6 +73,7 @@ import {
   projectRoomVideoPlaybackType,
   projectRoomVideoSrcIsPlayable,
   PROJECT_ROOM_CLOUD_SYNC_TIMEOUT_MS,
+  removeProjectRoomPost,
   runProjectRoomStudioSaveOnce,
   viewerCanPostToProjectRoom,
   withDeadline,
@@ -650,6 +654,7 @@ export default function ProjectCenter() {
     });
 
     const { data: sub } = sb.auth.onAuthStateChange((_event, session) => {
+      rememberBoardUploadSession(session);
       void boot(session?.user?.id ?? null);
     });
     const readyTimer = window.setTimeout(() => {
@@ -1412,6 +1417,40 @@ export default function ProjectCenter() {
     setRoomDraft("");
   };
 
+  function removeRoomDrop(postKey: string) {
+    const live =
+      (activeProjectId
+        ? projectsRef.current.find((project) => project.id === activeProjectId)
+        : null) || activeProject;
+    if (!live) return;
+    const { project: next, removed } = removeProjectRoomPost(live, postKey);
+    if (!removed) return;
+    commitProjects((prev) =>
+      prev.map((project) => (project.id === next.id ? next : project))
+    );
+    const dropId = String(removed.dropId || "").trim();
+    const postId = String(removed.id || "").trim();
+    if (dropId || postId) {
+      removeLocalActivity((item) => {
+        const meta = item.meta && typeof item.meta === "object" ? item.meta : {};
+        return (
+          item.id === `project_room_${dropId}` ||
+          item.id === `project_room_${postId}` ||
+          String(meta.dropId || "") === dropId ||
+          String(meta.dropId || "") === postId
+        );
+      });
+      removeDrops(
+        (drop) =>
+          drop.id === dropId ||
+          drop.id === postId ||
+          String(drop.meta?.dropId || "") === dropId
+      );
+    }
+    const owned = notebookProjectsOwnedByViewer([next], currentUserId);
+    void persistProjectListToAccount(owned.length ? owned : [next]);
+  }
+
   const projectTiles = useMemo(
     () => [...projects].sort((a, b) => b.updatedAt - a.updatedAt),
     [projects]
@@ -2054,41 +2093,57 @@ export default function ProjectCenter() {
 
               <div className="mt-4 grid gap-3">
                 {activeProject.roomPosts.some((post) => projectRoomPostHasMedia(post)) ? (
-                  <div className="rounded-2xl border border-cyan-100/15 bg-cyan-400/[0.06] p-3">
-                    <div className="text-[11px] tracking-[0.28em] text-cyan-50/55">
-                      ROOM DROPS
-                    </div>
-                    <div className="mt-3 grid gap-3">
-                      {activeProject.roomPosts
-                        .filter((post) => projectRoomPostHasMedia(post))
-                        .map((post) => (
-                          <div key={`media-${post.id}`}>
-                            <div className="text-xs text-white/55">{post.authorName}</div>
-                            <RoomPostMedia post={post} />
-                          </div>
-                        ))}
-                    </div>
+                  <div className="text-[11px] tracking-[0.28em] text-cyan-50/55">
+                    ROOM DROPS
                   </div>
                 ) : null}
-                {activeProject.roomPosts.map((post) => (
-                  <div
-                    key={post.id}
-                    className="rounded-2xl border border-white/10 bg-black/25 p-4"
-                  >
-                    <div className="flex items-center justify-between gap-3">
-                      <div className="text-sm font-medium text-white/86">
-                        {post.authorName}
+                {activeProject.roomPosts.map((post) =>
+                  projectRoomPostHasMedia(post) ? (
+                    <ActivityCard
+                      key={post.dropId || post.id}
+                      item={activityFromProjectRoomPost(post, activeProject)}
+                      roomScoped
+                      onRemove={(dropId) =>
+                        removeRoomDrop(dropId || post.dropId || post.id)
+                      }
+                    />
+                  ) : (
+                    <div
+                      key={post.id}
+                      className="rounded-2xl border border-white/10 bg-black/25 p-4"
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="text-sm font-medium text-white/86">
+                          {post.authorName}
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <div className="text-xs text-white/42">
+                            {formatDate(post.createdAt)}
+                          </div>
+                          <button
+                            type="button"
+                            className="rounded-full border border-pink-300/25 bg-pink-400/15 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-pink-100/90"
+                            onClick={() => {
+                              if (
+                                !window.confirm(
+                                  "Remove this drop from the project room?"
+                                )
+                              ) {
+                                return;
+                              }
+                              removeRoomDrop(post.id);
+                            }}
+                          >
+                            Remove
+                          </button>
+                        </div>
                       </div>
-                      <div className="text-xs text-white/42">
-                        {formatDate(post.createdAt)}
+                      <div className="mt-2 whitespace-pre-wrap text-sm text-white/68">
+                        {post.text}
                       </div>
                     </div>
-                    <div className="mt-2 whitespace-pre-wrap text-sm text-white/68">
-                      {post.text}
-                    </div>
-                    <RoomPostMedia post={post} />
-                  </div>
-                ))}
+                  )
+                )}
               </div>
             </div>
           </div>

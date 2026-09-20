@@ -481,6 +481,8 @@ type Props = {
   hideAuthor?: boolean;
   openBucketOnSignal?: boolean; // feels “command-center-ish”
   onRemove?: (dropId: string) => void;
+  /** Project Room posts: same card, room-only remove, no feed wipe. */
+  roomScoped?: boolean;
 };
 
 function ActivityCard({
@@ -489,6 +491,7 @@ function ActivityCard({
   hideAuthor = false,
   openBucketOnSignal = false,
   onRemove,
+  roomScoped = false,
 }: Props) {
   const [toast, setToast] = useState<string | null>(null);
   const [embedFailed, setEmbedFailed] = useState(false);
@@ -604,6 +607,7 @@ function ActivityCard({
     authorUserId === currentAuthUserId
       ? true
       : activityOwnedByCurrentUser(item, meta, viewerIdentity));
+  const canRemoveDrop = roomScoped || isCurrentUserDrop;
   const authorGlow =
     colorFromAura(meta?.authorAuraColor) ||
     colorFromAura(meta?.auraColor) ||
@@ -1265,12 +1269,19 @@ function ActivityCard({
   }
 
   async function removeDropFromBoard() {
-    if (!id || !isCurrentUserDrop) return;
+    if (!id || !canRemoveDrop) return;
     if (isRemovingDrop) return;
-    if (!window.confirm("Remove this drop from your Board?")) return;
+    const confirmMessage = roomScoped
+      ? "Remove this drop from the project room?"
+      : "Remove this drop from your Board?";
+    if (!window.confirm(confirmMessage)) return;
 
     setIsRemovingDrop(true);
     try {
+      if (roomScoped) {
+        onRemove?.(metaString(meta?.dropId, meta?.originalDropId, id) || id);
+        return;
+      }
       await performDropRemoval();
     } catch (error) {
       console.error("Failed to remove drop from Board:", error);
@@ -1444,7 +1455,7 @@ function ActivityCard({
           <div className="metaRow">
             <RemovableDropBadge
               label={kindLabel}
-              canRemove={isCurrentUserDrop}
+              canRemove={canRemoveDrop}
               onRemove={removeDropFromBoard}
               isRemoving={isRemovingDrop}
             />
@@ -1484,7 +1495,7 @@ function ActivityCard({
 
       {body && !isDescriptDrop && !isDropbookSlide ? <div className="body">{body}</div> : null}
 
-      {isCurrentUserDrop ? (
+      {isCurrentUserDrop && !roomScoped ? (
         <div className="ownerTools" aria-label="Drop owner controls">
           {canOpenStudio ? (
             <button

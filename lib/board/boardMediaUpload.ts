@@ -21,6 +21,10 @@ import {
 } from "@/lib/board/uploadProgress";
 import { supabaseBrowser } from "@/lib/supabase/browser";
 import { isMissingStorageObjectError } from "@/lib/board/signedMediaUrl";
+import {
+  BoardUploadSessionError,
+  resolveBoardUploadSession,
+} from "@/lib/board/boardUploadSession";
 
 /** Floor used by callers that don't have a file size yet. Prefer `uploadTimeoutMsForBytes`. */
 export const BOARD_MEDIA_UPLOAD_TIMEOUT_MS = 180_000;
@@ -162,20 +166,26 @@ export function explainBoardMediaUploadError(
     }
     return "Couldn't save this video to Board storage. Stay on this screen and try again.";
   }
+  if (
+    /couldn.?t start this video upload|did not start|sign-in check timed out|session check timed out/.test(
+      lower
+    )
+  ) {
+    return "Couldn't start this video upload. Stay on this screen and try again.";
+  }
+  if (/timed out|timeout|aborted|abort|stalled/.test(lower)) {
+    return "Video upload timed out. Stay on this screen and try again on Wi-Fi.";
+  }
   if (isUnauthorizedUploadError(error)) {
     return "Sign in again to upload this video.";
   }
-  if (/couldn.?t start this video upload|did not start/.test(lower)) {
-    return "Couldn't start this video upload. Stay on this screen and try again.";
-  }
-  if (/sign-in|sign in|session/.test(lower)) {
+  if (
+    /must be (signed|logged) in|sign in to upload|sign-in to upload/.test(lower)
+  ) {
     return "Sign in to upload this video.";
   }
   if (isMissingObjectUploadError(error) || /didn.?t finish saving/.test(lower)) {
     return "This video didn't finish saving to Board storage. Stay on this screen and try again.";
-  }
-  if (/timed out|timeout|aborted|abort|stalled/.test(lower)) {
-    return "Video upload timed out. Stay on this screen and try again on Wi-Fi.";
   }
   if (/could not read|notreadable|empty file/.test(lower)) {
     return "Safari couldn't read that video. Try Retake, or pick it again from Recents.";
@@ -651,31 +661,15 @@ async function signedResult(
 }
 
 async function requireUploadSession() {
-  const supabase = supabaseBrowser();
-  const { data } = await withTimeout(
-    supabase.auth.getSession(),
-    BOARD_MEDIA_SESSION_TIMEOUT_MS,
-    "Sign-in check timed out."
-  );
-  const session = data.session;
-  const expiresAtMs = session?.expires_at ? session.expires_at * 1000 : 0;
-  if (
-    session?.user?.id &&
-    session.access_token &&
-    (!expiresAtMs || expiresAtMs > Date.now() + 60_000)
-  ) {
-    return session;
+  try {
+    return await resolveBoardUploadSession();
+  } catch (error) {
+    if (error instanceof BoardUploadSessionError) {
+      throw new BoardMediaUploadError(error.message, error.code);
+    }
+    const text = error instanceof Error ? error.message : "Sign in to upload this video.";
+    throw new BoardMediaUploadError(text, "auth");
   }
-
-  const { data: refreshed } = await withTimeout(
-    supabase.auth.refreshSession(),
-    BOARD_MEDIA_SESSION_TIMEOUT_MS,
-    "Sign-in check timed out."
-  );
-  if (refreshed.session?.user?.id && refreshed.session.access_token) {
-    return refreshed.session;
-  }
-  throw new BoardMediaUploadError("Sign in to upload this video.", "auth");
 }
 
 function throwStorageFailure(error: unknown): never {

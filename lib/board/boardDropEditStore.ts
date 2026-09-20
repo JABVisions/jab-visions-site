@@ -9,6 +9,7 @@ import { syncActivitiesForDropEdit } from "@/lib/board/activity";
 import { ensureImageFileMinResolution, isHeicFile } from "@/lib/board/imageQuality";
 import { checkUploadSize, uploadTimeoutMsForBytes } from "@/lib/board/uploadLimits";
 import { uploadBoardMediaFile } from "@/lib/board/boardMediaUpload";
+import { resolveBoardUploadSession } from "@/lib/board/boardUploadSession";
 import type { BoardUploadProgressHandler } from "@/lib/board/uploadProgress";
 import type { DropItem } from "@/lib/board/dropItem";
 import { rememberDeletedDropId } from "@/lib/board/dropItem";
@@ -135,9 +136,8 @@ export async function loadDropMediaForFeed(
 
 export async function getCurrentUserId(): Promise<string | null> {
   try {
-    const supabase = supabaseBrowser();
-    const { data } = await supabase.auth.getSession();
-    return data.session?.user?.id ?? null;
+    const session = await resolveBoardUploadSession();
+    return session.user.id;
   } catch {
     return null;
   }

@@ -1,4 +1,5 @@
 import {
+  activityFromProjectRoomPost,
   applyCommittedRoomPostGuard,
   applyProjectRoomActivitiesToProjects,
   applyProjectRoomDropToProject,
@@ -10,6 +11,7 @@ import {
   mergeRoomPosts,
   persistableProjectRoomMediaUrl,
   preferredProjectRoomMediaSrc,
+  projectRoomDropDownloadKind,
   projectRoomDropTitle,
   projectRoomMediaKindForFile,
   projectRoomPostHasMedia,
@@ -22,6 +24,7 @@ import {
   projectRoomVideoSrcIsPlayable,
   isUnplayableProjectRoomVideoPost,
   rememberCommittedRoomPosts,
+  removeProjectRoomPost,
   stripUnplayableProjectRoomVideos,
   runProjectRoomStudioSaveOnce,
   viewerCanPostToProjectRoom,
@@ -309,6 +312,49 @@ assert(
     (post) => post.id === "post_tape"
   ),
   "commit updates the open project in the list, not a duplicate room"
+);
+
+const feedLike = activityFromProjectRoomPost(committed.saved.roomPosts[0], committed.saved);
+assert(feedLike.kind === "board_drop", "room renderer uses the feed drop kind");
+assert(feedLike.meta?.mediaKind === "video", "room renderer keeps video playback fields");
+assert(feedLike.meta?.bucket === "board-media", "room renderer keeps private bucket coords");
+assert(
+  String(feedLike.meta?.storagePath || "").includes("project-media/tape.mp4"),
+  "room renderer keeps storage path for signed playback"
+);
+assert(feedLike.meta?.authorName === "Zoe", "room renderer keeps the drop author");
+assert(
+  projectRoomDropDownloadKind(committed.saved.roomPosts[0]) === "video",
+  "room download uses the video file, not a public 403 URL"
+);
+
+const removableProject = { ...committed.saved, id: "project_remove_room" };
+const removed = removeProjectRoomPost(removableProject, "post_tape");
+assert(removed.removed?.id === "post_tape", "remove targets that room Drop");
+assert(
+  !removed.project.roomPosts.some((post) => post.id === "post_tape"),
+  "remove deletes only that room Drop"
+);
+assert(
+  removed.project.roomPosts.some((post) => post.id === "post_welcome"),
+  "remove must not wipe the rest of the room"
+);
+const resurrected = preferLiveRoomPosts(
+  [
+    {
+      ...removableProject,
+      roomPosts: [built.post, ...(project.roomPosts ?? [])],
+    },
+  ],
+  [removed.project]
+);
+assert(
+  !resurrected[0]?.roomPosts.some((post) => post.id === "post_tape"),
+  "stale hydrate cannot bring a removed room Drop back"
+);
+assert(
+  resurrected[0]?.roomPosts.some((post) => post.id === "post_welcome"),
+  "tombstone still keeps the rest of the room"
 );
 
 assert(
