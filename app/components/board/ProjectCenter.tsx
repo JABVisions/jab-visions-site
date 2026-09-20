@@ -49,8 +49,9 @@ import { readCurrentBoardIdentity } from "@/lib/board/currentProfile";
 import { emitBoardDropSignal } from "@/lib/board/dropSignals";
 import LazyDropStudioStage from "@/app/components/board/LazyDropStudioStage";
 import type { DropCustomization } from "@/lib/board/dropCustomizations";
-import { uploadBoardMediaFile, explainBoardMediaUploadError, preferredCommitPlaybackUrl, canCommitBoardMediaPlayback } from "@/lib/board/boardMediaUpload";
+import { uploadBoardMediaFile, explainBoardMediaUploadError, preferredCommitPlaybackUrl, canCommitBoardMediaPlayback, guessUploadBytes } from "@/lib/board/boardMediaUpload";
 import type { BoardUploadProgressHandler } from "@/lib/board/uploadProgress";
+import { preparingUploadProgress } from "@/lib/board/uploadProgress";
 import { boardProjectPatchFromDrop } from "@/lib/board/projectDropEdit";
 import {
   applyProjectRoomActivitiesToProjects,
@@ -1155,6 +1156,7 @@ export default function ProjectCenter() {
 
       setStudioMessage(mediaKind === "video" ? "Uploading video…" : "Uploading drop…");
       try {
+        onProgress?.(preparingUploadProgress(guessUploadBytes(file)));
         const uploaded = await uploadBoardMediaFile(file, { folder: "project-media", onProgress });
         onProgress?.(null);
         if (!canCommitBoardMediaPlayback(uploaded)) {

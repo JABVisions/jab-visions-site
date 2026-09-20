@@ -55,6 +55,8 @@ import {
   STUDIO_BYTES_DONE_UNSTICK_MS,
 } from "@/lib/board/uploadLimits";
 import type { BoardUploadProgress, BoardUploadProgressHandler } from "@/lib/board/uploadProgress";
+import { preparingUploadProgress, studioVisibleUploadProgress } from "@/lib/board/uploadProgress";
+import { guessUploadBytes } from "@/lib/board/boardMediaUpload";
 import { saveDropDraft, draftToFile, ensureVoiceStudioDraftCard, type DropDraft } from "@/lib/board/dropDrafts";
 import DropDraftsDrawer from "./DropDraftsDrawer";
 import BoardClientErrorBoundary from "./BoardClientErrorBoundary";
@@ -651,6 +653,20 @@ export default function DropStudioStage({
     liveVoiceHoldHasClips();
 
   const keepMixerMounted = voiceSessionActive || voiceMixerLocked;
+
+  const liveUploadProgress = studioVisibleUploadProgress({
+    processing: processingVocal,
+    isVideo:
+      mediaKind === "video" ||
+      mode === "video" ||
+      Boolean(
+        fileRef.current &&
+          (String(fileRef.current.type || "").startsWith("video/") ||
+            /\.(mp4|webm|mov|m4v)$/i.test(fileRef.current.name))
+      ),
+    progress: uploadProgress,
+    totalBytes: fileRef.current?.size || uploadProgress?.total,
+  });
 
   const flashSaveNote = useCallback((message: string, hold = false) => {
     setSaveNote(message);
@@ -2558,7 +2574,7 @@ export default function DropStudioStage({
       file.type.startsWith("video/") ||
       /\.(mp4|webm|mov|m4v)$/i.test(file.name);
     setProcessingVocal(true);
-    setUploadProgress(null);
+    setUploadProgress(preparingUploadProgress(guessUploadBytes(file)));
     completingRef.current = true;
     flashSaveNote(
       isAudioMix
@@ -2590,7 +2606,7 @@ export default function DropStudioStage({
         const complete = Promise.resolve(
           onComplete(file, source, (progress) => {
             if (!progressLive) return;
-            setUploadProgress(progress);
+            if (progress) setUploadProgress(progress);
             if (progress?.label) flashSaveNote(progress.label, true);
             if (progress && progress.percent >= 100 && bytesDoneTimer == null) {
               bytesDoneTimer = window.setTimeout(() => {
@@ -2826,14 +2842,7 @@ export default function DropStudioStage({
         }`}
         onPointerDown={(e) => e.stopPropagation()}
       >
-        {uploadProgress ? (
-          <div className="studioUploadDock">
-            <BoardUploadProgressBar
-              progress={uploadProgress}
-              title={mediaKind === "video" ? "Uploading video" : "Uploading"}
-            />
-          </div>
-        ) : null}
+        <div>
         <div className="studioBar">
           <div className="studioBarLeft">
             <div className="studioBrand">
@@ -2886,6 +2895,15 @@ export default function DropStudioStage({
               ✕
             </button>
           </div>
+        </div>
+        {liveUploadProgress ? (
+          <div className="studioUploadDock">
+            <BoardUploadProgressBar
+              progress={liveUploadProgress}
+              title={mediaKind === "video" ? "Uploading video" : "Uploading"}
+            />
+          </div>
+        ) : null}
         </div>
 
         <div className="studioBody">
@@ -3802,7 +3820,16 @@ export default function DropStudioStage({
                         enableArtTools={mode === "art"}
                         onMediaError={handleMediaPreviewError}
                       />
-                      {saveNote ? <span className="saveNote capStudioSaveNote">{saveNote}</span> : null}
+                      {liveUploadProgress && mediaKind === "video" ? (
+                        <div className="capStudioSaveNote">
+                          <BoardUploadProgressBar
+                            progress={liveUploadProgress}
+                            title="Uploading video"
+                          />
+                        </div>
+                      ) : saveNote ? (
+                        <span className="saveNote capStudioSaveNote">{saveNote}</span>
+                      ) : null}
                       <button
                         type="button"
                         className="studioDoneCheck"

@@ -29,6 +29,8 @@ export const BOARD_MEDIA_SESSION_TIMEOUT_MS = 12_000;
 export const SIGNED_PLAYBACK_TIMEOUT_MS = 4_000;
 export const BYTES_COMPLETE_SETTLE_MS = 400;
 export const BYTES_DONE_FINALIZE_MS = 8_000;
+/** Session / signed-URL / XHR must produce a first byte (or a real error) this fast. */
+export const START_UPLOAD_STALL_MS = 25_000;
 const COPY_BYTES_LIMIT = 8 * 1024 * 1024;
 const UNKNOWN_VIDEO_BYTES = 1024 * 1024 * 1024;
 const FIRST_BYTE_STALL_MS = 25_000;
@@ -162,6 +164,9 @@ export function explainBoardMediaUploadError(
   }
   if (isUnauthorizedUploadError(error)) {
     return "Sign in again to upload this video.";
+  }
+  if (/couldn.?t start this video upload|did not start/.test(lower)) {
+    return "Couldn't start this video upload. Stay on this screen and try again.";
   }
   if (/sign-in|sign in|session/.test(lower)) {
     return "Sign in to upload this video.";
@@ -942,11 +947,12 @@ export async function uploadBoardMediaFile(
   const tracker = createUploadProgressTracker(guessUploadBytes(file), opts?.onProgress);
   tracker.preparing();
 
-  const copy = await copyFileForUpload(file);
-  const session = await requireUploadSession();
-  const folder = ownerScopedUploadFolder(requestedFolder, session.user.id);
-  void requestBoardMediaLimitRaise();
-
+  let progressed = false;
+  let holdAtComplete = false;
+  let objectVerified = false;
+  let lastLoaded = 0;
+  let lastTotal = guessUploadBytes(file);
+  const uploadStartedAt = Date.now();
   const onBytes: ByteReporter = (loaded, total) => {
     if (holdAtComplete) return;
     if (loaded > 0) progressed = true;
@@ -955,43 +961,48 @@ export async function uploadBoardMediaFile(
     const held = progressBytesUntilVerified(loaded, lastTotal, objectVerified);
     tracker.bytes(held.loaded, held.total);
   };
-  let progressed = false;
-  let holdAtComplete = false;
-  let objectVerified = false;
-  let lastLoaded = 0;
-  let lastTotal = guessUploadBytes(copy);
-  const withToken = async (run: (accessToken: string) => Promise<BoardMediaUploadResult>) => {
-    if (!progressed) tracker.reset();
-    else if (bytesUploadFinished(lastLoaded, lastTotal)) holdAtComplete = true;
-    const live = await requireUploadSession();
-    return run(live.access_token);
-  };
 
-  const direct = () =>
-    withToken((accessToken) =>
-      uploadThroughBrowser(copy, { bucket, folder, accessToken, onBytes })
-    );
-  const signed = () =>
-    withToken((accessToken) =>
-      uploadThroughSignedPut(copy, { bucket, folder, accessToken, onBytes })
-    );
-  const tus = () =>
-    withToken((accessToken) =>
-      uploadThroughTus(copy, { bucket, folder, accessToken, onBytes })
-    );
+  const work = (async () => {
+    const copy = await copyFileForUpload(file);
+    lastTotal = guessUploadBytes(copy);
+    const session = await requireUploadSession();
+    const folder = ownerScopedUploadFolder(requestedFolder, session.user.id);
+    void requestBoardMediaLimitRaise();
 
-  const attempts: Array<() => Promise<BoardMediaUploadResult>> = prefersDirectStorageUpload(copy)
-    ? [direct, signed, tus]
-    : [tus, signed, direct];
-
-  if (!shouldSkipServerlessMediaUpload(copy)) {
-    attempts.push(() => {
+    const withToken = async (run: (accessToken: string) => Promise<BoardMediaUploadResult>) => {
       if (!progressed) tracker.reset();
-      return uploadThroughServerless(copy, { bucket, folder, onBytes });
-    });
-  }
+      else if (bytesUploadFinished(lastLoaded, lastTotal)) holdAtComplete = true;
+      const live = await requireUploadSession();
+      return run(live.access_token);
+    };
 
-  const work = runUploadAttempts(copy, attempts);
+    const direct = () =>
+      withToken((accessToken) =>
+        uploadThroughBrowser(copy, { bucket, folder, accessToken, onBytes })
+      );
+    const signed = () =>
+      withToken((accessToken) =>
+        uploadThroughSignedPut(copy, { bucket, folder, accessToken, onBytes })
+      );
+    const tus = () =>
+      withToken((accessToken) =>
+        uploadThroughTus(copy, { bucket, folder, accessToken, onBytes })
+      );
+
+    const attempts: Array<() => Promise<BoardMediaUploadResult>> = prefersDirectStorageUpload(copy)
+      ? [direct, signed, tus]
+      : [tus, signed, direct];
+
+    if (!shouldSkipServerlessMediaUpload(copy)) {
+      attempts.push(() => {
+        if (!progressed) tracker.reset();
+        return uploadThroughServerless(copy, { bucket, folder, onBytes });
+      });
+    }
+
+    return runUploadAttempts(copy, attempts);
+  })();
+
   const result = await new Promise<BoardMediaUploadResult>((resolve, reject) => {
     let settled = false;
     let finalizeTimer: ReturnType<typeof setTimeout> | undefined;
@@ -1003,7 +1014,19 @@ export async function uploadBoardMediaFile(
       run();
     };
     const watch = setInterval(() => {
-      if (settled || finalizeTimer) return;
+      if (settled) return;
+      if (lastLoaded <= 0 && !objectVerified && Date.now() - uploadStartedAt >= START_UPLOAD_STALL_MS) {
+        finish(() =>
+          reject(
+            new BoardMediaUploadError(
+              "Couldn't start this video upload. Stay on this screen and try again.",
+              "timeout"
+            )
+          )
+        );
+        return;
+      }
+      if (finalizeTimer) return;
       if (!objectVerified) return;
       if (!bytesUploadFinished(lastLoaded, lastTotal)) return;
       tracker.finishing();
