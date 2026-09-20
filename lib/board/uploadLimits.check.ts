@@ -38,6 +38,18 @@ assert(
   checkUploadSize({ size: 200 * 1024 * 1024, type: "", name: "take.mov" }) === null,
   "iOS .mov files with empty MIME use the video cap"
 );
+assert(
+  checkUploadSize({ size: 64.9 * 1024 * 1024, type: "video/mp4", name: "audition.mp4" }) === null,
+  "64.9MB Project Room tapes are under the 4GB app cap"
+);
+assert(
+  checkUploadSize({ size: 0, type: "video/mp4", name: "tape.mp4" }) === null,
+  "iPhone files that report size 0 are not treated as over-limit"
+);
+assert(
+  checkUploadSize({ type: "video/mp4", name: "tape.mp4" }) === null,
+  "missing File.size is not treated as over-limit"
+);
 
 assert(uploadKindForFile({ type: "", name: "tape.MOV" }) === "video", "empty MIME + .mov is video");
 assert(studioMediaKindForFile({ type: "", name: "tape.MOV" }) === "video", "studio treats .mov as video");

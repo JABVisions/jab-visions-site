@@ -4,8 +4,10 @@ import {
   SERVERLESS_UPLOAD_BODY_LIMIT,
   TUS_CHUNK_SIZE,
   TUS_UPLOAD_THRESHOLD,
+  UPLOAD_LIMITS,
   checkUploadSize,
   fileWithResolvedContentType,
+  formatBytes,
   ownerScopedUploadFolder,
   resolveUploadContentType,
   uploadKindForFile,
@@ -80,14 +82,34 @@ export function shouldUseTusUpload(file: { size?: number; type?: string; name?: 
   return size >= TUS_UPLOAD_THRESHOLD;
 }
 
-export function explainBoardMediaUploadError(error: unknown): string {
+export function isStoragePayloadTooLargeError(error: unknown): boolean {
   const raw = error instanceof Error ? error.message : String(error || "");
   const lower = raw.toLowerCase();
+  return (
+    /payload too large|entity too large|exceeded the maximum allowed size|file_size_limit/.test(
+      lower
+    ) ||
+    /response code:\s*413\b/.test(lower) ||
+    /statuscode["']?\s*[:=]\s*["']?413\b/.test(lower)
+  );
+}
+
+export function explainBoardMediaUploadError(
+  error: unknown,
+  file?: { size?: number; type?: string; name?: string }
+): string {
+  const raw = error instanceof Error ? error.message : String(error || "");
+  const lower = raw.toLowerCase();
+  const bytes =
+    typeof file?.size === "number" && Number.isFinite(file.size) && file.size > 0 ? file.size : 0;
   if (!raw.trim() || raw.trim() === "upload failed") {
     return "Couldn't upload that video. Try again.";
   }
-  if (/payload too large|maximum allowed size|file_size_limit|entity too large|413/.test(lower)) {
-    return "That video is larger than Board storage allows. Try a shorter take, or raise the board-media size limit.";
+  if (isStoragePayloadTooLargeError(error)) {
+    if (bytes > UPLOAD_LIMITS.video) {
+      return `That video is ${formatBytes(bytes)} — the limit is ${formatBytes(UPLOAD_LIMITS.video)}.`;
+    }
+    return "Couldn't save this video to Board storage. Stay on this screen and try again.";
   }
   if (
     /row-level security|not allowed|unauthorized|jwt|42501|403|401|access denied|invalid compact jws|expired/.test(
@@ -123,6 +145,34 @@ function shouldFallbackFromTus(file: File): boolean {
   if (uploadKindForFile(file) === "video") return false;
   const bytes = guessUploadBytes(file);
   return bytes > 0 && bytes < TUS_UPLOAD_THRESHOLD;
+}
+
+let mediaLimitRaise: Promise<void> | null = null;
+
+async function requestBoardMediaLimitRaise() {
+  if (typeof fetch === "undefined") return;
+  if (!mediaLimitRaise) {
+    mediaLimitRaise = (async () => {
+      try {
+        const supabase = supabaseBrowser();
+        await supabase.rpc("ensure_board_media_file_size_limit");
+      } catch {
+        // Function may not exist until the SQL script is applied.
+      }
+      try {
+        await fetch("/api/board/media/limits", {
+          method: "POST",
+          credentials: "include",
+        });
+      } catch {
+        // Service-role raise is best-effort; tus still runs.
+      }
+    })();
+  }
+  await Promise.race([
+    mediaLimitRaise,
+    new Promise<void>((resolve) => setTimeout(resolve, 8_000)),
+  ]);
 }
 
 function isIosSafari() {
@@ -308,6 +358,7 @@ export async function uploadBoardMediaFile(
 
   if (shouldSkipServerlessMediaUpload(copy)) {
     if (shouldUseTusUpload(copy)) {
+      await requestBoardMediaLimitRaise();
       try {
         return await uploadThroughTus(copy, {
           bucket,
@@ -315,6 +366,22 @@ export async function uploadBoardMediaFile(
           accessToken: session.access_token,
         });
       } catch (error) {
+        if (
+          isStoragePayloadTooLargeError(error) &&
+          (copy.size <= 0 || copy.size <= UPLOAD_LIMITS.video)
+        ) {
+          mediaLimitRaise = null;
+          await requestBoardMediaLimitRaise();
+          try {
+            return await uploadThroughTus(copy, {
+              bucket,
+              folder,
+              accessToken: session.access_token,
+            });
+          } catch (retryError) {
+            throw new BoardMediaUploadError(explainBoardMediaUploadError(retryError, copy));
+          }
+        }
         if (isUnauthorizedUploadError(error)) {
           const refreshed = await requireUploadSession();
           try {
@@ -324,16 +391,16 @@ export async function uploadBoardMediaFile(
               accessToken: refreshed.access_token,
             });
           } catch (retryError) {
-            throw new BoardMediaUploadError(explainBoardMediaUploadError(retryError));
+            throw new BoardMediaUploadError(explainBoardMediaUploadError(retryError, copy));
           }
         }
         if (!shouldFallbackFromTus(copy)) {
-          throw new BoardMediaUploadError(explainBoardMediaUploadError(error));
+          throw new BoardMediaUploadError(explainBoardMediaUploadError(error, copy));
         }
         try {
           return await uploadThroughBrowser(copy, { bucket, folder });
         } catch (fallbackError) {
-          throw new BoardMediaUploadError(explainBoardMediaUploadError(fallbackError));
+          throw new BoardMediaUploadError(explainBoardMediaUploadError(fallbackError, copy));
         }
       }
     }
@@ -366,7 +433,7 @@ export async function uploadBoardMediaFile(
       throw new BoardMediaUploadError("Sign in to upload this video.", "auth");
     }
     if (apiMessage) {
-      throw new BoardMediaUploadError(explainBoardMediaUploadError(apiMessage));
+      throw new BoardMediaUploadError(explainBoardMediaUploadError(apiMessage, copy));
     }
   } catch (error) {
     if (error instanceof BoardMediaUploadError) throw error;

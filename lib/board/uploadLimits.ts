@@ -142,12 +142,14 @@ export function formatBytes(bytes: number) {
  * upload is allowed.
  */
 export function checkUploadSize(
-  file: { size: number; type?: string; name?: string },
+  file: { size?: number; type?: string; name?: string },
   kind: UploadKind = uploadKindForFile(file)
 ): string | null {
   const limit = UPLOAD_LIMITS[kind];
-  if (file.size <= limit) return null;
-  return `That ${kind} is ${formatBytes(file.size)} — the limit is ${formatBytes(limit)}.`;
+  const size = typeof file.size === "number" && Number.isFinite(file.size) ? file.size : 0;
+  // iPhone Files sometimes report 0 until tus reads the blob. That is not over-limit.
+  if (size <= 0 || size <= limit) return null;
+  return `That ${kind} is ${formatBytes(size)} — the limit is ${formatBytes(limit)}.`;
 }
 
 const MIME_BY_EXTENSION: Record<string, string> = {

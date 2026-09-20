@@ -1136,7 +1136,7 @@ export default function ProjectCenter() {
         }
       })();
     } catch (error) {
-      const message = explainBoardMediaUploadError(error);
+      const message = explainBoardMediaUploadError(error, file);
       if (
         error instanceof Error &&
         (error.message === "Drop Studio can add a photo, video, or art drop to this room." ||
