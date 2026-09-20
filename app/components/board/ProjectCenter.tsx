@@ -49,7 +49,7 @@ import { readCurrentBoardIdentity } from "@/lib/board/currentProfile";
 import { emitBoardDropSignal } from "@/lib/board/dropSignals";
 import LazyDropStudioStage from "@/app/components/board/LazyDropStudioStage";
 import type { DropCustomization } from "@/lib/board/dropCustomizations";
-import { uploadBoardMediaFile, explainBoardMediaUploadError, preferredCommitPlaybackUrl } from "@/lib/board/boardMediaUpload";
+import { uploadBoardMediaFile, explainBoardMediaUploadError, preferredCommitPlaybackUrl, canCommitBoardMediaPlayback } from "@/lib/board/boardMediaUpload";
 import type { BoardUploadProgressHandler } from "@/lib/board/uploadProgress";
 import { boardProjectPatchFromDrop } from "@/lib/board/projectDropEdit";
 import {
@@ -1157,8 +1157,11 @@ export default function ProjectCenter() {
       try {
         const uploaded = await uploadBoardMediaFile(file, { folder: "project-media", onProgress });
         onProgress?.(null);
+        if (!canCommitBoardMediaPlayback(uploaded)) {
+          throw new Error("This video didn't finish saving to Board storage. Try uploading it again.");
+        }
         const mediaUrl = preferredCommitPlaybackUrl(uploaded);
-        if (!mediaUrl) throw new Error("Upload finished but Board could not create a playback URL.");
+        if (!mediaUrl) throw new Error("This video didn't finish saving to Board storage. Try uploading it again.");
 
         const liveProject =
           projectsRef.current.find((item) => item.id === project.id) || project;

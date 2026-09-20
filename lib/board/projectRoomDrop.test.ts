@@ -18,6 +18,8 @@ import {
   projectRoomVideoLoadError,
   projectRoomVideoPlaybackType,
   projectRoomVideoSrcIsPlayable,
+  isUnplayableProjectRoomVideoPost,
+  stripUnplayableProjectRoomVideos,
   runProjectRoomStudioSaveOnce,
   viewerCanPostToProjectRoom,
 } from "./projectRoomDrop";
@@ -375,6 +377,64 @@ assert(
   `the same tape committed twice must stay one room post, got ${tapePosts.length}`
 );
 
+const deadPublic =
+  "https://example.supabase.co/storage/v1/object/public/board-media/user/project-media/dead.mp4";
+const playableSigned =
+  "https://example.supabase.co/storage/v1/object/sign/board-media/user/project-media/live.mp4?token=1";
+assert(
+  isUnplayableProjectRoomVideoPost({
+    mediaKind: "video",
+    mediaUrl: deadPublic,
+    storagePath: "user/project-media/dead.mp4",
+  }),
+  "public board-media URLs are dead playback rows"
+);
+const liveTape = buildProjectRoomDrop({
+  project,
+  media: {
+    kind: "video",
+    src: playableSigned,
+    bucket: "board-media",
+    storagePath: "user/project-media/live.mp4",
+  },
+  author: { id: "user_zoe", displayName: "Zoe", username: "zoe" },
+  fileName: "tape.mp4",
+  dropId: "project_room_live",
+  postId: "post_live",
+});
+const withDead = {
+  ...project,
+  roomPosts: [
+    {
+      id: "post_dead",
+      authorName: "Zoe",
+      authorId: "user_zoe",
+      text: "Zoe posted an audition tape in Those Ryderz.",
+      createdAt: 1_700_000_150_000,
+      mediaUrl: deadPublic,
+      mediaKind: "video" as const,
+      bucket: "board-media",
+      storagePath: "user/project-media/dead.mp4",
+    },
+    ...(project.roomPosts ?? []),
+  ],
+};
+const replacedDead = applyProjectRoomDropToProject(withDead, liveTape);
+assert(
+  replacedDead.roomPosts.some((post) => post.mediaUrl === playableSigned),
+  "a verified studio save adds a playable drop"
+);
+assert(
+  !replacedDead.roomPosts.some((post) => post.mediaUrl === deadPublic),
+  "the next successful save replaces the dead public-URL row"
+);
+assert(
+  stripUnplayableProjectRoomVideos(withDead.roomPosts, liveTape.post).every(
+    (post) => post.mediaUrl !== deadPublic
+  ),
+  "unplayable same-author tapes are stripped before merge"
+);
+
 const saveKey = projectRoomStudioSaveKey("project_keep_me", {
   name: "tape.mp4",
   size: 62 * 1024 * 1024,
@@ -395,6 +455,25 @@ void (async () => {
     runs += 1;
   });
   assert(runs === 1, "finished studio save cannot post the same tape again");
+
+  const failKey = projectRoomStudioSaveKey("project_keep_me", {
+    name: "retry.mp4",
+    size: 62 * 1024 * 1024,
+    lastModified: 2,
+  });
+  let retryRuns = 0;
+  try {
+    await runProjectRoomStudioSaveOnce(failKey, async () => {
+      retryRuns += 1;
+      throw new Error("This video didn't finish saving to Board storage. Try uploading it again.");
+    });
+  } catch {
+    // expected
+  }
+  await runProjectRoomStudioSaveOnce(failKey, async () => {
+    retryRuns += 1;
+  });
+  assert(retryRuns === 2, `failed studio save must upload again, ran ${retryRuns} times`);
   console.log("projectRoomDrop.test.ts: ok");
 })().catch((error) => {
   console.error(error);

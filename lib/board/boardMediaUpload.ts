@@ -166,6 +166,9 @@ export function explainBoardMediaUploadError(
   if (/sign-in|sign in|session/.test(lower)) {
     return "Sign in to upload this video.";
   }
+  if (isMissingObjectUploadError(error) || /didn.?t finish saving/.test(lower)) {
+    return "This video didn't finish saving to Board storage. Stay on this screen and try again.";
+  }
   if (/timed out|timeout|aborted|abort|stalled/.test(lower)) {
     return "Video upload timed out. Stay on this screen and try again on Wi-Fi.";
   }
@@ -246,28 +249,40 @@ export function bytesUploadFinished(loaded: number, total: number): boolean {
 /**
  * iPhone Safari often reports 100% uploaded, then fires `onerror` / `onload`
  * with status 0. Treating that as failure restarts the 62MB PUT (progress
- * bar reset loop). Once bytes are done, only hard 401/403/413 fail the PUT.
+ * bar reset loop). Status 0 at 100% is **unverified** — do not commit a Drop
+ * until `createSignedUrl` proves the object exists.
  */
 export function acceptXhrOutcome(opts: {
   kind: "load" | "error" | "timeout" | "abort";
   status: number;
   loaded: number;
   total: number;
-}): "success" | "failure" {
-  const bytesDone = bytesUploadFinished(opts.loaded, opts.total);
+}): "success" | "unverified" | "failure" {
   if (opts.status === 401 || opts.status === 403 || opts.status === 413) {
     return "failure";
   }
-  if (bytesDone) {
-    if (opts.kind !== "load") return "success";
-    if (!opts.status || opts.status < 100 || (opts.status >= 200 && opts.status < 300)) {
-      return "success";
-    }
-    if (opts.status >= 400) return "failure";
-    return "success";
-  }
   if (opts.kind === "load" && opts.status >= 200 && opts.status < 300) return "success";
+  if (bytesUploadFinished(opts.loaded, opts.total)) {
+    if (opts.status >= 400) return "failure";
+    return "unverified";
+  }
   return "failure";
+}
+
+/** Keep the bar under 100% until createSignedUrl proves the object exists. */
+export function progressBytesUntilVerified(
+  loaded: number,
+  total: number,
+  objectVerified: boolean
+): { loaded: number; total: number; percent: number } {
+  const safeLoaded = Number.isFinite(loaded) ? Math.max(0, loaded) : 0;
+  const safeTotal = Number.isFinite(total) ? Math.max(0, total) : 0;
+  if (objectVerified || safeTotal <= 0 || safeLoaded < safeTotal) {
+    const percent = safeTotal > 0 ? Math.min(100, Math.round((safeLoaded / safeTotal) * 100)) : 0;
+    return { loaded: safeLoaded, total: safeTotal, percent };
+  }
+  const held = Math.max(0, safeTotal - Math.max(1, Math.floor(safeTotal / 100)));
+  return { loaded: held, total: safeTotal, percent: 99 };
 }
 
 export function playbackResultAfterUpload(opts: {
@@ -278,10 +293,10 @@ export function playbackResultAfterUpload(opts: {
 }): BoardMediaUploadResult {
   const publicUrl = String(opts.publicUrl || "").trim();
   const signedUrl = String(opts.signedUrl || "").trim();
-  if (!publicUrl && !signedUrl) {
+  if (!signedUrl) {
     throw new BoardMediaUploadError(
-      "Upload finished but Board could not create a playback URL.",
-      "storage"
+      "This video didn't finish saving to Board storage. Try uploading it again.",
+      "missing"
     );
   }
   return {
@@ -292,12 +307,24 @@ export function playbackResultAfterUpload(opts: {
   };
 }
 
-/** Persist signed playback when we have it. Public URLs on private `board-media` 403. */
+/** Room Drops may only persist a signed private-bucket URL. */
 export function preferredCommitPlaybackUrl(result: {
   signedUrl?: string | null;
   publicUrl?: string | null;
 }): string {
-  return String(result.signedUrl || "").trim() || String(result.publicUrl || "").trim();
+  return String(result.signedUrl || "").trim();
+}
+
+export function canCommitBoardMediaPlayback(result: {
+  signedUrl?: string | null;
+}): boolean {
+  return Boolean(String(result.signedUrl || "").trim());
+}
+
+export function isMissingObjectUploadError(error: unknown): boolean {
+  if (error instanceof BoardMediaUploadError && error.code === "missing") return true;
+  const raw = storageErrorText(error).toLowerCase();
+  return /didn.?t finish saving|object not found|no such file/.test(raw);
 }
 
 function sleep(ms: number) {
@@ -363,7 +390,7 @@ function xhrSend(opts: {
   withCredentials?: boolean;
   knownTotal?: number;
   onBytes?: ByteReporter;
-}): Promise<{ status: number; text: string }> {
+}): Promise<{ status: number; text: string; verified: boolean }> {
   return new Promise((resolve, reject) => {
     if (typeof XMLHttpRequest === "undefined") {
       reject(new BoardMediaUploadError("This browser cannot upload Board media.", "storage"));
@@ -412,7 +439,13 @@ function xhrSend(opts: {
       if (done && !bytesCompleteTimer && !settled) {
         // iPhone Safari can sit at 100% and never fire onload.
         bytesCompleteTimer = setTimeout(() => {
-          settle(() => resolve({ status: xhr.status || 200, text: String(xhr.responseText || "") }));
+          settle(() =>
+            resolve({
+              status: xhr.status || 0,
+              text: String(xhr.responseText || ""),
+              verified: xhr.status >= 200 && xhr.status < 300,
+            })
+          );
         }, BYTES_COMPLETE_SETTLE_MS);
       }
     };
@@ -428,12 +461,25 @@ function xhrSend(opts: {
           resolve({
             status: xhr.status >= 200 && xhr.status < 300 ? xhr.status : 200,
             text: String(xhr.responseText || ""),
+            verified: true,
+          })
+        );
+        return;
+      }
+      if (outcome === "unverified") {
+        settle(() =>
+          resolve({
+            status: xhr.status || 0,
+            text: String(xhr.responseText || ""),
+            verified: false,
           })
         );
         return;
       }
       if (kind === "load") {
-        settle(() => resolve({ status: xhr.status, text: String(xhr.responseText || "") }));
+        settle(() =>
+          resolve({ status: xhr.status, text: String(xhr.responseText || ""), verified: false })
+        );
         return;
       }
       if (kind === "error") {
@@ -495,6 +541,17 @@ function throwIfFailedStatus(status: number, text: string): void {
   throw new BoardMediaUploadError(message || "Media upload failed.", "storage");
 }
 
+async function playbackAfterXhrWrite(
+  uploaded: { status: number; text: string; verified: boolean },
+  bucket: string,
+  storagePath: string
+): Promise<BoardMediaUploadResult> {
+  if (uploaded.verified || uploaded.status >= 400) {
+    throwIfFailedStatus(uploaded.status, uploaded.text);
+  }
+  return signedResult(bucket, storagePath);
+}
+
 export async function copyFileForUpload(file: File): Promise<File> {
   const kind = uploadKindForFile(file);
   // iPhone camera-roll / MediaRecorder blobs OOM if we `new File([file])` a tape.
@@ -539,9 +596,8 @@ async function signedResult(
   }
   if (!publicUrl) publicUrl = publicObjectUrl(bucket, storagePath);
 
-  // PUT already succeeded (including iPhone status-0 at 100%). Sign for playback
-  // on private board-media, but never throw — that would re-upload the tape.
   let signedUrl = "";
+  let missing = false;
   try {
     const supabase = supabaseBrowser();
     const signed = await requestSignedPlaybackUrl(
@@ -554,8 +610,16 @@ async function signedResult(
       { timeoutMs: SIGNED_PLAYBACK_TIMEOUT_MS, retries: 2 }
     );
     signedUrl = signed.signedUrl;
+    missing = signed.missing;
   } catch {
     signedUrl = "";
+  }
+
+  if (!signedUrl) {
+    throw new BoardMediaUploadError(
+      "This video didn't finish saving to Board storage. Try uploading it again.",
+      missing ? "missing" : "missing"
+    );
   }
 
   return playbackResultAfterUpload({
@@ -755,8 +819,7 @@ async function uploadThroughSignedPut(
     knownTotal: file.size,
     onBytes: opts.onBytes,
   });
-  throwIfFailedStatus(uploaded.status, uploaded.text);
-  return signedResult(opts.bucket, storagePath);
+  return playbackAfterXhrWrite(uploaded, opts.bucket, storagePath);
 }
 
 async function uploadThroughBrowser(
@@ -782,8 +845,7 @@ async function uploadThroughBrowser(
     knownTotal: file.size,
     onBytes: opts.onBytes,
   });
-  throwIfFailedStatus(uploaded.status, uploaded.text);
-  return signedResult(opts.bucket, storagePath);
+  return playbackAfterXhrWrite(uploaded, opts.bucket, storagePath);
 }
 
 async function uploadThroughServerless(
@@ -814,9 +876,17 @@ async function uploadThroughServerless(
   }
   try {
     const parsed = parseBoardMediaUploadResponse(JSON.parse(uploaded.text));
-    if (parsed) return parsed;
-  } catch {
-    // fall through to status error
+    if (parsed) {
+      if (!parsed.signedUrl) {
+        throw new BoardMediaUploadError(
+          "This video didn't finish saving to Board storage. Try uploading it again.",
+          "missing"
+        );
+      }
+      return parsed;
+    }
+  } catch (error) {
+    if (error instanceof BoardMediaUploadError) throw error;
   }
   throwIfFailedStatus(uploaded.status, uploaded.text);
   throw new BoardMediaUploadError("Media upload failed.", "storage");
@@ -827,11 +897,17 @@ async function runUploadAttempts(
   attempts: Array<() => Promise<BoardMediaUploadResult>>
 ): Promise<BoardMediaUploadResult> {
   let lastError: unknown = new BoardMediaUploadError("Couldn't upload that video. Try again.");
+  let missingRetries = 0;
   for (const attempt of attempts) {
     try {
       return await attempt();
     } catch (error) {
       lastError = error;
+      if (isMissingObjectUploadError(error)) {
+        missingRetries += 1;
+        if (missingRetries > 1) break;
+        continue;
+      }
       if (isStoragePayloadTooLargeError(error) && (file.size <= 0 || file.size <= UPLOAD_LIMITS.video)) {
         mediaLimitRaise = null;
         await requestBoardMediaLimitRaise();
@@ -872,16 +948,21 @@ export async function uploadBoardMediaFile(
   void requestBoardMediaLimitRaise();
 
   const onBytes: ByteReporter = (loaded, total) => {
+    if (holdAtComplete) return;
     if (loaded > 0) progressed = true;
     lastLoaded = loaded;
     if (total && total > 0) lastTotal = total;
-    tracker.bytes(loaded, total);
+    const held = progressBytesUntilVerified(loaded, lastTotal, objectVerified);
+    tracker.bytes(held.loaded, held.total);
   };
   let progressed = false;
+  let holdAtComplete = false;
+  let objectVerified = false;
   let lastLoaded = 0;
   let lastTotal = guessUploadBytes(copy);
   const withToken = async (run: (accessToken: string) => Promise<BoardMediaUploadResult>) => {
     if (!progressed) tracker.reset();
+    else if (bytesUploadFinished(lastLoaded, lastTotal)) holdAtComplete = true;
     const live = await requireUploadSession();
     return run(live.access_token);
   };
@@ -923,6 +1004,7 @@ export async function uploadBoardMediaFile(
     };
     const watch = setInterval(() => {
       if (settled || finalizeTimer) return;
+      if (!objectVerified) return;
       if (!bytesUploadFinished(lastLoaded, lastTotal)) return;
       tracker.finishing();
       finalizeTimer = setTimeout(() => {
@@ -937,7 +1019,10 @@ export async function uploadBoardMediaFile(
       }, BYTES_DONE_FINALIZE_MS);
     }, 200);
     work.then(
-      (value) => finish(() => resolve(value)),
+      (value) => {
+        objectVerified = true;
+        finish(() => resolve(value));
+      },
       (error) => finish(() => reject(error))
     );
   });

@@ -180,6 +180,29 @@ export function projectRoomVideoSrcIsPlayable(url: string): boolean {
   return true;
 }
 
+export function isUnplayableProjectRoomVideoPost(post: {
+  mediaKind?: string | null;
+  mediaUrl?: string | null;
+  storagePath?: string | null;
+}): boolean {
+  if (!projectRoomPostIsVideo(post)) return false;
+  const src = persistableProjectRoomMediaUrl(post.mediaUrl) || "";
+  if (!src) return true;
+  return !projectRoomVideoSrcIsPlayable(src);
+}
+
+export function stripUnplayableProjectRoomVideos(
+  posts: ProjectRoomPost[] | null | undefined,
+  playable: ProjectRoomPost
+): ProjectRoomPost[] {
+  const authorId = String(playable.authorId || "").trim();
+  return (posts ?? []).filter((post) => {
+    if (!isUnplayableProjectRoomVideoPost(post)) return true;
+    if (authorId && post.authorId && String(post.authorId) !== authorId) return true;
+    return false;
+  });
+}
+
 export function normalizeIdentityToken(value: unknown): string {
   return String(value ?? "")
     .trim()
@@ -494,10 +517,15 @@ export function applyProjectRoomDropToProject(
   project: BoardProject,
   built: BuiltProjectRoomDrop
 ): BoardProject {
+  const incoming = [built.post];
+  const base =
+    built.post.mediaKind === "video" && projectRoomVideoSrcIsPlayable(built.post.mediaUrl || "")
+      ? stripUnplayableProjectRoomVideos(project.roomPosts, built.post)
+      : project.roomPosts;
   return {
     ...project,
     media: built.coverMedia ?? project.media,
-    roomPosts: mergeRoomPosts(project.roomPosts, [built.post]),
+    roomPosts: mergeRoomPosts(base, incoming),
     updatedAt: Math.max(project.updatedAt, built.post.createdAt),
   };
 }
