@@ -302,17 +302,20 @@ function SectionHeader({
   title,
   subtitle,
   action,
+  beforeTitle,
 }: {
   eyebrow: string;
   title: string;
   subtitle?: string;
   action?: React.ReactNode;
+  beforeTitle?: React.ReactNode;
 }) {
   return (
     <div className="px-5 pt-5 pb-4 border-b border-white/10 bg-white/[0.02]">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="text-[11px] tracking-[0.35em] text-white/55">{eyebrow}</div>
+          {beforeTitle ? <div className="mt-3">{beforeTitle}</div> : null}
           <div className="mt-2 text-xl font-semibold text-white/90">{title}</div>
           {subtitle ? <div className="mt-1 text-sm text-white/55">{subtitle}</div> : null}
         </div>
@@ -1302,17 +1305,6 @@ export default function ProjectCenter() {
                           type="button"
                           onClick={(event) => {
                             event.stopPropagation();
-                            setEditingProject(project);
-                            setCreateOpen(true);
-                          }}
-                          className="rounded-full border border-lime-200/25 bg-lime-400/15 px-3 py-1 text-[11px] tracking-[0.16em] text-lime-50/90 transition hover:bg-lime-400/22"
-                        >
-                          Edit / Update
-                        </button>
-                        <button
-                          type="button"
-                          onClick={(event) => {
-                            event.stopPropagation();
                             setCommentsProject(project);
                           }}
                           className="rounded-full border border-cyan-200/25 bg-cyan-400/15 px-3 py-1 text-[11px] tracking-[0.16em] text-cyan-50/90 transition hover:bg-cyan-400/22"
@@ -1349,73 +1341,85 @@ export default function ProjectCenter() {
                       </div>
                     </div>
 
-                    <button
-                      type="button"
-                      onClick={() => setActiveProjectId(project.id)}
-                      className="block w-full p-5 text-left"
-                    >
-                      <div className="text-lg font-semibold text-white/92">
-                        {project.title}
-                      </div>
-                      <div className="mt-1 text-xs uppercase tracking-[0.22em] text-white/45">
-                        {project.projectType}
-                      </div>
-                      <div className="mt-3 line-clamp-3 text-sm leading-6 text-white/65">
-                        {project.logline || "Add a logline to pitch the project."}
-                      </div>
-
-                      {project.rolesNeeded ? (
-                        <div className="mt-3 text-sm text-white/70">
-                          <span className="text-[11px] uppercase tracking-[0.18em] text-white/40">
-                            Roles{" "}
-                          </span>
-                          {project.rolesNeeded}
+                    <div className="p-5">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditingProject(project);
+                          setCreateOpen(true);
+                        }}
+                        className="rounded-full border border-lime-200/25 bg-lime-400/15 px-3 py-1 text-[11px] tracking-[0.16em] text-lime-50/90 transition hover:bg-lime-400/22"
+                      >
+                        Edit / Update
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setActiveProjectId(project.id)}
+                        className="mt-3 block w-full text-left"
+                      >
+                        <div className="text-lg font-semibold text-white/92">
+                          {project.title}
                         </div>
-                      ) : null}
+                        <div className="mt-1 text-xs uppercase tracking-[0.22em] text-white/45">
+                          {project.projectType}
+                        </div>
+                        <div className="mt-3 line-clamp-3 text-sm leading-6 text-white/65">
+                          {project.logline || "Add a logline to pitch the project."}
+                        </div>
 
-                      {project.goal || project.milestone ? (
-                        <div className="mt-4 grid gap-2 rounded-2xl border border-lime-200/10 bg-lime-300/[0.06] p-3 text-xs text-lime-50/72">
-                          {project.goal ? (
-                            <div>
-                              <span className="font-semibold uppercase tracking-[0.18em] text-lime-100/55">
-                                Goal
-                              </span>{" "}
-                              {project.goal}
+                        {project.rolesNeeded ? (
+                          <div className="mt-3 text-sm text-white/70">
+                            <span className="text-[11px] uppercase tracking-[0.18em] text-white/40">
+                              Roles{" "}
+                            </span>
+                            {project.rolesNeeded}
+                          </div>
+                        ) : null}
+
+                        {project.goal || project.milestone ? (
+                          <div className="mt-4 grid gap-2 rounded-2xl border border-lime-200/10 bg-lime-300/[0.06] p-3 text-xs text-lime-50/72">
+                            {project.goal ? (
+                              <div>
+                                <span className="font-semibold uppercase tracking-[0.18em] text-lime-100/55">
+                                  Goal
+                                </span>{" "}
+                                {project.goal}
+                              </div>
+                            ) : null}
+                            {project.milestone ? (
+                              <div>
+                                <span className="font-semibold uppercase tracking-[0.18em] text-lime-100/55">
+                                  Milestone
+                                </span>{" "}
+                                {project.milestone}
+                              </div>
+                            ) : null}
+                          </div>
+                        ) : null}
+
+                        <div className="mt-5 grid grid-cols-2 gap-4 text-xs text-white/52 md:grid-cols-4">
+                          <div>
+                            <div className="tracking-[0.22em] text-white/35">Location</div>
+                            <div className="mt-1 text-white/75">{project.location || "TBD"}</div>
+                          </div>
+                          <div>
+                            <div className="tracking-[0.22em] text-white/35">Dates</div>
+                            <div className="mt-1 text-white/75">
+                              {project.startDate || "TBD"}
+                              {project.endDate ? ` - ${project.endDate}` : ""}
                             </div>
-                          ) : null}
-                          {project.milestone ? (
-                            <div>
-                              <span className="font-semibold uppercase tracking-[0.18em] text-lime-100/55">
-                                Milestone
-                              </span>{" "}
-                              {project.milestone}
-                            </div>
-                          ) : null}
-                        </div>
-                      ) : null}
-
-                      <div className="mt-5 grid grid-cols-2 gap-4 text-xs text-white/52 md:grid-cols-4">
-                        <div>
-                          <div className="tracking-[0.22em] text-white/35">Location</div>
-                          <div className="mt-1 text-white/75">{project.location || "TBD"}</div>
-                        </div>
-                        <div>
-                          <div className="tracking-[0.22em] text-white/35">Dates</div>
-                          <div className="mt-1 text-white/75">
-                            {project.startDate || "TBD"}
-                            {project.endDate ? ` - ${project.endDate}` : ""}
+                          </div>
+                          <div>
+                            <div className="tracking-[0.22em] text-white/35">Invites</div>
+                            <div className="mt-1 text-white/75">{project.invites.length}</div>
+                          </div>
+                          <div>
+                            <div className="tracking-[0.22em] text-white/35">Room Posts</div>
+                            <div className="mt-1 text-white/75">{project.roomPosts.length}</div>
                           </div>
                         </div>
-                        <div>
-                          <div className="tracking-[0.22em] text-white/35">Invites</div>
-                          <div className="mt-1 text-white/75">{project.invites.length}</div>
-                        </div>
-                        <div>
-                          <div className="tracking-[0.22em] text-white/35">Room Posts</div>
-                          <div className="mt-1 text-white/75">{project.roomPosts.length}</div>
-                        </div>
-                      </div>
-                    </button>
+                      </button>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -1437,6 +1441,18 @@ export default function ProjectCenter() {
           subtitle={`${activeProject.projectType} • ${statusLabel(
             activeProject.status
           )}`}
+          beforeTitle={
+            <button
+              type="button"
+              onClick={() => {
+                setEditingProject(activeProject);
+                setCreateOpen(true);
+              }}
+              className="rounded-2xl border border-lime-200/25 bg-lime-400/15 px-3 py-2 text-sm text-lime-50/90 transition hover:bg-lime-400/22"
+            >
+              Edit / Update
+            </button>
+          }
           action={
             <div className="flex flex-wrap items-center justify-end gap-2">
               <button
@@ -1445,16 +1461,6 @@ export default function ProjectCenter() {
                 className="rounded-2xl border border-cyan-200/25 bg-cyan-400/15 px-3 py-2 text-sm text-cyan-50/90 transition hover:bg-cyan-400/22"
               >
                 Drop Studio Editor
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setEditingProject(activeProject);
-                  setCreateOpen(true);
-                }}
-                className="rounded-2xl border border-lime-200/25 bg-lime-400/15 px-3 py-2 text-sm text-lime-50/90 transition hover:bg-lime-400/22"
-              >
-                Edit / Update
               </button>
               <button
                 type="button"
@@ -1500,13 +1506,6 @@ export default function ProjectCenter() {
                 </div>
               </div>
             )}
-            <button
-              type="button"
-              onClick={() => openStudioForProject(activeProject)}
-              className="absolute bottom-4 left-4 rounded-full border border-cyan-200/30 bg-cyan-400/20 px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-cyan-50/90 transition hover:bg-cyan-400/28"
-            >
-              Drop Studio Editor
-            </button>
           </div>
           {studioMessage ? (
             <div className="rounded-2xl border border-white/10 bg-white/[0.05] px-4 py-3 text-sm text-white/72">
@@ -1736,7 +1735,7 @@ export default function ProjectCenter() {
                 </div>
               </div>
 
-              <div className="mt-4 flex gap-3">
+              <div className="mt-4 flex flex-col gap-3 sm:flex-row">
                 <textarea
                   value={roomDraft}
                   onChange={(event) => setRoomDraft(event.target.value)}
@@ -1744,13 +1743,22 @@ export default function ProjectCenter() {
                   placeholder="Post an update to your project room..."
                   className="min-h-[92px] flex-1 rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white/85 placeholder:text-white/35 focus:outline-none focus:ring-2 focus:ring-white/10"
                 />
-                <button
-                  type="button"
-                  onClick={postRoomMessage}
-                  className="self-end rounded-2xl border border-white/10 bg-white/10 px-4 py-3 text-sm text-white/85 hover:bg-white/15 transition"
-                >
-                  Post
-                </button>
+                <div className="flex shrink-0 flex-col gap-2 sm:self-end">
+                  <button
+                    type="button"
+                    onClick={() => openStudioForProject(activeProject)}
+                    className="rounded-2xl border border-cyan-200/25 bg-cyan-400/15 px-4 py-3 text-sm text-cyan-50/90 transition hover:bg-cyan-400/22"
+                  >
+                    Drop Studio Editor
+                  </button>
+                  <button
+                    type="button"
+                    onClick={postRoomMessage}
+                    className="rounded-2xl border border-white/10 bg-white/10 px-4 py-3 text-sm text-white/85 hover:bg-white/15 transition"
+                  >
+                    Post
+                  </button>
+                </div>
               </div>
 
               <div className="mt-4 grid gap-3">
