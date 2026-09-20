@@ -39,6 +39,14 @@ export const TUS_CHUNK_SIZE = 6 * MB;
 /** Files at or above this use tus instead of a single storage POST. */
 export const TUS_UPLOAD_THRESHOLD = 6 * MB;
 
+/**
+ * Known-size files under this use Drop Tile's direct `storage.upload` path.
+ * iPhone Safari's tus client is what turned a 64.9MB tape into
+ * "Couldn't upload that video. Try again." Direct PUT to Supabase works
+ * for Work Board audition tapes in the tens-of-MB range.
+ */
+export const DIRECT_STORAGE_UPLOAD_MAX_BYTES = 96 * MB;
+
 const UPLOAD_TIMEOUT_FLOOR_MS = 180_000;
 const UPLOAD_TIMEOUT_CAP_MS = 60 * 60_000;
 

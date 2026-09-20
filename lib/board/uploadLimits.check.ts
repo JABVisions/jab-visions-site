@@ -2,6 +2,7 @@ import {
   UPLOAD_LIMITS,
   SERVERLESS_UPLOAD_BODY_LIMIT,
   TUS_UPLOAD_THRESHOLD,
+  DIRECT_STORAGE_UPLOAD_MAX_BYTES,
   checkUploadSize,
   formatBytes,
   studioMediaKindForFile,
@@ -20,6 +21,10 @@ assert(UPLOAD_LIMITS.video === 4 * 1024 * 1024 * 1024, "videos allow 4GB auditio
 assert(UPLOAD_LIMITS.audio === 250 * 1024 * 1024, "audio stays under a half-gig");
 assert(SERVERLESS_UPLOAD_BODY_LIMIT === 4 * 1024 * 1024, "serverless body skip is 4MB");
 assert(TUS_UPLOAD_THRESHOLD === 6 * 1024 * 1024, "tus kicks in at 6MB");
+assert(
+  DIRECT_STORAGE_UPLOAD_MAX_BYTES === 96 * 1024 * 1024,
+  "known-size files under 96MB skip iPhone tus"
+);
 
 assert(checkUploadSize({ size: 20 * 1024 * 1024, type: "image/jpeg" }) === null, "20MB photo is allowed");
 assert(
