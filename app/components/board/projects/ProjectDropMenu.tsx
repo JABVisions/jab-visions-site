@@ -10,6 +10,8 @@ import {
 import { parseBoardStorageFromUrl } from "@/lib/board/musicPlayback";
 import { uploadProjectCover } from "@/lib/board/projectCoverUpload";
 import { checkUploadSize } from "@/lib/board/uploadLimits";
+import LazyDropStudioStage from "@/app/components/board/LazyDropStudioStage";
+import { type DropCustomization } from "@/lib/board/dropCustomizations";
 
 function clsx(...parts: Array<string | false | null | undefined>) {
   return parts.filter(Boolean).join(" ");
@@ -130,15 +132,41 @@ const UNION = ["Non-Union", "SAG-AFTRA", "Equity", "Other"] as const;
 
 const COMP = ["Paid", "Deferred", "Unpaid", "Negotiable"] as const;
 
+type ProjectDropDraft = {
+  id?: string;
+  title?: string;
+  logline?: string;
+  projectType?: string;
+  status?: ProjectDropStatus;
+  location?: string;
+  startDate?: string;
+  endDate?: string;
+  unionStatus?: string;
+  compensationType?: string;
+  rate?: string;
+  rolesNeeded?: string;
+  contactName?: string;
+  contactEmail?: string;
+  notes?: string;
+  goal?: string;
+  milestone?: string;
+  media?: ProjectMedia;
+  createdAt?: number;
+};
+
 export default function ProjectDropMenu({
   open,
   onClose,
   onCreate,
+  onUpdate,
+  initialProject,
   defaultHostName,
 }: {
   open: boolean;
   onClose: () => void;
   onCreate: (drop: ProjectDrop) => void | Promise<void>;
+  onUpdate?: (drop: ProjectDrop) => void | Promise<void>;
+  initialProject?: ProjectDropDraft | null;
   defaultHostName?: string;
 }) {
   const [error, setError] = useState<string | null>(null);
@@ -147,8 +175,7 @@ export default function ProjectDropMenu({
   const [title, setTitle] = useState("");
   const [logline, setLogline] = useState("");
 
-  const [projectType, setProjectType] =
-    useState<(typeof PROJECT_TYPES)[number]>("Feature Film");
+  const [projectType, setProjectType] = useState<string>("Feature Film");
   const [status, setStatus] = useState<ProjectDropStatus>("casting");
   const [location, setLocation] = useState("");
 
@@ -178,6 +205,9 @@ export default function ProjectDropMenu({
   const [mediaStoragePath, setMediaStoragePath] = useState("");
   const [mediaUploading, setMediaUploading] = useState(false);
   const [publishing, setPublishing] = useState(false);
+  const [studioOpen, setStudioOpen] = useState(false);
+  const [studioCustomizations, setStudioCustomizations] = useState<DropCustomization>({});
+  const editing = Boolean(initialProject?.id);
   const mediaFileRef = useRef<File | null>(null);
   const previewObjectUrlRef = useRef<string>("");
   const coverRef = useRef({ bucket: "", path: "", url: "" });
@@ -210,14 +240,55 @@ export default function ProjectDropMenu({
     } as ProjectMedia;
   }, [mediaDataUrl, mediaUrl, mediaKind, mediaBucket, mediaStoragePath]);
 
-  // Reset when opening (fresh slate)
+  // Hydrate create drafts vs edit fields when the sheet opens.
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      setStudioOpen(false);
+      return;
+    }
     setError(null);
-    setContactName((current) =>
-      current.trim() ? current : (defaultHostName || "").trim()
+    if (!initialProject?.id) {
+      setContactName((current) =>
+        current.trim() ? current : (defaultHostName || "").trim()
+      );
+      return;
+    }
+    setTitle(initialProject.title || "");
+    setLogline(initialProject.logline || "");
+    setProjectType(initialProject.projectType || "Feature Film");
+    setStatus(initialProject.status || "casting");
+    setLocation(initialProject.location || "");
+    setStartDate(initialProject.startDate || "");
+    setEndDate(initialProject.endDate || "");
+    setUnionStatus(
+      (UNION as readonly string[]).includes(initialProject.unionStatus || "")
+        ? (initialProject.unionStatus as (typeof UNION)[number])
+        : "Non-Union"
     );
-  }, [open, defaultHostName]);
+    setCompensationType(
+      (COMP as readonly string[]).includes(initialProject.compensationType || "")
+        ? (initialProject.compensationType as (typeof COMP)[number])
+        : "Negotiable"
+    );
+    setRate(initialProject.rate || "");
+    setRolesNeeded(initialProject.rolesNeeded || "");
+    setContactName(initialProject.contactName || defaultHostName || "");
+    setContactEmail(initialProject.contactEmail || "");
+    setNotes(initialProject.notes || "");
+    setGoal(initialProject.goal || "");
+    setMilestone(initialProject.milestone || "");
+    const media = initialProject.media;
+    setMediaKind(media?.kind === "video" ? "video" : "image");
+    rememberCover({
+      bucket: media?.bucket || "",
+      path: media?.storagePath || "",
+      url: media?.src || "",
+    });
+    revokePreviewObjectUrl();
+    setMediaDataUrl(media?.src?.startsWith("data:") || media?.src?.startsWith("blob:") ? media.src : "");
+    setPublishing(false);
+    publishingRef.current = false;
+  }, [open, initialProject, defaultHostName]);
 
   useEffect(() => {
     return () => {
@@ -284,6 +355,8 @@ export default function ProjectDropMenu({
     coverRef.current = { bucket: "", path: "", url: "" };
     uploadPromiseRef.current = null;
     uploadGenerationRef.current += 1;
+    setStudioOpen(false);
+    setStudioCustomizations({});
   }
 
   async function onPickFile(file: File | null) {
@@ -312,7 +385,36 @@ export default function ProjectDropMenu({
     }
 
     if (isVideo) {
-      setError("Video uploads aren’t local-save safe yet. Use a hosted video URL for now.");
+      setMediaKind("video");
+      mediaFileRef.current = file;
+      setPreviewFromFile(file);
+      setMediaUploading(true);
+      const job = (async () => {
+        try {
+          const { uploadBoardMediaFile } = await import("@/lib/board/boardMediaUpload");
+          const uploaded = await uploadBoardMediaFile(file, {
+            folder: "project-media",
+          });
+          if (generation !== uploadGenerationRef.current) return;
+          if (!uploaded) {
+            setError("Couldn’t upload that video. Try a shorter clip.");
+            return;
+          }
+          rememberCover({
+            bucket: uploaded.bucket,
+            path: uploaded.storagePath,
+            url: uploaded.signedUrl || uploaded.publicUrl,
+          });
+        } catch {
+          if (generation !== uploadGenerationRef.current) return;
+          setError("Couldn’t upload that video. Try again.");
+        } finally {
+          if (generation !== uploadGenerationRef.current) return;
+          setMediaUploading(false);
+          uploadPromiseRef.current = null;
+        }
+      })();
+      uploadPromiseRef.current = job;
       return;
     }
 
@@ -399,9 +501,10 @@ export default function ProjectDropMenu({
     const coverPath = coverRef.current.path || mediaStoragePath;
     const coverUrl = coverRef.current.url || mediaUrl;
 
-    const id =
-      (globalThis.crypto as any)?.randomUUID?.() ??
-      `${Date.now()}-${Math.random()}`;
+    const id = editing
+      ? String(initialProject?.id)
+      : (globalThis.crypto as any)?.randomUUID?.() ??
+        `${Date.now()}-${Math.random()}`;
 
     const drop: ProjectDrop = {
       id,
@@ -436,13 +539,18 @@ export default function ProjectDropMenu({
           }
         : mediaPreview ?? undefined,
 
-      createdAt: Date.now(),
+      createdAt: editing ? Number(initialProject?.createdAt || Date.now()) : Date.now(),
     };
 
     try {
-      onCreate(drop);
+      if (editing) {
+        if (!onUpdate) throw new Error("missing update handler");
+        await onUpdate(drop);
+      } else {
+        await onCreate(drop);
+      }
     } catch {
-      setError("Couldn’t post that Project Drop. Try Submit again.");
+      setError(editing ? "Couldn’t update that Project Drop. Try again." : "Couldn’t post that Project Drop. Try Submit again.");
       publishingRef.current = false;
       setPublishing(false);
       return;
@@ -452,9 +560,24 @@ export default function ProjectDropMenu({
     resetAll();
   }
 
-  if (!open) return null;
+  if (!open && !studioOpen) return null;
 
   return (
+    <>
+      <LazyDropStudioStage
+        open={studioOpen}
+        initialFile={null}
+        initialMode="photo"
+        allowedModes={["photo", "video", "art"]}
+        value={studioCustomizations}
+        onChange={setStudioCustomizations}
+        onComplete={async (file) => {
+          await onPickFile(file);
+          setStudioOpen(false);
+        }}
+        onClose={() => setStudioOpen(false)}
+      />
+      {open ? (
     <div
       className="fixed inset-0 z-[9999] flex items-start justify-center overflow-y-auto px-4 py-6 md:py-10"
       aria-modal="true"
@@ -488,10 +611,12 @@ export default function ProjectDropMenu({
           <div className="flex items-start justify-between gap-3">
             <div>
               <div className="text-white text-lg md:text-xl font-semibold">
-                Drop Project
+                {editing ? "Update Project Drop" : "Drop Project"}
               </div>
               <div className="text-white/60 text-sm">
-                Build the project, then publish it into the community feed.
+                {editing
+                  ? "Edit the project details, then save them back to the notebook."
+                  : "Build the project, then publish it into the community feed."}
               </div>
             </div>
 
@@ -501,7 +626,7 @@ export default function ProjectDropMenu({
                 disabled={publishing}
                 className="rounded-2xl border border-lime-300/30 bg-lime-400/20 px-4 py-2 text-sm font-semibold text-lime-50 hover:bg-lime-400/25 transition disabled:opacity-60"
               >
-                {publishing ? "Posting…" : "Publish to Community"}
+                {publishing ? (editing ? "Saving…" : "Posting…") : editing ? "Save Update" : "Publish to Community"}
               </button>
               <button
                 type="button"
@@ -549,7 +674,7 @@ export default function ProjectDropMenu({
             <Field label="Project Type *">
               <select
                 value={projectType}
-                onChange={(e) => setProjectType(e.target.value as any)}
+                onChange={(e) => setProjectType(e.target.value)}
                 className={selectClass}
               >
                 {PROJECT_TYPES.map((t) => (
@@ -557,6 +682,9 @@ export default function ProjectDropMenu({
                     {t}
                   </option>
                 ))}
+                {projectType && !(PROJECT_TYPES as readonly string[]).includes(projectType) ? (
+                  <option value={projectType}>{projectType}</option>
+                ) : null}
               </select>
             </Field>
 
@@ -744,20 +872,30 @@ export default function ProjectDropMenu({
             </div>
 
             <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3 items-end">
-              <Field label="Upload File (optional)">
-                <label className="inline-flex w-fit cursor-pointer items-center justify-center rounded-full border border-cyan-200/25 bg-cyan-100/10 px-4 py-2 text-[11px] font-black uppercase tracking-[0.16em] text-cyan-50 shadow-[0_0_18px_rgba(103,232,249,0.10)] transition hover:-translate-y-0.5 hover:bg-cyan-100/15">
-                  {mediaUploading ? "Uploading" : "Upload"}
-                  <input
-                    type="file"
-                    accept="image/*,image/heic,image/heif,.heic,.heif,video/*"
-                    onChange={(e) => {
-                      const next = e.target.files?.[0] ?? null;
-                      e.target.value = "";
-                      void onPickFile(next);
-                    }}
-                    className="sr-only"
-                  />
-                </label>
+              <div>
+                <div className="text-xs text-white/55">Add media</div>
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setStudioOpen(true)}
+                    className="inline-flex w-fit cursor-pointer items-center justify-center rounded-full border border-cyan-200/25 bg-cyan-100/10 px-4 py-2 text-[11px] font-black uppercase tracking-[0.16em] text-cyan-50 shadow-[0_0_18px_rgba(103,232,249,0.10)] transition hover:-translate-y-0.5 hover:bg-cyan-100/15"
+                  >
+                    Open Drop Studio
+                  </button>
+                  <label className="inline-flex w-fit cursor-pointer items-center justify-center rounded-full border border-white/15 bg-white/5 px-4 py-2 text-[11px] font-black uppercase tracking-[0.16em] text-white/80 transition hover:bg-white/10">
+                    {mediaUploading ? "Uploading" : "Upload"}
+                    <input
+                      type="file"
+                      accept="image/*,image/heic,image/heif,.heic,.heif,video/*"
+                      onChange={(e) => {
+                        const next = e.target.files?.[0] ?? null;
+                        e.target.value = "";
+                        void onPickFile(next);
+                      }}
+                      className="sr-only"
+                    />
+                  </label>
+                </div>
                 <div className="mt-2 min-h-5 max-w-full truncate text-xs font-semibold text-white/55">
                   {mediaStoragePath
                     ? "Cover uploaded to Board."
@@ -767,9 +905,9 @@ export default function ProjectDropMenu({
                         : "Preparing photo..."
                       : mediaDataUrl
                         ? "Media attached from this device."
-                        : "Select image or video from this device."}
+                        : "Open Drop Studio or select a file from this device."}
                 </div>
-              </Field>
+              </div>
 
               <div className="rounded-2xl border border-white/10 bg-black/30 p-3">
                 <div className="text-xs text-white/50">Preview</div>
@@ -833,7 +971,9 @@ export default function ProjectDropMenu({
         <div className="sticky bottom-0 p-5 md:p-6 border-t border-white/10 bg-black/75 backdrop-blur-xl">
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div className="text-xs uppercase tracking-[0.22em] text-white/45">
-              This will create the project tile and add the drop to Community Feed
+              {editing
+                ? "This will update the project tile in your notebook"
+                : "This will create the project tile and add the drop to Community Feed"}
             </div>
 
             <div className="flex items-center justify-end gap-3">
@@ -850,13 +990,21 @@ export default function ProjectDropMenu({
               disabled={publishing}
               className="rounded-2xl border border-lime-300/30 bg-lime-400/20 px-5 py-2.5 text-sm font-semibold text-lime-50 hover:bg-lime-400/25 transition disabled:opacity-60"
             >
-              {publishing ? "Posting…" : "Submit Project Drop to Community"}
+              {publishing
+                ? editing
+                  ? "Saving…"
+                  : "Posting…"
+                : editing
+                  ? "Update Project Drop"
+                  : "Submit Project Drop to Community"}
             </button>
             </div>
           </div>
         </div>
       </form>
     </div>
+      ) : null}
+    </>
   );
 }
 

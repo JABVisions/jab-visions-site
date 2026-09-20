@@ -45,6 +45,21 @@ import { getCurrentUserId, loadAllLocalDrops } from "@/lib/board/boardDropEditSt
 import { pushDrop, readDrops, writeDrops } from "@/lib/board/drops/storage";
 import { readCurrentBoardIdentity } from "@/lib/board/currentProfile";
 import { emitBoardDropSignal } from "@/lib/board/dropSignals";
+import LazyDropStudioStage from "@/app/components/board/LazyDropStudioStage";
+import type { DropCustomization } from "@/lib/board/dropCustomizations";
+import {
+  BOARD_IMAGE_MIN_LONG_EDGE,
+  prepareBoardImageFile,
+  PROJECT_COVER_MAX_LONG_EDGE,
+} from "@/lib/board/imageQuality";
+import { uploadProjectCover } from "@/lib/board/projectCoverUpload";
+import { uploadBoardMediaFile } from "@/lib/board/boardMediaUpload";
+import {
+  boardProjectPatchFromDrop,
+  isProjectStudioVideoFile,
+  projectCoverFromUpload,
+  projectMediaFromStudioUpload,
+} from "@/lib/board/projectDropEdit";
 
 function clsx(...parts: Array<string | false | null | undefined>) {
   return parts.filter(Boolean).join(" ");
@@ -342,6 +357,11 @@ export default function ProjectCenter() {
   >([]);
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
+  const [editingProject, setEditingProject] = useState<BoardProject | null>(null);
+  const [studioProject, setStudioProject] = useState<BoardProject | null>(null);
+  const [studioOpen, setStudioOpen] = useState(false);
+  const [studioCustomizations, setStudioCustomizations] = useState<DropCustomization>({});
+  const [studioMessage, setStudioMessage] = useState<string | null>(null);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [hostProfileName, setHostProfileName] = useState("");
   const [inviteDraft, setInviteDraft] = useState({
@@ -569,6 +589,7 @@ export default function ProjectCenter() {
   useEffect(() => {
     const onCreate = () => {
       setActiveProjectId(null);
+      setEditingProject(null);
       setCreateOpen(true);
     };
 
@@ -931,14 +952,78 @@ export default function ProjectCenter() {
   };
 
   const updateProject = (id: string, patch: Partial<BoardProject>) => {
+    let saved: BoardProject | null = null;
     commitProjects((prev) =>
-      prev.map((project) =>
-        project.id === id
-          ? { ...project, ...patch, updatedAt: Date.now() }
-          : project
-      )
+      prev.map((project) => {
+        if (project.id !== id) return project;
+        saved = { ...project, ...patch, updatedAt: Date.now() };
+        return saved;
+      })
     );
+    if (saved) {
+      void persistProjectListToAccount(
+        notebookProjectsOwnedByViewer([saved], currentUserId)
+      );
+    }
   };
+
+  const updateProjectFromDrop = (drop: ProjectDrop) => {
+    updateProject(drop.id, boardProjectPatchFromDrop(drop));
+    setEditingProject(null);
+    setCreateOpen(false);
+  };
+
+  function openStudioForProject(project: BoardProject) {
+    setStudioProject(project);
+    setStudioOpen(true);
+  }
+
+  async function applyStudioMediaToProject(project: BoardProject, file: File) {
+    const isVideo = isProjectStudioVideoFile(file);
+    const isImage = file.type.startsWith("image/") || /\.(png|jpe?g|gif|webp|avif|heic)$/i.test(file.name);
+    if (!isVideo && !isImage) {
+      setStudioMessage("Drop Studio can add a photo, video, or art cover.");
+      window.setTimeout(() => setStudioMessage(null), 2200);
+      throw new Error("unsupported project media");
+    }
+    setStudioMessage(isVideo ? "Uploading video…" : "Uploading cover…");
+    try {
+      if (isVideo) {
+        const uploaded = await uploadBoardMediaFile(file, { folder: "project-media" });
+        if (!uploaded) throw new Error("upload failed");
+        updateProject(project.id, {
+          media: projectMediaFromStudioUpload({
+            kind: "video",
+            src: uploaded.signedUrl || uploaded.publicUrl,
+            bucket: uploaded.bucket,
+            storagePath: uploaded.storagePath,
+          }),
+        });
+      } else {
+        const prepared = await prepareBoardImageFile(file, {
+          minLongEdge: BOARD_IMAGE_MIN_LONG_EDGE,
+          maxLongEdge: PROJECT_COVER_MAX_LONG_EDGE,
+        }).catch(() => file);
+        const uploaded = await uploadProjectCover(prepared);
+        if (!uploaded) throw new Error("upload failed");
+        const cover = persistableProjectCover(projectCoverFromUpload(uploaded)) ?? projectCoverFromUpload(uploaded);
+        updateProject(project.id, {
+          media: projectMediaFromStudioUpload({
+            kind: cover.kind === "video" ? "video" : "image",
+            src: cover.src,
+            bucket: cover.bucket,
+            storagePath: cover.storagePath,
+          }),
+        });
+      }
+      setStudioMessage("Media saved to this project.");
+      window.setTimeout(() => setStudioMessage(null), 1800);
+    } catch {
+      setStudioMessage("Couldn’t save that media. Try again.");
+      window.setTimeout(() => setStudioMessage(null), 2200);
+      throw new Error("Couldn’t save project media.");
+    }
+  }
 
   const deleteProject = (id: string) => {
     removeLocalActivity(
@@ -957,6 +1042,11 @@ export default function ProjectCenter() {
 
     commitProjects((prev) => prev.filter((project) => project.id !== id));
     if (commentsProject?.id === id) setCommentsProject(null);
+    if (editingProject?.id === id) setEditingProject(null);
+    if (studioProject?.id === id) {
+      setStudioProject(null);
+      setStudioOpen(false);
+    }
     if (activeProjectId === id) {
       setActiveProjectId(null);
       setInviteError(null);
@@ -1039,6 +1129,50 @@ export default function ProjectCenter() {
 
   const allProjectDropCount = projectTiles.length + dropPadProjectDrops.length;
 
+  const overlays = (
+    <>
+      <ProjectDropMenu
+        open={createOpen}
+        onClose={() => {
+          setCreateOpen(false);
+          setEditingProject(null);
+        }}
+        onCreate={createProjectFromDrop}
+        onUpdate={updateProjectFromDrop}
+        initialProject={editingProject}
+        defaultHostName={hostProfileName}
+      />
+      <DropCommentsDrawer
+        open={Boolean(commentsProject)}
+        onClose={() => setCommentsProject(null)}
+        dropId={commentsProject ? projectCommentDropId(commentsProject.id) : ""}
+        dropTitle={commentsProject?.title}
+      />
+      <LazyDropStudioStage
+        open={studioOpen}
+        initialFile={null}
+        initialMode="photo"
+        allowedModes={["photo", "video", "art"]}
+        value={studioCustomizations}
+        onChange={setStudioCustomizations}
+        onComplete={async (file) => {
+          const target =
+            (studioProject && projects.find((project) => project.id === studioProject.id)) ||
+            studioProject ||
+            activeProject;
+          if (!target) return;
+          await applyStudioMediaToProject(target, file);
+          setStudioOpen(false);
+          setStudioProject(null);
+        }}
+        onClose={() => {
+          setStudioOpen(false);
+          setStudioProject(null);
+        }}
+      />
+    </>
+  );
+
   if (!activeProject) {
     return (
       <div className="w-full grid gap-5">
@@ -1111,7 +1245,10 @@ export default function ProjectCenter() {
             action={
               <button
                 type="button"
-                onClick={() => setCreateOpen(true)}
+                onClick={() => {
+                  setEditingProject(null);
+                  setCreateOpen(true);
+                }}
                 className="rounded-2xl border border-lime-300/20 bg-lime-400/15 px-4 py-2 text-sm text-lime-100/90 hover:bg-lime-400/20 transition"
               >
                 + New Project Drop
@@ -1120,6 +1257,11 @@ export default function ProjectCenter() {
           />
 
           <div className="p-5">
+            {studioMessage ? (
+              <div className="mb-4 rounded-2xl border border-white/10 bg-white/[0.05] px-4 py-3 text-sm text-white/72">
+                {studioMessage}
+              </div>
+            ) : null}
             {allProjectDropCount === 0 ? (
               <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-6 text-sm text-white/65">
                 No projects yet. Start with a Project Drop and it will become a live project tile here.
@@ -1158,14 +1300,41 @@ export default function ProjectCenter() {
                       <div className="absolute right-4 top-4 z-10 flex flex-wrap justify-end gap-2">
                         <button
                           type="button"
-                          onClick={() => setCommentsProject(project)}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            setEditingProject(project);
+                            setCreateOpen(true);
+                          }}
+                          className="rounded-full border border-lime-200/25 bg-lime-400/15 px-3 py-1 text-[11px] tracking-[0.16em] text-lime-50/90 transition hover:bg-lime-400/22"
+                        >
+                          Edit / Update
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            openStudioForProject(project);
+                          }}
+                          className="rounded-full border border-cyan-200/25 bg-cyan-400/15 px-3 py-1 text-[11px] tracking-[0.16em] text-cyan-50/90 transition hover:bg-cyan-400/22"
+                        >
+                          Drop Studio
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            setCommentsProject(project);
+                          }}
                           className="rounded-full border border-cyan-200/25 bg-cyan-400/15 px-3 py-1 text-[11px] tracking-[0.16em] text-cyan-50/90 transition hover:bg-cyan-400/22"
                         >
                           Comment
                         </button>
                         <button
                           type="button"
-                          onClick={() => deleteProject(project.id)}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            deleteProject(project.id);
+                          }}
                           className="rounded-full border border-red-300/25 bg-red-500/20 px-3 py-1 text-[11px] tracking-[0.16em] text-red-50/90 hover:bg-red-500/28 transition"
                         >
                           Delete
@@ -1264,18 +1433,7 @@ export default function ProjectCenter() {
           </div>
         </TileFrame>
 
-        <ProjectDropMenu
-          open={createOpen}
-          onClose={() => setCreateOpen(false)}
-          onCreate={createProjectFromDrop}
-          defaultHostName={hostProfileName}
-        />
-        <DropCommentsDrawer
-          open={Boolean(commentsProject)}
-          onClose={() => setCommentsProject(null)}
-          dropId={commentsProject ? projectCommentDropId(commentsProject.id) : ""}
-          dropTitle={commentsProject?.title}
-        />
+        {overlays}
       </div>
     );
   }
@@ -1290,7 +1448,24 @@ export default function ProjectCenter() {
             activeProject.status
           )}`}
           action={
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => openStudioForProject(activeProject)}
+                className="rounded-2xl border border-cyan-200/25 bg-cyan-400/15 px-3 py-2 text-sm text-cyan-50/90 transition hover:bg-cyan-400/22"
+              >
+                Drop Studio Editor
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setEditingProject(activeProject);
+                  setCreateOpen(true);
+                }}
+                className="rounded-2xl border border-lime-200/25 bg-lime-400/15 px-3 py-2 text-sm text-lime-50/90 transition hover:bg-lime-400/22"
+              >
+                Edit / Update
+              </button>
               <button
                 type="button"
                 onClick={() => setCommentsProject(activeProject)}
@@ -1300,7 +1475,11 @@ export default function ProjectCenter() {
               </button>
               <button
                 type="button"
-                onClick={() => setActiveProjectId(null)}
+                onClick={() => {
+                  setStudioOpen(false);
+                  setStudioProject(null);
+                  setActiveProjectId(null);
+                }}
                 className="rounded-2xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-white/70 hover:bg-black/40 transition"
               >
                 ← Back
@@ -1317,13 +1496,31 @@ export default function ProjectCenter() {
         />
 
         <div className="p-5 space-y-4">
-          {activeProject.media ? (
-            <div className="relative h-56 overflow-hidden rounded-3xl border border-white/10 bg-black/30 md:h-72">
+          <div className="relative h-56 overflow-hidden rounded-3xl border border-white/10 bg-black/30 md:h-72">
+            {activeProject.media ? (
               <ProjectCoverImage
                 media={activeProject.media}
                 title={activeProject.title}
                 className="object-cover"
               />
+            ) : (
+              <div className="flex h-full items-center justify-center bg-[radial-gradient(circle_at_top_left,rgba(244,114,182,0.18),transparent_45%),radial-gradient(circle_at_bottom_right,rgba(96,165,250,0.16),transparent_48%),linear-gradient(180deg,rgba(12,12,20,0.92),rgba(4,4,8,0.98))]">
+                <div className="rounded-full border border-white/10 bg-white/5 px-4 py-2 text-[11px] tracking-[0.28em] text-white/55">
+                  ADD PROJECT MEDIA
+                </div>
+              </div>
+            )}
+            <button
+              type="button"
+              onClick={() => openStudioForProject(activeProject)}
+              className="absolute bottom-4 left-4 rounded-full border border-cyan-200/30 bg-cyan-400/20 px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-cyan-50/90 transition hover:bg-cyan-400/28"
+            >
+              Drop Studio Editor
+            </button>
+          </div>
+          {studioMessage ? (
+            <div className="rounded-2xl border border-white/10 bg-white/[0.05] px-4 py-3 text-sm text-white/72">
+              {studioMessage}
             </div>
           ) : null}
           <div className="grid gap-4 lg:grid-cols-[1.2fr_0.8fr]">
@@ -1591,18 +1788,7 @@ export default function ProjectCenter() {
         </div>
       </TileFrame>
 
-      <ProjectDropMenu
-        open={createOpen}
-        onClose={() => setCreateOpen(false)}
-        onCreate={createProjectFromDrop}
-        defaultHostName={hostProfileName}
-      />
-      <DropCommentsDrawer
-        open={Boolean(commentsProject)}
-        onClose={() => setCommentsProject(null)}
-        dropId={commentsProject ? projectCommentDropId(commentsProject.id) : ""}
-        dropTitle={commentsProject?.title}
-      />
+      {overlays}
     </div>
   );
 }
