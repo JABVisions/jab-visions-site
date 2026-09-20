@@ -10,8 +10,6 @@ import {
 import { parseBoardStorageFromUrl } from "@/lib/board/musicPlayback";
 import { uploadProjectCover } from "@/lib/board/projectCoverUpload";
 import { checkUploadSize } from "@/lib/board/uploadLimits";
-import LazyDropStudioStage from "@/app/components/board/LazyDropStudioStage";
-import { type DropCustomization } from "@/lib/board/dropCustomizations";
 
 function clsx(...parts: Array<string | false | null | undefined>) {
   return parts.filter(Boolean).join(" ");
@@ -205,8 +203,6 @@ export default function ProjectDropMenu({
   const [mediaStoragePath, setMediaStoragePath] = useState("");
   const [mediaUploading, setMediaUploading] = useState(false);
   const [publishing, setPublishing] = useState(false);
-  const [studioOpen, setStudioOpen] = useState(false);
-  const [studioCustomizations, setStudioCustomizations] = useState<DropCustomization>({});
   const editing = Boolean(initialProject?.id);
   const mediaFileRef = useRef<File | null>(null);
   const previewObjectUrlRef = useRef<string>("");
@@ -242,10 +238,7 @@ export default function ProjectDropMenu({
 
   // Hydrate create drafts vs edit fields when the sheet opens.
   useEffect(() => {
-    if (!open) {
-      setStudioOpen(false);
-      return;
-    }
+    if (!open) return;
     setError(null);
     if (!initialProject?.id) {
       setContactName((current) =>
@@ -355,8 +348,6 @@ export default function ProjectDropMenu({
     coverRef.current = { bucket: "", path: "", url: "" };
     uploadPromiseRef.current = null;
     uploadGenerationRef.current += 1;
-    setStudioOpen(false);
-    setStudioCustomizations({});
   }
 
   async function onPickFile(file: File | null) {
@@ -560,24 +551,9 @@ export default function ProjectDropMenu({
     resetAll();
   }
 
-  if (!open && !studioOpen) return null;
+  if (!open) return null;
 
   return (
-    <>
-      <LazyDropStudioStage
-        open={studioOpen}
-        initialFile={null}
-        initialMode="photo"
-        allowedModes={["photo", "video", "art"]}
-        value={studioCustomizations}
-        onChange={setStudioCustomizations}
-        onComplete={async (file) => {
-          await onPickFile(file);
-          setStudioOpen(false);
-        }}
-        onClose={() => setStudioOpen(false)}
-      />
-      {open ? (
     <div
       className="fixed inset-0 z-[9999] flex items-start justify-center overflow-y-auto px-4 py-6 md:py-10"
       aria-modal="true"
@@ -872,30 +848,20 @@ export default function ProjectDropMenu({
             </div>
 
             <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3 items-end">
-              <div>
-                <div className="text-xs text-white/55">Add media</div>
-                <div className="mt-2 flex flex-wrap items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setStudioOpen(true)}
-                    className="inline-flex w-fit cursor-pointer items-center justify-center rounded-full border border-cyan-200/25 bg-cyan-100/10 px-4 py-2 text-[11px] font-black uppercase tracking-[0.16em] text-cyan-50 shadow-[0_0_18px_rgba(103,232,249,0.10)] transition hover:-translate-y-0.5 hover:bg-cyan-100/15"
-                  >
-                    Open Drop Studio
-                  </button>
-                  <label className="inline-flex w-fit cursor-pointer items-center justify-center rounded-full border border-white/15 bg-white/5 px-4 py-2 text-[11px] font-black uppercase tracking-[0.16em] text-white/80 transition hover:bg-white/10">
-                    {mediaUploading ? "Uploading" : "Upload"}
-                    <input
-                      type="file"
-                      accept="image/*,image/heic,image/heif,.heic,.heif,video/*"
-                      onChange={(e) => {
-                        const next = e.target.files?.[0] ?? null;
-                        e.target.value = "";
-                        void onPickFile(next);
-                      }}
-                      className="sr-only"
-                    />
-                  </label>
-                </div>
+              <Field label="Upload File (optional)">
+                <label className="inline-flex w-fit cursor-pointer items-center justify-center rounded-full border border-cyan-200/25 bg-cyan-100/10 px-4 py-2 text-[11px] font-black uppercase tracking-[0.16em] text-cyan-50 shadow-[0_0_18px_rgba(103,232,249,0.10)] transition hover:-translate-y-0.5 hover:bg-cyan-100/15">
+                  {mediaUploading ? "Uploading" : "Upload"}
+                  <input
+                    type="file"
+                    accept="image/*,image/heic,image/heif,.heic,.heif,video/*"
+                    onChange={(e) => {
+                      const next = e.target.files?.[0] ?? null;
+                      e.target.value = "";
+                      void onPickFile(next);
+                    }}
+                    className="sr-only"
+                  />
+                </label>
                 <div className="mt-2 min-h-5 max-w-full truncate text-xs font-semibold text-white/55">
                   {mediaStoragePath
                     ? "Cover uploaded to Board."
@@ -905,9 +871,9 @@ export default function ProjectDropMenu({
                         : "Preparing photo..."
                       : mediaDataUrl
                         ? "Media attached from this device."
-                        : "Open Drop Studio or select a file from this device."}
+                        : "Select image or video from this device."}
                 </div>
-              </div>
+              </Field>
 
               <div className="rounded-2xl border border-white/10 bg-black/30 p-3">
                 <div className="text-xs text-white/50">Preview</div>
@@ -1003,8 +969,6 @@ export default function ProjectDropMenu({
         </div>
       </form>
     </div>
-      ) : null}
-    </>
   );
 }
 
