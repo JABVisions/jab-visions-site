@@ -233,6 +233,35 @@ assert(
   `profile Project Drops should hydrate into notebook records, got ${fromProfile.map((project) => project.title).join(",")}`
 );
 
+const fromNotebook = projectsFromProfileBoardDrops({
+  id: "user-1",
+  username: "johnandy",
+  display_name: "JAB",
+  board_style: {
+    projectNotebook: [
+      {
+        id: "project_drop_project_cloud_zoe",
+        type: "Project",
+        title: "zoe audition",
+        createdAt: Date.now(),
+        description: "Casting sides for Zoe",
+        origin: "project_notebook",
+        source: "work_board",
+        meta: {
+          dropType: "project",
+          projectId: "project_cloud_zoe",
+          cardStyle: "project_drop",
+        },
+      },
+    ],
+    boardDrops: [],
+  },
+});
+assert(
+  fromNotebook.some((project) => /zoe audition/i.test(project.title)),
+  `cloud projectNotebook rows should hydrate into notebook records, got ${fromNotebook.map((project) => project.title).join(",")}`
+);
+
 writeBoardProjects(resolved);
 const persisted = JSON.parse(memory.get("jab_board_projects_v2") || "[]") as Array<{ id: string; source?: string }>;
 assert(

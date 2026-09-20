@@ -5,6 +5,63 @@ import {
   type ProjectCoverMedia,
 } from "@/lib/board/projectCover";
 
+export const PROJECT_NOTEBOOK_STYLE_KEY = "projectNotebook";
+
+export function isCloudProjectDrop(item: unknown): boolean {
+  if (!item || typeof item !== "object") return false;
+  const drop = item as Record<string, any>;
+  const meta =
+    drop.meta && typeof drop.meta === "object" && !Array.isArray(drop.meta)
+      ? drop.meta
+      : {};
+  const id = String(drop.id ?? "");
+  const type = String(drop.type ?? drop.dropType ?? "");
+  const origin = String(drop.origin ?? meta.origin ?? "");
+  const dropType = String(meta.dropType ?? drop.dropType ?? "");
+  return (
+    id.startsWith("project_drop_") ||
+    origin === "project_notebook" ||
+    /^project$/i.test(type) ||
+    dropType === "project" ||
+    dropType === "project_drop"
+  );
+}
+
+export function projectDropsFromProfileStyle(style: unknown): any[] {
+  const record =
+    style && typeof style === "object" && !Array.isArray(style)
+      ? (style as Record<string, any>)
+      : {};
+  const notebook = Array.isArray(record[PROJECT_NOTEBOOK_STYLE_KEY])
+    ? record[PROJECT_NOTEBOOK_STYLE_KEY]
+    : [];
+  const drops = Array.isArray(record.boardDrops) ? record.boardDrops : [];
+  const deleted = new Set(
+    (Array.isArray(record.boardDropsDeleted) ? record.boardDropsDeleted : []).map(String)
+  );
+  const merged = new Map<string, any>();
+  for (const drop of [...notebook, ...drops]) {
+    if (!drop || typeof drop !== "object") continue;
+    const id = String((drop as { id?: unknown }).id ?? "").trim();
+    if (!id || deleted.has(id) || !isCloudProjectDrop(drop)) continue;
+    if (!merged.has(id)) merged.set(id, drop);
+  }
+  return Array.from(merged.values());
+}
+
+export function mergeCollectionPreservingProjectDrops(
+  collection: any[],
+  remote: any[]
+) {
+  const next = Array.isArray(collection) ? collection.filter((drop) => !isCloudProjectDrop(drop)) : [];
+  const seen = new Set(next.map((drop) => String(drop?.id ?? "")));
+  const preserved = (Array.isArray(remote) ? remote : []).filter((drop) => {
+    const id = String(drop?.id ?? "");
+    return Boolean(id) && isCloudProjectDrop(drop) && !seen.has(id);
+  });
+  return [...preserved, ...next];
+}
+
 export type ProjectProfileDropInput = {
   id: string;
   title: string;

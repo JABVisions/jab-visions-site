@@ -5,7 +5,12 @@ import {
   pickProjectHostName,
   persistableImageUrl,
 } from "@/lib/board/projectCover";
-import { profileBoardDropFromProject } from "@/lib/board/projectProfileDrop";
+import {
+  profileBoardDropFromProject,
+  projectDropsFromProfileStyle,
+  PROJECT_NOTEBOOK_STYLE_KEY,
+  isCloudProjectDrop,
+} from "@/lib/board/projectProfileDrop";
 import { createSupabaseRouteClient } from "@/lib/supabase/routeClient";
 
 export const runtime = "nodejs";
@@ -268,12 +273,7 @@ export async function GET(request: NextRequest) {
 
   const fromProfiles = profileRows.flatMap((profile) => {
     const style = asRecord(profile.board_style);
-    const drops = Array.isArray(style.boardDrops) ? style.boardDrops : [];
-    const deleted = new Set(
-      (Array.isArray(style.boardDropsDeleted) ? style.boardDropsDeleted : []).map(String)
-    );
-    return drops
-      .filter((drop: any) => drop && !deleted.has(String(drop.id ?? "")))
+    return projectDropsFromProfileStyle(style)
       .map((drop: any) => activityFromProfileDrop(profile, drop, viewerId))
       .filter(Boolean) as BoardActivity[];
   });
@@ -365,7 +365,16 @@ export async function POST(request: NextRequest) {
     const deleted = new Set(
       (Array.isArray(currentStyle.boardDropsDeleted) ? currentStyle.boardDropsDeleted : []).map(String)
     );
-    let drops = Array.isArray(currentStyle.boardDrops) ? [...currentStyle.boardDrops] : [];
+    const boardDrops = Array.isArray(currentStyle.boardDrops) ? [...currentStyle.boardDrops] : [];
+    let notebook = Array.isArray(currentStyle[PROJECT_NOTEBOOK_STYLE_KEY])
+      ? [...currentStyle[PROJECT_NOTEBOOK_STYLE_KEY]]
+      : [];
+    for (const drop of boardDrops) {
+      if (!isCloudProjectDrop(drop)) continue;
+      const id = String(drop?.id ?? "");
+      if (!id || notebook.some((item: any) => String(item?.id ?? "") === id)) continue;
+      notebook.push(drop);
+    }
 
     for (const project of projects) {
       const row = profileBoardDropFromProject(project, {
@@ -374,7 +383,7 @@ export async function POST(request: NextRequest) {
         display_name: profile?.display_name,
       });
       if (deleted.has(row.id)) continue;
-      drops = [row, ...drops.filter((item: any) => String(item?.id ?? "") !== row.id)];
+      notebook = [row, ...notebook.filter((item: any) => String(item?.id ?? "") !== row.id)];
     }
 
     const { data: updated, error: updateError } = await supabase
@@ -382,7 +391,8 @@ export async function POST(request: NextRequest) {
       .update({
         board_style: {
           ...currentStyle,
-          boardDrops: drops.slice(0, 120),
+          [PROJECT_NOTEBOOK_STYLE_KEY]: notebook.slice(0, 120),
+          boardDrops: boardDrops.filter((item: any) => !isCloudProjectDrop(item)).slice(0, 120),
         },
       })
       .eq("id", userId)

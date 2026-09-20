@@ -21,7 +21,13 @@ import {
   resolveProjectStartDate,
   type ProjectCoverMedia,
 } from "@/lib/board/projectCover";
-import { profileBoardDropFromProject, persistLocalProjectsViaApi } from "@/lib/board/projectProfileDrop";
+import {
+  profileBoardDropFromProject,
+  persistLocalProjectsViaApi,
+  projectDropsFromProfileStyle,
+  PROJECT_NOTEBOOK_STYLE_KEY,
+  isCloudProjectDrop,
+} from "@/lib/board/projectProfileDrop";
 import { getCurrentUserId } from "@/lib/board/boardDropEditStore";
 import { supabaseBrowser } from "@/lib/supabase/browser";
 
@@ -969,17 +975,12 @@ export function projectsFromProfileBoardDrops(profile: {
   display_name?: string | null;
   board_style?: unknown;
 }): BoardProject[] {
-  const style = asProjectRecord(profile.board_style);
-  const drops = Array.isArray(style.boardDrops) ? style.boardDrops : [];
-  const deleted = new Set(
-    (Array.isArray(style.boardDropsDeleted) ? style.boardDropsDeleted : []).map(String)
-  );
   const projects: BoardProject[] = [];
 
-  for (const drop of drops) {
+  for (const drop of projectDropsFromProfileStyle(profile.board_style)) {
     const row = asProjectRecord(drop);
     const id = String(row.id ?? "").trim();
-    if (!id || deleted.has(id)) continue;
+    if (!id) continue;
     const project = projectFromProfileBoardDrop(profile, row);
     if (project) projects.push(project);
   }
@@ -1109,21 +1110,31 @@ export async function persistProjectListToProfile(
     profile?.board_style && typeof profile.board_style === "object"
       ? profile.board_style
       : {};
-  let drops = Array.isArray(currentStyle.boardDrops) ? [...currentStyle.boardDrops] : [];
+  const boardDrops = Array.isArray(currentStyle.boardDrops) ? [...currentStyle.boardDrops] : [];
+  let notebook = Array.isArray(currentStyle[PROJECT_NOTEBOOK_STYLE_KEY])
+    ? [...currentStyle[PROJECT_NOTEBOOK_STYLE_KEY]]
+    : [];
+  for (const drop of boardDrops) {
+    if (!isCloudProjectDrop(drop)) continue;
+    const id = String(drop?.id ?? "");
+    if (!id || notebook.some((item: any) => String(item?.id ?? "") === id)) continue;
+    notebook.push(drop);
+  }
   for (const project of projects) {
     const row = profileBoardDropFromProject(project, {
       id: userId,
       username: profile?.username,
       display_name: profile?.display_name,
     });
-    drops = [row, ...drops.filter((item: any) => String(item?.id ?? "") !== row.id)];
+    notebook = [row, ...notebook.filter((item: any) => String(item?.id ?? "") !== row.id)];
   }
   const { data: updated, error } = await sb
     .from("profiles")
     .update({
       board_style: {
         ...currentStyle,
-        boardDrops: drops.slice(0, 120),
+        [PROJECT_NOTEBOOK_STYLE_KEY]: notebook.slice(0, 120),
+        boardDrops: boardDrops.filter((item: any) => !isCloudProjectDrop(item)).slice(0, 120),
       },
     })
     .eq("id", userId)
@@ -1146,14 +1157,17 @@ export function notebookProjectsOwnedByViewer(
 
 export async function persistProjectListToAccount(projects: BoardProject[]): Promise<boolean> {
   if (!projects.length) return false;
-  try {
-    const userId = await getCurrentUserId();
-    if (userId) {
-      await persistProjectListToProfile(supabaseBrowser(), userId, projects);
-      return true;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      const userId = await getCurrentUserId();
+      if (userId) {
+        await persistProjectListToProfile(supabaseBrowser(), userId, projects);
+        return true;
+      }
+    } catch {
+      // Retry, then fall through to the cookie-based API write.
     }
-  } catch {
-    // Fall through to the cookie-based API write.
+    await new Promise((resolve) => setTimeout(resolve, 500 * (attempt + 1)));
   }
   return persistLocalProjectsViaApi(projects);
 }

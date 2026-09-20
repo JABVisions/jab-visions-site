@@ -25,6 +25,7 @@ import {
   resolveDropMediaKind,
   storageCoordsFromDrop,
 } from "@/lib/board/dropDisplay";
+import { isCloudProjectDrop } from "@/lib/board/projectProfileDrop";
 
 export { toSoundCloudEmbed };
 
@@ -444,7 +445,7 @@ export function normalizeDropItems(input: unknown, userId: string | null): DropI
 
   const deletedIds = readDeletedDropIds(userId);
   return dedupeDropItems(input
-    .filter((x) => x && typeof x === "object")
+    .filter((x) => x && typeof x === "object" && !isCloudProjectDrop(x))
     .map((x: any): DropItem => {
       const type = canonicalDropType(x.type, {
         priceCents: typeof x.priceCents === "number" ? x.priceCents : undefined,

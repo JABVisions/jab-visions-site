@@ -5,7 +5,8 @@ import {
   isStoredNotebookProject,
   notebookSourceForProjectRecord,
 } from "./isProjectNotebookDrop";
-import { profileBoardDropFromProject } from "./projectProfileDrop";
+import { profileBoardDropFromProject, isCloudProjectDrop, mergeCollectionPreservingProjectDrops } from "./projectProfileDrop";
+import { normalizeBoardDropType } from "./dropDisplay";
 
 function assert(condition: unknown, message: string) {
   if (!condition) {
@@ -240,6 +241,44 @@ assert(
     })
   ),
   "profile Project rows built from notebook rooms should count as notebook drops"
+);
+
+assert(
+  isCloudProjectDrop(
+    profileBoardDropFromProject({
+      id: "project_zoe",
+      title: "zoe audition",
+      logline: "Casting sides for Zoe",
+      projectType: "Feature Film",
+      status: "casting",
+      location: "Atlanta",
+      startDate: "",
+      contactName: "Johnandy",
+    })
+  ),
+  "profile Project rows should be recognized as cloud project drops"
+);
+
+assert(
+  normalizeBoardDropType("Project") === "Project",
+  "Project drop type must not be remapped to Link"
+);
+
+const preserved = mergeCollectionPreservingProjectDrops(
+  [
+    { id: "thought_1", type: "Thought", title: "Hello" },
+    { id: "media_1", type: "Media", title: "Still" },
+  ],
+  [
+    { id: "project_drop_project_zoe", type: "Project", title: "zoe audition", origin: "project_notebook" },
+    { id: "thought_1", type: "Thought", title: "Hello" },
+  ]
+);
+assert(
+  preserved.some((drop) => drop.id === "project_drop_project_zoe") &&
+    preserved.some((drop) => drop.id === "thought_1") &&
+    preserved.some((drop) => drop.id === "media_1"),
+  `collection writes must keep cloud Project Drops, got ${preserved.map((drop) => drop.id).join(",")}`
 );
 
 console.log("isProjectNotebookDrop tests passed");
