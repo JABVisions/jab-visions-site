@@ -9,6 +9,7 @@ import {
   uploadKindForFile,
   uploadTimeoutMsForBytes,
   studioCompleteTimeoutMs,
+  STUDIO_BYTES_DONE_UNSTICK_MS,
   resolveUploadContentType,
 } from "./uploadLimits";
 
@@ -87,6 +88,11 @@ assert(
 assert(
   studioCompleteTimeoutMs(0) > 20 * 60_000,
   "iPhone files that report size 0 still get a long studio complete window"
+);
+
+assert(
+  STUDIO_BYTES_DONE_UNSTICK_MS <= 8_000 && STUDIO_BYTES_DONE_UNSTICK_MS >= 3_000,
+  "after 100%, studio unsticks in seconds, not the full upload budget"
 );
 
 console.log("uploadLimits.check.ts ok");

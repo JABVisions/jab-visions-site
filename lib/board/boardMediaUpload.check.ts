@@ -8,6 +8,7 @@ import {
   shouldUseTusUpload,
   bytesUploadFinished,
   playbackResultAfterUpload,
+  acceptXhrOutcome,
   type BoardMediaUploadOptions,
 } from "./boardMediaUpload";
 import { ownerScopedUploadFolder } from "./uploadLimits";
@@ -131,6 +132,30 @@ assert(typeof options.onProgress === "undefined", "progress callback stays optio
 
 assert(bytesUploadFinished(62 * 1024 * 1024, 62 * 1024 * 1024), "100% bytes are finished");
 assert(!bytesUploadFinished(10, 62 * 1024 * 1024), "partial bytes are not finished");
+assert(
+  acceptXhrOutcome({ kind: "error", status: 0, loaded: 62 * 1024 * 1024, total: 62 * 1024 * 1024 }) ===
+    "success",
+  "iPhone onerror after 100% must not restart the PUT"
+);
+assert(
+  acceptXhrOutcome({ kind: "load", status: 0, loaded: 62 * 1024 * 1024, total: 62 * 1024 * 1024 }) ===
+    "success",
+  "iPhone onload status 0 after 100% is success"
+);
+assert(
+  acceptXhrOutcome({ kind: "abort", status: 0, loaded: 62 * 1024 * 1024, total: 62 * 1024 * 1024 }) ===
+    "success",
+  "abort after 100% is success"
+);
+assert(
+  acceptXhrOutcome({ kind: "error", status: 0, loaded: 10, total: 62 * 1024 * 1024 }) === "failure",
+  "onerror before 100% is still a failure"
+);
+assert(
+  acceptXhrOutcome({ kind: "load", status: 413, loaded: 62 * 1024 * 1024, total: 62 * 1024 * 1024 }) ===
+    "failure",
+  "413 after bytes still fails so the limit-raise retry can run"
+);
 const playback = playbackResultAfterUpload({
   bucket: "board-media",
   storagePath: "user/project-media/tape.mp4",

@@ -55,12 +55,11 @@ import { boardProjectPatchFromDrop } from "@/lib/board/projectDropEdit";
 import {
   applyProjectRoomActivitiesToProjects,
   buildProjectRoomDrop,
-  claimProjectRoomStudioSave,
   commitProjectRoomDrop,
   projectRoomMediaKindForFile,
   projectRoomPostIsVideo,
   projectRoomStudioSaveKey,
-  releaseProjectRoomStudioSave,
+  runProjectRoomStudioSaveOnce,
   viewerCanPostToProjectRoom,
 } from "@/lib/board/projectRoomDrop";
 
@@ -1028,156 +1027,148 @@ export default function ProjectCenter() {
     onProgress?: BoardUploadProgressHandler
   ) {
     const saveKey = projectRoomStudioSaveKey(project.id, file);
-    if (!claimProjectRoomStudioSave(saveKey)) {
-      onProgress?.(null);
-      return;
-    }
+    await runProjectRoomStudioSaveOnce(saveKey, async () => {
+      const identity = readCurrentBoardIdentity();
+      const viewer = {
+        id: currentUserId || identity.id,
+        displayName: identity.displayName,
+        username: identity.username,
+      };
+      if (
+        !viewerCanPostToProjectRoom(project, viewer, { viewing: true })
+      ) {
+        setStudioMessage("Join this project room to add a Drop.");
+        window.setTimeout(() => setStudioMessage(null), 2200);
+        throw new Error("Join this project room to add a Drop.");
+      }
 
-    const identity = readCurrentBoardIdentity();
-    const viewer = {
-      id: currentUserId || identity.id,
-      displayName: identity.displayName,
-      username: identity.username,
-    };
-    if (
-      !viewerCanPostToProjectRoom(project, viewer, { viewing: true })
-    ) {
-      releaseProjectRoomStudioSave(saveKey, false);
-      setStudioMessage("Join this project room to add a Drop.");
-      window.setTimeout(() => setStudioMessage(null), 2200);
-      throw new Error("Join this project room to add a Drop.");
-    }
+      const mediaKind = projectRoomMediaKindForFile(file);
+      if (!mediaKind) {
+        setStudioMessage("Drop Studio can add a photo, video, or art drop to this room.");
+        window.setTimeout(() => setStudioMessage(null), 2200);
+        throw new Error("Drop Studio can add a photo, video, or art drop to this room.");
+      }
 
-    const mediaKind = projectRoomMediaKindForFile(file);
-    if (!mediaKind) {
-      releaseProjectRoomStudioSave(saveKey, false);
-      setStudioMessage("Drop Studio can add a photo, video, or art drop to this room.");
-      window.setTimeout(() => setStudioMessage(null), 2200);
-      throw new Error("Drop Studio can add a photo, video, or art drop to this room.");
-    }
+      setStudioMessage(mediaKind === "video" ? "Uploading video…" : "Uploading drop…");
+      try {
+        const uploaded = await uploadBoardMediaFile(file, { folder: "project-media", onProgress });
+        onProgress?.(null);
+        const mediaUrl = uploaded.publicUrl || uploaded.signedUrl;
+        if (!mediaUrl) throw new Error("Upload finished but Board could not create a playback URL.");
 
-    setStudioMessage(mediaKind === "video" ? "Uploading video…" : "Uploading drop…");
-    try {
-      const uploaded = await uploadBoardMediaFile(file, { folder: "project-media", onProgress });
-      onProgress?.(null);
-      const mediaUrl = uploaded.publicUrl || uploaded.signedUrl;
-      if (!mediaUrl) throw new Error("Upload finished but Board could not create a playback URL.");
+        const liveProject =
+          projectsRef.current.find((item) => item.id === project.id) || project;
+        const alreadyPosted = (liveProject.roomPosts ?? []).some(
+          (post) =>
+            post.storagePath === uploaded.storagePath ||
+            post.mediaUrl === mediaUrl
+        );
+        if (alreadyPosted) {
+          setStudioMessage(
+            mediaKind === "video"
+              ? "Video saved to this project room."
+              : "Drop saved to this project room."
+          );
+          window.setTimeout(() => setStudioMessage(null), 2800);
+          return;
+        }
 
-      const liveProject =
-        projectsRef.current.find((item) => item.id === project.id) || project;
-      const alreadyPosted = (liveProject.roomPosts ?? []).some(
-        (post) =>
-          post.storagePath === uploaded.storagePath ||
-          post.mediaUrl === mediaUrl
-      );
-      if (alreadyPosted) {
-        releaseProjectRoomStudioSave(saveKey, true);
+        const built = buildProjectRoomDrop({
+          project: liveProject,
+          media: {
+            kind: mediaKind,
+            src: mediaUrl,
+            bucket: uploaded.bucket,
+            storagePath: uploaded.storagePath,
+          },
+          author: {
+            id: currentUserId || identity.id,
+            displayName: identity.displayName,
+            username: identity.username,
+            avatar: identity.avatar,
+            glow: identity.glow,
+            auraIntensity: identity.auraIntensity,
+          },
+          fileName: file.name,
+        });
+
+        const committed = commitProjectRoomDrop(
+          projectsRef.current,
+          liveProject,
+          built
+        );
+        projectsRef.current = committed.projects;
+        writeBoardProjects(committed.projects);
+        setProjects(committed.projects);
+
+        try {
+          pushDrop(built.drop);
+        } catch {
+          // Universal drop write is best-effort; the room post still lands.
+        }
+
+        try {
+          appendLocalActivity(built.activity);
+          emitBoardDropSignal(built.signal);
+          window.setTimeout(() => {
+            window.dispatchEvent(
+              new CustomEvent("board:activity:new", { detail: built.activity })
+            );
+          }, 0);
+        } catch {
+          // Activity fan-out is best-effort after the room drop is local.
+        }
+
         setStudioMessage(
           mediaKind === "video"
             ? "Video saved to this project room."
             : "Drop saved to this project room."
         );
         window.setTimeout(() => setStudioMessage(null), 2800);
-        return;
-      }
 
-      const built = buildProjectRoomDrop({
-        project: liveProject,
-        media: {
-          kind: mediaKind,
-          src: mediaUrl,
-          bucket: uploaded.bucket,
-          storagePath: uploaded.storagePath,
-        },
-        author: {
-          id: currentUserId || identity.id,
-          displayName: identity.displayName,
-          username: identity.username,
-          avatar: identity.avatar,
-          glow: identity.glow,
-          auraIntensity: identity.auraIntensity,
-        },
-        fileName: file.name,
-      });
-
-      const committed = commitProjectRoomDrop(
-        projectsRef.current,
-        liveProject,
-        built
-      );
-      projectsRef.current = committed.projects;
-      writeBoardProjects(committed.projects);
-      setProjects(committed.projects);
-
-      try {
-        pushDrop(built.drop);
-      } catch {
-        // Universal drop write is best-effort; the room post still lands.
-      }
-
-      try {
-        appendLocalActivity(built.activity);
-        emitBoardDropSignal(built.signal);
-        window.setTimeout(() => {
-          window.dispatchEvent(
-            new CustomEvent("board:activity:new", { detail: built.activity })
-          );
-        }, 0);
-      } catch {
-        // Activity fan-out is best-effort after the room drop is local.
-      }
-
-      setStudioMessage(
-        mediaKind === "video"
-          ? "Video saved to this project room."
-          : "Drop saved to this project room."
-      );
-      window.setTimeout(() => setStudioMessage(null), 2800);
-      releaseProjectRoomStudioSave(saveKey, true);
-
-      void (async () => {
-        try {
-          const owned = notebookProjectsOwnedByViewer(
-            [committed.saved],
-            currentUserId
-          );
-          await persistProjectListToAccount(
-            owned.length ? owned : [committed.saved]
-          );
-          const sb = supabaseBrowser();
-          const userId = currentUserId || identity.id;
-          await Promise.race([
-            createActivity(sb, {
-              user_id: userId,
-              kind: built.activity.kind,
-              title: built.activity.title,
-              body: built.activity.body,
-              href: built.activity.href,
-              image_url: built.activity.image_url,
-              meta: built.activity.meta,
-            }),
-            new Promise<void>((resolve) => window.setTimeout(resolve, 4_000)),
-          ]);
-        } catch {
-          // Keep the local room drop even if remote activity sync fails.
+        void (async () => {
+          try {
+            const owned = notebookProjectsOwnedByViewer(
+              [committed.saved],
+              currentUserId
+            );
+            await persistProjectListToAccount(
+              owned.length ? owned : [committed.saved]
+            );
+            const sb = supabaseBrowser();
+            const userId = currentUserId || identity.id;
+            await Promise.race([
+              createActivity(sb, {
+                user_id: userId,
+                kind: built.activity.kind,
+                title: built.activity.title,
+                body: built.activity.body,
+                href: built.activity.href,
+                image_url: built.activity.image_url,
+                meta: built.activity.meta,
+              }),
+              new Promise<void>((resolve) => window.setTimeout(resolve, 4_000)),
+            ]);
+          } catch {
+            // Keep the local room drop even if remote activity sync fails.
+          }
+        })();
+      } catch (error) {
+        onProgress?.(null);
+        const message = explainBoardMediaUploadError(error, file);
+        if (
+          error instanceof Error &&
+          (error.message === "Drop Studio can add a photo, video, or art drop to this room." ||
+            error.message === "Join this project room to add a Drop." ||
+            error.message === "Open a project room before saving this Drop.")
+        ) {
+          throw error;
         }
-      })();
-    } catch (error) {
-      releaseProjectRoomStudioSave(saveKey, false);
-      onProgress?.(null);
-      const message = explainBoardMediaUploadError(error, file);
-      if (
-        error instanceof Error &&
-        (error.message === "Drop Studio can add a photo, video, or art drop to this room." ||
-          error.message === "Join this project room to add a Drop." ||
-          error.message === "Open a project room before saving this Drop.")
-      ) {
-        throw error;
+        setStudioMessage(message);
+        window.setTimeout(() => setStudioMessage(null), 2800);
+        throw new Error(message);
       }
-      setStudioMessage(message);
-      window.setTimeout(() => setStudioMessage(null), 2800);
-      throw new Error(message);
-    }
+    });
   }
 
   const deleteProject = (id: string) => {

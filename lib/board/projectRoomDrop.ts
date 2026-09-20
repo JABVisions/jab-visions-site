@@ -43,7 +43,7 @@ function uid(prefix: string) {
     .slice(2, 8)}`;
 }
 
-const inflightStudioSaves = new Set<string>();
+const inflightStudioSaves = new Map<string, Promise<void>>();
 const finishedStudioSaves = new Set<string>();
 
 export function projectRoomStudioSaveKey(
@@ -58,13 +58,34 @@ export function claimProjectRoomStudioSave(key: string): boolean {
   if (!key || inflightStudioSaves.has(key) || finishedStudioSaves.has(key)) {
     return false;
   }
-  inflightStudioSaves.add(key);
+  inflightStudioSaves.set(key, Promise.resolve());
   return true;
 }
 
 export function releaseProjectRoomStudioSave(key: string, committed: boolean) {
   inflightStudioSaves.delete(key);
   if (committed) finishedStudioSaves.add(key);
+}
+
+/** One in-flight save per tape. Joiners await the same promise instead of posting again. */
+export function runProjectRoomStudioSaveOnce(
+  key: string,
+  work: () => Promise<void>
+): Promise<void> {
+  if (!key) return work();
+  if (finishedStudioSaves.has(key)) return Promise.resolve();
+  const existing = inflightStudioSaves.get(key);
+  if (existing) return existing;
+  const promise = (async () => {
+    try {
+      await work();
+      finishedStudioSaves.add(key);
+    } finally {
+      inflightStudioSaves.delete(key);
+    }
+  })();
+  inflightStudioSaves.set(key, promise);
+  return promise;
 }
 
 export function roomPostIdentityKey(post: {
