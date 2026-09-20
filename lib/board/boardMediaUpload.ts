@@ -282,12 +282,27 @@ export function progressBytesUntilVerified(
 ): { loaded: number; total: number; percent: number } {
   const safeLoaded = Number.isFinite(loaded) ? Math.max(0, loaded) : 0;
   const safeTotal = Number.isFinite(total) ? Math.max(0, total) : 0;
-  if (objectVerified || safeTotal <= 0 || safeLoaded < safeTotal) {
-    const percent = safeTotal > 0 ? Math.min(100, Math.round((safeLoaded / safeTotal) * 100)) : 0;
-    return { loaded: safeLoaded, total: safeTotal, percent };
+  if (objectVerified) {
+    if (safeTotal <= 0) return { loaded: safeLoaded, total: safeTotal, percent: 100 };
+    if (safeLoaded >= safeTotal) return { loaded: safeLoaded, total: safeTotal, percent: 100 };
+    return {
+      loaded: safeLoaded,
+      total: safeTotal,
+      percent: Math.min(99, Math.floor((safeLoaded / safeTotal) * 100)),
+    };
   }
-  const held = Math.max(0, safeTotal - Math.max(1, Math.floor(safeTotal / 100)));
-  return { loaded: held, total: safeTotal, percent: 99 };
+  if (safeTotal <= 0) return { loaded: safeLoaded, total: 0, percent: 0 };
+  if (safeLoaded >= safeTotal) {
+    const held = Math.max(0, safeTotal - Math.max(1, Math.floor(safeTotal / 100)));
+    return { loaded: held, total: safeTotal, percent: 99 };
+  }
+  // Math.round(99.5%) is 100 — that started the "Board did not close" overlay
+  // while createSignedUrl was still running.
+  return {
+    loaded: safeLoaded,
+    total: safeTotal,
+    percent: Math.min(99, Math.floor((safeLoaded / safeTotal) * 100)),
+  };
 }
 
 export function playbackResultAfterUpload(opts: {
@@ -1005,12 +1020,10 @@ export async function uploadBoardMediaFile(
 
   const result = await new Promise<BoardMediaUploadResult>((resolve, reject) => {
     let settled = false;
-    let finalizeTimer: ReturnType<typeof setTimeout> | undefined;
     const finish = (run: () => void) => {
       if (settled) return;
       settled = true;
       clearInterval(watch);
-      if (finalizeTimer) clearTimeout(finalizeTimer);
       run();
     };
     const watch = setInterval(() => {
@@ -1024,22 +1037,7 @@ export async function uploadBoardMediaFile(
             )
           )
         );
-        return;
       }
-      if (finalizeTimer) return;
-      if (!objectVerified) return;
-      if (!bytesUploadFinished(lastLoaded, lastTotal)) return;
-      tracker.finishing();
-      finalizeTimer = setTimeout(() => {
-        finish(() =>
-          reject(
-            new BoardMediaUploadError(
-              "Upload finished but Board did not close. Stay on this screen and try again.",
-              "timeout"
-            )
-          )
-        );
-      }, BYTES_DONE_FINALIZE_MS);
     }, 200);
     work.then(
       (value) => {

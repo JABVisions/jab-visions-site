@@ -53,6 +53,7 @@ import {
   studioMediaKindForFile,
   studioCompleteTimeoutMs,
   STUDIO_BYTES_DONE_UNSTICK_MS,
+  studioBytesDoneUnstickAction,
 } from "@/lib/board/uploadLimits";
 import type { BoardUploadProgress, BoardUploadProgressHandler } from "@/lib/board/uploadProgress";
 import { preparingUploadProgress, studioVisibleUploadProgress } from "@/lib/board/uploadProgress";
@@ -2586,6 +2587,7 @@ export default function DropStudioStage({
     );
     let progressLive = true;
     let bytesDoneTimer: number | undefined;
+    let posted = false;
     const stopProgress = () => {
       progressLive = false;
       if (bytesDoneTimer) window.clearTimeout(bytesDoneTimer);
@@ -2609,12 +2611,10 @@ export default function DropStudioStage({
             if (progress) setUploadProgress(progress);
             if (progress?.label) flashSaveNote(progress.label, true);
             if (progress && progress.percent >= 100 && bytesDoneTimer == null) {
+              flashSaveNote("Posting Drop…", true);
               bytesDoneTimer = window.setTimeout(() => {
-                reject(
-                  new Error(
-                    "Upload finished but Board did not close. Stay on this screen and try again."
-                  )
-                );
+                // Verified 100% is success. Close even if persist/activity is still running.
+                if (studioBytesDoneUnstickAction() === "complete") resolve();
               }, STUDIO_BYTES_DONE_UNSTICK_MS);
             }
           })
@@ -2627,9 +2627,8 @@ export default function DropStudioStage({
           if (bytesDoneTimer) window.clearTimeout(bytesDoneTimer);
         });
       });
+      posted = true;
     } catch (error) {
-      stopProgress();
-      completingRef.current = false;
       console.error("[DropStudioStage] completion failed", error);
       const message = error instanceof Error ? error.message : "";
       const isStudioCap = /Audio session complete timed out/i.test(message);
@@ -2639,13 +2638,13 @@ export default function DropStudioStage({
           : "Couldn't save this Drop. It's in Drafts — ✕ to leave."
       );
       persistVoiceProjectRef.current();
+    } finally {
+      stopProgress();
+      completingRef.current = false;
       setProcessingVocal(false);
       setUploadProgress(null);
-      return;
     }
-    stopProgress();
-    setProcessingVocal(false);
-    setUploadProgress(null);
+    if (!posted) return;
     clearLiveVoiceStudio();
     setVoiceStudioOpen(false);
     setAudioSession(null);

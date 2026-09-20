@@ -10,6 +10,9 @@ import {
   uploadTimeoutMsForBytes,
   studioCompleteTimeoutMs,
   STUDIO_BYTES_DONE_UNSTICK_MS,
+  STUDIO_BYTES_DONE_CLOSE_MESSAGE,
+  isStudioBytesDoneCloseMessage,
+  studioBytesDoneUnstickAction,
   resolveUploadContentType,
   storageExtensionForFile,
 } from "./uploadLimits";
@@ -105,6 +108,18 @@ assert(
 assert(
   STUDIO_BYTES_DONE_UNSTICK_MS <= 8_000 && STUDIO_BYTES_DONE_UNSTICK_MS >= 3_000,
   "after 100%, studio unsticks in seconds, not the full upload budget"
+);
+assert(
+  studioBytesDoneUnstickAction() === "complete",
+  "bytes-done unstick must close studio, not fail into an overlay"
+);
+assert(
+  isStudioBytesDoneCloseMessage(STUDIO_BYTES_DONE_CLOSE_MESSAGE),
+  "legacy overlay copy is recognized so studio can refuse to treat it as a failure"
+);
+assert(
+  !isStudioBytesDoneCloseMessage("This video didn't finish saving to Board storage. Try uploading it again."),
+  "real storage failures stay failures"
 );
 
 console.log("uploadLimits.check.ts ok");

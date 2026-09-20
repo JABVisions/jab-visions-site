@@ -66,8 +66,10 @@ import {
   projectRoomVideoLoadError,
   projectRoomVideoPlaybackType,
   projectRoomVideoSrcIsPlayable,
+  PROJECT_ROOM_CLOUD_SYNC_TIMEOUT_MS,
   runProjectRoomStudioSaveOnce,
   viewerCanPostToProjectRoom,
+  withDeadline,
 } from "@/lib/board/projectRoomDrop";
 import { getCachedSignedMediaUrl, invalidateSignedMediaUrl, isMissingStorageObjectError } from "@/lib/board/signedMediaUrl";
 
@@ -1241,12 +1243,16 @@ export default function ProjectCenter() {
               [committed.saved],
               currentUserId
             );
-            await persistProjectListToAccount(
-              owned.length ? owned : [committed.saved]
+            await withDeadline(
+              persistProjectListToAccount(
+                owned.length ? owned : [committed.saved]
+              ),
+              PROJECT_ROOM_CLOUD_SYNC_TIMEOUT_MS,
+              false
             );
             const sb = supabaseBrowser();
             const userId = currentUserId || identity.id;
-            await Promise.race([
+            await withDeadline(
               createActivity(sb, {
                 user_id: userId,
                 kind: built.activity.kind,
@@ -1256,8 +1262,9 @@ export default function ProjectCenter() {
                 image_url: built.activity.image_url,
                 meta: built.activity.meta,
               }),
-              new Promise<void>((resolve) => window.setTimeout(resolve, 4_000)),
-            ]);
+              PROJECT_ROOM_CLOUD_SYNC_TIMEOUT_MS,
+              null
+            );
           } catch {
             // Keep the local room drop even if remote activity sync fails.
           }
