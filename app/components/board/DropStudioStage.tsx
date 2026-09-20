@@ -2535,10 +2535,18 @@ export default function DropStudioStage({
     const completedCustomizations = writeStudioDraft(completionValue);
     onChange(completedCustomizations);
     const isAudioMix = file.type.startsWith("audio/") || /\.(mp3|wav|m4a|aac|ogg|flac)$/i.test(file.name);
-    if (isAudioMix) {
-      setProcessingVocal(true);
-      flashSaveNote("Saving mix to Board…");
-    }
+    const isVideoDrop =
+      mediaKind === "video" ||
+      file.type.startsWith("video/") ||
+      /\.(mp4|webm|mov|m4v)$/i.test(file.name);
+    setProcessingVocal(true);
+    flashSaveNote(
+      isAudioMix
+        ? "Saving mix to Board…"
+        : isVideoDrop
+          ? "Uploading video…"
+          : "Saving Drop…"
+    );
     try {
       // Project Room audition tapes (and other large media) share the upload
       // budget — a 20s cap parked valid files in Drafts before onComplete finished.
@@ -2549,7 +2557,14 @@ export default function DropStudioStage({
       );
     } catch (error) {
       console.error("[DropStudioStage] completion failed", error);
-      flashSaveNote("Couldn't save this Drop. It's in Drafts — ✕ to leave.");
+      const message = error instanceof Error ? error.message : "";
+      flashSaveNote(
+        message &&
+          !/timed out/i.test(message) &&
+          !/Audio session complete/i.test(message)
+          ? message
+          : "Couldn't save this Drop. It's in Drafts — ✕ to leave."
+      );
       persistVoiceProjectRef.current();
       setProcessingVocal(false);
       return;
@@ -3724,8 +3739,12 @@ export default function DropStudioStage({
                         type="button"
                         className="studioDoneCheck"
                         onClick={done}
+                        disabled={processingVocal}
+                        aria-busy={processingVocal}
                         aria-label={
-                          isDropbookMode
+                          processingVocal
+                            ? "Saving Drop"
+                            : isDropbookMode
                             ? `Add ${mediaKind === "video" ? "Video" : "Vision"} to Dropbook`
                             : `Add ${mediaKind === "video" ? "Video" : "Vision"} to Drop`
                         }

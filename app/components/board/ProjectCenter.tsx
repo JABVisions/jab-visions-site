@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import ProjectDropMenu, {
   type ProjectDrop,
 } from "@/app/components/board/projects/ProjectDropMenu";
@@ -23,6 +23,7 @@ import {
   notebookProjectsOwnedByViewer,
   persistProjectListToAccount,
   projectsFromProfileBoardDrops,
+  reconcileProjectsWithLive,
   syncRemoteProjectActivitiesToStorage,
   syncResolvedProjectsToStorage,
   statusLabel,
@@ -52,9 +53,10 @@ import { uploadBoardMediaFile } from "@/lib/board/boardMediaUpload";
 import { boardProjectPatchFromDrop } from "@/lib/board/projectDropEdit";
 import {
   applyProjectRoomActivitiesToProjects,
-  applyProjectRoomDropToProject,
   buildProjectRoomDrop,
+  commitProjectRoomDrop,
   projectRoomMediaKindForFile,
+  projectRoomPostIsVideo,
   viewerCanPostToProjectRoom,
 } from "@/lib/board/projectRoomDrop";
 
@@ -97,6 +99,33 @@ function formatDate(ts: number) {
   } catch {
     return "";
   }
+}
+
+function RoomPostMedia({
+  post,
+}: {
+  post: ProjectRoomPost;
+}) {
+  if (!post.mediaUrl) return null;
+  if (projectRoomPostIsVideo(post)) {
+    return (
+      <video
+        className="mt-3 max-h-72 w-full rounded-2xl border border-cyan-100/20 bg-black/40 object-contain"
+        src={post.mediaUrl}
+        controls
+        playsInline
+        preload="metadata"
+      />
+    );
+  }
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      className="mt-3 max-h-72 w-full rounded-2xl border border-white/10 bg-black/40 object-cover"
+      src={post.mediaUrl}
+      alt=""
+    />
+  );
 }
 
 function TileFrame({
@@ -352,6 +381,8 @@ function projectCommentDropId(projectId: string) {
 export default function ProjectCenter() {
   const [storageReady, setStorageReady] = useState(false);
   const [projects, setProjects] = useState<BoardProject[]>([]);
+  const projectsRef = useRef<BoardProject[]>([]);
+  projectsRef.current = projects;
   const [dropPadProjectDrops, setDropPadProjectDrops] = useState<
     DropPadProjectDrop[]
   >([]);
@@ -397,9 +428,12 @@ export default function ProjectCenter() {
       merged.set(project.id, existing ? mergeProjectRecord(existing, project) : project);
     }
 
-    const next = applyProjectRoomActivitiesToProjects(
-      Array.from(merged.values()).sort((a, b) => b.updatedAt - a.updatedAt),
-      getLocalActivity()
+    const next = reconcileProjectsWithLive(
+      applyProjectRoomActivitiesToProjects(
+        Array.from(merged.values()).sort((a, b) => b.updatedAt - a.updatedAt),
+        getLocalActivity()
+      ),
+      projectsRef.current
     );
     const resolvedIds = new Set(resolved.map((project) => project.id));
     if (
@@ -409,6 +443,7 @@ export default function ProjectCenter() {
     ) {
       writeBoardProjects(next);
     }
+    projectsRef.current = next;
     setProjects(next);
     setDropPadProjectDrops(localProjectDrops);
   }
@@ -429,7 +464,12 @@ export default function ProjectCenter() {
           const existing = merged.get(project.id);
           merged.set(project.id, existing ? mergeProjectRecord(existing, project) : project);
         }
-        return Array.from(merged.values()).sort((a, b) => b.updatedAt - a.updatedAt);
+        const next = reconcileProjectsWithLive(
+          Array.from(merged.values()).sort((a, b) => b.updatedAt - a.updatedAt),
+          current
+        );
+        projectsRef.current = next;
+        return next;
       });
     } catch {
       loadProjects();
@@ -605,17 +645,21 @@ export default function ProjectCenter() {
 
   const activeProject = useMemo(() => {
     if (!activeProjectId) return null;
-    return projects.find((project) => project.id === activeProjectId) ?? null;
+    return (
+      projects.find((project) => project.id === activeProjectId) ??
+      projectsRef.current.find((project) => project.id === activeProjectId) ??
+      null
+    );
   }, [projects, activeProjectId]);
 
   const commitProjects = (
     updater: (current: BoardProject[]) => BoardProject[]
   ) => {
-    setProjects((current) => {
-      const next = updater(current);
-      writeBoardProjects(next);
-      return next;
-    });
+    const next = updater(projectsRef.current);
+    projectsRef.current = next;
+    writeBoardProjects(next);
+    setProjects(next);
+    return next;
   };
 
   const createProjectFromDrop = (drop: ProjectDrop) => {
@@ -993,14 +1037,14 @@ export default function ProjectCenter() {
     ) {
       setStudioMessage("Join this project room to add a Drop.");
       window.setTimeout(() => setStudioMessage(null), 2200);
-      throw new Error("not in project room");
+      throw new Error("Join this project room to add a Drop.");
     }
 
     const mediaKind = projectRoomMediaKindForFile(file);
     if (!mediaKind) {
       setStudioMessage("Drop Studio can add a photo, video, or art drop to this room.");
       window.setTimeout(() => setStudioMessage(null), 2200);
-      throw new Error("unsupported project media");
+      throw new Error("Drop Studio can add a photo, video, or art drop to this room.");
     }
 
     setStudioMessage(mediaKind === "video" ? "Uploading video…" : "Uploading drop…");
@@ -1010,8 +1054,10 @@ export default function ProjectCenter() {
       const mediaUrl = uploaded.signedUrl || uploaded.publicUrl;
       if (!mediaUrl) throw new Error("upload failed");
 
+      const liveProject =
+        projectsRef.current.find((item) => item.id === project.id) || project;
       const built = buildProjectRoomDrop({
-        project,
+        project: liveProject,
         media: {
           kind: mediaKind,
           src: mediaUrl,
@@ -1029,18 +1075,14 @@ export default function ProjectCenter() {
         fileName: file.name,
       });
 
-      let saved: BoardProject | null = null;
-      commitProjects((prev) =>
-        prev.map((item) => {
-          if (item.id !== project.id) return item;
-          saved = applyProjectRoomDropToProject(item, built);
-          return saved;
-        })
+      const committed = commitProjectRoomDrop(
+        projectsRef.current,
+        liveProject,
+        built
       );
-      if (!saved) {
-        saved = applyProjectRoomDropToProject(project, built);
-        commitProjects((prev) => [saved as BoardProject, ...prev]);
-      }
+      projectsRef.current = committed.projects;
+      writeBoardProjects(committed.projects);
+      setProjects(committed.projects);
 
       try {
         pushDrop(built.drop);
@@ -1050,25 +1092,31 @@ export default function ProjectCenter() {
 
       try {
         appendLocalActivity(built.activity);
-        window.dispatchEvent(
-          new CustomEvent("board:activity:new", { detail: built.activity })
-        );
         emitBoardDropSignal(built.signal);
+        window.setTimeout(() => {
+          window.dispatchEvent(
+            new CustomEvent("board:activity:new", { detail: built.activity })
+          );
+        }, 0);
       } catch {
         // Activity fan-out is best-effort after the room drop is local.
       }
 
-      setStudioMessage("Drop saved to this project room.");
-      window.setTimeout(() => setStudioMessage(null), 1800);
+      setStudioMessage(
+        mediaKind === "video"
+          ? "Video saved to this project room."
+          : "Drop saved to this project room."
+      );
+      window.setTimeout(() => setStudioMessage(null), 2800);
 
       void (async () => {
         try {
           const owned = notebookProjectsOwnedByViewer(
-            [saved as BoardProject],
+            [committed.saved],
             currentUserId
           );
           await persistProjectListToAccount(
-            owned.length ? owned : [saved as BoardProject]
+            owned.length ? owned : [committed.saved]
           );
           const sb = supabaseBrowser();
           const userId = currentUserId || identity.id;
@@ -1089,16 +1137,22 @@ export default function ProjectCenter() {
         }
       })();
     } catch (error) {
+      const message =
+        error instanceof Error && error.message && error.message !== "upload failed"
+          ? error.message
+          : mediaKind === "video"
+            ? "Couldn’t upload that video. Check your connection and try again."
+            : "Couldn’t save that Drop. Try again.";
       if (
         error instanceof Error &&
-        (error.message === "unsupported project media" ||
-          error.message === "not in project room")
+        (error.message === "Drop Studio can add a photo, video, or art drop to this room." ||
+          error.message === "Join this project room to add a Drop.")
       ) {
         throw error;
       }
-      setStudioMessage("Couldn’t save that Drop. Try again.");
-      window.setTimeout(() => setStudioMessage(null), 2200);
-      throw new Error("Couldn’t save project room drop.");
+      setStudioMessage(message);
+      window.setTimeout(() => setStudioMessage(null), 2800);
+      throw new Error(message);
     }
   }
 
@@ -1250,15 +1304,17 @@ export default function ProjectCenter() {
         onChange={setStudioCustomizations}
         onComplete={async (file) => {
           const target =
-            (studioProject && projects.find((project) => project.id === studioProject.id)) ||
+            (studioProject &&
+              projectsRef.current.find((project) => project.id === studioProject.id)) ||
             studioProject ||
-            activeProject;
+            activeProject ||
+            (activeProjectId
+              ? projectsRef.current.find((project) => project.id === activeProjectId)
+              : null);
           if (!target) {
-            throw new Error("No project room is open.");
+            throw new Error("Open a project room before saving this Drop.");
           }
           await saveProjectRoomStudioDrop(target, file);
-          setStudioOpen(false);
-          setStudioProject(null);
         }}
         onClose={() => {
           setStudioOpen(false);
@@ -1854,6 +1910,23 @@ export default function ProjectCenter() {
               </div>
 
               <div className="mt-4 grid gap-3">
+                {activeProject.roomPosts.some((post) => post.mediaUrl) ? (
+                  <div className="rounded-2xl border border-cyan-100/15 bg-cyan-400/[0.06] p-3">
+                    <div className="text-[11px] tracking-[0.28em] text-cyan-50/55">
+                      ROOM DROPS
+                    </div>
+                    <div className="mt-3 grid gap-3">
+                      {activeProject.roomPosts
+                        .filter((post) => post.mediaUrl)
+                        .map((post) => (
+                          <div key={`media-${post.id}`}>
+                            <div className="text-xs text-white/55">{post.authorName}</div>
+                            <RoomPostMedia post={post} />
+                          </div>
+                        ))}
+                    </div>
+                  </div>
+                ) : null}
                 {activeProject.roomPosts.map((post) => (
                   <div
                     key={post.id}
@@ -1870,24 +1943,7 @@ export default function ProjectCenter() {
                     <div className="mt-2 whitespace-pre-wrap text-sm text-white/68">
                       {post.text}
                     </div>
-                    {post.mediaUrl ? (
-                      post.mediaKind === "video" ? (
-                        <video
-                          className="mt-3 max-h-64 w-full rounded-2xl border border-white/10 bg-black/40 object-cover"
-                          src={post.mediaUrl}
-                          controls
-                          playsInline
-                          preload="metadata"
-                        />
-                      ) : (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img
-                          className="mt-3 max-h-64 w-full rounded-2xl border border-white/10 bg-black/40 object-cover"
-                          src={post.mediaUrl}
-                          alt=""
-                        />
-                      )
-                    ) : null}
+                    <RoomPostMedia post={post} />
                   </div>
                 ))}
               </div>

@@ -2,6 +2,7 @@ import {
   applyProjectRoomActivitiesToProjects,
   applyProjectRoomDropToProject,
   buildProjectRoomDrop,
+  commitProjectRoomDrop,
   isProjectRoomDropActivity,
   isProjectRoomHost,
   matchingProjectInvite,
@@ -9,9 +10,10 @@ import {
   persistableProjectRoomMediaUrl,
   projectRoomDropTitle,
   projectRoomMediaKindForFile,
+  projectRoomPostIsVideo,
   viewerCanPostToProjectRoom,
 } from "./projectRoomDrop";
-import type { BoardProject } from "./projects";
+import { mergeProjectRecord, reconcileProjectsWithLive, type BoardProject } from "./projects";
 
 function assert(condition: unknown, message: string) {
   if (!condition) throw new Error(message);
@@ -235,6 +237,38 @@ const hydrated = applyProjectRoomActivitiesToProjects(
 assert(
   hydrated[0]?.roomPosts.some((post) => post.dropId === "project_room_tape"),
   "activity channel events hydrate into the project room thread"
+);
+
+const committed = commitProjectRoomDrop([project], project, built);
+assert(committed.saved.roomPosts[0]?.mediaUrl === "https://cdn.example/tape.mp4", "commit writes media onto the room post");
+assert(
+  committed.projects.find((item) => item.id === "project_keep_me")?.roomPosts.some(
+    (post) => post.id === "post_tape"
+  ),
+  "commit updates the open project in the list, not a duplicate room"
+);
+
+assert(
+  projectRoomPostIsVideo({ mediaUrl: "https://cdn.example/tape.mp4" }),
+  "video URLs still render even if mediaKind was dropped"
+);
+assert(
+  !projectRoomPostIsVideo({ mediaKind: "image", mediaUrl: "https://cdn.example/still.jpg" }),
+  "photo posts are not treated as video"
+);
+
+const staleReload = { ...project, updatedAt: project.updatedAt };
+const liveAfterSave = committed.saved;
+const reconciled = reconcileProjectsWithLive([staleReload], [liveAfterSave]);
+assert(
+  reconciled[0]?.roomPosts.some((post) => post.mediaUrl === "https://cdn.example/tape.mp4"),
+  "stale loadProjects snapshots must not wipe a just-saved room video"
+);
+
+const mergedRecords = mergeProjectRecord(staleReload, liveAfterSave);
+assert(
+  mergedRecords.roomPosts.some((post) => post.id === "post_tape"),
+  "merging a stale notebook into the live room keeps the new tape"
 );
 
 console.log("projectRoomDrop.test.ts: ok");
