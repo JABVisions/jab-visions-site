@@ -643,9 +643,13 @@ export default function DropStudioStage({
 
   const keepMixerMounted = voiceSessionActive || voiceMixerLocked;
 
-  const flashSaveNote = useCallback((message: string) => {
+  const flashSaveNote = useCallback((message: string, hold = false) => {
     setSaveNote(message);
     if (saveNoteTimerRef.current) window.clearTimeout(saveNoteTimerRef.current);
+    if (hold) {
+      saveNoteTimerRef.current = null;
+      return;
+    }
     saveNoteTimerRef.current = window.setTimeout(() => setSaveNote(""), 2600);
   }, []);
 
@@ -2545,23 +2549,26 @@ export default function DropStudioStage({
         ? "Saving mix to Board…"
         : isVideoDrop
           ? "Uploading video…"
-          : "Saving Drop…"
+          : "Saving Drop…",
+      true
     );
     try {
       // Project Room audition tapes (and other large media) share the upload
       // budget — a 20s cap parked valid files in Drafts before onComplete finished.
       await withAudioTimeout(
         Promise.resolve(onComplete(file, source)),
-        studioCompleteTimeoutMs(file.size, isAudioMix),
+        studioCompleteTimeoutMs(
+          file.size > 0 ? file.size : isVideoDrop ? 1024 * 1024 * 1024 : file.size,
+          isAudioMix
+        ),
         "complete"
       );
     } catch (error) {
       console.error("[DropStudioStage] completion failed", error);
       const message = error instanceof Error ? error.message : "";
+      const isStudioCap = /Audio session complete timed out/i.test(message);
       flashSaveNote(
-        message &&
-          !/timed out/i.test(message) &&
-          !/Audio session complete/i.test(message)
+        message && !isStudioCap
           ? message
           : "Couldn't save this Drop. It's in Drafts — ✕ to leave."
       );

@@ -56,7 +56,8 @@ export function uploadTimeoutMsForBytes(bytes: number): number {
  * The old 20s cap parked valid audition tapes in Drafts before the room save finished.
  */
 export function studioCompleteTimeoutMs(bytes: number, isAudioMix = false): number {
-  return Math.max(isAudioMix ? 90_000 : 0, uploadTimeoutMsForBytes(bytes) + 15_000);
+  const safeBytes = bytes > 0 ? bytes : 1024 * MB;
+  return Math.max(isAudioMix ? 90_000 : 0, uploadTimeoutMsForBytes(safeBytes) + 15_000);
 }
 
 export type UploadKind = keyof typeof UPLOAD_LIMITS;
@@ -92,10 +93,36 @@ export function studioMediaKindForFile(file: { type?: string; name?: string }): 
 export function fileWithResolvedContentType(file: File): File {
   const type = resolveUploadContentType(file);
   if (!type || type === file.type) return file;
-  return new File([file], file.name || "board-media", {
-    type,
-    lastModified: file.lastModified,
-  });
+  // iPhone Safari OOMs if we clone a camera-roll / MediaRecorder tape into a new File.
+  if (uploadKindForFile(file) === "video" || file.size > 8 * MB || file.size <= 0) {
+    return file;
+  }
+  try {
+    return new File([file], file.name || "board-media", {
+      type,
+      lastModified: file.lastModified,
+    });
+  } catch {
+    return file;
+  }
+}
+
+/**
+ * Storage RLS on board-media is owner-folder based (`{userId}/...`), matching
+ * Drop Console `uploads/{userId}` and Drop Tile `{userId}/{dropId}`.
+ * Bare folders like `project-media` are rejected by the bucket policy.
+ */
+export function ownerScopedUploadFolder(folder: string, userId: string): string {
+  const user = String(userId || "").trim();
+  const clean = String(folder || "uploads")
+    .replace(/\\/g, "/")
+    .replace(/^\/+|\/+$/g, "")
+    .replace(/\/{2,}/g, "/");
+  if (!user) return clean || "uploads";
+  if (clean === user || clean.startsWith(`${user}/`)) return clean;
+  const parts = clean.split("/").filter(Boolean);
+  if (parts[0] === "uploads" && parts[1] === user) return clean;
+  return `${user}/${clean || "uploads"}`;
 }
 
 export function formatBytes(bytes: number) {
@@ -170,5 +197,11 @@ export function resolveUploadContentType(file: { type?: string; name?: string })
 
   const name = typeof file.name === "string" ? file.name : "";
   const ext = name.split(".").pop()?.toLowerCase() ?? "";
-  return MIME_BY_EXTENSION[ext] || reported || "application/octet-stream";
+  if (MIME_BY_EXTENSION[ext]) return MIME_BY_EXTENSION[ext];
+  if (reported) return reported;
+  const kind = uploadKindForFile(file);
+  if (kind === "video") return "video/mp4";
+  if (kind === "audio") return "audio/mp4";
+  if (kind === "image") return "image/jpeg";
+  return "application/octet-stream";
 }

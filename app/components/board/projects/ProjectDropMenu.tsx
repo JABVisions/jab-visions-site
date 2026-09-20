@@ -392,18 +392,15 @@ export default function ProjectDropMenu({
             folder: "project-media",
           });
           if (generation !== uploadGenerationRef.current) return;
-          if (!uploaded) {
-            setError("Couldn’t upload that video. Check your connection and try again.");
-            return;
-          }
           rememberCover({
             bucket: uploaded.bucket,
             path: uploaded.storagePath,
             url: uploaded.signedUrl || uploaded.publicUrl,
           });
-        } catch {
+        } catch (error) {
           if (generation !== uploadGenerationRef.current) return;
-          setError("Couldn’t upload that video. Try again.");
+          const { explainBoardMediaUploadError } = await import("@/lib/board/boardMediaUpload");
+          setError(explainBoardMediaUploadError(error));
         } finally {
           if (generation !== uploadGenerationRef.current) return;
           setMediaUploading(false);

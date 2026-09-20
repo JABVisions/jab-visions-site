@@ -44,6 +44,14 @@ assert(studioMediaKindForFile({ type: "", name: "tape.MOV" }) === "video", "stud
 assert(studioMediaKindForFile({ type: "video/mp4", name: "clip.bin" }) === "video", "video MIME wins");
 assert(studioMediaKindForFile({ type: "", name: "still.jpg" }) === "image", "jpg stays image");
 assert(resolveUploadContentType({ type: "", name: "tape.mov" }) === "video/quicktime", "mov gets a playable type");
+assert(
+  resolveUploadContentType({ type: "video/mp4", name: "" }) === "video/mp4",
+  "named-less MediaRecorder blobs keep a playable video type"
+);
+assert(
+  resolveUploadContentType({ type: "", name: "blob" }) === "application/octet-stream",
+  "blob names without a media MIME stay octet-stream"
+);
 
 assert(formatBytes(UPLOAD_LIMITS.video) === "4.0GB", "4GB formats as GB");
 assert(formatBytes(25 * 1024 * 1024) === "25MB", "25MB formats as MB");
@@ -58,6 +66,10 @@ assert(
 assert(
   studioCompleteTimeoutMs(4 * 1024 * 1024 * 1024) === 60 * 60_000 + 15_000,
   "4GB audition tapes get the full upload budget plus a close buffer"
+);
+assert(
+  studioCompleteTimeoutMs(0) > 20 * 60_000,
+  "iPhone files that report size 0 still get a long studio complete window"
 );
 
 console.log("uploadLimits.check.ts ok");
