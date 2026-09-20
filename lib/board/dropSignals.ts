@@ -6,6 +6,7 @@ export type BoardDropSignalType =
   | "drop_created"
   | "thought_drop_created"
   | "project_drop_created"
+  | "project_room_drop_created"
   | "drop_commented"
   | "drop_pushed"
   | "drop_funded";
