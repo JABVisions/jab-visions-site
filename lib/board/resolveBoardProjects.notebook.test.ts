@@ -1,4 +1,4 @@
-import { resolveBoardProjects, writeBoardProjects, projectsFromProfileBoardDrops } from "./projects";
+import { resolveBoardProjects, writeBoardProjects, projectsFromProfileBoardDrops, notebookProjectsOwnedByViewer } from "./projects";
 
 const memory = new Map<string, string>();
 
@@ -234,7 +234,7 @@ assert(
 );
 
 writeBoardProjects(resolved);
-const persisted = JSON.parse(memory.get("jab_board_projects_v2") || "[]") as Array<{ id: string }>;
+const persisted = JSON.parse(memory.get("jab_board_projects_v2") || "[]") as Array<{ id: string; source?: string }>;
 assert(
   persisted.every((item) => ids.includes(item.id)),
   "persisted notebook storage should only contain resolved project drops"
@@ -242,6 +242,23 @@ assert(
 assert(
   !persisted.some((item) => item.id.startsWith("loose_")),
   "polluted loose asset records should be pruned from notebook storage"
+);
+assert(
+  persisted.every((item) => Boolean(item.source)),
+  `persisted notebook rooms should keep a source stamp, got ${persisted.map((item) => item.source).join(",")}`
+);
+
+const owned = notebookProjectsOwnedByViewer(
+  [
+    { id: "mine", authorId: "user-1", title: "zoe audition" } as any,
+    { id: "theirs", authorId: "user-2", title: "Other room" } as any,
+    { id: "local", title: "Unscoped room" } as any,
+  ],
+  "user-1"
+);
+assert(
+  owned.map((project) => project.id).join(",") === "mine,local",
+  `viewer should persist owned and unscoped rooms, got ${owned.map((project) => project.id).join(",")}`
 );
 
 console.log("resolveBoardProjects integration passed", ids);
