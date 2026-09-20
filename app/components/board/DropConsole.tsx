@@ -32,7 +32,9 @@ import {
 import { makeEmbedByMode, newsCoverUrl } from "@/lib/board/dropItem";
 import { uploadBoardMediaFile } from "@/lib/board/boardMediaUpload";
 import { checkUploadSize } from "@/lib/board/uploadLimits";
+import type { BoardUploadProgress, BoardUploadProgressHandler } from "@/lib/board/uploadProgress";
 import { getCurrentUserId } from "@/lib/board/boardDropEditStore";
+import BoardUploadProgressBar from "@/app/components/board/BoardUploadProgressBar";
 
 import {
   createThread,
@@ -344,6 +346,7 @@ export default function DropConsole({
   const [announceCustomizations, setAnnounceCustomizations] = useState<DropCustomization>({});
 
   const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<BoardUploadProgress | null>(null);
   const [uploadErr, setUploadErr] = useState<string | null>(null);
   const localPreviewUrlRef = useRef("");
   const pendingMediaFileRef = useRef<File | null>(null);
@@ -430,7 +433,11 @@ export default function DropConsole({
       ? "Start a conversation… ask a question, share a thought, or invite opinions."
       : "Describe the drop. Make it feel like a cutout on your Board.";
 
-  async function uploadToBoardMedia(file: File, source: "upload" | "capture" = "upload") {
+  async function uploadToBoardMedia(
+    file: File,
+    source: "upload" | "capture" = "upload",
+    onProgress?: BoardUploadProgressHandler
+  ) {
     setUploadErr(null);
 
     const tooLarge = checkUploadSize(file);
@@ -449,6 +456,7 @@ export default function DropConsole({
     setMediaPreviewUrl(localUrl);
 
     setUploading(true);
+    setUploadProgress(null);
     if (mode === "announcement") {
       setAnnounceMediaUrl(localUrl);
       setAnnounceMediaName(file.name);
@@ -464,6 +472,10 @@ export default function DropConsole({
       const uploaded = await uploadBoardMediaFile(file, {
         bucket,
         folder: `uploads/${meId ?? "demo"}`,
+        onProgress: (progress) => {
+          setUploadProgress(progress);
+          onProgress?.(progress);
+        },
       });
       const url = durableAttachUrl(uploaded?.publicUrl) || durableAttachUrl(uploaded?.signedUrl);
       if (!uploaded || !url) {
@@ -496,6 +508,7 @@ export default function DropConsole({
       return null;
     } finally {
       setUploading(false);
+      setUploadProgress(null);
     }
   }
 
@@ -1217,8 +1230,8 @@ export default function DropConsole({
         descriptDestination="announcement"
         value={announceCustomizations}
         onChange={setAnnounceCustomizations}
-        onComplete={async (file) => {
-          const url = await uploadToBoardMedia(file, "capture");
+        onComplete={async (file, _source, onProgress) => {
+          const url = await uploadToBoardMedia(file, "capture", onProgress);
           if (!url) throw new Error("Couldn't upload this mix. Try Mix to Drop again.");
           setAnnounceStudioOpen(false);
         }}
@@ -1375,6 +1388,11 @@ export default function DropConsole({
                 )}
                 {uploading ? <span className="fileSize">Uploading...</span> : null}
               </div>
+              {uploadProgress ? (
+                <div style={{ marginTop: 10 }}>
+                  <BoardUploadProgressBar progress={uploadProgress} title="Uploading" />
+                </div>
+              ) : null}
 
               {announceMediaUrl ? (
                 <div className="consoleMediaPreview">
@@ -1429,6 +1447,7 @@ export default function DropConsole({
               mediaPreviewUrl={mediaPreviewUrl}
               uploadedFileName={uploadedFileName}
               uploading={uploading}
+              uploadProgress={uploadProgress}
               uploadErr={uploadErr}
               uploadToBoardMedia={uploadToBoardMedia}
               dropDesc={dropDesc}
@@ -1967,6 +1986,7 @@ function BoardDropConsoleFields({
   mediaPreviewUrl,
   uploadedFileName,
   uploading,
+  uploadProgress,
   uploadErr,
   uploadToBoardMedia,
   dropDesc,
@@ -1998,8 +2018,13 @@ function BoardDropConsoleFields({
   mediaPreviewUrl: string;
   uploadedFileName: string;
   uploading: boolean;
+  uploadProgress: BoardUploadProgress | null;
   uploadErr: string | null;
-  uploadToBoardMedia: (file: File, source?: "upload" | "capture") => Promise<string | null>;
+  uploadToBoardMedia: (
+    file: File,
+    source?: "upload" | "capture",
+    onProgress?: BoardUploadProgressHandler
+  ) => Promise<string | null>;
   dropDesc: string;
   setDropDesc: (value: string) => void;
   mediaSource: "upload" | "capture" | null;
@@ -2047,13 +2072,13 @@ function BoardDropConsoleFields({
         descriptDestination="doc"
         value={customizations}
         onChange={setCustomizations}
-        onComplete={async (file) => {
+        onComplete={async (file, _source, onProgress) => {
           if (isDropbookSlideFile({ name: file.name, type: file.type })) {
             setDropFlavor("media");
             setTitle((current) => current.trim() || "Dropbook");
             setDropDesc("");
           }
-          const url = await uploadToBoardMedia(file, "capture");
+          const url = await uploadToBoardMedia(file, "capture", onProgress);
           if (!url) throw new Error("Couldn't upload this mix. Try Mix to Drop again.");
         }}
         onDescriptComplete={async (doc: DescriptDoc) => {
@@ -2135,6 +2160,11 @@ function BoardDropConsoleFields({
                 )}
                 {uploading ? <span className="fileSize">Uploading...</span> : null}
               </div>
+              {uploadProgress ? (
+                <div style={{ marginTop: 10 }}>
+                  <BoardUploadProgressBar progress={uploadProgress} title="Uploading" />
+                </div>
+              ) : null}
               {dropFlavor === "media" || dropFlavor === "thought" || dropFlavor === "pay" ? (
                 <div className="captureHelp">
                   {dropFlavor === "pay"

@@ -19,6 +19,7 @@ import {
 import { createPortal } from "react-dom";
 import DropStudio from "./DropStudio";
 import BoardArtCanvas from "./BoardArtCanvas";
+import BoardUploadProgressBar from "./BoardUploadProgressBar";
 import { DropChipStage } from "./DropChipWorkbench";
 import chooseStyles from "./dropStudioChoose.module.css";
 import chipStyles from "./dropbookShelfChip.module.css";
@@ -52,6 +53,7 @@ import {
   studioMediaKindForFile,
   studioCompleteTimeoutMs,
 } from "@/lib/board/uploadLimits";
+import type { BoardUploadProgress, BoardUploadProgressHandler } from "@/lib/board/uploadProgress";
 import { saveDropDraft, draftToFile, ensureVoiceStudioDraftCard, type DropDraft } from "@/lib/board/dropDrafts";
 import DropDraftsDrawer from "./DropDraftsDrawer";
 import BoardClientErrorBoundary from "./BoardClientErrorBoundary";
@@ -483,7 +485,11 @@ export default function DropStudioStage({
   initialFile: File | null;
   value: DropCustomization;
   onChange: (next: DropCustomization) => void;
-  onComplete: (file: File, source: "capture" | "upload") => void | Promise<void>;
+  onComplete: (
+    file: File,
+    source: "capture" | "upload",
+    onProgress?: BoardUploadProgressHandler
+  ) => void | Promise<void>;
   onDescriptComplete?: (doc: DescriptDoc) => void | Promise<void>;
   /** Standalone YouTube / music / web Link Drop — not a Dropbook page. */
   onLinkComplete?: (link: ResolvedDropbookLink) => void | Promise<void>;
@@ -554,6 +560,7 @@ export default function DropStudioStage({
   const [audioPlaying, setAudioPlaying] = useState(false);
   const [voicePreset, setVoicePreset] = useState<VoicePresetKey>("clean");
   const [processingVocal, setProcessingVocal] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<BoardUploadProgress | null>(null);
   const [voiceStudioOpen, setVoiceStudioOpen] = useState(false);
   const [audioSession, setAudioSession] = useState<AudioSession | null>(null);
   const [studioHeadphonesOk, setStudioHeadphonesOk] = useState(false);
@@ -2099,7 +2106,7 @@ export default function DropStudioStage({
         `dropbook-${Date.now()}.dropbook.json`,
         { type: DROPBOOK_MIME }
       );
-      await onComplete(file, "capture");
+      await onComplete(file, "capture", setUploadProgress);
       onClose();
     } catch (error) {
       console.error("[DropStudioStage] Dropbook completion failed", error);
@@ -2544,6 +2551,7 @@ export default function DropStudioStage({
       file.type.startsWith("video/") ||
       /\.(mp4|webm|mov|m4v)$/i.test(file.name);
     setProcessingVocal(true);
+    setUploadProgress(null);
     flashSaveNote(
       isAudioMix
         ? "Saving mix to Board…"
@@ -2556,7 +2564,12 @@ export default function DropStudioStage({
       // Project Room audition tapes (and other large media) share the upload
       // budget — a 20s cap parked valid files in Drafts before onComplete finished.
       await withAudioTimeout(
-        Promise.resolve(onComplete(file, source)),
+        Promise.resolve(
+          onComplete(file, source, (progress) => {
+            setUploadProgress(progress);
+            if (progress?.label) flashSaveNote(progress.label, true);
+          })
+        ),
         studioCompleteTimeoutMs(
           file.size > 0 ? file.size : isVideoDrop ? 1024 * 1024 * 1024 : file.size,
           isAudioMix
@@ -2574,9 +2587,11 @@ export default function DropStudioStage({
       );
       persistVoiceProjectRef.current();
       setProcessingVocal(false);
+      setUploadProgress(null);
       return;
     }
     setProcessingVocal(false);
+    setUploadProgress(null);
     clearLiveVoiceStudio();
     setVoiceStudioOpen(false);
     setAudioSession(null);
@@ -2773,6 +2788,14 @@ export default function DropStudioStage({
         }`}
         onPointerDown={(e) => e.stopPropagation()}
       >
+        {uploadProgress ? (
+          <div className="studioUploadDock">
+            <BoardUploadProgressBar
+              progress={uploadProgress}
+              title={mediaKind === "video" ? "Uploading video" : "Uploading"}
+            />
+          </div>
+        ) : null}
         <div className="studioBar">
           <div className="studioBarLeft">
             <div className="studioBrand">

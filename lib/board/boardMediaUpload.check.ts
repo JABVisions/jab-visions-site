@@ -6,6 +6,7 @@ import {
   prefersDirectStorageUpload,
   shouldSkipServerlessMediaUpload,
   shouldUseTusUpload,
+  type BoardMediaUploadOptions,
 } from "./boardMediaUpload";
 import { ownerScopedUploadFolder } from "./uploadLimits";
 
@@ -121,6 +122,10 @@ assert(
   !explainBoardMediaUploadError(new Error("new row violates row-level security policy")).includes("connection"),
   "RLS is never reported as a connection problem"
 );
+
+const options: BoardMediaUploadOptions = { folder: "project-media" };
+assert(options.folder === "project-media", "upload options keep the folder");
+assert(typeof options.onProgress === "undefined", "progress callback stays optional");
 
 console.log("boardMediaUpload.check.ts ok");
 
