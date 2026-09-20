@@ -3,6 +3,7 @@ import {
   isDropPadProjectStorageKey,
   isExplicitProjectDropRecord,
   isStoredNotebookProject,
+  notebookSourceForProjectRecord,
 } from "./isProjectNotebookDrop";
 
 function assert(condition: unknown, message: string) {
@@ -177,6 +178,51 @@ assert(
     projectType: "Project",
   }),
   "unsourced default Project tiles from the old greedy matcher must be pruned"
+);
+
+assert(
+  isStoredNotebookProject({
+    id: "uuid-zoe-audition",
+    title: "zoe audition",
+    projectType: "Feature Film",
+  }),
+  "unsourced Project Drop Menu rooms should stay in the notebook"
+);
+
+assert(
+  isStoredNotebookProject({
+    id: "project_drop_project_k1abc",
+    source: "profiles.board_style.boardDrops",
+    projectType: "Project",
+  }),
+  "profile-persisted Project Drops should stay in the notebook"
+);
+
+assert(
+  isStoredNotebookProject({
+    id: "profile_project_user_project_drop_k1",
+    origin: "project_notebook",
+    projectType: "Project",
+  }),
+  "profile notebook mirrors should stay in the notebook"
+);
+
+assert(
+  notebookSourceForProjectRecord({
+    meta: { source: "profiles.board_style.boardDrops", dropType: "project" },
+  }) === "work_board",
+  "profile board-drop sources should remap onto the notebook"
+);
+
+assert(
+  isExplicitProjectDropRecord({
+    id: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+    kind: "board_drop",
+    title: "Project Drop: zoe audition",
+    body: "Casting sides",
+    meta: { dropType: "project", cardStyle: "project_drop" },
+  }),
+  "remote Project Drop activities without a source stamp should still count"
 );
 
 console.log("isProjectNotebookDrop tests passed");

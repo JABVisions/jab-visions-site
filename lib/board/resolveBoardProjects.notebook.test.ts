@@ -1,4 +1,4 @@
-import { resolveBoardProjects, writeBoardProjects } from "./projects";
+import { resolveBoardProjects, writeBoardProjects, projectsFromProfileBoardDrops } from "./projects";
 
 const memory = new Map<string, string>();
 
@@ -106,6 +106,21 @@ memory.set(
       image_url: null,
       meta: { source: "work_board", origin: "work_board", dropType: "thought" },
     },
+    {
+      id: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+      created_at: new Date().toISOString(),
+      user_id: "u1",
+      kind: "board_drop",
+      title: "Project Drop: zoe audition",
+      body: "Casting sides for Zoe",
+      href: "/board/work",
+      image_url: null,
+      meta: {
+        dropType: "project",
+        cardStyle: "project_drop",
+        projectType: "Feature Film",
+      },
+    },
   ])
 );
 
@@ -182,8 +197,40 @@ assert(
   `expected typed universal project drop in notebook, got ${ids.join(",")}`
 );
 assert(
+  ids.includes("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"),
+  `expected remote Project Drop without a source stamp in notebook, got ${ids.join(",")}`
+);
+assert(
   !ids.some((id) => id.includes("asset") || id.includes("folio") || id.includes("yt_work") || id.includes("thought") || id.startsWith("loose_")),
   `notebook included non-project records: ${ids.join(",")}`
+);
+
+const fromProfile = projectsFromProfileBoardDrops({
+  id: "user-1",
+  username: "johnandy",
+  display_name: "JAB",
+  board_style: {
+    boardDrops: [
+      {
+        id: "project_drop_project_zoe",
+        type: "Project",
+        title: "zoe audition",
+        createdAt: Date.now(),
+        description: "Casting sides for Zoe",
+        origin: "project_notebook",
+        source: "work_board",
+        meta: {
+          dropType: "project",
+          projectId: "project_zoe",
+          cardStyle: "project_drop",
+        },
+      },
+    ],
+  },
+});
+assert(
+  fromProfile.some((project) => /zoe audition/i.test(project.title)),
+  `profile Project Drops should hydrate into notebook records, got ${fromProfile.map((project) => project.title).join(",")}`
 );
 
 writeBoardProjects(resolved);

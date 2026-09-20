@@ -8,6 +8,7 @@ import {
   DROP_PAD_PROJECT_DROPS_STORAGE_KEYS,
   isExplicitProjectDropRecord,
   isStoredNotebookProject,
+  notebookSourceForProjectRecord,
 } from "@/lib/board/isProjectNotebookDrop";
 import {
   mergeProjectCover,
@@ -354,6 +355,10 @@ export function mergeProjectRecord(
   };
 }
 
+export function projectFromBoardActivity(item: BoardActivity): BoardProject | null {
+  return projectFromActivity(item);
+}
+
 function projectFromActivity(item: BoardActivity): BoardProject | null {
   const meta = item.meta ?? {};
   if (isSeededOrDemoProjectValue(item)) return null;
@@ -419,7 +424,7 @@ function projectFromActivity(item: BoardActivity): BoardProject | null {
     notes: typeof meta.notes === "string" ? meta.notes : undefined,
     goal: typeof meta.goal === "string" ? meta.goal : undefined,
     milestone: typeof meta.milestone === "string" ? meta.milestone : undefined,
-    source: typeof meta.source === "string" ? meta.source : undefined,
+    source: notebookSourceForProjectRecord({ ...item, meta }),
     media: resolvedCover,
     authorId: String(item.user_id ?? meta.authorId ?? "").trim() || undefined,
     authorName: authorName || undefined,
@@ -467,7 +472,9 @@ function projectFromFeed(drop: FeedDrop): BoardProject | null {
   }
 
   const activityLike: BoardActivity = {
-    id: `feed_${drop.id}`,
+    id:
+      (typeof meta.projectId === "string" && meta.projectId) ||
+      String(drop.id || ""),
     created_at: new Date(drop.createdAt).toISOString(),
     user_id: drop.authorId || null,
     kind: "status",
@@ -476,9 +483,10 @@ function projectFromFeed(drop: FeedDrop): BoardProject | null {
     href: drop.href ?? null,
     image_url: resolveProjectCover({ ...drop, meta })?.src ?? null,
     meta: {
-      authorName: drop.authorName,
-      authorId: drop.authorId,
       ...meta,
+      authorName: drop.authorName || meta.authorName,
+      authorId: drop.authorId || meta.authorId,
+      source: notebookSourceForProjectRecord({ ...drop, meta }),
     },
   };
 
@@ -818,9 +826,12 @@ export async function syncRemoteProjectActivitiesToStorage(sb: any) {
     if (typeof fetch === "function") {
       const response = await fetch("/api/board/projects", { cache: "no-store" });
       if (response.ok) {
-        const payload = await response.json();
-        if (Array.isArray(payload?.activities)) {
-          remoteActivities = payload.activities;
+        const raw = await response.text();
+        if (raw.trim()) {
+          const payload = JSON.parse(raw);
+          if (Array.isArray(payload?.activities)) {
+            remoteActivities = payload.activities;
+          }
         }
       }
     }
@@ -921,6 +932,135 @@ export function createBoardProject(
     invites: [],
     roomPosts: seedRoomPosts(input.title, contactName),
   };
+}
+
+function asProjectRecord(value: unknown): Record<string, any> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, any>)
+    : {};
+}
+
+export function projectsFromProfileBoardDrops(profile: {
+  id?: string | null;
+  username?: string | null;
+  display_name?: string | null;
+  board_style?: unknown;
+}): BoardProject[] {
+  const style = asProjectRecord(profile.board_style);
+  const drops = Array.isArray(style.boardDrops) ? style.boardDrops : [];
+  const deleted = new Set(
+    (Array.isArray(style.boardDropsDeleted) ? style.boardDropsDeleted : []).map(String)
+  );
+  const projects: BoardProject[] = [];
+
+  for (const drop of drops) {
+    const row = asProjectRecord(drop);
+    const id = String(row.id ?? "").trim();
+    if (!id || deleted.has(id)) continue;
+    const project = projectFromProfileBoardDrop(profile, row);
+    if (project) projects.push(project);
+  }
+
+  return projects;
+}
+
+function projectFromProfileBoardDrop(
+  profile: {
+    id?: string | null;
+    username?: string | null;
+    display_name?: string | null;
+  },
+  drop: Record<string, any>
+): BoardProject | null {
+  if (isSeededOrDemoProjectValue(drop)) return null;
+
+  const meta = asProjectRecord(drop.meta);
+  const type = String(drop.type ?? drop.dropType ?? "");
+  const title = String(drop.title ?? "").trim();
+  if (
+    !isExplicitProjectDropRecord({ ...drop, type, meta, title }) &&
+    !/\bproject(\s+drop)?\b/i.test(type)
+  ) {
+    return null;
+  }
+
+  const id = String(drop.id ?? "").trim();
+  const projectId =
+    (typeof meta.projectId === "string" && meta.projectId.trim()) ||
+    id.replace(/^project_drop_/, "") ||
+    id;
+  const coverUrl =
+    persistableImageUrl(drop.previewImage) ||
+    persistableImageUrl(drop.imageUrl) ||
+    persistableImageUrl(drop.mediaUrl) ||
+    persistableImageUrl(drop.media?.src);
+  const hostName =
+    pickProjectHostName(
+      drop.contactName,
+      drop.authorName,
+      meta.contactName,
+      meta.authorName,
+      profile.display_name,
+      profile.username
+    ) || "Project Host";
+
+  return projectFromActivity({
+    id: `profile_project_${profile.id ?? "user"}_${id}`,
+    created_at: new Date(Number(drop.createdAt ?? Date.now()) || Date.now()).toISOString(),
+    user_id: profile.id ?? null,
+    kind: "board_drop",
+    title: /^Project Drop:/i.test(title) ? title : `Project Drop: ${title || "Untitled Project"}`,
+    body: String(drop.description ?? drop.logline ?? meta.description ?? title ?? "Project Drop"),
+    href: "/board/work",
+    image_url: coverUrl,
+    meta: {
+      ...meta,
+      source: "work_board",
+      origin: "project_notebook",
+      kind: "project_drop",
+      cardStyle: "project_drop",
+      dropType: "project",
+      projectId,
+      projectType: drop.projectType ?? meta.projectType ?? type,
+      location: drop.location ?? meta.location ?? null,
+      startDate: drop.startDate ?? meta.startDate ?? null,
+      endDate: drop.endDate ?? meta.endDate ?? null,
+      rolesNeeded: drop.rolesNeeded ?? meta.rolesNeeded ?? null,
+      contactName: drop.contactName ?? meta.contactName ?? hostName,
+      contactEmail: drop.contactEmail ?? meta.contactEmail ?? null,
+      status: drop.projectStatus ?? drop.status ?? meta.status ?? null,
+      media: drop.media ?? meta.media ?? null,
+      bucket: drop.bucket ?? meta.bucket ?? drop.media?.bucket ?? null,
+      storagePath: drop.storagePath ?? meta.storagePath ?? drop.media?.storagePath ?? null,
+      previewImage: coverUrl,
+      authorName: hostName,
+      authorUsername: profile.username ?? null,
+      ownerLabel: hostName,
+      ownerUsername: profile.username ?? null,
+    },
+  });
+}
+
+export function mergeProjectsIntoNotebook(incoming: BoardProject[]) {
+  const stored = syncResolvedProjectsToStorage();
+  if (!incoming.length) return stored;
+
+  const merged = new Map(stored.map((project) => [project.id, project]));
+  for (const project of incoming) {
+    if (!isStoredNotebookProject(project)) continue;
+    const existing = merged.get(project.id);
+    merged.set(project.id, existing ? mergeProjectRecord(existing, project) : project);
+  }
+
+  const next = Array.from(merged.values())
+    .filter((project) => isStoredNotebookProject(project))
+    .sort((a, b) => b.updatedAt - a.updatedAt);
+
+  if (projectsNeedPersist(stored, next)) {
+    writeBoardProjects(next);
+  }
+
+  return next;
 }
 
 export async function persistProjectDropToProfile(

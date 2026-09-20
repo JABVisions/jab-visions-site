@@ -16,10 +16,19 @@ export const DROP_PAD_PROJECT_DROPS_STORAGE_KEYS: readonly string[] = [
 const PROJECT_KIND_RE =
   /^(project|project_drop|casting|casting_call|crew|crew_call|gig|audition)$/i;
 
+const NOTEBOOK_SOURCE_RE =
+  /^(work_board|project_notebook|drop_pad_projects|universal_drop)$/i;
+
+const PRODUCTION_TYPE_RE =
+  /^(feature_film|short_film|web_series|tv_pilot|music_video|commercial|photo_shoot|other|series)$/i;
+
 const ASSET_OR_PORTFOLIO_SOURCE_RE =
   /jab_drop_pad_assets|jab_drop_pad_portfolio|portfolio_drops|board_assets/i;
 
 const POLLUTED_ID_RE = /^(loose_|feed_|work_thought_)/i;
+
+const NOTEBOOK_ID_RE =
+  /^(droppad_|project_|project_drop_|profile_project_|universal_|asset_project_)/i;
 
 function asRecord(value: unknown): Record<string, any> {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -43,6 +52,22 @@ function nestedMeta(value: Record<string, any>): Record<string, any> {
 
 export function isDropPadProjectStorageKey(key: unknown): boolean {
   return DROP_PAD_PROJECT_DROPS_STORAGE_KEYS.includes(String(key ?? ""));
+}
+
+export function isNotebookProjectSource(value: unknown): boolean {
+  const sourceRaw = String(value ?? "");
+  return NOTEBOOK_SOURCE_RE.test(normalizeProjectToken(sourceRaw)) ||
+    isDropPadProjectStorageKey(sourceRaw);
+}
+
+export function notebookSourceForProjectRecord(value: unknown): string {
+  const item = asRecord(value);
+  const meta = nestedMeta(item);
+  const sourceRaw = item.source ?? meta.source;
+  if (isNotebookProjectSource(sourceRaw)) {
+    return normalizeProjectToken(sourceRaw);
+  }
+  return "work_board";
 }
 
 export function isAssetOrPortfolioLibraryItem(value: unknown): boolean {
@@ -117,12 +142,16 @@ export function isExplicitProjectDropRecord(value: unknown): boolean {
 export function isStoredNotebookProject(project: {
   id?: string;
   source?: string;
+  origin?: string;
   projectType?: string;
+  title?: string;
 }): boolean {
   const id = String(project.id ?? "");
   const sourceRaw = String(project.source ?? "");
   const source = normalizeProjectToken(sourceRaw);
+  const origin = normalizeProjectToken(project.origin);
   const projectType = normalizeProjectToken(project.projectType);
+  const title = String(project.title ?? "");
 
   if (!id) return false;
   if (POLLUTED_ID_RE.test(id)) return false;
@@ -131,16 +160,16 @@ export function isStoredNotebookProject(project: {
   if (isAssetOrPortfolioLibraryItem(project)) return false;
 
   // Canonical Drop Pad project-library records and Project Drop Menu rooms.
-  if (id.startsWith("droppad_") || id.startsWith("project_")) return true;
-  if (
-    source === "work_board" ||
-    source === "project_notebook" ||
-    source === "drop_pad_projects" ||
-    source === "universal_drop"
-  ) {
+  if (NOTEBOOK_ID_RE.test(id)) return true;
+  if (isNotebookProjectSource(sourceRaw) || NOTEBOOK_SOURCE_RE.test(source)) {
     return true;
   }
-  if (isDropPadProjectStorageKey(sourceRaw)) return true;
+  if (origin === "project_notebook") return true;
+  if (/^project_drop:\s*/i.test(title)) return true;
+
+  // Host-created rooms that lost their source stamp still keep production types.
+  // Bare projectType "Project" stays rejected — that was the old greedy matcher.
+  if (!source && PRODUCTION_TYPE_RE.test(projectType)) return true;
 
   return false;
 }
