@@ -485,7 +485,20 @@ export default function BoardArtCanvas({
           loop
           muted
           playsInline
+          preload="auto"
+          controls={false}
           aria-label="Video preview behind Art Palette"
+          onLoadedData={(event) => {
+            const el = event.currentTarget;
+            if (el.currentTime === 0) {
+              try {
+                el.currentTime = 0.05;
+              } catch {
+                // ignore
+              }
+            }
+            void el.play().catch(() => {});
+          }}
         />
       ) : backgroundImageUrl ? (
         // eslint-disable-next-line @next/next/no-img-element

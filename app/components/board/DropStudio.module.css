@@ -705,6 +705,57 @@
   cursor: crosshair;
 }
 
+.videoPlayHit {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  display: grid;
+  place-items: center;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: radial-gradient(circle at center, rgba(0, 0, 0, 0.18), transparent 62%);
+  cursor: pointer;
+  pointer-events: auto;
+  touch-action: manipulation;
+}
+
+.videoPlayHitPlaying {
+  inset: auto;
+  right: 10px;
+  bottom: 10px;
+  width: 44px;
+  height: 44px;
+  background: rgba(4, 16, 22, 0.62);
+  border: 1px solid rgba(167, 244, 232, 0.28);
+  border-radius: 999px;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.35);
+}
+
+.videoPlayGlyph {
+  display: grid;
+  place-items: center;
+  width: 64px;
+  height: 64px;
+  border-radius: 999px;
+  background: rgba(4, 16, 22, 0.72);
+  border: 1px solid rgba(167, 244, 232, 0.42);
+  color: #e8fff8;
+  font-size: 1.35rem;
+  line-height: 1;
+  box-shadow: 0 0 22px rgba(72, 238, 211, 0.22);
+  pointer-events: none;
+}
+
+.videoPlayHitPlaying .videoPlayGlyph {
+  width: 100%;
+  height: 100%;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  font-size: 0.78rem;
+}
+
 .workbenchDrawer input {
   width: 100%;
   padding: 0.68rem 0.72rem;

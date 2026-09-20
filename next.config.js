@@ -3,6 +3,11 @@ const { PHASE_DEVELOPMENT_SERVER } = require("next/constants")
 /** @type {import('next').NextConfig} */
 const baseConfig = {
   staticPageGenerationTimeout: 300,
+  experimental: {
+    // Server Actions only. Route Handler bodies still hit Vercel's ~4.5MB
+    // cap; large audition videos skip `/api/board/media` and use tus.
+    serverActions: { bodySizeLimit: "50mb" },
+  },
 }
 
 /** @type {import('next').NextConfig} */

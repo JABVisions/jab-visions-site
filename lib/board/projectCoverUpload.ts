@@ -1,9 +1,14 @@
 import { BOARD_PROJECT_MEDIA_BUCKET } from "@/lib/board/projectCover";
-import { checkUploadSize, resolveUploadContentType } from "@/lib/board/uploadLimits";
+import {
+  SERVERLESS_UPLOAD_BODY_LIMIT,
+  checkUploadSize,
+  resolveUploadContentType,
+  uploadTimeoutMsForBytes,
+} from "@/lib/board/uploadLimits";
 import { supabaseBrowser } from "@/lib/supabase/browser";
 
-export const PROJECT_COVER_UPLOAD_TIMEOUT_MS = 12_000;
-export const PROJECT_COVER_READ_TIMEOUT_MS = 5_000;
+export const PROJECT_COVER_UPLOAD_TIMEOUT_MS = 180_000;
+export const PROJECT_COVER_READ_TIMEOUT_MS = 20_000;
 
 export type ProjectCoverUploadResult = {
   bucket: string;
@@ -70,7 +75,7 @@ async function uploadCoverThroughBrowser(file: File): Promise<ProjectCoverUpload
         contentType,
         cacheControl: "3600",
       }),
-      PROJECT_COVER_UPLOAD_TIMEOUT_MS,
+      uploadTimeoutMsForBytes(file.size),
       "Cover upload timed out."
     );
     if (error) {
@@ -102,25 +107,31 @@ export async function uploadProjectCover(file: File): Promise<ProjectCoverUpload
   const copy = await copyFileForUpload(file);
   if (!copy) return null;
 
-  const body = new FormData();
-  body.set("file", copy, copy.name);
+  const timeoutMs = uploadTimeoutMsForBytes(copy.size);
 
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), PROJECT_COVER_UPLOAD_TIMEOUT_MS);
-  try {
-    const response = await fetch("/api/board/projects/cover", {
-      method: "POST",
-      body,
-      credentials: "include",
-      signal: controller.signal,
-    });
-    const json = await response.json().catch(() => null);
-    const parsed = parseCoverUploadResponse(json);
-    if (parsed) return parsed;
-  } catch (error) {
-    console.error("Project cover upload failed:", error);
-  } finally {
-    clearTimeout(timer);
+  // Skip the Vercel FormData route for photos over ~4.5MB so they are not
+  // silently rejected by the serverless body cap.
+  if (copy.size <= SERVERLESS_UPLOAD_BODY_LIMIT) {
+    const body = new FormData();
+    body.set("file", copy, copy.name);
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const response = await fetch("/api/board/projects/cover", {
+        method: "POST",
+        body,
+        credentials: "include",
+        signal: controller.signal,
+      });
+      const json = await response.json().catch(() => null);
+      const parsed = parseCoverUploadResponse(json);
+      if (parsed) return parsed;
+    } catch (error) {
+      console.error("Project cover upload failed:", error);
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   return uploadCoverThroughBrowser(copy);

@@ -1,7 +1,7 @@
 "use client";
 
 import type React from "react";
-import { memo, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import {
   compactDropCustomizations,
   type DropCustomization,
@@ -86,6 +86,90 @@ function makeId(prefix: string) {
   return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
+function StudioPreviewVideo({
+  src,
+  contentType,
+  style,
+  onError,
+}: {
+  src: string;
+  contentType?: string;
+  style?: React.CSSProperties;
+  onError?: () => void;
+}) {
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const [playing, setPlaying] = useState(false);
+
+  useEffect(() => {
+    setPlaying(false);
+    const el = videoRef.current;
+    if (!el) return;
+    el.pause();
+    el.load();
+  }, [src, contentType]);
+
+  function showFirstFrame() {
+    const el = videoRef.current;
+    if (!el) return;
+    if (el.currentTime === 0) {
+      try {
+        el.currentTime = 0.05;
+      } catch {
+        // Some blobs reject a seek until more data arrives.
+      }
+    }
+  }
+
+  async function togglePlay(event: React.MouseEvent) {
+    event.preventDefault();
+    event.stopPropagation();
+    const el = videoRef.current;
+    if (!el) return;
+    try {
+      if (el.paused) {
+        el.muted = false;
+        el.volume = 1;
+        await el.play();
+      } else {
+        el.pause();
+      }
+    } catch {
+      onError?.();
+    }
+  }
+
+  return (
+    <>
+      <video
+        ref={videoRef}
+        key={src}
+        src={src}
+        controls
+        playsInline
+        preload="auto"
+        style={style}
+        onPlay={() => setPlaying(true)}
+        onPause={() => setPlaying(false)}
+        onEnded={() => setPlaying(false)}
+        onLoadedMetadata={showFirstFrame}
+        onLoadedData={showFirstFrame}
+        onPointerDown={(event) => event.stopPropagation()}
+        onError={() => onError?.()}
+      />
+      <button
+        type="button"
+        className={`${styles.videoPlayHit} ${playing ? styles.videoPlayHitPlaying : ""}`}
+        onClick={togglePlay}
+        aria-label={playing ? "Pause video" : "Play video"}
+      >
+        <span className={styles.videoPlayGlyph} aria-hidden>
+          {playing ? "❚❚" : "▶"}
+        </span>
+      </button>
+    </>
+  );
+}
+
 function hasStudioEffects(effects?: DropStudioEffects | null) {
   if (!effects) return false;
   return Boolean(
@@ -99,22 +183,27 @@ function hasStudioEffects(effects?: DropStudioEffects | null) {
 function DropStudio({
   mediaUrl,
   mediaKind,
+  mediaContentType,
   value,
   onChange,
   compact = false,
   hideHeader = false,
   operatingTable = false,
+  enableArtTools = false,
   artTools,
   onMediaError,
 }: {
   mediaUrl: string;
   mediaKind: "image" | "video";
+  mediaContentType?: string;
   value: DropCustomization;
   onChange: (next: DropCustomization) => void;
   compact?: boolean;
   hideHeader?: boolean;
   /** Uniform 4:5 monitor + Palette overlay (Drop Studio stage). */
   operatingTable?: boolean;
+  /** Brush / Art Palette overlays — only when the Art mode button is on. */
+  enableArtTools?: boolean;
   /** Art brush tools — rendered below object tool panels in the Palette drawer. */
   artTools?: React.ReactNode;
   /** Rebuild preview URL if a blob fails to paint (e.g. revoked object URL). */
@@ -264,14 +353,10 @@ function DropStudio({
       {mediaUrl ? (
         <div className={styles.mediaLayer}>
           {mediaKind === "video" ? (
-            <video
-              key={mediaUrl}
+            <StudioPreviewVideo
               src={mediaUrl}
-              controls
-              playsInline
-              preload="metadata"
+              contentType={mediaContentType}
               style={mediaRotationStyle}
-              onPointerDown={(event) => event.stopPropagation()}
               onError={() => onMediaError?.()}
             />
           ) : (
@@ -533,20 +618,21 @@ function DropStudio({
 
   const drawerEl = <div className={drawerClassName}>{drawerPanelsEl}</div>;
 
-  const inlineArtTools = operatingTable ? (
-    <>
-      <DropStudioArtPalette
-        hostRef={previewRef}
-        initialOverlayUrl={normalized.artOverlayUrl}
-        onOverlayChange={(artOverlayUrl) =>
-          update({ ...normalized, artOverlayUrl })
-        }
-      />
-      {artTools}
-    </>
-  ) : (
-    artTools
-  );
+  const inlineArtTools =
+    operatingTable && enableArtTools ? (
+      <>
+        <DropStudioArtPalette
+          hostRef={previewRef}
+          initialOverlayUrl={normalized.artOverlayUrl}
+          onOverlayChange={(artOverlayUrl) =>
+            update({ ...normalized, artOverlayUrl })
+          }
+        />
+        {artTools}
+      </>
+    ) : enableArtTools ? (
+      artTools
+    ) : null;
 
   const deckPanelEl = (
     <DropStudioPaletteDeck

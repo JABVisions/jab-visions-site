@@ -7,7 +7,7 @@
 import { supabaseBrowser } from "@/lib/supabase/browser";
 import { syncActivitiesForDropEdit } from "@/lib/board/activity";
 import { ensureImageFileMinResolution, isHeicFile } from "@/lib/board/imageQuality";
-import { checkUploadSize, resolveUploadContentType } from "@/lib/board/uploadLimits";
+import { checkUploadSize, resolveUploadContentType, uploadTimeoutMsForBytes } from "@/lib/board/uploadLimits";
 import type { DropItem } from "@/lib/board/dropItem";
 import { rememberDeletedDropId } from "@/lib/board/dropItem";
 
@@ -200,9 +200,6 @@ function sanitizeFileName(name: string) {
 
 const SESSION_TIMEOUT_MS = 4_000;
 const IMAGE_PREPARE_TIMEOUT_MS = 18_000;
-const STORAGE_UPLOAD_TIMEOUT_MS = 20_000;
-const DROP_MEDIA_UPLOAD_TIMEOUT_MS =
-  SESSION_TIMEOUT_MS + IMAGE_PREPARE_TIMEOUT_MS + STORAGE_UPLOAD_TIMEOUT_MS + 2_000;
 
 function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
   let timeoutId: ReturnType<typeof setTimeout> | undefined;
@@ -255,14 +252,15 @@ export async function uploadDropMedia(
         }
 
         const storagePath = `${userId}/${dropId}/${Date.now()}-${sanitizeFileName(uploadFile.name)}`;
+        const uploadTimeoutMs = uploadTimeoutMsForBytes(uploadFile.size);
         const { error } = await withTimeout(
           supabase.storage.from(BOARD_MEDIA_BUCKET).upload(storagePath, uploadFile, {
             upsert: true,
             contentType: resolveUploadContentType(uploadFile),
             cacheControl: "3600",
           }),
-          STORAGE_UPLOAD_TIMEOUT_MS,
-          "Cover upload timed out."
+          uploadTimeoutMs,
+          "Media upload timed out."
         );
         if (error) {
           console.error("Drop media upload failed:", error);
@@ -270,8 +268,8 @@ export async function uploadDropMedia(
         }
         return { bucket: BOARD_MEDIA_BUCKET, storagePath };
       })(),
-      DROP_MEDIA_UPLOAD_TIMEOUT_MS,
-      "Cover upload timed out."
+      SESSION_TIMEOUT_MS + IMAGE_PREPARE_TIMEOUT_MS + uploadTimeoutMsForBytes(file.size) + 2_000,
+      "Media upload timed out."
     );
   } catch (error) {
     console.error("Drop media upload failed:", error);

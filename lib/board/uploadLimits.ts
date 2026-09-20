@@ -6,6 +6,10 @@
  * Settings), and the *smaller* of the two wins. If an upload fails with
  * "Payload too large" / "exceeded the maximum allowed size" while it is under
  * the limit below, raise the bucket limit in Supabase to match.
+ *
+ * Vercel serverless request bodies cap around 4.5MB, so files above
+ * `SERVERLESS_UPLOAD_BODY_LIMIT` must skip `/api/board/media` and upload
+ * directly (tus / Supabase storage). Do not silently fail those with a tiny cap.
  */
 
 const MB = 1024 * 1024;
@@ -14,14 +18,38 @@ export const UPLOAD_LIMITS = {
   /** Photos, doodles, and art layers. */
   image: 25 * MB,
   /** Voice drops, music drops, and audio attachments. */
-  audio: 150 * MB,
-  /** Video drops and Pay Drop video context. */
-  video: 500 * MB,
+  audio: 250 * MB,
+  /**
+   * Video drops, Project Room audition tapes, and Pay Drop video context.
+   * Sized for minutes-long iPhone tapes (1080p ~130MB/min, 4K ~350MB/min).
+   */
+  video: 4 * 1024 * MB,
   /** Docs and Descript exports. */
   doc: 50 * MB,
   /** Avatars and cover images. */
   avatar: 10 * MB,
 } as const;
+
+/** Vercel serverless incoming body cap. Larger files must not go through FormData APIs. */
+export const SERVERLESS_UPLOAD_BODY_LIMIT = 4 * MB;
+
+/** Supabase resumable uploads require 6MB chunks. */
+export const TUS_CHUNK_SIZE = 6 * MB;
+
+/** Files at or above this use tus instead of a single storage POST. */
+export const TUS_UPLOAD_THRESHOLD = 6 * MB;
+
+const UPLOAD_TIMEOUT_FLOOR_MS = 180_000;
+const UPLOAD_TIMEOUT_CAP_MS = 60 * 60_000;
+
+/**
+ * Give long audition tapes time to finish on mobile networks.
+ * ~1 minute per 30MB, 3-minute floor, 60-minute cap.
+ */
+export function uploadTimeoutMsForBytes(bytes: number): number {
+  const mb = Math.max(1, bytes / MB);
+  return Math.min(UPLOAD_TIMEOUT_CAP_MS, Math.max(UPLOAD_TIMEOUT_FLOOR_MS, Math.ceil(mb / 30) * 60_000));
+}
 
 export type UploadKind = keyof typeof UPLOAD_LIMITS;
 
@@ -41,7 +69,32 @@ export function uploadKindForFile(file: {
   return "doc";
 }
 
+/** Photo / video / voice kind for Drop Studio, including iOS files with an empty MIME. */
+export function studioMediaKindForFile(file: { type?: string; name?: string }): "image" | "video" | "audio" {
+  const kind = uploadKindForFile(file);
+  if (kind === "video") return "video";
+  if (kind === "audio") return "audio";
+  return "image";
+}
+
+/**
+ * Stamp a real Content-Type onto camera-roll files that arrive as
+ * `application/octet-stream` (or empty). Blob URLs and `<video>` both need it.
+ */
+export function fileWithResolvedContentType(file: File): File {
+  const type = resolveUploadContentType(file);
+  if (!type || type === file.type) return file;
+  return new File([file], file.name || "board-media", {
+    type,
+    lastModified: file.lastModified,
+  });
+}
+
 export function formatBytes(bytes: number) {
+  if (bytes >= 1024 * MB) {
+    const gb = bytes / (1024 * MB);
+    return `${gb >= 10 ? Math.round(gb) : gb.toFixed(1)}GB`;
+  }
   if (bytes >= MB) {
     const mb = bytes / MB;
     return `${mb >= 10 ? Math.round(mb) : mb.toFixed(1)}MB`;
