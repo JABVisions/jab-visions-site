@@ -82,7 +82,53 @@ export type ProjectProfileDropInput = {
   authorId?: string;
   authorName?: string;
   authorUsername?: string;
+  roomPosts?: Array<{
+    id?: string;
+    authorName?: string;
+    authorId?: string;
+    text?: string;
+    createdAt?: number;
+    mediaUrl?: string;
+    mediaKind?: "image" | "video";
+    bucket?: string;
+    storagePath?: string;
+    dropId?: string;
+    projectId?: string;
+  }>;
 };
+
+function persistableNotebookRoomPosts(
+  posts: ProjectProfileDropInput["roomPosts"]
+) {
+  if (!Array.isArray(posts) || !posts.length) return [];
+  const compact = [];
+  const seen = new Set<string>();
+  for (const post of posts) {
+    if (!post || typeof post !== "object") continue;
+    const storagePath = String(post.storagePath || "").trim().split("?")[0];
+    const mediaUrl = String(post.mediaUrl || "").trim();
+    const dropId = String(post.dropId || "").trim();
+    const id = String(post.id || "").trim();
+    const key = storagePath || mediaUrl.split("?")[0] || dropId || id;
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    compact.push({
+      id: id || undefined,
+      authorName: post.authorName,
+      authorId: post.authorId,
+      text: post.text,
+      createdAt: post.createdAt,
+      mediaKind: post.mediaKind,
+      bucket: post.bucket,
+      storagePath: storagePath || undefined,
+      dropId: dropId || undefined,
+      projectId: post.projectId,
+      mediaUrl: mediaUrl || undefined,
+    });
+    if (compact.length >= 80) break;
+  }
+  return compact;
+}
 
 export function profileBoardDropFromProject(
   project: ProjectProfileDropInput,
@@ -101,6 +147,7 @@ export function profileBoardDropFromProject(
     profile?.display_name,
     profile?.username
   );
+  const roomPosts = persistableNotebookRoomPosts(project.roomPosts);
 
   return {
     id: dropId,
@@ -130,6 +177,7 @@ export function profileBoardDropFromProject(
     authorUsername: project.authorUsername || profile?.username || "",
     origin: "project_notebook",
     source: "work_board",
+    roomPosts,
     meta: {
       cardStyle: "project_drop",
       dropType: "project",
@@ -146,6 +194,7 @@ export function profileBoardDropFromProject(
       media: cover,
       bucket: cover?.bucket || null,
       storagePath: cover?.storagePath || null,
+      roomPosts,
     },
   };
 }
@@ -178,6 +227,7 @@ export async function persistLocalProjectsViaApi(projects: ProjectProfileDropInp
           authorId: project.authorId,
           authorName: project.authorName,
           authorUsername: project.authorUsername,
+          roomPosts: persistableNotebookRoomPosts(project.roomPosts),
         })),
       }),
     });

@@ -11,6 +11,7 @@ import {
   notebookSourceForProjectRecord,
 } from "@/lib/board/isProjectNotebookDrop";
 import {
+  applyCommittedRoomPostGuard,
   applyProjectRoomActivitiesToProjects,
   mergeRoomPosts,
 } from "@/lib/board/projectRoomDrop";
@@ -404,6 +405,32 @@ export function mergeProjectRecord(
 }
 
 /**
+ * Keep live room media when React state rewinds to a stale snapshot.
+ * Unlike reconcileProjectsWithLive, this does not resurrect deleted projects.
+ */
+export function preferLiveRoomPosts(
+  incoming: BoardProject[],
+  live: BoardProject[]
+): BoardProject[] {
+  if (!incoming.length) {
+    return applyCommittedRoomPostGuard(live.length ? live : incoming);
+  }
+  if (!live.length) return applyCommittedRoomPostGuard(incoming);
+  const liveById = new Map(live.map((project) => [project.id, project]));
+  return applyCommittedRoomPostGuard(
+    incoming.map((project) => {
+      const current = liveById.get(project.id);
+      if (!current) return project;
+      return {
+        ...project,
+        roomPosts: mergeRoomPosts(project.roomPosts, current.roomPosts),
+        updatedAt: Math.max(safeTime(project.updatedAt), safeTime(current.updatedAt)),
+      };
+    })
+  );
+}
+
+/**
  * Keep in-memory room posts when a reload reads a stale notebook snapshot.
  * Studio save writes storage, then activity:new / projects:updated reload
  * and used to replace React state before the new video post was visible.
@@ -424,7 +451,7 @@ export function reconcileProjectsWithLive(
     if (seen.has(project.id)) continue;
     next.push(project);
   }
-  return next.sort((a, b) => b.updatedAt - a.updatedAt);
+  return applyCommittedRoomPostGuard(next.sort((a, b) => b.updatedAt - a.updatedAt));
 }
 
 export function projectFromBoardActivity(item: BoardActivity): BoardProject | null {
@@ -525,7 +552,9 @@ function projectFromActivity(item: BoardActivity): BoardProject | null {
     payDropEligible:
       typeof meta.payDropEligible === "boolean" ? meta.payDropEligible : undefined,
     invites: [],
-    roomPosts: [],
+    roomPosts: Array.isArray(meta.roomPosts)
+      ? mergeRoomPosts(meta.roomPosts as ProjectRoomPost[], [])
+      : [],
   };
 }
 
@@ -971,7 +1000,7 @@ let writingBoardProjects = false;
 
 export function writeBoardProjects(items: BoardProject[]) {
   const key = scopedProjectsKey();
-  const realItems = items
+  const realItems = applyCommittedRoomPostGuard(items)
     .filter(
       (project) => !isSeededOrDemoProject(project) && isStoredNotebookProject(project)
     )
@@ -1144,6 +1173,11 @@ function projectFromProfileBoardDrop(
       authorUsername: profile.username ?? null,
       ownerLabel: hostName,
       ownerUsername: profile.username ?? null,
+      roomPosts: Array.isArray(drop.roomPosts)
+        ? drop.roomPosts
+        : Array.isArray(meta.roomPosts)
+          ? meta.roomPosts
+          : [],
     },
   });
 }

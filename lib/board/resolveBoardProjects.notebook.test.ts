@@ -262,6 +262,61 @@ assert(
   `cloud projectNotebook rows should hydrate into notebook records, got ${fromNotebook.map((project) => project.title).join(",")}`
 );
 
+const fromNotebookWithTape = projectsFromProfileBoardDrops({
+  id: "user-1",
+  username: "johnandy",
+  display_name: "JAB",
+  board_style: {
+    projectNotebook: [
+      {
+        id: "project_drop_project_keep_me",
+        type: "Project",
+        title: "Those Ryderz",
+        createdAt: Date.now(),
+        description: "A crew rebuilds a city block.",
+        origin: "project_notebook",
+        source: "work_board",
+        roomPosts: [
+          {
+            id: "post_tape",
+            authorName: "Zoe",
+            text: "Zoe posted an audition tape in Those Ryderz.",
+            createdAt: Date.now(),
+            mediaKind: "video",
+            bucket: "board-media",
+            storagePath: "user/project-media/tape.mp4",
+            dropId: "project_room_tape",
+          },
+        ],
+        meta: {
+          dropType: "project",
+          projectId: "project_keep_me",
+          cardStyle: "project_drop",
+          roomPosts: [
+            {
+              id: "post_tape",
+              authorName: "Zoe",
+              text: "Zoe posted an audition tape in Those Ryderz.",
+              createdAt: Date.now(),
+              mediaKind: "video",
+              bucket: "board-media",
+              storagePath: "user/project-media/tape.mp4",
+              dropId: "project_room_tape",
+            },
+          ],
+        },
+      },
+    ],
+    boardDrops: [],
+  },
+});
+assert(
+  fromNotebookWithTape.some((project) =>
+    (project.roomPosts || []).some((post) => post.storagePath === "user/project-media/tape.mp4")
+  ),
+  "cloud notebook roomPosts must hydrate back into the Project Room"
+);
+
 writeBoardProjects(resolved);
 const postsBeforeLoop = (
   (JSON.parse(memory.get("jab_board_projects_v2") || "[]") as Array<{ id: string; roomPosts?: any[] }>)

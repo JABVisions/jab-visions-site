@@ -2613,8 +2613,10 @@ export default function DropStudioStage({
             if (progress && progress.percent >= 100 && bytesDoneTimer == null) {
               flashSaveNote("Posting Drop…", true);
               bytesDoneTimer = window.setTimeout(() => {
-                // Verified 100% is success. Close even if persist/activity is still running.
+                // 100% bytes is not a room Drop. Wait for onComplete to commit
+                // it; resolving here closed studio and the tape vanished.
                 if (studioBytesDoneUnstickAction() === "complete") resolve();
+                else flashSaveNote("Posting Drop…", true);
               }, STUDIO_BYTES_DONE_UNSTICK_MS);
             }
           })
