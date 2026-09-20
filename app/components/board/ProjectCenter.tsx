@@ -18,7 +18,9 @@ import {
   configureBoardProjectsStorage,
   createBoardProject,
   mergeProjectRecord,
+  mergeProjectsIntoNotebook,
   persistProjectDropToProfile,
+  projectsFromProfileBoardDrops,
   syncRemoteProjectActivitiesToStorage,
   syncResolvedProjectsToStorage,
   statusLabel,
@@ -392,8 +394,13 @@ export default function ProjectCenter() {
     async function configureStorage() {
       try {
         const sb = supabaseBrowser();
-        const { data: auth } = await sb.auth.getUser();
-        const userId = auth.user?.id ?? null;
+        const auth = await Promise.race([
+          sb.auth.getUser(),
+          new Promise<{ data: { user: null } }>((resolve) =>
+            window.setTimeout(() => resolve({ data: { user: null } }), 3_500)
+          ),
+        ]);
+        const userId = auth.data.user?.id ?? null;
         setCurrentUserId(userId);
         let username = "";
         if (userId) {
@@ -414,6 +421,15 @@ export default function ProjectCenter() {
               profile?.username
             )
           );
+          const fromProfile = projectsFromProfileBoardDrops({
+            id: userId,
+            username: profile?.username,
+            display_name: profile?.display_name,
+            board_style: profile?.board_style,
+          });
+          if (fromProfile.length > 0) {
+            mergeProjectsIntoNotebook(fromProfile);
+          }
         }
         configureBoardProjectsStorage(userId, username === "johnandy");
       } catch {
@@ -425,6 +441,8 @@ export default function ProjectCenter() {
     }
 
     loadDropPadProjectDrops();
+    loadProjects();
+    void loadRemoteProjects();
     void configureStorage();
 
     return () => {

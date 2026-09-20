@@ -10,6 +10,7 @@ import { getSupabaseAnonKey, getSupabasePublicUrl } from "@/lib/supabase/config"
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const maxDuration = 60;
 
 function supabaseServer() {
   const cookieStore = cookies();
@@ -63,10 +64,17 @@ function normalizeActivityRow(row: any): BoardActivity | null {
   };
 }
 
-function activityFromProfileDrop(profile: any, drop: any): BoardActivity | null {
+function activityFromProfileDrop(
+  profile: any,
+  drop: any,
+  viewerId: string | null
+): BoardActivity | null {
   if (!drop || typeof drop !== "object") return null;
   const id = String(drop.id ?? "").trim();
-  if (!id || drop.visibility === "private") return null;
+  if (!id) return null;
+  if (drop.visibility === "private" && String(profile?.id ?? "") !== String(viewerId ?? "")) {
+    return null;
+  }
   const type = String(drop.type ?? drop.dropType ?? "");
   const meta = asRecord(drop.meta);
   const title = String(drop.title ?? "").trim();
@@ -172,8 +180,12 @@ function activityFromAsset(row: any): BoardActivity | null {
 }
 
 export async function GET() {
-  const supabase = supabaseServer();
-  const [activityRes, profileRes, assetRes] = await Promise.all([
+  try {
+    const supabase = supabaseServer();
+    const { data: authData } = await supabase.auth.getUser();
+    const viewerId = authData?.user?.id ?? null;
+
+    const [activityRes, profileRes, assetRes] = await Promise.all([
     supabase
       .from("board_activity")
       .select("*")
@@ -215,6 +227,8 @@ export async function GET() {
         image_url: persistableImageUrl(item.image_url),
         meta: {
           ...(item.meta ?? {}),
+          source: item.meta?.source || "work_board",
+          origin: item.meta?.origin || "project_notebook",
           authorName: host || item.meta?.authorName,
           contactName: pickProjectHostName(item.meta?.contactName, host),
           ownerLabel: host || item.meta?.ownerLabel,
@@ -231,7 +245,7 @@ export async function GET() {
     );
     return drops
       .filter((drop: any) => drop && !deleted.has(String(drop.id ?? "")))
-      .map((drop: any) => activityFromProfileDrop(profile, drop))
+      .map((drop: any) => activityFromProfileDrop(profile, drop, viewerId))
       .filter(Boolean) as BoardActivity[];
   });
 
@@ -275,4 +289,8 @@ export async function GET() {
   );
 
   return Response.json({ ok: true, activities });
+  } catch (error) {
+    console.error("[board/projects] failed to load project notebook", error);
+    return Response.json({ ok: false, activities: [], message: "Could not load projects." }, { status: 200 });
+  }
 }

@@ -11,7 +11,6 @@ import QuickActionsRemote, { type DropPadApp } from "@/app/components/board/Quic
 import DropPadOS from "@/app/components/board/DropPadOS.v3";
 
 import { supabaseBrowser } from "@/lib/supabase/browser";
-import { syncResolvedProjectsToStorage } from "@/lib/board/projects";
 
 import { POWER_EVENT, readPower, togglePower, setPower } from "@/lib/board/powerBus";
 import { DROP_PAD_APP_EVENT, readDropPadApp, setDropPadApp } from "@/lib/board/dropPadNavBus";
@@ -84,12 +83,6 @@ export default function WorkPage() {
       sub?.subscription?.unsubscribe?.();
     };
   }, [sb]);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-
-    syncResolvedProjectsToStorage();
-  }, []);
 
   const goHome = () => setDropPadApp("home");
   const openProjects = () => {
@@ -185,6 +178,9 @@ export default function WorkPage() {
 
         .work-root .notebook {
           min-height: 740px;
+          max-height: calc(100vh - 120px);
+          overflow-x: hidden;
+          overflow-y: auto;
         }
 
         .work-root .qar {
