@@ -7,6 +7,7 @@ import {
   persistableImageUrl,
 } from "@/lib/board/projectCover";
 import { profileBoardDropFromProject } from "@/lib/board/projectProfileDrop";
+import { getSupabaseAnonKey, getSupabasePublicUrl } from "@/lib/supabase/config";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
