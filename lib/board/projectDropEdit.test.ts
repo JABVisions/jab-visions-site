@@ -121,6 +121,7 @@ assert(cover.kind === "image", "studio upload becomes an image cover");
 assert(cover.storagePath === "user/project-cover/studio.jpg", "studio upload keeps storage path");
 
 assert(isProjectStudioVideoFile({ type: "video/mp4", name: "clip.mp4" }), "mp4 files are studio video");
+assert(isProjectStudioVideoFile({ type: "video/mp4 ", name: "tape.MOV " }), "iOS names with trailing space stay video");
 assert(!isProjectStudioVideoFile({ type: "image/png", name: "art.png" }), "png files are not studio video");
 
 const studioMedia = projectMediaFromStudioUpload({

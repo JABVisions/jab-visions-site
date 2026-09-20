@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { checkUploadSize, resolveUploadContentType } from "@/lib/board/uploadLimits";
+import { checkUploadSize, ownerScopedUploadFolder, resolveUploadContentType } from "@/lib/board/uploadLimits";
 import { createSupabaseRouteClient } from "@/lib/supabase/routeClient";
 
 export const runtime = "nodejs";
@@ -52,7 +52,10 @@ export async function POST(request: NextRequest) {
 
   const requestedBucket = String(form.get("bucket") || "board-media");
   const bucket = requestedBucket === "board-docs" ? "board-docs" : "board-media";
-  const folder = safeFolder(form.get("folder") || `uploads/${user.id}`);
+  const folder = ownerScopedUploadFolder(
+    safeFolder(form.get("folder") || `uploads/${user.id}`),
+    user.id
+  );
   const ext = (fileName.split(".").pop() || "bin").toLowerCase().replace(/[^a-z0-9]+/g, "") || "bin";
   const storagePath = `${folder}/${Date.now()}-${crypto.randomUUID()}.${ext}`;
   const bytes = new Uint8Array(await file.arrayBuffer());

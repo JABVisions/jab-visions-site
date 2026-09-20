@@ -49,7 +49,7 @@ import { readCurrentBoardIdentity } from "@/lib/board/currentProfile";
 import { emitBoardDropSignal } from "@/lib/board/dropSignals";
 import LazyDropStudioStage from "@/app/components/board/LazyDropStudioStage";
 import type { DropCustomization } from "@/lib/board/dropCustomizations";
-import { uploadBoardMediaFile } from "@/lib/board/boardMediaUpload";
+import { uploadBoardMediaFile, explainBoardMediaUploadError } from "@/lib/board/boardMediaUpload";
 import { boardProjectPatchFromDrop } from "@/lib/board/projectDropEdit";
 import {
   applyProjectRoomActivitiesToProjects,
@@ -1050,9 +1050,8 @@ export default function ProjectCenter() {
     setStudioMessage(mediaKind === "video" ? "Uploading video…" : "Uploading drop…");
     try {
       const uploaded = await uploadBoardMediaFile(file, { folder: "project-media" });
-      if (!uploaded) throw new Error("upload failed");
       const mediaUrl = uploaded.signedUrl || uploaded.publicUrl;
-      if (!mediaUrl) throw new Error("upload failed");
+      if (!mediaUrl) throw new Error("Upload finished but Board could not create a playback URL.");
 
       const liveProject =
         projectsRef.current.find((item) => item.id === project.id) || project;
@@ -1137,16 +1136,12 @@ export default function ProjectCenter() {
         }
       })();
     } catch (error) {
-      const message =
-        error instanceof Error && error.message && error.message !== "upload failed"
-          ? error.message
-          : mediaKind === "video"
-            ? "Couldn’t upload that video. Check your connection and try again."
-            : "Couldn’t save that Drop. Try again.";
+      const message = explainBoardMediaUploadError(error);
       if (
         error instanceof Error &&
         (error.message === "Drop Studio can add a photo, video, or art drop to this room." ||
-          error.message === "Join this project room to add a Drop.")
+          error.message === "Join this project room to add a Drop." ||
+          error.message === "Open a project room before saving this Drop.")
       ) {
         throw error;
       }

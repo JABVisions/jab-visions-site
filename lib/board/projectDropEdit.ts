@@ -116,8 +116,8 @@ export function projectCoverFromUpload(
 }
 
 export function isProjectStudioVideoFile(file: { type?: string; name?: string }) {
-  const type = String(file.type || "");
-  const name = String(file.name || "");
+  const type = String(file.type || "").trim();
+  const name = String(file.name || "").trim();
   return type.startsWith("video/") || /\.(mp4|webm|mov|m4v)$/i.test(name);
 }
 
