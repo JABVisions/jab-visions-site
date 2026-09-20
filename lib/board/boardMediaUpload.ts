@@ -24,6 +24,8 @@ import { supabaseBrowser } from "@/lib/supabase/browser";
 export const BOARD_MEDIA_UPLOAD_TIMEOUT_MS = 180_000;
 export const BOARD_MEDIA_READ_TIMEOUT_MS = 12_000;
 export const BOARD_MEDIA_SESSION_TIMEOUT_MS = 12_000;
+const SIGNED_PLAYBACK_TIMEOUT_MS = 4_000;
+const BYTES_COMPLETE_SETTLE_MS = 2_500;
 const COPY_BYTES_LIMIT = 8 * 1024 * 1024;
 const UNKNOWN_VIDEO_BYTES = 1024 * 1024 * 1024;
 const FIRST_BYTE_STALL_MS = 25_000;
@@ -234,6 +236,41 @@ function absoluteUrl(root: string, pathOrUrl: string) {
 
 type ByteReporter = (loaded: number, total?: number) => void;
 
+export function bytesUploadFinished(loaded: number, total: number): boolean {
+  return total > 0 && loaded >= total;
+}
+
+export function playbackResultAfterUpload(opts: {
+  bucket: string;
+  storagePath: string;
+  publicUrl?: string | null;
+  signedUrl?: string | null;
+}): BoardMediaUploadResult {
+  const publicUrl = String(opts.publicUrl || "").trim();
+  const signedUrl = String(opts.signedUrl || "").trim();
+  if (!publicUrl && !signedUrl) {
+    throw new BoardMediaUploadError(
+      "Upload finished but Board could not create a playback URL.",
+      "storage"
+    );
+  }
+  return {
+    bucket: opts.bucket,
+    storagePath: opts.storagePath,
+    publicUrl,
+    signedUrl,
+  };
+}
+
+function publicObjectUrl(bucket: string, storagePath: string): string {
+  try {
+    const { url } = storageConfig();
+    return `${url}/storage/v1/object/public/${bucket}/${encodeStoragePath(storagePath)}`;
+  } catch {
+    return "";
+  }
+}
+
 function xhrSend(opts: {
   url: string;
   method: "POST" | "PUT";
@@ -257,44 +294,77 @@ function xhrSend(opts: {
     });
     xhr.timeout = Math.max(1, opts.timeoutMs);
     xhr.responseType = "text";
+    let settled = false;
     let lastLoaded = 0;
     let lastMove = Date.now();
+    let bytesCompleteTimer: ReturnType<typeof setTimeout> | undefined;
+    const knownTotal = opts.knownTotal && opts.knownTotal > 0 ? opts.knownTotal : 0;
+    const finishTimers = () => {
+      clearInterval(stall);
+      if (bytesCompleteTimer) clearTimeout(bytesCompleteTimer);
+    };
+    const settle = (run: () => void) => {
+      if (settled) return;
+      settled = true;
+      finishTimers();
+      run();
+    };
     const stall = setInterval(() => {
+      if (bytesUploadFinished(lastLoaded, knownTotal)) return;
       const wait = lastLoaded > 0 ? PROGRESS_STALL_MS : FIRST_BYTE_STALL_MS;
       if (Date.now() - lastMove > wait) {
         xhr.abort();
       }
     }, 1_000);
-    const finish = () => clearInterval(stall);
-    xhr.upload.onprogress = (event) => {
-      const known = opts.knownTotal && opts.knownTotal > 0 ? opts.knownTotal : 0;
-      const total = event.lengthComputable && event.total > 0 ? event.total : known;
-      const loaded = event.loaded || lastLoaded;
+    const noteBytes = (loaded: number, total?: number) => {
+      const resolvedTotal = total && total > 0 ? total : knownTotal;
       if (loaded > lastLoaded) {
         lastLoaded = loaded;
         lastMove = Date.now();
       }
-      opts.onBytes?.(loaded, total);
+      opts.onBytes?.(loaded, resolvedTotal);
+      if (
+        bytesUploadFinished(Math.max(loaded, lastLoaded), resolvedTotal) &&
+        !bytesCompleteTimer &&
+        !settled
+      ) {
+        // iPhone Safari can sit at 100% and never fire onload.
+        bytesCompleteTimer = setTimeout(() => {
+          settle(() => resolve({ status: xhr.status || 200, text: String(xhr.responseText || "") }));
+        }, BYTES_COMPLETE_SETTLE_MS);
+      }
+    };
+    xhr.upload.onprogress = (event) => {
+      const total = event.lengthComputable && event.total > 0 ? event.total : knownTotal;
+      noteBytes(event.loaded || lastLoaded, total);
     };
     xhr.onload = () => {
-      finish();
-      const known = opts.knownTotal && opts.knownTotal > 0 ? opts.knownTotal : lastLoaded;
       if (xhr.status >= 200 && xhr.status < 300) {
-        opts.onBytes?.(Math.max(lastLoaded, known), known);
+        noteBytes(Math.max(lastLoaded, knownTotal || lastLoaded), knownTotal || lastLoaded);
       }
-      resolve({ status: xhr.status, text: String(xhr.responseText || "") });
+      settle(() => resolve({ status: xhr.status, text: String(xhr.responseText || "") }));
     };
     xhr.onerror = () => {
-      finish();
-      reject(new BoardMediaUploadError("Couldn't reach Board storage. Check your connection and try again."));
+      settle(() =>
+        reject(new BoardMediaUploadError("Couldn't reach Board storage. Check your connection and try again."))
+      );
     };
     xhr.ontimeout = () => {
-      finish();
-      reject(new BoardMediaUploadError("Media upload timed out.", "timeout"));
+      settle(() => reject(new BoardMediaUploadError("Media upload timed out.", "timeout")));
     };
     xhr.onabort = () => {
-      finish();
-      reject(new BoardMediaUploadError("Upload stalled. Stay on this screen and try again on Wi-Fi.", "timeout"));
+      if (bytesUploadFinished(lastLoaded, knownTotal)) {
+        settle(() => resolve({ status: 200, text: String(xhr.responseText || "") }));
+        return;
+      }
+      settle(() =>
+        reject(
+          new BoardMediaUploadError(
+            "Upload stalled. Stay on this screen and try again on Wi-Fi.",
+            "timeout"
+          )
+        )
+      );
     };
     xhr.send(opts.body);
   });
@@ -357,31 +427,35 @@ async function signedResult(
   bucket: string,
   storagePath: string
 ): Promise<BoardMediaUploadResult> {
-  const supabase = supabaseBrowser();
-  const publicUrl = supabase.storage.from(bucket).getPublicUrl(storagePath).data.publicUrl || "";
+  let publicUrl = "";
   try {
+    const supabase = supabaseBrowser();
+    publicUrl = supabase.storage.from(bucket).getPublicUrl(storagePath).data.publicUrl || "";
+  } catch {
+    publicUrl = "";
+  }
+  if (!publicUrl) publicUrl = publicObjectUrl(bucket, storagePath);
+
+  try {
+    const supabase = supabaseBrowser();
     const { data: signed } = await withTimeout(
       supabase.storage.from(bucket).createSignedUrl(storagePath, 60 * 60 * 24 * 365),
-      BOARD_MEDIA_SESSION_TIMEOUT_MS,
+      SIGNED_PLAYBACK_TIMEOUT_MS,
       "Board could not create a playback URL."
     );
-    const signedUrl = signed?.signedUrl || "";
-    if (!publicUrl && !signedUrl) {
-      throw new BoardMediaUploadError("Upload finished but Board could not create a playback URL.", "storage");
-    }
-    return {
+    return playbackResultAfterUpload({
       bucket,
       storagePath,
       publicUrl,
-      signedUrl,
-    };
-  } catch (error) {
-    if (publicUrl) {
-      return { bucket, storagePath, publicUrl, signedUrl: "" };
-    }
-    throw error instanceof BoardMediaUploadError
-      ? error
-      : new BoardMediaUploadError("Upload finished but Board could not create a playback URL.", "storage");
+      signedUrl: signed?.signedUrl || "",
+    });
+  } catch {
+    return playbackResultAfterUpload({
+      bucket,
+      storagePath,
+      publicUrl,
+      signedUrl: "",
+    });
   }
 }
 
@@ -434,6 +508,12 @@ async function uploadThroughTus(
     let settled = false;
     let lastMove = Date.now();
     let lastLoaded = 0;
+    let bytesCompleteTimer: ReturnType<typeof setTimeout> | undefined;
+    const finishTimers = () => {
+      clearInterval(stall);
+      clearTimeout(hardTimeout);
+      if (bytesCompleteTimer) clearTimeout(bytesCompleteTimer);
+    };
     const upload = new Upload(file, {
       endpoint: `${supabaseUrl}/storage/v1/upload/resumable`,
       retryDelays: [0, 3000, 5000, 10000, 20000],
@@ -458,27 +538,37 @@ async function uploadThroughTus(
           lastMove = Date.now();
         }
         opts.onBytes?.(bytesUploaded, bytesTotal);
+        if (
+          bytesUploadFinished(bytesUploaded, bytesTotal || file.size) &&
+          !bytesCompleteTimer &&
+          !settled
+        ) {
+          bytesCompleteTimer = setTimeout(() => {
+            if (settled) return;
+            settled = true;
+            finishTimers();
+            resolve();
+          }, BYTES_COMPLETE_SETTLE_MS);
+        }
       },
       onError: (error) => {
         if (settled) return;
         settled = true;
-        clearInterval(stall);
-        clearTimeout(hardTimeout);
+        finishTimers();
         reject(error);
       },
       onSuccess: () => {
         if (settled) return;
         settled = true;
-        clearInterval(stall);
-        clearTimeout(hardTimeout);
+        finishTimers();
         resolve();
       },
     });
     const stall = setInterval(() => {
+      if (bytesUploadFinished(lastLoaded, file.size)) return;
       const wait = lastLoaded > 0 ? PROGRESS_STALL_MS : FIRST_BYTE_STALL_MS;
       if (Date.now() - lastMove <= wait) return;
-      clearInterval(stall);
-      clearTimeout(hardTimeout);
+      finishTimers();
       try {
         upload.abort(true);
       } catch {
@@ -489,7 +579,7 @@ async function uploadThroughTus(
       reject(new BoardMediaUploadError("Upload stalled. Stay on this screen and try again on Wi-Fi.", "timeout"));
     }, 1_000);
     const hardTimeout = setTimeout(() => {
-      clearInterval(stall);
+      finishTimers();
       try {
         upload.abort(true);
       } catch {
@@ -701,5 +791,6 @@ export async function uploadBoardMediaFile(
 
   const result = await runUploadAttempts(copy, attempts);
   tracker.finishing();
+  opts?.onProgress?.(null);
   return result;
 }

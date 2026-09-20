@@ -158,10 +158,14 @@ function safeTime(value: unknown, fallback = Date.now()) {
   return fallback;
 }
 
-function seedRoomPosts(title: string, contactName: string): ProjectRoomPost[] {
+function seedRoomPosts(
+  title: string,
+  contactName: string,
+  projectId?: string
+): ProjectRoomPost[] {
   return [
     {
-      id: uid("post"),
+      id: projectId ? `welcome_${projectId}` : "welcome_room",
       authorName: contactName || "Host",
       text: `Welcome to ${title}. Use this room to invite collaborators, post updates, and keep the project moving.`,
       createdAt: Date.now(),
@@ -222,7 +226,10 @@ function toPersistedProject(project: BoardProject): BoardProject {
     ...project,
     media: persistableProjectCover(project.media),
     roomPosts: Array.isArray(project.roomPosts)
-      ? (project.roomPosts.map(normalizeRoomPost).filter(Boolean) as ProjectRoomPost[])
+      ? mergeRoomPosts(
+          project.roomPosts.map(normalizeRoomPost).filter(Boolean) as ProjectRoomPost[],
+          []
+        )
       : project.roomPosts,
   };
 }
@@ -518,7 +525,7 @@ function projectFromActivity(item: BoardActivity): BoardProject | null {
     payDropEligible:
       typeof meta.payDropEligible === "boolean" ? meta.payDropEligible : undefined,
     invites: [],
-    roomPosts: seedRoomPosts(title, contactName),
+    roomPosts: [],
   };
 }
 
@@ -643,7 +650,7 @@ function projectFromUniversalDrop(drop: UniversalDrop): BoardProject | null {
       (typeof meta.authorAuraIntensity === "number" ? meta.authorAuraIntensity : undefined) ??
       identity.auraIntensity,
     invites: [],
-    roomPosts: seedRoomPosts(title, authorName || "Project Host"),
+    roomPosts: [],
   };
 }
 
@@ -713,7 +720,7 @@ function projectFromDropPadProjectDrop(value: any): BoardProject | null {
     authorGlow: typeof value.authorGlow === "string" ? value.authorGlow : undefined,
     source: "drop_pad_projects",
     invites: [],
-    roomPosts: seedRoomPosts(title, String(value.authorName ?? value.contactName ?? "Project Host")),
+    roomPosts: [],
   };
 }
 
@@ -814,8 +821,11 @@ export function readBoardProjects(): BoardProject[] {
             ? value.invites.map(normalizeInvite).filter(Boolean) as ProjectInvite[]
             : [],
           roomPosts: Array.isArray(value?.roomPosts)
-            ? value.roomPosts.map(normalizeRoomPost).filter(Boolean) as ProjectRoomPost[]
-            : seedRoomPosts(title, contactName),
+            ? mergeRoomPosts(
+                value.roomPosts.map(normalizeRoomPost).filter(Boolean) as ProjectRoomPost[],
+                []
+              )
+            : seedRoomPosts(title, contactName, String(value?.id ?? "")),
         };
       })
       .filter((value): value is BoardProject => Boolean(value))
@@ -956,6 +966,9 @@ export async function syncRemoteProjectActivitiesToStorage(sb: any) {
   }
 }
 
+let lastWrittenProjectsJson = "";
+let writingBoardProjects = false;
+
 export function writeBoardProjects(items: BoardProject[]) {
   const key = scopedProjectsKey();
   const realItems = items
@@ -968,30 +981,38 @@ export function writeBoardProjects(items: BoardProject[]) {
         source: project.source || notebookSourceForProjectRecord(project),
       })
     );
-  try {
-    localStorage.setItem(key, JSON.stringify(realItems));
-    if (key !== BOARD_PROJECTS_STORAGE_KEY) {
-      localStorage.setItem(BOARD_PROJECTS_STORAGE_KEY, JSON.stringify(realItems));
+  const payload = JSON.stringify(realItems);
+  const unchanged = payload === lastWrittenProjectsJson;
+
+  const dispatchChange = () => {
+    if (unchanged || writingBoardProjects) return;
+    writingBoardProjects = true;
+    try {
+      window.dispatchEvent(new CustomEvent(BOARD_PROJECTS_UPDATED_EVENT));
+      window.dispatchEvent(new StorageEvent("storage", { key }));
+    } finally {
+      writingBoardProjects = false;
     }
-    window.dispatchEvent(new CustomEvent(BOARD_PROJECTS_UPDATED_EVENT));
-    window.dispatchEvent(
-      new StorageEvent("storage", { key })
-    );
+  };
+
+  try {
+    localStorage.setItem(key, payload);
+    if (key !== BOARD_PROJECTS_STORAGE_KEY) {
+      localStorage.setItem(BOARD_PROJECTS_STORAGE_KEY, payload);
+    }
+    lastWrittenProjectsJson = payload;
+    dispatchChange();
     return true;
   } catch {
     try {
       const sanitized = sanitizeProjectsForStorage(realItems);
-      localStorage.setItem(
-        key,
-        JSON.stringify(sanitized)
-      );
+      const sanitizedPayload = JSON.stringify(sanitized);
+      localStorage.setItem(key, sanitizedPayload);
       if (key !== BOARD_PROJECTS_STORAGE_KEY) {
-        localStorage.setItem(BOARD_PROJECTS_STORAGE_KEY, JSON.stringify(sanitized));
+        localStorage.setItem(BOARD_PROJECTS_STORAGE_KEY, sanitizedPayload);
       }
-      window.dispatchEvent(new CustomEvent(BOARD_PROJECTS_UPDATED_EVENT));
-      window.dispatchEvent(
-        new StorageEvent("storage", { key })
-      );
+      lastWrittenProjectsJson = sanitizedPayload;
+      dispatchChange();
       return true;
     } catch {
       return false;
@@ -1003,13 +1024,14 @@ export function createBoardProject(
   input: Omit<BoardProject, "id" | "createdAt" | "updatedAt" | "invites" | "roomPosts">
 ): BoardProject {
   const now = Date.now();
+  const id = uid("project");
   const contactName = pickProjectHostName(input.contactName) || input.contactName.trim() || "Host";
   const identity = readCurrentBoardIdentity();
   const authorName =
     pickProjectHostName(input.authorName, contactName, identity.displayName) || contactName;
   return {
     ...input,
-    id: uid("project"),
+    id,
     createdAt: now,
     updatedAt: now,
     contactName,
@@ -1020,7 +1042,7 @@ export function createBoardProject(
     authorGlow: input.authorGlow || identity.glow,
     authorAuraIntensity: input.authorAuraIntensity ?? identity.auraIntensity,
     invites: [],
-    roomPosts: seedRoomPosts(input.title, contactName),
+    roomPosts: seedRoomPosts(input.title, contactName, id),
   };
 }
 

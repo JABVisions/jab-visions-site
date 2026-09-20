@@ -561,6 +561,7 @@ export default function DropStudioStage({
   const [voicePreset, setVoicePreset] = useState<VoicePresetKey>("clean");
   const [processingVocal, setProcessingVocal] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<BoardUploadProgress | null>(null);
+  const completingRef = useRef(false);
   const [voiceStudioOpen, setVoiceStudioOpen] = useState(false);
   const [audioSession, setAudioSession] = useState<AudioSession | null>(null);
   const [studioHeadphonesOk, setStudioHeadphonesOk] = useState(false);
@@ -2248,6 +2249,10 @@ export default function DropStudioStage({
     };
   }, [open, keepMixerMounted, phase, mediaFileTick]);
 
+  useEffect(() => {
+    if (!open) completingRef.current = false;
+  }, [open]);
+
   function commitBlob(blob: Blob, kind: "image" | "video" | "audio", src: "capture" | "upload") {
     const type =
       blob.type ||
@@ -2393,6 +2398,7 @@ export default function DropStudioStage({
   }
 
   async function done() {
+    if (completingRef.current) return;
     if (
       audioSession &&
       sessionHasLane(audioSession, "instrumental") &&
@@ -2552,6 +2558,7 @@ export default function DropStudioStage({
       /\.(mp4|webm|mov|m4v)$/i.test(file.name);
     setProcessingVocal(true);
     setUploadProgress(null);
+    completingRef.current = true;
     flashSaveNote(
       isAudioMix
         ? "Saving mix to Board…"
@@ -2577,6 +2584,7 @@ export default function DropStudioStage({
         "complete"
       );
     } catch (error) {
+      completingRef.current = false;
       console.error("[DropStudioStage] completion failed", error);
       const message = error instanceof Error ? error.message : "";
       const isStudioCap = /Audio session complete timed out/i.test(message);

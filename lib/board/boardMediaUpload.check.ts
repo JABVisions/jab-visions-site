@@ -6,6 +6,8 @@ import {
   prefersDirectStorageUpload,
   shouldSkipServerlessMediaUpload,
   shouldUseTusUpload,
+  bytesUploadFinished,
+  playbackResultAfterUpload,
   type BoardMediaUploadOptions,
 } from "./boardMediaUpload";
 import { ownerScopedUploadFolder } from "./uploadLimits";
@@ -126,6 +128,29 @@ assert(
 const options: BoardMediaUploadOptions = { folder: "project-media" };
 assert(options.folder === "project-media", "upload options keep the folder");
 assert(typeof options.onProgress === "undefined", "progress callback stays optional");
+
+assert(bytesUploadFinished(62 * 1024 * 1024, 62 * 1024 * 1024), "100% bytes are finished");
+assert(!bytesUploadFinished(10, 62 * 1024 * 1024), "partial bytes are not finished");
+const playback = playbackResultAfterUpload({
+  bucket: "board-media",
+  storagePath: "user/project-media/tape.mp4",
+  publicUrl: "https://cdn.example/tape.mp4",
+  signedUrl: "",
+});
+assert(
+  playback.publicUrl === "https://cdn.example/tape.mp4" && playback.signedUrl === "",
+  "a public URL is enough to close the studio after bytes finish"
+);
+let missingPlayback = false;
+try {
+  playbackResultAfterUpload({
+    bucket: "board-media",
+    storagePath: "user/project-media/tape.mp4",
+  });
+} catch {
+  missingPlayback = true;
+}
+assert(missingPlayback, "playback helper still fails when no URL exists");
 
 console.log("boardMediaUpload.check.ts ok");
 

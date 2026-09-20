@@ -2,6 +2,7 @@ import {
   applyProjectRoomActivitiesToProjects,
   applyProjectRoomDropToProject,
   buildProjectRoomDrop,
+  claimProjectRoomStudioSave,
   commitProjectRoomDrop,
   isProjectRoomDropActivity,
   isProjectRoomHost,
@@ -11,6 +12,8 @@ import {
   projectRoomDropTitle,
   projectRoomMediaKindForFile,
   projectRoomPostIsVideo,
+  projectRoomStudioSaveKey,
+  releaseProjectRoomStudioSave,
   viewerCanPostToProjectRoom,
 } from "./projectRoomDrop";
 import { mergeProjectRecord, reconcileProjectsWithLive, type BoardProject } from "./projects";
@@ -270,5 +273,63 @@ assert(
   mergedRecords.roomPosts.some((post) => post.id === "post_tape"),
   "merging a stale notebook into the live room keeps the new tape"
 );
+
+const spam = Array.from({ length: 300 }, (_, index) => ({
+  id: `post_dup_${index}`,
+  authorName: "Zoe",
+  text: "Zoe posted an audition tape in Those Ryderz.",
+  createdAt: 1_700_000_200_000 + index,
+  mediaUrl: "https://cdn.example/tape.mp4",
+  mediaKind: "video" as const,
+  dropId: index < 150 ? "project_room_tape" : undefined,
+}));
+const collapsedSpam = mergeRoomPosts(spam, []);
+assert(
+  collapsedSpam.length === 1,
+  `300 duplicate tape posts must collapse to one room drop, got ${collapsedSpam.length}`
+);
+
+const welcomes = Array.from({ length: 300 }, (_, index) => ({
+  id: `post_welcome_${index}`,
+  authorName: "John Andy",
+  text: "Welcome to Those Ryderz. Use this room to invite collaborators, post updates, and keep the project moving.",
+  createdAt: 1_700_000_060_000 + index,
+}));
+assert(
+  mergeRoomPosts(welcomes, []).length === 1,
+  "300 seeded welcome posts must collapse to one"
+);
+
+const secondTape = buildProjectRoomDrop({
+  project,
+  media: {
+    kind: "video",
+    src: "https://cdn.example/tape.mp4",
+    bucket: "board-media",
+    storagePath: "user/project-media/tape.mp4",
+  },
+  author: { id: "user_zoe", displayName: "Zoe", username: "zoe" },
+  fileName: "tape.mp4",
+  dropId: "project_room_tape_again",
+  postId: "post_tape_again",
+});
+const committedTwice = commitProjectRoomDrop(committed.projects, committed.saved, secondTape);
+const tapePosts = committedTwice.saved.roomPosts.filter(
+  (post) => post.mediaUrl === "https://cdn.example/tape.mp4"
+);
+assert(
+  tapePosts.length === 1,
+  `the same tape committed twice must stay one room post, got ${tapePosts.length}`
+);
+
+const saveKey = projectRoomStudioSaveKey("project_keep_me", {
+  name: "tape.mp4",
+  size: 62 * 1024 * 1024,
+  lastModified: 1,
+});
+assert(claimProjectRoomStudioSave(saveKey), "first studio save is claimed");
+assert(!claimProjectRoomStudioSave(saveKey), "in-flight studio save cannot be claimed again");
+releaseProjectRoomStudioSave(saveKey, true);
+assert(!claimProjectRoomStudioSave(saveKey), "finished studio save cannot post the same tape again");
 
 console.log("projectRoomDrop.test.ts: ok");

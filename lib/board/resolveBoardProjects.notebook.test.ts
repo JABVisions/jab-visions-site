@@ -1,4 +1,4 @@
-import { resolveBoardProjects, writeBoardProjects, projectsFromProfileBoardDrops, notebookProjectsOwnedByViewer } from "./projects";
+import { resolveBoardProjects, writeBoardProjects, projectsFromProfileBoardDrops, notebookProjectsOwnedByViewer, syncResolvedProjectsToStorage } from "./projects";
 
 const memory = new Map<string, string>();
 
@@ -263,6 +263,29 @@ assert(
 );
 
 writeBoardProjects(resolved);
+const postsBeforeLoop = (
+  (JSON.parse(memory.get("jab_board_projects_v2") || "[]") as Array<{ id: string; roomPosts?: any[] }>)
+    .find((project) => project.id === "project_realroom")?.roomPosts || []
+).length;
+for (let index = 0; index < 40; index += 1) {
+  syncResolvedProjectsToStorage();
+}
+const looped = JSON.parse(memory.get("jab_board_projects_v2") || "[]") as Array<{
+  id: string;
+  roomPosts?: any[];
+}>;
+const postsAfterLoop = looped.find((project) => project.id === "project_realroom")?.roomPosts || [];
+assert(
+  postsAfterLoop.length === postsBeforeLoop,
+  `notebook reloads must not mint room posts, got ${postsAfterLoop.length} from ${postsBeforeLoop}`
+);
+const hydratedProject = looped.find(
+  (project) => project.id === "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+);
+assert(
+  (hydratedProject?.roomPosts || []).length <= 1,
+  `project-drop activity hydrate must not fan out room posts, got ${(hydratedProject?.roomPosts || []).length}`
+);
 const persisted = JSON.parse(memory.get("jab_board_projects_v2") || "[]") as Array<{ id: string; source?: string }>;
 assert(
   persisted.every((item) => ids.includes(item.id)),

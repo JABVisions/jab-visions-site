@@ -43,6 +43,51 @@ function uid(prefix: string) {
     .slice(2, 8)}`;
 }
 
+const inflightStudioSaves = new Set<string>();
+const finishedStudioSaves = new Set<string>();
+
+export function projectRoomStudioSaveKey(
+  projectId: string,
+  file: { name?: string; size?: number; lastModified?: number }
+) {
+  return `${projectId}:${String(file.name || "")}:${Number(file.size) || 0}:${Number(file.lastModified) || 0}`;
+}
+
+/** Returns false if this tape is already saving or already posted. */
+export function claimProjectRoomStudioSave(key: string): boolean {
+  if (!key || inflightStudioSaves.has(key) || finishedStudioSaves.has(key)) {
+    return false;
+  }
+  inflightStudioSaves.add(key);
+  return true;
+}
+
+export function releaseProjectRoomStudioSave(key: string, committed: boolean) {
+  inflightStudioSaves.delete(key);
+  if (committed) finishedStudioSaves.add(key);
+}
+
+export function roomPostIdentityKey(post: {
+  id?: string | null;
+  dropId?: string | null;
+  mediaUrl?: string | null;
+  storagePath?: string | null;
+  text?: string | null;
+}): string {
+  const media =
+    persistableProjectRoomMediaUrl(post.mediaUrl) ||
+    (typeof post.storagePath === "string" && post.storagePath.trim()
+      ? post.storagePath.trim().split("?")[0]
+      : null);
+  if (media) return `media:${media.split("?")[0]}`;
+  const dropId = String(post.dropId || "").trim();
+  if (dropId) return `drop:${dropId}`;
+  const text = String(post.text || "").trim().toLowerCase();
+  if (text.startsWith("welcome to ")) return `welcome:${text}`;
+  const id = String(post.id || "").trim();
+  return id ? `id:${id}` : "";
+}
+
 export function persistableProjectRoomMediaUrl(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const src = value.trim();
@@ -334,9 +379,28 @@ export function mergeRoomPosts(
 ): ProjectRoomPost[] {
   const merged = new Map<string, ProjectRoomPost>();
   for (const post of [...(incoming ?? []), ...(base ?? [])]) {
-    if (!post?.id) continue;
-    const existing = merged.get(post.id);
-    merged.set(post.id, existing ? { ...existing, ...post } : post);
+    if (!post) continue;
+    const key = roomPostIdentityKey(post);
+    if (!key) continue;
+    const existing = merged.get(key);
+    if (!existing) {
+      merged.set(key, post.id ? post : { ...post, id: key });
+      continue;
+    }
+    merged.set(key, {
+      ...post,
+      ...existing,
+      id: existing.id || post.id,
+      dropId: existing.dropId || post.dropId,
+      mediaUrl: existing.mediaUrl || post.mediaUrl,
+      mediaKind: existing.mediaKind || post.mediaKind,
+      bucket: existing.bucket || post.bucket,
+      storagePath: existing.storagePath || post.storagePath,
+      createdAt:
+        existing.createdAt && post.createdAt
+          ? Math.min(existing.createdAt, post.createdAt)
+          : existing.createdAt || post.createdAt,
+    });
   }
   return Array.from(merged.values()).sort((a, b) => b.createdAt - a.createdAt);
 }
