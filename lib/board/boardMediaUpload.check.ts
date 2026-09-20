@@ -8,9 +8,13 @@ import {
   shouldUseTusUpload,
   bytesUploadFinished,
   playbackResultAfterUpload,
+  preferredCommitPlaybackUrl,
+  requestSignedPlaybackUrl,
+  SIGNED_PLAYBACK_TIMEOUT_MS,
   acceptXhrOutcome,
   type BoardMediaUploadOptions,
 } from "./boardMediaUpload";
+import { isMissingStorageObjectError, isPublicBoardStorageUrl } from "./signedMediaUrl";
 import { ownerScopedUploadFolder } from "./uploadLimits";
 
 function assert(condition: unknown, message: string) {
@@ -166,6 +170,44 @@ assert(
   playback.publicUrl === "https://cdn.example/tape.mp4" && playback.signedUrl === "",
   "a public URL is enough to close the studio after bytes finish"
 );
+assert(
+  preferredCommitPlaybackUrl({
+    signedUrl: "https://example.supabase.co/storage/v1/object/sign/board-media/tape.mp4?token=1",
+    publicUrl: "https://example.supabase.co/storage/v1/object/public/board-media/tape.mp4",
+  }).includes("/object/sign/"),
+  "commit prefers the signed playback URL over a public 403 URL"
+);
+assert(
+  preferredCommitPlaybackUrl({
+    signedUrl: "",
+    publicUrl: "https://example.supabase.co/storage/v1/object/public/board-media/tape.mp4",
+  }).includes("/object/public/"),
+  "commit can still save the drop when signing times out"
+);
+assert(
+  !isPublicBoardStorageUrl(
+    "https://example.supabase.co/storage/v1/object/sign/board-media/tape.mp4?token=1"
+  ),
+  "signed storage URLs are not treated as public"
+);
+assert(
+  isPublicBoardStorageUrl(
+    "https://example.supabase.co/storage/v1/object/public/board-media/tape.mp4"
+  ),
+  "public storage URLs are detected so video src can refuse them"
+);
+assert(
+  isMissingStorageObjectError({ statusCode: "404", message: "Object not found" }),
+  "404 on createSignedUrl is a missing object"
+);
+assert(
+  isMissingStorageObjectError({ statusCode: 400, message: "InvalidKey" }),
+  "400 on createSignedUrl is a missing object"
+);
+assert(
+  SIGNED_PLAYBACK_TIMEOUT_MS >= 4_000,
+  "signing after PUT must wait ~4s, not skip createSignedUrl"
+);
 let missingPlayback = false;
 try {
   playbackResultAfterUpload({
@@ -177,5 +219,28 @@ try {
 }
 assert(missingPlayback, "playback helper still fails when no URL exists");
 
-console.log("boardMediaUpload.check.ts ok");
+void (async () => {
+  const signed = await requestSignedPlaybackUrl(async () => ({
+    signedUrl: "https://example.supabase.co/storage/v1/object/sign/board-media/tape.mp4?token=1",
+  }));
+  assert(signed.signedUrl.includes("/object/sign/"), "sign helper returns the signed URL");
+  assert(!signed.missing, "successful sign is not missing");
+
+  const missing = await requestSignedPlaybackUrl(
+    async () => ({ error: { statusCode: 404, message: "Object not found" } }),
+    { timeoutMs: 800, retries: 0 }
+  );
+  assert(missing.missing && !missing.signedUrl, "404 on sign is missing, not a thrown upload error");
+
+  const timed = await requestSignedPlaybackUrl(
+    () => new Promise(() => {}),
+    { timeoutMs: 60, retries: 0 }
+  );
+  assert(!timed.signedUrl, "sign timeout must not throw after a finished PUT");
+
+  console.log("boardMediaUpload.check.ts ok");
+})().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});
 

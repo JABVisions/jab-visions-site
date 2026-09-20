@@ -210,11 +210,31 @@ export function resolveUploadContentType(file: { type?: string; name?: string })
 
   const name = typeof file.name === "string" ? file.name : "";
   const ext = name.split(".").pop()?.toLowerCase() ?? "";
-  if (MIME_BY_EXTENSION[ext]) return MIME_BY_EXTENSION[ext];
+  const hasDot = name.includes(".");
+  if (hasDot && MIME_BY_EXTENSION[ext]) return MIME_BY_EXTENSION[ext];
   if (reported) return reported;
   const kind = uploadKindForFile(file);
   if (kind === "video") return "video/mp4";
   if (kind === "audio") return "audio/mp4";
   if (kind === "image") return "image/jpeg";
+  const base = name.split(/[/\\]/).pop()?.split(".")[0] || "";
+  // iPhone camera-roll VIDEO often arrives with an empty MIME and a blank,
+  // `blob`, or `image` filename. Safari will not play application/octet-stream.
+  if (!reported && (!base || /^(blob|video|image|trim|fullsizerender|img_\d+|vid_\d+)$/i.test(base))) {
+    return "video/mp4";
+  }
   return "application/octet-stream";
+}
+
+/** Object key extension that matches the Content-Type we send to storage. */
+export function storageExtensionForFile(file: { type?: string; name?: string }): string {
+  const name = typeof file.name === "string" ? file.name : "";
+  const ext = (name.split(".").pop() || "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+  if (name.includes(".") && ext && MIME_BY_EXTENSION[ext]) return ext;
+  const type = resolveUploadContentType(file);
+  if (type === "video/quicktime") return "mov";
+  if (type.startsWith("video/")) return "mp4";
+  if (type.startsWith("audio/")) return "m4a";
+  if (type.startsWith("image/")) return "jpg";
+  return ext || "bin";
 }

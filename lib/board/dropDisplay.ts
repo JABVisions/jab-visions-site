@@ -343,6 +343,8 @@ export function dropDirectMediaUrl(drop: DropLike): string | null {
     if (!candidate?.trim()) continue;
     const value = candidate.trim();
     if (value.startsWith("blob:") || value.startsWith("data:")) return value;
+    // Private board-media 403s on /object/public/. Keep a signed URL as-is.
+    if (/\/storage\/v1\/(?:object|render\/image)\/sign\//i.test(value)) return value;
     const publicStorage = toPublicBoardStorageUrl(value);
     if (publicStorage) return publicStorage;
     const clean = extFromName(value);

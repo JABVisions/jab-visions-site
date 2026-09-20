@@ -8,10 +8,16 @@ import {
   matchingProjectInvite,
   mergeRoomPosts,
   persistableProjectRoomMediaUrl,
+  preferredProjectRoomMediaSrc,
   projectRoomDropTitle,
   projectRoomMediaKindForFile,
+  projectRoomPostHasMedia,
   projectRoomPostIsVideo,
+  projectRoomPostStorageCoords,
   projectRoomStudioSaveKey,
+  projectRoomVideoLoadError,
+  projectRoomVideoPlaybackType,
+  projectRoomVideoSrcIsPlayable,
   runProjectRoomStudioSaveOnce,
   viewerCanPostToProjectRoom,
 } from "./projectRoomDrop";
@@ -181,6 +187,54 @@ assert(built.drop.mediaKind === "video", "drop keeps video kind");
 assert(built.drop.origin === "project_room", "drop origin is project room, not Drop Console");
 assert(built.post.projectId === "project_keep_me", "room post keeps project id");
 assert(built.post.mediaUrl === "https://cdn.example/tape.mp4", "room post keeps media");
+assert(built.post.bucket === "board-media", "room post keeps the private bucket");
+assert(
+  built.post.storagePath === "user/project-media/tape.mp4",
+  "room post keeps the storage path for createSignedUrl"
+);
+assert(
+  preferredProjectRoomMediaSrc({
+    signedUrl: "https://example.supabase.co/storage/v1/object/sign/board-media/tape.mp4?token=1",
+    publicUrl: "https://example.supabase.co/storage/v1/object/public/board-media/tape.mp4",
+  }).includes("/object/sign/"),
+  "room drop commit prefers signed URL, not the public 403 URL"
+);
+assert(
+  !projectRoomVideoSrcIsPlayable(
+    "https://example.supabase.co/storage/v1/object/public/board-media/tape.mp4"
+  ),
+  "ROOM DROPS must not use a public board-media URL as <video src>"
+);
+assert(
+  projectRoomVideoSrcIsPlayable(
+    "https://example.supabase.co/storage/v1/object/sign/board-media/tape.mp4?token=1"
+  ),
+  "signed board-media URLs are playable"
+);
+assert(
+  projectRoomPostStorageCoords(built.post)?.storagePath === "user/project-media/tape.mp4",
+  "room renderer can resolve coords for createSignedUrl"
+);
+assert(
+  projectRoomPostHasMedia({
+    bucket: "board-media",
+    storagePath: "user/project-media/tape.mp4",
+  }),
+  "bucket + path is enough to render even if mediaUrl was a public 403 URL"
+);
+assert(
+  projectRoomVideoPlaybackType({ storagePath: "user/project-media/tape.mov" }) ===
+    "video/quicktime",
+  "iPhone .mov tapes advertise quicktime for Safari"
+);
+assert(
+  projectRoomVideoPlaybackType({ storagePath: "user/project-media/tape.mp4" }) === "video/mp4",
+  "mp4 tapes advertise video/mp4"
+);
+assert(
+  projectRoomVideoLoadError("missing").toLowerCase().includes("try uploading"),
+  "missing objects show a real error instead of a black player"
+);
 assert(built.activity.kind === "board_drop", "activity uses existing board_drop kind");
 assert(
   built.activity.meta?.signalSeed?.type === "project_room_drop_created",

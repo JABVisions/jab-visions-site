@@ -11,6 +11,7 @@ import {
   studioCompleteTimeoutMs,
   STUDIO_BYTES_DONE_UNSTICK_MS,
   resolveUploadContentType,
+  storageExtensionForFile,
 } from "./uploadLimits";
 
 function assert(condition: unknown, message: string) {
@@ -67,9 +68,20 @@ assert(
   "named-less MediaRecorder blobs keep a playable video type"
 );
 assert(
-  resolveUploadContentType({ type: "", name: "blob" }) === "application/octet-stream",
-  "blob names without a media MIME stay octet-stream"
+  resolveUploadContentType({ type: "", name: "blob" }) === "video/mp4",
+  "iPhone empty MIME + blob name must be video/mp4 so Safari will play"
 );
+assert(
+  resolveUploadContentType({ type: "", name: "" }) === "video/mp4",
+  "iPhone camera-roll VIDEO with empty MIME and empty name is video/mp4"
+);
+assert(
+  resolveUploadContentType({ type: "application/octet-stream", name: "IMG_1234.MOV" }) ===
+    "video/quicktime",
+  "octet-stream iPhone .MOV still uploads as quicktime"
+);
+assert(storageExtensionForFile({ type: "", name: "blob" }) === "mp4", "empty MIME blob keys as .mp4");
+assert(storageExtensionForFile({ type: "", name: "tape.MOV" }) === "mov", "MOV keeps its extension");
 
 assert(formatBytes(UPLOAD_LIMITS.video) === "4.0GB", "4GB formats as GB");
 assert(formatBytes(25 * 1024 * 1024) === "25MB", "25MB formats as MB");

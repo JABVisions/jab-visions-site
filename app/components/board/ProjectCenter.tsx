@@ -49,19 +49,26 @@ import { readCurrentBoardIdentity } from "@/lib/board/currentProfile";
 import { emitBoardDropSignal } from "@/lib/board/dropSignals";
 import LazyDropStudioStage from "@/app/components/board/LazyDropStudioStage";
 import type { DropCustomization } from "@/lib/board/dropCustomizations";
-import { uploadBoardMediaFile, explainBoardMediaUploadError } from "@/lib/board/boardMediaUpload";
+import { uploadBoardMediaFile, explainBoardMediaUploadError, preferredCommitPlaybackUrl } from "@/lib/board/boardMediaUpload";
 import type { BoardUploadProgressHandler } from "@/lib/board/uploadProgress";
 import { boardProjectPatchFromDrop } from "@/lib/board/projectDropEdit";
 import {
   applyProjectRoomActivitiesToProjects,
   buildProjectRoomDrop,
   commitProjectRoomDrop,
+  persistableProjectRoomMediaUrl,
   projectRoomMediaKindForFile,
+  projectRoomPostHasMedia,
   projectRoomPostIsVideo,
+  projectRoomPostStorageCoords,
   projectRoomStudioSaveKey,
+  projectRoomVideoLoadError,
+  projectRoomVideoPlaybackType,
+  projectRoomVideoSrcIsPlayable,
   runProjectRoomStudioSaveOnce,
   viewerCanPostToProjectRoom,
 } from "@/lib/board/projectRoomDrop";
+import { getCachedSignedMediaUrl, invalidateSignedMediaUrl, isMissingStorageObjectError } from "@/lib/board/signedMediaUrl";
 
 function clsx(...parts: Array<string | false | null | undefined>) {
   return parts.filter(Boolean).join(" ");
@@ -109,23 +116,120 @@ function RoomPostMedia({
 }: {
   post: ProjectRoomPost;
 }) {
-  if (!post.mediaUrl) return null;
-  if (projectRoomPostIsVideo(post)) {
+  const isVideo = projectRoomPostIsVideo(post);
+  const coords = projectRoomPostStorageCoords(post);
+  const persisted = persistableProjectRoomMediaUrl(post.mediaUrl) || "";
+  const [src, setSrc] = useState(() =>
+    persisted && (!isVideo || projectRoomVideoSrcIsPlayable(persisted)) ? persisted : ""
+  );
+  const [error, setError] = useState<string | null>(null);
+  const [pending, setPending] = useState(() => Boolean(isVideo && coords));
+
+  useEffect(() => {
+    let cancelled = false;
+    const persistedUrl = persistableProjectRoomMediaUrl(post.mediaUrl) || "";
+    const nextCoords = projectRoomPostStorageCoords(post);
+    const video = projectRoomPostIsVideo(post);
+
+    if (!nextCoords) {
+      if (video && persistedUrl && !projectRoomVideoSrcIsPlayable(persistedUrl)) {
+        setSrc("");
+        setError(projectRoomVideoLoadError("unsigned"));
+      } else {
+        setSrc(persistedUrl);
+        setError(persistedUrl || !video ? null : projectRoomVideoLoadError("unsigned"));
+      }
+      setPending(false);
+      return;
+    }
+
+    const canUsePersisted = Boolean(
+      persistedUrl && (!video || projectRoomVideoSrcIsPlayable(persistedUrl))
+    );
+    setSrc(canUsePersisted ? persistedUrl : "");
+    setError(null);
+    setPending(video);
+
+    void (async () => {
+      try {
+        let signed = await getCachedSignedMediaUrl(nextCoords.bucket, nextCoords.storagePath, {
+          allowPublicFallback: !video,
+        });
+        if (video && signed && !projectRoomVideoSrcIsPlayable(signed)) signed = "";
+        if (!signed && video) {
+          invalidateSignedMediaUrl(nextCoords.bucket, nextCoords.storagePath);
+          signed = await getCachedSignedMediaUrl(nextCoords.bucket, nextCoords.storagePath, {
+            allowPublicFallback: false,
+          });
+          if (signed && !projectRoomVideoSrcIsPlayable(signed)) signed = "";
+        }
+        if (cancelled) return;
+        if (signed) {
+          setSrc(signed);
+          setError(null);
+          setPending(false);
+          return;
+        }
+        if (video) {
+          setSrc("");
+          setError(projectRoomVideoLoadError("missing"));
+        } else if (persistedUrl) {
+          setSrc(persistedUrl);
+        }
+        setPending(false);
+      } catch (err) {
+        if (cancelled) return;
+        setPending(false);
+        if (video) {
+          setSrc("");
+          setError(
+            projectRoomVideoLoadError(isMissingStorageObjectError(err) ? "missing" : "unsigned")
+          );
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [post.mediaUrl, post.bucket, post.storagePath, post.mediaKind]);
+
+  if (isVideo && error) {
+    return (
+      <div
+        className="mt-3 rounded-2xl border border-amber-200/25 bg-black/40 px-4 py-6 text-sm text-amber-100/90"
+        role="alert"
+      >
+        {error}
+      </div>
+    );
+  }
+  if (isVideo && !src) {
+    return (
+      <div className="mt-3 rounded-2xl border border-cyan-100/20 bg-black/40 px-4 py-6 text-sm text-white/60">
+        {pending ? "Loading video…" : projectRoomVideoLoadError("unsigned")}
+      </div>
+    );
+  }
+  if (!src) return null;
+  if (isVideo) {
+    const type = projectRoomVideoPlaybackType(post);
     return (
       <video
         className="mt-3 max-h-72 w-full rounded-2xl border border-cyan-100/20 bg-black/40 object-contain"
-        src={post.mediaUrl}
         controls
         playsInline
         preload="metadata"
-      />
+      >
+        <source src={src} type={type} />
+      </video>
     );
   }
   return (
     // eslint-disable-next-line @next/next/no-img-element
     <img
       className="mt-3 max-h-72 w-full rounded-2xl border border-white/10 bg-black/40 object-cover"
-      src={post.mediaUrl}
+      src={src}
       alt=""
     />
   );
@@ -1053,7 +1157,7 @@ export default function ProjectCenter() {
       try {
         const uploaded = await uploadBoardMediaFile(file, { folder: "project-media", onProgress });
         onProgress?.(null);
-        const mediaUrl = uploaded.publicUrl || uploaded.signedUrl;
+        const mediaUrl = preferredCommitPlaybackUrl(uploaded);
         if (!mediaUrl) throw new Error("Upload finished but Board could not create a playback URL.");
 
         const liveProject =
@@ -1925,14 +2029,14 @@ export default function ProjectCenter() {
               </div>
 
               <div className="mt-4 grid gap-3">
-                {activeProject.roomPosts.some((post) => post.mediaUrl) ? (
+                {activeProject.roomPosts.some((post) => projectRoomPostHasMedia(post)) ? (
                   <div className="rounded-2xl border border-cyan-100/15 bg-cyan-400/[0.06] p-3">
                     <div className="text-[11px] tracking-[0.28em] text-cyan-50/55">
                       ROOM DROPS
                     </div>
                     <div className="mt-3 grid gap-3">
                       {activeProject.roomPosts
-                        .filter((post) => post.mediaUrl)
+                        .filter((post) => projectRoomPostHasMedia(post))
                         .map((post) => (
                           <div key={`media-${post.id}`}>
                             <div className="text-xs text-white/55">{post.authorName}</div>
