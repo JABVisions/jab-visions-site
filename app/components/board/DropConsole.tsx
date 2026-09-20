@@ -32,6 +32,7 @@ import {
 import { makeEmbedByMode, newsCoverUrl } from "@/lib/board/dropItem";
 import { uploadBoardMediaFile } from "@/lib/board/boardMediaUpload";
 import { checkUploadSize } from "@/lib/board/uploadLimits";
+import { getCurrentUserId } from "@/lib/board/boardDropEditStore";
 
 import {
   createThread,
@@ -499,49 +500,49 @@ export default function DropConsole({
   }
 
   async function persistBoardDropToProfile(drop: Record<string, unknown>): Promise<boolean> {
-    try {
-      const auth = await Promise.race([
-        sb.auth.getUser(),
-        new Promise<{ data: { user: null }; error: null }>((resolve) =>
-          window.setTimeout(() => resolve({ data: { user: null }, error: null }), 4_000)
-        ),
-      ]);
-      const { data, error: authError } = auth;
-      if (authError || !data.user?.id) return false;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        const userId = await getCurrentUserId();
+        if (!userId) {
+          await new Promise((resolve) => window.setTimeout(resolve, 500 * (attempt + 1)));
+          continue;
+        }
 
-      const { data: profile, error: profileError } = await sb
-        .from("profiles")
-        .select("board_style")
-        .eq("id", data.user.id)
-        .maybeSingle();
-      if (profileError) throw profileError;
+        const { data: profile, error: profileError } = await sb
+          .from("profiles")
+          .select("board_style")
+          .eq("id", userId)
+          .maybeSingle();
+        if (profileError) throw profileError;
 
-      const boardStyle =
-        profile?.board_style && typeof profile.board_style === "object"
-          ? profile.board_style
-          : {};
-      const currentDrops = Array.isArray((boardStyle as any).boardDrops)
-        ? (boardStyle as any).boardDrops
-        : [];
-      const dropId = String(drop.id ?? "");
-      const boardDrops = [
-        drop,
-        ...currentDrops.filter((item: any) => String(item?.id ?? "") !== dropId),
-      ].slice(0, 120);
+        const boardStyle =
+          profile?.board_style && typeof profile.board_style === "object"
+            ? profile.board_style
+            : {};
+        const currentDrops = Array.isArray((boardStyle as any).boardDrops)
+          ? (boardStyle as any).boardDrops
+          : [];
+        const dropId = String(drop.id ?? "");
+        const boardDrops = [
+          drop,
+          ...currentDrops.filter((item: any) => String(item?.id ?? "") !== dropId),
+        ].slice(0, 120);
 
-      const { data: updatedProfile, error: updateError } = await sb
-        .from("profiles")
-        .update({ board_style: { ...boardStyle, boardDrops } })
-        .eq("id", data.user.id)
-        .select("id")
-        .maybeSingle();
-      if (updateError) throw updateError;
-      if (!updatedProfile?.id) throw new Error("News Drop save did not update a profile row.");
-      return true;
-    } catch (error) {
-      console.error("[DropConsole] Board Drop profile save failed", error);
-      return false;
+        const { data: updatedProfile, error: updateError } = await sb
+          .from("profiles")
+          .update({ board_style: { ...boardStyle, boardDrops } })
+          .eq("id", userId)
+          .select("id")
+          .maybeSingle();
+        if (updateError) throw updateError;
+        if (!updatedProfile?.id) throw new Error("News Drop save did not update a profile row.");
+        return true;
+      } catch (error) {
+        console.error("[DropConsole] Board Drop profile save failed", error);
+        await new Promise((resolve) => window.setTimeout(resolve, 500 * (attempt + 1)));
+      }
     }
+    return false;
   }
 
   async function durableMediaCustomizations(

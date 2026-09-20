@@ -10,6 +10,7 @@ export function normalizeBoardDropType(raw: string | null | undefined): string {
   if (t.includes("thought")) return "Thought";
   if (t.includes("pay")) return "Pay";
   if (t.includes("youtube") || t.includes("youtu.be")) return "YouTube";
+  if (t === "project" || t === "project_drop" || t.includes("project drop")) return "Project";
   if (
     t.includes("music") ||
     t.includes("audio") ||
@@ -24,7 +25,7 @@ export function normalizeBoardDropType(raw: string | null | undefined): string {
     return "Media";
   }
   if (t.includes("announcement")) return "Media";
-  if (t === "link" || t.includes("link drop") || t.includes("project")) return "Link";
+  if (t === "link" || t.includes("link drop")) return "Link";
   if (t === "board_drop" || t === "board drop" || t === "drop") return "";
   return String(raw ?? "");
 }

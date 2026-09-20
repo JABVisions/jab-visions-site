@@ -64,6 +64,10 @@ import {
 } from "@/lib/board/dropDownload";
 import { boardDropToActivity } from "@/lib/board/boardDropActivity";
 import { toSoundCloudEmbed } from "@/lib/board/soundCloudEmbed";
+import {
+  isCloudProjectDrop,
+  mergeCollectionPreservingProjectDrops,
+} from "@/lib/board/projectProfileDrop";
 
 type DropType =
   | "YouTube"
@@ -827,10 +831,14 @@ export default function DropTile() {
           profile?.board_style && typeof profile.board_style === "object"
             ? (profile.board_style as any)
             : null;
-        const remoteDrops = normalizeDropItems(boardStyle?.boardDrops, userId);
+        const remoteDrops = normalizeDropItems(boardStyle?.boardDrops, userId).filter(
+          (drop) => !isCloudProjectDrop(drop)
+        );
         if (cancelled) return;
 
-        const mergedDrops = dedupeDropItems([...localDrops, ...remoteDrops]);
+        const mergedDrops = dedupeDropItems([...localDrops, ...remoteDrops]).filter(
+          (drop) => !isCloudProjectDrop(drop)
+        );
         if (!mergedDrops.length) return;
 
         setDrops(mergedDrops);
@@ -845,7 +853,10 @@ export default function DropTile() {
             .update({
               board_style: {
                 ...(boardStyle ?? {}),
-                boardDrops: mergedDrops,
+                boardDrops: mergeCollectionPreservingProjectDrops(
+                  mergedDrops,
+                  boardStyle?.boardDrops
+                ),
                 boardDropsDeleted: readDeletedDropIds(userId),
               },
             })
@@ -899,7 +910,12 @@ export default function DropTile() {
         .update({
           board_style: {
             ...currentStyle,
-            boardDrops: next,
+            boardDrops: mergeCollectionPreservingProjectDrops(
+              next,
+              Array.isArray((currentStyle as any).boardDrops)
+                ? (currentStyle as any).boardDrops
+                : []
+            ),
             boardDropsDeleted: readDeletedDropIds(userId),
           },
         })
