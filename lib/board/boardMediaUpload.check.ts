@@ -3,6 +3,7 @@ import {
   explainBoardMediaUploadError,
   isStoragePayloadTooLargeError,
   parseBoardMediaUploadResponse,
+  prefersDirectStorageUpload,
   shouldSkipServerlessMediaUpload,
   shouldUseTusUpload,
 } from "./boardMediaUpload";
@@ -52,8 +53,20 @@ assert(
   "unknown-size camera-roll tapes use tus"
 );
 assert(
-  shouldUseTusUpload({ size: 80 * 1024 * 1024, type: "video/mp4" }),
-  "audition tapes use tus"
+  prefersDirectStorageUpload({ size: 64.9 * 1024 * 1024, type: "video/mp4", name: "IMG_1234.MOV" }),
+  "64.9MB iPhone tapes use Drop Tile's direct PUT, not tus"
+);
+assert(
+  !shouldUseTusUpload({ size: 64.9 * 1024 * 1024, type: "video/mp4", name: "IMG_1234.MOV" }),
+  "64.9MB tapes must not start on iPhone tus"
+);
+assert(
+  !shouldUseTusUpload({ size: 80 * 1024 * 1024, type: "video/mp4" }),
+  "80MB Work Board files stay on a single storage PUT"
+);
+assert(
+  shouldUseTusUpload({ size: 120 * 1024 * 1024, type: "video/mp4" }),
+  "files over 96MB still use resumable tus first"
 );
 
 assert(
