@@ -353,6 +353,35 @@ export function applyProjectRoomDropToProject(
   };
 }
 
+/** Apply a room drop onto the open project list immediately (no React setState). */
+export function commitProjectRoomDrop(
+  projects: BoardProject[],
+  project: BoardProject,
+  built: BuiltProjectRoomDrop
+): { projects: BoardProject[]; saved: BoardProject } {
+  let saved: BoardProject | null = null;
+  const next = (Array.isArray(projects) ? projects : []).map((item) => {
+    if (item.id !== project.id) return item;
+    saved = applyProjectRoomDropToProject(item, built);
+    return saved;
+  });
+  if (!saved) {
+    saved = applyProjectRoomDropToProject(project, built);
+    return { projects: [saved, ...next], saved };
+  }
+  return { projects: next, saved };
+}
+
+export function projectRoomPostIsVideo(post: {
+  mediaKind?: string | null;
+  mediaUrl?: string | null;
+  storagePath?: string | null;
+}): boolean {
+  if (post.mediaKind === "video") return true;
+  const src = String(post.mediaUrl || post.storagePath || "");
+  return /\.(mp4|webm|mov|m4v)(\?|#|$)/i.test(src);
+}
+
 export function isProjectRoomDropActivity(item: {
   kind?: unknown;
   meta?: Record<string, any> | null;

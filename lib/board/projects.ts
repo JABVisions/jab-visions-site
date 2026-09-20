@@ -221,6 +221,9 @@ function toPersistedProject(project: BoardProject): BoardProject {
   return {
     ...project,
     media: persistableProjectCover(project.media),
+    roomPosts: Array.isArray(project.roomPosts)
+      ? (project.roomPosts.map(normalizeRoomPost).filter(Boolean) as ProjectRoomPost[])
+      : project.roomPosts,
   };
 }
 
@@ -391,6 +394,30 @@ export function mergeProjectRecord(
     roomPosts: mergeRoomPosts(base.roomPosts, incoming.roomPosts),
     updatedAt: Math.max(safeTime(base.updatedAt), safeTime(incoming.updatedAt)),
   };
+}
+
+/**
+ * Keep in-memory room posts when a reload reads a stale notebook snapshot.
+ * Studio save writes storage, then activity:new / projects:updated reload
+ * and used to replace React state before the new video post was visible.
+ */
+export function reconcileProjectsWithLive(
+  incoming: BoardProject[],
+  live: BoardProject[]
+): BoardProject[] {
+  if (!live.length) return incoming;
+  const liveById = new Map(live.map((project) => [project.id, project]));
+  const seen = new Set<string>();
+  const next = incoming.map((project) => {
+    seen.add(project.id);
+    const current = liveById.get(project.id);
+    return current ? mergeProjectRecord(project, current) : project;
+  });
+  for (const project of live) {
+    if (seen.has(project.id)) continue;
+    next.push(project);
+  }
+  return next.sort((a, b) => b.updatedAt - a.updatedAt);
 }
 
 export function projectFromBoardActivity(item: BoardActivity): BoardProject | null {
