@@ -7,6 +7,14 @@ import type {
 import { readDrops, type UniversalDrop } from "@/lib/board/drops/storage";
 import { resolveBoardProjects } from "@/lib/board/projects";
 import type { FeedDrop } from "@/lib/boardStore";
+import {
+  persistableFeedMediaHref,
+  preferFeedMediaUrl,
+} from "@/lib/board/feedDropMedia";
+import {
+  activityFromProjectRoomPost,
+  projectRoomPostHasMedia,
+} from "@/lib/board/projectRoomDrop";
 
 function safeIso(value: unknown) {
   const fallback = Date.now();
@@ -54,14 +62,32 @@ function mergeActivityRecords(
     ...preferred,
     title: preferred.title || fallback.title,
     body: preferred.body || fallback.body,
-    href: preferred.href || fallback.href,
+    href: preferFeedMediaUrl(preferred.href, fallback.href),
     image_url: preferred.image_url || fallback.image_url,
     meta: {
       ...fallbackMeta,
       ...preferredMeta,
+      origin: preferredMeta.origin || fallbackMeta.origin || null,
+      dropId: preferredMeta.dropId || fallbackMeta.dropId || null,
+      mediaKind: preferredMeta.mediaKind || fallbackMeta.mediaKind || null,
+      mediaUrl:
+        preferFeedMediaUrl(preferredMeta.mediaUrl, fallbackMeta.mediaUrl) ||
+        preferredMeta.mediaUrl ||
+        fallbackMeta.mediaUrl ||
+        null,
+      bucket: preferredMeta.bucket || fallbackMeta.bucket || null,
+      storagePath: preferredMeta.storagePath || fallbackMeta.storagePath || null,
+      cardStyle: preferredMeta.cardStyle || fallbackMeta.cardStyle || null,
       preview: {
         ...fallbackPreview,
         ...preferredPreview,
+        bucket: preferredPreview.bucket || fallbackPreview.bucket || preferredMeta.bucket || fallbackMeta.bucket,
+        storagePath:
+          preferredPreview.storagePath ||
+          fallbackPreview.storagePath ||
+          preferredMeta.storagePath ||
+          fallbackMeta.storagePath,
+        mediaKind: preferredPreview.mediaKind || fallbackPreview.mediaKind || preferredMeta.mediaKind,
       },
     },
   };
@@ -114,13 +140,24 @@ export function dedupeActivity(items: BoardActivity[]) {
     const dropId =
       typeof meta?.dropId === "string" && meta.dropId
         ? `drop:${ownerKey}:${meta.dropId}`
-        : typeof meta?.projectId === "string" && meta.projectId
-          ? `project:${ownerKey}:${meta.projectId}`
-          : "";
-    const isProjectDrop =
-      String(meta?.kind ?? "").includes("project") ||
-      String(meta?.cardStyle ?? "").includes("project") ||
-      /^Project Drop:\s*/i.test(item.title ?? "");
+        : "";
+    const projectNotebookKey =
+      (String(meta?.kind ?? "") === "project_drop" ||
+        String(meta?.cardStyle ?? "") === "project_drop" ||
+        /^Project Drop:\s*/i.test(item.title ?? "")) &&
+      typeof meta?.projectId === "string" &&
+      meta.projectId
+        ? `project:${ownerKey}:${meta.projectId}`
+        : "";
+    const isProjectDrop = Boolean(projectNotebookKey);
+    const storagePath = String(meta?.storagePath || meta?.preview?.storagePath || "").trim();
+    const storageKey = storagePath
+      ? `storage:${storagePath.split("?")[0].replace(/^\/+/, "")}`
+      : "";
+    const roomDropKey =
+      typeof meta?.dropId === "string" && meta.dropId
+        ? `dropid:${meta.dropId}`
+        : "";
     const titleKey = item.title
       ? `title:${item.kind}:${ownerKey}:${item.title.trim().toLowerCase()}`
       : "";
@@ -154,7 +191,7 @@ export function dedupeActivity(items: BoardActivity[]) {
         ? `generated:${item.kind}:${item.title?.trim().toLowerCase()}`
         : "";
     const isRecoveredMirror = /^New .+ drop from .+/i.test(item.body ?? "");
-    const hasStrongIdentity = Boolean(dropId || hrefKey || imageKey);
+    const hasStrongIdentity = Boolean(dropId || roomDropKey || hrefKey || imageKey || storageKey);
     const pushKey = isPushed
       ? `push:${meta?.originalDropId || item.id}:${meta?.pushedByUserId || ""}`
       : "";
@@ -164,11 +201,14 @@ export function dedupeActivity(items: BoardActivity[]) {
       ? [pushKey || item.id]
       : [
           dropId,
+          roomDropKey,
+          projectNotebookKey,
+          storageKey,
           hrefKey,
           imageKey,
           descriptContentKey,
           isProjectDrop ? titleBodyKey : "",
-          !dropId && !hrefKey && !imageKey ? titleBodyKey : "",
+          !dropId && !hrefKey && !imageKey && !storageKey ? titleBodyKey : "",
         ].filter(Boolean);
     const weakAliases = [generatedCaptionKey].filter(Boolean);
     const matchableAliases =
@@ -186,7 +226,7 @@ export function dedupeActivity(items: BoardActivity[]) {
         ? itemAliases[0]
         : isPushed
         ? pushKey || item.id
-        : dropId || hrefKey || imageKey || item.id || titleBodyKey;
+        : dropId || roomDropKey || storageKey || hrefKey || imageKey || item.id || titleBodyKey;
     const previous = map.get(key);
     if (!previous) {
       map.set(key, item);
@@ -282,7 +322,7 @@ export function universalDropToActivity(drop: UniversalDrop): BoardActivity | nu
   const imageUrl =
     drop.imageUrl ||
     (drop.mediaKind === "image" ? drop.mediaUrl || drop.url || null : null);
-  const href = drop.mediaUrl || drop.url || null;
+  const href = persistableFeedMediaHref(drop.mediaUrl || drop.url);
   const title =
     drop.type === "project" && !/^Project Drop:/i.test(drop.title)
       ? `Project Drop: ${drop.title}`
@@ -337,6 +377,18 @@ export function universalDropToActivity(drop: UniversalDrop): BoardActivity | nu
   };
 }
 
+export function notebookRoomDropActivities(): BoardActivity[] {
+  return resolveBoardProjects().flatMap((project) => [
+    ...(Array.isArray(project.roomPosts) ? project.roomPosts : [])
+      .filter((post) => projectRoomPostHasMedia(post))
+      .map((post) => activityFromProjectRoomPost(post, project)),
+  ]);
+}
+
+export function hydrateFeedWithNotebook(items: BoardActivity[]): BoardActivity[] {
+  return dedupeActivity([...items.filter(Boolean), ...notebookRoomDropActivities()]);
+}
+
 export function mergeActivityWithFeed(
   activityItems: BoardActivity[],
   feedItems: FeedDrop[]
@@ -346,5 +398,6 @@ export function mergeActivityWithFeed(
     ...feedItems.map(feedDropToActivity),
     ...(readDrops().map(universalDropToActivity).filter(Boolean) as BoardActivity[]),
     ...resolveBoardProjects().map(projectToActivity),
+    ...notebookRoomDropActivities(),
   ]);
 }

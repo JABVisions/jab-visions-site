@@ -37,6 +37,8 @@ export default function BoardFeedVideo({
     return () => io.disconnect();
   }, [src]);
 
+  if (!src) return null;
+
   return (
     <video
       ref={ref}

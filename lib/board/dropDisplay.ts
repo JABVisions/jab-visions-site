@@ -1,6 +1,10 @@
 /** Shared labels + media inference for Board Drop tiles and Activity cards. */
 
-import { parseBoardStorageFromUrl } from "@/lib/board/musicPlayback";
+import {
+  isPublicBoardStorageUrl,
+  parseBoardStorageFromUrl,
+  resolveStoredMediaCoords,
+} from "@/lib/board/musicPlayback";
 
 export type DropMediaKind = "image" | "video" | "audio" | null;
 
@@ -304,37 +308,12 @@ export function studioSubcategoryFromMeta(meta: Record<string, unknown> | null |
 }
 
 export function storageCoordsFromDrop(drop: DropLike) {
-  const bucket = drop.bucket?.trim() || "";
-  let path = drop.storagePath?.trim() || "";
-
-  if (path) {
-    const parsedPath = parseBoardStorageFromUrl(path);
-    if (parsedPath) return parsedPath;
-    if (/^https?:\/\//i.test(path)) {
-      path = "";
-    } else {
-      try {
-        path = decodeURIComponent(path.split("?")[0].split("#")[0]);
-      } catch {
-        path = path.split("?")[0].split("#")[0];
-      }
-      path = path.replace(/^\/+/, "");
-      if (bucket && path.startsWith(`${bucket}/`)) {
-        path = path.slice(bucket.length + 1);
-      }
-    }
-  }
-
-  if (bucket && path) {
-    return { bucket, storagePath: path };
-  }
-
-  for (const url of [drop.mediaUrl, drop.url]) {
-    if (!url) continue;
-    const parsed = parseBoardStorageFromUrl(url);
-    if (parsed) return parsed;
-  }
-  return null;
+  return resolveStoredMediaCoords({
+    bucket: drop.bucket,
+    storagePath: drop.storagePath,
+    mediaUrl: drop.mediaUrl,
+    href: drop.url,
+  });
 }
 
 /** Direct file URL we can render before/without a fresh signed URL. */
@@ -344,9 +323,15 @@ export function dropDirectMediaUrl(drop: DropLike): string | null {
     const value = candidate.trim();
     if (value.startsWith("blob:") || value.startsWith("data:")) return value;
     // Private board-media 403s on /object/public/. Keep a signed URL as-is.
-    if (/\/storage\/v1\/(?:object|render\/image)\/sign\//i.test(value)) return value;
-    const publicStorage = toPublicBoardStorageUrl(value);
-    if (publicStorage) return publicStorage;
+    if (
+      /\/storage\/v1\/(?:object|render\/image)\/sign\//i.test(value) &&
+      !isPublicBoardStorageUrl(value)
+    ) {
+      return value;
+    }
+    if (parseBoardStorageFromUrl(value) || isPublicBoardStorageUrl(value)) {
+      return null;
+    }
     const clean = extFromName(value);
     if (IMAGE_EXT.test(clean) || AUDIO_EXT.test(clean) || VIDEO_EXT.test(clean)) {
       return value;
@@ -379,7 +364,7 @@ export function resolveDropPlaybackSrc(
   const coords = storageCoordsFromDrop(drop);
   if (coords && signedUrlByKey) {
     const signed = signedUrlByKey[`${coords.bucket}:${coords.storagePath}`];
-    if (signed) return signed;
+    if (signed && !isPublicBoardStorageUrl(signed)) return signed;
   }
   return dropDirectMediaUrl(drop);
 }

@@ -48,6 +48,15 @@ import {
 } from "@/lib/board/dropComments";
 import { supabaseBrowser } from "@/lib/supabase/browser";
 import { getCachedSignedMediaUrl, invalidateSignedMediaUrl } from "@/lib/board/signedMediaUrl";
+import {
+  activityLooksLikeStoredVideo,
+  activityMediaCoords,
+  feedShouldEmbedRawHref,
+  feedShouldShowStorageLinkCover,
+  isBoardStorageMediaUrl,
+  playableFeedMediaSrc,
+} from "@/lib/board/feedDropMedia";
+import { projectRoomVideoLoadError } from "@/lib/board/projectRoomDrop";
 import DropCommentsDrawer from "./DropCommentsDrawer";
 import BoardFeedVideo from "./BoardFeedVideo";
 import DropStudioOverlay from "./DropStudioOverlay";
@@ -353,9 +362,11 @@ function isExternalHref(href: string) {
 
 function isLikelyImageUrl(href: string) {
   const clean = href.toLowerCase();
+  if (isBoardStorageMediaUrl(clean) && !/\.(png|jpg|jpeg|gif|webp|avif|svg|bmp|tif|tiff|heic|heif)(\?|#|$)/i.test(clean)) {
+    return false;
+  }
   return (
-    /\.(png|jpg|jpeg|gif|webp|avif|svg|bmp|tif|tiff|heic|heif)(\?|#|$)/i.test(clean) ||
-    /\/storage\/v1\/object\/public\/board-media\//i.test(clean)
+    /\.(png|jpg|jpeg|gif|webp|avif|svg|bmp|tif|tiff|heic|heif)(\?|#|$)/i.test(clean)
   );
 }
 
@@ -635,9 +646,20 @@ function ActivityCard({
     (typeof preview?.description === "string" && preview.description) ||
     (typeof preview?.previewDescription === "string" && preview.previewDescription) ||
     "";
-  const previewBucket = metaString(preview?.bucket, meta?.bucket);
-  const previewStoragePath = metaString(preview?.storagePath, meta?.storagePath);
-  const mediaKind = metaString(meta?.mediaKind, preview?.mediaKind);
+  const previewBucket = metaString(preview?.bucket, meta?.bucket, meta?.media?.bucket);
+  const previewStoragePath = metaString(
+    preview?.storagePath,
+    meta?.storagePath,
+    meta?.media?.storagePath
+  );
+  const storedMediaCoords = activityMediaCoords({
+    href,
+    image_url: typeof (item as any)?.image_url === "string" ? (item as any).image_url : null,
+    meta,
+  });
+  const mediaKind =
+    metaString(meta?.mediaKind, preview?.mediaKind, meta?.media?.kind) ||
+    (activityLooksLikeStoredVideo(item) ? "video" : "");
   const storedFileName = metaString(meta?.fileName, preview?.fileName);
   const storedMime = metaString(meta?.mime, preview?.mime);
   const isHtmlDocument =
@@ -678,13 +700,19 @@ function ActivityCard({
     announcementMediaType === "image" || isLikelyImageUrl(announcementMediaUrl)
       ? announcementMediaUrl
       : "";
+  const fallbackPreview =
+    resolveLinkPreviewImage(href, previewImage || announcementImageUrl) || hydratedImage || "";
   const resolvedPreviewImage =
-    signedPreviewImage ||
-    resolveLinkPreviewImage(href, previewImage || announcementImageUrl) ||
-    hydratedImage ||
-    "";
-  const isStoredVideoDrop = mediaKind === "video" && !!signedPreviewImage;
-  const isStoredBoardVideo = mediaKind === "video" && Boolean(previewBucket && previewStoragePath);
+    playableFeedMediaSrc(signedPreviewImage) ||
+    (mediaKind === "video" || isBoardStorageMediaUrl(href)
+      ? ""
+      : playableFeedMediaSrc(fallbackPreview));
+  const isStoredVideoDrop =
+    (mediaKind === "video" || activityLooksLikeStoredVideo(item)) &&
+    Boolean(playableFeedMediaSrc(signedPreviewImage));
+  const isStoredBoardVideo =
+    (mediaKind === "video" || activityLooksLikeStoredVideo(item)) &&
+    Boolean(storedMediaCoords);
   const isStoredAudioDrop = isAudioFileDrop && Boolean(signedPreviewImage || href);
   const showAnnouncementImage =
     item?.kind === "announcement" &&
@@ -795,13 +823,23 @@ function ActivityCard({
     setSignedPreviewImage("");
     setPreviewSignFailed(false);
 
-    if (!previewBucket || !previewStoragePath) return;
+    const coords = storedMediaCoords;
+    if (!coords) return;
+    const signBucket = coords.bucket;
+    const signPath = coords.storagePath;
 
     async function signPreviewImage() {
       try {
-        const resolvedUrl = await getCachedSignedMediaUrl(previewBucket, previewStoragePath, {
-          allowPublicFallback: mediaKind !== "video",
+        let resolvedUrl = await getCachedSignedMediaUrl(signBucket, signPath, {
+          allowPublicFallback: mediaKind !== "video" && signBucket !== "board-media",
         });
+        if (resolvedUrl && mediaKind === "video" && !playableFeedMediaSrc(resolvedUrl)) {
+          invalidateSignedMediaUrl(signBucket, signPath);
+          resolvedUrl = await getCachedSignedMediaUrl(signBucket, signPath, {
+            allowPublicFallback: false,
+          });
+        }
+        resolvedUrl = playableFeedMediaSrc(resolvedUrl);
         if (!cancelled && resolvedUrl) {
           setSignedPreviewImage(resolvedUrl);
           setPreviewSignFailed(false);
@@ -818,26 +856,30 @@ function ActivityCard({
     return () => {
       cancelled = true;
     };
-  }, [previewBucket, previewStoragePath, signedPreviewNonce, mediaKind]);
+  }, [storedMediaCoords?.bucket, storedMediaCoords?.storagePath, signedPreviewNonce, mediaKind]);
 
   // Storage signed URLs expire (45m). Media players call this to mint a fresh
   // one instead of staying stuck on a dead link.
   const refreshSignedMedia = useCallback(async () => {
-    if (!previewBucket || !previewStoragePath) return;
-    invalidateSignedMediaUrl(previewBucket, previewStoragePath);
+    const coords = storedMediaCoords;
+    if (!coords) return;
+    invalidateSignedMediaUrl(coords.bucket, coords.storagePath);
     try {
-      const resolvedUrl = await getCachedSignedMediaUrl(previewBucket, previewStoragePath, {
-        allowPublicFallback: mediaKind !== "video",
-      });
+      const resolvedUrl = playableFeedMediaSrc(
+        await getCachedSignedMediaUrl(coords.bucket, coords.storagePath, {
+          allowPublicFallback: mediaKind !== "video" && coords.bucket !== "board-media",
+        })
+      );
       if (resolvedUrl) {
         setSignedPreviewImage(resolvedUrl);
+        setPreviewSignFailed(false);
         return;
       }
     } catch {
       // Fall through to a full re-run of the signing effect.
     }
     setSignedPreviewNonce((tick) => tick + 1);
-  }, [previewBucket, previewStoragePath, mediaKind]);
+  }, [storedMediaCoords?.bucket, storedMediaCoords?.storagePath, mediaKind]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1050,7 +1092,12 @@ function ActivityCard({
     !isDescriptDrop &&
     !isDropbookSlide &&
     !isAudioFileDrop &&
-    !isStoredBoardVideo;
+    !isStoredBoardVideo &&
+    feedShouldEmbedRawHref({
+      href,
+      embedUrl: embed.url,
+      isStoredBoardVideo,
+    });
   const audioSoundboardUrl = signedPreviewImage || (isAudioFileDrop ? href : "");
 
   const downloadKind = useMemo((): DropDownloadKind => {
@@ -1585,7 +1632,7 @@ function ActivityCard({
           {embed.kind === "image" && (
             <div className="mediaFrame imageMediaFrame">
               <img
-                src={embed.url}
+                src={playableFeedMediaSrc(embed.url) || undefined}
                 alt={title || "Vision drop"}
                 className="img"
                 loading="lazy"
@@ -1599,7 +1646,7 @@ function ActivityCard({
             <div className="mediaFrame">
               <BoardFeedVideo
                 className="vid"
-                src={embed.url}
+                src={playableFeedMediaSrc(embed.url)}
                 onError={() => setEmbedFailed(true)}
               />
               <DropStudioOverlay customizations={dropCustomizations} />
@@ -1735,7 +1782,7 @@ function ActivityCard({
         <div className="mediaFrame storedVideoFrame">
           <BoardFeedVideo
             className="vid"
-            src={signedPreviewImage}
+            src={playableFeedMediaSrc(signedPreviewImage)}
             onError={() => {
               void refreshSignedMedia();
             }}
@@ -1747,9 +1794,9 @@ function ActivityCard({
         !isDropbookSlide &&
         isStoredBoardVideo &&
         previewSignFailed &&
-        !signedPreviewImage ? (
+        !playableFeedMediaSrc(signedPreviewImage) ? (
         <div className="mediaMissing" role="alert">
-          This video didn't finish saving to Board storage. Try uploading it again.
+          {projectRoomVideoLoadError("missing")}
         </div>
       ) : null}
 
@@ -1795,7 +1842,12 @@ function ActivityCard({
       !resolvedPreviewImage &&
       !isPayDrop &&
       !isStoredVideoDrop &&
-      !isStoredAudioDrop ? (
+      !isStoredAudioDrop &&
+      feedShouldShowStorageLinkCover({
+        href,
+        isStoredBoardVideo,
+        isStoredVideoDrop,
+      }) ? (
         <a
           className="linkPreview linkCoverFallback"
           href={href}
@@ -1838,7 +1890,16 @@ function ActivityCard({
             </div>
           </div>
         </a>
-      ) : !showEmbed && !isDescriptDrop && !isDropbookSlide && href && !resolvedPreviewImage ? (
+      ) : !showEmbed &&
+        !isDescriptDrop &&
+        !isDropbookSlide &&
+        href &&
+        !resolvedPreviewImage &&
+        feedShouldShowStorageLinkCover({
+          href,
+          isStoredBoardVideo,
+          isStoredVideoDrop,
+        }) ? (
         <a
           className="href"
           href={href}

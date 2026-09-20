@@ -263,7 +263,37 @@ assert(
   built.activity.meta?.cardStyle === "project_room_drop",
   "activity card style is not a cover-only project drop"
 );
+assert(
+  built.activity.href === "https://cdn.example/tape.mp4",
+  "playable non-public media URLs can stay on activity href"
+);
 assert(!built.coverMedia, "existing cover is left in place");
+
+const publicTape = buildProjectRoomDrop({
+  project,
+  media: {
+    kind: "video",
+    src: "https://ywvzwtpy.supabase.co/storage/v1/object/public/board-media/user/project-media/tape.mp4",
+    bucket: "board-media",
+    storagePath: "user/project-media/tape.mp4",
+  },
+  author: {
+    id: "user_zoe",
+    displayName: "Board User",
+    username: "johnandy",
+  },
+  fileName: "tape.mp4",
+  dropId: "project_room_public_tape",
+});
+assert(
+  publicTape.activity.href == null,
+  "public board-media URLs must not become feed hrefs"
+);
+assert(
+  publicTape.activity.meta?.bucket === "board-media" &&
+    publicTape.activity.meta?.storagePath === "user/project-media/tape.mp4",
+  "feed activity keeps private coords so ActivityCard can createSignedUrl"
+);
 
 const applied = applyProjectRoomDropToProject(project, built);
 assert(applied.roomPosts[0]?.id === "post_tape", "new room post is first");
