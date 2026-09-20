@@ -1313,16 +1313,6 @@ export default function ProjectCenter() {
                           type="button"
                           onClick={(event) => {
                             event.stopPropagation();
-                            openStudioForProject(project);
-                          }}
-                          className="rounded-full border border-cyan-200/25 bg-cyan-400/15 px-3 py-1 text-[11px] tracking-[0.16em] text-cyan-50/90 transition hover:bg-cyan-400/22"
-                        >
-                          Drop Studio
-                        </button>
-                        <button
-                          type="button"
-                          onClick={(event) => {
-                            event.stopPropagation();
                             setCommentsProject(project);
                           }}
                           className="rounded-full border border-cyan-200/25 bg-cyan-400/15 px-3 py-1 text-[11px] tracking-[0.16em] text-cyan-50/90 transition hover:bg-cyan-400/22"
