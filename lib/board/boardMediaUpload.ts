@@ -14,6 +14,10 @@ import {
   uploadKindForFile,
   uploadTimeoutMsForBytes,
 } from "@/lib/board/uploadLimits";
+import {
+  createUploadProgressTracker,
+  type BoardUploadProgressHandler,
+} from "@/lib/board/uploadProgress";
 import { supabaseBrowser } from "@/lib/supabase/browser";
 
 /** Floor used by callers that don't have a file size yet. Prefer `uploadTimeoutMsForBytes`. */
@@ -22,12 +26,20 @@ export const BOARD_MEDIA_READ_TIMEOUT_MS = 12_000;
 export const BOARD_MEDIA_SESSION_TIMEOUT_MS = 12_000;
 const COPY_BYTES_LIMIT = 8 * 1024 * 1024;
 const UNKNOWN_VIDEO_BYTES = 1024 * 1024 * 1024;
+const FIRST_BYTE_STALL_MS = 25_000;
+const PROGRESS_STALL_MS = 20_000;
 
 export type BoardMediaUploadResult = {
   bucket: string;
   storagePath: string;
   publicUrl: string;
   signedUrl: string;
+};
+
+export type BoardMediaUploadOptions = {
+  bucket?: string;
+  folder?: string;
+  onProgress?: BoardUploadProgressHandler;
 };
 
 export class BoardMediaUploadError extends Error {
@@ -149,7 +161,7 @@ export function explainBoardMediaUploadError(
   if (/sign-in|sign in|session/.test(lower)) {
     return "Sign in to upload this video.";
   }
-  if (/timed out|timeout|aborted|abort/.test(lower)) {
+  if (/timed out|timeout|aborted|abort|stalled/.test(lower)) {
     return "Video upload timed out. Stay on this screen and try again on Wi-Fi.";
   }
   if (/could not read|notreadable|empty file/.test(lower)) {
@@ -169,29 +181,142 @@ async function requestBoardMediaLimitRaise() {
     mediaLimitRaise = (async () => {
       try {
         const supabase = supabaseBrowser();
-        await supabase.rpc("ensure_board_media_file_size_limit");
+        await withTimeout(
+          Promise.resolve(supabase.rpc("ensure_board_media_file_size_limit")),
+          3_000,
+          "limit-raise"
+        );
       } catch {
         // Function may not exist until the SQL script is applied.
       }
       try {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 3_000);
         await fetch("/api/board/media/limits", {
           method: "POST",
           credentials: "include",
-        });
+          signal: controller.signal,
+        }).finally(() => clearTimeout(timer));
       } catch {
         // Service-role raise is best-effort; the browser upload still runs.
       }
     })();
   }
-  await Promise.race([
-    mediaLimitRaise,
-    new Promise<void>((resolve) => setTimeout(resolve, 8_000)),
-  ]);
 }
 
 function isIosSafari() {
   if (typeof navigator === "undefined") return false;
   return /iP(hone|ad|od)/.test(navigator.userAgent);
+}
+
+function storageConfig() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const anonKey =
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
+  if (!url || !anonKey) {
+    throw new BoardMediaUploadError("Board storage is not configured.", "config");
+  }
+  return { url: url.replace(/\/+$/, ""), anonKey };
+}
+
+function encodeStoragePath(path: string) {
+  return path
+    .split("/")
+    .filter(Boolean)
+    .map((part) => encodeURIComponent(part))
+    .join("/");
+}
+
+function absoluteUrl(root: string, pathOrUrl: string) {
+  if (/^https?:\/\//i.test(pathOrUrl)) return pathOrUrl;
+  return `${root}${pathOrUrl.startsWith("/") ? "" : "/"}${pathOrUrl}`;
+}
+
+type ByteReporter = (loaded: number, total?: number) => void;
+
+function xhrSend(opts: {
+  url: string;
+  method: "POST" | "PUT";
+  headers: Record<string, string>;
+  body: XMLHttpRequestBodyInit;
+  timeoutMs: number;
+  withCredentials?: boolean;
+  knownTotal?: number;
+  onBytes?: ByteReporter;
+}): Promise<{ status: number; text: string }> {
+  return new Promise((resolve, reject) => {
+    if (typeof XMLHttpRequest === "undefined") {
+      reject(new BoardMediaUploadError("This browser cannot upload Board media.", "storage"));
+      return;
+    }
+    const xhr = new XMLHttpRequest();
+    xhr.open(opts.method, opts.url);
+    if (opts.withCredentials) xhr.withCredentials = true;
+    Object.entries(opts.headers).forEach(([key, value]) => {
+      if (value) xhr.setRequestHeader(key, value);
+    });
+    xhr.timeout = Math.max(1, opts.timeoutMs);
+    xhr.responseType = "text";
+    let lastLoaded = 0;
+    let lastMove = Date.now();
+    const stall = setInterval(() => {
+      const wait = lastLoaded > 0 ? PROGRESS_STALL_MS : FIRST_BYTE_STALL_MS;
+      if (Date.now() - lastMove > wait) {
+        xhr.abort();
+      }
+    }, 1_000);
+    const finish = () => clearInterval(stall);
+    xhr.upload.onprogress = (event) => {
+      const known = opts.knownTotal && opts.knownTotal > 0 ? opts.knownTotal : 0;
+      const total = event.lengthComputable && event.total > 0 ? event.total : known;
+      const loaded = event.loaded || lastLoaded;
+      if (loaded > lastLoaded) {
+        lastLoaded = loaded;
+        lastMove = Date.now();
+      }
+      opts.onBytes?.(loaded, total);
+    };
+    xhr.onload = () => {
+      finish();
+      const known = opts.knownTotal && opts.knownTotal > 0 ? opts.knownTotal : lastLoaded;
+      if (xhr.status >= 200 && xhr.status < 300) {
+        opts.onBytes?.(Math.max(lastLoaded, known), known);
+      }
+      resolve({ status: xhr.status, text: String(xhr.responseText || "") });
+    };
+    xhr.onerror = () => {
+      finish();
+      reject(new BoardMediaUploadError("Couldn't reach Board storage. Check your connection and try again."));
+    };
+    xhr.ontimeout = () => {
+      finish();
+      reject(new BoardMediaUploadError("Media upload timed out.", "timeout"));
+    };
+    xhr.onabort = () => {
+      finish();
+      reject(new BoardMediaUploadError("Upload stalled. Stay on this screen and try again on Wi-Fi.", "timeout"));
+    };
+    xhr.send(opts.body);
+  });
+}
+
+function throwIfFailedStatus(status: number, text: string): void {
+  if (status >= 200 && status < 300) return;
+  let message = text.trim() || `Board storage ${status}`;
+  try {
+    const parsed = JSON.parse(text) as { message?: unknown; error?: unknown; statusCode?: unknown };
+    message = String(parsed.message || parsed.error || message);
+    if (parsed.statusCode === 413 || parsed.statusCode === "413" || status === 413) {
+      throw new BoardMediaUploadError("Payload too large", "storage");
+    }
+  } catch (error) {
+    if (error instanceof BoardMediaUploadError) throw error;
+  }
+  if (status === 413) throw new BoardMediaUploadError("Payload too large", "storage");
+  if (status === 401 || status === 403) {
+    throw new BoardMediaUploadError(message || `Upload failed (${status})`, "auth");
+  }
+  throw new BoardMediaUploadError(message || "Media upload failed.", "storage");
 }
 
 export async function copyFileForUpload(file: File): Promise<File> {
@@ -234,17 +359,30 @@ async function signedResult(
 ): Promise<BoardMediaUploadResult> {
   const supabase = supabaseBrowser();
   const publicUrl = supabase.storage.from(bucket).getPublicUrl(storagePath).data.publicUrl || "";
-  const { data: signed } = await supabase.storage.from(bucket).createSignedUrl(storagePath, 60 * 60 * 24 * 365);
-  const signedUrl = signed?.signedUrl || "";
-  if (!publicUrl && !signedUrl) {
-    throw new BoardMediaUploadError("Upload finished but Board could not create a playback URL.", "storage");
+  try {
+    const { data: signed } = await withTimeout(
+      supabase.storage.from(bucket).createSignedUrl(storagePath, 60 * 60 * 24 * 365),
+      BOARD_MEDIA_SESSION_TIMEOUT_MS,
+      "Board could not create a playback URL."
+    );
+    const signedUrl = signed?.signedUrl || "";
+    if (!publicUrl && !signedUrl) {
+      throw new BoardMediaUploadError("Upload finished but Board could not create a playback URL.", "storage");
+    }
+    return {
+      bucket,
+      storagePath,
+      publicUrl,
+      signedUrl,
+    };
+  } catch (error) {
+    if (publicUrl) {
+      return { bucket, storagePath, publicUrl, signedUrl: "" };
+    }
+    throw error instanceof BoardMediaUploadError
+      ? error
+      : new BoardMediaUploadError("Upload finished but Board could not create a playback URL.", "storage");
   }
-  return {
-    bucket,
-    storagePath,
-    publicUrl,
-    signedUrl,
-  };
 }
 
 async function requireUploadSession() {
@@ -285,151 +423,200 @@ function throwStorageFailure(error: unknown): never {
 
 async function uploadThroughTus(
   file: File,
-  opts: { bucket: string; folder: string; accessToken: string }
+  opts: { bucket: string; folder: string; accessToken: string; onBytes?: ByteReporter }
 ): Promise<BoardMediaUploadResult> {
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const anonKey =
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
-  if (!supabaseUrl || !anonKey) {
-    throw new BoardMediaUploadError("Board storage is not configured.", "config");
-  }
-
+  const { url: supabaseUrl, anonKey } = storageConfig();
   const contentType = resolveUploadContentType(file);
   const storagePath = storagePathFor(file, opts.folder);
   const timeoutMs = uploadTimeoutMsForBytes(guessUploadBytes(file));
 
-  await withTimeout(
-    new Promise<void>((resolve, reject) => {
-      const upload = new Upload(file, {
-        endpoint: `${supabaseUrl.replace(/\/+$/, "")}/storage/v1/upload/resumable`,
-        retryDelays: [0, 3000, 5000, 10000, 20000],
-        headers: {
-          authorization: `Bearer ${opts.accessToken}`,
-          apikey: anonKey,
-          "x-upsert": "true",
-        },
-        uploadDataDuringCreation: !isIosSafari(),
-        storeFingerprintForResuming: !isIosSafari(),
-        removeFingerprintOnSuccess: true,
-        chunkSize: TUS_CHUNK_SIZE,
-        metadata: {
-          bucketName: opts.bucket,
-          objectName: storagePath,
-          contentType,
-          cacheControl: "3600",
-        },
-        onError: (error) => reject(error),
-        onSuccess: () => resolve(),
-      });
-      if (isIosSafari()) {
-        upload.start();
-        return;
+  await new Promise<void>((resolve, reject) => {
+    let settled = false;
+    let lastMove = Date.now();
+    let lastLoaded = 0;
+    const upload = new Upload(file, {
+      endpoint: `${supabaseUrl}/storage/v1/upload/resumable`,
+      retryDelays: [0, 3000, 5000, 10000, 20000],
+      headers: {
+        authorization: `Bearer ${opts.accessToken}`,
+        apikey: anonKey,
+        "x-upsert": "true",
+      },
+      uploadDataDuringCreation: !isIosSafari(),
+      storeFingerprintForResuming: !isIosSafari(),
+      removeFingerprintOnSuccess: true,
+      chunkSize: TUS_CHUNK_SIZE,
+      metadata: {
+        bucketName: opts.bucket,
+        objectName: storagePath,
+        contentType,
+        cacheControl: "3600",
+      },
+      onProgress: (bytesUploaded, bytesTotal) => {
+        if (bytesUploaded > lastLoaded) {
+          lastLoaded = bytesUploaded;
+          lastMove = Date.now();
+        }
+        opts.onBytes?.(bytesUploaded, bytesTotal);
+      },
+      onError: (error) => {
+        if (settled) return;
+        settled = true;
+        clearInterval(stall);
+        clearTimeout(hardTimeout);
+        reject(error);
+      },
+      onSuccess: () => {
+        if (settled) return;
+        settled = true;
+        clearInterval(stall);
+        clearTimeout(hardTimeout);
+        resolve();
+      },
+    });
+    const stall = setInterval(() => {
+      const wait = lastLoaded > 0 ? PROGRESS_STALL_MS : FIRST_BYTE_STALL_MS;
+      if (Date.now() - lastMove <= wait) return;
+      clearInterval(stall);
+      clearTimeout(hardTimeout);
+      try {
+        upload.abort(true);
+      } catch {
+        // ignore
       }
-      void upload.findPreviousUploads().then(
-        (previous) => {
-          if (previous[0]) upload.resumeFromPreviousUpload(previous[0]);
-          upload.start();
-        },
-        () => upload.start()
-      );
-    }),
-    timeoutMs,
-    "Media upload timed out."
-  );
+      if (settled) return;
+      settled = true;
+      reject(new BoardMediaUploadError("Upload stalled. Stay on this screen and try again on Wi-Fi.", "timeout"));
+    }, 1_000);
+    const hardTimeout = setTimeout(() => {
+      clearInterval(stall);
+      try {
+        upload.abort(true);
+      } catch {
+        // ignore
+      }
+      if (settled) return;
+      settled = true;
+      reject(new BoardMediaUploadError("Media upload timed out.", "timeout"));
+    }, timeoutMs);
+    if (isIosSafari()) {
+      upload.start();
+      return;
+    }
+    void upload.findPreviousUploads().then(
+      (previous) => {
+        if (previous[0]) upload.resumeFromPreviousUpload(previous[0]);
+        upload.start();
+      },
+      () => upload.start()
+    );
+  });
 
   return signedResult(opts.bucket, storagePath);
 }
 
 async function uploadThroughSignedPut(
   file: File,
-  opts: { bucket: string; folder: string }
+  opts: { bucket: string; folder: string; accessToken: string; onBytes?: ByteReporter }
 ): Promise<BoardMediaUploadResult> {
   const supabase = supabaseBrowser();
+  const { url, anonKey } = storageConfig();
   const contentType = resolveUploadContentType(file);
   const storagePath = storagePathFor(file, opts.folder);
   const timeoutMs = uploadTimeoutMsForBytes(guessUploadBytes(file));
   const signed = await withTimeout(
-    supabase.storage.from(opts.bucket).createSignedUploadUrl(storagePath),
+    supabase.storage.from(opts.bucket).createSignedUploadUrl(storagePath, { upsert: true }),
     BOARD_MEDIA_SESSION_TIMEOUT_MS,
     "Board storage did not grant an upload URL."
   );
   if (signed.error || !signed.data?.token) {
     throwStorageFailure(signed.error || new Error("Board storage did not grant an upload URL."));
   }
-  const uploaded = await withTimeout(
-    supabase.storage.from(opts.bucket).uploadToSignedUrl(storagePath, signed.data.token, file, {
-      contentType,
-      upsert: true,
-    }),
-    timeoutMs,
-    "Media upload timed out."
+  const signedUrl = absoluteUrl(
+    `${url}/storage/v1`,
+    signed.data.signedUrl ||
+      `/object/upload/sign/${opts.bucket}/${encodeStoragePath(storagePath)}?token=${signed.data.token}`
   );
-  if (uploaded.error) {
-    throwStorageFailure(uploaded.error);
-  }
+  const uploaded = await xhrSend({
+    url: signedUrl,
+    method: "PUT",
+    headers: {
+      authorization: `Bearer ${opts.accessToken}`,
+      apikey: anonKey,
+      "content-type": contentType,
+      "x-upsert": "true",
+      "cache-control": "max-age=3600",
+    },
+    body: file,
+    timeoutMs,
+    knownTotal: file.size,
+    onBytes: opts.onBytes,
+  });
+  throwIfFailedStatus(uploaded.status, uploaded.text);
   return signedResult(opts.bucket, storagePath);
 }
 
 async function uploadThroughBrowser(
   file: File,
-  opts: { bucket: string; folder: string }
+  opts: { bucket: string; folder: string; accessToken: string; onBytes?: ByteReporter }
 ): Promise<BoardMediaUploadResult> {
-  const supabase = supabaseBrowser();
+  const { url, anonKey } = storageConfig();
   const contentType = resolveUploadContentType(file);
   const storagePath = storagePathFor(file, opts.folder);
   const timeoutMs = uploadTimeoutMsForBytes(guessUploadBytes(file));
-  const { error } = await withTimeout(
-    supabase.storage.from(opts.bucket).upload(storagePath, file, {
-      upsert: true,
-      contentType,
-      cacheControl: "3600",
-    }),
+  const uploaded = await xhrSend({
+    url: `${url}/storage/v1/object/${opts.bucket}/${encodeStoragePath(storagePath)}`,
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${opts.accessToken}`,
+      apikey: anonKey,
+      "content-type": contentType,
+      "x-upsert": "true",
+      "cache-control": "max-age=3600",
+    },
+    body: file,
     timeoutMs,
-    "Media upload timed out."
-  );
-  if (error) {
-    throwStorageFailure(error);
-  }
+    knownTotal: file.size,
+    onBytes: opts.onBytes,
+  });
+  throwIfFailedStatus(uploaded.status, uploaded.text);
   return signedResult(opts.bucket, storagePath);
 }
 
 async function uploadThroughServerless(
   file: File,
-  opts: { bucket: string; folder: string }
+  opts: { bucket: string; folder: string; onBytes?: ByteReporter }
 ): Promise<BoardMediaUploadResult> {
   const body = new FormData();
   body.set("file", file, file.name);
   body.set("bucket", opts.bucket);
   body.set("folder", opts.folder);
-  const controller = new AbortController();
   const timeoutMs = uploadTimeoutMsForBytes(guessUploadBytes(file));
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const response = await fetch("/api/board/media", {
-      method: "POST",
-      body,
-      credentials: "include",
-      signal: controller.signal,
-    });
-    const json = await response.json().catch(() => null);
-    const parsed = parseBoardMediaUploadResponse(json);
-    if (parsed) return parsed;
-    const apiMessage =
-      json && typeof json === "object" && typeof (json as { message?: unknown }).message === "string"
-        ? String((json as { message: string }).message)
-        : "";
-    if (response.status === 401) {
-      throw new BoardMediaUploadError("Sign in to upload this video.", "auth");
-    }
-    if (response.status === 413) {
-      throw new BoardMediaUploadError("Payload too large", "storage");
-    }
-    throw new BoardMediaUploadError(
-      explainBoardMediaUploadError(apiMessage || `Board media API ${response.status}`, file)
-    );
-  } finally {
-    clearTimeout(timer);
+  const origin = typeof window !== "undefined" ? window.location.origin : "";
+  const uploaded = await xhrSend({
+    url: `${origin}/api/board/media`,
+    method: "POST",
+    headers: {},
+    body,
+    timeoutMs,
+    withCredentials: true,
+    knownTotal: file.size,
+    onBytes: opts.onBytes,
+  });
+  if (uploaded.status === 401) {
+    throw new BoardMediaUploadError("Sign in to upload this video.", "auth");
   }
+  if (uploaded.status === 413) {
+    throw new BoardMediaUploadError("Payload too large", "storage");
+  }
+  try {
+    const parsed = parseBoardMediaUploadResponse(JSON.parse(uploaded.text));
+    if (parsed) return parsed;
+  } catch {
+    // fall through to status error
+  }
+  throwIfFailedStatus(uploaded.status, uploaded.text);
+  throw new BoardMediaUploadError("Media upload failed.", "storage");
 }
 
 async function runUploadAttempts(
@@ -464,7 +651,7 @@ async function runUploadAttempts(
 
 export async function uploadBoardMediaFile(
   file: File,
-  opts?: { bucket?: string; folder?: string }
+  opts?: BoardMediaUploadOptions
 ): Promise<BoardMediaUploadResult> {
   const bucket = opts?.bucket === BUCKET_DOCS ? BUCKET_DOCS : BUCKET_MEDIA;
   const requestedFolder = (opts?.folder || "uploads").replace(/^\/+|\/+$/g, "");
@@ -473,29 +660,46 @@ export async function uploadBoardMediaFile(
     throw new BoardMediaUploadError(sizeError, "size");
   }
 
+  const tracker = createUploadProgressTracker(guessUploadBytes(file), opts?.onProgress);
+  tracker.preparing();
+
   const copy = await copyFileForUpload(file);
   const session = await requireUploadSession();
   const folder = ownerScopedUploadFolder(requestedFolder, session.user.id);
-  await requestBoardMediaLimitRaise();
+  void requestBoardMediaLimitRaise();
 
-  const direct = () => uploadThroughBrowser(copy, { bucket, folder });
-  const signed = () => uploadThroughSignedPut(copy, { bucket, folder });
-  const tus = async () => {
+  const onBytes: ByteReporter = (loaded, total) => tracker.bytes(loaded, total);
+  const withToken = async (run: (accessToken: string) => Promise<BoardMediaUploadResult>) => {
+    tracker.reset();
     const live = await requireUploadSession();
-    return uploadThroughTus(copy, {
-      bucket,
-      folder,
-      accessToken: live.access_token,
-    });
+    return run(live.access_token);
   };
+
+  const direct = () =>
+    withToken((accessToken) =>
+      uploadThroughBrowser(copy, { bucket, folder, accessToken, onBytes })
+    );
+  const signed = () =>
+    withToken((accessToken) =>
+      uploadThroughSignedPut(copy, { bucket, folder, accessToken, onBytes })
+    );
+  const tus = () =>
+    withToken((accessToken) =>
+      uploadThroughTus(copy, { bucket, folder, accessToken, onBytes })
+    );
 
   const attempts: Array<() => Promise<BoardMediaUploadResult>> = prefersDirectStorageUpload(copy)
     ? [direct, signed, tus]
     : [tus, signed, direct];
 
   if (!shouldSkipServerlessMediaUpload(copy)) {
-    attempts.push(() => uploadThroughServerless(copy, { bucket, folder }));
+    attempts.push(() => {
+      tracker.reset();
+      return uploadThroughServerless(copy, { bucket, folder, onBytes });
+    });
   }
 
-  return runUploadAttempts(copy, attempts);
+  const result = await runUploadAttempts(copy, attempts);
+  tracker.finishing();
+  return result;
 }

@@ -10,6 +10,8 @@ import {
 import { parseBoardStorageFromUrl } from "@/lib/board/musicPlayback";
 import { uploadProjectCover } from "@/lib/board/projectCoverUpload";
 import { checkUploadSize } from "@/lib/board/uploadLimits";
+import type { BoardUploadProgress } from "@/lib/board/uploadProgress";
+import BoardUploadProgressBar from "@/app/components/board/BoardUploadProgressBar";
 
 function clsx(...parts: Array<string | false | null | undefined>) {
   return parts.filter(Boolean).join(" ");
@@ -202,6 +204,7 @@ export default function ProjectDropMenu({
   const [mediaBucket, setMediaBucket] = useState("");
   const [mediaStoragePath, setMediaStoragePath] = useState("");
   const [mediaUploading, setMediaUploading] = useState(false);
+  const [mediaUploadProgress, setMediaUploadProgress] = useState<BoardUploadProgress | null>(null);
   const [publishing, setPublishing] = useState(false);
   const editing = Boolean(initialProject?.id);
   const mediaFileRef = useRef<File | null>(null);
@@ -390,6 +393,7 @@ export default function ProjectDropMenu({
           const { uploadBoardMediaFile } = await import("@/lib/board/boardMediaUpload");
           const uploaded = await uploadBoardMediaFile(file, {
             folder: "project-media",
+            onProgress: setMediaUploadProgress,
           });
           if (generation !== uploadGenerationRef.current) return;
           rememberCover({
@@ -404,6 +408,7 @@ export default function ProjectDropMenu({
         } finally {
           if (generation !== uploadGenerationRef.current) return;
           setMediaUploading(false);
+          setMediaUploadProgress(null);
           uploadPromiseRef.current = null;
         }
       })();
@@ -875,6 +880,14 @@ export default function ProjectDropMenu({
                         ? "Media attached from this device."
                         : "Select image or video from this device."}
                 </div>
+                {mediaUploadProgress ? (
+                  <div className="mt-3">
+                    <BoardUploadProgressBar
+                      progress={mediaUploadProgress}
+                      title={mediaKind === "video" ? "Uploading video" : "Uploading"}
+                    />
+                  </div>
+                ) : null}
               </Field>
 
               <div className="rounded-2xl border border-white/10 bg-black/30 p-3">

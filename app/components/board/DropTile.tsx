@@ -46,7 +46,10 @@ import {
   studioLinkEmbedUrl,
   studioLinkPersistKind,
 } from "@/lib/board/dropbookLink";
-import { checkUploadSize, resolveUploadContentType } from "@/lib/board/uploadLimits";
+import { checkUploadSize } from "@/lib/board/uploadLimits";
+import { uploadBoardMediaFile, explainBoardMediaUploadError } from "@/lib/board/boardMediaUpload";
+import type { BoardUploadProgress } from "@/lib/board/uploadProgress";
+import BoardUploadProgressBar from "./BoardUploadProgressBar";
 import { getCachedSignedMediaUrl, invalidateSignedMediaUrl } from "@/lib/board/signedMediaUrl";
 import {
   isSupabaseStorageHostLabel,
@@ -617,6 +620,7 @@ export default function DropTile() {
   const [title, setTitle] = useState("");
   const [dropDesc, setDropDesc] = useState("");
   const [msg, setMsg] = useState<string | null>(null);
+  const [uploadProgress, setUploadProgress] = useState<BoardUploadProgress | null>(null);
   const [url, setUrl] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [payPrice, setPayPrice] = useState("");
@@ -1303,7 +1307,7 @@ export default function DropTile() {
       return null;
     }
 
-    const { supabase, userId } = sess;
+    const { userId } = sess;
 
     const tooLarge = checkUploadSize(opts.file);
     if (tooLarge) {
@@ -1311,22 +1315,20 @@ export default function DropTile() {
       return null;
     }
 
-    const cleanName = sanitizeFileName(opts.file.name);
-    const storagePath = `${userId}/${opts.dropId}/${Date.now()}-${cleanName}`;
-
-    const { error } = await supabase.storage.from(opts.bucket).upload(storagePath, opts.file, {
-      upsert: true,
-      contentType: resolveUploadContentType(opts.file),
-      cacheControl: "3600",
-    });
-
-    if (error) {
+    try {
+      const uploaded = await uploadBoardMediaFile(opts.file, {
+        bucket: opts.bucket,
+        folder: `${userId}/${opts.dropId}`,
+        onProgress: setUploadProgress,
+      });
+      setUploadProgress(null);
+      return { bucket: uploaded.bucket, storagePath: uploaded.storagePath };
+    } catch (error) {
       console.error("Storage upload error:", error);
-      flash(setMsg, `Upload failed: ${error.message}`, 2600);
+      setUploadProgress(null);
+      flash(setMsg, explainBoardMediaUploadError(error, opts.file), 2600);
       return null;
     }
-
-    return { bucket: opts.bucket, storagePath };
   }
 
   function publicStorageUrl(bucket: string, path: string) {
@@ -2378,6 +2380,11 @@ export default function DropTile() {
         <button className="drop-add" onClick={addDrop}>
           ADD A DROP
         </button>
+        {uploadProgress ? (
+          <div style={{ marginTop: 10 }}>
+            <BoardUploadProgressBar progress={uploadProgress} title="Uploading" />
+          </div>
+        ) : null}
 
         {msg ? <div className="drop-msg">{msg}</div> : <div className="drop-hint">{hint}</div>}
       </div>

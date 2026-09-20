@@ -7,7 +7,9 @@
 import { supabaseBrowser } from "@/lib/supabase/browser";
 import { syncActivitiesForDropEdit } from "@/lib/board/activity";
 import { ensureImageFileMinResolution, isHeicFile } from "@/lib/board/imageQuality";
-import { checkUploadSize, resolveUploadContentType, uploadTimeoutMsForBytes } from "@/lib/board/uploadLimits";
+import { checkUploadSize, uploadTimeoutMsForBytes } from "@/lib/board/uploadLimits";
+import { uploadBoardMediaFile } from "@/lib/board/boardMediaUpload";
+import type { BoardUploadProgressHandler } from "@/lib/board/uploadProgress";
 import type { DropItem } from "@/lib/board/dropItem";
 import { rememberDeletedDropId } from "@/lib/board/dropItem";
 
@@ -194,10 +196,6 @@ export async function getDropSignedUrl(
   return request;
 }
 
-function sanitizeFileName(name: string) {
-  return name.replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/-+/g, "-").slice(0, 120) || "drop-media";
-}
-
 const SESSION_TIMEOUT_MS = 4_000;
 const IMAGE_PREPARE_TIMEOUT_MS = 18_000;
 
@@ -218,7 +216,8 @@ function alreadyPreparedJpeg(file: File) {
 /** Upload replacement media for an existing drop. Returns the new storage path. */
 export async function uploadDropMedia(
   file: File,
-  dropId: string
+  dropId: string,
+  onProgress?: BoardUploadProgressHandler
 ): Promise<{ bucket: string; storagePath: string } | null> {
   try {
     return await withTimeout(
@@ -251,22 +250,11 @@ export async function uploadDropMedia(
           return null;
         }
 
-        const storagePath = `${userId}/${dropId}/${Date.now()}-${sanitizeFileName(uploadFile.name)}`;
-        const uploadTimeoutMs = uploadTimeoutMsForBytes(uploadFile.size);
-        const { error } = await withTimeout(
-          supabase.storage.from(BOARD_MEDIA_BUCKET).upload(storagePath, uploadFile, {
-            upsert: true,
-            contentType: resolveUploadContentType(uploadFile),
-            cacheControl: "3600",
-          }),
-          uploadTimeoutMs,
-          "Media upload timed out."
-        );
-        if (error) {
-          console.error("Drop media upload failed:", error);
-          return null;
-        }
-        return { bucket: BOARD_MEDIA_BUCKET, storagePath };
+        const uploaded = await uploadBoardMediaFile(uploadFile, {
+          folder: `${userId}/${dropId}`,
+          onProgress,
+        });
+        return { bucket: uploaded.bucket, storagePath: uploaded.storagePath };
       })(),
       SESSION_TIMEOUT_MS + IMAGE_PREPARE_TIMEOUT_MS + uploadTimeoutMsForBytes(file.size) + 2_000,
       "Media upload timed out."

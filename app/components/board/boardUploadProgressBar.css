@@ -1,0 +1,88 @@
+.boardUploadProgress {
+  display: grid;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  padding: 10px 12px;
+  border-radius: 16px;
+  border: 1px solid rgba(126, 226, 255, 0.28);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(8, 16, 22, 0.42)),
+    rgba(9, 13, 19, 0.72);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.16),
+    0 0 22px rgba(126, 226, 255, 0.12);
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.boardUploadProgressTitle {
+  font-size: 10px;
+  font-weight: 950;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: rgba(126, 226, 255, 0.86);
+}
+
+.boardUploadProgressMeta {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.boardUploadProgressPercent {
+  flex: 0 0 auto;
+  font-size: 12px;
+  font-weight: 950;
+  letter-spacing: 0.08em;
+  color: #7ee2ff;
+  text-shadow: 0 0 12px rgba(126, 226, 255, 0.45);
+}
+
+.boardUploadProgressBytes {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 11px;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.68);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.boardUploadProgressEta {
+  flex: 0 1 auto;
+  max-width: 46%;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  color: rgba(196, 244, 255, 0.88);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: right;
+}
+
+.boardUploadProgressTrack {
+  height: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.boardUploadProgressFill {
+  height: 100%;
+  border-radius: inherit;
+  background:
+    linear-gradient(90deg, rgba(126, 226, 255, 0.55), #7ee2ff 58%, #fff);
+  box-shadow: 0 0 16px rgba(126, 226, 255, 0.55);
+  transition: width 120ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .boardUploadProgressFill {
+    transition: none;
+  }
+}

@@ -50,6 +50,7 @@ import { emitBoardDropSignal } from "@/lib/board/dropSignals";
 import LazyDropStudioStage from "@/app/components/board/LazyDropStudioStage";
 import type { DropCustomization } from "@/lib/board/dropCustomizations";
 import { uploadBoardMediaFile, explainBoardMediaUploadError } from "@/lib/board/boardMediaUpload";
+import type { BoardUploadProgressHandler } from "@/lib/board/uploadProgress";
 import { boardProjectPatchFromDrop } from "@/lib/board/projectDropEdit";
 import {
   applyProjectRoomActivitiesToProjects,
@@ -1025,7 +1026,11 @@ export default function ProjectCenter() {
     setStudioOpen(true);
   }
 
-  async function saveProjectRoomStudioDrop(project: BoardProject, file: File) {
+  async function saveProjectRoomStudioDrop(
+    project: BoardProject,
+    file: File,
+    onProgress?: BoardUploadProgressHandler
+  ) {
     const identity = readCurrentBoardIdentity();
     const viewer = {
       id: currentUserId || identity.id,
@@ -1049,7 +1054,7 @@ export default function ProjectCenter() {
 
     setStudioMessage(mediaKind === "video" ? "Uploading video…" : "Uploading drop…");
     try {
-      const uploaded = await uploadBoardMediaFile(file, { folder: "project-media" });
+      const uploaded = await uploadBoardMediaFile(file, { folder: "project-media", onProgress });
       const mediaUrl = uploaded.signedUrl || uploaded.publicUrl;
       if (!mediaUrl) throw new Error("Upload finished but Board could not create a playback URL.");
 
@@ -1297,7 +1302,7 @@ export default function ProjectCenter() {
         allowedModes={["photo", "video", "art"]}
         value={studioCustomizations}
         onChange={setStudioCustomizations}
-        onComplete={async (file) => {
+        onComplete={async (file, _source, onProgress) => {
           const target =
             (studioProject &&
               projectsRef.current.find((project) => project.id === studioProject.id)) ||
@@ -1309,7 +1314,7 @@ export default function ProjectCenter() {
           if (!target) {
             throw new Error("Open a project room before saving this Drop.");
           }
-          await saveProjectRoomStudioDrop(target, file);
+          await saveProjectRoomStudioDrop(target, file, onProgress);
         }}
         onClose={() => {
           setStudioOpen(false);

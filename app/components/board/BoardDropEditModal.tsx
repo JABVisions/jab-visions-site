@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import LazyDropStudioStage from "./LazyDropStudioStage";
+import BoardUploadProgressBar from "./BoardUploadProgressBar";
 import { EyeToggle } from "./icons/EyeToggle";
 import type { DropItem } from "@/lib/board/dropItem";
 import {
@@ -22,6 +23,7 @@ import {
 } from "@/lib/board/boardDropEditStore";
 import { persistActivityEdit } from "@/lib/board/activity";
 import { supabaseBrowser } from "@/lib/supabase/browser";
+import type { BoardUploadProgress, BoardUploadProgressHandler } from "@/lib/board/uploadProgress";
 import {
   normalizeRichText,
   richToPlain,
@@ -131,6 +133,7 @@ export default function BoardDropEditModal() {
   const [studioInitialFile, setStudioInitialFile] = useState<File | null>(null);
   const [studioDescriptDoc, setStudioDescriptDoc] = useState<DescriptDoc | null>(null);
   const [saving, setSaving] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<BoardUploadProgress | null>(null);
   const [toast, setToast] = useState<string | null>(null);
 
   const open = useCallback((d: DropItem) => {
@@ -371,8 +374,15 @@ export default function BoardDropEditModal() {
     }
   }
 
-  async function publicUrlForUpload(file: File, dropId: string) {
-    const up = await uploadDropMedia(file, dropId);
+  async function publicUrlForUpload(
+    file: File,
+    dropId: string,
+    onProgress?: BoardUploadProgressHandler
+  ) {
+    const up = await uploadDropMedia(file, dropId, (progress) => {
+      setUploadProgress(progress);
+      onProgress?.(progress);
+    });
     if (!up) return null;
     const sb = supabaseBrowser();
     const pub = sb.storage.from(up.bucket || BOARD_MEDIA_BUCKET).getPublicUrl(up.storagePath);
@@ -395,7 +405,7 @@ export default function BoardDropEditModal() {
     return { ...next, artOverlayUrl: uploadedUrl };
   }
 
-  async function save(fileOverride?: File | null) {
+  async function save(fileOverride?: File | null, onProgress?: BoardUploadProgressHandler) {
     if (!drop) return;
     const nextFile = fileOverride !== undefined ? fileOverride : pendingFile;
     setSaving(true);
@@ -412,7 +422,7 @@ export default function BoardDropEditModal() {
         let mediaUrl = drop.mediaUrl ?? null;
         let mediaKind = drop.mediaKind ?? "image";
         if (nextFile) {
-          const uploaded = await publicUrlForUpload(nextFile, drop.sourceActivityId);
+          const uploaded = await publicUrlForUpload(nextFile, drop.sourceActivityId, onProgress);
           if (!uploaded) throw new Error("Couldn't upload announcement media.");
           mediaUrl = uploaded;
           mediaKind = nextFile.type.startsWith("video/")
@@ -458,6 +468,7 @@ export default function BoardDropEditModal() {
         );
 
         setToast("Announcement updated ✓");
+        setUploadProgress(null);
         close();
         return;
       }
@@ -471,7 +482,10 @@ export default function BoardDropEditModal() {
         fileSize: drop.fileSize,
       };
       if (nextFile) {
-        const up = await uploadDropMedia(nextFile, drop.id);
+        const up = await uploadDropMedia(nextFile, drop.id, (progress) => {
+          setUploadProgress(progress);
+          onProgress?.(progress);
+        });
         if (up) {
           media = {
             bucket: up.bucket,
@@ -555,9 +569,11 @@ export default function BoardDropEditModal() {
       }
 
       setToast("Drop updated ✓");
+      setUploadProgress(null);
       close();
     } catch (err) {
       setToast(err instanceof Error ? err.message : "Couldn't update drop.");
+      setUploadProgress(null);
       setSaving(false);
     }
   }
@@ -699,6 +715,11 @@ export default function BoardDropEditModal() {
             </div>
 
             <div className="bde-actions">
+              {uploadProgress ? (
+                <div style={{ flex: "1 1 100%", marginBottom: 8 }}>
+                  <BoardUploadProgressBar progress={uploadProgress} title="Uploading" />
+                </div>
+              ) : null}
               <button
                 type="button"
                 className="bde-cancel"
@@ -737,12 +758,13 @@ export default function BoardDropEditModal() {
           setCustomizations(next);
           studioCustomizationsRef.current = next;
         }}
-        onComplete={async (captured) => {
+        onComplete={async (captured, _source, onProgress) => {
           setPendingFile(captured);
           try {
-            await save(captured);
+            await save(captured, onProgress);
           } finally {
             setStudioMode(null);
+            setUploadProgress(null);
           }
         }}
         onClose={() => setStudioMode(null)}
@@ -915,6 +937,7 @@ export default function BoardDropEditModal() {
         }
         .bde-actions {
           display: flex;
+          flex-wrap: wrap;
           gap: 10px;
           padding: 14px 18px;
           border-top: 1px solid rgba(0, 0, 0, 0.06);

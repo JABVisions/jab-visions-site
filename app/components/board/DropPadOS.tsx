@@ -12,6 +12,8 @@ import DropPadSpatialWorld, {
 } from "@/app/components/board/DropPadSpatialWorld";
 import ActivityBadge from "@/app/components/board/activity/ActivityBadge";
 import LazyDropStudioStage from "@/app/components/board/LazyDropStudioStage";
+import BoardUploadProgressBar from "@/app/components/board/BoardUploadProgressBar";
+import type { BoardUploadProgress, BoardUploadProgressHandler } from "@/lib/board/uploadProgress";
 import VoiceDropSoundboard from "@/app/components/board/VoiceDropSoundboard";
 import type { DropCustomization } from "@/lib/board/dropCustomizations";
 import { descriptDocToFile, type DescriptDoc } from "@/lib/board/descriptDocs";
@@ -502,29 +504,22 @@ async function deleteAllAssetsFromSupabase(sb: ReturnType<typeof supabaseBrowser
 }
 
 async function uploadMediaToSupabaseStorage(
-  sb: ReturnType<typeof supabaseBrowser>,
   userId: string,
-  file: File
+  file: File,
+  onProgress?: BoardUploadProgressHandler
 ): Promise<{ ok: true; publicUrl: string } | { ok: false }> {
-  const safeName = file.name.replace(/[^\w.\-]+/g, "_");
-  const path = `${userId}/${Date.now()}_${safeName}`;
-
-  const { error: upErr } = await withTimeout(
-    sb.storage.from("board-media").upload(path, file, {
-      cacheControl: "3600",
-      upsert: false,
-      contentType: file.type,
-    }),
-    12000
-  ).catch(() => ({ error: new Error("upload_timeout") }));
-
-  if (upErr) return { ok: false };
-
-  const { data } = sb.storage.from("board-media").getPublicUrl(path);
-  const publicUrl = data?.publicUrl ?? "";
-  if (!publicUrl) return { ok: false };
-
-  return { ok: true, publicUrl };
+  try {
+    const { uploadBoardMediaFile } = await import("@/lib/board/boardMediaUpload");
+    const uploaded = await uploadBoardMediaFile(file, {
+      folder: userId,
+      onProgress,
+    });
+    const publicUrl = uploaded.signedUrl || uploaded.publicUrl;
+    if (!publicUrl) return { ok: false };
+    return { ok: true, publicUrl };
+  } catch {
+    return { ok: false };
+  }
 }
 
 /* -------------------------------------------------------------------------- */
@@ -1232,6 +1227,7 @@ export default function DropPadOS({
   const [dropDestination, setDropDestination] = useState<DropDestination>("assets");
   const [dropStudioOpen, setDropStudioOpen] = useState(false);
   const [dropStudioCustomizations, setDropStudioCustomizations] = useState<DropCustomization>({});
+  const [uploadProgress, setUploadProgress] = useState<BoardUploadProgress | null>(null);
   const [sentDropReceipt, setSentDropReceipt] = useState<SentDropReceipt | null>(null);
   const [viewingAsset, setViewingAsset] = useState<AssetItem | null>(null);
   const [syncing, setSyncing] = useState(false);
@@ -1723,10 +1719,13 @@ export default function DropPadOS({
     jumpToDestination(destination);
   };
 
-  const saveDropStudioFile = async (file: File) => {
+  const saveDropStudioFile = async (
+    file: File,
+    onProgress?: BoardUploadProgressHandler
+  ) => {
     let mediaUrl = "";
     if (userId) {
-      const uploaded = await uploadMediaToSupabaseStorage(sb, userId, file);
+      const uploaded = await uploadMediaToSupabaseStorage(userId, file, onProgress);
       if (uploaded.ok) mediaUrl = uploaded.publicUrl;
     }
     if (!mediaUrl && file.size < 4_000_000) {
@@ -1907,7 +1906,9 @@ export default function DropPadOS({
       };
 
       if (userId) {
-        const uploaded = await uploadMediaToSupabaseStorage(sb, userId, f);
+        setUploadProgress(null);
+        const uploaded = await uploadMediaToSupabaseStorage(userId, f, setUploadProgress);
+        setUploadProgress(null);
         if (!uploaded.ok) {
           await placeLocalMedia();
           return;
@@ -2548,6 +2549,12 @@ export default function DropPadOS({
                           </div>
                         )}
 
+                        {uploadProgress ? (
+                          <div className="mt-4">
+                            <BoardUploadProgressBar progress={uploadProgress} title="Uploading" />
+                          </div>
+                        ) : null}
+
                         {modal.error ? (
                           <div className="mt-4 rounded-2xl border border-red-400/20 bg-red-500/10 p-3 text-sm text-red-200/90">
                             {modal.error}
@@ -2734,8 +2741,8 @@ export default function DropPadOS({
         descriptDestination="doc"
         value={dropStudioCustomizations}
         onChange={setDropStudioCustomizations}
-        onComplete={(file) => {
-          return saveDropStudioFile(file);
+        onComplete={(file, _source, onProgress) => {
+          return saveDropStudioFile(file, onProgress);
         }}
         onDescriptComplete={(doc: DescriptDoc) => saveDropStudioFile(descriptDocToFile(doc))}
         onLinkComplete={async (link) => {
