@@ -5,6 +5,7 @@ import {
   isStoredNotebookProject,
   notebookSourceForProjectRecord,
 } from "./isProjectNotebookDrop";
+import { profileBoardDropFromProject } from "./projectProfileDrop";
 
 function assert(condition: unknown, message: string) {
   if (!condition) {
@@ -223,6 +224,22 @@ assert(
     meta: { dropType: "project", cardStyle: "project_drop" },
   }),
   "remote Project Drop activities without a source stamp should still count"
+);
+
+assert(
+  isExplicitProjectDropRecord(
+    profileBoardDropFromProject({
+      id: "project_zoe",
+      title: "zoe audition",
+      logline: "Casting sides for Zoe",
+      projectType: "Feature Film",
+      status: "casting",
+      location: "Atlanta",
+      startDate: "",
+      contactName: "Johnandy",
+    })
+  ),
+  "profile Project rows built from notebook rooms should count as notebook drops"
 );
 
 console.log("isProjectNotebookDrop tests passed");

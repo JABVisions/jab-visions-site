@@ -6,7 +6,7 @@ import {
   pickProjectHostName,
   persistableImageUrl,
 } from "@/lib/board/projectCover";
-import { getSupabaseAnonKey, getSupabasePublicUrl } from "@/lib/supabase/config";
+import { profileBoardDropFromProject } from "@/lib/board/projectProfileDrop";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -185,7 +185,7 @@ export async function GET() {
     const { data: authData } = await supabase.auth.getUser();
     const viewerId = authData?.user?.id ?? null;
 
-    const [activityRes, profileRes, assetRes] = await Promise.all([
+    const [activityRes, profileRes, assetRes, viewerRes] = await Promise.all([
     supabase
       .from("board_activity")
       .select("*")
@@ -200,11 +200,21 @@ export async function GET() {
       .select("id, user_id, kind, title, description, payload, created_at")
       .order("created_at", { ascending: false })
       .limit(200),
+    viewerId
+      ? supabase
+          .from("profiles")
+          .select("id, username, display_name, board_style")
+          .eq("id", viewerId)
+          .maybeSingle()
+      : Promise.resolve({ data: null }),
   ]);
 
   const activityRows = Array.isArray(activityRes.data) ? activityRes.data : [];
   const profileRows = Array.isArray(profileRes.data) ? profileRes.data : [];
   const assetRows = Array.isArray(assetRes.data) ? assetRes.data : [];
+  if (viewerRes.data && !profileRows.some((profile) => String(profile.id) === String(viewerId))) {
+    profileRows.unshift(viewerRes.data);
+  }
 
   const profileById = new Map(
     profileRows.map((profile) => [String(profile.id), profile])
@@ -292,5 +302,72 @@ export async function GET() {
   } catch (error) {
     console.error("[board/projects] failed to load project notebook", error);
     return Response.json({ ok: false, activities: [], message: "Could not load projects." }, { status: 200 });
+  }
+}
+
+export async function POST(request: Request) {
+  try {
+    const supabase = supabaseServer();
+    const { data: authData } = await supabase.auth.getUser();
+    const userId = authData?.user?.id ?? null;
+    if (!userId) {
+      return Response.json({ ok: false, saved: 0, message: "Sign in to save project drops." }, { status: 401 });
+    }
+
+    const payload = await request.json().catch(() => null);
+    const incoming = Array.isArray(payload?.projects)
+      ? payload.projects
+      : payload?.project
+        ? [payload.project]
+        : [];
+    const projects = incoming.filter(
+      (project: any) =>
+        project &&
+        typeof project === "object" &&
+        String(project.id ?? "").trim() &&
+        String(project.title ?? "").trim()
+    );
+    if (!projects.length) {
+      return Response.json({ ok: true, saved: 0 });
+    }
+
+    const { data: profile, error: profileError } = await supabase
+      .from("profiles")
+      .select("id, username, display_name, board_style")
+      .eq("id", userId)
+      .maybeSingle();
+    if (profileError) throw profileError;
+
+    const currentStyle = asRecord(profile?.board_style);
+    const deleted = new Set(
+      (Array.isArray(currentStyle.boardDropsDeleted) ? currentStyle.boardDropsDeleted : []).map(String)
+    );
+    let drops = Array.isArray(currentStyle.boardDrops) ? [...currentStyle.boardDrops] : [];
+
+    for (const project of projects) {
+      const row = profileBoardDropFromProject(project, {
+        id: userId,
+        username: profile?.username,
+        display_name: profile?.display_name,
+      });
+      if (deleted.has(row.id)) continue;
+      drops = [row, ...drops.filter((item: any) => String(item?.id ?? "") !== row.id)];
+    }
+
+    const { error: updateError } = await supabase
+      .from("profiles")
+      .update({
+        board_style: {
+          ...currentStyle,
+          boardDrops: drops.slice(0, 120),
+        },
+      })
+      .eq("id", userId);
+    if (updateError) throw updateError;
+
+    return Response.json({ ok: true, saved: projects.length });
+  } catch (error) {
+    console.error("[board/projects] failed to save project drops", error);
+    return Response.json({ ok: false, saved: 0, message: "Could not save project drops." }, { status: 200 });
   }
 }
