@@ -55,9 +55,12 @@ import { boardProjectPatchFromDrop } from "@/lib/board/projectDropEdit";
 import {
   applyProjectRoomActivitiesToProjects,
   buildProjectRoomDrop,
+  claimProjectRoomStudioSave,
   commitProjectRoomDrop,
   projectRoomMediaKindForFile,
   projectRoomPostIsVideo,
+  projectRoomStudioSaveKey,
+  releaseProjectRoomStudioSave,
   viewerCanPostToProjectRoom,
 } from "@/lib/board/projectRoomDrop";
 
@@ -436,14 +439,7 @@ export default function ProjectCenter() {
       ),
       projectsRef.current
     );
-    const resolvedIds = new Set(resolved.map((project) => project.id));
-    if (
-      localProjectDrops.length > 0 ||
-      next.length !== resolved.length ||
-      next.some((project) => !resolvedIds.has(project.id))
-    ) {
-      writeBoardProjects(next);
-    }
+    writeBoardProjects(next);
     projectsRef.current = next;
     setProjects(next);
     setDropPadProjectDrops(localProjectDrops);
@@ -1031,6 +1027,12 @@ export default function ProjectCenter() {
     file: File,
     onProgress?: BoardUploadProgressHandler
   ) {
+    const saveKey = projectRoomStudioSaveKey(project.id, file);
+    if (!claimProjectRoomStudioSave(saveKey)) {
+      onProgress?.(null);
+      return;
+    }
+
     const identity = readCurrentBoardIdentity();
     const viewer = {
       id: currentUserId || identity.id,
@@ -1040,6 +1042,7 @@ export default function ProjectCenter() {
     if (
       !viewerCanPostToProjectRoom(project, viewer, { viewing: true })
     ) {
+      releaseProjectRoomStudioSave(saveKey, false);
       setStudioMessage("Join this project room to add a Drop.");
       window.setTimeout(() => setStudioMessage(null), 2200);
       throw new Error("Join this project room to add a Drop.");
@@ -1047,6 +1050,7 @@ export default function ProjectCenter() {
 
     const mediaKind = projectRoomMediaKindForFile(file);
     if (!mediaKind) {
+      releaseProjectRoomStudioSave(saveKey, false);
       setStudioMessage("Drop Studio can add a photo, video, or art drop to this room.");
       window.setTimeout(() => setStudioMessage(null), 2200);
       throw new Error("Drop Studio can add a photo, video, or art drop to this room.");
@@ -1055,11 +1059,28 @@ export default function ProjectCenter() {
     setStudioMessage(mediaKind === "video" ? "Uploading video…" : "Uploading drop…");
     try {
       const uploaded = await uploadBoardMediaFile(file, { folder: "project-media", onProgress });
-      const mediaUrl = uploaded.signedUrl || uploaded.publicUrl;
+      onProgress?.(null);
+      const mediaUrl = uploaded.publicUrl || uploaded.signedUrl;
       if (!mediaUrl) throw new Error("Upload finished but Board could not create a playback URL.");
 
       const liveProject =
         projectsRef.current.find((item) => item.id === project.id) || project;
+      const alreadyPosted = (liveProject.roomPosts ?? []).some(
+        (post) =>
+          post.storagePath === uploaded.storagePath ||
+          post.mediaUrl === mediaUrl
+      );
+      if (alreadyPosted) {
+        releaseProjectRoomStudioSave(saveKey, true);
+        setStudioMessage(
+          mediaKind === "video"
+            ? "Video saved to this project room."
+            : "Drop saved to this project room."
+        );
+        window.setTimeout(() => setStudioMessage(null), 2800);
+        return;
+      }
+
       const built = buildProjectRoomDrop({
         project: liveProject,
         media: {
@@ -1112,6 +1133,7 @@ export default function ProjectCenter() {
           : "Drop saved to this project room."
       );
       window.setTimeout(() => setStudioMessage(null), 2800);
+      releaseProjectRoomStudioSave(saveKey, true);
 
       void (async () => {
         try {
@@ -1141,6 +1163,8 @@ export default function ProjectCenter() {
         }
       })();
     } catch (error) {
+      releaseProjectRoomStudioSave(saveKey, false);
+      onProgress?.(null);
       const message = explainBoardMediaUploadError(error, file);
       if (
         error instanceof Error &&

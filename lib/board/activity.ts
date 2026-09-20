@@ -122,6 +122,17 @@ export function setLocalActivity(items: BoardActivity[]) {
 
 export function appendLocalActivity(item: BoardActivity) {
   const prev = getLocalActivity();
+  if (prev.some((existing) => existing.id === item.id)) return;
+  const dropId = String(item.meta?.dropId ?? "").trim();
+  const origin = String(item.meta?.origin ?? "").trim().toLowerCase();
+  if (
+    dropId &&
+    (origin === "project_room" ||
+      String(item.meta?.cardStyle ?? "").trim().toLowerCase() === "project_room_drop") &&
+    prev.some((existing) => String(existing.meta?.dropId ?? "").trim() === dropId)
+  ) {
+    return;
+  }
   const next = [item, ...prev].slice(0, MAX_LOCAL);
   setLocalActivity(next);
 }
