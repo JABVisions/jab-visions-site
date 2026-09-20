@@ -1,5 +1,4 @@
-import { cookies } from "next/headers";
-import { createServerClient } from "@supabase/ssr";
+import { NextRequest, NextResponse } from "next/server";
 import type { BoardActivity } from "@/lib/board/activity";
 import { isExplicitProjectDropRecord } from "@/lib/board/isProjectNotebookDrop";
 import {
@@ -7,26 +6,45 @@ import {
   persistableImageUrl,
 } from "@/lib/board/projectCover";
 import { profileBoardDropFromProject } from "@/lib/board/projectProfileDrop";
-import { getSupabaseAnonKey, getSupabasePublicUrl } from "@/lib/supabase/config";
+import { createSupabaseRouteClient } from "@/lib/supabase/routeClient";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-function supabaseServer() {
-  const cookieStore = cookies();
-  return createServerClient(getSupabasePublicUrl(), getSupabaseAnonKey(), {
-    cookies: {
-      getAll: () => cookieStore.getAll(),
-      setAll: (cs) => {
-        try {
-          cs.forEach(({ name, value, options }) => cookieStore.set(name, value, options));
-        } catch {
-          // GET handlers may not persist refreshed auth cookies.
-        }
-      },
-    },
-  });
+const AUTH_TIMEOUT_MS = 2500;
+
+async function resolveRouteUserId(supabase: {
+  auth: {
+    getSession: () => Promise<{ data: { session: { user?: { id?: string } | null } | null } }>;
+    getUser: () => Promise<{ data: { user: { id?: string } | null } }>;
+  };
+}) {
+  try {
+    const sessionResult = await Promise.race([
+      supabase.auth.getSession(),
+      new Promise<{ data: { session: null } }>((resolve) =>
+        setTimeout(() => resolve({ data: { session: null } }), AUTH_TIMEOUT_MS)
+      ),
+    ]);
+    const fromSession = sessionResult?.data?.session?.user?.id ?? null;
+    if (fromSession) return String(fromSession);
+  } catch {
+    // Fall through to getUser.
+  }
+
+  try {
+    const userResult = await Promise.race([
+      supabase.auth.getUser(),
+      new Promise<{ data: { user: null } }>((resolve) =>
+        setTimeout(() => resolve({ data: { user: null } }), AUTH_TIMEOUT_MS)
+      ),
+    ]);
+    const fromUser = userResult?.data?.user?.id ?? null;
+    return fromUser ? String(fromUser) : null;
+  } catch {
+    return null;
+  }
 }
 
 function asRecord(value: unknown): Record<string, any> {
@@ -180,42 +198,42 @@ function activityFromAsset(row: any): BoardActivity | null {
   };
 }
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
-    const supabase = supabaseServer();
-    const { data: authData } = await supabase.auth.getUser();
-    const viewerId = authData?.user?.id ?? null;
+    const { supabase, applyCookies } = createSupabaseRouteClient(request);
 
-    const [activityRes, profileRes, assetRes, viewerRes] = await Promise.all([
-    supabase
-      .from("board_activity")
-      .select("*")
-      .order("created_at", { ascending: false })
-      .limit(400),
-    supabase
-      .from("profiles")
-      .select("id, username, display_name, board_style")
-      .limit(500),
-    supabase
-      .from("board_assets")
-      .select("id, user_id, kind, title, description, payload, created_at")
-      .order("created_at", { ascending: false })
-      .limit(200),
-    viewerId
-      ? supabase
+    const [viewerId, activityRes, profileRes, assetRes] = await Promise.all([
+      resolveRouteUserId(supabase),
+      supabase
+        .from("board_activity")
+        .select("*")
+        .order("created_at", { ascending: false })
+        .limit(400),
+      supabase
+        .from("profiles")
+        .select("id, username, display_name, board_style")
+        .limit(500),
+      supabase
+        .from("board_assets")
+        .select("id, user_id, kind, title, description, payload, created_at")
+        .order("created_at", { ascending: false })
+        .limit(200),
+    ]);
+
+    const viewerRes = viewerId
+      ? await supabase
           .from("profiles")
           .select("id, username, display_name, board_style")
           .eq("id", viewerId)
           .maybeSingle()
-      : Promise.resolve({ data: null }),
-  ]);
+      : { data: null };
 
-  const activityRows = Array.isArray(activityRes.data) ? activityRes.data : [];
-  const profileRows = Array.isArray(profileRes.data) ? profileRes.data : [];
-  const assetRows = Array.isArray(assetRes.data) ? assetRes.data : [];
-  if (viewerRes.data && !profileRows.some((profile) => String(profile.id) === String(viewerId))) {
-    profileRows.unshift(viewerRes.data);
-  }
+    const activityRows = Array.isArray(activityRes.data) ? activityRes.data : [];
+    const profileRows = Array.isArray(profileRes.data) ? profileRes.data : [];
+    const assetRows = Array.isArray(assetRes.data) ? assetRes.data : [];
+    if (viewerRes.data && !profileRows.some((profile) => String(profile.id) === String(viewerId))) {
+      profileRows.unshift(viewerRes.data);
+    }
 
   const profileById = new Map(
     profileRows.map((profile) => [String(profile.id), profile])
@@ -299,20 +317,24 @@ export async function GET() {
     a.created_at < b.created_at ? 1 : -1
   );
 
-  return Response.json({ ok: true, activities });
+    return applyCookies(NextResponse.json({ ok: true, activities }));
   } catch (error) {
     console.error("[board/projects] failed to load project notebook", error);
-    return Response.json({ ok: false, activities: [], message: "Could not load projects." }, { status: 200 });
+    return NextResponse.json({ ok: false, activities: [], message: "Could not load projects." }, { status: 200 });
   }
 }
 
-export async function POST(request: Request) {
+export async function POST(request: NextRequest) {
   try {
-    const supabase = supabaseServer();
-    const { data: authData } = await supabase.auth.getUser();
-    const userId = authData?.user?.id ?? null;
+    const { supabase, applyCookies } = createSupabaseRouteClient(request);
+    const userId = await resolveRouteUserId(supabase);
     if (!userId) {
-      return Response.json({ ok: false, saved: 0, message: "Sign in to save project drops." }, { status: 401 });
+      return applyCookies(
+        NextResponse.json(
+          { ok: false, saved: 0, message: "Sign in to save project drops." },
+          { status: 401 }
+        )
+      );
     }
 
     const payload = await request.json().catch(() => null);
@@ -329,7 +351,7 @@ export async function POST(request: Request) {
         String(project.title ?? "").trim()
     );
     if (!projects.length) {
-      return Response.json({ ok: true, saved: 0 });
+      return applyCookies(NextResponse.json({ ok: true, saved: 0 }));
     }
 
     const { data: profile, error: profileError } = await supabase
@@ -355,7 +377,7 @@ export async function POST(request: Request) {
       drops = [row, ...drops.filter((item: any) => String(item?.id ?? "") !== row.id)];
     }
 
-    const { error: updateError } = await supabase
+    const { data: updated, error: updateError } = await supabase
       .from("profiles")
       .update({
         board_style: {
@@ -363,12 +385,15 @@ export async function POST(request: Request) {
           boardDrops: drops.slice(0, 120),
         },
       })
-      .eq("id", userId);
+      .eq("id", userId)
+      .select("id")
+      .maybeSingle();
     if (updateError) throw updateError;
+    if (!updated?.id) throw new Error("Project Drop save did not update a profile row.");
 
-    return Response.json({ ok: true, saved: projects.length });
+    return applyCookies(NextResponse.json({ ok: true, saved: projects.length }));
   } catch (error) {
     console.error("[board/projects] failed to save project drops", error);
-    return Response.json({ ok: false, saved: 0, message: "Could not save project drops." }, { status: 200 });
+    return NextResponse.json({ ok: false, saved: 0, message: "Could not save project drops." }, { status: 200 });
   }
 }

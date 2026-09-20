@@ -19,6 +19,8 @@ import {
   createBoardProject,
   mergeProjectRecord,
   mergeProjectsIntoNotebook,
+  notebookProjectsOwnedByViewer,
+  persistProjectListToAccount,
   projectsFromProfileBoardDrops,
   syncRemoteProjectActivitiesToStorage,
   syncResolvedProjectsToStorage,
@@ -29,7 +31,7 @@ import {
   writeBoardProjects,
 } from "@/lib/board/projects";
 import ProjectCoverImage from "@/app/components/board/projects/ProjectCoverImage";
-import { DROP_PAD_PROJECT_DROPS_STORAGE_KEYS, isStoredNotebookProject } from "@/lib/board/isProjectNotebookDrop";
+import { DROP_PAD_PROJECT_DROPS_STORAGE_KEYS } from "@/lib/board/isProjectNotebookDrop";
 import {
   persistableImageUrl,
   persistableProjectCover,
@@ -39,7 +41,7 @@ import {
   resolveProjectLocation,
   resolveProjectStartDate,
 } from "@/lib/board/projectCover";
-import { persistLocalProjectsViaApi } from "@/lib/board/projectProfileDrop";
+import { getCurrentUserId, loadAllLocalDrops } from "@/lib/board/boardDropEditStore";
 import { pushDrop, readDrops, writeDrops } from "@/lib/board/drops/storage";
 import { readCurrentBoardIdentity } from "@/lib/board/currentProfile";
 import { emitBoardDropSignal } from "@/lib/board/dropSignals";
@@ -368,8 +370,22 @@ export default function ProjectCenter() {
       merged.set(project.id, existing ? mergeProjectRecord(existing, project) : project);
     }
 
+    for (const project of projectsFromProfileBoardDrops({
+      board_style: { boardDrops: loadAllLocalDrops().items },
+    })) {
+      const existing = merged.get(project.id);
+      merged.set(project.id, existing ? mergeProjectRecord(existing, project) : project);
+    }
+
     const next = Array.from(merged.values()).sort((a, b) => b.updatedAt - a.updatedAt);
-    if (localProjectDrops.length > 0) writeBoardProjects(next);
+    const resolvedIds = new Set(resolved.map((project) => project.id));
+    if (
+      localProjectDrops.length > 0 ||
+      next.length !== resolved.length ||
+      next.some((project) => !resolvedIds.has(project.id))
+    ) {
+      writeBoardProjects(next);
+    }
     setProjects(next);
     setDropPadProjectDrops(localProjectDrops);
   }
@@ -397,33 +413,26 @@ export default function ProjectCenter() {
     }
   }
 
-  async function syncLocalProjectsToProfile(items: BoardProject[]) {
-    if (!items.length) return;
-    await persistLocalProjectsViaApi(items);
+  async function syncLocalProjectsToProfile(items: BoardProject[], userId?: string | null) {
+    const owned = notebookProjectsOwnedByViewer(items, userId ?? currentUserId);
+    if (!owned.length) return;
+    await persistProjectListToAccount(owned);
   }
 
   useEffect(() => {
     let cancelled = false;
+    const sb = supabaseBrowser();
 
-    async function configureStorage() {
+    async function boot(userId: string | null) {
+      if (cancelled) return;
+      setCurrentUserId(userId);
       try {
-        const sb = supabaseBrowser();
-        const auth = await Promise.race([
-          sb.auth.getUser(),
-          new Promise<{ data: { user: null } }>((resolve) =>
-            window.setTimeout(() => resolve({ data: { user: null } }), 3_500)
-          ),
-        ]);
-        const userId = auth.data.user?.id ?? null;
-        setCurrentUserId(userId);
-        let username = "";
         if (userId) {
           const { data: profile } = await sb
             .from("profiles")
             .select("username, display_name, board_style")
             .eq("id", userId)
             .maybeSingle();
-          username = String(profile?.username || "").toLowerCase();
           const style =
             profile?.board_style && typeof profile.board_style === "object"
               ? (profile.board_style as Record<string, any>)
@@ -435,6 +444,7 @@ export default function ProjectCenter() {
               profile?.username
             )
           );
+          configureBoardProjectsStorage(userId, true);
           const fromProfile = projectsFromProfileBoardDrops({
             id: userId,
             username: profile?.username,
@@ -444,29 +454,43 @@ export default function ProjectCenter() {
           if (fromProfile.length > 0) {
             mergeProjectsIntoNotebook(fromProfile);
           }
+        } else {
+          configureBoardProjectsStorage(null, true);
         }
-        configureBoardProjectsStorage(userId, username === "johnandy");
       } catch {
+        if (cancelled) return;
         setCurrentUserId(null);
         configureBoardProjectsStorage(null, true);
-      } finally {
-        if (!cancelled) setStorageReady(true);
       }
+
+      if (cancelled) return;
+      loadProjects();
+      const local = syncResolvedProjectsToStorage();
+      if (local.length > 0) {
+        await syncLocalProjectsToProfile(local, userId);
+      }
+      if (cancelled) return;
+      await loadRemoteProjects();
+      if (!cancelled) setStorageReady(true);
     }
 
     loadDropPadProjectDrops();
     loadProjects();
-    void (async () => {
-      const local = syncResolvedProjectsToStorage();
-      if (local.length > 0) {
-        await syncLocalProjectsToProfile(local);
-      }
-      await loadRemoteProjects();
-    })();
-    void configureStorage();
+    void getCurrentUserId().then((userId) => {
+      if (userId) void boot(userId);
+    });
+
+    const { data: sub } = sb.auth.onAuthStateChange((_event, session) => {
+      void boot(session?.user?.id ?? null);
+    });
+    const readyTimer = window.setTimeout(() => {
+      if (!cancelled) setStorageReady(true);
+    }, 4000);
 
     return () => {
       cancelled = true;
+      window.clearTimeout(readyTimer);
+      sub?.subscription?.unsubscribe?.();
     };
   }, []);
 
@@ -780,7 +804,7 @@ export default function ProjectCenter() {
 
     void (async () => {
       try {
-        await persistLocalProjectsViaApi([
+        await persistProjectListToAccount([
           {
             ...next,
             authorName,
@@ -1009,10 +1033,7 @@ export default function ProjectCenter() {
   };
 
   const projectTiles = useMemo(
-    () =>
-      [...projects]
-        .filter((project) => isStoredNotebookProject(project))
-        .sort((a, b) => b.updatedAt - a.updatedAt),
+    () => [...projects].sort((a, b) => b.updatedAt - a.updatedAt),
     [projects]
   );
 
@@ -1020,8 +1041,8 @@ export default function ProjectCenter() {
 
   if (!activeProject) {
     return (
-      <div className="w-full">
-        <TileFrame className="mb-5">
+      <div className="w-full grid gap-5">
+        <TileFrame className="order-2">
           <SectionHeader
             eyebrow="THOUGHT DROP"
             title="Quick Work Thought"
@@ -1082,7 +1103,7 @@ export default function ProjectCenter() {
           </div>
         </TileFrame>
 
-        <TileFrame>
+        <TileFrame className="order-1">
           <SectionHeader
             eyebrow="PROJECTS"
             title="Project Notebook"

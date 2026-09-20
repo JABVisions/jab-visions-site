@@ -21,7 +21,9 @@ import {
   resolveProjectStartDate,
   type ProjectCoverMedia,
 } from "@/lib/board/projectCover";
-import { profileBoardDropFromProject } from "@/lib/board/projectProfileDrop";
+import { profileBoardDropFromProject, persistLocalProjectsViaApi } from "@/lib/board/projectProfileDrop";
+import { getCurrentUserId } from "@/lib/board/boardDropEditStore";
+import { supabaseBrowser } from "@/lib/supabase/browser";
 
 export const BOARD_PROJECTS_STORAGE_KEY = "jab_board_projects_v2";
 export const BOARD_PROJECTS_UPDATED_EVENT = "board:projects:updated";
@@ -821,21 +823,33 @@ export function syncResolvedProjectsToStorage() {
   return resolved;
 }
 
+async function fetchRemoteProjectActivities(timeoutMs = 8000): Promise<BoardActivity[]> {
+  if (typeof fetch !== "function") return [];
+  const controller = typeof AbortController === "function" ? new AbortController() : null;
+  const timer = controller
+    ? setTimeout(() => controller.abort(), timeoutMs)
+    : null;
+  try {
+    const response = await fetch("/api/board/projects", {
+      cache: "no-store",
+      credentials: "include",
+      signal: controller?.signal,
+    });
+    if (!response.ok) return [];
+    const raw = await response.text();
+    if (!raw.trim()) return [];
+    const payload = JSON.parse(raw);
+    return Array.isArray(payload?.activities) ? payload.activities : [];
+  } catch {
+    return [];
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 export async function syncRemoteProjectActivitiesToStorage(sb: any) {
   try {
-    let remoteActivities: BoardActivity[] = [];
-    if (typeof fetch === "function") {
-      const response = await fetch("/api/board/projects", { cache: "no-store" });
-      if (response.ok) {
-        const raw = await response.text();
-        if (raw.trim()) {
-          const payload = JSON.parse(raw);
-          if (Array.isArray(payload?.activities)) {
-            remoteActivities = payload.activities;
-          }
-        }
-      }
-    }
+    let remoteActivities = await fetchRemoteProjectActivities();
 
     if (!remoteActivities.length) {
       const { data, error } = await sb
@@ -881,7 +895,12 @@ export function writeBoardProjects(items: BoardProject[]) {
     .filter(
       (project) => !isSeededOrDemoProject(project) && isStoredNotebookProject(project)
     )
-    .map(toPersistedProject);
+    .map((project) =>
+      toPersistedProject({
+        ...project,
+        source: project.source || notebookSourceForProjectRecord(project),
+      })
+    );
   try {
     localStorage.setItem(key, JSON.stringify(realItems));
     if (key !== BOARD_PROJECTS_STORAGE_KEY) {
@@ -1072,6 +1091,15 @@ export async function persistProjectDropToProfile(
   userId: string,
   project: BoardProject
 ): Promise<void> {
+  await persistProjectListToProfile(sb, userId, [project]);
+}
+
+export async function persistProjectListToProfile(
+  sb: any,
+  userId: string,
+  projects: BoardProject[]
+): Promise<void> {
+  if (!projects.length) return;
   const { data: profile } = await sb
     .from("profiles")
     .select("board_style, display_name, username")
@@ -1081,22 +1109,53 @@ export async function persistProjectDropToProfile(
     profile?.board_style && typeof profile.board_style === "object"
       ? profile.board_style
       : {};
-  const existing = Array.isArray(currentStyle.boardDrops) ? currentStyle.boardDrops : [];
-  const row = profileBoardDropFromProject(project, {
-    id: userId,
-    username: profile?.username,
-    display_name: profile?.display_name,
-  });
-  const nextDrops = [row, ...existing.filter((item: any) => String(item?.id ?? "") !== row.id)];
-  await sb
+  let drops = Array.isArray(currentStyle.boardDrops) ? [...currentStyle.boardDrops] : [];
+  for (const project of projects) {
+    const row = profileBoardDropFromProject(project, {
+      id: userId,
+      username: profile?.username,
+      display_name: profile?.display_name,
+    });
+    drops = [row, ...drops.filter((item: any) => String(item?.id ?? "") !== row.id)];
+  }
+  const { data: updated, error } = await sb
     .from("profiles")
     .update({
       board_style: {
         ...currentStyle,
-        boardDrops: nextDrops,
+        boardDrops: drops.slice(0, 120),
       },
     })
-    .eq("id", userId);
+    .eq("id", userId)
+    .select("id")
+    .maybeSingle();
+  if (error) throw error;
+  if (!updated?.id) throw new Error("Project Drop save did not update a profile row.");
+}
+
+export function notebookProjectsOwnedByViewer(
+  projects: BoardProject[],
+  userId: string | null
+) {
+  if (!userId) return projects;
+  return projects.filter((project) => {
+    const authorId = String(project.authorId ?? "").trim();
+    return !authorId || authorId === userId;
+  });
+}
+
+export async function persistProjectListToAccount(projects: BoardProject[]): Promise<boolean> {
+  if (!projects.length) return false;
+  try {
+    const userId = await getCurrentUserId();
+    if (userId) {
+      await persistProjectListToProfile(supabaseBrowser(), userId, projects);
+      return true;
+    }
+  } catch {
+    // Fall through to the cookie-based API write.
+  }
+  return persistLocalProjectsViaApi(projects);
 }
 
 export function statusLabel(status: ProjectStatus) {
