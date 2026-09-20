@@ -557,8 +557,7 @@ export async function createActivity(
   const table = "board_activity";
 
   try {
-    // NOTE: if your table requires `scope`, add it here too
-    const { data, error } = await sb
+    const insert = sb
       .from(table)
       .insert({
         scope: "global", // ✅ required in your screenshot
@@ -572,6 +571,16 @@ export async function createActivity(
       })
       .select("*")
       .single();
+
+    const { data, error } = await Promise.race([
+      insert,
+      new Promise<{ data: null; error: Error }>((resolve) =>
+        setTimeout(
+          () => resolve({ data: null, error: new Error("board_activity insert timed out") }),
+          5_000
+        )
+      ),
+    ]);
 
     if (error) throw error;
 

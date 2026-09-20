@@ -21,6 +21,7 @@ import {
   resolveProjectStartDate,
   type ProjectCoverMedia,
 } from "@/lib/board/projectCover";
+import { profileBoardDropFromProject } from "@/lib/board/projectProfileDrop";
 
 export const BOARD_PROJECTS_STORAGE_KEY = "jab_board_projects_v2";
 export const BOARD_PROJECTS_UPDATED_EVENT = "board:projects:updated";
@@ -860,6 +861,9 @@ export async function syncRemoteProjectActivitiesToStorage(sb: any) {
     const next = Array.from(merged.values())
       .filter((project) => isStoredNotebookProject(project))
       .sort((a, b) => b.updatedAt - a.updatedAt);
+    if (!next.length && stored.length) {
+      return stored;
+    }
     if (projectsNeedPersist(stored, next)) {
       writeBoardProjects(next);
       return next;
@@ -1068,9 +1072,6 @@ export async function persistProjectDropToProfile(
   userId: string,
   project: BoardProject
 ): Promise<void> {
-  const cover = persistableProjectCover(project.media);
-  const coverUrl = persistableImageUrl(cover?.src);
-  const dropId = `project_drop_${project.id}`;
   const { data: profile } = await sb
     .from("profiles")
     .select("board_style, display_name, username")
@@ -1081,59 +1082,12 @@ export async function persistProjectDropToProfile(
       ? profile.board_style
       : {};
   const existing = Array.isArray(currentStyle.boardDrops) ? currentStyle.boardDrops : [];
-  const hostName = pickProjectHostName(
-    project.contactName,
-    project.authorName,
-    profile?.display_name,
-    profile?.username
-  );
-  const row = {
-    id: dropId,
-    type: "Project",
-    title: project.title,
-    createdAt: project.createdAt,
-    updatedAt: Date.now(),
-    description: project.logline,
-    previewImage: coverUrl,
-    imageUrl: coverUrl,
-    mediaUrl: coverUrl,
-    mediaKind: cover?.kind,
-    bucket: cover?.bucket,
-    storagePath: cover?.storagePath,
-    media: cover,
-    location: project.location,
-    startDate: project.startDate,
-    endDate: project.endDate,
-    rolesNeeded: project.rolesNeeded,
-    contactName: hostName || project.contactName,
-    contactEmail: project.contactEmail,
-    projectType: project.projectType,
-    projectStatus: project.status,
-    status: project.status,
-    authorName: hostName || project.authorName,
-    authorId: project.authorId || userId,
-    authorUsername: project.authorUsername || profile?.username,
-    origin: "project_notebook",
-    source: "work_board",
-    meta: {
-      cardStyle: "project_drop",
-      dropType: "project",
-      projectId: project.id,
-      location: project.location,
-      startDate: project.startDate,
-      endDate: project.endDate,
-      rolesNeeded: project.rolesNeeded,
-      contactName: hostName || project.contactName,
-      contactEmail: project.contactEmail,
-      unionStatus: project.unionStatus,
-      compensationType: project.compensationType,
-      source: "work_board",
-      media: cover,
-      bucket: cover?.bucket,
-      storagePath: cover?.storagePath,
-    },
-  };
-  const nextDrops = [row, ...existing.filter((item: any) => String(item?.id ?? "") !== dropId)];
+  const row = profileBoardDropFromProject(project, {
+    id: userId,
+    username: profile?.username,
+    display_name: profile?.display_name,
+  });
+  const nextDrops = [row, ...existing.filter((item: any) => String(item?.id ?? "") !== row.id)];
   await sb
     .from("profiles")
     .update({

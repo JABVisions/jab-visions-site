@@ -19,7 +19,6 @@ import {
   createBoardProject,
   mergeProjectRecord,
   mergeProjectsIntoNotebook,
-  persistProjectDropToProfile,
   projectsFromProfileBoardDrops,
   syncRemoteProjectActivitiesToStorage,
   syncResolvedProjectsToStorage,
@@ -40,6 +39,7 @@ import {
   resolveProjectLocation,
   resolveProjectStartDate,
 } from "@/lib/board/projectCover";
+import { persistLocalProjectsViaApi } from "@/lib/board/projectProfileDrop";
 import { pushDrop, readDrops, writeDrops } from "@/lib/board/drops/storage";
 import { readCurrentBoardIdentity } from "@/lib/board/currentProfile";
 import { emitBoardDropSignal } from "@/lib/board/dropSignals";
@@ -382,10 +382,24 @@ export default function ProjectCenter() {
   async function loadRemoteProjects() {
     try {
       const sb = supabaseBrowser();
-      setProjects(await syncRemoteProjectActivitiesToStorage(sb));
+      const remote = await syncRemoteProjectActivitiesToStorage(sb);
+      setProjects((current) => {
+        if (!remote.length) return current.length ? current : remote;
+        const merged = new Map(current.map((project) => [project.id, project]));
+        for (const project of remote) {
+          const existing = merged.get(project.id);
+          merged.set(project.id, existing ? mergeProjectRecord(existing, project) : project);
+        }
+        return Array.from(merged.values()).sort((a, b) => b.updatedAt - a.updatedAt);
+      });
     } catch {
       loadProjects();
     }
+  }
+
+  async function syncLocalProjectsToProfile(items: BoardProject[]) {
+    if (!items.length) return;
+    await persistLocalProjectsViaApi(items);
   }
 
   useEffect(() => {
@@ -442,7 +456,13 @@ export default function ProjectCenter() {
 
     loadDropPadProjectDrops();
     loadProjects();
-    void loadRemoteProjects();
+    void (async () => {
+      const local = syncResolvedProjectsToStorage();
+      if (local.length > 0) {
+        await syncLocalProjectsToProfile(local);
+      }
+      await loadRemoteProjects();
+    })();
     void configureStorage();
 
     return () => {
@@ -483,7 +503,13 @@ export default function ProjectCenter() {
   useEffect(() => {
     if (!storageReady) return;
     loadProjects();
-    void loadRemoteProjects();
+    void (async () => {
+      const local = syncResolvedProjectsToStorage();
+      if (local.length > 0) {
+        await syncLocalProjectsToProfile(local);
+      }
+      await loadRemoteProjects();
+    })();
 
     const onStorage = (event: StorageEvent) => {
       if (event.key) loadProjects();
@@ -754,34 +780,28 @@ export default function ProjectCenter() {
 
     void (async () => {
       try {
-        const sb = supabaseBrowser();
-        const auth = await Promise.race([
-          sb.auth.getUser(),
-          new Promise<{ data: { user: null } }>((resolve) =>
-            window.setTimeout(() => resolve({ data: { user: null } }), 4_000)
-          ),
+        await persistLocalProjectsViaApi([
+          {
+            ...next,
+            authorName,
+            authorUsername,
+            contactName: authorName,
+          },
         ]);
-        const userId = auth.data.user?.id || currentUserId;
+        const sb = supabaseBrowser();
+        const userId = currentUserId;
         if (!userId) return;
         await Promise.race([
-          (async () => {
-            await createActivity(sb, {
-              user_id: userId,
-              kind: activity.kind,
-              title: activity.title,
-              body: activity.body,
-              href: activity.href,
-              image_url: activity.image_url,
-              meta: activity.meta,
-            });
-            await persistProjectDropToProfile(sb, userId, {
-              ...next,
-              authorName,
-              authorUsername,
-              contactName: authorName,
-            });
-          })(),
-          new Promise<void>((resolve) => window.setTimeout(resolve, 12_000)),
+          createActivity(sb, {
+            user_id: userId,
+            kind: activity.kind,
+            title: activity.title,
+            body: activity.body,
+            href: activity.href,
+            image_url: activity.image_url,
+            meta: activity.meta,
+          }),
+          new Promise<void>((resolve) => window.setTimeout(resolve, 4_000)),
         ]);
       } catch {
         // Keep the local project notebook even if remote activity sync fails.
