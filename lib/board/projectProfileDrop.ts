@@ -123,11 +123,18 @@ function persistableNotebookRoomPosts(
       storagePath: storagePath || undefined,
       dropId: dropId || undefined,
       projectId: post.projectId,
-      mediaUrl: mediaUrl || undefined,
+      mediaUrl: storagePath ? undefined : mediaUrl || undefined,
     });
     if (compact.length >= 80) break;
   }
   return compact;
+}
+
+export function mergeNotebookRoomPosts(
+  base: ProjectProfileDropInput["roomPosts"],
+  incoming: ProjectProfileDropInput["roomPosts"]
+) {
+  return persistableNotebookRoomPosts([...(incoming ?? []), ...(base ?? [])]);
 }
 
 export function profileBoardDropFromProject(

@@ -32,6 +32,8 @@ export const BOARD_MEDIA_UPLOAD_TIMEOUT_MS = 180_000;
 export const BOARD_MEDIA_READ_TIMEOUT_MS = 12_000;
 export const BOARD_MEDIA_SESSION_TIMEOUT_MS = 12_000;
 export const SIGNED_PLAYBACK_TIMEOUT_MS = 4_000;
+/** After a finished PUT, wait longer for Storage to make the object visible. */
+export const SIGNED_PLAYBACK_VERIFY_TIMEOUT_MS = 12_000;
 export const BYTES_COMPLETE_SETTLE_MS = 400;
 export const BYTES_DONE_FINALIZE_MS = 8_000;
 /** Session / signed-URL / XHR must produce a first byte (or a real error) this fast. */
@@ -46,6 +48,8 @@ export type BoardMediaUploadResult = {
   storagePath: string;
   publicUrl: string;
   signedUrl: string;
+  /** HTTP 2xx write or createSignedUrl proved the object exists. */
+  objectVerified?: boolean;
 };
 
 export type BoardMediaUploadOptions = {
@@ -228,6 +232,9 @@ export function explainBoardMediaUploadError(
   ) {
     return "Sign in to upload this video.";
   }
+  if (isSignTimeoutUploadError(error)) {
+    return "This video didn't finish saving to Board storage. Stay on this screen and try again.";
+  }
   if (isMissingObjectUploadError(error) || /didn.?t finish saving/.test(lower)) {
     if (isLikelyBoardStorageLimitFailure(error, file)) {
       return boardMediaStorageLimitMessage(file);
@@ -367,10 +374,12 @@ export function playbackResultAfterUpload(opts: {
   storagePath: string;
   publicUrl?: string | null;
   signedUrl?: string | null;
+  objectVerified?: boolean;
 }): BoardMediaUploadResult {
   const publicUrl = String(opts.publicUrl || "").trim();
   const signedUrl = String(opts.signedUrl || "").trim();
-  if (!signedUrl) {
+  const objectVerified = Boolean(opts.objectVerified) || Boolean(signedUrl);
+  if (!signedUrl && !objectVerified) {
     throw new BoardMediaUploadError(
       "This video didn't finish saving to Board storage. Try uploading it again.",
       "missing"
@@ -381,6 +390,7 @@ export function playbackResultAfterUpload(opts: {
     storagePath: opts.storagePath,
     publicUrl,
     signedUrl,
+    objectVerified,
   };
 }
 
@@ -392,16 +402,30 @@ export function preferredCommitPlaybackUrl(result: {
   return String(result.signedUrl || "").trim();
 }
 
+/**
+ * Commit a room Drop when the object is in storage. A late signed URL is not
+ * required — ActivityCard mints playback from bucket + storagePath.
+ * Never treat an unverified status-0 PUT as committable without proof.
+ */
 export function canCommitBoardMediaPlayback(result: {
   signedUrl?: string | null;
+  storagePath?: string | null;
+  objectVerified?: boolean;
 }): boolean {
-  return Boolean(String(result.signedUrl || "").trim());
+  if (String(result.signedUrl || "").trim()) return true;
+  return Boolean(result.objectVerified && String(result.storagePath || "").trim());
 }
 
 export function isMissingObjectUploadError(error: unknown): boolean {
-  if (error instanceof BoardMediaUploadError && error.code === "missing") return true;
+  if (error instanceof BoardMediaUploadError) return error.code === "missing";
   const raw = storageErrorText(error).toLowerCase();
-  return /didn.?t finish saving|object not found|no such file/.test(raw);
+  return /object not found|no such file/.test(raw);
+}
+
+export function isSignTimeoutUploadError(error: unknown): boolean {
+  if (error instanceof BoardMediaUploadError) return error.code === "sign";
+  const raw = storageErrorText(error).toLowerCase();
+  return /could not create a playback url|playback url timed out/.test(raw);
 }
 
 function sleep(ms: number) {
@@ -640,7 +664,9 @@ async function playbackAfterXhrWrite(
   if (uploaded.verified || uploaded.status >= 400) {
     throwIfFailedStatus(uploaded.status, uploaded.text);
   }
-  return signedResult(bucket, storagePath);
+  return signedResult(bucket, storagePath, {
+    objectKnownWritten: uploaded.verified,
+  });
 }
 
 export async function copyFileForUpload(file: File): Promise<File> {
@@ -676,7 +702,8 @@ function storagePathFor(file: File, folder: string) {
 
 async function signedResult(
   bucket: string,
-  storagePath: string
+  storagePath: string,
+  opts?: { objectKnownWritten?: boolean }
 ): Promise<BoardMediaUploadResult> {
   let publicUrl = "";
   try {
@@ -687,6 +714,7 @@ async function signedResult(
   }
   if (!publicUrl) publicUrl = publicObjectUrl(bucket, storagePath);
 
+  const objectKnownWritten = Boolean(opts?.objectKnownWritten);
   let signedUrl = "";
   let missing = false;
   try {
@@ -698,7 +726,12 @@ async function signedResult(
           .createSignedUrl(storagePath, 60 * 60 * 24 * 365);
         return { signedUrl: data?.signedUrl || "", error };
       },
-      { timeoutMs: SIGNED_PLAYBACK_TIMEOUT_MS, retries: 2 }
+      {
+        timeoutMs: objectKnownWritten
+          ? SIGNED_PLAYBACK_VERIFY_TIMEOUT_MS
+          : SIGNED_PLAYBACK_VERIFY_TIMEOUT_MS,
+        retries: objectKnownWritten ? 4 : 4,
+      }
     );
     signedUrl = signed.signedUrl;
     missing = signed.missing;
@@ -706,19 +739,37 @@ async function signedResult(
     signedUrl = "";
   }
 
-  if (!signedUrl) {
-    throw new BoardMediaUploadError(
-      "This video didn't finish saving to Board storage. Try uploading it again.",
-      missing ? "missing" : "missing"
-    );
+  if (signedUrl) {
+    return playbackResultAfterUpload({
+      bucket,
+      storagePath,
+      publicUrl,
+      signedUrl,
+      objectVerified: true,
+    });
   }
 
-  return playbackResultAfterUpload({
-    bucket,
-    storagePath,
-    publicUrl,
-    signedUrl,
-  });
+  // HTTP 2xx already proved the object. Late metadata must not skip the Drop.
+  if (objectKnownWritten) {
+    return playbackResultAfterUpload({
+      bucket,
+      storagePath,
+      publicUrl,
+      signedUrl: "",
+      objectVerified: true,
+    });
+  }
+
+  if (missing) {
+    throw new BoardMediaUploadError(
+      "This video didn't finish saving to Board storage. Try uploading it again.",
+      "missing"
+    );
+  }
+  throw new BoardMediaUploadError(
+    "Board could not create a playback URL.",
+    "sign"
+  );
 }
 
 async function requireUploadSession() {
@@ -749,6 +800,7 @@ async function uploadThroughTus(
   const contentType = resolveUploadContentType(file);
   const storagePath = storagePathFor(file, opts.folder);
   const timeoutMs = uploadTimeoutMsForBytes(guessUploadBytes(file));
+  let objectKnownWritten = false;
 
   await new Promise<void>((resolve, reject) => {
     let settled = false;
@@ -812,6 +864,7 @@ async function uploadThroughTus(
       onSuccess: () => {
         if (settled) return;
         settled = true;
+        objectKnownWritten = true;
         finishTimers();
         resolve();
       },
@@ -854,7 +907,7 @@ async function uploadThroughTus(
     );
   });
 
-  return signedResult(opts.bucket, storagePath);
+  return signedResult(opts.bucket, storagePath, { objectKnownWritten });
 }
 
 async function uploadThroughSignedPut(
@@ -987,6 +1040,10 @@ async function runUploadAttempts(
           lastError = retryError;
         }
         // Same 65MB tape will 413 on signed/tus too. Stop the PUT loop.
+        break;
+      }
+      if (isSignTimeoutUploadError(error)) {
+        // Bytes already left the phone; another transport would clone the tape.
         break;
       }
       if (isMissingObjectUploadError(error)) {

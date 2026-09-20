@@ -14,6 +14,8 @@ import {
   applyCommittedRoomPostGuard,
   applyProjectRoomActivitiesToProjects,
   mergeRoomPosts,
+  persistableProjectRoomMediaUrl,
+  projectRoomPostStorageCoords,
 } from "@/lib/board/projectRoomDrop";
 import {
   mergeProjectCover,
@@ -32,6 +34,7 @@ import {
   projectDropsFromProfileStyle,
   PROJECT_NOTEBOOK_STYLE_KEY,
   isCloudProjectDrop,
+  mergeNotebookRoomPosts,
 } from "@/lib/board/projectProfileDrop";
 import { getCurrentUserId } from "@/lib/board/boardDropEditStore";
 import { supabaseBrowser } from "@/lib/supabase/browser";
@@ -190,24 +193,43 @@ function normalizeInvite(value: any): ProjectInvite | null {
 }
 
 function persistableRoomMediaUrl(value: unknown): string | undefined {
-  if (typeof value !== "string") return undefined;
-  const src = value.trim();
-  if (!src || src.startsWith("data:") || src.startsWith("blob:")) return undefined;
-  return src;
+  return persistableProjectRoomMediaUrl(value) || undefined;
+}
+
+function durableRoomPost(post: ProjectRoomPost): ProjectRoomPost {
+  const coords = projectRoomPostStorageCoords(post);
+  const mediaUrl = persistableRoomMediaUrl(post.mediaUrl);
+  if (!coords) return { ...post, mediaUrl };
+  return {
+    ...post,
+    bucket: coords.bucket,
+    storagePath: coords.storagePath,
+    // Signed JWTs bloat localStorage / board_style. Coords are enough to re-sign.
+    mediaUrl: mediaUrl && mediaUrl.length <= 400 ? mediaUrl : undefined,
+  };
 }
 
 function normalizeRoomPost(value: any): ProjectRoomPost | null {
   if (!value || typeof value !== "object") return null;
   const text = String(value.text ?? "").trim();
   const mediaUrl = persistableRoomMediaUrl(value.mediaUrl ?? value.src);
-  if (!text && !mediaUrl) return null;
+  const storagePath = String(value.storagePath ?? "").trim();
+  const bucket = String(value.bucket ?? "").trim();
+  const coords = projectRoomPostStorageCoords({
+    bucket,
+    storagePath,
+    mediaUrl,
+  });
+  if (!text && !mediaUrl && !coords) return null;
   const mediaKind =
     value.mediaKind === "video" || value.kind === "video"
       ? "video"
       : value.mediaKind === "image" || value.kind === "image"
         ? "image"
-        : undefined;
-  return {
+        : coords && /\.(mp4|webm|mov|m4v)(\?|#|$)/i.test(coords.storagePath)
+          ? "video"
+          : undefined;
+  return durableRoomPost({
     id: String(value.id ?? uid("post")),
     authorName: String(value.authorName ?? "Host"),
     authorId: typeof value.authorId === "string" ? value.authorId : undefined,
@@ -215,11 +237,11 @@ function normalizeRoomPost(value: any): ProjectRoomPost | null {
     createdAt: safeTime(value.createdAt),
     mediaUrl,
     mediaKind,
-    bucket: typeof value.bucket === "string" ? value.bucket : undefined,
-    storagePath: typeof value.storagePath === "string" ? value.storagePath : undefined,
+    bucket: coords?.bucket || bucket || undefined,
+    storagePath: coords?.storagePath || storagePath || undefined,
     dropId: typeof value.dropId === "string" ? value.dropId : undefined,
     projectId: typeof value.projectId === "string" ? value.projectId : undefined,
-  };
+  });
 }
 
 function toPersistedProject(project: BoardProject): BoardProject {
@@ -1243,6 +1265,15 @@ export async function persistProjectListToProfile(
       username: profile?.username,
       display_name: profile?.display_name,
     });
+    const existing = notebook.find((item: any) => String(item?.id ?? "") === row.id);
+    if (existing) {
+      const mergedPosts = mergeNotebookRoomPosts(
+        existing.roomPosts || existing.meta?.roomPosts,
+        row.roomPosts
+      );
+      row.roomPosts = mergedPosts;
+      row.meta = { ...row.meta, roomPosts: mergedPosts };
+    }
     notebook = [row, ...notebook.filter((item: any) => String(item?.id ?? "") !== row.id)];
   }
   const { data: updated, error } = await sb

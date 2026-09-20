@@ -317,6 +317,46 @@ assert(
   "cloud notebook roomPosts must hydrate back into the Project Room"
 );
 
+const fromNotebookCoordsOnly = projectsFromProfileBoardDrops({
+  id: "user-1",
+  username: "johnandy",
+  display_name: "JAB",
+  board_style: {
+    projectNotebook: [
+      {
+        id: "project_drop_project_coords",
+        type: "Project",
+        title: "Those Ryderz",
+        createdAt: Date.now(),
+        origin: "project_notebook",
+        source: "work_board",
+        roomPosts: [
+          {
+            id: "post_coords",
+            authorName: "Zoe",
+            mediaKind: "video",
+            bucket: "board-media",
+            storagePath: "user/project-media/coords.mp4",
+            dropId: "project_room_coords",
+          },
+        ],
+        meta: {
+          dropType: "project",
+          projectId: "project_coords",
+          cardStyle: "project_drop",
+        },
+      },
+    ],
+    boardDrops: [],
+  },
+});
+assert(
+  fromNotebookCoordsOnly.some((project) =>
+    (project.roomPosts || []).some((post) => post.storagePath === "user/project-media/coords.mp4")
+  ),
+  "coords-only notebook videos without text still hydrate into the room"
+);
+
 writeBoardProjects(resolved);
 const postsBeforeLoop = (
   (JSON.parse(memory.get("jab_board_projects_v2") || "[]") as Array<{ id: string; roomPosts?: any[] }>)

@@ -17,6 +17,7 @@ import {
   projectRoomPostHasMedia,
   projectRoomPostIsVideo,
   projectRoomPostStorageCoords,
+  projectHasVisibleRoomDrop,
   PROJECT_ROOM_CLOUD_SYNC_TIMEOUT_MS,
   projectRoomStudioSaveKey,
   projectRoomVideoLoadError,
@@ -31,7 +32,7 @@ import {
   withDeadline,
 } from "./projectRoomDrop";
 import { mergeProjectRecord, preferLiveRoomPosts, reconcileProjectsWithLive, type BoardProject } from "./projects";
-import { profileBoardDropFromProject } from "./projectProfileDrop";
+import { mergeNotebookRoomPosts, profileBoardDropFromProject } from "./projectProfileDrop";
 
 function assert(condition: unknown, message: string) {
   if (!condition) throw new Error(message);
@@ -435,10 +436,18 @@ const playableSigned =
 assert(
   isUnplayableProjectRoomVideoPost({
     mediaKind: "video",
+    mediaUrl: "",
+  }),
+  "video posts with no src and no coords are unplayable"
+);
+assert(
+  !isUnplayableProjectRoomVideoPost({
+    mediaKind: "video",
     mediaUrl: deadPublic,
+    bucket: "board-media",
     storagePath: "user/project-media/dead.mp4",
   }),
-  "public board-media URLs are dead playback rows"
+  "storage coords can re-sign a public 403 URL, so the Drop stays"
 );
 const liveTape = buildProjectRoomDrop({
   project,
@@ -476,14 +485,28 @@ assert(
   "a verified studio save adds a playable drop"
 );
 assert(
-  !replacedDead.roomPosts.some((post) => post.mediaUrl === deadPublic),
-  "the next successful save replaces the dead public-URL row"
+  projectHasVisibleRoomDrop(replacedDead, {
+    storagePath: "user/project-media/dead.mp4",
+  }),
+  "a previous tape with storage coords is not deleted by the next save"
 );
 assert(
-  stripUnplayableProjectRoomVideos(withDead.roomPosts, liveTape.post).every(
-    (post) => post.mediaUrl !== deadPublic
-  ),
-  "unplayable same-author tapes are stripped before merge"
+  stripUnplayableProjectRoomVideos(
+    [
+      {
+        id: "post_dead_url",
+        authorName: "Zoe",
+        authorId: "user_zoe",
+        text: "Zoe posted an audition tape in Those Ryderz.",
+        createdAt: 1_700_000_150_000,
+        mediaUrl: "",
+        mediaKind: "video" as const,
+      },
+      ...(project.roomPosts ?? []),
+    ],
+    liveTape.post
+  ).every((post) => post.id !== "post_dead_url"),
+  "unplayable same-author tapes without coords are stripped before merge"
 );
 
 const signedSameTape = {
@@ -546,6 +569,84 @@ assert(
       (post) => post.dropId === "project_room_tape"
     )),
   "cloud notebook meta must keep the room Drop id"
+);
+assert(
+  (notebookRow as { roomPosts: Array<{ mediaUrl?: string; storagePath?: string }> }).roomPosts.every(
+    (post) => !post.storagePath || !post.mediaUrl
+  ),
+  "notebook persist must not store giant signed URLs when storage coords exist"
+);
+
+const coordsOnly = buildProjectRoomDrop({
+  project,
+  media: {
+    kind: "video",
+    src: "",
+    bucket: "board-media",
+    storagePath: "user/project-media/late-sign.mp4",
+  },
+  author: { id: "user_zoe", displayName: "Zoe", username: "zoe" },
+  fileName: "late-sign.mp4",
+  dropId: "project_room_late",
+  postId: "post_late",
+});
+const committedLate = commitProjectRoomDrop([project], project, coordsOnly);
+assert(
+  projectHasVisibleRoomDrop(committedLate.saved, {
+    dropId: "project_room_late",
+    storagePath: "user/project-media/late-sign.mp4",
+  }),
+  "commit creates a visible room post even if the signed URL is late"
+);
+assert(
+  projectRoomPostHasMedia(coordsOnly.post),
+  "renderer includes video posts that only have storage coords"
+);
+assert(
+  activityFromProjectRoomPost(committedLate.saved.roomPosts[0], committedLate.saved).meta
+    ?.mediaKind === "video",
+  "room renderer still treats coords-only posts as feed video Drops"
+);
+assert(
+  !isUnplayableProjectRoomVideoPost({
+    mediaKind: "video",
+    mediaUrl: "",
+    bucket: "board-media",
+    storagePath: "user/project-media/late-sign.mp4",
+  }),
+  "coords-only videos are not stripped as unplayable"
+);
+
+const staleNotebook = {
+  ...committedLate.saved,
+  roomPosts: project.roomPosts,
+};
+rememberCommittedRoomPosts("project_keep_me", committedLate.saved.roomPosts);
+const guardedLate = applyCommittedRoomPostGuard([staleNotebook]);
+assert(
+  projectHasVisibleRoomDrop(guardedLate[0], {
+    storagePath: "user/project-media/late-sign.mp4",
+  }),
+  "hydrate cannot wipe a fresh coords-only commit"
+);
+const reconciledLate = reconcileProjectsWithLive([staleNotebook], [committedLate.saved]);
+assert(
+  projectHasVisibleRoomDrop(reconciledLate[0], { dropId: "project_room_late" }),
+  "load/seed/merge must keep a just-committed room video"
+);
+
+const staleCloud = [
+  {
+    id: "post_welcome",
+    authorName: "John Andy",
+    text: "Welcome in.",
+    createdAt: 1_700_000_060_000,
+  },
+];
+const mergedCloud = mergeNotebookRoomPosts(staleCloud, committed.saved.roomPosts);
+assert(
+  mergedCloud.some((post) => post.storagePath === "user/project-media/tape.mp4"),
+  "a stale cloud persist cannot drop a committed room Drop"
 );
 
 const saveKey = projectRoomStudioSaveKey("project_keep_me", {

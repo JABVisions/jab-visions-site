@@ -64,6 +64,7 @@ import {
   forgetCommittedRoomPosts,
   mergeRoomPosts,
   persistableProjectRoomMediaUrl,
+  projectHasVisibleRoomDrop,
   projectRoomMediaKindForFile,
   projectRoomPostHasMedia,
   projectRoomPostIsVideo,
@@ -73,6 +74,7 @@ import {
   projectRoomVideoPlaybackType,
   projectRoomVideoSrcIsPlayable,
   PROJECT_ROOM_CLOUD_SYNC_TIMEOUT_MS,
+  rememberCommittedRoomPosts,
   removeProjectRoomPost,
   runProjectRoomStudioSaveOnce,
   viewerCanPostToProjectRoom,
@@ -1179,16 +1181,14 @@ export default function ProjectCenter() {
           throw new Error("This video didn't finish saving to Board storage. Try uploading it again.");
         }
         const mediaUrl = preferredCommitPlaybackUrl(uploaded);
-        if (!mediaUrl) throw new Error("This video didn't finish saving to Board storage. Try uploading it again.");
-
         const liveProject =
           projectsRef.current.find((item) => item.id === project.id) || project;
-        const alreadyPosted = (liveProject.roomPosts ?? []).some(
-          (post) =>
-            post.storagePath === uploaded.storagePath ||
-            post.mediaUrl === mediaUrl
-        );
+        const alreadyPosted = projectHasVisibleRoomDrop(liveProject, {
+          storagePath: uploaded.storagePath,
+          mediaUrl,
+        });
         if (alreadyPosted) {
+          rememberCommittedRoomPosts(liveProject.id, liveProject.roomPosts);
           setStudioMessage(
             mediaKind === "video"
               ? "Video saved to this project room."
@@ -1222,6 +1222,15 @@ export default function ProjectCenter() {
           liveProject,
           built
         );
+        if (
+          !projectHasVisibleRoomDrop(committed.saved, {
+            dropId: built.dropId,
+            storagePath: uploaded.storagePath,
+            mediaUrl,
+          })
+        ) {
+          throw new Error("This video didn't finish saving to Board storage. Try uploading it again.");
+        }
         projectsRef.current = committed.projects;
         writeBoardProjects(committed.projects);
         setProjects(committed.projects);

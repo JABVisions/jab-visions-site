@@ -48,13 +48,79 @@ const inflightStudioSaves = new Map<string, Promise<void>>();
 const finishedStudioSaves = new Set<string>();
 
 /** Keep just-committed room media across stale notebook reloads. */
-const COMMITTED_ROOM_POST_GUARD_MS = 120_000;
+const COMMITTED_ROOM_POST_GUARD_MS = 24 * 60 * 60 * 1000;
+const COMMITTED_ROOM_POSTS_SESSION_KEY = "jab_committed_room_posts_v1";
 const committedRoomPostGuard = new Map<
   string,
   { posts: ProjectRoomPost[]; until: number }
 >();
 
 const removedRoomPostGuard = new Map<string, { keys: Set<string>; until: number }>();
+let hydratedCommittedRoomPosts = false;
+
+function persistCommittedRoomPostGuard() {
+  if (typeof sessionStorage === "undefined") return;
+  try {
+    const committed = Array.from(committedRoomPostGuard.entries()).map(([id, entry]) => ({
+      id,
+      posts: entry.posts,
+      until: entry.until,
+    }));
+    const removed = Array.from(removedRoomPostGuard.entries()).map(([id, entry]) => ({
+      id,
+      keys: Array.from(entry.keys),
+      until: entry.until,
+    }));
+    sessionStorage.setItem(
+      COMMITTED_ROOM_POSTS_SESSION_KEY,
+      JSON.stringify({ committed, removed })
+    );
+  } catch {
+    // Private mode / quota — in-memory guard still applies.
+  }
+}
+
+function hydrateCommittedRoomPostGuard() {
+  if (hydratedCommittedRoomPosts) return;
+  hydratedCommittedRoomPosts = true;
+  if (typeof sessionStorage === "undefined") return;
+  try {
+    const raw = sessionStorage.getItem(COMMITTED_ROOM_POSTS_SESSION_KEY);
+    if (!raw) return;
+    const parsed = JSON.parse(raw) as {
+      committed?: Array<{ id?: string; posts?: ProjectRoomPost[]; until?: number }>;
+      removed?: Array<{ id?: string; keys?: string[]; until?: number }>;
+    };
+    const now = Date.now();
+    for (const entry of parsed.committed ?? []) {
+      const id = String(entry.id || "").trim();
+      const posts = Array.isArray(entry.posts) ? entry.posts : [];
+      const until = typeof entry.until === "number" ? entry.until : 0;
+      if (!id || !posts.length || until <= now) continue;
+      const existing = committedRoomPostGuard.get(id);
+      committedRoomPostGuard.set(id, {
+        posts: mergeRoomPosts(existing?.posts, posts),
+        until: Math.max(existing?.until ?? 0, until),
+      });
+    }
+    for (const entry of parsed.removed ?? []) {
+      const id = String(entry.id || "").trim();
+      const until = typeof entry.until === "number" ? entry.until : 0;
+      if (!id || until <= now) continue;
+      const existing = removedRoomPostGuard.get(id) ?? {
+        keys: new Set<string>(),
+        until: 0,
+      };
+      for (const key of entry.keys ?? []) {
+        if (key) existing.keys.add(key);
+      }
+      existing.until = Math.max(existing.until, until);
+      removedRoomPostGuard.set(id, existing);
+    }
+  } catch {
+    // Ignore corrupt session snapshots.
+  }
+}
 
 export function rememberCommittedRoomPosts(
   projectId: string,
@@ -70,6 +136,7 @@ export function rememberCommittedRoomPosts(
   );
   if (!keep.length) {
     committedRoomPostGuard.delete(id);
+    persistCommittedRoomPostGuard();
     return;
   }
   const existing = committedRoomPostGuard.get(id);
@@ -77,11 +144,13 @@ export function rememberCommittedRoomPosts(
     posts: mergeRoomPosts(existing?.posts, keep),
     until: Date.now() + COMMITTED_ROOM_POST_GUARD_MS,
   });
+  persistCommittedRoomPostGuard();
 }
 
 export function forgetCommittedRoomPosts(projectId: string) {
   committedRoomPostGuard.delete(String(projectId || "").trim());
   removedRoomPostGuard.delete(String(projectId || "").trim());
+  persistCommittedRoomPostGuard();
 }
 
 export function rememberRemovedRoomPost(
@@ -111,6 +180,7 @@ export function rememberRemovedRoomPost(
     if (!remaining.length) committedRoomPostGuard.delete(id);
     else committedRoomPostGuard.set(id, { ...guarded, posts: remaining });
   }
+  persistCommittedRoomPostGuard();
 }
 
 export function filterRemovedRoomPosts<T extends {
@@ -176,6 +246,7 @@ export function removeProjectRoomPost(
 export function applyCommittedRoomPostGuard(
   projects: BoardProject[] | null | undefined
 ): BoardProject[] {
+  hydrateCommittedRoomPostGuard();
   const list = Array.isArray(projects) ? projects : [];
   const now = Date.now();
   for (const [id, entry] of committedRoomPostGuard) {
@@ -350,12 +421,36 @@ export function projectRoomVideoSrcIsPlayable(url: string): boolean {
 export function isUnplayableProjectRoomVideoPost(post: {
   mediaKind?: string | null;
   mediaUrl?: string | null;
+  bucket?: string | null;
   storagePath?: string | null;
 }): boolean {
   if (!projectRoomPostIsVideo(post)) return false;
+  if (projectRoomPostStorageCoords(post)) return false;
   const src = persistableProjectRoomMediaUrl(post.mediaUrl) || "";
   if (!src) return true;
   return !projectRoomVideoSrcIsPlayable(src);
+}
+
+export function projectHasVisibleRoomDrop(
+  project: Pick<BoardProject, "roomPosts"> | null | undefined,
+  match: {
+    dropId?: string | null;
+    storagePath?: string | null;
+    mediaUrl?: string | null;
+  }
+): boolean {
+  const posts = Array.isArray(project?.roomPosts) ? project!.roomPosts : [];
+  const dropId = String(match.dropId || "").trim();
+  const storagePath = String(match.storagePath || "").trim().split("?")[0];
+  const mediaUrl = persistableProjectRoomMediaUrl(match.mediaUrl) || "";
+  return posts.some((post) => {
+    if (!projectRoomPostHasMedia(post)) return false;
+    if (dropId && String(post.dropId || "").trim() === dropId) return true;
+    const coords = projectRoomPostStorageCoords(post);
+    if (storagePath && coords?.storagePath === storagePath) return true;
+    const src = persistableProjectRoomMediaUrl(post.mediaUrl) || "";
+    return Boolean(mediaUrl && src && src.split("?")[0] === mediaUrl.split("?")[0]);
+  });
 }
 
 export function stripUnplayableProjectRoomVideos(
@@ -648,6 +743,17 @@ export function buildProjectRoomDrop(opts: {
   };
 }
 
+function preferredRoomPostMediaUrl(
+  left?: string | null,
+  right?: string | null
+): string | undefined {
+  const a = persistableProjectRoomMediaUrl(left) || "";
+  const b = persistableProjectRoomMediaUrl(right) || "";
+  if (a && projectRoomVideoSrcIsPlayable(a)) return a;
+  if (b && projectRoomVideoSrcIsPlayable(b)) return b;
+  return a || b || undefined;
+}
+
 export function mergeRoomPosts(
   base: ProjectRoomPost[] | null | undefined,
   incoming: ProjectRoomPost[] | null | undefined
@@ -667,7 +773,7 @@ export function mergeRoomPosts(
       ...existing,
       id: existing.id || post.id,
       dropId: existing.dropId || post.dropId,
-      mediaUrl: existing.mediaUrl || post.mediaUrl,
+      mediaUrl: preferredRoomPostMediaUrl(existing.mediaUrl, post.mediaUrl),
       mediaKind: existing.mediaKind || post.mediaKind,
       bucket: existing.bucket || post.bucket,
       storagePath: existing.storagePath || post.storagePath,

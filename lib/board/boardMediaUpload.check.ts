@@ -17,10 +17,12 @@ import {
   progressBytesUntilVerified,
   requestSignedPlaybackUrl,
   SIGNED_PLAYBACK_TIMEOUT_MS,
+  SIGNED_PLAYBACK_VERIFY_TIMEOUT_MS,
   START_UPLOAD_STALL_MS,
   acceptXhrOutcome,
   xhrIndicatesPayloadTooLarge,
   isMissingObjectUploadError,
+  isSignTimeoutUploadError,
   BoardMediaUploadError,
   type BoardMediaUploadOptions,
 } from "./boardMediaUpload";
@@ -263,6 +265,22 @@ assert(
   "unsigned playback cannot be saved as a room Drop"
 );
 assert(
+  canCommitBoardMediaPlayback({
+    signedUrl: "",
+    storagePath: "user/project-media/tape.mp4",
+    objectVerified: true,
+  }),
+  "a verified storage object must commit even if the signed URL is late"
+);
+assert(
+  !canCommitBoardMediaPlayback({
+    signedUrl: "",
+    storagePath: "user/project-media/tape.mp4",
+    objectVerified: false,
+  }),
+  "status-0 PUTs cannot commit without createSignedUrl or a 2xx write"
+);
+assert(
   preferredCommitPlaybackUrl({
     signedUrl: "https://example.supabase.co/storage/v1/object/sign/board-media/tape.mp4?token=1",
     publicUrl: "https://example.supabase.co/storage/v1/object/public/board-media/tape.mp4",
@@ -301,6 +319,10 @@ assert(
   "signing after PUT must wait ~4s, not skip createSignedUrl"
 );
 assert(
+  SIGNED_PLAYBACK_VERIFY_TIMEOUT_MS >= 12_000,
+  "after a finished PUT, sign/verify must wait long enough for Storage visibility"
+);
+assert(
   START_UPLOAD_STALL_MS <= 25_000 && START_UPLOAD_STALL_MS >= 15_000,
   "session/signed-URL/XHR must fail within ~25s if no first byte"
 );
@@ -310,6 +332,48 @@ assert(
   ).includes("didn't finish saving"),
   "missing objects surface the studio retry copy"
 );
+assert(
+  isSignTimeoutUploadError(
+    new BoardMediaUploadError("Board could not create a playback URL.", "sign")
+  ),
+  "sign timeout is not a missing object"
+);
+assert(
+  !isMissingObjectUploadError(
+    new BoardMediaUploadError("Board could not create a playback URL.", "sign")
+  ),
+  "a slow createSignedUrl is not a 404"
+);
+assert(
+  !isLikelyBoardStorageLimitFailure(
+    new BoardMediaUploadError("Board could not create a playback URL.", "sign"),
+    tape65
+  ),
+  "sign timeout on a 65MB tape is not the 50MB Storage Settings cap"
+);
+assert(
+  !isBoardStorageLimitMessage(
+    explainBoardMediaUploadError(
+      new BoardMediaUploadError("Board could not create a playback URL.", "sign"),
+      tape65
+    )
+  ),
+  "sign timeout copy must not tell the user to paste SQL when the object may exist"
+);
+let lateSignOk = false;
+try {
+  const late = playbackResultAfterUpload({
+    bucket: "board-media",
+    storagePath: "user/project-media/tape.mp4",
+    publicUrl: "https://cdn.example/tape.mp4",
+    signedUrl: "",
+    objectVerified: true,
+  });
+  lateSignOk = late.objectVerified === true && late.storagePath.endsWith("tape.mp4") && !late.signedUrl;
+} catch {
+  lateSignOk = false;
+}
+assert(lateSignOk, "verified objects can commit before the signed URL is minted");
 let noUrlPlayback = false;
 try {
   playbackResultAfterUpload({
