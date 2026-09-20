@@ -495,6 +495,7 @@ function ActivityCard({
   const [resolvedSoundCloud, setResolvedSoundCloud] = useState("");
   const [downloadBusy, setDownloadBusy] = useState(false);
   const [signedPreviewImage, setSignedPreviewImage] = useState<string>("");
+  const [previewSignFailed, setPreviewSignFailed] = useState(false);
   // Bumped to re-mint the storage signed URL after it expires.
   const [signedPreviewNonce, setSignedPreviewNonce] = useState(0);
   // Image fetched on the client for link drops whose stored record has no
@@ -679,6 +680,7 @@ function ActivityCard({
     hydratedImage ||
     "";
   const isStoredVideoDrop = mediaKind === "video" && !!signedPreviewImage;
+  const isStoredBoardVideo = mediaKind === "video" && Boolean(previewBucket && previewStoragePath);
   const isStoredAudioDrop = isAudioFileDrop && Boolean(signedPreviewImage || href);
   const showAnnouncementImage =
     item?.kind === "announcement" &&
@@ -787,17 +789,23 @@ function ActivityCard({
   useEffect(() => {
     let cancelled = false;
     setSignedPreviewImage("");
+    setPreviewSignFailed(false);
 
     if (!previewBucket || !previewStoragePath) return;
 
     async function signPreviewImage() {
       try {
-        const resolvedUrl = await getCachedSignedMediaUrl(previewBucket, previewStoragePath);
+        const resolvedUrl = await getCachedSignedMediaUrl(previewBucket, previewStoragePath, {
+          allowPublicFallback: mediaKind !== "video",
+        });
         if (!cancelled && resolvedUrl) {
           setSignedPreviewImage(resolvedUrl);
+          setPreviewSignFailed(false);
+        } else if (!cancelled) {
+          setPreviewSignFailed(true);
         }
       } catch {
-        // Fall back to image_url/previewImage if storage signing fails.
+        if (!cancelled) setPreviewSignFailed(true);
       }
     }
 
@@ -806,7 +814,7 @@ function ActivityCard({
     return () => {
       cancelled = true;
     };
-  }, [previewBucket, previewStoragePath, signedPreviewNonce]);
+  }, [previewBucket, previewStoragePath, signedPreviewNonce, mediaKind]);
 
   // Storage signed URLs expire (45m). Media players call this to mint a fresh
   // one instead of staying stuck on a dead link.
@@ -814,7 +822,9 @@ function ActivityCard({
     if (!previewBucket || !previewStoragePath) return;
     invalidateSignedMediaUrl(previewBucket, previewStoragePath);
     try {
-      const resolvedUrl = await getCachedSignedMediaUrl(previewBucket, previewStoragePath);
+      const resolvedUrl = await getCachedSignedMediaUrl(previewBucket, previewStoragePath, {
+        allowPublicFallback: mediaKind !== "video",
+      });
       if (resolvedUrl) {
         setSignedPreviewImage(resolvedUrl);
         return;
@@ -823,7 +833,7 @@ function ActivityCard({
       // Fall through to a full re-run of the signing effect.
     }
     setSignedPreviewNonce((tick) => tick + 1);
-  }, [previewBucket, previewStoragePath]);
+  }, [previewBucket, previewStoragePath, mediaKind]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1035,7 +1045,8 @@ function ActivityCard({
     embed.kind !== "none" &&
     !isDescriptDrop &&
     !isDropbookSlide &&
-    !isAudioFileDrop;
+    !isAudioFileDrop &&
+    !isStoredBoardVideo;
   const audioSoundboardUrl = signedPreviewImage || (isAudioFileDrop ? href : "");
 
   const downloadKind = useMemo((): DropDownloadKind => {
@@ -1714,9 +1725,20 @@ function ActivityCard({
           <BoardFeedVideo
             className="vid"
             src={signedPreviewImage}
-            onError={() => setEmbedFailed(true)}
+            onError={() => {
+              void refreshSignedMedia();
+            }}
           />
           <DropStudioOverlay customizations={dropCustomizations} />
+        </div>
+      ) : !showEmbed &&
+        !isDescriptDrop &&
+        !isDropbookSlide &&
+        isStoredBoardVideo &&
+        previewSignFailed &&
+        !signedPreviewImage ? (
+        <div className="mediaMissing" role="alert">
+          This video didn't finish saving to Board storage. Try uploading it again.
         </div>
       ) : null}
 

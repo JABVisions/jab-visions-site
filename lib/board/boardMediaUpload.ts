@@ -11,6 +11,7 @@ import {
   formatBytes,
   ownerScopedUploadFolder,
   resolveUploadContentType,
+  storageExtensionForFile,
   uploadKindForFile,
   uploadTimeoutMsForBytes,
 } from "@/lib/board/uploadLimits";
@@ -19,12 +20,13 @@ import {
   type BoardUploadProgressHandler,
 } from "@/lib/board/uploadProgress";
 import { supabaseBrowser } from "@/lib/supabase/browser";
+import { isMissingStorageObjectError } from "@/lib/board/signedMediaUrl";
 
 /** Floor used by callers that don't have a file size yet. Prefer `uploadTimeoutMsForBytes`. */
 export const BOARD_MEDIA_UPLOAD_TIMEOUT_MS = 180_000;
 export const BOARD_MEDIA_READ_TIMEOUT_MS = 12_000;
 export const BOARD_MEDIA_SESSION_TIMEOUT_MS = 12_000;
-const SIGNED_PLAYBACK_TIMEOUT_MS = 1_500;
+export const SIGNED_PLAYBACK_TIMEOUT_MS = 4_000;
 export const BYTES_COMPLETE_SETTLE_MS = 400;
 export const BYTES_DONE_FINALIZE_MS = 8_000;
 const COPY_BYTES_LIMIT = 8 * 1024 * 1024;
@@ -290,6 +292,59 @@ export function playbackResultAfterUpload(opts: {
   };
 }
 
+/** Persist signed playback when we have it. Public URLs on private `board-media` 403. */
+export function preferredCommitPlaybackUrl(result: {
+  signedUrl?: string | null;
+  publicUrl?: string | null;
+}): string {
+  return String(result.signedUrl || "").trim() || String(result.publicUrl || "").trim();
+}
+
+function sleep(ms: number) {
+  return new Promise<void>((resolve) => {
+    setTimeout(resolve, Math.max(0, ms));
+  });
+}
+
+/**
+ * Mint a signed playback URL after a finished PUT. Never throws — a timeout or
+ * 404 must not restart the 62MB upload. Retries briefly so iPhone status-0
+ * success can catch up to object visibility.
+ */
+export async function requestSignedPlaybackUrl(
+  createSignedUrl: () => Promise<{ signedUrl?: string | null; error?: unknown }>,
+  opts?: { timeoutMs?: number; retries?: number }
+): Promise<{ signedUrl: string; missing: boolean }> {
+  const timeoutMs = opts?.timeoutMs ?? SIGNED_PLAYBACK_TIMEOUT_MS;
+  const retries = Math.max(0, opts?.retries ?? 2);
+  const deadline = Date.now() + timeoutMs;
+  let missing = false;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) break;
+    try {
+      const result = await withTimeout(
+        createSignedUrl(),
+        remaining,
+        "Board could not create a playback URL."
+      );
+      const signedUrl = String(result?.signedUrl || "").trim();
+      if (signedUrl) return { signedUrl, missing: false };
+      if (isMissingStorageObjectError(result?.error)) {
+        missing = true;
+        if (attempt < retries && Date.now() + 250 < deadline) {
+          await sleep(Math.min(400, deadline - Date.now()));
+          continue;
+        }
+        break;
+      }
+    } catch {
+      break;
+    }
+  }
+  return { signedUrl: "", missing };
+}
+
 function publicObjectUrl(bucket: string, storagePath: string): string {
   try {
     const { url } = storageConfig();
@@ -467,10 +522,7 @@ export async function copyFileForUpload(file: File): Promise<File> {
 }
 
 function storagePathFor(file: File, folder: string) {
-  const ext =
-    (file.name.split(".").pop() || (uploadKindForFile(file) === "video" ? "mp4" : "bin"))
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "") || "bin";
+  const ext = storageExtensionForFile(file);
   return `${folder.replace(/\/+$/, "")}/${Date.now()}-${Math.random().toString(16).slice(2)}.${ext}`;
 }
 
@@ -486,36 +538,32 @@ async function signedResult(
     publicUrl = "";
   }
   if (!publicUrl) publicUrl = publicObjectUrl(bucket, storagePath);
-  if (publicUrl) {
-    return playbackResultAfterUpload({
-      bucket,
-      storagePath,
-      publicUrl,
-      signedUrl: "",
-    });
-  }
 
+  // PUT already succeeded (including iPhone status-0 at 100%). Sign for playback
+  // on private board-media, but never throw — that would re-upload the tape.
+  let signedUrl = "";
   try {
     const supabase = supabaseBrowser();
-    const { data: signed } = await withTimeout(
-      supabase.storage.from(bucket).createSignedUrl(storagePath, 60 * 60 * 24 * 365),
-      SIGNED_PLAYBACK_TIMEOUT_MS,
-      "Board could not create a playback URL."
+    const signed = await requestSignedPlaybackUrl(
+      async () => {
+        const { data, error } = await supabase.storage
+          .from(bucket)
+          .createSignedUrl(storagePath, 60 * 60 * 24 * 365);
+        return { signedUrl: data?.signedUrl || "", error };
+      },
+      { timeoutMs: SIGNED_PLAYBACK_TIMEOUT_MS, retries: 2 }
     );
-    return playbackResultAfterUpload({
-      bucket,
-      storagePath,
-      publicUrl,
-      signedUrl: signed?.signedUrl || "",
-    });
+    signedUrl = signed.signedUrl;
   } catch {
-    return playbackResultAfterUpload({
-      bucket,
-      storagePath,
-      publicUrl,
-      signedUrl: "",
-    });
+    signedUrl = "";
   }
+
+  return playbackResultAfterUpload({
+    bucket,
+    storagePath,
+    publicUrl,
+    signedUrl,
+  });
 }
 
 async function requireUploadSession() {

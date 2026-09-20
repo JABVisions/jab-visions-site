@@ -1,6 +1,7 @@
 import type { BoardActivity } from "@/lib/board/activity";
 import type { BoardDropSignal } from "@/lib/board/dropSignals";
 import type { UniversalDrop } from "@/lib/board/drops/storage";
+import { parseBoardStorageFromUrl, isPublicBoardStorageUrl } from "@/lib/board/musicPlayback";
 import { isProjectStudioVideoFile } from "@/lib/board/projectDropEdit";
 import type {
   BoardProject,
@@ -114,6 +115,69 @@ export function persistableProjectRoomMediaUrl(value: unknown): string | null {
   const src = value.trim();
   if (!src || src.startsWith("data:") || src.startsWith("blob:")) return null;
   return src;
+}
+
+export function projectRoomPostHasMedia(post: {
+  mediaUrl?: string | null;
+  bucket?: string | null;
+  storagePath?: string | null;
+}): boolean {
+  return Boolean(
+    persistableProjectRoomMediaUrl(post.mediaUrl) || projectRoomPostStorageCoords(post)
+  );
+}
+
+export function preferredProjectRoomMediaSrc(opts: {
+  signedUrl?: string | null;
+  publicUrl?: string | null;
+}): string {
+  return String(opts.signedUrl || "").trim() || String(opts.publicUrl || "").trim();
+}
+
+export function projectRoomPostStorageCoords(post: {
+  bucket?: string | null;
+  storagePath?: string | null;
+  mediaUrl?: string | null;
+}): { bucket: string; storagePath: string } | null {
+  const bucket = String(post.bucket || "").trim();
+  let storagePath = String(post.storagePath || "").trim();
+  if (storagePath && /^https?:\/\//i.test(storagePath)) {
+    const parsedPath = parseBoardStorageFromUrl(storagePath);
+    if (parsedPath) return parsedPath;
+    storagePath = "";
+  }
+  if (bucket && storagePath) {
+    return { bucket, storagePath: storagePath.split("?")[0].replace(/^\/+/, "") };
+  }
+  for (const url of [post.mediaUrl, post.storagePath]) {
+    const parsed = url ? parseBoardStorageFromUrl(url) : null;
+    if (parsed) return parsed;
+  }
+  return null;
+}
+
+export function projectRoomVideoPlaybackType(post: {
+  mediaUrl?: string | null;
+  storagePath?: string | null;
+}): string {
+  const src = String(post.storagePath || post.mediaUrl || "");
+  if (/\.mov(\?|#|$)/i.test(src) || /\.qt(\?|#|$)/i.test(src)) return "video/quicktime";
+  return "video/mp4";
+}
+
+export function projectRoomVideoLoadError(kind: "missing" | "unsigned"): string {
+  if (kind === "missing") {
+    return "This video didn't finish saving to Board storage. Try uploading it again.";
+  }
+  return "Couldn't load this video. Refresh and try again.";
+}
+
+export function projectRoomVideoSrcIsPlayable(url: string): boolean {
+  const src = String(url || "").trim();
+  if (!src) return false;
+  if (src.startsWith("blob:") || src.startsWith("data:")) return true;
+  if (isPublicBoardStorageUrl(src)) return false;
+  return true;
 }
 
 export function normalizeIdentityToken(value: unknown): string {

@@ -46,6 +46,14 @@ export function parseBoardStorageFromUrl(
   };
 }
 
+export function isPublicBoardStorageUrl(url: string): boolean {
+  return /\/storage\/v1\/(?:object|render\/image)\/public\//i.test(String(url || ""));
+}
+
+export function isSignedBoardStorageUrl(url: string): boolean {
+  return /\/storage\/v1\/(?:object|render\/image)\/sign\//i.test(String(url || ""));
+}
+
 /** Resolve authoritative storage coords from meta fields or embedded storage URLs. */
 export function resolveStoredMediaCoords(opts: {
   bucket?: string | null;

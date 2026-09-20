@@ -1,17 +1,47 @@
 "use client";
 
 import { supabaseBrowser } from "@/lib/supabase/browser";
+import { isPublicBoardStorageUrl } from "@/lib/board/musicPlayback";
+
+export { isPublicBoardStorageUrl, isSignedBoardStorageUrl } from "@/lib/board/musicPlayback";
 
 const TTL_MS = 40 * 60 * 1000;
 const cache = new Map<string, { url: string; at: number }>();
 
+export function isMissingStorageObjectError(error: unknown): boolean {
+  const record = error && typeof error === "object" ? (error as Record<string, unknown>) : null;
+  const status = Number(record?.statusCode ?? record?.status ?? record?.status_code ?? 0);
+  const statusText = String(record?.statusCode ?? record?.status ?? record?.status_code ?? "");
+  if (status === 404 || status === 400 || statusText === "404" || statusText === "400") {
+    return true;
+  }
+  const text = String(
+    record?.message || record?.error || (error instanceof Error ? error.message : error) || ""
+  ).toLowerCase();
+  return /object not found|not found|no such file|does not exist|resource was not found|not_found/.test(
+    text
+  );
+}
+
+export type SignedMediaLookupOptions = {
+  /** Private `board-media` 403s on public URLs. Video playback must not fall back. */
+  allowPublicFallback?: boolean;
+};
+
 export async function getCachedSignedMediaUrl(
   bucket: string,
-  path: string
+  path: string,
+  opts?: SignedMediaLookupOptions
 ): Promise<string> {
   const key = `${bucket}:${path}`;
   const hit = cache.get(key);
-  if (hit && Date.now() - hit.at < TTL_MS) return hit.url;
+  if (hit && Date.now() - hit.at < TTL_MS) {
+    if (opts?.allowPublicFallback !== true && isPublicBoardStorageUrl(hit.url)) {
+      cache.delete(key);
+    } else {
+      return hit.url;
+    }
+  }
 
   const supabase = supabaseBrowser();
   const { data, error } = await supabase.storage.from(bucket).createSignedUrl(path, 60 * 45);
@@ -19,8 +49,12 @@ export async function getCachedSignedMediaUrl(
     cache.set(key, { url: data.signedUrl, at: Date.now() });
     return data.signedUrl;
   }
-  // Signing can fail on a private bucket before auth is ready. Don't cache the
-  // public fallback so the next pass can mint a real signed URL.
+  if (isMissingStorageObjectError(error)) {
+    cache.delete(key);
+    if (opts?.allowPublicFallback !== true) return "";
+  }
+  // Private `board-media` 403s on getPublicUrl. Only opt-in callers may fall back.
+  if (opts?.allowPublicFallback !== true) return "";
   return supabase.storage.from(bucket).getPublicUrl(path).data.publicUrl || "";
 }
 
