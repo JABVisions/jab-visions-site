@@ -52,6 +52,7 @@ import {
   resolveUploadContentType,
   studioMediaKindForFile,
   studioCompleteTimeoutMs,
+  STUDIO_BYTES_DONE_UNSTICK_MS,
 } from "@/lib/board/uploadLimits";
 import type { BoardUploadProgress, BoardUploadProgressHandler } from "@/lib/board/uploadProgress";
 import { saveDropDraft, draftToFile, ensureVoiceStudioDraftCard, type DropDraft } from "@/lib/board/dropDrafts";
@@ -2567,23 +2568,51 @@ export default function DropStudioStage({
           : "Saving Drop…",
       true
     );
+    let progressLive = true;
+    let bytesDoneTimer: number | undefined;
+    const stopProgress = () => {
+      progressLive = false;
+      if (bytesDoneTimer) window.clearTimeout(bytesDoneTimer);
+      bytesDoneTimer = undefined;
+    };
     try {
       // Project Room audition tapes (and other large media) share the upload
       // budget — a 20s cap parked valid files in Drafts before onComplete finished.
-      await withAudioTimeout(
-        Promise.resolve(
-          onComplete(file, source, (progress) => {
-            setUploadProgress(progress);
-            if (progress?.label) flashSaveNote(progress.label, true);
-          })
-        ),
-        studioCompleteTimeoutMs(
+      await new Promise<void>((resolve, reject) => {
+        const overall = window.setTimeout(() => {
+          reject(
+            new Error("Video upload timed out. Stay on this screen and try again on Wi-Fi.")
+          );
+        }, studioCompleteTimeoutMs(
           file.size > 0 ? file.size : isVideoDrop ? 1024 * 1024 * 1024 : file.size,
           isAudioMix
-        ),
-        "complete"
-      );
+        ));
+        const complete = Promise.resolve(
+          onComplete(file, source, (progress) => {
+            if (!progressLive) return;
+            setUploadProgress(progress);
+            if (progress?.label) flashSaveNote(progress.label, true);
+            if (progress && progress.percent >= 100 && bytesDoneTimer == null) {
+              bytesDoneTimer = window.setTimeout(() => {
+                reject(
+                  new Error(
+                    "Upload finished but Board did not close. Stay on this screen and try again."
+                  )
+                );
+              }, STUDIO_BYTES_DONE_UNSTICK_MS);
+            }
+          })
+        );
+        complete.then(
+          () => resolve(),
+          (error) => reject(error)
+        ).finally(() => {
+          window.clearTimeout(overall);
+          if (bytesDoneTimer) window.clearTimeout(bytesDoneTimer);
+        });
+      });
     } catch (error) {
+      stopProgress();
       completingRef.current = false;
       console.error("[DropStudioStage] completion failed", error);
       const message = error instanceof Error ? error.message : "";
@@ -2598,6 +2627,7 @@ export default function DropStudioStage({
       setUploadProgress(null);
       return;
     }
+    stopProgress();
     setProcessingVocal(false);
     setUploadProgress(null);
     clearLiveVoiceStudio();

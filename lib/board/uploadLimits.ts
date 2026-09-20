@@ -68,6 +68,9 @@ export function studioCompleteTimeoutMs(bytes: number, isAudioMix = false): numb
   return Math.max(isAudioMix ? 90_000 : 0, uploadTimeoutMsForBytes(safeBytes) + 15_000);
 }
 
+/** After the tape hits 100%, Drop Studio must unstick instead of looping on Almost done. */
+export const STUDIO_BYTES_DONE_UNSTICK_MS = 8_000;
+
 export type UploadKind = keyof typeof UPLOAD_LIMITS;
 
 export function uploadKindForFile(file: {

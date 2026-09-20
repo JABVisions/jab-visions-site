@@ -24,8 +24,9 @@ import { supabaseBrowser } from "@/lib/supabase/browser";
 export const BOARD_MEDIA_UPLOAD_TIMEOUT_MS = 180_000;
 export const BOARD_MEDIA_READ_TIMEOUT_MS = 12_000;
 export const BOARD_MEDIA_SESSION_TIMEOUT_MS = 12_000;
-const SIGNED_PLAYBACK_TIMEOUT_MS = 4_000;
-const BYTES_COMPLETE_SETTLE_MS = 2_500;
+const SIGNED_PLAYBACK_TIMEOUT_MS = 1_500;
+export const BYTES_COMPLETE_SETTLE_MS = 400;
+export const BYTES_DONE_FINALIZE_MS = 8_000;
 const COPY_BYTES_LIMIT = 8 * 1024 * 1024;
 const UNKNOWN_VIDEO_BYTES = 1024 * 1024 * 1024;
 const FIRST_BYTE_STALL_MS = 25_000;
@@ -240,6 +241,33 @@ export function bytesUploadFinished(loaded: number, total: number): boolean {
   return total > 0 && loaded >= total;
 }
 
+/**
+ * iPhone Safari often reports 100% uploaded, then fires `onerror` / `onload`
+ * with status 0. Treating that as failure restarts the 62MB PUT (progress
+ * bar reset loop). Once bytes are done, only hard 401/403/413 fail the PUT.
+ */
+export function acceptXhrOutcome(opts: {
+  kind: "load" | "error" | "timeout" | "abort";
+  status: number;
+  loaded: number;
+  total: number;
+}): "success" | "failure" {
+  const bytesDone = bytesUploadFinished(opts.loaded, opts.total);
+  if (opts.status === 401 || opts.status === 403 || opts.status === 413) {
+    return "failure";
+  }
+  if (bytesDone) {
+    if (opts.kind !== "load") return "success";
+    if (!opts.status || opts.status < 100 || (opts.status >= 200 && opts.status < 300)) {
+      return "success";
+    }
+    if (opts.status >= 400) return "failure";
+    return "success";
+  }
+  if (opts.kind === "load" && opts.status >= 200 && opts.status < 300) return "success";
+  return "failure";
+}
+
 export function playbackResultAfterUpload(opts: {
   bucket: string;
   storagePath: string;
@@ -323,38 +351,48 @@ function xhrSend(opts: {
         lastMove = Date.now();
       }
       opts.onBytes?.(loaded, resolvedTotal);
-      if (
-        bytesUploadFinished(Math.max(loaded, lastLoaded), resolvedTotal) &&
-        !bytesCompleteTimer &&
-        !settled
-      ) {
+      const done =
+        bytesUploadFinished(Math.max(loaded, lastLoaded), knownTotal) ||
+        bytesUploadFinished(Math.max(loaded, lastLoaded), resolvedTotal);
+      if (done && !bytesCompleteTimer && !settled) {
         // iPhone Safari can sit at 100% and never fire onload.
         bytesCompleteTimer = setTimeout(() => {
           settle(() => resolve({ status: xhr.status || 200, text: String(xhr.responseText || "") }));
         }, BYTES_COMPLETE_SETTLE_MS);
       }
     };
-    xhr.upload.onprogress = (event) => {
-      const total = event.lengthComputable && event.total > 0 ? event.total : knownTotal;
-      noteBytes(event.loaded || lastLoaded, total);
-    };
-    xhr.onload = () => {
-      if (xhr.status >= 200 && xhr.status < 300) {
-        noteBytes(Math.max(lastLoaded, knownTotal || lastLoaded), knownTotal || lastLoaded);
+    const terminal = (kind: "load" | "error" | "timeout" | "abort") => {
+      const outcome = acceptXhrOutcome({
+        kind,
+        status: xhr.status || 0,
+        loaded: lastLoaded,
+        total: knownTotal || lastLoaded,
+      });
+      if (outcome === "success") {
+        settle(() =>
+          resolve({
+            status: xhr.status >= 200 && xhr.status < 300 ? xhr.status : 200,
+            text: String(xhr.responseText || ""),
+          })
+        );
+        return;
       }
-      settle(() => resolve({ status: xhr.status, text: String(xhr.responseText || "") }));
-    };
-    xhr.onerror = () => {
-      settle(() =>
-        reject(new BoardMediaUploadError("Couldn't reach Board storage. Check your connection and try again."))
-      );
-    };
-    xhr.ontimeout = () => {
-      settle(() => reject(new BoardMediaUploadError("Media upload timed out.", "timeout")));
-    };
-    xhr.onabort = () => {
-      if (bytesUploadFinished(lastLoaded, knownTotal)) {
-        settle(() => resolve({ status: 200, text: String(xhr.responseText || "") }));
+      if (kind === "load") {
+        settle(() => resolve({ status: xhr.status, text: String(xhr.responseText || "") }));
+        return;
+      }
+      if (kind === "error") {
+        settle(() =>
+          reject(
+            new BoardMediaUploadError(
+              "Couldn't reach Board storage. Check your connection and try again."
+            )
+          )
+        );
+        return;
+      }
+      if (kind === "timeout") {
+        settle(() => reject(new BoardMediaUploadError("Media upload timed out.", "timeout")));
         return;
       }
       settle(() =>
@@ -366,6 +404,19 @@ function xhrSend(opts: {
         )
       );
     };
+    xhr.upload.onprogress = (event) => {
+      const total = event.lengthComputable && event.total > 0 ? event.total : knownTotal;
+      noteBytes(event.loaded || lastLoaded, total);
+    };
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        noteBytes(Math.max(lastLoaded, knownTotal || lastLoaded), knownTotal || lastLoaded);
+      }
+      terminal("load");
+    };
+    xhr.onerror = () => terminal("error");
+    xhr.ontimeout = () => terminal("timeout");
+    xhr.onabort = () => terminal("abort");
     xhr.send(opts.body);
   });
 }
@@ -435,6 +486,14 @@ async function signedResult(
     publicUrl = "";
   }
   if (!publicUrl) publicUrl = publicObjectUrl(bucket, storagePath);
+  if (publicUrl) {
+    return playbackResultAfterUpload({
+      bucket,
+      storagePath,
+      publicUrl,
+      signedUrl: "",
+    });
+  }
 
   try {
     const supabase = supabaseBrowser();
@@ -516,7 +575,7 @@ async function uploadThroughTus(
     };
     const upload = new Upload(file, {
       endpoint: `${supabaseUrl}/storage/v1/upload/resumable`,
-      retryDelays: [0, 3000, 5000, 10000, 20000],
+      retryDelays: [0, 2000],
       headers: {
         authorization: `Bearer ${opts.accessToken}`,
         apikey: anonKey,
@@ -553,6 +612,12 @@ async function uploadThroughTus(
       },
       onError: (error) => {
         if (settled) return;
+        if (bytesUploadFinished(lastLoaded, file.size)) {
+          settled = true;
+          finishTimers();
+          resolve();
+          return;
+        }
         settled = true;
         finishTimers();
         reject(error);
@@ -758,9 +823,17 @@ export async function uploadBoardMediaFile(
   const folder = ownerScopedUploadFolder(requestedFolder, session.user.id);
   void requestBoardMediaLimitRaise();
 
-  const onBytes: ByteReporter = (loaded, total) => tracker.bytes(loaded, total);
+  const onBytes: ByteReporter = (loaded, total) => {
+    if (loaded > 0) progressed = true;
+    lastLoaded = loaded;
+    if (total && total > 0) lastTotal = total;
+    tracker.bytes(loaded, total);
+  };
+  let progressed = false;
+  let lastLoaded = 0;
+  let lastTotal = guessUploadBytes(copy);
   const withToken = async (run: (accessToken: string) => Promise<BoardMediaUploadResult>) => {
-    tracker.reset();
+    if (!progressed) tracker.reset();
     const live = await requireUploadSession();
     return run(live.access_token);
   };
@@ -784,12 +857,42 @@ export async function uploadBoardMediaFile(
 
   if (!shouldSkipServerlessMediaUpload(copy)) {
     attempts.push(() => {
-      tracker.reset();
+      if (!progressed) tracker.reset();
       return uploadThroughServerless(copy, { bucket, folder, onBytes });
     });
   }
 
-  const result = await runUploadAttempts(copy, attempts);
+  const work = runUploadAttempts(copy, attempts);
+  const result = await new Promise<BoardMediaUploadResult>((resolve, reject) => {
+    let settled = false;
+    let finalizeTimer: ReturnType<typeof setTimeout> | undefined;
+    const finish = (run: () => void) => {
+      if (settled) return;
+      settled = true;
+      clearInterval(watch);
+      if (finalizeTimer) clearTimeout(finalizeTimer);
+      run();
+    };
+    const watch = setInterval(() => {
+      if (settled || finalizeTimer) return;
+      if (!bytesUploadFinished(lastLoaded, lastTotal)) return;
+      tracker.finishing();
+      finalizeTimer = setTimeout(() => {
+        finish(() =>
+          reject(
+            new BoardMediaUploadError(
+              "Upload finished but Board did not close. Stay on this screen and try again.",
+              "timeout"
+            )
+          )
+        );
+      }, BYTES_DONE_FINALIZE_MS);
+    }, 200);
+    work.then(
+      (value) => finish(() => resolve(value)),
+      (error) => finish(() => reject(error))
+    );
+  });
   tracker.finishing();
   opts?.onProgress?.(null);
   return result;

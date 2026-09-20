@@ -2,7 +2,6 @@ import {
   applyProjectRoomActivitiesToProjects,
   applyProjectRoomDropToProject,
   buildProjectRoomDrop,
-  claimProjectRoomStudioSave,
   commitProjectRoomDrop,
   isProjectRoomDropActivity,
   isProjectRoomHost,
@@ -13,7 +12,7 @@ import {
   projectRoomMediaKindForFile,
   projectRoomPostIsVideo,
   projectRoomStudioSaveKey,
-  releaseProjectRoomStudioSave,
+  runProjectRoomStudioSaveOnce,
   viewerCanPostToProjectRoom,
 } from "./projectRoomDrop";
 import { mergeProjectRecord, reconcileProjectsWithLive, type BoardProject } from "./projects";
@@ -327,9 +326,23 @@ const saveKey = projectRoomStudioSaveKey("project_keep_me", {
   size: 62 * 1024 * 1024,
   lastModified: 1,
 });
-assert(claimProjectRoomStudioSave(saveKey), "first studio save is claimed");
-assert(!claimProjectRoomStudioSave(saveKey), "in-flight studio save cannot be claimed again");
-releaseProjectRoomStudioSave(saveKey, true);
-assert(!claimProjectRoomStudioSave(saveKey), "finished studio save cannot post the same tape again");
-
-console.log("projectRoomDrop.test.ts: ok");
+let runs = 0;
+void (async () => {
+  const first = runProjectRoomStudioSaveOnce(saveKey, async () => {
+    runs += 1;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  });
+  const joined = runProjectRoomStudioSaveOnce(saveKey, async () => {
+    runs += 1;
+  });
+  await Promise.all([first, joined]);
+  assert(runs === 1, `in-flight studio save must be single-flight, ran ${runs} times`);
+  await runProjectRoomStudioSaveOnce(saveKey, async () => {
+    runs += 1;
+  });
+  assert(runs === 1, "finished studio save cannot post the same tape again");
+  console.log("projectRoomDrop.test.ts: ok");
+})().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});
