@@ -46,6 +46,11 @@ import {
   compactDropCustomizations,
   type DropCustomization,
 } from "@/lib/board/dropCustomizations";
+import {
+  fileWithResolvedContentType,
+  resolveUploadContentType,
+  studioMediaKindForFile,
+} from "@/lib/board/uploadLimits";
 import { saveDropDraft, draftToFile, ensureVoiceStudioDraftCard, type DropDraft } from "@/lib/board/dropDrafts";
 import DropDraftsDrawer from "./DropDraftsDrawer";
 import BoardClientErrorBoundary from "./BoardClientErrorBoundary";
@@ -508,6 +513,7 @@ export default function DropStudioStage({
   const [recording, setRecording] = useState(false);
   const [mediaUrl, setMediaUrl] = useState("");
   const [mediaKind, setMediaKind] = useState<"image" | "video" | "audio">("image");
+  const [mediaContentType, setMediaContentType] = useState("");
   /** Bumped whenever fileRef changes so preview blob URLs stay in sync (incl. Strict Mode). */
   const [mediaFileTick, setMediaFileTick] = useState(0);
   const [source, setSource] = useState<"capture" | "upload">("capture");
@@ -1387,8 +1393,10 @@ export default function DropStudioStage({
     (draft: DropDraft) => {
       const file = draftToFile(draft);
       if (!file) return;
-      fileRef.current = file;
-      setMediaKind(draft.kind);
+      const playable = fileWithResolvedContentType(file);
+      fileRef.current = playable;
+      setMediaKind(draft.kind === "audio" || draft.kind === "video" ? draft.kind : studioMediaKindForFile(playable));
+      setMediaContentType(resolveUploadContentType(playable));
       setSource("upload");
       draftIdRef.current = draft.id; // re-saving updates this same draft
       stopCamera();
@@ -1541,14 +1549,10 @@ export default function DropStudioStage({
         : allowedModes[0] ?? "photo";
     setMode(safeMode);
     if (initialFile) {
-      fileRef.current = initialFile;
-      setMediaKind(
-        initialFile.type.startsWith("audio/")
-          ? "audio"
-          : initialFile.type.startsWith("video/")
-            ? "video"
-            : "image"
-      );
+      const playable = fileWithResolvedContentType(initialFile);
+      fileRef.current = playable;
+      setMediaKind(studioMediaKindForFile(playable));
+      setMediaContentType(resolveUploadContentType(playable));
       setSource("upload");
       setPhase("edit");
       syncMediaPreview();
@@ -1631,14 +1635,9 @@ export default function DropStudioStage({
         return;
       }
       setDropbookEditingDescriptDoc(null);
-      fileRef.current = file;
-      setMediaKind(
-        file.type.startsWith("audio")
-          ? "audio"
-          : file.type.startsWith("video")
-            ? "video"
-            : "image"
-      );
+      fileRef.current = fileWithResolvedContentType(file);
+      setMediaKind(studioMediaKindForFile(fileRef.current));
+      setMediaContentType(resolveUploadContentType(fileRef.current));
       setSource("capture");
       setDrawOpen(false);
       setAudioPlaying(false);
@@ -2225,10 +2224,12 @@ export default function DropStudioStage({
       return;
     }
 
-    const file = fileRef.current;
+    const file = fileWithResolvedContentType(fileRef.current);
+    fileRef.current = file;
     const url = URL.createObjectURL(file);
     urlRef.current = url;
     setMediaUrl(url);
+    setMediaContentType(resolveUploadContentType(file));
 
     return () => {
       URL.revokeObjectURL(url);
@@ -2243,6 +2244,7 @@ export default function DropStudioStage({
     const base = kind === "audio" ? "board-vocal" : "board-vision";
     fileRef.current = new File([blob], `${base}-${Date.now()}.${ext}`, { type });
     setMediaKind(kind);
+    setMediaContentType(type);
     setSource(src);
     stopCamera();
     setPhase("edit");
@@ -2335,17 +2337,15 @@ export default function DropStudioStage({
 
   async function onUpload(f: File | undefined) {
     if (!f) return;
-    const file =
+    const file = fileWithResolvedContentType(
       f.type.startsWith("image/") && f.type !== "image/gif" && f.type !== "image/svg+xml"
         ? await ensureImageFileMinResolution(f)
-        : f;
+        : f
+    );
     fileRef.current = file;
-    const kind = file.type.startsWith("audio/")
-      ? "audio"
-      : file.type.startsWith("video/")
-        ? "video"
-        : "image";
+    const kind = studioMediaKindForFile(file);
     setMediaKind(kind);
+    setMediaContentType(resolveUploadContentType(file));
     setSource("upload");
     stopCamera();
     setPhase("edit");
@@ -3660,7 +3660,7 @@ export default function DropStudioStage({
                         </button>
                       </div>
                     </>
-                  ) : drawOpen ? (
+                  ) : drawOpen && mode === "art" ? (
                     <div className="capMonitorHost">
                       <BoardArtCanvas
                         operatingTable
@@ -3708,10 +3708,12 @@ export default function DropStudioStage({
                       <DropStudio
                         mediaUrl={mediaUrl}
                         mediaKind={mediaKind === "video" ? "video" : "image"}
+                        mediaContentType={mediaContentType}
                         value={studioValue}
                         onChange={handleStudioChange}
                         hideHeader
                         operatingTable
+                        enableArtTools={mode === "art"}
                         onMediaError={handleMediaPreviewError}
                       />
                       {saveNote ? <span className="saveNote capStudioSaveNote">{saveNote}</span> : null}

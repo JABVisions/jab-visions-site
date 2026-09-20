@@ -1,8 +1,18 @@
+import { Upload } from "tus-js-client";
 import { BUCKET_DOCS, BUCKET_MEDIA } from "@/lib/board/dropItem";
-import { checkUploadSize, resolveUploadContentType } from "@/lib/board/uploadLimits";
+import {
+  SERVERLESS_UPLOAD_BODY_LIMIT,
+  TUS_CHUNK_SIZE,
+  TUS_UPLOAD_THRESHOLD,
+  checkUploadSize,
+  fileWithResolvedContentType,
+  resolveUploadContentType,
+  uploadTimeoutMsForBytes,
+} from "@/lib/board/uploadLimits";
 import { supabaseBrowser } from "@/lib/supabase/browser";
 
-export const BOARD_MEDIA_UPLOAD_TIMEOUT_MS = 55_000;
+/** Floor used by callers that don't have a file size yet. Prefer `uploadTimeoutMsForBytes`. */
+export const BOARD_MEDIA_UPLOAD_TIMEOUT_MS = 180_000;
 export const BOARD_MEDIA_READ_TIMEOUT_MS = 12_000;
 const COPY_BYTES_LIMIT = 8 * 1024 * 1024;
 
@@ -38,7 +48,7 @@ export function parseBoardMediaUploadResponse(value: unknown): BoardMediaUploadR
 export async function copyFileForUpload(file: File): Promise<File | null> {
   try {
     if (file.size > COPY_BYTES_LIMIT) {
-      return file;
+      return fileWithResolvedContentType(file);
     }
     const buffer = await withTimeout(
       file.slice(0).arrayBuffer(),
@@ -52,6 +62,87 @@ export async function copyFileForUpload(file: File): Promise<File | null> {
       lastModified: Date.now(),
     });
   } catch {
+    return null;
+  }
+}
+
+function storagePathFor(file: File, folder: string) {
+  const ext = (file.name.split(".").pop() || "bin").toLowerCase().replace(/[^a-z0-9]+/g, "") || "bin";
+  return `${folder.replace(/\/+$/, "")}/${Date.now()}-${Math.random().toString(16).slice(2)}.${ext}`;
+}
+
+async function signedResult(
+  bucket: string,
+  storagePath: string
+): Promise<BoardMediaUploadResult | null> {
+  const supabase = supabaseBrowser();
+  const publicUrl = supabase.storage.from(bucket).getPublicUrl(storagePath).data.publicUrl || "";
+  const { data: signed } = await supabase.storage.from(bucket).createSignedUrl(storagePath, 60 * 60 * 24 * 365);
+  return {
+    bucket,
+    storagePath,
+    publicUrl,
+    signedUrl: signed?.signedUrl || "",
+  };
+}
+
+async function uploadThroughTus(
+  file: File,
+  opts: { bucket: string; folder: string }
+): Promise<BoardMediaUploadResult | null> {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const anonKey =
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
+  if (!supabaseUrl || !anonKey) return null;
+
+  try {
+    const supabase = supabaseBrowser();
+    const { data } = await withTimeout(
+      supabase.auth.getSession(),
+      4_000,
+      "Sign-in check timed out."
+    );
+    const session = data.session;
+    if (!session?.user?.id || !session.access_token) return null;
+
+    const contentType = resolveUploadContentType(file);
+    const storagePath = storagePathFor(file, opts.folder);
+    const timeoutMs = uploadTimeoutMsForBytes(file.size);
+
+    await withTimeout(
+      new Promise<void>((resolve, reject) => {
+        const upload = new Upload(file, {
+          endpoint: `${supabaseUrl.replace(/\/+$/, "")}/storage/v1/upload/resumable`,
+          retryDelays: [0, 3000, 5000, 10000, 20000],
+          headers: {
+            authorization: `Bearer ${session.access_token}`,
+            apikey: anonKey,
+            "x-upsert": "true",
+          },
+          uploadDataDuringCreation: true,
+          removeFingerprintOnSuccess: true,
+          chunkSize: TUS_CHUNK_SIZE,
+          metadata: {
+            bucketName: opts.bucket,
+            objectName: storagePath,
+            contentType,
+            cacheControl: "3600",
+          },
+          onError: (error) => reject(error),
+          onSuccess: () => resolve(),
+        });
+        void upload.findPreviousUploads().then((previous) => {
+          if (previous[0]) upload.resumeFromPreviousUpload(previous[0]);
+          upload.start();
+        }, () => upload.start());
+      }),
+      timeoutMs,
+      "Media upload timed out."
+    );
+
+    return signedResult(opts.bucket, storagePath);
+  } catch (error) {
+    console.error("Board media tus upload failed:", error);
     return null;
   }
 }
@@ -70,35 +161,23 @@ async function uploadThroughBrowser(
     const userId = data.session?.user?.id;
     if (!userId) return null;
 
-    const bytes = file.size > COPY_BYTES_LIMIT ? file : new Uint8Array(await file.arrayBuffer());
     const contentType = resolveUploadContentType(file);
-    const ext = (file.name.split(".").pop() || "bin").toLowerCase();
-    const storagePath = `${opts.folder.replace(/\/+$/, "")}/${Date.now()}-${Math.random()
-      .toString(16)
-      .slice(2)}.${ext}`;
+    const storagePath = storagePathFor(file, opts.folder);
+    const timeoutMs = uploadTimeoutMsForBytes(file.size);
     const { error } = await withTimeout(
-      supabase.storage.from(opts.bucket).upload(storagePath, bytes, {
+      supabase.storage.from(opts.bucket).upload(storagePath, file, {
         upsert: true,
         contentType,
         cacheControl: "3600",
       }),
-      BOARD_MEDIA_UPLOAD_TIMEOUT_MS,
+      timeoutMs,
       "Media upload timed out."
     );
     if (error) {
       console.error("Board media upload failed:", error);
       return null;
     }
-    const publicUrl = supabase.storage.from(opts.bucket).getPublicUrl(storagePath).data.publicUrl || "";
-    const { data: signed } = await supabase.storage
-      .from(opts.bucket)
-      .createSignedUrl(storagePath, 60 * 60 * 24 * 365);
-    return {
-      bucket: opts.bucket,
-      storagePath,
-      publicUrl,
-      signedUrl: signed?.signedUrl || "",
-    };
+    return signedResult(opts.bucket, storagePath);
   } catch (error) {
     console.error("Board media upload failed:", error);
     return null;
@@ -120,13 +199,24 @@ export async function uploadBoardMediaFile(
   const copy = await copyFileForUpload(file);
   if (!copy) return null;
 
+  // Vercel serverless rejects FormData over ~4.5MB. Long audition tapes go
+  // straight to Supabase (tus when large enough) so they are not silently capped.
+  if (copy.size > SERVERLESS_UPLOAD_BODY_LIMIT) {
+    if (copy.size >= TUS_UPLOAD_THRESHOLD) {
+      const tusResult = await uploadThroughTus(copy, { bucket, folder });
+      if (tusResult) return tusResult;
+    }
+    return uploadThroughBrowser(copy, { bucket, folder });
+  }
+
   const body = new FormData();
   body.set("file", copy, copy.name);
   body.set("bucket", bucket);
   body.set("folder", folder);
 
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), BOARD_MEDIA_UPLOAD_TIMEOUT_MS);
+  const timeoutMs = uploadTimeoutMsForBytes(copy.size);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const response = await fetch("/api/board/media", {
       method: "POST",

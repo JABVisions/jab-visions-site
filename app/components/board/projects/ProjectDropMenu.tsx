@@ -376,6 +376,11 @@ export default function ProjectDropMenu({
     }
 
     if (isVideo) {
+      const sizeError = checkUploadSize(file, "video");
+      if (sizeError) {
+        setError(sizeError);
+        return;
+      }
       setMediaKind("video");
       mediaFileRef.current = file;
       setPreviewFromFile(file);
@@ -388,7 +393,7 @@ export default function ProjectDropMenu({
           });
           if (generation !== uploadGenerationRef.current) return;
           if (!uploaded) {
-            setError("Couldn’t upload that video. Try a shorter clip.");
+            setError("Couldn’t upload that video. Check your connection and try again.");
             return;
           }
           rememberCover({
