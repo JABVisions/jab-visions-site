@@ -23,11 +23,9 @@
 }
 
 .studioUploadDock {
-  position: absolute;
-  left: 12px;
-  right: 12px;
-  bottom: 12px;
+  position: relative;
   z-index: 60;
+  padding: 8px 12px 4px;
 }
 .studioSheet {
   width: min(560px, calc(100vw - 20px));

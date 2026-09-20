@@ -59,6 +59,24 @@ export function preparingUploadProgress(total = 0): BoardUploadProgress {
   return makeUploadProgress(0, total, 0, "Preparing upload…");
 }
 
+/** Video Tools must show a bar as soon as save starts, even at 0%. */
+export function studioVisibleUploadProgress(opts: {
+  processing: boolean;
+  isVideo: boolean;
+  progress: BoardUploadProgress | null | undefined;
+  totalBytes?: number;
+}): BoardUploadProgress | null {
+  if (opts.progress) return opts.progress;
+  if (opts.processing && opts.isVideo) {
+    const total =
+      typeof opts.totalBytes === "number" && Number.isFinite(opts.totalBytes) && opts.totalBytes > 0
+        ? opts.totalBytes
+        : 0;
+    return preparingUploadProgress(total);
+  }
+  return null;
+}
+
 export function createUploadProgressReporter(
   onProgress?: BoardUploadProgressHandler,
   throttleMs = UPLOAD_PROGRESS_THROTTLE_MS

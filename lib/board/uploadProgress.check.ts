@@ -6,6 +6,7 @@ import {
   formatUploadEta,
   makeUploadProgress,
   preparingUploadProgress,
+  studioVisibleUploadProgress,
   type BoardUploadProgress,
 } from "./uploadProgress";
 
@@ -38,6 +39,32 @@ assert(preparing.percent === 0, "preparing starts at 0%");
 assert(preparing.loaded === 0, "preparing has sent 0 bytes");
 assert(preparing.total === 80 * 1024 * 1024, "preparing keeps the known total");
 assert(preparing.label === "Preparing upload…", "preparing copy");
+
+assert(
+  studioVisibleUploadProgress({
+    processing: true,
+    isVideo: true,
+    progress: null,
+    totalBytes: 62 * 1024 * 1024,
+  })?.label === "Preparing upload…",
+  "Video Tools show a 0% preparing bar as soon as save starts"
+);
+assert(
+  studioVisibleUploadProgress({
+    processing: true,
+    isVideo: true,
+    progress: mid,
+  })?.percent === 50,
+  "live byte ticks replace the preparing placeholder"
+);
+assert(
+  studioVisibleUploadProgress({
+    processing: false,
+    isVideo: true,
+    progress: null,
+  }) === null,
+  "idle studio does not show a fake bar"
+);
 
 assert(formatUploadBytes(0, 0) === "Waiting…", "unknown totals wait");
 assert(formatUploadBytes(1024, 0).endsWith("KB"), "loaded-only still formats");

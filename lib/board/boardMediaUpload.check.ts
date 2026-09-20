@@ -13,6 +13,7 @@ import {
   progressBytesUntilVerified,
   requestSignedPlaybackUrl,
   SIGNED_PLAYBACK_TIMEOUT_MS,
+  START_UPLOAD_STALL_MS,
   acceptXhrOutcome,
   isMissingObjectUploadError,
   BoardMediaUploadError,
@@ -230,6 +231,10 @@ assert(
 assert(
   SIGNED_PLAYBACK_TIMEOUT_MS >= 4_000,
   "signing after PUT must wait ~4s, not skip createSignedUrl"
+);
+assert(
+  START_UPLOAD_STALL_MS <= 25_000 && START_UPLOAD_STALL_MS >= 15_000,
+  "session/signed-URL/XHR must fail within ~25s if no first byte"
 );
 assert(
   explainBoardMediaUploadError(
