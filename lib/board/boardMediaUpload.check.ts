@@ -9,9 +9,13 @@ import {
   bytesUploadFinished,
   playbackResultAfterUpload,
   preferredCommitPlaybackUrl,
+  canCommitBoardMediaPlayback,
+  progressBytesUntilVerified,
   requestSignedPlaybackUrl,
   SIGNED_PLAYBACK_TIMEOUT_MS,
   acceptXhrOutcome,
+  isMissingObjectUploadError,
+  BoardMediaUploadError,
   type BoardMediaUploadOptions,
 } from "./boardMediaUpload";
 import { isMissingStorageObjectError, isPublicBoardStorageUrl } from "./signedMediaUrl";
@@ -138,18 +142,23 @@ assert(bytesUploadFinished(62 * 1024 * 1024, 62 * 1024 * 1024), "100% bytes are 
 assert(!bytesUploadFinished(10, 62 * 1024 * 1024), "partial bytes are not finished");
 assert(
   acceptXhrOutcome({ kind: "error", status: 0, loaded: 62 * 1024 * 1024, total: 62 * 1024 * 1024 }) ===
-    "success",
-  "iPhone onerror after 100% must not restart the PUT"
+    "unverified",
+  "iPhone onerror after 100% must not restart the PUT, and must not count as a written object"
 );
 assert(
   acceptXhrOutcome({ kind: "load", status: 0, loaded: 62 * 1024 * 1024, total: 62 * 1024 * 1024 }) ===
-    "success",
-  "iPhone onload status 0 after 100% is success"
+    "unverified",
+  "iPhone onload status 0 after 100% is unverified until createSignedUrl"
 );
 assert(
   acceptXhrOutcome({ kind: "abort", status: 0, loaded: 62 * 1024 * 1024, total: 62 * 1024 * 1024 }) ===
+    "unverified",
+  "abort after 100% is unverified, not a committed Drop"
+);
+assert(
+  acceptXhrOutcome({ kind: "load", status: 200, loaded: 62 * 1024 * 1024, total: 62 * 1024 * 1024 }) ===
     "success",
-  "abort after 100% is success"
+  "HTTP 200 at 100% is a verified write"
 );
 assert(
   acceptXhrOutcome({ kind: "error", status: 0, loaded: 10, total: 62 * 1024 * 1024 }) === "failure",
@@ -160,15 +169,29 @@ assert(
     "failure",
   "413 after bytes still fails so the limit-raise retry can run"
 );
-const playback = playbackResultAfterUpload({
-  bucket: "board-media",
-  storagePath: "user/project-media/tape.mp4",
-  publicUrl: "https://cdn.example/tape.mp4",
-  signedUrl: "",
-});
 assert(
-  playback.publicUrl === "https://cdn.example/tape.mp4" && playback.signedUrl === "",
-  "a public URL is enough to close the studio after bytes finish"
+  progressBytesUntilVerified(62 * 1024 * 1024, 62 * 1024 * 1024, false).percent === 99,
+  "progress stays under 100% until the object is signed"
+);
+assert(
+  progressBytesUntilVerified(62 * 1024 * 1024, 62 * 1024 * 1024, true).percent === 100,
+  "verified objects can close at 100%"
+);
+let missingPlayback = false;
+try {
+  playbackResultAfterUpload({
+    bucket: "board-media",
+    storagePath: "user/project-media/tape.mp4",
+    publicUrl: "https://cdn.example/tape.mp4",
+    signedUrl: "",
+  });
+} catch (error) {
+  missingPlayback = isMissingObjectUploadError(error);
+}
+assert(missingPlayback, "a public URL is not enough to commit a private-bucket video");
+assert(
+  !canCommitBoardMediaPlayback({ signedUrl: "" }),
+  "unsigned playback cannot be saved as a room Drop"
 );
 assert(
   preferredCommitPlaybackUrl({
@@ -181,8 +204,8 @@ assert(
   preferredCommitPlaybackUrl({
     signedUrl: "",
     publicUrl: "https://example.supabase.co/storage/v1/object/public/board-media/tape.mp4",
-  }).includes("/object/public/"),
-  "commit can still save the drop when signing times out"
+  }) === "",
+  "commit must not fall back to a public 403 URL"
 );
 assert(
   !isPublicBoardStorageUrl(
@@ -208,16 +231,22 @@ assert(
   SIGNED_PLAYBACK_TIMEOUT_MS >= 4_000,
   "signing after PUT must wait ~4s, not skip createSignedUrl"
 );
-let missingPlayback = false;
+assert(
+  explainBoardMediaUploadError(
+    new BoardMediaUploadError("This video didn't finish saving to Board storage. Try uploading it again.", "missing")
+  ).includes("didn't finish saving"),
+  "missing objects surface the studio retry copy"
+);
+let noUrlPlayback = false;
 try {
   playbackResultAfterUpload({
     bucket: "board-media",
     storagePath: "user/project-media/tape.mp4",
   });
 } catch {
-  missingPlayback = true;
+  noUrlPlayback = true;
 }
-assert(missingPlayback, "playback helper still fails when no URL exists");
+assert(noUrlPlayback, "playback helper still fails when no URL exists");
 
 void (async () => {
   const signed = await requestSignedPlaybackUrl(async () => ({
