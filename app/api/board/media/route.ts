@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { ensureBoardMediaFileSizeLimit } from "@/lib/board/ensureBoardMediaLimits";
 import { checkUploadSize, ownerScopedUploadFolder, resolveUploadContentType } from "@/lib/board/uploadLimits";
 import { createSupabaseRouteClient } from "@/lib/supabase/routeClient";
 
@@ -33,6 +34,11 @@ export async function POST(request: NextRequest) {
   if (!user) {
     return applyCookies(jsonError(401, "Sign in to upload Board media."));
   }
+
+  await Promise.race([
+    ensureBoardMediaFileSizeLimit(),
+    new Promise<void>((resolve) => setTimeout(resolve, 4_000)),
+  ]).catch(() => undefined);
 
   const form = await request.formData();
   const file = form.get("file");

@@ -400,7 +400,7 @@ export default function ProjectDropMenu({
         } catch (error) {
           if (generation !== uploadGenerationRef.current) return;
           const { explainBoardMediaUploadError } = await import("@/lib/board/boardMediaUpload");
-          setError(explainBoardMediaUploadError(error));
+          setError(explainBoardMediaUploadError(error, file));
         } finally {
           if (generation !== uploadGenerationRef.current) return;
           setMediaUploading(false);
