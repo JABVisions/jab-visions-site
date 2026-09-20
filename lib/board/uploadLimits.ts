@@ -51,6 +51,14 @@ export function uploadTimeoutMsForBytes(bytes: number): number {
   return Math.min(UPLOAD_TIMEOUT_CAP_MS, Math.max(UPLOAD_TIMEOUT_FLOOR_MS, Math.ceil(mb / 30) * 60_000));
 }
 
+/**
+ * Drop Studio waits this long for onComplete (Project Room uploads included).
+ * The old 20s cap parked valid audition tapes in Drafts before the room save finished.
+ */
+export function studioCompleteTimeoutMs(bytes: number, isAudioMix = false): number {
+  return Math.max(isAudioMix ? 90_000 : 0, uploadTimeoutMsForBytes(bytes) + 15_000);
+}
+
 export type UploadKind = keyof typeof UPLOAD_LIMITS;
 
 export function uploadKindForFile(file: {
