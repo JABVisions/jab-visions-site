@@ -1,7 +1,10 @@
 "use client";
 
 import { supabaseBrowser } from "@/lib/supabase/browser";
-import { isPublicBoardStorageUrl } from "@/lib/board/musicPlayback";
+import {
+  isPublicBoardStorageUrl,
+  resolveStoredMediaCoords,
+} from "@/lib/board/musicPlayback";
 
 export { isPublicBoardStorageUrl, isSignedBoardStorageUrl } from "@/lib/board/musicPlayback";
 
@@ -33,7 +36,13 @@ export async function getCachedSignedMediaUrl(
   path: string,
   opts?: SignedMediaLookupOptions
 ): Promise<string> {
-  const key = `${bucket}:${path}`;
+  const coords = resolveStoredMediaCoords({ bucket, storagePath: path }) || {
+    bucket,
+    storagePath: path,
+  };
+  const signBucket = coords.bucket;
+  const signPath = coords.storagePath;
+  const key = `${signBucket}:${signPath}`;
   const hit = cache.get(key);
   if (hit && Date.now() - hit.at < TTL_MS) {
     if (opts?.allowPublicFallback !== true && isPublicBoardStorageUrl(hit.url)) {
@@ -44,8 +53,10 @@ export async function getCachedSignedMediaUrl(
   }
 
   const supabase = supabaseBrowser();
-  const { data, error } = await supabase.storage.from(bucket).createSignedUrl(path, 60 * 45);
-  if (!error && data?.signedUrl) {
+  const { data, error } = await supabase.storage
+    .from(signBucket)
+    .createSignedUrl(signPath, 60 * 45);
+  if (!error && data?.signedUrl && !isPublicBoardStorageUrl(data.signedUrl)) {
     cache.set(key, { url: data.signedUrl, at: Date.now() });
     return data.signedUrl;
   }
@@ -55,7 +66,7 @@ export async function getCachedSignedMediaUrl(
   }
   // Private `board-media` 403s on getPublicUrl. Only opt-in callers may fall back.
   if (opts?.allowPublicFallback !== true) return "";
-  return supabase.storage.from(bucket).getPublicUrl(path).data.publicUrl || "";
+  return supabase.storage.from(signBucket).getPublicUrl(signPath).data.publicUrl || "";
 }
 
 export function invalidateSignedMediaUrl(bucket: string, path: string) {

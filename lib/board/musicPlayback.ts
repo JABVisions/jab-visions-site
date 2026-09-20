@@ -54,6 +54,24 @@ export function isSignedBoardStorageUrl(url: string): boolean {
   return /\/storage\/v1\/(?:object|render\/image)\/sign\//i.test(String(url || ""));
 }
 
+function normalizeObjectPath(bucket: string, path: string): string {
+  let next = String(path || "").trim();
+  if (!next) return "";
+  const parsed = parseBoardStorageFromUrl(next);
+  if (parsed) return parsed.storagePath;
+  if (/^https?:\/\//i.test(next)) return "";
+  try {
+    next = decodeURIComponent(next.split("?")[0].split("#")[0]);
+  } catch {
+    next = next.split("?")[0].split("#")[0];
+  }
+  next = next.replace(/^\/+/, "");
+  if (bucket && next.startsWith(`${bucket}/`)) {
+    next = next.slice(bucket.length + 1);
+  }
+  return next;
+}
+
 /** Resolve authoritative storage coords from meta fields or embedded storage URLs. */
 export function resolveStoredMediaCoords(opts: {
   bucket?: string | null;
@@ -61,10 +79,17 @@ export function resolveStoredMediaCoords(opts: {
   mediaUrl?: string | null;
   href?: string | null;
 }): { bucket: string; storagePath: string } | null {
-  if (opts.bucket?.trim() && opts.storagePath?.trim()) {
-    return { bucket: opts.bucket.trim(), storagePath: opts.storagePath.trim() };
+  const bucket = String(opts.bucket || "").trim();
+  let storagePath = String(opts.storagePath || "").trim();
+  if (storagePath) {
+    const parsedPath = parseBoardStorageFromUrl(storagePath);
+    if (parsedPath) return parsedPath;
+    storagePath = normalizeObjectPath(bucket, storagePath);
   }
-  for (const url of [opts.mediaUrl, opts.href]) {
+  if (bucket && storagePath) {
+    return { bucket, storagePath };
+  }
+  for (const url of [opts.mediaUrl, opts.href, opts.storagePath]) {
     if (!url) continue;
     const parsed = parseBoardStorageFromUrl(url);
     if (parsed) return parsed;

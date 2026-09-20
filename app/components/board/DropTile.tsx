@@ -47,7 +47,7 @@ import {
   studioLinkPersistKind,
 } from "@/lib/board/dropbookLink";
 import { checkUploadSize } from "@/lib/board/uploadLimits";
-import { uploadBoardMediaFile, explainBoardMediaUploadError } from "@/lib/board/boardMediaUpload";
+import { uploadBoardMediaFile, explainBoardMediaUploadError, preferredCommitPlaybackUrl } from "@/lib/board/boardMediaUpload";
 import { resolveBoardUploadSession } from "@/lib/board/boardUploadSession";
 import type { BoardUploadProgress } from "@/lib/board/uploadProgress";
 import BoardUploadProgressBar from "./BoardUploadProgressBar";
@@ -542,7 +542,12 @@ function normalizeDropItems(input: unknown, userId: string | null): DropItem[] {
       }
       const resolvedKind = resolveDropMediaKind(item);
       if (resolvedKind) item.mediaKind = resolvedKind;
-      if (!item.mediaUrl && item.url && parseBoardStorageFromUrl(item.url)) {
+      if (
+        !item.mediaUrl &&
+        item.url &&
+        parseBoardStorageFromUrl(item.url) &&
+        !/\/storage\/v1\/(?:object|render\/image)\/public\//i.test(item.url)
+      ) {
         item.mediaUrl = item.url;
       }
       return item;
@@ -1303,7 +1308,7 @@ export default function DropTile() {
     bucket: string;
     file: File;
     dropId: string;
-  }): Promise<{ bucket: string; storagePath: string } | null> {
+  }): Promise<{ bucket: string; storagePath: string; signedUrl?: string } | null> {
     const sess = await requireSession();
     if (!sess) {
         flash(setMsg, "Sign in to upload this video.", 2000);
@@ -1325,22 +1330,16 @@ export default function DropTile() {
         onProgress: setUploadProgress,
       });
       setUploadProgress(null);
-      return { bucket: uploaded.bucket, storagePath: uploaded.storagePath };
+      return {
+        bucket: uploaded.bucket,
+        storagePath: uploaded.storagePath,
+        signedUrl: preferredCommitPlaybackUrl(uploaded) || undefined,
+      };
     } catch (error) {
       console.error("Storage upload error:", error);
       setUploadProgress(null);
       flash(setMsg, explainBoardMediaUploadError(error, opts.file), 2600);
       return null;
-    }
-  }
-
-  function publicStorageUrl(bucket: string, path: string) {
-    try {
-      return (
-        supabaseBrowser().storage.from(bucket).getPublicUrl(path).data.publicUrl || undefined
-      );
-    } catch {
-      return undefined;
     }
   }
 
@@ -1363,10 +1362,9 @@ export default function DropTile() {
       dropId: `${dropId}-art-layer`,
     });
     if (!uploaded) throw new Error("Couldn't save the editable art layer.");
-    const publicUrl = supabaseBrowser().storage.from(uploaded.bucket)
-      .getPublicUrl(uploaded.storagePath).data.publicUrl;
-    if (!publicUrl) throw new Error("Couldn't resolve the editable art layer.");
-    return { ...input, artOverlayUrl: publicUrl };
+    const overlayUrl = uploaded.signedUrl;
+    if (!overlayUrl) throw new Error("Couldn't resolve the editable art layer.");
+    return { ...input, artOverlayUrl: overlayUrl };
   }
 
   async function addMediaDrop() {
@@ -1397,8 +1395,8 @@ export default function DropTile() {
         createdAt: Date.now(),
         bucket: up.bucket,
         storagePath: up.storagePath,
-        url: publicStorageUrl(up.bucket, up.storagePath),
-        mediaUrl: publicStorageUrl(up.bucket, up.storagePath),
+        url: up.signedUrl,
+        mediaUrl: up.signedUrl,
         fileName: file.name,
         fileSize: file.size,
         mime: file.type,
@@ -1444,8 +1442,8 @@ export default function DropTile() {
         createdAt: Date.now(),
         bucket: up.bucket,
         storagePath: up.storagePath,
-        url: publicStorageUrl(up.bucket, up.storagePath),
-        mediaUrl: publicStorageUrl(up.bucket, up.storagePath),
+        url: up.signedUrl,
+        mediaUrl: up.signedUrl,
         fileName: file.name,
         fileSize: file.size,
         mime: file.type || "audio/mpeg",
@@ -1484,8 +1482,8 @@ export default function DropTile() {
         createdAt: Date.now(),
         bucket: up.bucket,
         storagePath: up.storagePath,
-        url: publicStorageUrl(up.bucket, up.storagePath),
-        mediaUrl: publicStorageUrl(up.bucket, up.storagePath),
+        url: up.signedUrl,
+        mediaUrl: up.signedUrl,
         fileName: file.name,
         fileSize: file.size,
         mime: file.type,
@@ -1525,7 +1523,7 @@ export default function DropTile() {
       compactDropCustomizations(dropCustomizations),
       id
     );
-    let uploaded: { bucket: string; storagePath: string } | null = null;
+    let uploaded: { bucket: string; storagePath: string; signedUrl?: string } | null = null;
 
     if (file) {
       uploaded = await uploadFileToStorage({ bucket: BUCKET_MEDIA, file, dropId: id });
@@ -1542,8 +1540,8 @@ export default function DropTile() {
           ? {
               bucket: uploaded.bucket,
               storagePath: uploaded.storagePath,
-              url: publicStorageUrl(uploaded.bucket, uploaded.storagePath),
-              mediaUrl: publicStorageUrl(uploaded.bucket, uploaded.storagePath),
+              url: uploaded.signedUrl,
+              mediaUrl: uploaded.signedUrl,
               fileName: file?.name,
               fileSize: file?.size,
               mime: file?.type,
@@ -1616,8 +1614,8 @@ export default function DropTile() {
         createdAt: Date.now(),
         bucket: up.bucket,
         storagePath: up.storagePath,
-        url: publicStorageUrl(up.bucket, up.storagePath),
-        mediaUrl: publicStorageUrl(up.bucket, up.storagePath),
+        url: up.signedUrl,
+        mediaUrl: up.signedUrl,
         fileName: file.name,
         fileSize: file.size,
         mime: file.type,

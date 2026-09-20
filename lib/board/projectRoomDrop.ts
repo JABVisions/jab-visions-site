@@ -704,7 +704,11 @@ export function buildProjectRoomDrop(opts: {
     kind: "board_drop",
     title,
     body,
-    href: persistableProjectRoomMediaUrl(mediaUrl),
+    href: (() => {
+      const persistable = persistableProjectRoomMediaUrl(mediaUrl);
+      if (!persistable || isPublicBoardStorageUrl(persistable)) return null;
+      return persistable;
+    })(),
     image_url:
       opts.media.kind === "image" ? persistableProjectRoomMediaUrl(mediaUrl) : null,
     meta,
@@ -878,7 +882,11 @@ export function activityFromProjectRoomPost(
     kind: "board_drop",
     title,
     body,
-    href: mediaUrl || null,
+    href: (() => {
+      const persistable = persistableProjectRoomMediaUrl(mediaUrl);
+      if (!persistable || isPublicBoardStorageUrl(persistable)) return null;
+      return persistable;
+    })(),
     image_url: kind === "image" ? mediaUrl || null : null,
     meta: {
       cardStyle: PROJECT_ROOM_DROP_CARD,
