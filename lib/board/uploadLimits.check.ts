@@ -110,8 +110,8 @@ assert(
   "after 100%, studio unsticks in seconds, not the full upload budget"
 );
 assert(
-  studioBytesDoneUnstickAction() === "complete",
-  "bytes-done unstick must close studio, not fail into an overlay"
+  studioBytesDoneUnstickAction() === "wait",
+  "bytes-done unstick must keep waiting for the room Drop commit, not close on 100% bytes"
 );
 assert(
   isStudioBytesDoneCloseMessage(STUDIO_BYTES_DONE_CLOSE_MESSAGE),

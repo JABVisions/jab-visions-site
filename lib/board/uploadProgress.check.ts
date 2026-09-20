@@ -29,6 +29,16 @@ assert(mid.percent === 50, "percent is loaded/total");
 assert(mid.etaMs === 16_000, "ETA uses remaining bytes / speed");
 assert(mid.label === "About 16s left", "progress label uses ETA copy");
 
+assert(
+  makeUploadProgress(Math.floor(0.995 * 62 * 1024 * 1024), 62 * 1024 * 1024, 1_000_000).percent ===
+    99,
+  "99.5% bytes must not round to 100% or studio closes before the room Drop commits"
+);
+assert(
+  makeUploadProgress(62 * 1024 * 1024, 62 * 1024 * 1024, 1_000_000).percent === 100,
+  "loaded >= total is the only 100% tick"
+);
+
 const zero = makeUploadProgress(0, 0, 0);
 assert(zero.percent === 0, "zero-size files stay at 0%");
 assert(zero.etaMs === null, "zero-size files have no ETA");
@@ -96,5 +106,15 @@ assert(tracked[0]?.label === "Preparing upload…", "tracker starts in preparing
 tracker.bytes(1000, 1000);
 tracker.finishing();
 assert(tracked.at(-1)?.percent === 100, "tracker finishing is 100%");
+
+const holdEvents: BoardUploadProgress[] = [];
+const holdTracker = createUploadProgressTracker(62 * 1024 * 1024, (progress) => {
+  if (progress) holdEvents.push(progress);
+});
+holdTracker.bytes(Math.floor(0.995 * 62 * 1024 * 1024), 62 * 1024 * 1024);
+assert(
+  holdEvents.at(-1)?.percent === 99,
+  "tracker must not report 100% at 99.5% or studio closes before commit"
+);
 
 console.log("uploadProgress.check.ts ok");

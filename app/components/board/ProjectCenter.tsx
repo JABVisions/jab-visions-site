@@ -22,6 +22,7 @@ import {
   mergeProjectsIntoNotebook,
   notebookProjectsOwnedByViewer,
   persistProjectListToAccount,
+  preferLiveRoomPosts,
   projectsFromProfileBoardDrops,
   reconcileProjectsWithLive,
   syncRemoteProjectActivitiesToStorage,
@@ -57,6 +58,8 @@ import {
   applyProjectRoomActivitiesToProjects,
   buildProjectRoomDrop,
   commitProjectRoomDrop,
+  forgetCommittedRoomPosts,
+  mergeRoomPosts,
   persistableProjectRoomMediaUrl,
   projectRoomMediaKindForFile,
   projectRoomPostHasMedia,
@@ -492,7 +495,7 @@ export default function ProjectCenter() {
   const [storageReady, setStorageReady] = useState(false);
   const [projects, setProjects] = useState<BoardProject[]>([]);
   const projectsRef = useRef<BoardProject[]>([]);
-  projectsRef.current = projects;
+  projectsRef.current = preferLiveRoomPosts(projects, projectsRef.current);
   const [dropPadProjectDrops, setDropPadProjectDrops] = useState<
     DropPadProjectDrop[]
   >([]);
@@ -748,11 +751,17 @@ export default function ProjectCenter() {
 
   const activeProject = useMemo(() => {
     if (!activeProjectId) return null;
-    return (
-      projects.find((project) => project.id === activeProjectId) ??
-      projectsRef.current.find((project) => project.id === activeProjectId) ??
-      null
-    );
+    const fromState =
+      projects.find((project) => project.id === activeProjectId) ?? null;
+    const fromRef =
+      projectsRef.current.find((project) => project.id === activeProjectId) ?? null;
+    if (fromState && fromRef) {
+      return {
+        ...fromState,
+        roomPosts: mergeRoomPosts(fromState.roomPosts, fromRef.roomPosts),
+      };
+    }
+    return fromState ?? fromRef ?? null;
   }, [projects, activeProjectId]);
 
   const commitProjects = (
@@ -1239,17 +1248,19 @@ export default function ProjectCenter() {
 
         void (async () => {
           try {
+            const liveSaved =
+              projectsRef.current.find((item) => item.id === committed.saved.id) ||
+              committed.saved;
             const owned = notebookProjectsOwnedByViewer(
-              [committed.saved],
+              [liveSaved],
               currentUserId
             );
-            await withDeadline(
-              persistProjectListToAccount(
-                owned.length ? owned : [committed.saved]
-              ),
-              PROJECT_ROOM_CLOUD_SYNC_TIMEOUT_MS,
-              false
-            );
+            const payload = owned.length ? owned : [liveSaved];
+            let persisted = await persistProjectListToAccount(payload);
+            if (!persisted) {
+              await new Promise((resolve) => window.setTimeout(resolve, 1_200));
+              persisted = await persistProjectListToAccount(payload);
+            }
             const sb = supabaseBrowser();
             const userId = currentUserId || identity.id;
             await withDeadline(
@@ -1288,6 +1299,7 @@ export default function ProjectCenter() {
   }
 
   const deleteProject = (id: string) => {
+    forgetCommittedRoomPosts(id);
     removeLocalActivity(
       (item) =>
         item.id === `project_drop_${id}` ||

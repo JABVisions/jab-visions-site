@@ -1,4 +1,5 @@
 import {
+  applyCommittedRoomPostGuard,
   applyProjectRoomActivitiesToProjects,
   applyProjectRoomDropToProject,
   buildProjectRoomDrop,
@@ -20,12 +21,14 @@ import {
   projectRoomVideoPlaybackType,
   projectRoomVideoSrcIsPlayable,
   isUnplayableProjectRoomVideoPost,
+  rememberCommittedRoomPosts,
   stripUnplayableProjectRoomVideos,
   runProjectRoomStudioSaveOnce,
   viewerCanPostToProjectRoom,
   withDeadline,
 } from "./projectRoomDrop";
-import { mergeProjectRecord, reconcileProjectsWithLive, type BoardProject } from "./projects";
+import { mergeProjectRecord, preferLiveRoomPosts, reconcileProjectsWithLive, type BoardProject } from "./projects";
+import { profileBoardDropFromProject } from "./projectProfileDrop";
 
 function assert(condition: unknown, message: string) {
   if (!condition) throw new Error(message);
@@ -437,6 +440,68 @@ assert(
   "unplayable same-author tapes are stripped before merge"
 );
 
+const signedSameTape = {
+  ...built.post,
+  id: "post_signed_same",
+  mediaUrl:
+    "https://example.supabase.co/storage/v1/object/sign/board-media/user/project-media/tape.mp4?token=abc",
+  bucket: "board-media",
+  storagePath: "user/project-media/tape.mp4",
+};
+assert(
+  mergeRoomPosts([built.post, signedSameTape], []).length === 1,
+  "signed URL and storage path for the same tape must stay one room Drop"
+);
+
+const wipedAfterCommit = {
+  ...committed.saved,
+  roomPosts: project.roomPosts,
+};
+rememberCommittedRoomPosts("project_keep_me", committed.saved.roomPosts);
+const restored = applyCommittedRoomPostGuard([wipedAfterCommit]);
+assert(
+  restored[0]?.roomPosts.some((post) => post.id === "post_tape"),
+  "a stale notebook reload must restore the just-committed tape"
+);
+
+const rewound = preferLiveRoomPosts([wipedAfterCommit], [committed.saved]);
+assert(
+  rewound[0]?.roomPosts.some((post) => post.mediaUrl === "https://cdn.example/tape.mp4"),
+  "stale React state must not rewind live room posts"
+);
+assert(
+  preferLiveRoomPosts([], [committed.saved]).length === 1,
+  "an empty stale render must not wipe live room posts from the ref"
+);
+assert(
+  preferLiveRoomPosts([], [committed.saved])[0]?.roomPosts.some(
+    (post) => post.id === "post_tape"
+  ),
+  "empty stale render still keeps the committed tape"
+);
+assert(
+  !preferLiveRoomPosts([{ ...project, id: "project_other" }], [committed.saved]).some(
+    (item) => item.id === "project_keep_me"
+  ),
+  "preferLiveRoomPosts must not resurrect a deleted project"
+);
+
+const notebookRow = profileBoardDropFromProject(committed.saved);
+assert(
+  Array.isArray((notebookRow as { roomPosts?: unknown[] }).roomPosts) &&
+    (notebookRow as { roomPosts: Array<{ storagePath?: string }> }).roomPosts.some(
+      (post) => post.storagePath === "user/project-media/tape.mp4"
+    ),
+  "cloud notebook rows must persist room Drop storage paths"
+);
+assert(
+  Array.isArray((notebookRow as { meta?: { roomPosts?: unknown[] } }).meta?.roomPosts) &&
+    ((notebookRow as { meta: { roomPosts: Array<{ dropId?: string }> } }).meta.roomPosts.some(
+      (post) => post.dropId === "project_room_tape"
+    )),
+  "cloud notebook meta must keep the room Drop id"
+);
+
 const saveKey = projectRoomStudioSaveKey("project_keep_me", {
   name: "tape.mp4",
   size: 62 * 1024 * 1024,
@@ -479,7 +544,7 @@ void (async () => {
 
   assert(
     PROJECT_ROOM_CLOUD_SYNC_TIMEOUT_MS <= 4_000 && PROJECT_ROOM_CLOUD_SYNC_TIMEOUT_MS >= 2_000,
-    "cloud persist/activity must time out in seconds so studio can close"
+    "cloud activity must time out in seconds so a hung network cannot clone the post"
   );
   const hangKey = projectRoomStudioSaveKey("project_keep_me", {
     name: "persist-hang.mp4",

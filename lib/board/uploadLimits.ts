@@ -79,9 +79,13 @@ export function isStudioBytesDoneCloseMessage(message: string): boolean {
   return /upload finished but board did not close/i.test(String(message || ""));
 }
 
-/** After verified 100%, studio must post + close — not reject into the overlay. */
-export function studioBytesDoneUnstickAction(): "complete" {
-  return "complete";
+/**
+ * After 100% bytes, keep waiting for onComplete to commit the room Drop.
+ * Resolving here closed studio on a storage PUT before the post existed.
+ * Never reject — that overlay ("Board did not close") is not a storage failure.
+ */
+export function studioBytesDoneUnstickAction(): "wait" | "complete" {
+  return "wait";
 }
 
 export type UploadKind = keyof typeof UPLOAD_LIMITS;

@@ -37,7 +37,14 @@ export function makeUploadProgress(
 ): BoardUploadProgress {
   const safeLoaded = Number.isFinite(loaded) ? Math.max(0, loaded) : 0;
   const safeTotal = Number.isFinite(total) ? Math.max(0, total) : 0;
-  const percent = safeTotal > 0 ? Math.min(100, Math.round((safeLoaded / safeTotal) * 100)) : 0;
+  // Floor until the last byte lands. Math.round(99.5%) is 100 and used to close
+  // Drop Studio before the Project Room Drop was committed.
+  const percent =
+    safeTotal > 0
+      ? safeLoaded >= safeTotal
+        ? 100
+        : Math.min(99, Math.floor((safeLoaded / safeTotal) * 100))
+      : 0;
   const speed = Number.isFinite(bytesPerSecond) ? Math.max(0, bytesPerSecond) : 0;
   const etaMs =
     safeTotal > 0 && safeLoaded >= safeTotal
