@@ -120,6 +120,29 @@ assert(
   ) === "Maya waved at you.",
   "wave copy uses Board vocabulary"
 );
+assert(
+  describeActivity(
+    item({
+      id: "room-share",
+      activityType: "room_drop_shared",
+      href: "/board/forums/music",
+      entityType: "room",
+      metadata: { actorName: "Maya", dropTitle: "Night Tape", roomName: "Music" },
+      message: "Maya shared Night Tape in Music.",
+    })
+  ) === "Maya shared Night Tape in Music.",
+  "room drop shares use Activity Channel copy"
+);
+assert(
+  describeActivity(
+    item({
+      id: "room-live",
+      activityType: "room_live_started",
+      message: "Music went Live.",
+    })
+  ) === "Music went Live.",
+  "live room starts can notify followers"
+);
 
 const persistedComment = item({
   id: "uuid-1",

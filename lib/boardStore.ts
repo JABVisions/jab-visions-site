@@ -1,4 +1,6 @@
 // lib/boardStore.ts
+import { resolveRoomId, roomHref } from "@/lib/board/rooms/catalog";
+
 export type BoardUser = {
   id: string; // demo for now
   displayName: string;
@@ -306,7 +308,7 @@ export function createThread(args: {
     text: t.body.slice(0, 180),
     authorId: t.authorId,
     authorName: t.authorName,
-    href: `/board/forums?thread=${encodeURIComponent(t.id)}`,
+    href: roomHref(resolveRoomId(t.forumId) || t.forumId, { conversation: t.id }),
     meta: { forumId: t.forumId },
   });
 
@@ -343,7 +345,7 @@ export function createReply(args: {
     text: r.body.slice(0, 180),
     authorId: r.authorId,
     authorName: r.authorName,
-    href: `/board/forums?thread=${encodeURIComponent(args.threadId)}`,
+    href: roomHref(resolveRoomId(thread?.forumId || "lobby") || "lobby", { conversation: args.threadId }),
     meta: { threadId: args.threadId },
   });
 

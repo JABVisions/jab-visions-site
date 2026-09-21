@@ -15,6 +15,14 @@ export type ActivityType =
   | "dm"
   | "work_board"
   | "drop"
+  | "room_joined"
+  | "room_drop_shared"
+  | "room_reply"
+  | "room_mention"
+  | "room_call_started"
+  | "room_live_started"
+  | "room_followed_active"
+  | "room_announcement"
   | "system";
 
 export type ActivityPriority = "high" | "medium" | "normal";
@@ -34,6 +42,7 @@ export type ActivityEntityType =
   | "profile"
   | "work_board"
   | "signal"
+  | "room"
   | "system";
 
 export type BoardNotification = {
@@ -102,10 +111,24 @@ const TYPE_ALIASES: Record<string, ActivityType> = {
   message: "dm",
   direct_message: "dm",
   board_signal: "signal",
+  joined_room: "room_joined",
+  room_share: "room_drop_shared",
+  room_discussion_reply: "room_reply",
+  room_call: "room_call_started",
+  room_live: "room_live_started",
 };
 
 const HIGH_TYPES: ActivityType[] = ["friendzone_request", "dm", "comment_reply", "system"];
-const MEDIUM_TYPES: ActivityType[] = ["comment", "wave", "mention", "work_board"];
+const MEDIUM_TYPES: ActivityType[] = [
+  "comment",
+  "wave",
+  "mention",
+  "work_board",
+  "room_mention",
+  "room_call_started",
+  "room_live_started",
+  "room_announcement",
+];
 const UNGROUPABLE: ActivityType[] = [
   "friendzone_request",
   "dm",
@@ -129,6 +152,14 @@ export function normalizeActivityType(value: unknown): ActivityType {
     raw === "dm" ||
     raw === "work_board" ||
     raw === "drop" ||
+    raw === "room_joined" ||
+    raw === "room_drop_shared" ||
+    raw === "room_reply" ||
+    raw === "room_mention" ||
+    raw === "room_call_started" ||
+    raw === "room_live_started" ||
+    raw === "room_followed_active" ||
+    raw === "room_announcement" ||
     raw === "system"
   ) {
     return raw;
@@ -147,9 +178,19 @@ export function actionRequiredForType(type: ActivityType) {
 }
 
 export function filterForActivityType(type: ActivityType): Exclude<ActivityFilter, "all"> {
-  if (type === "signal" || type === "drop" || type === "work_board") return "signals";
+  if (type === "signal" || type === "drop" || type === "work_board" || type === "room_drop_shared") {
+    return "signals";
+  }
   if (type === "dm") return "messages";
-  if (type === "comment" || type === "comment_reply" || type === "mention") return "comments";
+  if (
+    type === "comment" ||
+    type === "comment_reply" ||
+    type === "mention" ||
+    type === "room_reply" ||
+    type === "room_mention"
+  ) {
+    return "comments";
+  }
   if (type === "friendzone_request") return "requests";
   return "social";
 }
@@ -215,6 +256,18 @@ export function typeLabel(type: ActivityType) {
   if (type === "dm") return "MESSAGE";
   if (type === "work_board") return "WORK BOARD";
   if (type === "drop") return "DROP";
+  if (
+    type === "room_joined" ||
+    type === "room_drop_shared" ||
+    type === "room_reply" ||
+    type === "room_mention" ||
+    type === "room_call_started" ||
+    type === "room_live_started" ||
+    type === "room_followed_active" ||
+    type === "room_announcement"
+  ) {
+    return "ROOM";
+  }
   return "BOARD";
 }
 
@@ -269,6 +322,30 @@ export function describeActivity(item: BoardNotification, extras?: { names?: str
   if (item.activityType === "drop") {
     return item.message || `${name} published a new Drop.`;
   }
+  if (item.activityType === "room_joined") {
+    return item.message || `${name} joined a Room.`;
+  }
+  if (item.activityType === "room_drop_shared") {
+    return item.message || `${name} shared ${title} in a Room.`;
+  }
+  if (item.activityType === "room_reply") {
+    return item.message || `${name} replied in a Room.`;
+  }
+  if (item.activityType === "room_mention") {
+    return item.message || `${name} mentioned you in a Room.`;
+  }
+  if (item.activityType === "room_call_started") {
+    return item.message || `A Room Call started.`;
+  }
+  if (item.activityType === "room_live_started") {
+    return item.message || `A Live Room started.`;
+  }
+  if (item.activityType === "room_followed_active") {
+    return item.message || `A Room you follow became active.`;
+  }
+  if (item.activityType === "room_announcement") {
+    return item.message || `Official announcement in a Room.`;
+  }
   return item.message || `${name} moved through Board.`;
 }
 
@@ -298,6 +375,19 @@ export function destinationForActivity(item: BoardNotification): ActivityDestina
     };
   }
 
+  if (
+    item.activityType === "room_joined" ||
+    item.activityType === "room_drop_shared" ||
+    item.activityType === "room_reply" ||
+    item.activityType === "room_mention" ||
+    item.activityType === "room_call_started" ||
+    item.activityType === "room_live_started" ||
+    item.activityType === "room_followed_active" ||
+    item.activityType === "room_announcement"
+  ) {
+    if (item.href) return { kind: "href", href: item.href };
+  }
+
   if (dropId || item.commentId) {
     return {
       kind: "drop",
@@ -307,6 +397,7 @@ export function destinationForActivity(item: BoardNotification): ActivityDestina
     };
   }
 
+  if (item.entityType === "room" && item.href) return { kind: "href", href: item.href };
   if (item.href) return { kind: "href", href: item.href };
   if (username) return { kind: "profile", username, userId: item.actorUserId };
   return { kind: "none" };
