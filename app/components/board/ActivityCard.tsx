@@ -58,6 +58,7 @@ import {
   playableFeedMediaSrc,
   playablePosterSrc,
 } from "@/lib/board/feedDropMedia";
+import { applyForumRoomFeedCopy } from "@/lib/board/forumRoomFeedCopy";
 import { projectRoomVideoLoadError } from "@/lib/board/projectRoomDrop";
 import {
   captureVideoPosterFile,
@@ -567,8 +568,13 @@ function ActivityCard({
   // id-based ownership check (drops store the author's user_id as a uuid).
   const [currentAuthUserId, setCurrentAuthUserId] = useState("");
 
-  const title = metaString(item?.title) || "Drop";
-  const body = metaString((item as any)?.body, (item as any)?.text);
+  const forumCopy = applyForumRoomFeedCopy({
+    title: metaString(item?.title),
+    body: metaString((item as any)?.body, (item as any)?.text),
+    meta: item?.meta && typeof item.meta === "object" ? (item.meta as Record<string, unknown>) : null,
+  });
+  const title = forumCopy?.title || metaString(item?.title) || "Drop";
+  const body = forumCopy?.body || metaString((item as any)?.body, (item as any)?.text);
   const id = String((item as any)?.id || "");
   const timeLabel = formatDropTime((item as any)?.created_at);
 

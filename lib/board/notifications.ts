@@ -1,3 +1,5 @@
+import { forumRoomFeedCopy, looksLikeMediaFileName } from "@/lib/board/forumRoomFeedCopy";
+
 export const BOARD_NOTIFICATIONS_UPDATED_EVENT = "board:notifications:updated";
 export const BOARD_ACTIVITY_NAV_EVENT = "board:activity:navigate";
 export const BOARD_OPEN_FRIENDZONE_CHAT_EVENT = "board:open-friendzone-chat";
@@ -236,7 +238,9 @@ export function actorAvatar(item: BoardNotification) {
 
 export function dropTitle(item: BoardNotification) {
   const meta = item.metadata || {};
-  return metaString(meta, "dropTitle") || metaString(meta, "title") || "Drop";
+  const raw = metaString(meta, "dropTitle") || metaString(meta, "title");
+  if (!raw || looksLikeMediaFileName(raw)) return "Drop";
+  return raw;
 }
 
 export function reactionKind(item: BoardNotification) {
@@ -325,11 +329,20 @@ export function describeActivity(item: BoardNotification, extras?: { names?: str
   if (item.activityType === "room_joined") {
     return item.message || `${name} joined a Room.`;
   }
-  if (item.activityType === "room_drop_shared") {
-    return item.message || `${name} shared ${title} in a Room.`;
-  }
-  if (item.activityType === "room_reply") {
-    return item.message || `${name} replied in a Room.`;
+  if (item.activityType === "room_drop_shared" || item.activityType === "room_reply") {
+    if (item.message) return item.message;
+    const meta = item.metadata || {};
+    const conversationTitle = metaString(meta, "conversationTitle");
+    return forumRoomFeedCopy({
+      kind:
+        item.activityType === "room_reply" || conversationTitle
+          ? "room_conversation"
+          : "room",
+      roomId: metaString(meta, "roomId"),
+      roomName: metaString(meta, "roomName"),
+      conversationTitle,
+      actorName: name,
+    }).body;
   }
   if (item.activityType === "room_mention") {
     return item.message || `${name} mentioned you in a Room.`;

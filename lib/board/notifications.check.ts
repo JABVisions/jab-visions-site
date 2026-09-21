@@ -136,6 +136,41 @@ assert(
 assert(
   describeActivity(
     item({
+      id: "room-share-file",
+      activityType: "room_drop_shared",
+      href: "/board/forums/music",
+      entityType: "room",
+      metadata: {
+        actorName: "Maya",
+        dropTitle: "IMG_1234.MOV",
+        roomId: "music",
+        roomName: "Music",
+      },
+    })
+  ) === "Maya added a Drop to 🎧 Music.",
+  "Activity Channel fallback names the Forum Room instead of the filename"
+);
+assert(
+  describeActivity(
+    item({
+      id: "room-reply-file",
+      activityType: "room_reply",
+      href: "/board/forums/jab-comics",
+      entityType: "room",
+      metadata: {
+        actorName: "John",
+        dropTitle: "audio.m4a",
+        roomId: "jab-comics",
+        roomName: "JAB Comics",
+        conversationTitle: "Comic Character Design",
+      },
+    })
+  ) === "John replied with a Drop in Comic Character Design in JAB Comics.",
+  "conversation Activity Channel fallback names the thread and Forum Room"
+);
+assert(
+  describeActivity(
+    item({
       id: "room-live",
       activityType: "room_live_started",
       message: "Music went Live.",

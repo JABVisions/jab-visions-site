@@ -5,17 +5,32 @@ import ActivityCard from "@/app/components/board/ActivityCard";
 import { activityFromRoomShare } from "@/lib/board/rooms";
 import type { RoomConversationReply } from "@/lib/board/rooms";
 
-export default function ConversationDropReply({ reply }: { reply: RoomConversationReply }) {
+export default function ConversationDropReply({
+  reply,
+  roomId,
+  roomName,
+  conversationTitle,
+}: {
+  reply: RoomConversationReply;
+  roomId?: string;
+  roomName?: string;
+  conversationTitle?: string;
+}) {
   if (reply.dropId && reply.dropSnapshot) {
     const activity = activityFromRoomShare({
       id: reply.id,
-      roomId: reply.threadId,
+      roomId: roomId || String(reply.dropSnapshot.roomId || ""),
       dropId: reply.dropId,
       sharedBy: "",
       sharedByName: reply.authorName,
-      snapshot: reply.dropSnapshot,
+      snapshot: {
+        ...reply.dropSnapshot,
+        roomName: roomName || reply.dropSnapshot.roomName,
+        conversationTitle: conversationTitle || reply.dropSnapshot.conversationTitle,
+      },
       createdAt: reply.createdAt,
       origin: "conversation",
+      conversationId: reply.threadId,
     });
     if (activity) {
       return (

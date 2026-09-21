@@ -1,6 +1,8 @@
 import type { DropItem } from "@/lib/board/dropItem";
 import type { DropDestination, ForumRoomDestination } from "@/lib/board/dropDestination";
 import { isForumRoomDestination } from "@/lib/board/dropDestination";
+import { looksLikeMediaFileName } from "@/lib/board/forumRoomFeedCopy";
+import { getRoomById } from "@/lib/board/rooms/catalog";
 import type {
   RoomConversation,
   RoomConversationReply,
@@ -142,12 +144,14 @@ export function conversationReplyFromDrop(input: {
   authorAvatar?: string;
 }): RoomConversationReply {
   const title = String(input.drop.title || "").trim();
+  const named =
+    title && !looksLikeMediaFileName(title) && !/^drop in /i.test(title) ? title : "";
   return {
     id: input.id,
     threadId: input.threadId,
     authorName: input.authorName,
     authorAvatar: input.authorAvatar,
-    body: title ? `Replied with ${title}` : "Replied with a Drop",
+    body: named ? `Replied with ${named}` : "Replied with a Drop",
     createdAt: new Date().toISOString(),
     dropId: input.drop.id,
     dropSnapshot: dropSnapshotFromItem(input.drop),
@@ -165,13 +169,17 @@ export function conversationDropPointerItem(input: {
   const dropId = String(input.reply.dropId || "").trim();
   if (!dropId) return null;
   const createdAt = Date.parse(input.reply.createdAt) || Date.now();
+  const roomName = getRoomById(input.conversation.roomId)?.name || "a Room";
+  const conversation = String(input.conversation.title || "").trim();
   return {
     id: `conversation_drop:${input.reply.id}`,
     roomId: input.conversation.roomId,
     kind: "reply",
     createdAt,
-    title: input.conversation.title,
-    body: `${input.reply.authorName} shared a Drop in ${input.conversation.title}`,
+    title: conversation ? `Drop in ${conversation}` : `Added a Drop to ${roomName}`,
+    body: conversation
+      ? `${input.reply.authorName} replied with a Drop in ${conversation} in ${roomName}.`
+      : `${input.reply.authorName} added a Drop to ${roomName}.`,
     authorName: input.reply.authorName,
     conversation: input.conversation,
   };

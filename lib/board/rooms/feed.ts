@@ -1,4 +1,5 @@
 import { boardDropToActivity } from "@/lib/board/boardDropActivity";
+import { applyForumRoomFeedCopy, looksLikeMediaFileName } from "@/lib/board/forumRoomFeedCopy";
 import type { BoardActivity } from "@/lib/board/activity";
 import { conversationDropPointers, roomFeedShares } from "@/lib/board/forumRoomDrop";
 import type { RoomConversation, RoomDropShare, RoomFeedItem, RoomSession } from "./types";
@@ -75,10 +76,11 @@ export function activityFromRoomShare(share: RoomDropShare): BoardActivity | nul
   const snapshot = share.snapshot || {};
   const dropId = share.dropId || String(snapshot.id || snapshot.dropId || "");
   if (!dropId) return null;
-  return boardDropToActivity(
+  const snapshotTitle = String(snapshot.title || "");
+  const activity = boardDropToActivity(
     {
       id: dropId,
-      title: String(snapshot.title || "Shared Drop"),
+      title: looksLikeMediaFileName(snapshotTitle) ? "Drop" : snapshotTitle || "Shared Drop",
       type: String(snapshot.type || snapshot.dropType || "Media"),
       createdAt: share.createdAt,
       url: typeof snapshot.url === "string" ? snapshot.url : undefined,
@@ -116,4 +118,27 @@ export function activityFromRoomShare(share: RoomDropShare): BoardActivity | nul
       },
     }
   );
+  const snapshotConversationTitle =
+    typeof snapshot.conversationTitle === "string" ? snapshot.conversationTitle : "";
+  activity.meta = {
+    ...(activity.meta || {}),
+    source: "forum_room_studio",
+    destinationType: share.origin === "conversation" ? "room_conversation" : "room",
+    roomId: share.roomId,
+    roomName: typeof snapshot.roomName === "string" ? snapshot.roomName : null,
+    roomIcon: typeof snapshot.roomIcon === "string" ? snapshot.roomIcon : null,
+    conversationId: share.conversationId || null,
+    conversationTitle: snapshotConversationTitle || null,
+    authorName: share.sharedByName || String(snapshot.authorName || "") || null,
+  };
+  const copy = applyForumRoomFeedCopy({
+    title: activity.title,
+    body: activity.body,
+    meta: activity.meta as Record<string, unknown>,
+  });
+  if (copy) {
+    activity.title = copy.title;
+    activity.body = copy.body;
+  }
+  return activity;
 }
