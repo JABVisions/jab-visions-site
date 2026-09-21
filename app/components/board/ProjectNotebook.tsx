@@ -308,7 +308,7 @@ export default function ProjectNotebook({
         </div>
 
         <div className="mt-2 text-xs text-white/40">
-          Open Projects to manage host info, invites, and the project room.
+          Open a Project Drop to see its info in a popup window over the Work Board.
         </div>
       </div>
     </div>

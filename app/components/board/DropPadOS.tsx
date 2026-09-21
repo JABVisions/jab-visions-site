@@ -19,7 +19,7 @@ import { descriptDocToFile, type DescriptDoc } from "@/lib/board/descriptDocs";
 import type { ResolvedDropbookLink } from "@/lib/board/dropbookLink";
 import { studioLinkEmbedUrl, studioLinkPersistKind } from "@/lib/board/dropbookLink";
 import { toSoundCloudEmbed } from "@/lib/board/soundCloudEmbed";
-import { openProjectNotebook } from "@/lib/board/projectNotebookBus";
+import { openProjectDropInfo, openProjectNotebook } from "@/lib/board/projectNotebookBus";
 
 type DropRoute =
   | "board"
@@ -926,14 +926,23 @@ function LibraryDropCard({
 }) {
   return (
     <div className="overflow-hidden rounded-3xl border border-white/10 bg-black/20">
-      <EmbeddedAssetTile a={asset} />
+      <button
+        type="button"
+        className="block w-full text-left"
+        onClick={() => onView?.(asset)}
+        aria-label={`Open ${asset.title} info`}
+      >
+        <EmbeddedAssetTile a={asset} />
+      </button>
       <div className="flex gap-2 border-t border-white/10 p-3">
         <button type="button" onClick={() => onView?.(asset)} className="flex-1 rounded-full border border-cyan-200/20 bg-cyan-200/10 px-3 py-2 text-xs font-semibold text-cyan-50/85 hover:bg-cyan-200/15">
           Expand Drop
         </button>
-        <button type="button" onClick={() => onDelete?.(asset)} className="rounded-full border border-rose-200/20 bg-rose-200/10 px-3 py-2 text-xs font-semibold text-rose-100/80 hover:bg-rose-200/15">
-          Delete
-        </button>
+        {onDelete ? (
+          <button type="button" onClick={() => onDelete(asset)} className="rounded-full border border-rose-200/20 bg-rose-200/10 px-3 py-2 text-xs font-semibold text-rose-100/80 hover:bg-rose-200/15">
+            Delete
+          </button>
+        ) : null}
       </div>
     </div>
   );
@@ -986,13 +995,14 @@ function AssetsScreen({
   );
 }
 
-function ProjectsScreen({ drops }: { drops: AssetItem[] }) {
+function ProjectsScreen({ drops, onOpenDrop }: { drops: AssetItem[]; onOpenDrop?: (asset: AssetItem) => void }) {
   return (
     <ScreenShell title="Projects" description="Project tiles, WIP boards, collaborations, and builds.">
       <PlacedDropsSection
         title="Board Drops In Projects"
         empty="Place drops here when they are tied to a project, pitch, casting call, or active build."
         drops={drops}
+        onView={onOpenDrop}
       />
       <div className="rounded-3xl border border-white/10 bg-black/25 p-4">
         <div className="text-sm font-semibold text-white/85">Project Notebook</div>
@@ -1061,7 +1071,7 @@ function PlacedDropsSection({
           drops
             .slice()
             .sort((a, b) => b.createdAt - a.createdAt)
-            .map((a) => onView && onDelete
+            .map((a) => onView
               ? <LibraryDropCard key={a.id} asset={a} onView={onView} onDelete={onDelete} />
               : <EmbeddedAssetTile key={a.id} a={a} />)
         )}
@@ -2081,7 +2091,12 @@ export default function DropPadOS({
           />
         );
       case "projects":
-        return <ProjectsScreen drops={projectDrops} />;
+        return (
+          <ProjectsScreen
+            drops={projectDrops}
+            onOpenDrop={(asset) => openProjectDropInfo(`droppad_${asset.id}`)}
+          />
+        );
       case "portfolio":
         return (
           <PortfolioScreen

@@ -6,6 +6,7 @@ import {
   type BoardNotification,
 } from "@/lib/board/notifications";
 import { openForumRoom, parseForumHref } from "@/lib/board/boardAuthor";
+import { openProjectDropInfo, projectIdFromWorkHref } from "@/lib/board/projectNotebookBus";
 
 export type ActivityNavigationDetail = {
   notification: BoardNotification;
@@ -64,6 +65,11 @@ export function handleActivityNavigation(notification: BoardNotification) {
   if (destination.kind === "href" && destination.href) {
     if (parseForumHref(destination.href)) {
       openForumRoom(destination.href);
+      return;
+    }
+    const projectId = projectIdFromWorkHref(destination.href);
+    if (projectId && window.location.pathname.startsWith("/board/work")) {
+      openProjectDropInfo(projectId);
       return;
     }
     if (destination.href.startsWith("/") && !destination.href.startsWith("//")) {

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ProjectDropMenu, {
   type ProjectDrop,
 } from "@/app/components/board/projects/ProjectDropMenu";
@@ -85,6 +85,18 @@ import {
   withDeadline,
 } from "@/lib/board/projectRoomDrop";
 import { getCachedSignedMediaUrl, invalidateSignedMediaUrl, isMissingStorageObjectError } from "@/lib/board/signedMediaUrl";
+import DropPadPopup from "@/app/components/board/DropPadPopup";
+import {
+  BOARD_OPEN_PROJECT_EVENT,
+  BOARD_PROJECT_NOTEBOOK_EVENT,
+  openProjectDropInfo,
+  openProjectRoom,
+  presentationForProjectDropClick,
+  projectDropInfoHref,
+  projectIdFromWorkHref,
+  type ProjectDropPresentation,
+  type ProjectNotebookDetail,
+} from "@/lib/board/projectNotebookBus";
 
 function clsx(...parts: Array<string | false | null | undefined>) {
   return parts.filter(Boolean).join(" ");
@@ -389,7 +401,13 @@ function projectFromDropPadProjectDrop(drop: DropPadProjectDrop): BoardProject {
   };
 }
 
-function DropPadProjectDropCard({ drop }: { drop: DropPadProjectDrop }) {
+function DropPadProjectDropCard({
+  drop,
+  onOpen,
+}: {
+  drop: DropPadProjectDrop;
+  onOpen?: () => void;
+}) {
   const cover = resolveProjectCover(drop, drop.payload?.mediaUrl || null);
   const externalUrl = drop.payload?.url;
   const body = drop.payload?.text || drop.description;
@@ -397,15 +415,26 @@ function DropPadProjectDropCard({ drop }: { drop: DropPadProjectDrop }) {
   return (
     <div className="overflow-hidden rounded-[28px] border border-white/10 bg-white/[0.04] shadow-[0_16px_44px_rgba(0,0,0,0.24)]">
       {cover ? (
-        <div className="relative h-56 bg-black/30">
+        <button
+          type="button"
+          onClick={onOpen}
+          className="relative block h-56 w-full bg-black/30 text-left"
+          aria-label={`Open ${drop.title} info`}
+        >
           <ProjectCoverImage media={cover} title={drop.title} className="object-cover" />
-        </div>
+        </button>
       ) : null}
 
       <div className="p-5">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <div className="text-lg font-semibold text-white/90">{drop.title}</div>
+            <button
+              type="button"
+              onClick={onOpen}
+              className="block w-full text-left text-lg font-semibold text-white/90"
+            >
+              {drop.title}
+            </button>
             <div className="mt-1 text-xs uppercase tracking-[0.22em] text-white/45">
               {kindLabel(drop.kind)}
             </div>
@@ -510,6 +539,8 @@ export default function ProjectCenter() {
     DropPadProjectDrop[]
   >([]);
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
+  const [projectPresentation, setProjectPresentation] =
+    useState<ProjectDropPresentation>("popup");
   const [createOpen, setCreateOpen] = useState(false);
   const [editingProject, setEditingProject] = useState<BoardProject | null>(null);
   const [studioProject, setStudioProject] = useState<BoardProject | null>(null);
@@ -761,13 +792,31 @@ export default function ProjectCenter() {
   }, []);
 
   useEffect(() => {
-    const onOpen = (event: Event) => {
+    const onOpenRoom = (event: Event) => {
       const projectId = String((event as CustomEvent<{ projectId?: string }>).detail?.projectId || "").trim();
       if (!projectId) return;
+      setProjectPresentation(presentationForProjectDropClick("enter-room"));
       setActiveProjectId(projectId);
     };
-    window.addEventListener("board:projects:open", onOpen as EventListener);
-    return () => window.removeEventListener("board:projects:open", onOpen as EventListener);
+    const onNotebook = (event: Event) => {
+      const detail = (event as CustomEvent<ProjectNotebookDetail>).detail;
+      if ((detail?.action || "open") === "close") return;
+      const projectId = String(detail?.projectId || "").trim();
+      if (!projectId) return;
+      setProjectPresentation(presentationForProjectDropClick("info"));
+      setActiveProjectId(projectId);
+    };
+    window.addEventListener(BOARD_OPEN_PROJECT_EVENT, onOpenRoom as EventListener);
+    window.addEventListener(BOARD_PROJECT_NOTEBOOK_EVENT, onNotebook as EventListener);
+    return () => {
+      window.removeEventListener(BOARD_OPEN_PROJECT_EVENT, onOpenRoom as EventListener);
+      window.removeEventListener(BOARD_PROJECT_NOTEBOOK_EVENT, onNotebook as EventListener);
+    };
+  }, []);
+
+  useEffect(() => {
+    const projectId = projectIdFromWorkHref(window.location.href);
+    if (projectId) openProjectDropInfo(projectId);
   }, []);
 
   const activeProject = useMemo(() => {
@@ -784,6 +833,13 @@ export default function ProjectCenter() {
     }
     return fromState ?? fromRef ?? null;
   }, [projects, activeProjectId]);
+
+  const closeActiveProject = useCallback(() => {
+    setStudioOpen(false);
+    setStudioProject(null);
+    setActiveProjectId(null);
+    setProjectPresentation("popup");
+  }, []);
 
   const commitProjects = (
     updater: (current: BoardProject[]) => BoardProject[]
@@ -822,7 +878,7 @@ export default function ProjectCenter() {
       body:
         next.logline ||
         `${next.contactName || "Host"} is planning a ${next.projectType.toLowerCase()} project.`,
-      href: "/board/work",
+      href: projectDropInfoHref(next.id),
       image_url: coverUrl,
       meta: {
         cardStyle: "project_drop",
@@ -881,7 +937,7 @@ export default function ProjectCenter() {
           `${next.contactName || "Host"} opened a new project room on BOARD.`,
         authorId: currentUserId || identity.id,
         authorName,
-        href: "/board/work",
+        href: projectDropInfoHref(next.id),
         meta: {
           kind: "project_drop",
           cardStyle: "project_drop",
@@ -1000,8 +1056,8 @@ export default function ProjectCenter() {
     }
 
     commitProjects((prev) => [next, ...prev]);
-    setActiveProjectId(next.id);
     setCreateOpen(false);
+    openProjectDropInfo(next.id);
 
     void (async () => {
       try {
@@ -1367,10 +1423,7 @@ export default function ProjectCenter() {
       setStudioOpen(false);
     }
     if (activeProjectId === id) {
-      setActiveProjectId(null);
-      setInviteError(null);
-      setInviteDraft({ name: "", handle: "", email: "", role: "" });
-      setRoomDraft("");
+      closeActiveProject();
     }
   };
 
@@ -1546,263 +1599,7 @@ export default function ProjectCenter() {
     </>
   );
 
-  if (!activeProject) {
-    return (
-      <div className="w-full grid gap-5">
-        <TileFrame className="order-2">
-          <SectionHeader
-            eyebrow="THOUGHT DROP"
-            title="Quick Work Thought"
-            subtitle="Capture a loose idea, note, or production spark without opening a full project room."
-          />
-          <div className="grid gap-4 p-5">
-            <div className="grid gap-3 md:grid-cols-[0.8fr_1.2fr]">
-              <input
-                value={thoughtTitle}
-                onChange={(event) => setThoughtTitle(event.target.value)}
-                placeholder="Optional title"
-                className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white/85 placeholder:text-white/35 focus:outline-none focus:ring-2 focus:ring-lime-200/15"
-              />
-              <div className="flex flex-wrap gap-2">
-                {(["public", "private"] as const).map((visibility) => (
-                  <button
-                    key={visibility}
-                    type="button"
-                    onClick={() => setThoughtVisibility(visibility)}
-                    className={clsx(
-                      "rounded-full border px-4 py-2 text-xs font-semibold uppercase tracking-[0.18em] transition",
-                      thoughtVisibility === visibility
-                        ? "border-lime-200/30 bg-lime-300/18 text-lime-50"
-                        : "border-white/10 bg-black/25 text-white/55 hover:bg-white/10"
-                    )}
-                  >
-                    {visibility}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <textarea
-              value={thoughtText}
-              onChange={(event) => setThoughtText(event.target.value)}
-              rows={4}
-              placeholder="Catch the work thought before it leaves..."
-              className="min-h-[116px] w-full rounded-3xl border border-white/10 bg-black/30 px-4 py-4 text-sm leading-6 text-white/85 placeholder:text-white/35 focus:outline-none focus:ring-2 focus:ring-lime-200/15"
-            />
-
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div className="text-xs text-white/45">
-                Public thoughts can enter the Feed. Private thoughts stay in your Activity Channel.
-              </div>
-              <button
-                type="button"
-                onClick={createWorkThoughtDrop}
-                className="rounded-2xl border border-cyan-200/20 bg-cyan-400/15 px-4 py-3 text-sm text-cyan-50/90 transition hover:bg-cyan-400/22"
-              >
-                Save Thought Drop
-              </button>
-            </div>
-            {thoughtMessage ? (
-              <div className="rounded-2xl border border-white/10 bg-white/[0.05] px-4 py-3 text-sm text-white/72">
-                {thoughtMessage}
-              </div>
-            ) : null}
-          </div>
-        </TileFrame>
-
-        <TileFrame className="order-1">
-          <SectionHeader
-            eyebrow="PROJECTS"
-            title="Project Notebook"
-            subtitle="Create host-ready project drops, then open each tile to manage collaborators and project room activity."
-            action={
-              <button
-                type="button"
-                onClick={() => {
-                  setEditingProject(null);
-                  setCreateOpen(true);
-                }}
-                className="rounded-2xl border border-lime-300/20 bg-lime-400/15 px-4 py-2 text-sm text-lime-100/90 hover:bg-lime-400/20 transition"
-              >
-                + New Project Drop
-              </button>
-            }
-          />
-
-          <div className="p-5">
-            {studioMessage ? (
-              <div className="mb-4 rounded-2xl border border-white/10 bg-white/[0.05] px-4 py-3 text-sm text-white/72">
-                {studioMessage}
-              </div>
-            ) : null}
-            {allProjectDropCount === 0 ? (
-              <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-6 text-sm text-white/65">
-                No projects yet. Start with a Project Drop and it will become a live project tile here.
-              </div>
-            ) : (
-              <div className="grid gap-5">
-                {dropPadProjectDrops.length > 0 ? (
-                  <div className="rounded-3xl border border-lime-300/15 bg-lime-400/[0.06] p-4">
-                    <div className="flex items-center justify-between gap-3">
-                      <div>
-                        <div className="text-sm font-semibold text-lime-100/90">
-                          Drop Pad Project Drops
-                        </div>
-                        <div className="mt-1 text-xs text-white/48">
-                          Drops placed into the Projects destination from Drop Pad OS.
-                        </div>
-                      </div>
-                      <div className="text-xs text-white/42">
-                        {dropPadProjectDrops.length} drops
-                      </div>
-                    </div>
-                    <div className="mt-4 grid gap-4">
-                      {dropPadProjectDrops.map((drop) => (
-                        <DropPadProjectDropCard key={drop.id} drop={drop} />
-                      ))}
-                    </div>
-                  </div>
-                ) : null}
-
-                {projectTiles.map((project) => (
-                  <div
-                    key={project.id}
-                    className="overflow-hidden rounded-[30px] border border-white/10 bg-white/[0.04] text-left shadow-[0_16px_44px_rgba(0,0,0,0.28)] transition hover:bg-white/[0.08]"
-                  >
-                    <div className="relative h-56 bg-black/30 md:h-64">
-                      <div className="absolute right-4 top-4 z-10 flex flex-wrap justify-end gap-2">
-                        <button
-                          type="button"
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            setCommentsProject(project);
-                          }}
-                          className="rounded-full border border-cyan-200/25 bg-cyan-400/15 px-3 py-1 text-[11px] tracking-[0.16em] text-cyan-50/90 transition hover:bg-cyan-400/22"
-                        >
-                          Comment
-                        </button>
-                        <button
-                          type="button"
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            deleteProject(project.id);
-                          }}
-                          className="rounded-full border border-red-300/25 bg-red-500/20 px-3 py-1 text-[11px] tracking-[0.16em] text-red-50/90 hover:bg-red-500/28 transition"
-                        >
-                          Delete
-                        </button>
-                      </div>
-                      {project.media ? (
-                        <ProjectCoverImage
-                          media={project.media}
-                          title={project.title}
-                          className="object-cover"
-                        />
-                      ) : (
-                        <div className="flex h-full items-center justify-center bg-[radial-gradient(circle_at_top_left,rgba(244,114,182,0.18),transparent_45%),radial-gradient(circle_at_bottom_right,rgba(96,165,250,0.16),transparent_48%),linear-gradient(180deg,rgba(12,12,20,0.92),rgba(4,4,8,0.98))]">
-                          <div className="rounded-full border border-white/10 bg-white/5 px-4 py-2 text-[11px] tracking-[0.28em] text-white/55">
-                            PROJECT TILE
-                          </div>
-                        </div>
-                      )}
-
-                      <div className="absolute left-4 top-4 rounded-full border border-white/10 bg-black/45 px-3 py-1 text-[11px] tracking-[0.24em] text-white/80">
-                        {statusLabel(project.status)}
-                      </div>
-                    </div>
-
-                    <div className="p-5">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setEditingProject(project);
-                          setCreateOpen(true);
-                        }}
-                        className="rounded-full border border-lime-200/25 bg-lime-400/15 px-3 py-1 text-[11px] tracking-[0.16em] text-lime-50/90 transition hover:bg-lime-400/22"
-                      >
-                        Edit / Update
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setActiveProjectId(project.id)}
-                        className="mt-3 block w-full text-left"
-                      >
-                        <div className="text-lg font-semibold text-white/92">
-                          {project.title}
-                        </div>
-                        <div className="mt-1 text-xs uppercase tracking-[0.22em] text-white/45">
-                          {project.projectType}
-                        </div>
-                        <div className="mt-3 line-clamp-3 text-sm leading-6 text-white/65">
-                          {project.logline || "Add a logline to pitch the project."}
-                        </div>
-
-                        {project.rolesNeeded ? (
-                          <div className="mt-3 text-sm text-white/70">
-                            <span className="text-[11px] uppercase tracking-[0.18em] text-white/40">
-                              Roles{" "}
-                            </span>
-                            {project.rolesNeeded}
-                          </div>
-                        ) : null}
-
-                        {project.goal || project.milestone ? (
-                          <div className="mt-4 grid gap-2 rounded-2xl border border-lime-200/10 bg-lime-300/[0.06] p-3 text-xs text-lime-50/72">
-                            {project.goal ? (
-                              <div>
-                                <span className="font-semibold uppercase tracking-[0.18em] text-lime-100/55">
-                                  Goal
-                                </span>{" "}
-                                {project.goal}
-                              </div>
-                            ) : null}
-                            {project.milestone ? (
-                              <div>
-                                <span className="font-semibold uppercase tracking-[0.18em] text-lime-100/55">
-                                  Milestone
-                                </span>{" "}
-                                {project.milestone}
-                              </div>
-                            ) : null}
-                          </div>
-                        ) : null}
-
-                        <div className="mt-5 grid grid-cols-2 gap-4 text-xs text-white/52 md:grid-cols-4">
-                          <div>
-                            <div className="tracking-[0.22em] text-white/35">Location</div>
-                            <div className="mt-1 text-white/75">{project.location || "TBD"}</div>
-                          </div>
-                          <div>
-                            <div className="tracking-[0.22em] text-white/35">Dates</div>
-                            <div className="mt-1 text-white/75">
-                              {project.startDate || "TBD"}
-                              {project.endDate ? ` - ${project.endDate}` : ""}
-                            </div>
-                          </div>
-                          <div>
-                            <div className="tracking-[0.22em] text-white/35">Invites</div>
-                            <div className="mt-1 text-white/75">{project.invites.length}</div>
-                          </div>
-                          <div>
-                            <div className="tracking-[0.22em] text-white/35">Room Posts</div>
-                            <div className="mt-1 text-white/75">{project.roomPosts.length}</div>
-                          </div>
-                        </div>
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </TileFrame>
-
-        {overlays}
-      </div>
-    );
-  }
-
-  return (
+  const projectRoom = !activeProject ? null : (
     <div className="w-full">
       <TileFrame>
         <SectionHeader
@@ -1841,11 +1638,7 @@ export default function ProjectCenter() {
               </button>
               <button
                 type="button"
-                onClick={() => {
-                  setStudioOpen(false);
-                  setStudioProject(null);
-                  setActiveProjectId(null);
-                }}
+                onClick={closeActiveProject}
                 className="rounded-2xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-white/70 hover:bg-black/40 transition"
               >
                 ← Back
@@ -2189,7 +1982,310 @@ export default function ProjectCenter() {
           </div>
         </div>
       </TileFrame>
+    </div>
+  );
 
+  if (!activeProject || projectPresentation === "popup") {
+    return (
+      <div className="w-full grid gap-5">
+        <TileFrame className="order-2">
+          <SectionHeader
+            eyebrow="THOUGHT DROP"
+            title="Quick Work Thought"
+            subtitle="Capture a loose idea, note, or production spark without opening a full project room."
+          />
+          <div className="grid gap-4 p-5">
+            <div className="grid gap-3 md:grid-cols-[0.8fr_1.2fr]">
+              <input
+                value={thoughtTitle}
+                onChange={(event) => setThoughtTitle(event.target.value)}
+                placeholder="Optional title"
+                className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white/85 placeholder:text-white/35 focus:outline-none focus:ring-2 focus:ring-lime-200/15"
+              />
+              <div className="flex flex-wrap gap-2">
+                {(["public", "private"] as const).map((visibility) => (
+                  <button
+                    key={visibility}
+                    type="button"
+                    onClick={() => setThoughtVisibility(visibility)}
+                    className={clsx(
+                      "rounded-full border px-4 py-2 text-xs font-semibold uppercase tracking-[0.18em] transition",
+                      thoughtVisibility === visibility
+                        ? "border-lime-200/30 bg-lime-300/18 text-lime-50"
+                        : "border-white/10 bg-black/25 text-white/55 hover:bg-white/10"
+                    )}
+                  >
+                    {visibility}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <textarea
+              value={thoughtText}
+              onChange={(event) => setThoughtText(event.target.value)}
+              rows={4}
+              placeholder="Catch the work thought before it leaves..."
+              className="min-h-[116px] w-full rounded-3xl border border-white/10 bg-black/30 px-4 py-4 text-sm leading-6 text-white/85 placeholder:text-white/35 focus:outline-none focus:ring-2 focus:ring-lime-200/15"
+            />
+
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="text-xs text-white/45">
+                Public thoughts can enter the Feed. Private thoughts stay in your Activity Channel.
+              </div>
+              <button
+                type="button"
+                onClick={createWorkThoughtDrop}
+                className="rounded-2xl border border-cyan-200/20 bg-cyan-400/15 px-4 py-3 text-sm text-cyan-50/90 transition hover:bg-cyan-400/22"
+              >
+                Save Thought Drop
+              </button>
+            </div>
+            {thoughtMessage ? (
+              <div className="rounded-2xl border border-white/10 bg-white/[0.05] px-4 py-3 text-sm text-white/72">
+                {thoughtMessage}
+              </div>
+            ) : null}
+          </div>
+        </TileFrame>
+
+        <TileFrame className="order-1">
+          <SectionHeader
+            eyebrow="PROJECTS"
+            title="Project Notebook"
+            subtitle="Create host-ready project drops, then open each tile for a popup with the drop info. Enter Room still opens the project room."
+            action={
+              <button
+                type="button"
+                onClick={() => {
+                  setEditingProject(null);
+                  setCreateOpen(true);
+                }}
+                className="rounded-2xl border border-lime-300/20 bg-lime-400/15 px-4 py-2 text-sm text-lime-100/90 hover:bg-lime-400/20 transition"
+              >
+                + New Project Drop
+              </button>
+            }
+          />
+
+          <div className="p-5">
+            {studioMessage ? (
+              <div className="mb-4 rounded-2xl border border-white/10 bg-white/[0.05] px-4 py-3 text-sm text-white/72">
+                {studioMessage}
+              </div>
+            ) : null}
+            {allProjectDropCount === 0 ? (
+              <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-6 text-sm text-white/65">
+                No projects yet. Start with a Project Drop and it will become a live project tile here.
+              </div>
+            ) : (
+              <div className="grid gap-5">
+                {dropPadProjectDrops.length > 0 ? (
+                  <div className="rounded-3xl border border-lime-300/15 bg-lime-400/[0.06] p-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <div className="text-sm font-semibold text-lime-100/90">
+                          Drop Pad Project Drops
+                        </div>
+                        <div className="mt-1 text-xs text-white/48">
+                          Drops placed into the Projects destination from Drop Pad OS.
+                        </div>
+                      </div>
+                      <div className="text-xs text-white/42">
+                        {dropPadProjectDrops.length} drops
+                      </div>
+                    </div>
+                    <div className="mt-4 grid gap-4">
+                      {dropPadProjectDrops.map((drop) => (
+                        <DropPadProjectDropCard
+                          key={drop.id}
+                          drop={drop}
+                          onOpen={() => openProjectDropInfo(`droppad_${drop.id}`)}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+
+                {projectTiles.map((project) => (
+                  <div
+                    key={project.id}
+                    className="overflow-hidden rounded-[30px] border border-white/10 bg-white/[0.04] text-left shadow-[0_16px_44px_rgba(0,0,0,0.28)] transition hover:bg-white/[0.08]"
+                  >
+                    <div className="relative h-56 bg-black/30 md:h-64">
+                      <div className="absolute right-4 top-4 z-10 flex flex-wrap justify-end gap-2">
+                        <button
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            setCommentsProject(project);
+                          }}
+                          className="rounded-full border border-cyan-200/25 bg-cyan-400/15 px-3 py-1 text-[11px] tracking-[0.16em] text-cyan-50/90 transition hover:bg-cyan-400/22"
+                        >
+                          Comment
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            openProjectRoom(project.id);
+                          }}
+                          className="rounded-full border border-white/15 bg-black/45 px-3 py-1 text-[11px] tracking-[0.16em] text-white/80 transition hover:bg-black/60"
+                        >
+                          Enter Room
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            deleteProject(project.id);
+                          }}
+                          className="rounded-full border border-red-300/25 bg-red-500/20 px-3 py-1 text-[11px] tracking-[0.16em] text-red-50/90 hover:bg-red-500/28 transition"
+                        >
+                          Delete
+                        </button>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => openProjectDropInfo(project.id)}
+                        className="absolute inset-0 block h-full w-full text-left"
+                        aria-label={`Open ${project.title} info`}
+                      >
+                      {project.media ? (
+                        <ProjectCoverImage
+                          media={project.media}
+                          title={project.title}
+                          className="object-cover"
+                        />
+                      ) : (
+                        <div className="flex h-full items-center justify-center bg-[radial-gradient(circle_at_top_left,rgba(244,114,182,0.18),transparent_45%),radial-gradient(circle_at_bottom_right,rgba(96,165,250,0.16),transparent_48%),linear-gradient(180deg,rgba(12,12,20,0.92),rgba(4,4,8,0.98))]">
+                          <div className="rounded-full border border-white/10 bg-white/5 px-4 py-2 text-[11px] tracking-[0.28em] text-white/55">
+                            PROJECT TILE
+                          </div>
+                        </div>
+                      )}
+                      </button>
+
+                      <div className="pointer-events-none absolute left-4 top-4 rounded-full border border-white/10 bg-black/45 px-3 py-1 text-[11px] tracking-[0.24em] text-white/80">
+                        {statusLabel(project.status)}
+                      </div>
+                    </div>
+
+                    <div className="p-5">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditingProject(project);
+                          setCreateOpen(true);
+                        }}
+                        className="rounded-full border border-lime-200/25 bg-lime-400/15 px-3 py-1 text-[11px] tracking-[0.16em] text-lime-50/90 transition hover:bg-lime-400/22"
+                      >
+                        Edit / Update
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => openProjectDropInfo(project.id)}
+                        className="mt-3 block w-full text-left"
+                      >
+                        <div className="text-lg font-semibold text-white/92">
+                          {project.title}
+                        </div>
+                        <div className="mt-1 text-xs uppercase tracking-[0.22em] text-white/45">
+                          {project.projectType}
+                        </div>
+                        <div className="mt-3 line-clamp-3 text-sm leading-6 text-white/65">
+                          {project.logline || "Add a logline to pitch the project."}
+                        </div>
+
+                        {project.rolesNeeded ? (
+                          <div className="mt-3 text-sm text-white/70">
+                            <span className="text-[11px] uppercase tracking-[0.18em] text-white/40">
+                              Roles{" "}
+                            </span>
+                            {project.rolesNeeded}
+                          </div>
+                        ) : null}
+
+                        {project.goal || project.milestone ? (
+                          <div className="mt-4 grid gap-2 rounded-2xl border border-lime-200/10 bg-lime-300/[0.06] p-3 text-xs text-lime-50/72">
+                            {project.goal ? (
+                              <div>
+                                <span className="font-semibold uppercase tracking-[0.18em] text-lime-100/55">
+                                  Goal
+                                </span>{" "}
+                                {project.goal}
+                              </div>
+                            ) : null}
+                            {project.milestone ? (
+                              <div>
+                                <span className="font-semibold uppercase tracking-[0.18em] text-lime-100/55">
+                                  Milestone
+                                </span>{" "}
+                                {project.milestone}
+                              </div>
+                            ) : null}
+                          </div>
+                        ) : null}
+
+                        <div className="mt-5 grid grid-cols-2 gap-4 text-xs text-white/52 md:grid-cols-4">
+                          <div>
+                            <div className="tracking-[0.22em] text-white/35">Location</div>
+                            <div className="mt-1 text-white/75">{project.location || "TBD"}</div>
+                          </div>
+                          <div>
+                            <div className="tracking-[0.22em] text-white/35">Dates</div>
+                            <div className="mt-1 text-white/75">
+                              {project.startDate || "TBD"}
+                              {project.endDate ? ` - ${project.endDate}` : ""}
+                            </div>
+                          </div>
+                          <div>
+                            <div className="tracking-[0.22em] text-white/35">Invites</div>
+                            <div className="mt-1 text-white/75">{project.invites.length}</div>
+                          </div>
+                          <div>
+                            <div className="tracking-[0.22em] text-white/35">Room Posts</div>
+                            <div className="mt-1 text-white/75">{project.roomPosts.length}</div>
+                          </div>
+                        </div>
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </TileFrame>
+
+        {activeProject && projectPresentation === "popup" ? (
+          <DropPadPopup
+            open
+            title={activeProject.title}
+            eyebrow="PROJECT DROP"
+            label="Project Drop"
+            onClose={closeActiveProject}
+            extraChrome={
+              <button
+                type="button"
+                onClick={() => openProjectRoom(activeProject.id)}
+                className="rounded-2xl border border-cyan-200/25 bg-cyan-400/15 px-4 py-2 text-sm text-cyan-50/90 transition hover:bg-cyan-400/22"
+              >
+                Enter Room
+              </button>
+            }
+          >
+            {projectRoom}
+          </DropPadPopup>
+        ) : null}
+        {overlays}
+      </div>
+    );
+  }
+
+
+  return (
+    <div className="w-full">
+      {projectRoom}
       {overlays}
     </div>
   );

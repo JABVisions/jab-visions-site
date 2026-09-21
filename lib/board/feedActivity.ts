@@ -15,6 +15,7 @@ import {
   activityFromProjectRoomPost,
   projectRoomPostHasMedia,
 } from "@/lib/board/projectRoomDrop";
+import { projectDropInfoHref } from "@/lib/board/projectNotebookBus";
 
 function safeIso(value: unknown) {
   const fallback = Date.now();
@@ -269,7 +270,7 @@ export function projectToActivity(project: ReturnType<typeof resolveBoardProject
     body:
       project.logline ||
       `${project.contactName || "Host"} is planning a ${project.projectType.toLowerCase()} project.`,
-    href: "/board/work",
+    href: projectDropInfoHref(project.id),
     image_url: project.media?.kind === "image" ? project.media.src : null,
     meta: {
       kind: "project_drop",

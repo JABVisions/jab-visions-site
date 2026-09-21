@@ -17,6 +17,7 @@ import {
   persistableProjectRoomMediaUrl,
   projectRoomPostStorageCoords,
 } from "@/lib/board/projectRoomDrop";
+import { projectDropInfoHref } from "@/lib/board/projectNotebookBus";
 import {
   mergeProjectCover,
   persistableImageUrl,
@@ -1201,7 +1202,7 @@ function projectFromProfileBoardDrop(
     kind: "board_drop",
     title: /^Project Drop:/i.test(title) ? title : `Project Drop: ${title || "Untitled Project"}`,
     body: String(drop.description ?? drop.logline ?? meta.description ?? title ?? "Project Drop"),
-    href: "/board/work",
+    href: projectDropInfoHref(projectId),
     image_url: coverUrl,
     meta: {
       ...meta,
