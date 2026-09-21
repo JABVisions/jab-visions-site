@@ -143,6 +143,33 @@ const DEFAULT_SEED: RoomConversation[] = [
       },
     ],
   },
+  {
+    id: "tr1",
+    roomId: "those-ryderz",
+    title: "Auditions, tapes, and production signals",
+    body: "Open calls, self-tapes, crew notes, and Drops for THAT RYDERZ live here. Invite collaborators, post updates, and keep the film moving.",
+    authorName: "Those Ryderz",
+    createdAt: isoFromOffset(1000 * 60 * 32),
+    replies: [
+      {
+        id: "tr1_r1",
+        threadId: "tr1",
+        authorName: "Casting",
+        body: "Signals needed: availability, a current photo, and the tape. Casting Corner still holds extras calls — this room is the project.",
+        createdAt: isoFromOffset(1000 * 60 * 14),
+      },
+    ],
+  },
+  {
+    id: "jv1",
+    roomId: "jab-visions",
+    title: "Studio signal from JAB Visions",
+    body: "Board releases, studio notes, announcements, and official Drops. This is the ecosystem room.",
+    authorName: "JAB Visions",
+    createdAt: isoFromOffset(1000 * 60 * 21),
+    replies: [],
+    isPinned: true,
+  },
 ];
 
 export function seedConversations(existing: RoomConversation[]) {

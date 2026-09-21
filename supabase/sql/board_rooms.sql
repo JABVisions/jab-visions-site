@@ -668,15 +668,15 @@ insert into public.rooms (
   ),
   (
     'those-ryderz', 'those-ryderz', 'Those Ryderz', '🎬',
-    'Official Those Ryderz room. Lore, casting, production, and the film world — arriving next.',
-    array['Lore', 'Casting', 'Production'],
-    'reserved', true, true, '#5EEAD4', '#99F6E4'
+    'The JAB Visions project room for THAT RYDERZ — auditions, self-tapes, production, crew, and Drops. Invite collaborators, post updates, and keep the film moving.',
+    array['Auditions', 'Production', 'Crew', 'Drops'],
+    'official', true, false, '#5EEAD4', '#99F6E4'
   ),
   (
     'jab-visions', 'jab-visions', 'JAB Visions', '✦',
-    'Official JAB Visions room for studio signal, Board releases, and visionary drops — arriving next.',
-    array['Studio', 'Board', 'Visions'],
-    'reserved', true, true, '#F0ABFC', '#E9D5FF'
+    'The official JAB Visions studio room — Board, studio, announcements, and official Drops.',
+    array['Board', 'Studio', 'Announcements', 'Drops'],
+    'official', true, false, '#F0ABFC', '#E9D5FF'
   ),
   (
     'lobby', 'lobby', 'Lobby', '🏁',
