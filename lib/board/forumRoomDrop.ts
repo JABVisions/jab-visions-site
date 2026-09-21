@@ -9,7 +9,7 @@ import type {
   RoomPermissions,
 } from "@/lib/board/rooms/types";
 
-export type RoomShareOrigin = "create" | "share";
+export type RoomShareOrigin = "create" | "share" | "conversation";
 
 export type ForumRoomDropPlacement =
   | { kind: "room"; roomId: string; origin: RoomShareOrigin }

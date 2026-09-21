@@ -5,8 +5,8 @@ import {
   canCommitBoardMediaPlayback,
   preferredCommitPlaybackUrl,
   uploadBoardMediaFile,
-  type BoardUploadProgressHandler,
 } from "@/lib/board/boardMediaUpload";
+import type { BoardUploadProgressHandler } from "@/lib/board/uploadProgress";
 import { getCurrentUserId } from "@/lib/board/boardDropEditStore";
 import { compactDropCustomizations, type DropCustomization } from "@/lib/board/dropCustomizations";
 import {
