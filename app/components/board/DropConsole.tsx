@@ -43,6 +43,8 @@ import {
   seedForumsIfEmpty,
   type BoardUser,
 } from "@/lib/boardStore";
+import { forumPickerRooms, resolveRoomId } from "@/lib/board/rooms/catalog";
+import { upsertConversation } from "@/lib/board/rooms/storage";
 import LazyDropStudioStage from "./LazyDropStudioStage";
 import BoardClientErrorBoundary from "./BoardClientErrorBoundary";
 import { DropPrivacyButton } from "./DropPrivacyButton";
@@ -333,7 +335,7 @@ export default function DropConsole({
   const [docDesc, setDocDesc] = useState("");
 
   // Forum Post mode
-  const [forumId, setForumId] = useState<string>("general");
+  const [forumId, setForumId] = useState<string>("lobby");
   const [forumOptions, setForumOptions] = useState<
     Array<{ id: string; title: string }>
   >([]);
@@ -397,23 +399,24 @@ export default function DropConsole({
   /* forums */
   useEffect(() => {
     seedForumsIfEmpty();
+    const roomOptions = forumPickerRooms();
     const db = readForums();
-    const nextOptions = db.forums.map((f) => ({ id: f.id, title: f.title }));
+    const legacy = db.forums
+      .filter((forum) => !roomOptions.some((room) => room.id === forum.id || resolveRoomId(forum.id) === room.id))
+      .map((forum) => ({ id: resolveRoomId(forum.id) || forum.id, title: forum.title }));
+    const nextOptions = [...roomOptions, ...legacy];
     setForumOptions(nextOptions);
 
-    const hasGeneral = nextOptions.some((f) => f.id === "general");
-    if (hasGeneral) setForumId("general");
+    const hasLobby = nextOptions.some((f) => f.id === "lobby");
+    if (hasLobby) setForumId("lobby");
     else if (nextOptions.length > 0) setForumId(nextOptions[0].id);
 
     const onForums = () => {
-      const next = readForums();
-      const opts = next.forums.map((f) => ({ id: f.id, title: f.title }));
-      setForumOptions(opts);
-
-      const stillExists = opts.some((f) => f.id === forumId);
+      const rooms = forumPickerRooms();
+      setForumOptions(rooms);
+      const stillExists = rooms.some((f) => f.id === forumId);
       if (!stillExists) {
-        const hasGen = opts.some((f) => f.id === "general");
-        setForumId(hasGen ? "general" : opts[0]?.id ?? "general");
+        setForumId(rooms[0]?.id ?? "lobby");
       }
     };
 
@@ -719,15 +722,25 @@ export default function DropConsole({
             : cleanBody);
 
         const t = createThread({
-          forumId,
+          forumId: resolveRoomId(forumId) || forumId,
           title: threadTitle,
           body: cleanBody,
           author: me,
         });
 
-        autoHref = `/board/forums?forum=${encodeURIComponent(
-          forumId
-        )}&thread=${encodeURIComponent(t.id)}`;
+        upsertConversation({
+          id: t.id,
+          roomId: resolveRoomId(forumId) || "lobby",
+          title: t.title,
+          body: t.body,
+          authorName: me.displayName,
+          createdAt: new Date(t.createdAt).toISOString(),
+          replies: [],
+        });
+
+        autoHref = `/board/forums/${encodeURIComponent(
+          resolveRoomId(forumId) || "lobby"
+        )}?conversation=${encodeURIComponent(t.id)}`;
       }
 
       // Board Drop: preview if external attachment
@@ -1333,8 +1346,8 @@ export default function DropConsole({
                 onChange={(e) => setForumId(e.target.value)}
                 className="dcInput"
               >
-                {!forumOptions.some((f) => f.id === "general") && (
-                  <option value="general">General</option>
+                {!forumOptions.some((f) => f.id === "lobby") && (
+                  <option value="lobby">Lobby</option>
                 )}
                 {forumOptions.map((f) => (
                   <option key={f.id} value={f.id}>
@@ -1342,7 +1355,7 @@ export default function DropConsole({
                   </option>
                 ))}
               </select>
-              <div className="dcFieldHelp">Pick where this conversation lives.</div>
+                  <div className="dcFieldHelp">Pick the Room this conversation lives in.</div>
             </div>
           )}
 
