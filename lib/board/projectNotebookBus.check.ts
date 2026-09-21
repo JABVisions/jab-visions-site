@@ -54,7 +54,7 @@ assert(
   "picking a project drop focuses that drop in the popup"
 );
 assert(
-  events[1]?.type !== BOARD_OPEN_PROJECT_EVENT,
+  events.filter((event) => event.type === BOARD_OPEN_PROJECT_EVENT).length === 1,
   "picking a project drop does not embed the Work Board project room"
 );
 assert(
