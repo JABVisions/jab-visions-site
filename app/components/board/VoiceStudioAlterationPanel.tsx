@@ -29,7 +29,7 @@ export default function VoiceStudioAlterationPanel({
   onClose: () => void;
   onPreset: (preset: VoicePresetKey) => void;
   onAlteration: (patch: Partial<AlterationParams>) => void;
-  onPreview: () => void;
+  onPreview: (preset?: VoicePresetKey) => void;
   previewing?: boolean;
 }) {
   if (!open) return null;
@@ -58,7 +58,10 @@ export default function VoiceStudioAlterationPanel({
             key={key}
             type="button"
             className={`${styles.presetChip} ${active === key ? styles.presetChipOn : ""}`}
-            onClick={() => onPreset(key)}
+            onClick={() => {
+              onPreset(key);
+              onPreview(key);
+            }}
           >
             {LABEL[key]}
           </button>
@@ -82,21 +85,22 @@ export default function VoiceStudioAlterationPanel({
         ))}
       </div>
       <div className={styles.drawerActions}>
-        <button type="button" onClick={onPreview} disabled={previewing}>
-          {previewing ? "Previewing…" : "Preview preset"}
+        <button type="button" onClick={() => onPreview()} disabled={previewing}>
+          {previewing ? "Previewing…" : "Play selected"}
         </button>
         <button
           type="button"
           onClick={() => {
             onPreset("clean");
             onAlteration({ intensity: 0.35 });
+            onPreview("clean");
           }}
         >
           Clear effect
         </button>
       </div>
       <p className={styles.drawerNote}>
-        Effects stay non-destructive — the original take is kept until you mix to Drop.
+        Tap a preset to hear only that effect. Switching stops the previous preview.
       </p>
     </div>
   );

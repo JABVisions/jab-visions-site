@@ -2,6 +2,10 @@
 
 import { useEffect, useRef, useState } from "react";
 import {
+  registerExclusivePreviewStopper,
+  stopAllExclusiveAudioPreviews,
+} from "@/lib/board/exclusiveAudioPreview";
+import {
   renderVoicePresetFile,
   VOICE_PRESETS,
   type VoicePresetKey,
@@ -44,27 +48,64 @@ export default function VoicePresets({
   const [renderingPreset, setRenderingPreset] = useState<VoicePresetKey | null>(null);
   const [effectError, setEffectError] = useState("");
 
+  function stopPreviewAudio() {
+    const audio = audioRef.current;
+    if (!audio) return;
+    try {
+      audio.pause();
+      audio.currentTime = 0;
+    } catch {
+      // Detached or not yet playable.
+    }
+    onPlayingChange?.(false);
+  }
+
   useEffect(() => {
     sourceFilePromiseRef.current = null;
     renderRequestRef.current += 1;
+    resumeAfterRenderRef.current = false;
     setPreviewSrc("");
     setPreset(null);
     setRenderingPreset(null);
     setEffectError("");
+    stopPreviewAudio();
 
     const oldUrls = renderedUrlsRef.current;
     renderedUrlsRef.current = new Map();
     oldUrls.forEach((url) => URL.revokeObjectURL(url));
 
     return () => {
+      stopPreviewAudio();
       renderedUrlsRef.current.forEach((url) => URL.revokeObjectURL(url));
       renderedUrlsRef.current.clear();
     };
+    // Intentionally tied to the take URL only — stop helpers close over the latest callback.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [src]);
 
   useEffect(() => {
+    return registerExclusivePreviewStopper(() => {
+      const audio = audioRef.current;
+      if (!audio) return;
+      try {
+        audio.pause();
+        audio.currentTime = 0;
+      } catch {
+        // Already stopped.
+      }
+    });
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      stopPreviewAudio();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
     const audio = audioRef.current;
-    if (!audio) return;
+    if (!audio || !previewSrc) return;
     audio.load();
     if (!resumeAfterRenderRef.current) return;
     resumeAfterRenderRef.current = false;
@@ -97,15 +138,29 @@ export default function VoicePresets({
   }
 
   async function choosePreset(nextPreset: VoicePresetKey) {
-    const audio = audioRef.current;
-    resumeAfterRenderRef.current = Boolean(audio && !audio.paused);
-    audio?.pause();
+    stopAllExclusiveAudioPreviews();
+    stopPreviewAudio();
+    resumeAfterRenderRef.current = true;
     setPreset(nextPreset);
     onPresetChange?.(nextPreset);
     setEffectError("");
 
     const cachedUrl = renderedUrlsRef.current.get(nextPreset);
     if (cachedUrl) {
+      if (previewSrc === cachedUrl) {
+        const audio = audioRef.current;
+        if (audio) {
+          try {
+            audio.currentTime = 0;
+            void audio.play().catch(() => undefined);
+          } catch {
+            // Need a fresh load() after src was cleared.
+            setPreviewSrc("");
+            requestAnimationFrame(() => setPreviewSrc(cachedUrl));
+          }
+        }
+        return;
+      }
       setPreviewSrc(cachedUrl);
       return;
     }
@@ -149,7 +204,7 @@ export default function VoicePresets({
       ) : (
         <div className={styles.head}>
           <span className={styles.eyebrow}>Vocal Enhancement</span>
-          <span className={styles.hint}>Tap a preset, let it render, then press play.</span>
+          <span className={styles.hint}>Tap a preset to hear it. Only one plays at a time.</span>
         </div>
       )}
       <div className={styles.chips} role="tablist" aria-label="Voice presets">
@@ -163,7 +218,7 @@ export default function VoicePresets({
               aria-selected={preset === option.key}
               aria-label={`${option.label}: ${option.detail}`}
               title={option.detail}
-              disabled={renderingPreset !== null}
+              aria-busy={rendering}
               className={[styles.chip, preset === option.key ? styles.chipOn : ""]
                 .filter(Boolean)
                 .join(" ")}

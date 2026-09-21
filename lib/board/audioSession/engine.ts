@@ -16,6 +16,7 @@ const LANE_ANALYSER_FFT = 256;
 export class AudioSessionEngine {
   private ctx: AudioContext | null = null;
   private sources: AudioBufferSourceNode[] = [];
+  private outputs: AudioNode[] = [];
   private analysers = new Map<string, AnalyserNode>();
   private laneGains = new Map<string, GainNode>();
   private laneMix = new Map<string, Pick<TrackMix, "volume" | "muted">>();
@@ -246,6 +247,7 @@ export class AudioSessionEngine {
     const scheduled = scheduleSession(shifted);
     const timeOrigin = ctx.currentTime;
     const started: AudioBufferSourceNode[] = [];
+    const outputs: AudioNode[] = [];
     for (const item of scheduled) {
       // Volume/mute live on the lane bus — schedule clips dry at unity.
       const bus = this.busFor(item.track.id, item.track.kind, ctx, item.track.mix);
@@ -257,9 +259,13 @@ export class AudioSessionEngine {
         },
       };
       const connected = connectScheduledClip(ctx, dry, bus, { timeOrigin });
-      if (connected) started.push(connected.source);
+      if (connected) {
+        started.push(connected.source);
+        outputs.push(connected.output);
+      }
     }
     this.sources = started;
+    this.outputs = outputs;
     this.playing = started.length > 0;
     this.playOriginMs = Math.max(0, fromMs);
     this.playStartedAt = this.playing ? performance.now() : 0;
@@ -308,8 +314,20 @@ export class AudioSessionEngine {
       }
     }
     this.sources = [];
+    for (const output of this.outputs) {
+      try {
+        output.disconnect();
+      } catch {
+        // Graph already torn down.
+      }
+    }
+    this.outputs = [];
     this.playing = false;
     this.playStartedAt = 0;
+    // Preset graphs (reverb/delay tails) stay connected to the lane bus after
+    // source.stop(). Tear the buses down so a new preset cannot stack on the
+    // previous ones and play every effect at once.
+    this.disconnectBuses();
   }
 
   private disconnectBuses() {

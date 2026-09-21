@@ -180,6 +180,7 @@ export default function VoiceStudioSession({
   onVocalPreset,
   onVocalAlteration,
   onPreviewPreset,
+  onStopPresetPreview,
   presetPreviewing = false,
   onScrub,
   onMoveClip,
@@ -231,7 +232,8 @@ export default function VoiceStudioSession({
   onAdlibFade: (trackId: string, fadeInMs: number, fadeOutMs: number) => void;
   onVocalPreset: (preset: VoicePresetKey) => void;
   onVocalAlteration: (patch: Partial<AlterationParams>) => void;
-  onPreviewPreset: () => void;
+  onPreviewPreset: (preset?: VoicePresetKey) => void;
+  onStopPresetPreview?: () => void;
   presetPreviewing?: boolean;
   onScrub: (ms: number) => void;
   onMoveClip: (trackId: string, clipId: string, offsetMs: number) => void;
@@ -250,6 +252,14 @@ export default function VoiceStudioSession({
   const [zoom, setZoom] = useState(100);
   const [selected, setSelected] = useState<{ trackId: string; clipId: string } | null>(null);
   const loopOn = Boolean(session.loop);
+
+  useEffect(() => {
+    return () => {
+      onStopPresetPreview?.();
+    };
+    // Stop booth preset audio if this session unmounts (collapse / leave Studio).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const vocal = session.tracks.find((track) => track.kind === "vocal");
   const instrumental = session.tracks.find((track) => track.kind === "instrumental");
@@ -438,7 +448,10 @@ export default function VoiceStudioSession({
         open={voicePanelOpen}
         preset={vocalPreset}
         alteration={vocal?.mix.alteration}
-        onClose={() => setVoicePanelOpen(false)}
+        onClose={() => {
+          setVoicePanelOpen(false);
+          onStopPresetPreview?.();
+        }}
         onPreset={onVocalPreset}
         onAlteration={onVocalAlteration}
         onPreview={onPreviewPreset}
@@ -498,7 +511,11 @@ export default function VoiceStudioSession({
         <button
           type="button"
           className={`${styles.ghost} ${voicePanelOpen ? styles.ghostOn : ""}`}
-          onClick={() => setVoicePanelOpen((value) => !value)}
+          onClick={() => {
+            const next = !voicePanelOpen;
+            setVoicePanelOpen(next);
+            if (!next) onStopPresetPreview?.();
+          }}
           disabled={recording || countingIn}
           title="Vocal alteration presets"
         >

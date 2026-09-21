@@ -113,6 +113,10 @@ import {
   type VoicePresetKey,
 } from "@/lib/board/voicePresetAudio";
 import {
+  playExclusiveAudioPreview,
+  stopAllExclusiveAudioPreviews,
+} from "@/lib/board/exclusiveAudioPreview";
+import {
   loadLatestVoiceStudioProject,
   loadVoiceStudioProject,
   rememberActiveVoiceStudioDraft,
@@ -594,6 +598,7 @@ export default function DropStudioStage({
   const studioCountInTimerRef = useRef<number[]>([]);
   const studioRecordStartedAtRef = useRef(0);
   const studioLoopRef = useRef(false);
+  const presetPreviewGenRef = useRef(0);
   const audioSessionRef = useRef<AudioSession | null>(null);
   const sessionHistoryRef = useRef<SessionHistory>(createSessionHistory());
   const [studioValue, setStudioValue] = useState<DropCustomization>(value);
@@ -707,6 +712,9 @@ export default function DropStudioStage({
     setAudioSession(null);
     audioSessionRef.current = null;
     clearLiveVoiceStudio();
+    stopAllExclusiveAudioPreviews();
+    presetPreviewGenRef.current += 1;
+    setPresetPreviewing(false);
     handleClose();
   }, [handleClose]);
 
@@ -746,6 +754,9 @@ export default function DropStudioStage({
     studioCountInTimerRef.current = [];
     setStudioCountIn(null);
     studioEngineRef.current?.stop({ cancel: true });
+    stopAllExclusiveAudioPreviews();
+    presetPreviewGenRef.current += 1;
+    setPresetPreviewing(false);
     setStudioPlaying(false);
     setStudioLaneAnalysers({});
   };
@@ -904,6 +915,9 @@ export default function DropStudioStage({
   const playStudioSession = useCallback(async () => {
     if (!audioSession) return;
     setError("");
+    stopAllExclusiveAudioPreviews();
+    presetPreviewGenRef.current += 1;
+    setPresetPreviewing(false);
     try {
       const fromMs = audioSession.playheadMs || 0;
       const analysers = await studioEngine().play(audioSession, fromMs);
@@ -1063,32 +1077,75 @@ export default function DropStudioStage({
     [audioSession]
   );
 
-  const previewVocalPreset = useCallback(async () => {
-    const session = audioSession;
-    const vocal = session?.tracks.find((track) => track.kind === "vocal");
-    const file = vocal?.clips[0]?.file ?? fileRef.current;
-    if (!file?.type.startsWith("audio/")) {
-      flashSaveNote("Record a vocal before previewing Voice.");
-      return;
-    }
-    setPresetPreviewing(true);
-    try {
+  const previewVocalPreset = useCallback(
+    async (presetKey?: VoicePresetKey) => {
+      const session = audioSessionRef.current ?? audioSession;
+      const vocal = session?.tracks.find((track) => track.kind === "vocal");
       const presetRaw = vocal?.mix.preset;
       const preset: VoicePresetKey =
-        !presetRaw || presetRaw === "none" ? voicePreset : presetRaw;
-      const previewFile = await renderVoicePresetFile(file, preset);
-      const url = URL.createObjectURL(previewFile);
-      const audio = new Audio(url);
-      await audio.play();
-      audio.onended = () => URL.revokeObjectURL(url);
-      window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
-      flashSaveNote(`Previewing ${preset}`);
-    } catch (reason) {
-      setError(playableAudioMessage(reason));
-    } finally {
-      setPresetPreviewing(false);
-    }
-  }, [audioSession, flashSaveNote, voicePreset]);
+        presetKey ??
+        (!presetRaw || presetRaw === "none" ? voicePreset : presetRaw);
+      const requestId = ++presetPreviewGenRef.current;
+
+      stopAllExclusiveAudioPreviews();
+      studioCountInTimerRef.current.forEach((id) => window.clearTimeout(id));
+      studioCountInTimerRef.current = [];
+      setStudioCountIn(null);
+      studioEngineRef.current?.stop({ cancel: true });
+      setStudioPlaying(false);
+      setStudioLaneAnalysers({});
+
+      if (vocal?.clips.length && session) {
+        setPresetPreviewing(true);
+        try {
+          const soloSession: AudioSession = {
+            ...session,
+            playheadMs: vocal.clips[0]?.offsetMs ?? 0,
+            tracks: session.tracks.map((item) =>
+              item.id === vocal.id
+                ? { ...item, mix: { ...item.mix, preset, muted: false, solo: true } }
+                : { ...item, mix: { ...item.mix, muted: true, solo: false } }
+            ),
+          };
+          const analysers = await studioEngine().play(soloSession, soloSession.playheadMs);
+          if (requestId !== presetPreviewGenRef.current) return;
+          if (!analysers) return;
+          setStudioLaneAnalysers(analysers);
+          setStudioPlaying(true);
+          flashSaveNote(`Previewing ${preset}`);
+        } catch (reason) {
+          if (requestId === presetPreviewGenRef.current) {
+            setError(playableAudioMessage(reason, vocal.label || vocal.clips[0]?.name));
+          }
+        } finally {
+          if (requestId === presetPreviewGenRef.current) setPresetPreviewing(false);
+        }
+        return;
+      }
+
+      const file = fileRef.current;
+      if (!file?.type.startsWith("audio/")) {
+        flashSaveNote("Record a vocal before previewing Voice.");
+        return;
+      }
+      setPresetPreviewing(true);
+      try {
+        const previewFile = await renderVoicePresetFile(file, preset);
+        if (requestId !== presetPreviewGenRef.current) return;
+        const url = URL.createObjectURL(previewFile);
+        await playExclusiveAudioPreview(preset, url, { revokeOnStop: true });
+        if (requestId !== presetPreviewGenRef.current) return;
+        flashSaveNote(`Previewing ${preset}`);
+      } catch (reason) {
+        if (requestId === presetPreviewGenRef.current) {
+          setError(playableAudioMessage(reason));
+        }
+      } finally {
+        if (requestId === presetPreviewGenRef.current) setPresetPreviewing(false);
+      }
+    },
+    [audioSession, flashSaveNote, voicePreset]
+  );
 
   const commitStudioTake = useCallback(
     (take: StudioTakeCapture, session: AudioSession, hasBeat: boolean, generation: number) => {
@@ -1376,6 +1433,9 @@ export default function DropStudioStage({
     }
     if (wasVoiceStudioOpenRef.current) persistVoiceProjectRef.current();
     wasVoiceStudioOpenRef.current = false;
+    stopAllExclusiveAudioPreviews();
+    presetPreviewGenRef.current += 1;
+    setPresetPreviewing(false);
   }, [voiceStudioOpen]);
 
   const syncMediaPreview = useCallback(() => {
@@ -1396,6 +1456,9 @@ export default function DropStudioStage({
     studioCountInTimerRef.current = [];
     setStudioCountIn(null);
     studioEngineRef.current?.stop({ cancel: true });
+    stopAllExclusiveAudioPreviews();
+    presetPreviewGenRef.current += 1;
+    setPresetPreviewing(false);
     setStudioPlaying(false);
     setStudioLaneAnalysers({});
     setStudioMicStream(null);
@@ -1417,6 +1480,8 @@ export default function DropStudioStage({
 
   useEffect(() => {
     return () => {
+      stopAllExclusiveAudioPreviews();
+      presetPreviewGenRef.current += 1;
       studioTakeRef.current?.dispose();
       studioTakeRef.current = null;
       adlibTakeRef.current?.dispose();
@@ -2659,6 +2724,9 @@ export default function DropStudioStage({
     setVoiceStudioOpen(false);
     setAudioSession(null);
     audioSessionRef.current = null;
+    stopAllExclusiveAudioPreviews();
+    presetPreviewGenRef.current += 1;
+    setPresetPreviewing(false);
     wasStudioOpenRef.current = false;
     onClose();
   }
@@ -3461,7 +3529,15 @@ export default function DropStudioStage({
                           });
                         });
                       }}
-                      onPreviewPreset={() => void previewVocalPreset()}
+                      onPreviewPreset={(preset) => void previewVocalPreset(preset)}
+                      onStopPresetPreview={() => {
+                        stopAllExclusiveAudioPreviews();
+                        presetPreviewGenRef.current += 1;
+                        setPresetPreviewing(false);
+                        studioEngineRef.current?.stop({ cancel: true });
+                        setStudioPlaying(false);
+                        setStudioLaneAnalysers({});
+                      }}
                       onScrub={(ms) => {
                         haltStudioTransport();
                         setAudioSession((current) =>
