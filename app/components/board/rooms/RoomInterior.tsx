@@ -509,7 +509,7 @@ export default function RoomInterior({ roomId }: { roomId: string }) {
         </section>
       ) : (
         <div className="rounded-[1.5rem] border border-white/10 bg-white/[0.03] p-5 text-sm text-white/55">
-          This Official room is reserved. The doorway is here so Those Ryderz / JAB Visions can open without a rewrite.
+          This Official room is reserved. The doorway is here so more JAB rooms can open without a rewrite.
         </div>
       )}
 

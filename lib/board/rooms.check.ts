@@ -21,6 +21,7 @@ import {
   shouldEmitRoomActivity,
   upsertPresence,
 } from "./rooms";
+import { mapRoomRow } from "./rooms/server";
 import type { RoomConversation, RoomDropShare, RoomPresence } from "./rooms/types";
 
 function assert(condition: unknown, message: string): asserts condition {
@@ -34,10 +35,24 @@ assert(resolveRoomId("general") === "lobby", "general aliases to Lobby");
 assert(getRoomById("jab-lit")?.name === "JAB LIT", "JAB LIT is in the catalog");
 assert(getRoomById("jab-comics")?.isOfficial === true, "JAB Comics is official");
 assert(getRoomById("music")?.chips.includes("Beats") === true, "Music room keeps Voice Studio chips");
-assert(getRoomById("those-ryderz")?.comingSoon === true, "Those Ryderz is reserved, not missing");
-assert(getRoomById("jab-visions")?.comingSoon === true, "JAB Visions is reserved for later");
+assert(getRoomById("those-ryderz")?.comingSoon === false, "Those Ryderz is enterable");
+assert(getRoomById("those-ryderz")?.kind === "official", "Those Ryderz is a first-class official room");
+assert(getRoomById("those-ryderz")?.isOfficial === true, "Those Ryderz keeps JAB Official treatment");
+assert(getRoomById("jab-visions")?.comingSoon === false, "JAB Visions is enterable");
+assert(getRoomById("jab-visions")?.kind === "official", "JAB Visions is a first-class official room");
+assert(getRoomById("jab-visions")?.isOfficial === true, "JAB Visions keeps JAB Official treatment");
 assert(officialRooms().length >= 5, "official architecture can grow beyond the first three rooms");
 assert(liveOfficialRooms().every((room) => !room.comingSoon), "live official rooms are enterable");
+assert(
+  liveOfficialRooms().some((room) => room.id === "those-ryderz") &&
+    liveOfficialRooms().some((room) => room.id === "jab-visions"),
+  "Those Ryderz and JAB Visions are live official rooms"
+);
+assert(roomHref("those-ryderz") === "/board/forums/those-ryderz", "Those Ryderz interior path resolves");
+assert(roomHref("ryderz-lore") === "/board/forums/those-ryderz", "ryderz-lore aliases into Those Ryderz");
+assert(roomHref("jab-visions") === "/board/forums/jab-visions", "JAB Visions interior path resolves");
+assert(forumPickerRooms().some((room) => room.id === "those-ryderz"), "Drop Console picker includes Those Ryderz");
+assert(forumPickerRooms().some((room) => room.id === "jab-visions"), "Drop Console picker includes JAB Visions");
 assert(
   BOARD_ROOM_CATALOG.some((room) => room.id === "lobby") &&
     BOARD_ROOM_CATALOG.some((room) => room.id === "casting"),
@@ -51,7 +66,11 @@ assert(viewer.post === false && viewer.follow === true, "viewers follow but do n
 assert(canStartCall("member", getRoomById("music")) === true, "members can start a Room Call placeholder");
 assert(canGoLive("member", getRoomById("music")) === false, "Go Live stays host/owner until media is wired");
 assert(canGoLive("host", getRoomById("music")) === true, "hosts can Go Live");
-assert(permissionsForRole("owner", getRoomById("those-ryderz")).goLive === false, "reserved rooms stay closed");
+assert(permissionsForRole("member", getRoomById("those-ryderz")).join === true, "Those Ryderz members can join");
+assert(permissionsForRole("member", getRoomById("those-ryderz")).shareDrop === true, "Those Ryderz members can share Drops");
+assert(canStartCall("member", getRoomById("those-ryderz")) === true, "Those Ryderz members can start a Room Call placeholder");
+assert(canGoLive("host", getRoomById("jab-visions")) === true, "JAB Visions hosts can Go Live");
+assert(permissionsForRole("member", getRoomById("jab-visions")).post === true, "JAB Visions members can post");
 
 assert(isPresenceEvent("entered") === true, "enter is a presence event");
 assert(shouldEmitRoomActivity("entered") === false, "presence enter is not an Activity Channel event");
@@ -97,6 +116,8 @@ const conversations: RoomConversation[] = seedConversations([]);
 assert(conversationsForRoom(conversations, "lobby").length >= 2, "legacy lobby threads still seed");
 assert(conversationsForRoom(conversations, "jab-lit").length >= 1, "JAB LIT has a conversation seed");
 assert(conversationsForRoom(conversations, "music").length >= 1, "Music keeps discussion as a room component");
+assert(conversationsForRoom(conversations, "those-ryderz").length >= 1, "Those Ryderz has a conversation seed");
+assert(conversationsForRoom(conversations, "jab-visions").length >= 1, "JAB Visions has a conversation seed");
 
 const share: RoomDropShare = {
   id: "share_1",
@@ -129,5 +150,31 @@ const feed = mergeRoomFeed({
 assert(feed.some((item) => item.kind === "drop_share"), "shared drops appear in the room feed");
 assert(feed.some((item) => item.kind === "live"), "live placeholder sessions appear in the room feed");
 assert(feed.some((item) => item.kind === "conversation"), "existing discussions remain a room component");
+
+const staleSql = mapRoomRow({
+  id: "those-ryderz",
+  slug: "those-ryderz",
+  kind: "reserved",
+  is_official: true,
+  coming_soon: true,
+  name: "Those Ryderz",
+});
+assert(staleSql?.comingSoon === false, "catalog opens Those Ryderz even if SQL still says coming_soon");
+assert(staleSql?.kind === "official", "catalog kind wins so Those Ryderz is official, not reserved");
+const staleVisions = mapRoomRow({
+  id: "jab-visions",
+  slug: "jab-visions",
+  kind: "reserved",
+  is_official: true,
+  coming_soon: true,
+});
+assert(staleVisions?.comingSoon === false, "catalog opens JAB Visions even if SQL still says coming_soon");
+assert(
+  getRoomById("jab-lit")?.comingSoon === false &&
+    getRoomById("jab-comics")?.comingSoon === false &&
+    getRoomById("music")?.comingSoon === false &&
+    getRoomById("lobby")?.comingSoon === false,
+  "existing Forums rooms stay enterable"
+);
 
 console.log("forums rooms architecture checks passed");
