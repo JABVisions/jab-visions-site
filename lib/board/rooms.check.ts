@@ -92,6 +92,13 @@ assert(
     "Maya shared Night Tape in Music.",
   "drop-share copy names the room"
 );
+assert(
+  describeRoomActivity("room_reply", "John", "JAB Comics", {
+    conversationTitle: "Comic Character Design",
+    dropTitle: "Rewritten scene",
+  }) === "John replied with a Drop in Comic Character Design.",
+  "conversation drop reply copy names the thread"
+);
 
 const presence: RoomPresence[] = [
   {

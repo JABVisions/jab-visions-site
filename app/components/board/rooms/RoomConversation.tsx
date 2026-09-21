@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import type { Room, RoomConversation } from "@/lib/board/rooms";
+import ConversationDropReply from "./ConversationDropReply";
 
 function clsx(...parts: Array<string | false | null | undefined>) {
   return parts.filter(Boolean).join(" ");
@@ -13,15 +14,20 @@ export default function RoomConversation({
   thread,
   onClose,
   onSend,
+  onAddDrop,
+  canAddDrop = true,
 }: {
   room: Room;
   thread: RoomConversation;
   onClose: () => void;
   onSend: (threadId: string, body: string) => void;
+  onAddDrop?: () => void;
+  canAddDrop?: boolean;
 }) {
   const [signal, setSignal] = useState("");
   const [mounted, setMounted] = useState(false);
   const canSend = signal.trim().length > 0;
+  const locked = thread.mood === "locked";
 
   useEffect(() => setMounted(true), []);
   useEffect(() => {
@@ -77,14 +83,7 @@ export default function RoomConversation({
               <div className="text-[11px] font-black uppercase tracking-[0.18em] text-white/55">Replies</div>
               <div className="mt-4 space-y-3">
                 {thread.replies.length ? (
-                  thread.replies.map((reply) => (
-                    <div key={reply.id} className="rounded-2xl border border-white/10 bg-white/[0.055] p-4">
-                      <div className="flex justify-between gap-2 text-xs text-white/48">
-                        <span className="font-bold text-white/72">{reply.authorName}</span>
-                      </div>
-                      <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-white/78">{reply.body}</p>
-                    </div>
-                  ))
+                  thread.replies.map((reply) => <ConversationDropReply key={reply.id} reply={reply} />)
                 ) : (
                   <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4 text-sm text-white/55">
                     No replies yet. Be the first voice in this conversation.
@@ -94,32 +93,53 @@ export default function RoomConversation({
             </section>
           </div>
           <footer className="relative border-t border-white/10 p-4 sm:p-5">
-            <div className="flex flex-col gap-3 sm:flex-row">
-              <input
-                value={signal}
-                onChange={(e) => setSignal(e.target.value)}
-                placeholder="Reply in this conversation..."
-                className="min-w-0 flex-1 rounded-2xl border border-white/10 bg-black/35 px-4 py-3 text-sm text-white outline-none"
-              />
-              <button
-                type="button"
-                disabled={!canSend}
-                onClick={() => {
-                  const text = signal.trim();
-                  if (!text) return;
-                  onSend(thread.id, text);
-                  setSignal("");
-                }}
-                className={clsx(
-                  "rounded-2xl border px-5 py-3 text-sm font-black uppercase tracking-[0.14em]",
-                  canSend
-                    ? "border-emerald-200/30 bg-emerald-300/16 text-emerald-50"
-                    : "cursor-not-allowed border-white/10 bg-white/5 text-white/35"
-                )}
-              >
-                Send
-              </button>
-            </div>
+            {locked ? (
+              <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white/55">
+                This conversation is locked. New Drops cannot be added here.
+              </div>
+            ) : (
+              <div className="flex flex-col gap-3 sm:flex-row">
+                <input
+                  value={signal}
+                  onChange={(e) => setSignal(e.target.value)}
+                  placeholder="Reply in this conversation..."
+                  className="min-w-0 flex-1 rounded-2xl border border-white/10 bg-black/35 px-4 py-3 text-sm text-white outline-none"
+                />
+                {onAddDrop ? (
+                  <button
+                    type="button"
+                    disabled={!canAddDrop}
+                    onClick={onAddDrop}
+                    className={clsx(
+                      "rounded-2xl border px-5 py-3 text-sm font-black uppercase tracking-[0.14em]",
+                      canAddDrop
+                        ? "border-white/16 bg-white/10 text-white/85"
+                        : "cursor-not-allowed border-white/10 bg-white/5 text-white/35"
+                    )}
+                  >
+                    Add Drop
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  disabled={!canSend}
+                  onClick={() => {
+                    const text = signal.trim();
+                    if (!text) return;
+                    onSend(thread.id, text);
+                    setSignal("");
+                  }}
+                  className={clsx(
+                    "rounded-2xl border px-5 py-3 text-sm font-black uppercase tracking-[0.14em]",
+                    canSend
+                      ? "border-emerald-200/30 bg-emerald-300/16 text-emerald-50"
+                      : "cursor-not-allowed border-white/10 bg-white/5 text-white/35"
+                  )}
+                >
+                  Send
+                </button>
+              </div>
+            )}
           </footer>
         </section>
       </div>

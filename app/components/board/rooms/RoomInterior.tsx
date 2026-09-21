@@ -37,6 +37,7 @@ import {
   writeConversations,
   writePresence,
   writeSessions,
+  writeShares,
   readSessions,
 } from "@/lib/board/rooms/storage";
 import { upsertPresence } from "@/lib/board/rooms/presence";
@@ -48,6 +49,20 @@ import RoomCallPreview from "./RoomCallPreview";
 import RoomActivityFeed from "./RoomActivityFeed";
 import RoomShareDrop from "./RoomShareDrop";
 import RoomConversation from "./RoomConversation";
+import RoomDropComposer from "./RoomDropComposer";
+import DropStudioLauncher from "@/app/components/board/DropStudioLauncher";
+import type { DropDestination } from "@/lib/board/dropDestination";
+import { suggestedStudioModeForRoom } from "@/lib/board/dropDestination";
+import type { StudioCaptureMode } from "@/lib/board/dropItem";
+import {
+  canCreateConversationDrop,
+  canCreateRoomDrop,
+  canRemoveFromRoom,
+  conversationReplyFromDrop,
+  dropSnapshotFromItem,
+  removeShareFromRoom,
+  shareFromCreatedDrop,
+} from "@/lib/board/forumRoomDrop";
 
 function uid(prefix: string) {
   return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
@@ -87,6 +102,10 @@ export default function RoomInterior({ roomId }: { roomId: string }) {
   const [composeBody, setComposeBody] = useState("");
   const [openThreadId, setOpenThreadId] = useState<string | null>(null);
   const [authUserId, setAuthUserId] = useState<string | null>(null);
+  const [studioOpen, setStudioOpen] = useState(false);
+  const [studioMode, setStudioMode] = useState<StudioCaptureMode>("photo");
+  const [studioDestination, setStudioDestination] = useState<DropDestination | null>(null);
+  const [successNote, setSuccessNote] = useState("");
 
   const identity = useMemo(() => readLocalIdentity(), []);
   const userId = authUserId || identity.userId;
@@ -175,11 +194,73 @@ export default function RoomInterior({ roomId }: { roomId: string }) {
             sharedBy: String(row.shared_by || row.sharedBy || ""),
             snapshot: row.snapshot && typeof row.snapshot === "object" ? row.snapshot : {},
             createdAt: String(row.created_at || row.createdAt || new Date().toISOString()),
+            origin:
+              row.origin === "create" || row.origin === "conversation" || row.origin === "share"
+                ? row.origin
+                : "share",
+            conversationId: typeof row.conversation_id === "string" ? row.conversation_id : row.conversationId || null,
           }));
           const byKey = new Map<string, RoomDropShare>();
           for (const share of [...remote, ...local]) byKey.set(`${share.dropId}:${share.sharedBy}`, share);
           return [...byKey.values()];
         });
+      })
+      .catch(() => undefined);
+    fetch(`/api/board/rooms/${resolved}/posts`)
+      .then((res) => res.json())
+      .then((payload) => {
+        if (cancelled || !Array.isArray(payload?.posts) || !payload.posts.length) return;
+        const remoteConversations = new Map<string, RoomConversationRecord>();
+        const replies: Array<{ parentId: string; reply: RoomConversationRecord["replies"][number] }> = [];
+        for (const row of payload.posts) {
+          const id = String(row.id || "");
+          const kind = String(row.kind || "conversation");
+          const parentId = typeof row.parent_id === "string" ? row.parent_id : "";
+          if (kind === "reply" && parentId) {
+            replies.push({
+              parentId,
+              reply: {
+                id,
+                threadId: parentId,
+                authorName: String(row.author_name || row.display_name || "Board"),
+                body: String(row.body || ""),
+                createdAt: String(row.created_at || new Date().toISOString()),
+                dropId: typeof row.drop_id === "string" && row.drop_id ? row.drop_id : undefined,
+                dropSnapshot:
+                  row.metadata && typeof row.metadata === "object"
+                    ? (row.metadata.dropSnapshot as Record<string, unknown> | undefined)
+                    : undefined,
+              },
+            });
+            continue;
+          }
+          if (kind === "conversation" || kind === "text_post" || kind === "announcement") {
+            remoteConversations.set(id, {
+              id,
+              roomId: resolved,
+              title: String(row.title || "Conversation"),
+              body: String(row.body || ""),
+              authorName: String(row.author_name || "Board"),
+              createdAt: String(row.created_at || new Date().toISOString()),
+              replies: [],
+              isPinned: row.pinned === true,
+            });
+          }
+        }
+        for (const item of replies) {
+          const thread = remoteConversations.get(item.parentId);
+          if (thread) thread.replies = [item.reply, ...thread.replies];
+        }
+        if (!remoteConversations.size) return;
+        const seeded = seedConversations(readConversations());
+        const byId = new Map(seeded.map((item) => [item.id, item]));
+        for (const remote of remoteConversations.values()) {
+          const current = byId.get(remote.id);
+          byId.set(remote.id, current ? { ...current, ...remote, replies: remote.replies.length ? remote.replies : current.replies } : remote);
+        }
+        const merged = [...byId.values()];
+        writeConversations(merged);
+        setConversations(conversationsForRoom(merged, resolved));
       })
       .catch(() => undefined);
     return () => {
@@ -388,16 +469,56 @@ export default function RoomInterior({ roomId }: { roomId: string }) {
     });
   }
 
-  function shareDrop(drop: DropItem) {
-    const share: RoomDropShare = {
+  function flashSuccess(text: string) {
+    setSuccessNote(text);
+    window.setTimeout(() => setSuccessNote(""), 1800);
+  }
+
+  function ensureJoined() {
+    if (joined && (role === "member" || role === "moderator" || role === "host" || role === "owner")) return true;
+    if (!permissions.join && !permissions.post) return false;
+    persistMembership("join");
+    return true;
+  }
+
+  function openRoomStudio(mode: StudioCaptureMode = suggestedStudioModeForRoom(currentRoom.id)) {
+    if (!ensureJoined()) return;
+    setStudioDestination({
+      type: "room",
+      roomId: currentRoom.id,
+      roomName: currentRoom.name,
+      roomIcon: currentRoom.icon,
+    });
+    setStudioMode(mode);
+    setStudioOpen(true);
+  }
+
+  function openConversationStudio() {
+    if (!openThread) return;
+    if (!canCreateConversationDrop(permissions, openThread, currentRoom)) return;
+    if (!ensureJoined()) return;
+    setStudioDestination({
+      type: "room_conversation",
+      roomId: currentRoom.id,
+      conversationId: openThread.id,
+      roomName: currentRoom.name,
+      roomIcon: currentRoom.icon,
+      conversationTitle: openThread.title,
+    });
+    setStudioMode(suggestedStudioModeForRoom(currentRoom.id));
+    setStudioOpen(true);
+  }
+
+  function shareDrop(drop: DropItem, origin: "create" | "share" = "share") {
+    const share = shareFromCreatedDrop({
       id: uid("share"),
       roomId: currentRoom.id,
-      dropId: drop.id,
+      drop,
       sharedBy: userId,
       sharedByName: identity.displayName,
-      snapshot: { ...drop },
-      createdAt: new Date().toISOString(),
-    };
+      origin,
+    });
+    share.snapshot = { ...dropSnapshotFromItem(drop), authorName: identity.displayName };
     upsertShare(share);
     setShares(readShares().filter((row) => resolveRoomId(row.roomId) === currentRoom.id));
     setShareOpen(false);
@@ -406,9 +527,68 @@ export default function RoomInterior({ roomId }: { roomId: string }) {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
         dropId: drop.id,
-        snapshot: drop,
+        snapshot: share.snapshot,
         displayName: identity.displayName,
+        origin,
       }),
+    });
+  }
+
+  function replyWithDrop(drop: DropItem, threadId: string) {
+    const current = readConversations();
+    const thread = current.find((item) => item.id === threadId);
+    const reply = conversationReplyFromDrop({
+      id: uid("sig"),
+      threadId,
+      drop,
+      authorName: identity.displayName,
+      authorAvatar: identity.avatarUrl,
+    });
+    const next = current.map((item) =>
+      item.id === threadId ? { ...item, replies: [reply, ...item.replies] } : item
+    );
+    writeConversations(next);
+    setConversations(conversationsForRoom(next, currentRoom.id));
+    void fetch(`/api/board/rooms/${currentRoom.id}/posts`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        kind: "reply",
+        body: reply.body,
+        parentId: threadId,
+        displayName: identity.displayName,
+        dropId: drop.id,
+        dropTitle: drop.title,
+        conversationTitle: thread?.title || "",
+        metadata: { dropSnapshot: reply.dropSnapshot },
+      }),
+    });
+  }
+
+  async function onStudioPublished(drop: DropItem) {
+    const destination = studioDestination;
+    if (destination?.type === "room_conversation") {
+      replyWithDrop(drop, destination.conversationId);
+      flashSuccess("Replied with Drop");
+    } else {
+      shareDrop(drop, "create");
+      flashSuccess("Posted to Room");
+    }
+    setStudioOpen(false);
+    setStudioDestination(null);
+  }
+
+  function removeDropShare(dropId: string) {
+    const share =
+      shares.find((row) => row.dropId === dropId) ||
+      readShares().find((row) => row.roomId === currentRoom.id && row.dropId === dropId);
+    if (share && !canRemoveFromRoom({ share, userId, moderate: permissions.moderate })) return;
+    const next = removeShareFromRoom(readShares(), { roomId: currentRoom.id, dropId });
+    writeShares(next);
+    setShares(next.filter((row) => resolveRoomId(row.roomId) === currentRoom.id));
+    flashSuccess("Removed from Room");
+    void fetch(`/api/board/rooms/${currentRoom.id}/shares?dropId=${encodeURIComponent(dropId)}`, {
+      method: "DELETE",
     });
   }
 
@@ -472,56 +652,89 @@ export default function RoomInterior({ roomId }: { roomId: string }) {
       <RoomCallPreview room={room} session={call} />
 
       {!room.comingSoon ? (
-        <section className="rounded-[1.5rem] border border-white/10 bg-white/[0.035] p-4">
-          <div className="text-[11px] font-black uppercase tracking-[0.16em] text-white/50">Leave a signal</div>
-          <div className="mt-3 grid gap-3">
-            <input
-              value={composeTitle}
-              onChange={(e) => setComposeTitle(e.target.value)}
-              placeholder="Conversation title"
-              className="w-full rounded-2xl border border-white/10 bg-black/35 px-4 py-3 text-sm text-white outline-none"
-            />
-            <textarea
-              value={composeBody}
-              onChange={(e) => setComposeBody(e.target.value)}
-              placeholder="What should people know when they step in?"
-              rows={3}
-              className="w-full resize-none rounded-2xl border border-white/10 bg-black/35 px-4 py-3 text-sm text-white outline-none"
-            />
-            <div className="flex flex-wrap gap-2">
-              <button
-                type="button"
-                onClick={createConversation}
-                disabled={!composeTitle.trim() || !composeBody.trim()}
-                className="rounded-full border border-emerald-200/25 bg-emerald-300/14 px-4 py-2 text-[11px] font-black uppercase tracking-[0.14em] text-emerald-50 disabled:opacity-40"
-              >
-                Open conversation
-              </button>
-              <button
-                type="button"
-                onClick={() => setShareOpen(true)}
-                className="rounded-full border border-white/12 bg-white/8 px-4 py-2 text-[11px] font-black uppercase tracking-[0.14em] text-white/80"
-              >
-                Share a Drop
-              </button>
+        <>
+          <RoomDropComposer
+            room={room}
+            canCreate={canCreateRoomDrop(permissions, room) || permissions.join}
+            canShare={permissions.shareDrop || permissions.join}
+            disabledReason={permissions.join ? undefined : "You cannot post in this Room."}
+            onCreateDrop={(mode) => openRoomStudio(mode)}
+            onShareExisting={() => {
+              if (!ensureJoined()) return;
+              setShareOpen(true);
+            }}
+          />
+          <section className="rounded-[1.5rem] border border-white/10 bg-white/[0.035] p-4">
+            <div className="text-[11px] font-black uppercase tracking-[0.16em] text-white/50">Leave a signal</div>
+            <div className="mt-3 grid gap-3">
+              <input
+                value={composeTitle}
+                onChange={(e) => setComposeTitle(e.target.value)}
+                placeholder="Conversation title"
+                className="w-full rounded-2xl border border-white/10 bg-black/35 px-4 py-3 text-sm text-white outline-none"
+              />
+              <textarea
+                value={composeBody}
+                onChange={(e) => setComposeBody(e.target.value)}
+                placeholder="What should people know when they step in?"
+                rows={3}
+                className="w-full resize-none rounded-2xl border border-white/10 bg-black/35 px-4 py-3 text-sm text-white outline-none"
+              />
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={createConversation}
+                  disabled={!composeTitle.trim() || !composeBody.trim()}
+                  className="rounded-full border border-emerald-200/25 bg-emerald-300/14 px-4 py-2 text-[11px] font-black uppercase tracking-[0.14em] text-emerald-50 disabled:opacity-40"
+                >
+                  Open conversation
+                </button>
+              </div>
             </div>
-          </div>
-        </section>
+          </section>
+        </>
       ) : (
         <div className="rounded-[1.5rem] border border-white/10 bg-white/[0.03] p-5 text-sm text-white/55">
           This Official room is reserved. The doorway is here so more JAB rooms can open without a rewrite.
         </div>
       )}
 
-      <RoomActivityFeed items={feed} color={room.color} onOpenConversation={setOpenThreadId} />
+      {successNote ? (
+        <div className="rounded-2xl border border-emerald-200/20 bg-emerald-300/12 px-4 py-2 text-sm text-emerald-50">
+          {successNote}
+        </div>
+      ) : null}
 
-      <RoomShareDrop open={shareOpen} onClose={() => setShareOpen(false)} onShare={shareDrop} />
+      <RoomActivityFeed
+        items={feed}
+        color={room.color}
+        onOpenConversation={setOpenThreadId}
+        onRemoveShare={removeDropShare}
+        userId={userId}
+        canModerate={permissions.moderate}
+      />
+
+      <RoomShareDrop open={shareOpen} onClose={() => setShareOpen(false)} onShare={(drop) => shareDrop(drop, "share")} />
       {openThread ? (
         <RoomConversation
           room={room}
           thread={openThread}
           onClose={() => setOpenThreadId(null)}
           onSend={sendReply}
+          onAddDrop={openConversationStudio}
+          canAddDrop={canCreateConversationDrop(permissions, openThread, room) || permissions.join}
+        />
+      ) : null}
+      {studioDestination ? (
+        <DropStudioLauncher
+          open={studioOpen}
+          destination={studioDestination}
+          initialMode={studioMode}
+          onClose={() => {
+            setStudioOpen(false);
+            setStudioDestination(null);
+          }}
+          onPublished={onStudioPublished}
         />
       ) : null}
     </div>

@@ -129,6 +129,9 @@ export type RoomConversationReply = {
   authorAvatar?: string;
   body: string;
   createdAt: string;
+  /** Attached Board Drop. The Drop stays a Drop; the reply is just context. */
+  dropId?: string;
+  dropSnapshot?: Record<string, unknown>;
 };
 
 export type RoomConversation = {
@@ -154,6 +157,9 @@ export type RoomDropShare = {
   activityId?: string | null;
   snapshot: Record<string, unknown>;
   createdAt: string;
+  /** create = posted from Drop Studio; share = existing Drop; conversation = pointer only */
+  origin?: "create" | "share" | "conversation";
+  conversationId?: string | null;
 };
 
 export type RoomFeedItem = {
