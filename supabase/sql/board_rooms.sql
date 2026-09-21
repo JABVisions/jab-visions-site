@@ -668,7 +668,7 @@ insert into public.rooms (
   ),
   (
     'those-ryderz', 'those-ryderz', 'Those Ryderz', '🎬',
-    'The JAB Visions project room for THAT RYDERZ — auditions, self-tapes, production, crew, and Drops. Invite collaborators, post updates, and keep the film moving.',
+    'The JAB Visions project room for Those Ryderz — auditions, self-tapes, production, crew, and Drops. Invite collaborators, post updates, and keep the film moving.',
     array['Auditions', 'Production', 'Crew', 'Drops'],
     'official', true, false, '#5EEAD4', '#99F6E4'
   ),

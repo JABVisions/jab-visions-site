@@ -295,6 +295,67 @@ assert(
   "feed activity keeps private coords so ActivityCard can createSignedUrl"
 );
 
+const postedWithPoster = buildProjectRoomDrop({
+  project,
+  media: {
+    kind: "video",
+    src: "https://cdn.example/tape.mp4",
+    bucket: "board-media",
+    storagePath: "user/project-media/tape.mp4",
+    posterUrl:
+      "https://example.supabase.co/storage/v1/object/sign/board-media/user/project-cover/still.jpg?token=1",
+    posterBucket: "board-media",
+    posterStoragePath: "user/project-cover/still.jpg",
+  },
+  author: {
+    id: "user_zoe",
+    displayName: "Zoe",
+    username: "zoe",
+  },
+  fileName: "tape.mp4",
+  dropId: "project_room_poster_tape",
+  postId: "post_poster_tape",
+});
+assert(
+  postedWithPoster.activity.image_url?.includes("project-cover/still.jpg") === true,
+  "video room drops expose a poster still, not a blank player"
+);
+assert(
+  postedWithPoster.activity.meta?.posterStoragePath === "user/project-cover/still.jpg",
+  "video room drops keep poster coords for signed thumbs"
+);
+assert(
+  postedWithPoster.post.posterStoragePath === "user/project-cover/still.jpg",
+  "ROOM DROPS persist the still path without re-uploading the tape"
+);
+assert(
+  activityFromProjectRoomPost(postedWithPoster.post, project).meta?.posterStoragePath ===
+    "user/project-cover/still.jpg",
+  "ActivityCard can sign the stored poster for the feed"
+);
+
+const emptyCoverVideo = { ...project, media: undefined };
+const posterCover = buildProjectRoomDrop({
+  project: emptyCoverVideo,
+  media: {
+    kind: "video",
+    src: "https://cdn.example/tape.mp4",
+    bucket: "board-media",
+    storagePath: "user/project-media/tape.mp4",
+    posterUrl: "https://cdn.example/still.jpg",
+    posterBucket: "board-media",
+    posterStoragePath: "user/project-cover/still.jpg",
+  },
+  author: { id: "user_host", displayName: "John Andy" },
+  fileName: "tape.mp4",
+  dropId: "project_room_poster_cover",
+});
+assert(posterCover.coverMedia?.kind === "image", "video still becomes the notebook thumbnail");
+assert(
+  posterCover.coverMedia?.storagePath === "user/project-cover/still.jpg",
+  "notebook thumb uses the small still, not the 65MB tape"
+);
+
 const applied = applyProjectRoomDropToProject(project, built);
 assert(applied.roomPosts[0]?.id === "post_tape", "new room post is first");
 assert(

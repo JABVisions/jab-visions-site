@@ -147,7 +147,7 @@ const DEFAULT_SEED: RoomConversation[] = [
     id: "tr1",
     roomId: "those-ryderz",
     title: "Auditions, tapes, and production signals",
-    body: "Open calls, self-tapes, crew notes, and Drops for THAT RYDERZ live here. Invite collaborators, post updates, and keep the film moving.",
+    body: "Open calls, self-tapes, crew notes, and Drops for Those Ryderz live here. Invite collaborators, post updates, and keep the film moving.",
     authorName: "Those Ryderz",
     createdAt: isoFromOffset(1000 * 60 * 32),
     replies: [
@@ -175,7 +175,19 @@ const DEFAULT_SEED: RoomConversation[] = [
 export function seedConversations(existing: RoomConversation[]) {
   const byId = new Map(existing.map((item) => [item.id, item]));
   for (const seed of DEFAULT_SEED) {
-    if (!byId.has(seed.id)) byId.set(seed.id, seed);
+    const current = byId.get(seed.id);
+    if (!current) {
+      byId.set(seed.id, seed);
+      continue;
+    }
+    if (seed.roomId === "those-ryderz" && /THAT RYDERZ/.test(`${current.body} ${current.authorName}`)) {
+      byId.set(seed.id, {
+        ...current,
+        body: seed.body,
+        authorName: seed.authorName,
+        title: current.title || seed.title,
+      });
+    }
   }
   return [...byId.values()];
 }

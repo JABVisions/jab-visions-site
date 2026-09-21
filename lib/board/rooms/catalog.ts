@@ -72,7 +72,7 @@ export const BOARD_ROOM_CATALOG: Room[] = [
     name: "Those Ryderz",
     icon: "🎬",
     description:
-      "The JAB Visions project room for THAT RYDERZ — auditions, self-tapes, production, crew, and Drops. Invite collaborators, post updates, and keep the film moving.",
+      "The JAB Visions project room for Those Ryderz — auditions, self-tapes, production, crew, and Drops. Invite collaborators, post updates, and keep the film moving.",
     chips: ["Auditions", "Production", "Crew", "Drops"],
     kind: "official",
     isOfficial: true,

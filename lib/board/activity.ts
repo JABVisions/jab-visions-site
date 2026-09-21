@@ -1,5 +1,6 @@
 // lib/board/activity.ts
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { looksLikePosterImageUrl } from "@/lib/board/feedDropMedia";
 
 /* -------------------------------------------------------------------------- */
 /* types */
@@ -354,6 +355,7 @@ export async function syncActivitiesForDropEdit(updated: {
   mime?: string;
   fileName?: string;
   mediaPreviewUrl?: string | null;
+  previewImage?: string | null;
   visibility?: "public" | "private";
   updatedAt?: number;
 }): Promise<void> {
@@ -421,7 +423,13 @@ export async function syncActivitiesForDropEdit(updated: {
         image_url = null;
       } else if (mediaKind === "video") {
         href = previewUrl;
-        image_url = null;
+        const existingPoster =
+          looksLikePosterImageUrl(item.image_url) ? item.image_url : null;
+        const posterCandidate =
+          [updated.previewImage, item.meta?.previewImage, item.meta?.posterUrl].find(
+            looksLikePosterImageUrl
+          ) || existingPoster;
+        image_url = persistableImageUrl(posterCandidate);
       } else {
         image_url = previewUrl;
       }

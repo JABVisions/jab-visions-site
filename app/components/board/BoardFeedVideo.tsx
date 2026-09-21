@@ -8,10 +8,12 @@ import { useEffect, useRef } from "react";
  */
 export default function BoardFeedVideo({
   src,
+  poster,
   className,
   onError,
 }: {
   src: string;
+  poster?: string;
   className?: string;
   onError?: () => void;
 }) {
@@ -44,9 +46,10 @@ export default function BoardFeedVideo({
       ref={ref}
       className={className}
       src={src}
+      poster={poster || undefined}
       controls
       playsInline
-      preload="none"
+      preload={poster ? "none" : "metadata"}
       onError={onError}
     />
   );

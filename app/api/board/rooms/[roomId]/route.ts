@@ -41,7 +41,7 @@ export async function GET(
       ]);
 
     if (error && isMissingRoomsTable(error)) {
-      return json({ ok: true, room: catalog, presence: [], sessions: [], setupRequired: true, source: "catalog" });
+      return json({ ok: true, room: { ...catalog, title: catalog.name }, presence: [], sessions: [], setupRequired: true, source: "catalog" });
     }
 
     const mapped = mapRoomRow(row as Record<string, any>) || catalog;
@@ -49,6 +49,7 @@ export async function GET(
       ok: true,
       room: {
         ...mapped,
+        title: mapped.name,
         memberCount: memberCount ?? mapped.memberCount,
         presenceCount: (presence || []).length,
       },
@@ -57,6 +58,6 @@ export async function GET(
       source: row ? "db" : "catalog",
     });
   } catch {
-    return json({ ok: true, room: catalog, presence: [], sessions: [], source: "catalog" });
+    return json({ ok: true, room: { ...catalog, title: catalog.name }, presence: [], sessions: [], source: "catalog" });
   }
 }

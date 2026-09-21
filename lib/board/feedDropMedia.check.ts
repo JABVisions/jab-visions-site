@@ -1,9 +1,11 @@
 import {
   activityLooksLikeStoredVideo,
   activityMediaCoords,
+  activityPosterLookup,
   feedShouldEmbedRawHref,
   feedShouldShowStorageLinkCover,
   playableFeedMediaSrc,
+  playablePosterSrc,
   preferFeedMediaUrl,
 } from "./feedDropMedia";
 import { resolveStoredMediaCoords } from "./musicPlayback";
@@ -134,5 +136,38 @@ assert(
   String(deduped[0]?.meta?.storagePath || "").includes("project-media/tape.mp4"),
   "deduped feed Drop keeps storage coords for createSignedUrl"
 );
+
+const posterPublic =
+  "https://ywvzwtpy.supabase.co/storage/v1/object/public/board-media/user/project-cover/still.jpg";
+const posterSigned =
+  "https://ywvzwtpy.supabase.co/storage/v1/object/sign/board-media/user/project-cover/still.jpg?token=abc";
+assert(!playablePosterSrc(posterPublic), "private board-media thumbs must not use getPublicUrl");
+assert(playablePosterSrc(posterSigned) === posterSigned, "signed poster URLs can render before play");
+assert(!playablePosterSrc(publicUrl), "the tape itself is not a thumbnail");
+
+const posterLookup = activityPosterLookup({
+  href: publicUrl,
+  image_url: posterSigned,
+  meta: {
+    origin: "project_room",
+    mediaKind: "video",
+    posterBucket: "board-media",
+    posterStoragePath: "user/project-cover/still.jpg",
+    storagePath: "user/project-media/tape.mp4",
+  },
+});
+assert(
+  posterLookup.coords?.storagePath === "user/project-cover/still.jpg",
+  "video room drops expose poster coords for createSignedUrl"
+);
+assert(posterLookup.url === posterSigned, "stored signed still is preferred over the tape");
+
+const missingPoster = activityPosterLookup({
+  href: publicUrl,
+  image_url: publicUrl,
+  meta: { mediaKind: "video", storagePath: "user/project-media/tape.mp4" },
+});
+assert(!missingPoster.coords, "missing stills do not treat the tape path as a poster");
+assert(!missingPoster.url, "missing stills leave the client capture path");
 
 console.log("feedDropMedia.check.ts: ok");

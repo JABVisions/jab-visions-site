@@ -49,6 +49,10 @@ import { rememberBoardUploadSession } from "@/lib/board/boardUploadSession";
 import { pushDrop, readDrops, writeDrops } from "@/lib/board/drops/storage";
 import { readCurrentBoardIdentity } from "@/lib/board/currentProfile";
 import { emitBoardDropSignal } from "@/lib/board/dropSignals";
+import {
+  captureVideoPosterFromFile,
+  uploadVideoPosterStill,
+} from "@/lib/board/videoPoster";
 import LazyDropStudioStage from "@/app/components/board/LazyDropStudioStage";
 import ActivityCard from "@/app/components/board/ActivityCard";
 import type { DropCustomization } from "@/lib/board/dropCustomizations";
@@ -1174,6 +1178,12 @@ export default function ProjectCenter() {
 
       setStudioMessage(mediaKind === "video" ? "Uploading video…" : "Uploading drop…");
       try {
+        const posterPromise =
+          mediaKind === "video"
+            ? captureVideoPosterFromFile(file)
+                .then((still) => (still ? uploadVideoPosterStill(still) : null))
+                .catch(() => null)
+            : Promise.resolve(null);
         onProgress?.(preparingUploadProgress(guessUploadBytes(file)));
         const uploaded = await uploadBoardMediaFile(file, { folder: "project-media", onProgress });
         onProgress?.(null);
@@ -1181,6 +1191,7 @@ export default function ProjectCenter() {
           throw new Error("This video didn't finish saving to Board storage. Try uploading it again.");
         }
         const mediaUrl = preferredCommitPlaybackUrl(uploaded);
+        const poster = await posterPromise;
         const liveProject =
           projectsRef.current.find((item) => item.id === project.id) || project;
         const alreadyPosted = projectHasVisibleRoomDrop(liveProject, {
@@ -1205,6 +1216,13 @@ export default function ProjectCenter() {
             src: mediaUrl,
             bucket: uploaded.bucket,
             storagePath: uploaded.storagePath,
+            ...(poster
+              ? {
+                  posterUrl: poster.url,
+                  posterBucket: poster.bucket,
+                  posterStoragePath: poster.storagePath,
+                }
+              : {}),
           },
           author: {
             id: currentUserId || identity.id,

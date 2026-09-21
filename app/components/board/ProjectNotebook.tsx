@@ -7,6 +7,7 @@ import {
   syncResolvedProjectsToStorage,
   statusLabel,
 } from "@/lib/board/projects";
+import ProjectCoverImage from "@/app/components/board/projects/ProjectCoverImage";
 
 const PROJECT_DROPS_UPDATED_EVENT = "board:project-drops:updated";
 type NotebookTab = "all" | "projects" | "casting" | "crew" | "gigs" | "auditions" | "saved";
@@ -227,6 +228,13 @@ export default function ProjectNotebook({
                     className="rounded-2xl border border-white/10 bg-white/5 p-3 text-left transition hover:bg-white/10"
                   >
                     <div className="flex items-start justify-between gap-3">
+                      <div className="h-16 w-16 shrink-0 overflow-hidden rounded-2xl border border-white/10 bg-black/40">
+                        <ProjectCoverImage
+                          media={p.media}
+                          title={p.title}
+                          className="object-cover"
+                        />
+                      </div>
                       <div className="min-w-0 flex-1">
                         <div className="mb-2 flex flex-wrap items-center gap-2">
                           <span className="rounded-full border border-cyan-200/18 bg-cyan-300/10 px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.14em] text-cyan-100/80">

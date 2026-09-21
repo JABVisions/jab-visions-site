@@ -116,3 +116,80 @@ export function preferFeedMediaUrl(
   const b = playableFeedMediaSrc(fallback);
   return a || b || persistableFeedMediaHref(preferred) || persistableFeedMediaHref(fallback);
 }
+
+const POSTER_IMAGE_EXT = /\.(jpe?g|png|gif|webp|avif|heic|bmp)(\?|#|$)/i;
+const POSTER_VIDEO_EXT = /\.(mp4|webm|mov|m4v)(\?|#|$)/i;
+
+/** Stills/covers only — never the 65MB tape or a public board-media 403 URL. */
+export function looksLikePosterImageUrl(url?: string | null): boolean {
+  const src = String(url || "").trim();
+  if (!src) return false;
+  if (src.startsWith("data:image/")) return true;
+  if (src.startsWith("blob:")) return true;
+  if (POSTER_VIDEO_EXT.test(src)) return false;
+  if (POSTER_IMAGE_EXT.test(src)) return true;
+  if (/project-cover\//i.test(src)) return true;
+  if (/(?:^|[/_-])(?:poster|thumb(?:nail)?|cover|still)(?:[._/-]|$)/i.test(src)) return true;
+  return false;
+}
+
+export function playablePosterSrc(url?: string | null): string {
+  const src = String(url || "").trim();
+  if (!src) return "";
+  if (src.startsWith("blob:") || src.startsWith("data:image/")) return src;
+  if (!looksLikePosterImageUrl(src)) return "";
+  return playableFeedMediaSrc(src);
+}
+
+export type ActivityPosterLookup = {
+  url: string;
+  coords: { bucket: string; storagePath: string } | null;
+};
+
+function posterCoordsFromValue(
+  bucket?: unknown,
+  storagePath?: unknown,
+  mediaUrl?: unknown
+): { bucket: string; storagePath: string } | null {
+  const coords = resolveStoredMediaCoords({
+    bucket: metaString(bucket),
+    storagePath: metaString(storagePath),
+    mediaUrl: metaString(mediaUrl),
+  });
+  if (!coords) return null;
+  if (POSTER_VIDEO_EXT.test(coords.storagePath)) return null;
+  return coords;
+}
+
+/** Prefer stored poster/cover/thumbnail fields; never treat the video object as a still. */
+export function activityPosterLookup(item: {
+  href?: string | null;
+  image_url?: string | null;
+  meta?: Record<string, any> | null;
+}): ActivityPosterLookup {
+  const meta = item.meta && typeof item.meta === "object" ? item.meta : {};
+  const preview =
+    meta.preview && typeof meta.preview === "object" ? meta.preview : meta;
+  const media = meta.media && typeof meta.media === "object" ? meta.media : {};
+  const urlCandidates = [
+    meta.posterUrl,
+    meta.poster,
+    meta.thumbnail,
+    meta.thumbnailUrl,
+    meta.coverUrl,
+    meta.cover_url,
+    media.posterUrl,
+    media.poster,
+    meta.previewImage,
+    preview.previewImage,
+    preview.image,
+    item.image_url,
+  ];
+  const url = urlCandidates.map((value) => metaString(value)).find(looksLikePosterImageUrl) || "";
+  const coords =
+    posterCoordsFromValue(meta.posterBucket, meta.posterStoragePath || meta.posterPath, url) ||
+    posterCoordsFromValue(preview.posterBucket, preview.posterStoragePath, url) ||
+    posterCoordsFromValue(media.posterBucket, media.posterStoragePath, url) ||
+    posterCoordsFromValue(meta.bucket, meta.storagePath, url);
+  return { url, coords };
+}

@@ -51,12 +51,19 @@ import { getCachedSignedMediaUrl, invalidateSignedMediaUrl } from "@/lib/board/s
 import {
   activityLooksLikeStoredVideo,
   activityMediaCoords,
+  activityPosterLookup,
   feedShouldEmbedRawHref,
   feedShouldShowStorageLinkCover,
   isBoardStorageMediaUrl,
   playableFeedMediaSrc,
+  playablePosterSrc,
 } from "@/lib/board/feedDropMedia";
 import { projectRoomVideoLoadError } from "@/lib/board/projectRoomDrop";
+import {
+  captureVideoPosterFile,
+  persistGeneratedVideoPoster,
+  uploadVideoPosterStill,
+} from "@/lib/board/videoPoster";
 import DropCommentsDrawer from "./DropCommentsDrawer";
 import BoardFeedVideo from "./BoardFeedVideo";
 import DropStudioOverlay from "./DropStudioOverlay";
@@ -72,6 +79,7 @@ import { isSoundCloudUrl, toSoundCloudEmbed } from "@/lib/board/soundCloudEmbed"
 const EVT_OPEN = "board:bucketBrain:open";
 const EVT_BUCKET_UPDATED = "board:bucketBrain:updated";
 const fallbackAuraColor = "#8ee7ff";
+const videoPosterPersistStarted = new Set<string>();
 
 const AURA_HEX: Record<string, string> = {
   sloth_pink: "#FF4FD8",
@@ -509,6 +517,7 @@ function ActivityCard({
   const [resolvedSoundCloud, setResolvedSoundCloud] = useState("");
   const [downloadBusy, setDownloadBusy] = useState(false);
   const [signedPreviewImage, setSignedPreviewImage] = useState<string>("");
+  const [signedPosterImage, setSignedPosterImage] = useState<string>("");
   const [previewSignFailed, setPreviewSignFailed] = useState(false);
   // Bumped to re-mint the storage signed URL after it expires.
   const [signedPreviewNonce, setSignedPreviewNonce] = useState(0);
@@ -657,6 +666,11 @@ function ActivityCard({
     image_url: typeof (item as any)?.image_url === "string" ? (item as any).image_url : null,
     meta,
   });
+  const posterLookup = activityPosterLookup({
+    href,
+    image_url: typeof (item as any)?.image_url === "string" ? (item as any).image_url : null,
+    meta,
+  });
   const mediaKind =
     metaString(meta?.mediaKind, preview?.mediaKind, meta?.media?.kind) ||
     (activityLooksLikeStoredVideo(item) ? "video" : "");
@@ -702,11 +716,14 @@ function ActivityCard({
       : "";
   const fallbackPreview =
     resolveLinkPreviewImage(href, previewImage || announcementImageUrl) || hydratedImage || "";
+  const resolvedPosterImage =
+    playablePosterSrc(signedPosterImage) || playablePosterSrc(posterLookup.url);
   const resolvedPreviewImage =
-    playableFeedMediaSrc(signedPreviewImage) ||
-    (mediaKind === "video" || isBoardStorageMediaUrl(href)
-      ? ""
-      : playableFeedMediaSrc(fallbackPreview));
+    mediaKind === "video" || activityLooksLikeStoredVideo(item)
+      ? resolvedPosterImage
+      : playableFeedMediaSrc(signedPreviewImage) ||
+        (isBoardStorageMediaUrl(href) ? "" : playableFeedMediaSrc(fallbackPreview)) ||
+        resolvedPosterImage;
   const isStoredVideoDrop =
     (mediaKind === "video" || activityLooksLikeStoredVideo(item)) &&
     Boolean(playableFeedMediaSrc(signedPreviewImage));
@@ -857,6 +874,78 @@ function ActivityCard({
       cancelled = true;
     };
   }, [storedMediaCoords?.bucket, storedMediaCoords?.storagePath, signedPreviewNonce, mediaKind]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const coords = posterLookup.coords;
+    const localPlayable = playablePosterSrc(posterLookup.url);
+    if (!coords) {
+      if (localPlayable) setSignedPosterImage(localPlayable);
+      return;
+    }
+
+    const signBucket = coords.bucket;
+    const signPath = coords.storagePath;
+
+    async function signPoster() {
+      try {
+        const signed = playablePosterSrc(
+          await getCachedSignedMediaUrl(signBucket, signPath, {
+            allowPublicFallback: signBucket !== "board-media",
+          })
+        );
+        if (!cancelled) setSignedPosterImage(signed || localPlayable);
+      } catch {
+        if (!cancelled) setSignedPosterImage(localPlayable);
+      }
+    }
+
+    void signPoster();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    posterLookup.coords?.bucket,
+    posterLookup.coords?.storagePath,
+    posterLookup.url,
+    signedPreviewNonce,
+  ]);
+
+  useEffect(() => {
+    const isVideo = mediaKind === "video" || activityLooksLikeStoredVideo(item);
+    const videoSrc = playableFeedMediaSrc(signedPreviewImage);
+    if (!isVideo || !videoSrc || playablePosterSrc(signedPosterImage)) return;
+
+    let cancelled = false;
+    const dropId = String(meta?.dropId || meta?.originalDropId || "").trim();
+    const persistKey = `${storedMediaCoords?.storagePath || videoSrc}:${dropId || id}`;
+    if (videoPosterPersistStarted.has(persistKey)) return;
+    videoPosterPersistStarted.add(persistKey);
+
+    async function makePoster() {
+      const still = await captureVideoPosterFile(videoSrc);
+      if (cancelled || !still) return;
+      const objectUrl = URL.createObjectURL(still);
+      if (!cancelled) setSignedPosterImage(objectUrl);
+      const uploaded = await uploadVideoPosterStill(still);
+      if (cancelled || !uploaded) return;
+      const signedStill = playablePosterSrc(uploaded.url);
+      if (signedStill) setSignedPosterImage(signedStill);
+      await persistGeneratedVideoPoster({
+        dropId,
+        activityId: id,
+        projectId: metaString(meta?.projectId),
+        poster: uploaded,
+      });
+    }
+
+    void makePoster();
+    return () => {
+      cancelled = true;
+    };
+    // Persist once a signed tape URL exists and no stored still was found.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [signedPreviewImage, signedPosterImage, mediaKind, storedMediaCoords?.storagePath, id]);
 
   // Storage signed URLs expire (45m). Media players call this to mint a fresh
   // one instead of staying stuck on a dead link.
@@ -1647,6 +1736,7 @@ function ActivityCard({
               <BoardFeedVideo
                 className="vid"
                 src={playableFeedMediaSrc(embed.url)}
+                poster={resolvedPosterImage}
                 onError={() => setEmbedFailed(true)}
               />
               <DropStudioOverlay customizations={dropCustomizations} />
@@ -1783,6 +1873,7 @@ function ActivityCard({
           <BoardFeedVideo
             className="vid"
             src={playableFeedMediaSrc(signedPreviewImage)}
+            poster={resolvedPosterImage}
             onError={() => {
               void refreshSignedMedia();
             }}

@@ -27,9 +27,9 @@ export function mapRoomRow(row: Record<string, any> | null | undefined): Room | 
   return {
     id,
     slug: String(row.slug || id),
-    name: String(row.name || catalog?.name || id),
+    name: catalog?.name || String(row.name || id),
     icon: String(row.icon || catalog?.icon || "◈"),
-    description: String(row.description || catalog?.description || ""),
+    description: catalog?.description || String(row.description || ""),
     chips: Array.isArray(row.chips) ? row.chips.map(String) : catalog?.chips || [],
     kind: catalog?.kind === "official" ? "official" : kind,
     isOfficial: row.is_official === true || catalog?.isOfficial === true,

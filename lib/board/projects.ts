@@ -93,6 +93,9 @@ export type ProjectRoomPost = {
   mediaKind?: "image" | "video";
   bucket?: string;
   storagePath?: string;
+  posterUrl?: string;
+  posterBucket?: string;
+  posterStoragePath?: string;
   dropId?: string;
   projectId?: string;
 };
@@ -196,16 +199,36 @@ function persistableRoomMediaUrl(value: unknown): string | undefined {
   return persistableProjectRoomMediaUrl(value) || undefined;
 }
 
+function persistablePosterUrl(value: unknown): string | undefined {
+  const src = persistableRoomMediaUrl(value);
+  if (!src) return undefined;
+  if (/\.(mp4|webm|mov|m4v)(\?|#|$)/i.test(src)) return undefined;
+  return src;
+}
+
 function durableRoomPost(post: ProjectRoomPost): ProjectRoomPost {
   const coords = projectRoomPostStorageCoords(post);
   const mediaUrl = persistableRoomMediaUrl(post.mediaUrl);
-  if (!coords) return { ...post, mediaUrl };
+  const posterUrl = persistablePosterUrl(post.posterUrl);
+  const posterBucket = String(post.posterBucket || "").trim() || undefined;
+  const posterStoragePath = String(post.posterStoragePath || "").trim() || undefined;
+  const durablePoster = {
+    ...(posterBucket ? { posterBucket } : {}),
+    ...(posterStoragePath ? { posterStoragePath } : {}),
+    ...(posterUrl && posterUrl.length <= 400
+      ? { posterUrl }
+      : posterUrl && !posterStoragePath
+        ? { posterUrl }
+        : {}),
+  };
+  if (!coords) return { ...post, mediaUrl, ...durablePoster };
   return {
     ...post,
     bucket: coords.bucket,
     storagePath: coords.storagePath,
     // Signed JWTs bloat localStorage / board_style. Coords are enough to re-sign.
     mediaUrl: mediaUrl && mediaUrl.length <= 400 ? mediaUrl : undefined,
+    ...durablePoster,
   };
 }
 
@@ -229,6 +252,12 @@ function normalizeRoomPost(value: any): ProjectRoomPost | null {
         : coords && /\.(mp4|webm|mov|m4v)(\?|#|$)/i.test(coords.storagePath)
           ? "video"
           : undefined;
+  const posterUrl = persistablePosterUrl(
+    value.posterUrl ?? value.previewImage ?? value.thumbnail
+  );
+  const posterBucket = String(value.posterBucket || "").trim() || undefined;
+  const posterStoragePath =
+    String(value.posterStoragePath || value.posterPath || "").trim() || undefined;
   return durableRoomPost({
     id: String(value.id ?? uid("post")),
     authorName: String(value.authorName ?? "Host"),
@@ -239,6 +268,9 @@ function normalizeRoomPost(value: any): ProjectRoomPost | null {
     mediaKind,
     bucket: coords?.bucket || bucket || undefined,
     storagePath: coords?.storagePath || storagePath || undefined,
+    posterUrl,
+    posterBucket,
+    posterStoragePath,
     dropId: typeof value.dropId === "string" ? value.dropId : undefined,
     projectId: typeof value.projectId === "string" ? value.projectId : undefined,
   });

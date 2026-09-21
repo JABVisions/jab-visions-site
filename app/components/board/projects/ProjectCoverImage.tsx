@@ -6,6 +6,8 @@ import {
   projectCoverCoords,
   type ProjectCoverMedia,
 } from "@/lib/board/projectCover";
+import { playableFeedMediaSrc, playablePosterSrc } from "@/lib/board/feedDropMedia";
+import { captureVideoPosterFile } from "@/lib/board/videoPoster";
 
 function clsx(...parts: Array<string | false | null | undefined>) {
   return parts.filter(Boolean).join(" ");
@@ -22,24 +24,44 @@ export default function ProjectCoverImage({
   className?: string;
   placeholderClassName?: string;
 }) {
-  const fallbackSrc = media?.src?.startsWith("data:") || media?.src?.startsWith("blob:")
-    ? media.src
-    : media?.src || "";
-  const [src, setSrc] = useState(fallbackSrc);
+  const localSrc =
+    media?.src?.startsWith("data:") || media?.src?.startsWith("blob:") ? media.src : "";
+  const [src, setSrc] = useState(localSrc);
+  const [poster, setPoster] = useState("");
 
   useEffect(() => {
     let cancelled = false;
     const coords = projectCoverCoords(media);
-    const nextFallback =
-      media?.src?.startsWith("data:") || media?.src?.startsWith("blob:")
-        ? media.src
-        : media?.src || "";
-    setSrc(nextFallback);
+    const nextLocal =
+      media?.src?.startsWith("data:") || media?.src?.startsWith("blob:") ? media.src : "";
+    setSrc(nextLocal);
+    setPoster("");
 
-    if (!coords) return;
+    if (!coords) {
+      if (media?.kind === "image") {
+        setSrc(playablePosterSrc(media.src) || nextLocal);
+      } else if (media?.kind === "video") {
+        const playable = playableFeedMediaSrc(media.src);
+        if (playable) setSrc(playable);
+      }
+      return;
+    }
 
-    void getCachedSignedMediaUrl(coords.bucket, coords.storagePath).then((signed) => {
-      if (!cancelled && signed) setSrc(signed);
+    void getCachedSignedMediaUrl(coords.bucket, coords.storagePath, {
+      allowPublicFallback: coords.bucket !== "board-media",
+    }).then(async (signed) => {
+      if (cancelled || !signed) return;
+      if (media?.kind === "video") {
+        const playable = playableFeedMediaSrc(signed);
+        if (playable) {
+          setSrc(playable);
+          const still = await captureVideoPosterFile(playable);
+          if (!cancelled && still) setPoster(URL.createObjectURL(still));
+        }
+        return;
+      }
+      const still = playablePosterSrc(signed);
+      if (still) setSrc(still);
     });
 
     return () => {
@@ -47,7 +69,7 @@ export default function ProjectCoverImage({
     };
   }, [media?.src, media?.bucket, media?.storagePath, media?.kind]);
 
-  if (!src) {
+  if (!src && !poster) {
     if (projectCoverCoords(media)) {
       return (
         <div
@@ -71,12 +93,24 @@ export default function ProjectCoverImage({
   }
 
   if (media?.kind === "video") {
+    if (poster) {
+      return (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={poster}
+          alt={title}
+          className={clsx("h-full w-full object-cover", className)}
+        />
+      );
+    }
     return (
       <video
         src={src}
+        poster={poster || undefined}
         className={clsx("h-full w-full object-cover", className)}
         muted
         playsInline
+        preload="metadata"
       />
     );
   }

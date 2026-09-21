@@ -35,6 +35,11 @@ assert(resolveRoomId("general") === "lobby", "general aliases to Lobby");
 assert(getRoomById("jab-lit")?.name === "JAB LIT", "JAB LIT is in the catalog");
 assert(getRoomById("jab-comics")?.isOfficial === true, "JAB Comics is official");
 assert(getRoomById("music")?.chips.includes("Beats") === true, "Music room keeps Voice Studio chips");
+assert(getRoomById("those-ryderz")?.name === "Those Ryderz", "Those Ryderz display name is title case");
+assert(
+  !/THAT RYDERZ/.test(getRoomById("those-ryderz")?.description || ""),
+  "Those Ryderz description does not use the all-caps reserved title"
+);
 assert(getRoomById("those-ryderz")?.comingSoon === false, "Those Ryderz is enterable");
 assert(getRoomById("those-ryderz")?.kind === "official", "Those Ryderz is a first-class official room");
 assert(getRoomById("those-ryderz")?.isOfficial === true, "Those Ryderz keeps JAB Official treatment");
@@ -117,6 +122,12 @@ assert(conversationsForRoom(conversations, "lobby").length >= 2, "legacy lobby t
 assert(conversationsForRoom(conversations, "jab-lit").length >= 1, "JAB LIT has a conversation seed");
 assert(conversationsForRoom(conversations, "music").length >= 1, "Music keeps discussion as a room component");
 assert(conversationsForRoom(conversations, "those-ryderz").length >= 1, "Those Ryderz has a conversation seed");
+assert(
+  conversationsForRoom(conversations, "those-ryderz").every(
+    (item) => !/THAT RYDERZ/.test(`${item.title} ${item.body} ${item.authorName}`)
+  ),
+  "Those Ryderz conversation copy does not use the all-caps reserved title"
+);
 assert(conversationsForRoom(conversations, "jab-visions").length >= 1, "JAB Visions has a conversation seed");
 
 const share: RoomDropShare = {
@@ -157,10 +168,13 @@ const staleSql = mapRoomRow({
   kind: "reserved",
   is_official: true,
   coming_soon: true,
-  name: "Those Ryderz",
+  name: "THAT RYDERZ",
+  description: "THAT RYDERZ project room",
 });
 assert(staleSql?.comingSoon === false, "catalog opens Those Ryderz even if SQL still says coming_soon");
 assert(staleSql?.kind === "official", "catalog kind wins so Those Ryderz is official, not reserved");
+assert(staleSql?.name === "Those Ryderz", "catalog name wins over stale THAT RYDERZ SQL");
+assert(!/THAT RYDERZ/.test(staleSql?.description || ""), "catalog description wins over stale SQL copy");
 const staleVisions = mapRoomRow({
   id: "jab-visions",
   slug: "jab-visions",

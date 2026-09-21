@@ -21,10 +21,22 @@ export async function GET() {
     ]);
 
     if (roomsError && isMissingRoomsTable(roomsError)) {
-      return json({ ok: true, rooms: catalog, liveRoomIds: [], setupRequired: true, source: "catalog" });
+      return json({
+        ok: true,
+        rooms: catalog.map((room) => ({ ...room, title: room.name })),
+        liveRoomIds: [],
+        setupRequired: true,
+        source: "catalog",
+      });
     }
     if (roomsError) {
-      return json({ ok: true, rooms: catalog, liveRoomIds: [], source: "catalog", warning: roomsError.message });
+      return json({
+        ok: true,
+        rooms: catalog.map((room) => ({ ...room, title: room.name })),
+        liveRoomIds: [],
+        source: "catalog",
+        warning: roomsError.message,
+      });
     }
 
     const merged = mergeCatalogWithRows(rooms as Array<Record<string, any>>);
@@ -46,6 +58,7 @@ export async function GET() {
     ];
     const roomsWithPresence = merged.map((room) => ({
       ...room,
+      title: room.name,
       presenceCount: presenceCounts.get(room.id)?.size || 0,
       state:
         liveRoomIds.includes(room.id)
@@ -59,7 +72,7 @@ export async function GET() {
   } catch (error: any) {
     return json({
       ok: true,
-      rooms: catalog,
+      rooms: catalog.map((room) => ({ ...room, title: room.name })),
       liveRoomIds: [],
       source: "catalog",
       warning: error?.message || "rooms catalog fallback",

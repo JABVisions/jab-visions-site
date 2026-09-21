@@ -20,6 +20,9 @@ export type ProjectRoomDropMedia = {
   src: string;
   bucket?: string;
   storagePath?: string;
+  posterUrl?: string;
+  posterBucket?: string;
+  posterStoragePath?: string;
 };
 
 export type ProjectRoomDropViewer = {
@@ -355,6 +358,14 @@ export function persistableProjectRoomMediaUrl(value: unknown): string | null {
   return src;
 }
 
+function persistablePosterMediaUrl(value: unknown): string | undefined {
+  const src = persistableProjectRoomMediaUrl(value);
+  if (!src) return undefined;
+  if (/\.(mp4|webm|mov|m4v)(\?|#|$)/i.test(src)) return undefined;
+  if (isPublicBoardStorageUrl(src) && /\.(mp4|webm|mov|m4v)/i.test(src)) return undefined;
+  return src;
+}
+
 export function projectRoomPostHasMedia(post: {
   mediaUrl?: string | null;
   bucket?: string | null;
@@ -632,6 +643,9 @@ export function buildProjectRoomDrop(opts: {
   );
   const createdIso = new Date(createdAt).toISOString();
   const dropType = label === "video" ? "video" : "media";
+  const posterUrl =
+    persistableProjectRoomMediaUrl(opts.media.posterUrl) ||
+    (opts.media.kind === "image" ? persistableProjectRoomMediaUrl(mediaUrl) : null);
   const meta = {
     cardStyle: PROJECT_ROOM_DROP_CARD,
     origin: PROJECT_ROOM_DROP_ORIGIN,
@@ -644,7 +658,10 @@ export function buildProjectRoomDrop(opts: {
     media: opts.media,
     bucket: opts.media.bucket || null,
     storagePath: opts.media.storagePath || null,
-    previewImage: opts.media.kind === "image" ? mediaUrl : null,
+    previewImage: posterUrl,
+    posterUrl: posterUrl,
+    posterBucket: opts.media.posterBucket || null,
+    posterStoragePath: opts.media.posterStoragePath || null,
     authorId: opts.author.id,
     authorName: opts.author.displayName,
     authorUsername: opts.author.username || null,
@@ -669,6 +686,9 @@ export function buildProjectRoomDrop(opts: {
     mediaKind: opts.media.kind,
     bucket: opts.media.bucket,
     storagePath: opts.media.storagePath,
+    posterUrl: posterUrl || undefined,
+    posterBucket: opts.media.posterBucket,
+    posterStoragePath: opts.media.posterStoragePath,
     dropId,
     projectId: opts.project.id,
   };
@@ -682,7 +702,8 @@ export function buildProjectRoomDrop(opts: {
     description: body,
     mediaUrl,
     mediaKind: opts.media.kind,
-    imageUrl: opts.media.kind === "image" ? mediaUrl : undefined,
+    imageUrl:
+      opts.media.kind === "image" ? mediaUrl : posterUrl || undefined,
     authorId: opts.author.id,
     authorName: opts.author.displayName,
     authorUsername: opts.author.username || undefined,
@@ -710,7 +731,9 @@ export function buildProjectRoomDrop(opts: {
       return persistable;
     })(),
     image_url:
-      opts.media.kind === "image" ? persistableProjectRoomMediaUrl(mediaUrl) : null,
+      opts.media.kind === "image"
+        ? persistableProjectRoomMediaUrl(mediaUrl)
+        : persistableProjectRoomMediaUrl(posterUrl),
     meta,
   };
 
@@ -736,7 +759,14 @@ export function buildProjectRoomDrop(opts: {
     signal,
     coverMedia: opts.project.media
       ? undefined
-      : {
+      : posterUrl && opts.media.posterStoragePath
+        ? {
+            kind: "image" as const,
+            src: posterUrl,
+            ...(opts.media.posterBucket ? { bucket: opts.media.posterBucket } : {}),
+            storagePath: opts.media.posterStoragePath,
+          }
+        : {
           kind: opts.media.kind,
           src: mediaUrl,
           ...(opts.media.bucket ? { bucket: opts.media.bucket } : {}),
@@ -781,6 +811,9 @@ export function mergeRoomPosts(
       mediaKind: existing.mediaKind || post.mediaKind,
       bucket: existing.bucket || post.bucket,
       storagePath: existing.storagePath || post.storagePath,
+      posterUrl: existing.posterUrl || post.posterUrl,
+      posterBucket: existing.posterBucket || post.posterBucket,
+      posterStoragePath: existing.posterStoragePath || post.posterStoragePath,
       createdAt:
         existing.createdAt && post.createdAt
           ? Math.min(existing.createdAt, post.createdAt)
@@ -887,7 +920,7 @@ export function activityFromProjectRoomPost(
       if (!persistable || isPublicBoardStorageUrl(persistable)) return null;
       return persistable;
     })(),
-    image_url: kind === "image" ? mediaUrl || null : null,
+    image_url: kind === "image" ? mediaUrl || null : persistableProjectRoomMediaUrl(post.posterUrl),
     meta: {
       cardStyle: PROJECT_ROOM_DROP_CARD,
       origin: PROJECT_ROOM_DROP_ORIGIN,
@@ -900,6 +933,10 @@ export function activityFromProjectRoomPost(
       mediaUrl: mediaUrl || null,
       bucket: coords?.bucket || post.bucket || null,
       storagePath: coords?.storagePath || post.storagePath || null,
+      previewImage: persistableProjectRoomMediaUrl(post.posterUrl) || (kind === "image" ? mediaUrl : null),
+      posterUrl: persistableProjectRoomMediaUrl(post.posterUrl),
+      posterBucket: post.posterBucket || null,
+      posterStoragePath: post.posterStoragePath || null,
       authorId: post.authorId || null,
       authorName: post.authorName || null,
       fileName: coords?.storagePath?.split("/").pop() || null,
@@ -935,7 +972,7 @@ export function projectRoomPostFromActivity(
   const mediaUrl =
     persistableProjectRoomMediaUrl(media.src) ||
     persistableProjectRoomMediaUrl(item.href) ||
-    persistableProjectRoomMediaUrl(meta.previewImage) ||
+    persistableProjectRoomMediaUrl(meta.mediaUrl) ||
     undefined;
   const mediaKind: ProjectRoomDropMediaKind | undefined =
     media.kind === "video" || meta.mediaKind === "video"
@@ -943,6 +980,12 @@ export function projectRoomPostFromActivity(
       : media.kind === "image" || meta.mediaKind === "image"
         ? "image"
         : undefined;
+  const posterUrl =
+    persistablePosterMediaUrl(meta.posterUrl) ||
+    persistablePosterMediaUrl(media.posterUrl) ||
+    persistablePosterMediaUrl(item.image_url) ||
+    persistablePosterMediaUrl(meta.previewImage) ||
+    undefined;
   const createdAt = Date.parse(item.created_at);
   return {
     projectId,
@@ -957,6 +1000,19 @@ export function projectRoomPostFromActivity(
       bucket: typeof meta.bucket === "string" ? meta.bucket : media.bucket,
       storagePath:
         typeof meta.storagePath === "string" ? meta.storagePath : media.storagePath,
+      posterUrl,
+      posterBucket:
+        typeof meta.posterBucket === "string"
+          ? meta.posterBucket
+          : typeof media.posterBucket === "string"
+            ? media.posterBucket
+            : undefined,
+      posterStoragePath:
+        typeof meta.posterStoragePath === "string"
+          ? meta.posterStoragePath
+          : typeof media.posterStoragePath === "string"
+            ? media.posterStoragePath
+            : undefined,
       dropId: typeof meta.dropId === "string" ? meta.dropId : undefined,
       projectId,
     },
