@@ -1,9 +1,11 @@
 import { supabaseServer } from "@/lib/supabase/server";
 import { resolveRoomId, getRoomById, roomHref } from "@/lib/board/rooms/catalog";
+import { hydrateAuthorRows } from "@/lib/board/rooms/authors";
 import { isMissingRoomsTable, json, roomMembershipGate } from "@/lib/board/rooms/server";
 import { describeRoomActivity, roomActivityGroupKey } from "@/lib/board/rooms/activity";
 import { createBoardNotification } from "@/lib/board/createNotification";
 import { isUuid } from "@/lib/board/forumRoomDrop";
+import { pickBoardDisplayName } from "@/lib/board/boardAuthor";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -24,7 +26,12 @@ export async function GET(
       .limit(120);
     if (error && isMissingRoomsTable(error)) return json({ ok: true, posts: [], setupRequired: true });
     if (error) return json({ ok: true, posts: [], warning: error.message });
-    return json({ ok: true, posts: data || [] });
+    const posts = await hydrateAuthorRows(
+      supabase,
+      (data || []) as Record<string, unknown>[],
+      "author_id"
+    );
+    return json({ ok: true, posts });
   } catch {
     return json({ ok: true, posts: [] });
   }
@@ -107,7 +114,7 @@ export async function POST(
 
   if (kind === "reply" || kind === "announcement") {
     const activityType = kind === "announcement" ? "room_announcement" : "room_reply";
-    const actorName = String(body.displayName || "Someone");
+    const actorName = pickBoardDisplayName(body.displayName) || "Someone";
     const conversationTitle = String(body.conversationTitle || "").trim();
     const dropTitle = String(body.dropTitle || "").trim();
     const mentionIds = Array.isArray(body.mentionUserIds) ? body.mentionUserIds.map(String) : [];
@@ -134,7 +141,7 @@ export async function POST(
         entityType: "room",
         entityId: roomId,
         dropId: dropId || undefined,
-        href: roomHref(roomId),
+        href: roomHref(roomId, parentId ? { conversation: parentId } : undefined),
         message: describeRoomActivity(
           mentionIds.includes(recipientId) ? "room_mention" : activityType,
           actorName,

@@ -80,7 +80,10 @@ export function removeShareFromRoom(
   });
 }
 
-export function dropSnapshotFromItem(drop: DropItem): Record<string, unknown> {
+export function dropSnapshotFromItem(
+  drop: DropItem,
+  author?: { name?: string | null; avatar?: string | null; username?: string | null }
+): Record<string, unknown> {
   return {
     id: drop.id,
     title: drop.title,
@@ -108,7 +111,9 @@ export function dropSnapshotFromItem(drop: DropItem): Record<string, unknown> {
     fromDropbook: drop.fromDropbook === true,
     visibility: drop.visibility === "private" ? "private" : "public",
     customizations: drop.customizations,
-    authorName: undefined,
+    authorName: author?.name || undefined,
+    authorUsername: author?.username || undefined,
+    authorAvatar: author?.avatar || undefined,
   };
 }
 
@@ -129,7 +134,10 @@ export function shareFromCreatedDrop(input: {
     sharedBy: input.sharedBy,
     sharedByName: input.sharedByName,
     activityId: input.activityId ?? null,
-    snapshot: dropSnapshotFromItem(input.drop),
+    snapshot: dropSnapshotFromItem(input.drop, {
+      name: input.sharedByName,
+      username: undefined,
+    }),
     createdAt: new Date().toISOString(),
     origin: input.origin || "create",
     conversationId: input.conversationId || null,
@@ -154,7 +162,10 @@ export function conversationReplyFromDrop(input: {
     body: named ? `Replied with ${named}` : "Replied with a Drop",
     createdAt: new Date().toISOString(),
     dropId: input.drop.id,
-    dropSnapshot: dropSnapshotFromItem(input.drop),
+    dropSnapshot: dropSnapshotFromItem(input.drop, {
+      name: input.authorName,
+      avatar: input.authorAvatar,
+    }),
   };
 }
 
@@ -181,6 +192,7 @@ export function conversationDropPointerItem(input: {
       ? `${input.reply.authorName} replied with a Drop in ${conversation} in ${roomName}.`
       : `${input.reply.authorName} added a Drop to ${roomName}.`,
     authorName: input.reply.authorName,
+    authorAvatar: input.reply.authorAvatar,
     conversation: input.conversation,
   };
 }

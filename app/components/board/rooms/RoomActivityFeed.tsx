@@ -3,7 +3,9 @@
 import React from "react";
 import type { RoomFeedItem } from "@/lib/board/rooms";
 import { canRemoveFromRoom } from "@/lib/board/forumRoomDrop";
+import { pickBoardDisplayName } from "@/lib/board/boardAuthor";
 import RoomDropCard from "./RoomDropCard";
+import RoomMemberOrb from "./RoomMemberOrb";
 
 function clsx(...parts: Array<string | false | null | undefined>) {
   return parts.filter(Boolean).join(" ");
@@ -100,7 +102,14 @@ export default function RoomActivityFeed({
               <p className="mt-2 line-clamp-4 text-sm leading-6 text-white/65">{item.body}</p>
             ) : null}
             <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-white/50">
-              <span>{item.authorName || "Board"}</span>
+              <span className="inline-flex items-center gap-2">
+                <RoomMemberOrb
+                  name={pickBoardDisplayName(item.authorName, item.conversation?.authorName) || "Board"}
+                  avatarUrl={item.authorAvatar || item.conversation?.authorAvatar}
+                  size={22}
+                />
+                {pickBoardDisplayName(item.authorName, item.conversation?.authorName) || "Board"}
+              </span>
               {item.conversation ? (
                 <button
                   type="button"

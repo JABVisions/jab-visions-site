@@ -2,6 +2,7 @@
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { Eye, EyeOff, SlidersHorizontal } from "lucide-react";
 import {
   appendLocalActivity,
@@ -59,6 +60,11 @@ import {
   playablePosterSrc,
 } from "@/lib/board/feedDropMedia";
 import { applyForumRoomFeedCopy } from "@/lib/board/forumRoomFeedCopy";
+import {
+  activityForumPath,
+  pickBoardDisplayName,
+  replacePlaceholderActor,
+} from "@/lib/board/boardAuthor";
 import { projectRoomVideoLoadError } from "@/lib/board/projectRoomDrop";
 import {
   captureVideoPosterFile,
@@ -573,8 +579,14 @@ function ActivityCard({
     body: metaString((item as any)?.body, (item as any)?.text),
     meta: item?.meta && typeof item.meta === "object" ? (item.meta as Record<string, unknown>) : null,
   });
-  const title = forumCopy?.title || metaString(item?.title) || "Drop";
-  const body = forumCopy?.body || metaString((item as any)?.body, (item as any)?.text);
+  const title = replacePlaceholderActor(
+    forumCopy?.title || metaString(item?.title) || "Drop",
+    pickBoardDisplayName(item?.meta?.authorName, item?.meta?.actorName)
+  );
+  const body = replacePlaceholderActor(
+    forumCopy?.body || metaString((item as any)?.body, (item as any)?.text),
+    pickBoardDisplayName(item?.meta?.authorName, item?.meta?.actorName)
+  );
   const id = String((item as any)?.id || "");
   const timeLabel = formatDropTime((item as any)?.created_at);
 
@@ -599,15 +611,6 @@ function ActivityCard({
     storedDropCustomizations
   );
   const authorUserId = String((item as any)?.user_id || "");
-  const authorName = metaString(
-    meta?.authorName,
-    meta?.recipientDisplayName,
-    meta?.contactName,
-    meta?.displayName,
-    meta?.name,
-    authorProfile.displayName,
-    "Board"
-  );
   const authorUsername = metaString(
     meta?.authorUsername,
     meta?.ownerUsername,
@@ -615,6 +618,16 @@ function ActivityCard({
     meta?.username,
     authorProfile.username
   ).replace(/^@+/, "");
+  const authorName =
+    pickBoardDisplayName(
+      authorProfile.displayName,
+      meta?.authorName,
+      meta?.recipientDisplayName,
+      meta?.contactName,
+      meta?.displayName,
+      meta?.name,
+      authorUsername
+    ) || "Board";
   const authorHandle = formatHandle(authorUsername || authorName);
   // Prefer the freshly-loaded Supabase profile avatar so it always reflects the
   // user's CURRENT picture; the meta.* snapshot (baked at drop-creation) is only
@@ -643,6 +656,14 @@ function ActivityCard({
     typeof meta?.authorAuraIntensity === "number"
       ? Math.max(0.22, Math.min(1, meta.authorAuraIntensity / 100))
       : Math.max(0.22, Math.min(1, authorProfile.auraIntensity / 100));
+  const forumHref = activityForumPath(item);
+  const forumLinkLabel = metaString(meta?.conversationTitle)
+    ? `Open ${metaString(meta?.conversationTitle)}`
+    : metaString(meta?.roomName)
+      ? `Open ${metaString(meta?.roomName)}`
+      : "Open Room";
+  const shownTitle = replacePlaceholderActor(title, authorName);
+  const shownBody = replacePlaceholderActor(body, authorName);
   const isPushed = Boolean(meta?.isPushed);
   const pushedByName = metaString(meta?.pushedByName, meta?.pushedByUsername, "Someone");
   const announcementVibeLabel =
@@ -1012,7 +1033,12 @@ function ActivityCard({
 
         setAuthorProfile((current) => ({
           username: metaString(data.username, current.username),
-          displayName: metaString(data.display_name, current.displayName),
+          displayName: pickBoardDisplayName(
+            (boardStyle as any).displayName,
+            data.display_name,
+            data.username,
+            current.displayName
+          ),
           avatarSrc: avatarSrc || current.avatarSrc,
           glowColor:
             colorFromAura((boardStyle as any).auraColor) ||
@@ -1609,7 +1635,17 @@ function ActivityCard({
             {isPayDrop && priceLabel ? <span className="metaBadge">{priceLabel}</span> : null}
             {timeLabel ? <span className="metaBadge timeBadge">{timeLabel}</span> : null}
           </div>
-          <div className="title">{isNewsDrop ? previewTitle || title : title}</div>
+          <div className="title">
+            {forumHref ? (
+              <Link href={forumHref} className="forumTitleLink">
+                {isNewsDrop ? previewTitle || shownTitle : shownTitle}
+              </Link>
+            ) : isNewsDrop ? (
+              previewTitle || shownTitle
+            ) : (
+              shownTitle
+            )}
+          </div>
         </div>
 
         {!hideAuthor ? (
@@ -1635,7 +1671,13 @@ function ActivityCard({
         ) : null}
       </div>
 
-      {body && !isDescriptDrop && !isDropbookSlide ? <div className="body">{body}</div> : null}
+      {shownBody && !isDescriptDrop && !isDropbookSlide ? <div className="body">{shownBody}</div> : null}
+
+      {forumHref ? (
+        <Link href={forumHref} className="forumRoomLink">
+          {forumLinkLabel}
+        </Link>
+      ) : null}
 
       {isCurrentUserDrop && !roomScoped ? (
         <div className="ownerTools" aria-label="Drop owner controls">
@@ -2299,6 +2341,30 @@ function ActivityCard({
           color: rgba(0, 0, 0, 0.76);
           letter-spacing: 0.02em;
           overflow-wrap: anywhere;
+        }
+
+        .forumTitleLink {
+          color: inherit;
+          text-decoration: none;
+        }
+
+        .forumTitleLink:hover {
+          text-decoration: underline;
+        }
+
+        .forumRoomLink {
+          display: inline-flex;
+          margin-top: 8px;
+          border-radius: 999px;
+          border: 1px solid rgba(110, 231, 183, 0.28);
+          background: rgba(16, 185, 129, 0.12);
+          color: rgba(16, 80, 60, 0.86);
+          padding: 6px 10px;
+          font-size: 10px;
+          font-weight: 950;
+          letter-spacing: 0.14em;
+          text-transform: uppercase;
+          text-decoration: none;
         }
 
         .authorMark {

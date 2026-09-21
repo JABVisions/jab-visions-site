@@ -73,6 +73,21 @@ assert(rewritten?.title === "Added a Drop to JAB LIT", "display rewrite replaces
 assert(rewritten?.body === "John Andy added a Drop to 📚 JAB LIT.", "display rewrite body names the author and JAB LIT");
 assert(rewritten?.title.includes("IMG_") === false, "display rewrite does not keep the filename");
 
+const placeholder = applyForumRoomFeedCopy({
+  title: "Added a Drop to Music",
+  body: "Board User added a Drop to Music.",
+  meta: {
+    source: "forum_room_studio",
+    destinationType: "room",
+    roomId: "music",
+    authorName: "John Andy",
+  },
+});
+assert(
+  placeholder?.body === "John Andy added a Drop to 🎧 Music.",
+  "Board User feed copy is replaced with the profile name"
+);
+
 const untouched = applyForumRoomFeedCopy({
   title: "Night Tape",
   body: "A cut from this week.",

@@ -1,6 +1,12 @@
 import { cookies } from "next/headers";
 import { createServerClient } from "@supabase/ssr";
 import { persistableMediaUrl, type BoardActivity, type BoardActivityKind } from "@/lib/board/activity";
+import {
+  applyForumDropNavigation,
+  authorFromProfileRow,
+  hydrateActivityAuthor,
+  pickBoardDisplayName,
+} from "@/lib/board/boardAuthor";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -138,9 +144,7 @@ function normalizeProfileBoardDrop(row: any): BoardActivity[] {
     ? boardStyle.boardDropsDeleted.map(String)
     : [];
   const ownerLabel =
-    (typeof boardStyle.displayName === "string" && boardStyle.displayName.trim()) ||
-    (typeof row.display_name === "string" && row.display_name.trim()) ||
-    (typeof row.username === "string" && row.username.trim()) ||
+    pickBoardDisplayName(boardStyle.displayName, row.display_name, row.username) ||
     "Board User";
   const ownerUsername =
     typeof row.username === "string" && row.username.trim()
@@ -480,7 +484,7 @@ export async function GET(req: Request) {
       selectRows<any>(
         supabase
           .from("profiles")
-          .select("id, username, display_name, board_style")
+          .select("id, username, display_name, avatar_url, avatar_path, board_style")
           .limit(500),
         "profiles"
       ),
@@ -494,9 +498,20 @@ export async function GET(req: Request) {
     ...profileRows.flatMap(normalizeProfileBoardDrop),
   ] as BoardActivity[], profileRows));
 
+  const authors = new Map(
+    profileRows
+      .map((row) => authorFromProfileRow(row))
+      .filter((row): row is NonNullable<ReturnType<typeof authorFromProfileRow>> => Boolean(row))
+      .map((author) => [author.id, author])
+  );
+  const named = items.map((item) => {
+    const author = item.user_id ? authors.get(String(item.user_id)) : null;
+    return applyForumDropNavigation(hydrateActivityAuthor(item, author || null));
+  });
+
   const scoped = kinds.length
-    ? items.filter((item) => kinds.includes(item.kind))
-    : items;
+    ? named.filter((item) => kinds.includes(item.kind))
+    : named;
   const visible = scoped.filter((item) => {
     const meta = item.meta && typeof item.meta === "object" ? item.meta : null;
     if (meta?.visibility !== "private") return true;

@@ -67,6 +67,7 @@ import {
   resolveDropDownloadExtension,
 } from "@/lib/board/dropDownload";
 import { boardDropToActivity } from "@/lib/board/boardDropActivity";
+import { pickBoardDisplayName } from "@/lib/board/boardAuthor";
 import { toSoundCloudEmbed } from "@/lib/board/soundCloudEmbed";
 import {
   isCloudProjectDrop,
@@ -1094,7 +1095,7 @@ export default function DropTile() {
           mediaUrl: item.url,
           mediaKind: item.mediaKind === "audio" ? "audio" : item.mediaKind === "image" ? "image" : undefined,
           authorId: sess.userId,
-          authorName: displayName ?? username ?? "Board User",
+          authorName: pickBoardDisplayName(displayName, username) || "Board User",
           authorUsername: username ?? undefined,
           authorAvatar: avatarSrc || undefined,
           authorGlow: avatarGlow,

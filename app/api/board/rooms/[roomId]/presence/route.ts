@@ -1,5 +1,7 @@
 import { supabaseServer } from "@/lib/supabase/server";
-import { publicOrbAvatarUrl } from "@/lib/board/friendZoneOrbs";
+import { hostedOrbAvatarUrl } from "@/lib/board/friendZoneOrbs";
+import { pickBoardDisplayName } from "@/lib/board/boardAuthor";
+import { hydratePresenceRows } from "@/lib/board/rooms/authors";
 import { resolveRoomId } from "@/lib/board/rooms/catalog";
 import { isMissingRoomsTable, json } from "@/lib/board/rooms/server";
 import { ROOM_PRESENCE_TTL_MS } from "@/lib/board/rooms/types";
@@ -32,7 +34,8 @@ export async function GET(
       return json({ ok: true, presence: [], setupRequired: true });
     }
     if (error) return json({ ok: true, presence: [], warning: error.message });
-    return json({ ok: true, presence: data || [] });
+    const presence = await hydratePresenceRows(supabase, (data || []) as Record<string, unknown>[]);
+    return json({ ok: true, presence });
   } catch {
     return json({ ok: true, presence: [] });
   }
@@ -77,15 +80,15 @@ export async function POST(
     .maybeSingle();
 
   const lastSeenAt = new Date().toISOString();
+  const displayName =
+    pickBoardDisplayName(profile?.display_name, body.displayName, profile?.username, body.username) ||
+    "Board User";
   const row = {
     room_id: roomId,
     user_id: user.id,
     username: cleanText(body.username, 24) || cleanText(profile?.username, 24) || null,
-    display_name:
-      cleanText(body.displayName, 60) ||
-      cleanText(profile?.display_name, 60) ||
-      "Board User",
-    avatar_url: publicOrbAvatarUrl(body.avatarUrl, profile?.avatar_url) || null,
+    display_name: displayName,
+    avatar_url: hostedOrbAvatarUrl(profile?.avatar_url, body.avatarUrl) || null,
     last_seen_at: lastSeenAt,
   };
 
