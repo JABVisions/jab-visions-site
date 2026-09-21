@@ -1084,6 +1084,10 @@ export default function ProfileBoardViewPage({
           map.set(drop.id, {
             ...(existing ?? {}),
             ...drop,
+            url: drop.url || existing?.url,
+            embedUrl: drop.embedUrl || existing?.embedUrl,
+            hostLabel: drop.hostLabel || existing?.hostLabel,
+            mediaUrl: drop.mediaUrl || existing?.mediaUrl,
             bucket: drop.bucket ?? existing?.bucket,
             storagePath: drop.storagePath ?? existing?.storagePath,
             mediaKind: drop.mediaKind ?? existing?.mediaKind,

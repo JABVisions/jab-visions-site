@@ -543,20 +543,42 @@ export function normalizeDropItems(input: unknown, userId: string | null): DropI
 }
 
 export function dropDedupeKey(drop: DropItem) {
-  const title = drop.title.trim().toLowerCase();
-  const url = drop.url || drop.linkUrl || "";
+  const id = String(drop.id || "").trim();
+  if (id) return `id:${id}`;
   const storage = drop.bucket && drop.storagePath ? `${drop.bucket}:${drop.storagePath}` : "";
-  const typedTitle = title ? `${drop.type}:${title}` : "";
-  return typedTitle || url || storage || drop.id;
+  if (storage) return `storage:${storage}`;
+  const url = String(drop.url || drop.linkUrl || drop.embedUrl || "").trim().toLowerCase();
+  if (url) return `url:${drop.type}:${url}`;
+  const title = drop.title.trim().toLowerCase();
+  return title ? `${drop.type}:${title}` : "";
 }
 
 export function dropCompletenessScore(drop: DropItem) {
   return (
     (drop.bucket && drop.storagePath ? 4 : 0) +
-    (drop.previewImage ? 3 : 0) +
-    (drop.embedUrl ? 2 : 0) +
-    (drop.url || drop.linkUrl ? 1 : 0)
+    (drop.embedUrl ? 3 : 0) +
+    (drop.url || drop.linkUrl ? 2 : 0) +
+    (drop.previewImage ? 1 : 0)
   );
+}
+
+function mergeDropCopies(previous: DropItem, next: DropItem): DropItem {
+  const richer =
+    dropCompletenessScore(next) > dropCompletenessScore(previous) ? next : previous;
+  const other = richer === next ? previous : next;
+  return {
+    ...other,
+    ...richer,
+    url: richer.url || other.url,
+    embedUrl: richer.embedUrl || other.embedUrl,
+    linkUrl: richer.linkUrl || other.linkUrl,
+    hostLabel: richer.hostLabel || other.hostLabel,
+    mediaUrl: richer.mediaUrl || other.mediaUrl,
+    previewImage: richer.previewImage || other.previewImage,
+    previewImages: richer.previewImages || other.previewImages,
+    bucket: richer.bucket || other.bucket,
+    storagePath: richer.storagePath || other.storagePath,
+  };
 }
 
 export function dedupeDropItems(items: DropItem[]) {
@@ -564,17 +586,13 @@ export function dedupeDropItems(items: DropItem[]) {
 
   for (const item of items) {
     const key = dropDedupeKey(item);
+    if (!key) continue;
     const previous = map.get(key);
     if (!previous) {
       map.set(key, item);
       continue;
     }
-
-    const previousScore = dropCompletenessScore(previous);
-    const nextScore = dropCompletenessScore(item);
-    if (nextScore > previousScore || item.createdAt > previous.createdAt) {
-      map.set(key, item);
-    }
+    map.set(key, mergeDropCopies(previous, item));
   }
 
   return Array.from(map.values()).sort((a, b) => b.createdAt - a.createdAt);

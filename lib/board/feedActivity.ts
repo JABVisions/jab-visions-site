@@ -10,6 +10,8 @@ import type { FeedDrop } from "@/lib/boardStore";
 import {
   persistableFeedMediaHref,
   preferFeedMediaUrl,
+  preferStreamingHref,
+  isStreamingDropHref,
 } from "@/lib/board/feedDropMedia";
 import {
   activityFromProjectRoomPost,
@@ -63,7 +65,9 @@ function mergeActivityRecords(
     ...preferred,
     title: preferred.title || fallback.title,
     body: preferred.body || fallback.body,
-    href: preferFeedMediaUrl(preferred.href, fallback.href),
+    href:
+      preferStreamingHref(preferred.href, fallback.href) ||
+      preferFeedMediaUrl(preferred.href, fallback.href),
     image_url: preferred.image_url || fallback.image_url,
     meta: {
       ...fallbackMeta,
@@ -71,7 +75,14 @@ function mergeActivityRecords(
       origin: preferredMeta.origin || fallbackMeta.origin || null,
       dropId: preferredMeta.dropId || fallbackMeta.dropId || null,
       mediaKind: preferredMeta.mediaKind || fallbackMeta.mediaKind || null,
+      embedUrl:
+        preferredMeta.embedUrl ||
+        fallbackMeta.embedUrl ||
+        preferredPreview.embedUrl ||
+        fallbackPreview.embedUrl ||
+        null,
       mediaUrl:
+        preferStreamingHref(preferredMeta.mediaUrl, fallbackMeta.mediaUrl) ||
         preferFeedMediaUrl(preferredMeta.mediaUrl, fallbackMeta.mediaUrl) ||
         preferredMeta.mediaUrl ||
         fallbackMeta.mediaUrl ||
@@ -89,6 +100,12 @@ function mergeActivityRecords(
           preferredMeta.storagePath ||
           fallbackMeta.storagePath,
         mediaKind: preferredPreview.mediaKind || fallbackPreview.mediaKind || preferredMeta.mediaKind,
+        embedUrl:
+          preferredPreview.embedUrl ||
+          fallbackPreview.embedUrl ||
+          preferredMeta.embedUrl ||
+          fallbackMeta.embedUrl ||
+          null,
       },
     },
   };
@@ -320,10 +337,20 @@ export function universalDropToActivity(drop: UniversalDrop): BoardActivity | nu
   if (!drop?.id || drop.visibility === "private") return null;
 
   const meta = drop.meta && typeof drop.meta === "object" ? drop.meta : {};
+  const streamingHref =
+    preferStreamingHref(drop.url, drop.embedUrl) ||
+    (isStreamingDropHref(drop.mediaUrl) ? drop.mediaUrl : null);
+  const href =
+    streamingHref ||
+    persistableFeedMediaHref(drop.url) ||
+    persistableFeedMediaHref(drop.mediaUrl);
   const imageUrl =
     drop.imageUrl ||
-    (drop.mediaKind === "image" ? drop.mediaUrl || drop.url || null : null);
-  const href = persistableFeedMediaHref(drop.mediaUrl || drop.url);
+    (drop.mediaKind === "image" &&
+    !isStreamingDropHref(drop.mediaUrl) &&
+    !isStreamingDropHref(drop.url)
+      ? drop.mediaUrl || drop.url || null
+      : null);
   const title =
     drop.type === "project" && !/^Project Drop:/i.test(drop.title)
       ? `Project Drop: ${drop.title}`
@@ -361,15 +388,25 @@ export function universalDropToActivity(drop: UniversalDrop): BoardActivity | nu
       authorAvatar: drop.authorAvatar || null,
       authorGlow: drop.authorGlow || null,
       authorAuraIntensity: drop.authorAuraIntensity ?? null,
-      mediaKind: drop.mediaKind || null,
-      mediaUrl: drop.mediaUrl || null,
+      mediaKind:
+        isStreamingDropHref(streamingHref) && drop.mediaKind !== "audio"
+          ? null
+          : drop.mediaKind || null,
+      mediaUrl: drop.mediaUrl || drop.url || null,
+      embedUrl: drop.embedUrl || meta.embedUrl || null,
       preview: imageUrl
         ? {
             image: imageUrl,
             title,
             description: drop.description || drop.thoughtText || null,
+            embedUrl: drop.embedUrl || meta.embedUrl || null,
           }
-        : meta.preview ?? null,
+        : drop.embedUrl || meta.embedUrl
+          ? {
+              ...(meta.preview && typeof meta.preview === "object" ? meta.preview : {}),
+              embedUrl: drop.embedUrl || meta.embedUrl,
+            }
+          : meta.preview ?? null,
       signalSeed: {
         type: drop.type === "thought" ? "thought_drop_created" : "drop_created",
         dropId: drop.id,

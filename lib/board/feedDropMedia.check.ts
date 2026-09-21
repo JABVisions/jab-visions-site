@@ -1,6 +1,7 @@
 import {
   activityLooksLikeStoredImage,
   activityLooksLikeStoredVideo,
+  activityLooksLikeStreamingMusicDrop,
   activityMediaCoords,
   activityPosterLookup,
   feedShouldEmbedRawHref,
@@ -9,6 +10,7 @@ import {
   playableFeedMediaSrc,
   playablePosterSrc,
   preferFeedMediaUrl,
+  preferStreamingHref,
 } from "./feedDropMedia";
 import { resolveStoredMediaCoords } from "./musicPlayback";
 import { dropDirectMediaUrl, resolveDropPlaybackSrc } from "./dropDisplay";
@@ -211,6 +213,42 @@ assert(
     isStoredImageDrop: true,
   }),
   "local Vision Drop photos must show fully, not as a preview crop"
+);
+
+const lanaSoundCloud = "https://soundcloud.com/lanadelrey/video-games";
+const lanaArtwork = "https://i1.sndcdn.com/artworks-lana-del-rey-t500x500.jpg";
+const lanaMusicDrop = {
+  href: lanaArtwork,
+  image_url: lanaArtwork,
+  meta: {
+    dropType: "Music",
+    mediaKind: "image",
+    embedUrl: "https://w.soundcloud.com/player/?url=https%3A%2F%2Fsoundcloud.com%2Flanadelrey%2Fvideo-games",
+    mediaUrl: lanaArtwork,
+  },
+};
+assert(
+  activityLooksLikeStreamingMusicDrop(lanaMusicDrop),
+  "Lana Del Rey SoundCloud Drops stay Music even when artwork is a jpeg"
+);
+assert(
+  !activityLooksLikeStoredImage(lanaMusicDrop),
+  "SoundCloud Music Drops must not be classified as Vision/image Drops"
+);
+assert(
+  preferStreamingHref(lanaArtwork, lanaSoundCloud) === lanaSoundCloud,
+  "hydrate must keep the SoundCloud track URL over OG artwork"
+);
+assert(
+  preferFeedMediaUrl(lanaArtwork, lanaSoundCloud) === lanaSoundCloud,
+  "feed merge must not overwrite SoundCloud with a jpeg preview"
+);
+assert(
+  feedShouldShowLinkPreviewCard({
+    href: lanaSoundCloud,
+    isStoredImageDrop: false,
+  }),
+  "SoundCloud Music Drops may fall back to a link card if the embed is blocked"
 );
 
 console.log("feedDropMedia.check.ts: ok");

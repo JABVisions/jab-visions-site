@@ -601,10 +601,17 @@ function MediaDropTile({ a, expanded = false }: { a: AssetItem; expanded?: boole
 }
 
 function MusicDropTile({ a }: { a: AssetItem }) {
-  const embedUrl = a.payload?.embedUrl;
+  const rawUrl = String(a.payload?.url || a.payload?.embedUrl || "");
+  const embedUrl = a.payload?.embedUrl || toSoundCloudEmbed(rawUrl) || "";
+  const openUrl = rawUrl || embedUrl;
   return (
     <TileFrame>
-      <DropHeader emoji={kindEmoji("music")} title={a.title} meta={embedUrl ? "Embedded player" : "No embed"} description={a.description} />
+      <DropHeader
+        emoji={kindEmoji("music")}
+        title={a.title}
+        meta={embedUrl ? "Embedded player" : openUrl ? "Music link" : "No embed"}
+        description={a.description}
+      />
       <div className="mt-3 px-4 pb-4">
         <div className="rounded-2xl overflow-hidden border border-white/10 bg-black/30">
           {embedUrl ? (
@@ -615,8 +622,17 @@ function MusicDropTile({ a }: { a: AssetItem }) {
               allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
               loading="lazy"
             />
+          ) : openUrl ? (
+            <a
+              href={openUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="h-44 grid place-items-center px-4 text-sm text-white/80 underline"
+            >
+              {a.title || "Open SoundCloud"}
+            </a>
           ) : (
-            <div className="h-44 grid place-items-center text-sm text-white/50">Unsupported music link</div>
+            <div className="h-44 grid place-items-center text-sm text-white/50">Music Drop</div>
           )}
         </div>
       </div>
@@ -1977,7 +1993,8 @@ export default function DropPadOS({
         return;
       }
       const { embedUrl } = buildMusicEmbed(url);
-      if (!embedUrl) {
+      const scFallback = toSoundCloudEmbed(url);
+      if (!embedUrl && !scFallback && !/soundcloud\.com|snd\.sc|spotify\.com|music\.apple\.com/i.test(url)) {
         setModal({ ...modal, error: "Unsupported music link. Use Spotify or SoundCloud." });
         return;
       }
@@ -1989,7 +2006,7 @@ export default function DropPadOS({
           title: titleVal,
           description: descVal || undefined,
           createdAt: now,
-          payload: { embedUrl },
+          payload: { url, embedUrl: embedUrl || scFallback || undefined },
         },
         destination
       );

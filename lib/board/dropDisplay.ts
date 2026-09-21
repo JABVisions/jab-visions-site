@@ -2,6 +2,7 @@
 
 import {
   isPublicBoardStorageUrl,
+  isStreamingMusicUrl,
   parseBoardStorageFromUrl,
   resolveStoredMediaCoords,
 } from "@/lib/board/musicPlayback";
@@ -135,6 +136,24 @@ export function resolveDropMediaKind(drop: DropLike): DropMediaKind {
   const candidates = [drop.fileName, drop.storagePath, drop.url, drop.mediaUrl].filter(
     Boolean
   ) as string[];
+
+  const streamingSrc = [drop.url, drop.mediaUrl].find(
+    (value) => value && isStreamingMusicUrl(value)
+  );
+  if (streamingSrc) {
+    const mk = String(drop.mediaKind ?? "").toLowerCase();
+    if (mk === "audio") return "audio";
+    return null;
+  }
+  if (type === "Music" || type === "YouTube" || type === "News" || type === "Link") {
+    const uploaded =
+      Boolean(drop.bucket?.trim() && drop.storagePath?.trim()) ||
+      candidates.some((c) => parseBoardStorageFromUrl(c));
+    if (!uploaded) {
+      if (String(drop.mediaKind ?? "").toLowerCase() === "audio") return "audio";
+      return null;
+    }
+  }
 
   if (candidates.some((c) => IMAGE_EXT.test(extFromName(c)))) return "image";
 

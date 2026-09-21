@@ -58,8 +58,10 @@ import {
   feedShouldShowLinkPreviewCard,
   feedShouldShowStorageLinkCover,
   isBoardStorageMediaUrl,
+  isImageLikeHref,
   playableFeedMediaSrc,
   playablePosterSrc,
+  preferStreamingHref,
 } from "@/lib/board/feedDropMedia";
 import { applyForumRoomFeedCopy } from "@/lib/board/forumRoomFeedCopy";
 import {
@@ -594,17 +596,26 @@ function ActivityCard({
   const id = String((item as any)?.id || "");
   const timeLabel = formatDropTime((item as any)?.created_at);
 
-  // Be tolerant: href can be stored a few ways depending on older drops
-  const rawHref =
-    (typeof (item as any)?.href === "string" && (item as any).href) ||
-    (typeof (item as any)?.url === "string" && (item as any).url) ||
-    (typeof (item as any)?.link === "string" && (item as any).link) ||
-    "";
-  const href = rawHref && !isEphemeralHref(rawHref) ? rawHref : "";
   const rawMeta = (item as any)?.meta;
   const meta = rawMeta && typeof rawMeta === "object" ? rawMeta : null;
   const preview = meta?.preview ?? meta ?? null;
   const storedSoundCloudEmbed = metaString(meta?.embedUrl, preview?.embedUrl);
+  const rawHref =
+    preferStreamingHref(
+      typeof (item as any)?.href === "string" ? (item as any).href : "",
+      storedSoundCloudEmbed ||
+        (typeof (item as any)?.url === "string" ? (item as any).url : "") ||
+        (typeof (item as any)?.link === "string" ? (item as any).link : "")
+    ) ||
+    (typeof (item as any)?.href === "string" &&
+    !isImageLikeHref((item as any).href)
+      ? (item as any).href
+      : "") ||
+    storedSoundCloudEmbed ||
+    (typeof (item as any)?.url === "string" && (item as any).url) ||
+    (typeof (item as any)?.link === "string" && (item as any).link) ||
+    "";
+  const href = rawHref && !isEphemeralHref(rawHref) ? rawHref : "";
   const storedDropCustomizations = normalizeDropCustomizations(
     meta?.customizations ?? preview?.customizations
   );

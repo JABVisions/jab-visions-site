@@ -545,8 +545,29 @@ export async function fetchActivity(
       .map(normalizeActivity)
       .filter(Boolean) as BoardActivity[];
 
-    // warm local cache with the newest page only
-    if (offset === 0 && normalized.length) setLocalActivity(normalized);
+    // Warm cache with the newest remote page, but keep unsynced local Drops
+    // (SoundCloud Music Drops included) so a feed refetch cannot wipe them.
+    if (offset === 0 && normalized.length) {
+      const remoteIds = new Set(normalized.map((item) => item.id));
+      const remoteDropIds = new Set(
+        normalized
+          .map((item) => String(item.meta?.dropId || "").trim())
+          .filter(Boolean)
+      );
+      const keepLocal = getLocalActivity().filter((item) => {
+        if (!item.id.startsWith("local_") && !item.id.startsWith("private_drop_")) {
+          return false;
+        }
+        if (remoteIds.has(item.id)) return false;
+        const dropId = String(item.meta?.dropId || "").trim();
+        if (dropId && remoteDropIds.has(dropId)) return false;
+        return true;
+      });
+      const merged = [...normalized, ...keepLocal].sort((a, b) =>
+        a.created_at < b.created_at ? 1 : -1
+      );
+      setLocalActivity(merged.slice(0, MAX_LOCAL));
+    }
 
     return normalized;
   } catch {

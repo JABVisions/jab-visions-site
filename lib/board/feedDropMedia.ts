@@ -2,6 +2,7 @@ import type { BoardActivity } from "@/lib/board/activity";
 import {
   isPublicBoardStorageUrl,
   isSignedBoardStorageUrl,
+  isStreamingMusicUrl,
   parseBoardStorageFromUrl,
   resolveStoredMediaCoords,
 } from "@/lib/board/musicPlayback";
@@ -10,6 +11,7 @@ import {
   persistableProjectRoomMediaUrl,
   projectRoomVideoSrcIsPlayable,
 } from "@/lib/board/projectRoomDrop";
+import { isSoundCloudUrl } from "@/lib/board/soundCloudEmbed";
 
 function metaString(...values: unknown[]) {
   for (const value of values) {
@@ -112,6 +114,76 @@ export function feedShouldShowStorageLinkCover(opts: {
 const IMAGE_EXT = /\.(jpe?g|png|gif|webp|avif|heic|heif|bmp|tif|tiff|svg)(\?|#|$)/i;
 const AUDIO_EXT = /\.(mp3|wav|m4a|aac|ogg|flac)(\?|#|$)/i;
 
+export function isImageLikeHref(url?: string | null): boolean {
+  return IMAGE_EXT.test(String(url || "").trim());
+}
+
+/** SoundCloud / Spotify / Apple Music / YouTube share links — never Vision photos. */
+export function isStreamingDropHref(url?: string | null): boolean {
+  const src = String(url || "").trim();
+  if (!src) return false;
+  return isStreamingMusicUrl(src) || isSoundCloudUrl(src);
+}
+
+function activityStreamingHints(item: {
+  href?: string | null;
+  image_url?: string | null;
+  meta?: Record<string, any> | null;
+}): string[] {
+  const meta = item.meta && typeof item.meta === "object" ? item.meta : {};
+  const preview =
+    meta.preview && typeof meta.preview === "object" ? meta.preview : {};
+  const media = meta.media && typeof meta.media === "object" ? meta.media : {};
+  return [
+    item.href,
+    meta.embedUrl,
+    preview.embedUrl,
+    meta.url,
+    meta.linkUrl,
+    media.src,
+    meta.mediaUrl,
+  ].map((value) => metaString(value));
+}
+
+export function activityLooksLikeStreamingMusicDrop(item: {
+  href?: string | null;
+  image_url?: string | null;
+  meta?: Record<string, any> | null;
+}): boolean {
+  const meta = item.meta && typeof item.meta === "object" ? item.meta : {};
+  const preview =
+    meta.preview && typeof meta.preview === "object" ? meta.preview : {};
+  const dropType = metaString(
+    meta.dropType,
+    meta.drop_flavor,
+    meta.dropFlavor,
+    preview.dropType
+  ).toLowerCase();
+  if (
+    dropType.includes("music") ||
+    dropType.includes("spotify") ||
+    dropType.includes("soundcloud") ||
+    dropType.includes("apple")
+  ) {
+    return true;
+  }
+  return activityStreamingHints(item).some(
+    (value) => isSoundCloudUrl(value) || isStreamingMusicUrl(value)
+  );
+}
+
+/** Prefer a playable SoundCloud/Spotify/YouTube href over OG artwork jpegs. */
+export function preferStreamingHref(
+  preferred?: string | null,
+  fallback?: string | null
+): string | null {
+  const a = String(preferred || "").trim();
+  const b = String(fallback || "").trim();
+  if (isStreamingDropHref(a) && !isImageLikeHref(a)) return a;
+  if (isStreamingDropHref(b) && (isImageLikeHref(a) || !a)) return b;
+  return a || b || null;
+}
+
 /** Uploaded Vision/photo Drops — not OG link thumbs, not video posters. */
 export function activityLooksLikeStoredImage(item: {
   href?: string | null;
@@ -125,6 +197,8 @@ export function activityLooksLikeStoredImage(item: {
   const mediaKind = metaString(meta.mediaKind, preview.mediaKind, media.kind);
   if (mediaKind === "video" || mediaKind === "audio") return false;
   if (activityLooksLikeStoredVideo(item)) return false;
+  if (activityLooksLikeStreamingMusicDrop(item)) return false;
+  if (isStreamingDropHref(item.href) || isStreamingDropHref(item.image_url)) return false;
   if (mediaKind === "image") return true;
   const mime = metaString(meta.mime, preview.mime, media.mime);
   if (/^image\//i.test(mime)) return true;
@@ -187,8 +261,12 @@ export function preferFeedMediaUrl(
   preferred?: string | null,
   fallback?: string | null
 ): string | null {
+  const streaming = preferStreamingHref(preferred, fallback);
+  if (isStreamingDropHref(streaming)) return streaming;
   const a = playableFeedMediaSrc(preferred);
   const b = playableFeedMediaSrc(fallback);
+  if (isImageLikeHref(a) && isStreamingDropHref(fallback)) return String(fallback).trim();
+  if (isImageLikeHref(b) && isStreamingDropHref(preferred)) return String(preferred).trim();
   return a || b || persistableFeedMediaHref(preferred) || persistableFeedMediaHref(fallback);
 }
 

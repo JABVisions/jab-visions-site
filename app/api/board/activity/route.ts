@@ -64,7 +64,10 @@ function normalizeActivityRow(row: any): BoardActivity | null {
     kind: cleanKind(row.kind),
     title: title || null,
     body: body || title || "Board Drop",
-    href: persistableMediaUrl(row.href ?? row.url ?? row.link_url),
+    href:
+      persistableMediaUrl(row.href ?? row.url ?? row.link_url) ||
+      persistableMediaUrl(meta.embedUrl) ||
+      persistableMediaUrl(meta?.preview?.embedUrl),
     image_url:
       row.image_url ??
       row.imageUrl ??
@@ -197,8 +200,9 @@ function normalizeProfileBoardDrop(row: any): BoardActivity[] {
         ownerLabel;
       const href =
         (type === "Pay" && typeof drop.linkUrl === "string" && drop.linkUrl.trim()) ||
-        (typeof drop.mediaUrl === "string" && drop.mediaUrl.trim()) ||
         (typeof drop.url === "string" && drop.url.trim()) ||
+        (typeof drop.embedUrl === "string" && drop.embedUrl.trim()) ||
+        (typeof drop.mediaUrl === "string" && drop.mediaUrl.trim()) ||
         null;
 
       return {
@@ -259,6 +263,7 @@ function normalizeProfileBoardDrop(row: any): BoardActivity[] {
             storagePath: drop.storagePath ?? null,
             mediaKind: drop.mediaKind ?? null,
             mediaUrl: drop.mediaUrl ?? null,
+            embedUrl: drop.embedUrl ?? dropMeta.embedUrl ?? null,
             customizations: drop.customizations ?? null,
           },
         },
@@ -289,14 +294,20 @@ function mergeActivityRecords(
     ...preferred,
     title: preferred.title || fallback.title,
     body: preferred.body || fallback.body,
-    href: preferred.href || fallback.href,
+    href: persistableMediaUrl(preferred.href) || persistableMediaUrl(fallback.href),
     image_url: preferred.image_url || fallback.image_url,
     meta: {
       ...fallbackMeta,
       ...preferredMeta,
+      embedUrl: persistableMediaUrl(preferredMeta.embedUrl) || persistableMediaUrl(fallbackMeta.embedUrl),
       preview: {
         ...fallbackPreview,
         ...preferredPreview,
+        embedUrl:
+          persistableMediaUrl(preferredPreview.embedUrl) ||
+          persistableMediaUrl(fallbackPreview.embedUrl) ||
+          persistableMediaUrl(preferredMeta.embedUrl) ||
+          persistableMediaUrl(fallbackMeta.embedUrl),
       },
     },
   };

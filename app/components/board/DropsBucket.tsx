@@ -33,6 +33,7 @@ import {
 } from "@/lib/board/bucketBrain";
 import { persistWave } from "@/lib/board/persistWave";
 import { isSoundCloudUrl, toSoundCloudEmbed } from "@/lib/board/soundCloudEmbed";
+import { isImageLikeHref, isStreamingDropHref } from "@/lib/board/feedDropMedia";
 import { fetchLinkPreview } from "@/lib/board/linkPreview";
 
 function clsx(...parts: Array<string | false | null | undefined>) {
@@ -1602,19 +1603,25 @@ function BucketDropCard({
     typeof preview?.bucket === "string" && preview.bucket ? preview.bucket : "";
   const previewStoragePath =
     typeof preview?.storagePath === "string" && preview.storagePath ? preview.storagePath : "";
+    const hrefCandidates = [
+    safeStr(item?.href),
+    safeStr((rawMeta as any)?.embedUrl),
+    safeStr((preview as any)?.embedUrl),
+    safeStr((rawMeta as any)?.mediaUrl),
+    safeStr((preview as any)?.url),
+    safeStr((preview as any)?.href),
+    safeStr((preview as any)?.linkUrl),
+    safeStr((rawMeta as any)?.announcement_media_url),
+    safeStr(item?.image_url),
+    safeStr((preview as any)?.image),
+    safeStr((preview as any)?.previewImage),
+    safeStr((preview as any)?.src),
+  ].filter(Boolean);
     const previewHref =
-    safeStr(item?.href) ||
-    safeStr(item?.image_url) ||
-    safeStr((rawMeta as any)?.embedUrl) ||
-    safeStr((rawMeta as any)?.mediaUrl) ||
-    safeStr((rawMeta as any)?.announcement_media_url) ||
-    safeStr((preview as any)?.embedUrl) ||
-    safeStr((preview as any)?.linkUrl) ||
-    safeStr((preview as any)?.url) ||
-    safeStr((preview as any)?.href) ||
-    safeStr((preview as any)?.src) ||
-    safeStr((preview as any)?.image) ||
-    safeStr((preview as any)?.previewImage);
+    hrefCandidates.find((value) => isStreamingDropHref(value)) ||
+    hrefCandidates.find((value) => value && !isImageLikeHref(value)) ||
+    hrefCandidates[0] ||
+    "";
   const [signedPreviewUrl, setSignedPreviewUrl] = useState("");
   const href = signedPreviewUrl || previewHref;
   const external = href ? isExternalHref(href) : false;
@@ -1822,7 +1829,7 @@ function BucketDropCard({
         />
       ) : null}
 
-      {!showEmbed && mediaKind === "image" && href ? (
+      {!showEmbed && mediaKind === "image" && href && !isStreamingDropHref(href) ? (
         <div className="embed image">
           <div className="mediaFrame imageMediaFrame">
             <img

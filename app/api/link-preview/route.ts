@@ -16,7 +16,7 @@ type Preview = {
   image: string | null;
   images?: string[];
   embedUrl: string | null;
-  type: "youtube" | "spotify" | "image" | "video" | "link";
+  type: "youtube" | "spotify" | "apple_music" | "music" | "image" | "video" | "link";
 };
 
 function host(u: string) {
@@ -460,7 +460,7 @@ export async function GET(req: Request) {
       description: null,
       image: null,
       embedUrl,
-      type: "link",
+      type: "music",
     };
     return NextResponse.json(out, { status: 200 });
   }
