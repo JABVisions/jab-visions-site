@@ -1,4 +1,8 @@
 import { boardDropToActivity } from "@/lib/board/boardDropActivity";
+import {
+  applyForumDropNavigation,
+  pickBoardDisplayName,
+} from "@/lib/board/boardAuthor";
 import { applyForumRoomFeedCopy, looksLikeMediaFileName } from "@/lib/board/forumRoomFeedCopy";
 import type { BoardActivity } from "@/lib/board/activity";
 import { conversationDropPointers, roomFeedShares } from "@/lib/board/forumRoomDrop";
@@ -21,6 +25,7 @@ export function conversationToFeedItem(conversation: RoomConversation): RoomFeed
     title: conversation.title,
     body: conversation.body,
     authorName: conversation.authorName,
+    authorAvatar: conversation.authorAvatar,
     conversation,
   };
 }
@@ -34,7 +39,10 @@ export function shareToFeedItem(share: RoomDropShare): RoomFeedItem {
     createdAt: parseTime(share.createdAt),
     title: String(snapshot.title || snapshot.dropTitle || "Shared Drop"),
     body: String(snapshot.description || snapshot.body || ""),
-    authorName: share.sharedByName || String(snapshot.authorName || "Board"),
+    authorName:
+      pickBoardDisplayName(share.sharedByName, snapshot.authorName, snapshot.authorUsername) ||
+      "Board",
+    authorAvatar: String(snapshot.authorAvatar || "").trim() || undefined,
     share,
   };
 }
@@ -112,7 +120,9 @@ export function activityFromRoomShare(share: RoomDropShare): BoardActivity | nul
       activityId: share.activityId || `room_share_${share.id}`,
       userId: share.sharedBy,
       author: {
-        displayName: share.sharedByName || String(snapshot.authorName || ""),
+        displayName:
+          pickBoardDisplayName(share.sharedByName, snapshot.authorName, snapshot.authorUsername) ||
+          "",
         username: typeof snapshot.authorUsername === "string" ? snapshot.authorUsername : null,
         avatarSrc: typeof snapshot.authorAvatar === "string" ? snapshot.authorAvatar : null,
       },
@@ -120,6 +130,8 @@ export function activityFromRoomShare(share: RoomDropShare): BoardActivity | nul
   );
   const snapshotConversationTitle =
     typeof snapshot.conversationTitle === "string" ? snapshot.conversationTitle : "";
+  const authorName =
+    pickBoardDisplayName(share.sharedByName, snapshot.authorName, snapshot.authorUsername) || null;
   activity.meta = {
     ...(activity.meta || {}),
     source: "forum_room_studio",
@@ -129,7 +141,8 @@ export function activityFromRoomShare(share: RoomDropShare): BoardActivity | nul
     roomIcon: typeof snapshot.roomIcon === "string" ? snapshot.roomIcon : null,
     conversationId: share.conversationId || null,
     conversationTitle: snapshotConversationTitle || null,
-    authorName: share.sharedByName || String(snapshot.authorName || "") || null,
+    authorName,
+    authorAvatar: typeof snapshot.authorAvatar === "string" ? snapshot.authorAvatar : activity.meta?.authorAvatar,
   };
   const copy = applyForumRoomFeedCopy({
     title: activity.title,
@@ -140,5 +153,5 @@ export function activityFromRoomShare(share: RoomDropShare): BoardActivity | nul
     activity.title = copy.title;
     activity.body = copy.body;
   }
-  return activity;
+  return applyForumDropNavigation(activity);
 }

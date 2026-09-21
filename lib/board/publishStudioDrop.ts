@@ -27,7 +27,8 @@ import { isDropbookSlideFile } from "@/lib/board/dropbookSlides";
 import type { ResolvedDropbookLink } from "@/lib/board/dropbookLink";
 import { emitBoardDropSignal } from "@/lib/board/dropSignals";
 import { boardDropToActivity } from "@/lib/board/boardDropActivity";
-import { readCurrentBoardIdentity } from "@/lib/board/currentProfile";
+import { resolveCurrentBoardIdentity } from "@/lib/board/currentProfile";
+import { applyForumDropNavigation, pickBoardDisplayName } from "@/lib/board/boardAuthor";
 import { supabaseBrowser } from "@/lib/supabase/browser";
 import type { DropDestination } from "@/lib/board/dropDestination";
 import { isForumRoomDestination, isProjectRoomDestination } from "@/lib/board/dropDestination";
@@ -129,8 +130,9 @@ function applyForumActivityCopy(
     conversationTitle:
       forumDestination?.type === "room_conversation" ? forumDestination.conversationTitle || null : null,
     conversationId: forumDestination?.type === "room_conversation" ? forumDestination.conversationId : null,
+    authorName: pickBoardDisplayName(actorName, activity.meta?.authorName) || activity.meta?.authorName || null,
   };
-  return activity;
+  return forumDestination ? applyForumDropNavigation(activity) : activity;
 }
 
 function assertNotWorkBoard(destination: DropDestination | null | undefined) {
@@ -148,8 +150,8 @@ export async function publishStudioFileDrop(input: {
   title?: string;
 }): Promise<DropItem> {
   assertNotWorkBoard(input.destination);
-  const identity = readCurrentBoardIdentity();
-  const userId = (await getCurrentUserId()) || identity.id || null;
+  const userId = await getCurrentUserId();
+  const identity = await resolveCurrentBoardIdentity(userId);
   const id = safeId();
   const kind = dropTypeForFile(input.file);
   const bucket = kind.type === "Doc" ? BUCKET_DOCS : BUCKET_MEDIA;
@@ -253,10 +255,10 @@ export async function publishStudioLinkDrop(input: {
   destination?: DropDestination | null;
 }): Promise<DropItem> {
   assertNotWorkBoard(input.destination);
-  const identity = readCurrentBoardIdentity();
-  const userId = (await getCurrentUserId()) || identity.id || null;
+  const userId = await getCurrentUserId();
+  const identity = await resolveCurrentBoardIdentity(userId);
   const type = dropTypeForLink(input.link.kind);
-  const roomCopy = copyFromDropDestination(input.destination);
+  const roomCopy = copyFromDropDestination(input.destination, { actorName: identity.displayName });
   const drop: DropItem = {
     id: safeId(),
     title: roomCopy

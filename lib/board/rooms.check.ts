@@ -23,6 +23,7 @@ import {
   upsertPresence,
 } from "./rooms";
 import { mapRoomRow } from "./rooms/server";
+import { activityForumPath } from "./boardAuthor";
 import type { RoomConversation, RoomDropShare, RoomPresence } from "./rooms/types";
 
 function assert(condition: unknown, message: string): asserts condition {
@@ -216,6 +217,14 @@ assert(
 assert(
   conversationShareActivity?.body === "John replied with a Drop in Comic Character Design in JAB Comics.",
   "conversation feed body names the thread and the Forum Room"
+);
+assert(
+  activityForumPath(conversationShareActivity!) === "/board/forums/jab-comics?conversation=com1",
+  "conversation Drop activity path points at the forum room and conversation"
+);
+assert(
+  activityForumPath(filenameActivity!) === "/board/forums/music",
+  "room Drop activity path points at the Forum Room"
 );
 assert(conversationShareActivity?.title?.includes("audio") === false, "conversation feed title is not the audio filename");
 

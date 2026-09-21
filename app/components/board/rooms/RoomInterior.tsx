@@ -3,7 +3,9 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabaseBrowser } from "@/lib/supabase/browser";
-import { publicOrbAvatarUrl } from "@/lib/board/friendZoneOrbs";
+import { hostedOrbAvatarUrl } from "@/lib/board/friendZoneOrbs";
+import { presenceFromApiRow, pickBoardDisplayName } from "@/lib/board/boardAuthor";
+import { resolveCurrentBoardIdentity } from "@/lib/board/currentProfile";
 import { PROFILE_STORAGE_KEY } from "@/lib/board/dropItem";
 import type { DropItem } from "@/lib/board/dropItem";
 import {
@@ -76,9 +78,9 @@ function readLocalIdentity() {
     const profile = JSON.parse(window.localStorage.getItem(PROFILE_STORAGE_KEY) || "{}");
     return {
       userId: String(profile.id || profile.userId || "local"),
-      displayName: String(profile.displayName || profile.name || "You"),
+      displayName: pickBoardDisplayName(profile.displayName, profile.name, profile.username) || "You",
       username: String(profile.handle || profile.username || ""),
-      avatarUrl: publicOrbAvatarUrl(profile.avatarUrl, profile.avatarDataUrl),
+      avatarUrl: hostedOrbAvatarUrl(profile.avatarUrl, profile.avatarDataUrl),
     };
   } catch {
     return { userId: "local", displayName: "You", username: "", avatarUrl: "" };
@@ -107,8 +109,25 @@ export default function RoomInterior({ roomId }: { roomId: string }) {
   const [studioDestination, setStudioDestination] = useState<DropDestination | null>(null);
   const [successNote, setSuccessNote] = useState("");
 
-  const identity = useMemo(() => readLocalIdentity(), []);
+  const [identity, setIdentity] = useState(readLocalIdentity);
   const userId = authUserId || identity.userId;
+
+  useEffect(() => {
+    let cancelled = false;
+    void resolveCurrentBoardIdentity().then((next) => {
+      if (cancelled) return;
+      if (next.id && next.id !== "board-user") setAuthUserId(next.id);
+      setIdentity({
+        userId: next.id || "local",
+        displayName: pickBoardDisplayName(next.displayName, next.username) || next.displayName,
+        username: next.username,
+        avatarUrl: hostedOrbAvatarUrl(next.avatar),
+      });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const hydrateLocal = useCallback((id: string) => {
     const seeded = seedConversations(readConversations());
@@ -169,14 +188,9 @@ export default function RoomInterior({ roomId }: { roomId: string }) {
         setRoom(payload.room);
         if (Array.isArray(payload.presence)) {
           setPeople(
-            payload.presence.map((row: any) => ({
-              userId: String(row.user_id || row.userId),
-              roomId: resolved,
-              displayName: String(row.display_name || row.displayName || "Board"),
-              username: row.username,
-              avatarUrl: row.avatar_url || row.avatarUrl,
-              lastSeenAt: String(row.last_seen_at || row.lastSeenAt || new Date().toISOString()),
-            }))
+            payload.presence
+              .map((row: Record<string, unknown>) => presenceFromApiRow(row, resolved))
+              .filter((row: ReturnType<typeof presenceFromApiRow>): row is NonNullable<typeof row> => Boolean(row))
           );
         }
       })
@@ -192,7 +206,21 @@ export default function RoomInterior({ roomId }: { roomId: string }) {
             roomId: resolved,
             dropId: String(row.drop_id || row.dropId),
             sharedBy: String(row.shared_by || row.sharedBy || ""),
-            snapshot: row.snapshot && typeof row.snapshot === "object" ? row.snapshot : {},
+            sharedByName: pickBoardDisplayName(
+              row.shared_by_name,
+              row.display_name,
+              row.snapshot?.authorName
+            ),
+            snapshot: {
+              ...(row.snapshot && typeof row.snapshot === "object" ? row.snapshot : {}),
+              authorName: pickBoardDisplayName(
+                row.shared_by_name,
+                row.display_name,
+                row.snapshot?.authorName
+              ),
+              authorAvatar: row.avatar_url || row.snapshot?.authorAvatar,
+              authorUsername: row.username || row.snapshot?.authorUsername,
+            },
             createdAt: String(row.created_at || row.createdAt || new Date().toISOString()),
             origin:
               row.origin === "create" || row.origin === "conversation" || row.origin === "share"
@@ -222,7 +250,8 @@ export default function RoomInterior({ roomId }: { roomId: string }) {
               reply: {
                 id,
                 threadId: parentId,
-                authorName: String(row.author_name || row.display_name || "Board"),
+                authorName: pickBoardDisplayName(row.author_name, row.display_name, row.username) || "Board",
+                authorAvatar: String(row.avatar_url || row.author_avatar || ""),
                 body: String(row.body || ""),
                 createdAt: String(row.created_at || new Date().toISOString()),
                 dropId: typeof row.drop_id === "string" && row.drop_id ? row.drop_id : undefined,
@@ -240,7 +269,8 @@ export default function RoomInterior({ roomId }: { roomId: string }) {
               roomId: resolved,
               title: String(row.title || "Conversation"),
               body: String(row.body || ""),
-              authorName: String(row.author_name || "Board"),
+              authorName: pickBoardDisplayName(row.author_name, row.display_name, row.username) || "Board",
+              authorAvatar: String(row.avatar_url || ""),
               createdAt: String(row.created_at || new Date().toISOString()),
               replies: [],
               isPinned: row.pinned === true,
@@ -320,14 +350,9 @@ export default function RoomInterior({ roomId }: { roomId: string }) {
                 .then((payload) => {
                   if (!Array.isArray(payload?.presence)) return;
                   setPeople(
-                    payload.presence.map((row: any) => ({
-                      userId: String(row.user_id || row.userId),
-                      roomId: resolved,
-                      displayName: String(row.display_name || row.displayName || "Board"),
-                      username: row.username,
-                      avatarUrl: row.avatar_url || row.avatarUrl,
-                      lastSeenAt: String(row.last_seen_at || row.lastSeenAt || new Date().toISOString()),
-                    }))
+                    payload.presence
+                      .map((row: Record<string, unknown>) => presenceFromApiRow(row, resolved))
+                      .filter((row: ReturnType<typeof presenceFromApiRow>): row is NonNullable<typeof row> => Boolean(row))
                   );
                 })
                 .catch(() => undefined);
@@ -421,6 +446,7 @@ export default function RoomInterior({ roomId }: { roomId: string }) {
       title,
       body,
       authorName: identity.displayName,
+      authorAvatar: identity.avatarUrl,
       createdAt: new Date().toISOString(),
       replies: [],
     };
@@ -447,6 +473,7 @@ export default function RoomInterior({ roomId }: { roomId: string }) {
                 id: uid("sig"),
                 threadId,
                 authorName: identity.displayName,
+                authorAvatar: identity.avatarUrl,
                 body,
                 createdAt: new Date().toISOString(),
               },
@@ -519,8 +546,11 @@ export default function RoomInterior({ roomId }: { roomId: string }) {
       origin,
     });
     share.snapshot = {
-      ...dropSnapshotFromItem(drop),
-      authorName: identity.displayName,
+      ...dropSnapshotFromItem(drop, {
+        name: identity.displayName,
+        avatar: identity.avatarUrl,
+        username: identity.username,
+      }),
       roomId: currentRoom.id,
       roomName: currentRoom.name,
       roomIcon: currentRoom.icon,
@@ -551,8 +581,14 @@ export default function RoomInterior({ roomId }: { roomId: string }) {
       authorAvatar: identity.avatarUrl,
     });
     reply.dropSnapshot = {
-      ...(reply.dropSnapshot || dropSnapshotFromItem(drop)),
+      ...(reply.dropSnapshot ||
+        dropSnapshotFromItem(drop, {
+          name: identity.displayName,
+          avatar: identity.avatarUrl,
+          username: identity.username,
+        })),
       authorName: identity.displayName,
+      authorAvatar: identity.avatarUrl,
       roomId: currentRoom.id,
       roomName: currentRoom.name,
       roomIcon: currentRoom.icon,

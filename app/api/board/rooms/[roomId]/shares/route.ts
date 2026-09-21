@@ -1,9 +1,10 @@
 import { supabaseServer } from "@/lib/supabase/server";
-import { resolveRoomId, getRoomById } from "@/lib/board/rooms/catalog";
+import { resolveRoomId, getRoomById, roomHref } from "@/lib/board/rooms/catalog";
+import { hydrateAuthorRows } from "@/lib/board/rooms/authors";
 import { isMissingRoomsTable, json, roomMembershipGate } from "@/lib/board/rooms/server";
 import { describeRoomActivity, roomActivityGroupKey } from "@/lib/board/rooms/activity";
 import { createBoardNotification } from "@/lib/board/createNotification";
-import { roomHref } from "@/lib/board/rooms/catalog";
+import { pickBoardDisplayName } from "@/lib/board/boardAuthor";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -24,7 +25,12 @@ export async function GET(
       .limit(80);
     if (error && isMissingRoomsTable(error)) return json({ ok: true, shares: [], setupRequired: true });
     if (error) return json({ ok: true, shares: [], warning: error.message });
-    return json({ ok: true, shares: data || [] });
+    const shares = await hydrateAuthorRows(
+      supabase,
+      (data || []) as Record<string, unknown>[],
+      "shared_by"
+    );
+    return json({ ok: true, shares });
   } catch {
     return json({ ok: true, shares: [] });
   }
@@ -101,9 +107,10 @@ export async function POST(
       room,
       roomId,
       dropId,
-      actorName: String(body.displayName || snapshot.authorName || "Someone"),
+      actorName: pickBoardDisplayName(body.displayName, snapshot.authorName) || "Someone",
       dropTitle: String(snapshot.title || "a Drop"),
       conversationTitle: typeof body.conversationTitle === "string" ? body.conversationTitle : "",
+      conversationId,
       origin,
       share: retry.data || fallback,
     });
@@ -115,9 +122,10 @@ export async function POST(
     room,
     roomId,
     dropId,
-    actorName: String(body.displayName || snapshot.authorName || "Someone"),
+    actorName: pickBoardDisplayName(body.displayName, snapshot.authorName) || "Someone",
     dropTitle: String(snapshot.title || "a Drop"),
     conversationTitle: typeof body.conversationTitle === "string" ? body.conversationTitle : "",
+    conversationId,
     origin,
     share: data || row,
   });
@@ -171,6 +179,7 @@ async function finishShare(input: {
   actorName: string;
   dropTitle: string;
   conversationTitle: string;
+  conversationId?: string | null;
   origin: string;
   share: unknown;
 }) {
@@ -178,10 +187,12 @@ async function finishShare(input: {
     dropTitle: input.dropTitle,
     conversationTitle: input.origin === "conversation" ? input.conversationTitle : undefined,
   };
-  const href =
-    input.origin === "conversation" && input.conversationTitle
-      ? roomHref(input.roomId)
-      : `/board/forums/${input.roomId}`;
+  const href = roomHref(
+    input.roomId,
+    input.origin === "conversation" && input.conversationId
+      ? { conversation: input.conversationId }
+      : undefined
+  );
   const { data: followers } = await input.supabase
     .from("room_members")
     .select("user_id")

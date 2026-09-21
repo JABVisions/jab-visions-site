@@ -1,5 +1,6 @@
 import { supabaseServer } from "@/lib/supabase/server";
 import { getRoomById, resolveRoomId } from "@/lib/board/rooms/catalog";
+import { hydratePresenceRows } from "@/lib/board/rooms/authors";
 import { isMissingRoomsTable, json, mapRoomRow } from "@/lib/board/rooms/server";
 import { ROOM_PRESENCE_TTL_MS } from "@/lib/board/rooms/types";
 
@@ -45,15 +46,19 @@ export async function GET(
     }
 
     const mapped = mapRoomRow(row as Record<string, any>) || catalog;
+    const hydratedPresence = await hydratePresenceRows(
+      supabase,
+      (presence || []) as Record<string, unknown>[]
+    );
     return json({
       ok: true,
       room: {
         ...mapped,
         title: mapped.name,
         memberCount: memberCount ?? mapped.memberCount,
-        presenceCount: (presence || []).length,
+        presenceCount: hydratedPresence.length,
       },
-      presence: presence || [],
+      presence: hydratedPresence,
       sessions: sessions || [],
       source: row ? "db" : "catalog",
     });

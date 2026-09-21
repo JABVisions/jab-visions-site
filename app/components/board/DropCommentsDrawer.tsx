@@ -9,6 +9,8 @@ import {
   syncDropComments,
   type DropComment,
 } from "@/lib/board/dropComments";
+import { readCurrentBoardIdentity } from "@/lib/board/currentProfile";
+import { pickBoardDisplayName } from "@/lib/board/boardAuthor";
 import styles from "./DropCommentsDrawer.module.css";
 
 type Props = {
@@ -29,18 +31,17 @@ function readViewerIdentity() {
   }
 
   try {
-    const raw = window.localStorage.getItem("jab_board_profile_v2");
-    const parsed = raw ? JSON.parse(raw) : null;
-    const displayName = String(parsed?.displayName ?? parsed?.name ?? "Board User").trim();
-    const username = String(parsed?.username ?? displayName ?? "board")
+    const identity = readCurrentBoardIdentity();
+    const displayName = pickBoardDisplayName(identity.displayName, identity.username) || identity.displayName;
+    const username = String(identity.username || displayName || "board")
       .replace(/^@+/, "")
       .trim()
       .toLowerCase();
     return {
-      userId: String(parsed?.userId ?? parsed?.id ?? "local-board-user"),
+      userId: identity.id || "local-board-user",
       username: username || "board",
       displayName: displayName || "Board User",
-      avatarUrl: String(parsed?.avatarSrc ?? parsed?.avatarUrl ?? parsed?.avatarDataUrl ?? ""),
+      avatarUrl: identity.avatar || "",
     };
   } catch {
     return { userId: "local-board-user", username: "board", displayName: "Board User", avatarUrl: "" };

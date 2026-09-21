@@ -4,6 +4,7 @@ import React, { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import type { Room, RoomConversation } from "@/lib/board/rooms";
 import ConversationDropReply from "./ConversationDropReply";
+import RoomMemberOrb from "./RoomMemberOrb";
 
 function clsx(...parts: Array<string | false | null | undefined>) {
   return parts.filter(Boolean).join(" ");
@@ -63,7 +64,10 @@ export default function RoomConversation({
                   </span>
                 </div>
                 <h2 className="mt-3 text-xl font-semibold text-white sm:text-2xl">{thread.title}</h2>
-                <div className="mt-2 text-xs text-white/55">Opened by {thread.authorName}</div>
+                <div className="mt-2 inline-flex items-center gap-2 text-xs text-white/55">
+                  <RoomMemberOrb name={thread.authorName} avatarUrl={thread.authorAvatar} size={22} />
+                  Opened by {thread.authorName}
+                </div>
               </div>
               <button
                 type="button"

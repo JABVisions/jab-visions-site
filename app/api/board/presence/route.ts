@@ -1,6 +1,7 @@
 import { cookies } from "next/headers";
 import { createServerClient } from "@supabase/ssr";
-import { publicOrbAvatarUrl } from "@/lib/board/friendZoneOrbs";
+import { hostedOrbAvatarUrl } from "@/lib/board/friendZoneOrbs";
+import { pickBoardDisplayName } from "@/lib/board/boardAuthor";
 import { publishFriendZoneDirectory } from "@/lib/board/friendZoneDirectory";
 
 export const runtime = "nodejs";
@@ -69,15 +70,14 @@ export async function POST(req: Request) {
       .replace(/[^a-z0-9_]/gi, "")
       .slice(0, 24);
   const displayName =
-    cleanText(body.displayName, 60) ||
-    cleanText(profile?.display_name, 60) ||
+    pickBoardDisplayName(profile?.display_name, body.displayName, profile?.username, username) ||
     username ||
     "Board User";
-  const avatarUrl = publicOrbAvatarUrl(
-    body.avatarUrl,
+  const avatarUrl = hostedOrbAvatarUrl(
     profile?.avatar_url,
     existingStyle.avatarUrl,
-    existingStyle.avatarPath
+    existingStyle.avatarPath,
+    body.avatarUrl
   );
   const lastSeenAt = new Date().toISOString();
 

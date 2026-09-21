@@ -1,6 +1,7 @@
 import { getRoomById } from "@/lib/board/rooms/catalog";
 import type { DropDestination } from "@/lib/board/dropDestination";
 import { isForumRoomDestination } from "@/lib/board/dropDestination";
+import { pickBoardDisplayName } from "@/lib/board/boardAuthor";
 
 /** Raw camera/upload names that must never headline a Forum Room feed card. */
 export function looksLikeMediaFileName(value: unknown): boolean {
@@ -54,7 +55,7 @@ export function forumRoomFeedCopy(input: {
 }): ForumRoomFeedCopy {
   const room = forumRoomDisplayName(input);
   const conversation = String(input.conversationTitle || "").trim();
-  const actor = String(input.actorName || "").trim();
+  const actor = pickBoardDisplayName(input.actorName);
   const labeled = room.icon ? `${room.icon} ${room.name}` : room.name;
 
   if (input.kind === "room_conversation") {
@@ -117,6 +118,7 @@ export function applyForumRoomFeedCopy(item: {
 }): { title: string; body: string } | null {
   const meta = item.meta && typeof item.meta === "object" ? item.meta : null;
   if (!isForumRoomActivityMeta(meta)) return null;
+  const actor = pickBoardDisplayName(meta?.authorName, meta?.actorName);
   const copy = forumRoomFeedCopy({
     kind: String(meta?.destinationType || "") === "room_conversation" ? "room_conversation" : "room",
     roomId: typeof meta?.roomId === "string" ? meta.roomId : null,
@@ -124,19 +126,15 @@ export function applyForumRoomFeedCopy(item: {
     roomIcon: typeof meta?.roomIcon === "string" ? meta.roomIcon : null,
     conversationTitle:
       typeof meta?.conversationTitle === "string" ? meta.conversationTitle : null,
-    actorName:
-      typeof meta?.authorName === "string"
-        ? meta.authorName
-        : typeof meta?.actorName === "string"
-          ? meta.actorName
-          : null,
+    actorName: actor,
   });
   const rawBody = String(item.body || "").trim();
   const keepBody =
     rawBody &&
     !looksLikeMediaFileName(rawBody) &&
     !/^new .+ drop added to board\.?$/i.test(rawBody) &&
-    !/^shared drop$/i.test(rawBody);
+    !/^shared drop$/i.test(rawBody) &&
+    !/\bBoard User\b/.test(rawBody);
   return {
     title: copy.title,
     body: keepBody ? rawBody : copy.body,

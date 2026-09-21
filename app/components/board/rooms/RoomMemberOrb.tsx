@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { publicOrbAvatarUrl } from "@/lib/board/friendZoneOrbs";
+import { hostedOrbAvatarUrl } from "@/lib/board/friendZoneOrbs";
 
 function clsx(...parts: Array<string | false | null | undefined>) {
   return parts.filter(Boolean).join(" ");
@@ -18,7 +18,7 @@ export default function RoomMemberOrb({
   size?: number;
   glow?: string;
 }) {
-  const src = publicOrbAvatarUrl(avatarUrl);
+  const src = hostedOrbAvatarUrl(avatarUrl);
   const initial = (name || "?").trim().slice(0, 1).toUpperCase();
 
   return (

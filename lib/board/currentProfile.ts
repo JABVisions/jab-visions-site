@@ -6,6 +6,7 @@ import {
   loadBoardOptionsSettings,
 } from "@/lib/board/optionsSettings";
 import { BOARD_PROFILE_STORAGE_KEY } from "@/lib/board/profileStorage";
+import { pickBoardDisplayName } from "@/lib/board/boardAuthor";
 
 export type BoardAuthorIdentity = {
   id: string;
@@ -69,11 +70,12 @@ export function readCurrentBoardIdentity(): BoardAuthorIdentity {
   const options = loadBoardOptionsSettings();
   const username = cleanText(rawOptions?.username ?? profile?.username).replace(/^@+/, "");
   const displayName =
-    cleanText(options.displayName) ||
-    cleanText(profile?.displayName) ||
-    cleanText(profile?.name) ||
-    username ||
-    "Board User";
+    pickBoardDisplayName(
+      options.displayName,
+      profile?.displayName,
+      profile?.name,
+      username
+    ) || "Board User";
   const avatar =
     cleanStoredUrl(profile?.avatarUrl) ||
     cleanStoredUrl(profile?.avatarDataUrl) ||
@@ -94,4 +96,53 @@ export function readCurrentBoardIdentity(): BoardAuthorIdentity {
     glow,
     auraIntensity: options.auraIntensity,
   };
+}
+
+/** Session profile wins over the Options "Board User" placeholder. */
+export async function resolveCurrentBoardIdentity(
+  userId?: string | null
+): Promise<BoardAuthorIdentity> {
+  const local = readCurrentBoardIdentity();
+  try {
+    const { supabaseBrowser } = await import("@/lib/supabase/browser");
+    const sb = supabaseBrowser();
+    const { data: auth } = userId ? { data: { user: { id: userId } } } : await sb.auth.getUser();
+    const id = userId || auth?.user?.id || "";
+    if (!id) return local;
+    const { data: profile } = await sb
+      .from("profiles")
+      .select("id, username, display_name, avatar_url, avatar_path, board_style")
+      .eq("id", id)
+      .maybeSingle();
+    if (!profile) {
+      return { ...local, id };
+    }
+    const boardStyle =
+      profile.board_style && typeof profile.board_style === "object"
+        ? (profile.board_style as Record<string, unknown>)
+        : {};
+    let avatar = cleanStoredUrl(local.avatar) || cleanStoredUrl(profile.avatar_url);
+    const avatarPath = cleanText(boardStyle.avatarPath || boardStyle.avatar_path || profile.avatar_path);
+    if (avatarPath && !avatar.includes("token=")) {
+      const { data: signed } = await sb.storage.from("board-avatars").createSignedUrl(avatarPath, 60 * 45);
+      if (signed?.signedUrl) avatar = signed.signedUrl;
+    }
+    return {
+      id,
+      displayName:
+        pickBoardDisplayName(
+          boardStyle.displayName,
+          profile.display_name,
+          local.displayName,
+          profile.username,
+          local.username
+        ) || local.displayName,
+      username: cleanText(profile.username || local.username).replace(/^@+/, ""),
+      avatar: avatar || cleanStoredUrl(boardStyle.avatarUrl),
+      glow: local.glow,
+      auraIntensity: local.auraIntensity,
+    };
+  } catch {
+    return local;
+  }
 }

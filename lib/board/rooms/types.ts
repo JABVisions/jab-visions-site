@@ -172,6 +172,7 @@ export type RoomFeedItem = {
   title?: string;
   body?: string;
   authorName?: string;
+  authorAvatar?: string;
   conversation?: RoomConversation;
   share?: RoomDropShare;
   session?: RoomSession;

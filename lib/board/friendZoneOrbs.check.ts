@@ -2,6 +2,7 @@ import {
   DEFAULT_ORB_AVATAR,
   deriveFriendZoneState,
   formatFriendZoneLastActive,
+  hostedOrbAvatarUrl,
   mergeFriendZoneOrbs,
   orbFromProfileLike,
   orbsFromActivityRows,
@@ -141,8 +142,12 @@ assert(
   "data URLs stay out of Friend Zone orbs"
 );
 assert(
-  publicOrbAvatarUrl("https://cdn.example.com/maya.jpg") === "https://cdn.example.com/maya.jpg",
-  "hosted avatar URLs pass through"
+  hostedOrbAvatarUrl("") === "",
+  "Forums orbs do not invent a default photo when someone has no Board avatar"
+);
+assert(
+  hostedOrbAvatarUrl("https://cdn.example.com/maya.jpg") === "https://cdn.example.com/maya.jpg",
+  "avatar URL is passed to Forums UI when a Friendzone photo exists"
 );
 const signedKept = publicOrbAvatarUrl(
   "https://abc.supabase.co/storage/v1/object/sign/board-avatars/user-1/avatar.jpg?token=secret"

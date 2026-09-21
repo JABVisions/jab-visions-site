@@ -713,7 +713,10 @@ export default function DropConsole({
       // Forum Post: auto-create thread + href to thread
       let autoHref: string | null = null;
       if (mode === "forum_post") {
-        const me: BoardUser = { id: meId ?? "demo", displayName: "Board User" };
+        const me: BoardUser = {
+          id: meId ?? identity.id ?? "demo",
+          displayName: identity.displayName || "Board User",
+        };
 
         const threadTitle =
           cleanTitle ??

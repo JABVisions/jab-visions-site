@@ -95,17 +95,22 @@ export function publicUrlForAvatarPath(path: unknown) {
 }
 
 /** Hosted http(s) avatars only — iPhone Safari OOMs on giant data: URLs in the dock. */
-export function publicOrbAvatarUrl(...values: unknown[]): string {
+export function hostedOrbAvatarUrl(...values: unknown[]): string {
   for (const value of values) {
     if (typeof value !== "string") continue;
     const clean = value.trim();
     if (!clean) continue;
     if (clean.startsWith("data:")) continue;
+    if (clean === DEFAULT_ORB_AVATAR) continue;
     if (clean.length > 4096 && !isSignedBoardAvatarUrl(clean)) continue;
     const hosted = publicUrlForAvatarPath(clean);
-    if (hosted) return hosted;
+    if (hosted && hosted !== DEFAULT_ORB_AVATAR) return hosted;
   }
-  return DEFAULT_ORB_AVATAR;
+  return "";
+}
+
+export function publicOrbAvatarUrl(...values: unknown[]): string {
+  return hostedOrbAvatarUrl(...values) || DEFAULT_ORB_AVATAR;
 }
 
 export function isFriendZonePresenceMeta(meta: unknown): boolean {

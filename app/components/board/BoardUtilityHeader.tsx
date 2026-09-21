@@ -12,6 +12,7 @@ import {
   type BoardOptionsSettings,
 } from "@/lib/board/optionsSettings";
 import { supabaseBrowser } from "@/lib/supabase/browser";
+import { pickBoardDisplayName } from "@/lib/board/boardAuthor";
 
 const PROFILE_STORAGE_KEY = "jab_board_profile_v2";
 
@@ -90,10 +91,12 @@ export default function BoardUtilityHeader() {
           ? window.localStorage.getItem("jab_board_last_username")?.trim().replace(/^@+/, "").toLowerCase()
           : "";
       const resolvedDisplayName =
-        parsedOptions.displayName?.trim() ||
-        parsedProfile.displayName?.trim() ||
-        (lastUsername === "johnandy" ? "John Andy" : "") ||
-        "Board User";
+        pickBoardDisplayName(
+          parsedOptions.displayName,
+          parsedProfile.displayName,
+          lastUsername === "johnandy" ? "John Andy" : "",
+          parsedProfile.username
+        ) || "Board User";
       const parsedOptionsUsername = (parsedOptions as unknown as { username?: string }).username;
       const displayNameRouteKey = resolvedDisplayName.toLowerCase().replace(/[^a-z0-9]/g, "");
       const resolvedUsername =
@@ -182,9 +185,12 @@ export default function BoardUtilityHeader() {
 
         setProfile((current) => ({
           displayName:
-            (typeof remoteProfile.display_name === "string" && remoteProfile.display_name.trim()) ||
-            boardStyle.displayName?.trim() ||
-            current.displayName ||
+            pickBoardDisplayName(
+              remoteProfile.display_name,
+              boardStyle.displayName,
+              remoteProfile.username,
+              current.displayName
+            ) || current.displayName ||
             "Board User",
           username:
             (typeof remoteProfile.username === "string" && remoteProfile.username.trim()
