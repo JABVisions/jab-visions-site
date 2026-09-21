@@ -1822,10 +1822,23 @@ function BucketDropCard({
         />
       ) : null}
 
+      {!showEmbed && mediaKind === "image" && href ? (
+        <div className="embed image">
+          <div className="mediaFrame imageMediaFrame">
+            <img
+              src={href}
+              alt={item?.title || "Saved drop image"}
+              className="img"
+              loading="lazy"
+            />
+          </div>
+        </div>
+      ) : null}
+
       {showEmbed && (
         <div className={clsx("embed", embed.kind)}>
           {embed.kind === "image" && (
-            <div className="mediaFrame">
+            <div className="mediaFrame imageMediaFrame">
               <img
                 src={embed.url}
                 alt={item?.title || "Saved drop image"}
@@ -2026,8 +2039,10 @@ function BucketDropCard({
         iframe { width: 100%; height: 240px; border: none; display: block; background: rgba(255, 255, 255, 0.05); }
         .embed.spotify iframe { height: 160px; }
         .embed.apple_music iframe { height: 175px; }
+        .embed.image { overflow: visible; border: 0; background: transparent; }
         .mediaFrame { background: rgba(255, 255, 255, 0.04); }
-        .img { width: 100%; height: auto; display: block; }
+        .mediaFrame.imageMediaFrame { overflow: hidden; }
+        .img { width: 100%; max-width: 100%; height: auto; max-height: min(90vh, 1400px); object-fit: contain; display: block; }
         .vid { width: 100%; display: block; background: #000; max-height: 520px; }
         .aud { width: 100%; display: block; padding: 10px; }
 

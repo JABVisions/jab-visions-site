@@ -52,13 +52,13 @@ export default function ProjectDropCard({
             // eslint-disable-next-line @next/next/no-img-element
             <img
               src={drop.media.src}
-              alt={`${drop.title} thumbnail`}
-              className="w-full h-44 md:h-56 object-cover"
+              alt={drop.title}
+              className="w-full max-h-[min(90vh,56rem)] object-contain bg-black/40"
             />
           ) : (
             <video
               src={drop.media.src}
-              className="w-full h-44 md:h-56 object-cover"
+              className="w-full max-h-72 object-contain bg-black"
               muted
               playsInline
               controls

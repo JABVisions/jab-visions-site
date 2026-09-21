@@ -3301,7 +3301,7 @@ export default function DropTile() {
           margin: 0 auto;
           display: block;
           object-fit: contain;
-          max-height: min(520px, 72vh);
+          max-height: min(90vh, 1400px);
         }
         .media-thumb.natural-media img,
         .media-thumb.natural-media video {

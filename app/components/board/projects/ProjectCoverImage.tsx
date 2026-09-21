@@ -18,11 +18,13 @@ export default function ProjectCoverImage({
   title,
   className,
   placeholderClassName,
+  fit = "cover",
 }: {
   media?: ProjectCoverMedia | null;
   title: string;
   className?: string;
   placeholderClassName?: string;
+  fit?: "cover" | "contain";
 }) {
   const localSrc =
     media?.src?.startsWith("data:") || media?.src?.startsWith("blob:") ? media.src : "";
@@ -39,7 +41,7 @@ export default function ProjectCoverImage({
 
     if (!coords) {
       if (media?.kind === "image") {
-        setSrc(playablePosterSrc(media.src) || nextLocal);
+        setSrc(playableFeedMediaSrc(media.src) || playablePosterSrc(media.src) || nextLocal);
       } else if (media?.kind === "video") {
         const playable = playableFeedMediaSrc(media.src);
         if (playable) setSrc(playable);
@@ -60,7 +62,7 @@ export default function ProjectCoverImage({
         }
         return;
       }
-      const still = playablePosterSrc(signed);
+      const still = playableFeedMediaSrc(signed) || playablePosterSrc(signed);
       if (still) setSrc(still);
     });
 
@@ -68,6 +70,11 @@ export default function ProjectCoverImage({
       cancelled = true;
     };
   }, [media?.src, media?.bucket, media?.storagePath, media?.kind]);
+
+  const imageFitClass =
+    fit === "contain"
+      ? "h-auto w-full max-h-[min(90vh,56rem)] object-contain bg-black/40"
+      : "h-full w-full object-cover";
 
   if (!src && !poster) {
     if (projectCoverCoords(media)) {
@@ -99,7 +106,7 @@ export default function ProjectCoverImage({
         <img
           src={poster}
           alt={title}
-          className={clsx("h-full w-full object-cover", className)}
+          className={clsx(fit === "contain" ? imageFitClass : "h-full w-full object-cover", className)}
         />
       );
     }
@@ -107,7 +114,7 @@ export default function ProjectCoverImage({
       <video
         src={src}
         poster={poster || undefined}
-        className={clsx("h-full w-full object-cover", className)}
+        className={clsx(fit === "contain" ? imageFitClass : "h-full w-full object-cover", className)}
         muted
         playsInline
         preload="metadata"
@@ -120,7 +127,7 @@ export default function ProjectCoverImage({
     <img
       src={src}
       alt={title}
-      className={clsx("h-full w-full object-cover", className)}
+      className={clsx(imageFitClass, className)}
     />
   );
 }

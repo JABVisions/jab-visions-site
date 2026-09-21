@@ -50,10 +50,12 @@ import {
 import { supabaseBrowser } from "@/lib/supabase/browser";
 import { getCachedSignedMediaUrl, invalidateSignedMediaUrl } from "@/lib/board/signedMediaUrl";
 import {
+  activityLooksLikeStoredImage,
   activityLooksLikeStoredVideo,
   activityMediaCoords,
   activityPosterLookup,
   feedShouldEmbedRawHref,
+  feedShouldShowLinkPreviewCard,
   feedShouldShowStorageLinkCover,
   isBoardStorageMediaUrl,
   playableFeedMediaSrc,
@@ -766,6 +768,20 @@ function ActivityCard({
     (mediaKind === "video" || activityLooksLikeStoredVideo(item)) &&
     Boolean(storedMediaCoords);
   const isStoredAudioDrop = isAudioFileDrop && Boolean(signedPreviewImage || href);
+  const isStoredImageDrop =
+    !isStoredVideoDrop &&
+    !isStoredAudioDrop &&
+    activityLooksLikeStoredImage({
+      href,
+      image_url: typeof (item as any)?.image_url === "string" ? (item as any).image_url : null,
+      meta,
+    });
+  const showLinkPreviewCard = feedShouldShowLinkPreviewCard({
+    href,
+    isStoredImageDrop,
+    isStoredVideoDrop,
+    isStoredAudioDrop,
+  });
   const showAnnouncementImage =
     item?.kind === "announcement" &&
     !!resolvedPreviewImage &&
@@ -1108,6 +1124,11 @@ function ActivityCard({
     payProvider === "payment_link" ||
     priceCents > 0;
   const priceLabel = formatPriceFromCents(priceCents);
+  const showFullDropImage =
+    !!resolvedPreviewImage &&
+    !isStoredVideoDrop &&
+    !isStoredAudioDrop &&
+    (isStoredImageDrop || isPayDrop || !href || !showLinkPreviewCard);
 
   const embed = useMemo(() => {
     const base = computeEmbed(href, storedSoundCloudEmbed);
@@ -1897,7 +1918,9 @@ function ActivityCard({
       resolvedPreviewImage &&
       !isPayDrop &&
       !isStoredVideoDrop &&
-      !isStoredAudioDrop ? (
+      !isStoredAudioDrop &&
+      !isStoredImageDrop &&
+      showLinkPreviewCard ? (
         isNewsDrop ? (
           <NewsDropMagazine
             url={href}
@@ -1973,11 +1996,8 @@ function ActivityCard({
       {!showEmbed &&
       !isDescriptDrop &&
       !isDropbookSlide &&
-      resolvedPreviewImage &&
-      !showAnnouncementImage &&
-      (!href || isPayDrop) &&
-      !isStoredVideoDrop &&
-      !isStoredAudioDrop ? (
+      showFullDropImage &&
+      !showAnnouncementImage ? (
         <div className="activityImagePreview">
           <img
             className="activityImage"
@@ -2004,6 +2024,7 @@ function ActivityCard({
         href,
         isStoredBoardVideo,
         isStoredVideoDrop,
+        isStoredImageDrop,
       }) ? (
         <a
           className="linkPreview linkCoverFallback"
@@ -2056,6 +2077,7 @@ function ActivityCard({
           href,
           isStoredBoardVideo,
           isStoredVideoDrop,
+          isStoredImageDrop,
         }) ? (
         <a
           className="href"
@@ -2581,6 +2603,11 @@ function ActivityCard({
           max-width: 100%;
           border: 0;
           background: transparent;
+          overflow: visible;
+        }
+
+        .embed.image {
+          width: 100%;
         }
 
         .embed.audio {
@@ -2711,6 +2738,7 @@ function ActivityCard({
             radial-gradient(circle at 80% 22%, rgba(0, 180, 255, 0.08), transparent 34%),
             rgba(0, 0, 0, 0.055);
           width: 100%;
+          max-width: 100%;
           display: block;
         }
 
@@ -2718,10 +2746,11 @@ function ActivityCard({
           width: 100%;
           height: auto;
           max-width: 100%;
-          max-height: none;
-          margin: 0;
+          max-height: min(90vh, 1400px);
+          margin: 0 auto;
           display: block;
           object-fit: contain;
+          object-position: center;
         }
 
         .announcementMedia {
@@ -2782,12 +2811,16 @@ function ActivityCard({
 
         .imageMediaFrame {
           aspect-ratio: auto;
+          height: auto;
+          overflow: hidden;
           display: block;
         }
 
         .imageMediaFrame .img {
+          width: 100%;
           height: auto;
-          max-height: none;
+          max-height: min(90vh, 1400px);
+          object-fit: contain;
         }
 
         .storedVideoFrame {
@@ -2817,8 +2850,8 @@ function ActivityCard({
         .img {
           width: 100%;
           max-width: 100%;
-          height: 100%;
-          max-height: 100%;
+          height: auto;
+          max-height: min(90vh, 1400px);
           object-fit: contain;
           display: block;
         }

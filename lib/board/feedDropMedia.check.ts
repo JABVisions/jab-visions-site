@@ -1,8 +1,10 @@
 import {
+  activityLooksLikeStoredImage,
   activityLooksLikeStoredVideo,
   activityMediaCoords,
   activityPosterLookup,
   feedShouldEmbedRawHref,
+  feedShouldShowLinkPreviewCard,
   feedShouldShowStorageLinkCover,
   playableFeedMediaSrc,
   playablePosterSrc,
@@ -169,5 +171,46 @@ const missingPoster = activityPosterLookup({
 });
 assert(!missingPoster.coords, "missing stills do not treat the tape path as a poster");
 assert(!missingPoster.url, "missing stills leave the client capture path");
+
+const visionDrop = {
+  href: signedUrl.replace("tape.mp4", "photo.jpg"),
+  image_url: signedUrl.replace("tape.mp4", "photo.jpg"),
+  meta: {
+    dropType: "media",
+    mediaKind: "image",
+    bucket: "board-media",
+    storagePath: "user/vision/photo.jpg",
+  },
+};
+assert(activityLooksLikeStoredImage(visionDrop), "Vision Drops are stored images");
+assert(
+  !activityLooksLikeStoredImage(roomItem),
+  "audition tapes are not image drops"
+);
+assert(
+  !feedShouldShowLinkPreviewCard({
+    href: visionDrop.href,
+    isStoredImageDrop: true,
+    isStoredVideoDrop: false,
+    isStoredAudioDrop: false,
+  }),
+  "image drops must not render as cropped link-preview cards"
+);
+assert(
+  !feedShouldShowStorageLinkCover({
+    href: visionDrop.href,
+    isStoredBoardVideo: false,
+    isStoredVideoDrop: false,
+    isStoredImageDrop: true,
+  }),
+  "image drops must not fall back to a supabase hostname cover"
+);
+assert(
+  !feedShouldShowLinkPreviewCard({
+    href: "/assets/john_andy_headshot.jpg",
+    isStoredImageDrop: true,
+  }),
+  "local Vision Drop photos must show fully, not as a preview crop"
+);
 
 console.log("feedDropMedia.check.ts: ok");

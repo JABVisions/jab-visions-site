@@ -102,9 +102,84 @@ export function feedShouldShowStorageLinkCover(opts: {
   href?: string | null;
   isStoredBoardVideo?: boolean;
   isStoredVideoDrop?: boolean;
+  isStoredImageDrop?: boolean;
 }): boolean {
-  if (opts.isStoredBoardVideo || opts.isStoredVideoDrop) return false;
+  if (opts.isStoredBoardVideo || opts.isStoredVideoDrop || opts.isStoredImageDrop) return false;
   if (isBoardStorageMediaUrl(opts.href)) return false;
+  return true;
+}
+
+const IMAGE_EXT = /\.(jpe?g|png|gif|webp|avif|heic|heif|bmp|tif|tiff|svg)(\?|#|$)/i;
+const AUDIO_EXT = /\.(mp3|wav|m4a|aac|ogg|flac)(\?|#|$)/i;
+
+/** Uploaded Vision/photo Drops — not OG link thumbs, not video posters. */
+export function activityLooksLikeStoredImage(item: {
+  href?: string | null;
+  image_url?: string | null;
+  meta?: Record<string, any> | null;
+}): boolean {
+  const meta = item.meta && typeof item.meta === "object" ? item.meta : {};
+  const preview =
+    meta.preview && typeof meta.preview === "object" ? meta.preview : {};
+  const media = meta.media && typeof meta.media === "object" ? meta.media : {};
+  const mediaKind = metaString(meta.mediaKind, preview.mediaKind, media.kind);
+  if (mediaKind === "video" || mediaKind === "audio") return false;
+  if (activityLooksLikeStoredVideo(item)) return false;
+  if (mediaKind === "image") return true;
+  const mime = metaString(meta.mime, preview.mime, media.mime);
+  if (/^image\//i.test(mime)) return true;
+  const dropType = metaString(
+    meta.dropType,
+    meta.drop_flavor,
+    meta.dropFlavor,
+    preview.dropType
+  ).toLowerCase();
+  if (
+    dropType.includes("youtube") ||
+    dropType.includes("news") ||
+    dropType === "link" ||
+    dropType.includes("link drop") ||
+    dropType.includes("music") ||
+    dropType.includes("spotify") ||
+    dropType.includes("soundcloud")
+  ) {
+    return false;
+  }
+  const coords = activityMediaCoords(item);
+  const haystack = [
+    item.href,
+    item.image_url,
+    meta.mediaUrl,
+    media.src,
+    coords?.storagePath,
+    meta.fileName,
+    preview.fileName,
+  ]
+    .map((value) => String(value || ""))
+    .join(" ");
+  if (/\.(mp4|webm|mov|m4v)(\?|#|$)/i.test(haystack) || AUDIO_EXT.test(haystack)) return false;
+  if (IMAGE_EXT.test(haystack)) return true;
+  if (coords && (dropType.includes("vision") || dropType.includes("media") || dropType.includes("photo"))) {
+    return true;
+  }
+  return false;
+}
+
+/** OG/link cards stay cropped; uploaded photos must not. */
+export function feedShouldShowLinkPreviewCard(opts: {
+  href?: string | null;
+  isStoredImageDrop?: boolean;
+  isStoredVideoDrop?: boolean;
+  isStoredAudioDrop?: boolean;
+}): boolean {
+  if (opts.isStoredImageDrop || opts.isStoredVideoDrop || opts.isStoredAudioDrop) return false;
+  if (isBoardStorageMediaUrl(opts.href)) return false;
+  const href = String(opts.href || "");
+  if (IMAGE_EXT.test(href) && !/^https?:\/\/(?:www\.)?(?:instagram|tiktok|twitter|x|facebook|threads)\./i.test(href)) {
+    if (isBoardStorageMediaUrl(href) || href.startsWith("/") || href.startsWith("data:") || href.startsWith("blob:")) {
+      return false;
+    }
+  }
   return true;
 }
 

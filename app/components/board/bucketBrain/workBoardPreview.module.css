@@ -281,11 +281,13 @@
 }
 
 .media img,
-.media video,
-.media iframe {
+.media video {
   display: block;
   width: 100%;
-  max-height: 62vh;
+  height: auto;
+  max-height: 80vh;
+  object-fit: contain;
+  background: #000;
 }
 
 .media iframe {

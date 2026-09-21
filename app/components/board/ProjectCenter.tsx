@@ -256,7 +256,7 @@ function RoomPostMedia({
   return (
     // eslint-disable-next-line @next/next/no-img-element
     <img
-      className="mt-3 max-h-72 w-full rounded-2xl border border-white/10 bg-black/40 object-cover"
+      className="mt-3 max-h-[min(90vh,56rem)] w-full rounded-2xl border border-white/10 bg-black/40 object-contain"
       src={src}
       alt=""
     />
@@ -418,10 +418,10 @@ function DropPadProjectDropCard({
         <button
           type="button"
           onClick={onOpen}
-          className="relative block h-56 w-full bg-black/30 text-left"
+          className="relative block w-full bg-black/30 text-left"
           aria-label={`Open ${drop.title} info`}
         >
-          <ProjectCoverImage media={cover} title={drop.title} className="object-cover" />
+          <ProjectCoverImage media={cover} title={drop.title} fit="contain" />
         </button>
       ) : null}
 
@@ -1655,12 +1655,12 @@ export default function ProjectCenter() {
         />
 
         <div className="p-5 space-y-4">
-          <div className="relative h-56 overflow-hidden rounded-3xl border border-white/10 bg-black/30 md:h-72">
+          <div className="relative overflow-hidden rounded-3xl border border-white/10 bg-black/30">
             {activeProject.media ? (
               <ProjectCoverImage
                 media={activeProject.media}
                 title={activeProject.title}
-                className="object-cover"
+                fit="contain"
               />
             ) : (
               <div className="flex h-full items-center justify-center bg-[radial-gradient(circle_at_top_left,rgba(244,114,182,0.18),transparent_45%),radial-gradient(circle_at_bottom_right,rgba(96,165,250,0.16),transparent_48%),linear-gradient(180deg,rgba(12,12,20,0.92),rgba(4,4,8,0.98))]">

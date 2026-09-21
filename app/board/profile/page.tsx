@@ -3199,7 +3199,7 @@ export default function BoardProfileHubPage() {
           width: auto;
           height: auto;
           max-width: 100%;
-          max-height: min(520px, 72vh);
+          max-height: min(90vh, 1400px);
           border-radius: 16px;
           border: 1px solid rgba(0, 0, 0, 0.1);
           object-fit: contain;
