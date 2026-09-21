@@ -111,6 +111,51 @@ export function isForumRoomActivityMeta(meta: Record<string, unknown> | null | u
   return source === "forum_room_studio";
 }
 
+function metaFlag(meta: Record<string, unknown> | null | undefined, key: string): boolean {
+  return Boolean(meta && meta[key] === true);
+}
+
+function isPlaceholderForumTitle(value: unknown): boolean {
+  const title = String(value || "").trim();
+  if (!title) return true;
+  if (looksLikeMediaFileName(title)) return true;
+  if (/^added a drop to /i.test(title)) return true;
+  if (/^drop in /i.test(title)) return true;
+  if (/^(shared )?drop$/i.test(title)) return true;
+  if (/^(vision|media|music|doc|descript|dropbook) drop$/i.test(title)) return true;
+  return false;
+}
+
+/**
+ * “Added a Drop to [Room]” is only for Drops created from Drop Studio into a
+ * Room or conversation. Sharing an existing Drop (Descript, Dropbook, titled
+ * media) must keep the original title and subtitle.
+ */
+export function isStudioCreatedForumDrop(
+  meta: Record<string, unknown> | null | undefined
+): boolean {
+  if (!isForumRoomActivityMeta(meta)) return false;
+  const origin = String(meta?.origin || "").trim();
+  if (origin === "share") return false;
+  const destinationType = String(meta?.destinationType || "");
+  const destIsForum = destinationType === "room" || destinationType === "room_conversation";
+  if (origin === "create" && destIsForum) return true;
+  if (origin === "conversation" && destinationType === "room_conversation") return true;
+  const source = String(meta?.source || "");
+  return source === "forum_room_studio" && destIsForum && origin !== "share";
+}
+
+export function keepOriginalForumFeedTitle(item: {
+  title?: string | null;
+  body?: string | null;
+  meta?: Record<string, unknown> | null;
+}): boolean {
+  const meta = item.meta && typeof item.meta === "object" ? item.meta : null;
+  if (metaFlag(meta, "fromDescript") || metaFlag(meta, "fromDropbook")) return true;
+  if (!isStudioCreatedForumDrop(meta)) return true;
+  return !isPlaceholderForumTitle(item.title);
+}
+
 export function applyForumRoomFeedCopy(item: {
   title?: string | null;
   body?: string | null;
@@ -118,6 +163,7 @@ export function applyForumRoomFeedCopy(item: {
 }): { title: string; body: string } | null {
   const meta = item.meta && typeof item.meta === "object" ? item.meta : null;
   if (!isForumRoomActivityMeta(meta)) return null;
+  if (keepOriginalForumFeedTitle(item)) return null;
   const actor = pickBoardDisplayName(meta?.authorName, meta?.actorName);
   const copy = forumRoomFeedCopy({
     kind: String(meta?.destinationType || "") === "room_conversation" ? "room_conversation" : "room",

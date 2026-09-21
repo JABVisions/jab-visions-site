@@ -5,6 +5,7 @@ import {
   forumDropPath,
   hydrateActivityAuthor,
   isPlaceholderBoardName,
+  parseForumHref,
   pickBoardDisplayName,
   presenceFromApiRow,
   replacePlaceholderActor,
@@ -126,6 +127,24 @@ assert(
   activityForumPath(shareActivity!) === "/board/forums/jab-comics?conversation=com1",
   "conversation share renderer points at the originating conversation"
 );
+assert(
+  shareActivity?.title === "Night Tape",
+  "titled conversation Drops keep their original title instead of Added a Drop to"
+);
+assert(
+  parseForumHref("/board/forums/music")?.href === "/board/forums/music",
+  "Open Room path is the Forum Room route"
+);
+assert(
+  parseForumHref("/board/forums/jab-comics?conversation=com1")?.href ===
+    "/board/forums/jab-comics?conversation=com1",
+  "Open Room keeps the conversation query"
+);
+assert(
+  parseForumHref("/board/forums/jab-comics?conversation=com1")?.roomId === "jab-comics",
+  "Open Room parses the Forum Room id"
+);
+assert(parseForumHref("https://example.supabase.co/storage/v1/object/sign/tape.mp4") === null, "media hrefs are not Open Room targets");
 assert(
   shareActivity?.meta?.authorAvatar === "https://signed.example/john.jpg",
   "avatar URL is passed through the existing Drop renderer"

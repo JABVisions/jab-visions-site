@@ -132,15 +132,21 @@ export function activityFromRoomShare(share: RoomDropShare): BoardActivity | nul
     typeof snapshot.conversationTitle === "string" ? snapshot.conversationTitle : "";
   const authorName =
     pickBoardDisplayName(share.sharedByName, snapshot.authorName, snapshot.authorUsername) || null;
+  const origin = share.origin === "conversation" || share.origin === "create" || share.origin === "share"
+    ? share.origin
+    : "share";
   activity.meta = {
     ...(activity.meta || {}),
-    source: "forum_room_studio",
-    destinationType: share.origin === "conversation" ? "room_conversation" : "room",
+    source: origin === "share" ? "forum_room_share" : "forum_room_studio",
+    origin,
+    destinationType: origin === "conversation" ? "room_conversation" : "room",
     roomId: share.roomId,
     roomName: typeof snapshot.roomName === "string" ? snapshot.roomName : null,
     roomIcon: typeof snapshot.roomIcon === "string" ? snapshot.roomIcon : null,
     conversationId: share.conversationId || null,
     conversationTitle: snapshotConversationTitle || null,
+    fromDescript: snapshot.fromDescript === true,
+    fromDropbook: snapshot.fromDropbook === true,
     authorName,
     authorAvatar: typeof snapshot.authorAvatar === "string" ? snapshot.authorAvatar : activity.meta?.authorAvatar,
   };

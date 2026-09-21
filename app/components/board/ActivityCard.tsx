@@ -2,7 +2,7 @@
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Eye, EyeOff, SlidersHorizontal } from "lucide-react";
 import {
   appendLocalActivity,
@@ -62,6 +62,7 @@ import {
 import { applyForumRoomFeedCopy } from "@/lib/board/forumRoomFeedCopy";
 import {
   activityForumPath,
+  openForumRoom,
   pickBoardDisplayName,
   replacePlaceholderActor,
 } from "@/lib/board/boardAuthor";
@@ -519,6 +520,7 @@ function ActivityCard({
   onRemove,
   roomScoped = false,
 }: Props) {
+  const router = useRouter();
   const [toast, setToast] = useState<string | null>(null);
   const [embedFailed, setEmbedFailed] = useState(false);
   const [resolvedSoundCloud, setResolvedSoundCloud] = useState("");
@@ -662,6 +664,12 @@ function ActivityCard({
     : metaString(meta?.roomName)
       ? `Open ${metaString(meta?.roomName)}`
       : "Open Room";
+  function goToForumRoom(event?: React.SyntheticEvent) {
+    event?.preventDefault();
+    event?.stopPropagation();
+    if (!forumHref) return;
+    openForumRoom(forumHref, router);
+  }
   const shownTitle = replacePlaceholderActor(title, authorName);
   const shownBody = replacePlaceholderActor(body, authorName);
   const isPushed = Boolean(meta?.isPushed);
@@ -1637,9 +1645,14 @@ function ActivityCard({
           </div>
           <div className="title">
             {forumHref ? (
-              <Link href={forumHref} className="forumTitleLink">
+              <button
+                type="button"
+                className="forumTitleLink"
+                onPointerDown={(event) => event.stopPropagation()}
+                onClick={goToForumRoom}
+              >
                 {isNewsDrop ? previewTitle || shownTitle : shownTitle}
-              </Link>
+              </button>
             ) : isNewsDrop ? (
               previewTitle || shownTitle
             ) : (
@@ -1674,9 +1687,14 @@ function ActivityCard({
       {shownBody && !isDescriptDrop && !isDropbookSlide ? <div className="body">{shownBody}</div> : null}
 
       {forumHref ? (
-        <Link href={forumHref} className="forumRoomLink">
+        <button
+          type="button"
+          className="forumRoomLink"
+          onPointerDown={(event) => event.stopPropagation()}
+          onClick={goToForumRoom}
+        >
           {forumLinkLabel}
-        </Link>
+        </button>
       ) : null}
 
       {isCurrentUserDrop && !roomScoped ? (
@@ -2344,8 +2362,18 @@ function ActivityCard({
         }
 
         .forumTitleLink {
+          position: relative;
+          z-index: 3;
+          display: inline;
+          margin: 0;
+          padding: 0;
+          border: 0;
+          background: transparent;
           color: inherit;
+          font: inherit;
+          text-align: inherit;
           text-decoration: none;
+          cursor: pointer;
         }
 
         .forumTitleLink:hover {
@@ -2353,6 +2381,8 @@ function ActivityCard({
         }
 
         .forumRoomLink {
+          position: relative;
+          z-index: 3;
           display: inline-flex;
           margin-top: 8px;
           border-radius: 999px;
@@ -2365,6 +2395,7 @@ function ActivityCard({
           letter-spacing: 0.14em;
           text-transform: uppercase;
           text-decoration: none;
+          cursor: pointer;
         }
 
         .authorMark {

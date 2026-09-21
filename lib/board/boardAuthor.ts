@@ -42,21 +42,81 @@ export function forumDropPath(input: {
   return conversation ? roomHref(roomId, { conversation }) : roomHref(roomId);
 }
 
+export const BOARD_OPEN_FORUM_ROOM_EVENT = "board:forums:open";
+
+export type ForumOpenDetail = {
+  href: string;
+  roomId: string;
+  conversationId: string | null;
+};
+
+export function parseForumHref(href: string | null | undefined): ForumOpenDetail | null {
+  const trimmed = String(href || "").trim();
+  if (!trimmed) return null;
+  try {
+    const url = /^https?:\/\//i.test(trimmed)
+      ? new URL(trimmed)
+      : new URL(trimmed, "https://jabvisions.com");
+    const match = url.pathname.match(/^\/board\/forums\/([^/]+)\/?$/i);
+    if (!match) return null;
+    const roomId = decodeURIComponent(match[1] || "").trim();
+    if (!roomId) return null;
+    const conversationId =
+      url.searchParams.get("conversation") || url.searchParams.get("thread") || "";
+    const path = `/board/forums/${encodeURIComponent(roomId)}`;
+    const nextHref = conversationId
+      ? `${path}?conversation=${encodeURIComponent(conversationId)}`
+      : path;
+    return { href: nextHref, roomId, conversationId: conversationId || null };
+  } catch {
+    return null;
+  }
+}
+
+export function openForumRoom(
+  href: string,
+  router?: { push: (url: string) => void } | null
+): ForumOpenDetail | null {
+  const parsed = parseForumHref(href);
+  if (!parsed) return null;
+  if (typeof window === "undefined") return parsed;
+  window.dispatchEvent(new CustomEvent(BOARD_OPEN_FORUM_ROOM_EVENT, { detail: parsed }));
+  const currentPath = window.location.pathname.replace(/\/+$/, "");
+  const targetPath = `/board/forums/${encodeURIComponent(parsed.roomId)}`;
+  const alreadyInRoom =
+    currentPath === targetPath || currentPath === `/board/forums/${parsed.roomId}`;
+  if (alreadyInRoom) {
+    const current = `${window.location.pathname}${window.location.search}`;
+    if (current !== parsed.href) {
+      window.history.replaceState(null, "", parsed.href);
+    }
+    return parsed;
+  }
+  if (router?.push) router.push(parsed.href);
+  else window.location.assign(parsed.href);
+  return parsed;
+}
+
 export function forumDropPathFromMeta(
   meta: Record<string, unknown> | null | undefined
 ): string | null {
   if (!meta || typeof meta !== "object") return null;
   const destinationType = String(meta.destinationType || "");
   const source = String(meta.source || "");
+  const origin = String(meta.origin || "");
   const isForum =
     destinationType === "room" ||
     destinationType === "room_conversation" ||
-    source === "forum_room_studio";
-  if (!isForum) return null;
-  const roomId = typeof meta.roomId === "string" ? meta.roomId : "";
+    source === "forum_room_studio" ||
+    source === "forum_room_share";
+  if (!isForum && origin !== "create" && origin !== "share" && origin !== "conversation") {
+    return null;
+  }
+  const roomId = typeof meta.roomId === "string" ? meta.roomId.trim() : "";
+  if (!roomId) return null;
   const conversationId =
-    destinationType === "room_conversation" && typeof meta.conversationId === "string"
-      ? meta.conversationId
+    typeof meta.conversationId === "string" && meta.conversationId.trim()
+      ? meta.conversationId.trim()
       : "";
   return forumDropPath({ roomId, conversationId });
 }

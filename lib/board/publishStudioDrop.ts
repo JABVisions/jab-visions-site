@@ -33,8 +33,10 @@ import { supabaseBrowser } from "@/lib/supabase/browser";
 import type { DropDestination } from "@/lib/board/dropDestination";
 import { isForumRoomDestination, isProjectRoomDestination } from "@/lib/board/dropDestination";
 import {
+  applyForumRoomFeedCopy,
   copyFromDropDestination,
   forumRoomDropItemTitle,
+  keepOriginalForumFeedTitle,
   looksLikeMediaFileName,
 } from "@/lib/board/forumRoomFeedCopy";
 
@@ -114,15 +116,11 @@ function applyForumActivityCopy(
   destination: DropDestination | null | undefined,
   actorName: string
 ) {
-  const roomCopy = copyFromDropDestination(destination, { actorName });
   const forumDestination = isForumRoomDestination(destination) ? destination : null;
-  if (roomCopy) {
-    activity.title = roomCopy.title;
-    activity.body = roomCopy.body;
-  }
   activity.meta = {
     ...(activity.meta || {}),
     source: forumDestination ? "forum_room_studio" : "drop_studio",
+    origin: forumDestination ? "create" : null,
     destinationType: destination?.type || "feed",
     roomId: forumDestination?.roomId || null,
     roomName: forumDestination?.roomName || null,
@@ -132,6 +130,16 @@ function applyForumActivityCopy(
     conversationId: forumDestination?.type === "room_conversation" ? forumDestination.conversationId : null,
     authorName: pickBoardDisplayName(actorName, activity.meta?.authorName) || activity.meta?.authorName || null,
   };
+  const roomCopy = copyFromDropDestination(destination, { actorName });
+  if (roomCopy && !keepOriginalForumFeedTitle({ title: activity.title, body: activity.body, meta: activity.meta })) {
+    const rewritten = applyForumRoomFeedCopy({
+      title: activity.title,
+      body: activity.body,
+      meta: activity.meta as Record<string, unknown>,
+    });
+    activity.title = rewritten?.title || roomCopy.title;
+    activity.body = rewritten?.body || roomCopy.body;
+  }
   return forumDestination ? applyForumDropNavigation(activity) : activity;
 }
 
@@ -167,19 +175,24 @@ export async function publishStudioFileDrop(input: {
   const customizations = compactDropCustomizations(input.customizations);
   const typeLabel = kind.fromDropbook ? "Dropbook" : kind.type === "Media" ? "Vision" : kind.type;
   const fileStem = input.file.name.replace(/\.[^.]+$/, "");
-  const roomCopy = copyFromDropDestination(input.destination, { actorName: identity.displayName });
-  const dropTitle =
+  const namedTitle =
     input.title?.trim() && !looksLikeMediaFileName(input.title)
       ? input.title.trim()
-      : roomCopy
-        ? forumRoomDropItemTitle({
-            roomId: isForumRoomDestination(input.destination) ? input.destination.roomId : null,
-            roomName: isForumRoomDestination(input.destination) ? input.destination.roomName : null,
-            fallback: `${typeLabel} Drop`,
-          })
-        : fileStem && !looksLikeMediaFileName(fileStem)
-          ? fileStem
-          : `${typeLabel} Drop`;
+      : fileStem && !looksLikeMediaFileName(fileStem)
+        ? fileStem
+        : "";
+  const roomCopy = copyFromDropDestination(input.destination, { actorName: identity.displayName });
+  const keepNamed =
+    Boolean(namedTitle) || kind.fromDescript === true || kind.fromDropbook === true;
+  const dropTitle = keepNamed
+    ? namedTitle || `${typeLabel} Drop`
+    : roomCopy
+      ? forumRoomDropItemTitle({
+          roomId: isForumRoomDestination(input.destination) ? input.destination.roomId : null,
+          roomName: isForumRoomDestination(input.destination) ? input.destination.roomName : null,
+          fallback: `${typeLabel} Drop`,
+        })
+      : `${typeLabel} Drop`;
   const drop: DropItem = {
     id,
     title: dropTitle,
@@ -258,16 +271,19 @@ export async function publishStudioLinkDrop(input: {
   const userId = await getCurrentUserId();
   const identity = await resolveCurrentBoardIdentity(userId);
   const type = dropTypeForLink(input.link.kind);
+  const namedTitle = String(input.link.title || "").trim();
   const roomCopy = copyFromDropDestination(input.destination, { actorName: identity.displayName });
   const drop: DropItem = {
     id: safeId(),
-    title: roomCopy
-      ? forumRoomDropItemTitle({
-          roomId: isForumRoomDestination(input.destination) ? input.destination.roomId : null,
-          roomName: isForumRoomDestination(input.destination) ? input.destination.roomName : null,
-          fallback: input.link.title || `${type} Drop`,
-        })
-      : input.link.title || `${type} Drop`,
+    title: namedTitle
+      ? namedTitle
+      : roomCopy
+        ? forumRoomDropItemTitle({
+            roomId: isForumRoomDestination(input.destination) ? input.destination.roomId : null,
+            roomName: isForumRoomDestination(input.destination) ? input.destination.roomName : null,
+            fallback: `${type} Drop`,
+          })
+        : `${type} Drop`,
     type,
     createdAt: Date.now(),
     url: input.link.url,

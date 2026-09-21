@@ -226,6 +226,34 @@ assert(
   activityForumPath(filenameActivity!) === "/board/forums/music",
   "room Drop activity path points at the Forum Room"
 );
+
+const descriptShareActivity = activityFromRoomShare({
+  id: "share_descript",
+  roomId: "those-ryderz",
+  dropId: "drop_sides",
+  sharedBy: "user-1",
+  sharedByName: "John Andy",
+  snapshot: {
+    title: "Audition sides — Ryder",
+    type: "Doc",
+    fromDescript: true,
+    description: "Cold read for the diner scene.",
+  },
+  createdAt: new Date().toISOString(),
+  origin: "share",
+});
+assert(
+  descriptShareActivity?.title === "Audition sides — Ryder",
+  "shared Descript Drops keep their original title"
+);
+assert(
+  /diner scene/i.test(String(descriptShareActivity?.body || "")),
+  "shared Descript Drops keep their original subtitle"
+);
+assert(
+  activityForumPath(descriptShareActivity!) === "/board/forums/those-ryderz",
+  "shared Forum Drops still deep-link into the Room"
+);
 assert(conversationShareActivity?.title?.includes("audio") === false, "conversation feed title is not the audio filename");
 
 const staleSql = mapRoomRow({

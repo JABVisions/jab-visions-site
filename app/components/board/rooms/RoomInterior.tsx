@@ -4,7 +4,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabaseBrowser } from "@/lib/supabase/browser";
 import { hostedOrbAvatarUrl } from "@/lib/board/friendZoneOrbs";
-import { presenceFromApiRow, pickBoardDisplayName } from "@/lib/board/boardAuthor";
+import { presenceFromApiRow, pickBoardDisplayName, BOARD_OPEN_FORUM_ROOM_EVENT, type ForumOpenDetail } from "@/lib/board/boardAuthor";
 import { resolveCurrentBoardIdentity } from "@/lib/board/currentProfile";
 import { PROFILE_STORAGE_KEY } from "@/lib/board/dropItem";
 import type { DropItem } from "@/lib/board/dropItem";
@@ -87,7 +87,13 @@ function readLocalIdentity() {
   }
 }
 
-export default function RoomInterior({ roomId }: { roomId: string }) {
+export default function RoomInterior({
+  roomId,
+  conversationId,
+}: {
+  roomId: string;
+  conversationId?: string | null;
+}) {
   const router = useRouter();
   const resolved = resolveRoomId(roomId);
   const [room, setRoom] = useState<Room | null>(resolved ? getRoomById(resolved) : null);
@@ -174,9 +180,26 @@ export default function RoomInterior({ roomId }: { roomId: string }) {
     if (!resolved || !room) return;
     rememberRecentRoom(resolved);
     hydrateLocal(resolved);
-    const params = new URLSearchParams(window.location.search);
-    setOpenThreadId(params.get("conversation") || params.get("thread"));
-  }, [resolved, room, hydrateLocal]);
+    const fromUrl =
+      conversationId ||
+      new URLSearchParams(window.location.search).get("conversation") ||
+      new URLSearchParams(window.location.search).get("thread");
+    if (fromUrl) setOpenThreadId(fromUrl);
+  }, [resolved, room, hydrateLocal, conversationId]);
+
+  useEffect(() => {
+    const onOpenForum = (event: Event) => {
+      const detail = (event as CustomEvent<ForumOpenDetail>).detail;
+      if (!detail?.roomId || !resolved) return;
+      if (resolveRoomId(detail.roomId) !== resolved && detail.roomId !== resolved) {
+        router.push(detail.href);
+        return;
+      }
+      setOpenThreadId(detail.conversationId || null);
+    };
+    window.addEventListener(BOARD_OPEN_FORUM_ROOM_EVENT, onOpenForum as EventListener);
+    return () => window.removeEventListener(BOARD_OPEN_FORUM_ROOM_EVENT, onOpenForum as EventListener);
+  }, [resolved, router]);
 
   useEffect(() => {
     if (!resolved) return;

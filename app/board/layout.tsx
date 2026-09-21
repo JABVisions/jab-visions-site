@@ -10,6 +10,7 @@ import BucketBrainBridge from "@/app/components/board/BucketBrainBridge";
 import { ActivityProvider } from "@/app/components/board/activity/ActivityProvider";
 import ActivityNavigationHost from "@/app/components/board/activity/ActivityNavigationHost";
 import BoardCloudSync from "@/app/components/board/BoardCloudSync";
+import ProjectNotebookWindow from "@/app/components/board/ProjectNotebookWindow";
 
 export default function BoardLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname() || "";
@@ -61,6 +62,7 @@ export default function BoardLayout({ children }: { children: React.ReactNode })
         </BoardClientErrorBoundary>
       ) : null}
       {!isAuthRoute ? <ActivityNavigationHost /> : null}
+      {!isAuthRoute ? <ProjectNotebookWindow /> : null}
 
       <style>{`
         .board-root {

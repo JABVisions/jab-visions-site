@@ -4,7 +4,6 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import Image from "next/image";
 import { supabaseBrowser } from "@/lib/supabase/browser";
 import WorkCallsList, { type WorkCallItem } from "@/app/components/board/WorkCallsList";
-import ProjectCenter from "@/app/components/board/ProjectCenter";
 import StoreDropTile, { type StoreDrop } from "@/app/components/board/StoreDropTile";
 import DropPadSpatialWorld, {
   type DropPadSpace,
@@ -20,6 +19,7 @@ import { descriptDocToFile, type DescriptDoc } from "@/lib/board/descriptDocs";
 import type { ResolvedDropbookLink } from "@/lib/board/dropbookLink";
 import { studioLinkEmbedUrl, studioLinkPersistKind } from "@/lib/board/dropbookLink";
 import { toSoundCloudEmbed } from "@/lib/board/soundCloudEmbed";
+import { openProjectNotebook } from "@/lib/board/projectNotebookBus";
 
 type DropRoute =
   | "board"
@@ -994,7 +994,19 @@ function ProjectsScreen({ drops }: { drops: AssetItem[] }) {
         empty="Place drops here when they are tied to a project, pitch, casting call, or active build."
         drops={drops}
       />
-      <ProjectCenter />
+      <div className="rounded-3xl border border-white/10 bg-black/25 p-4">
+        <div className="text-sm font-semibold text-white/85">Project Notebook</div>
+        <div className="mt-1 text-xs text-white/45">
+          Project Drops open in a popup window over the Work Board, so the project card and Home Space stay put.
+        </div>
+        <button
+          type="button"
+          onClick={() => openProjectNotebook()}
+          className="mt-4 rounded-2xl border border-lime-300/25 bg-lime-400/15 px-4 py-2 text-sm text-lime-100/90 hover:bg-lime-400/20 transition"
+        >
+          Open Project Notebook
+        </button>
+      </div>
     </ScreenShell>
   );
 }
@@ -1581,8 +1593,7 @@ export default function DropPadOS({
 
   // ✅ Controlled: whenever osApp changes, open correct screen if powered
   const activeRoute = appToRoute(osApp);
-  const showProjectHologram =
-    osOn && bootPhase === "ready" && activeSpace === "work" && mode === "screen" && activeRoute === "projects";
+  const showProjectHologram = false;
 
   useEffect(() => {
     if (!osOn) return;
@@ -1591,9 +1602,16 @@ export default function DropPadOS({
       setActiveSpace("home");
       return;
     }
+    if (osApp === "projects") {
+      openProjectNotebook();
+      setMode("menu");
+      setActiveSpace("home");
+      onNavigate?.("home");
+      return;
+    }
     setMode("screen");
     setActiveSpace("work");
-  }, [osOn, osApp]);
+  }, [osOn, osApp, onNavigate]);
 
   const navigateToSpace = useCallback(
     (space: DropPadSpace) => {
@@ -1615,6 +1633,15 @@ export default function DropPadOS({
   const openRoute = (route: DropRoute) => {
     // keep backward-compat with any older parent listeners
     onSelect?.(route);
+
+    if (route === "projects") {
+      openProjectNotebook();
+      setMode("menu");
+      setActiveSpace("home");
+      onHome?.();
+      onNavigate?.("home");
+      return;
+    }
 
     // ✅ tell the Remote/WorkPage where to go
     onNavigate?.(routeToApp(route));
@@ -2843,7 +2870,7 @@ export default function DropPadOS({
               </div>
 
               <div className="h-[calc(100%-74px)] overflow-y-auto overflow-x-visible bg-[linear-gradient(180deg,rgba(255,255,255,0.05),rgba(255,255,255,0.02))] px-4 py-4">
-                <ProjectCenter />
+                {null}
               </div>
             </div>
           </div>

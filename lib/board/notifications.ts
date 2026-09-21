@@ -1,4 +1,5 @@
 import { forumRoomFeedCopy, looksLikeMediaFileName } from "@/lib/board/forumRoomFeedCopy";
+import { activityForumPath } from "@/lib/board/boardAuthor";
 
 export const BOARD_NOTIFICATIONS_UPDATED_EVENT = "board:notifications:updated";
 export const BOARD_ACTIVITY_NAV_EVENT = "board:activity:navigate";
@@ -398,6 +399,16 @@ export function destinationForActivity(item: BoardNotification): ActivityDestina
     item.activityType === "room_followed_active" ||
     item.activityType === "room_announcement"
   ) {
+    const forumHref = activityForumPath({
+      href: item.href,
+      meta: {
+        ...meta,
+        roomId: meta.roomId || meta.entityId || item.entityId,
+        conversationId: meta.conversationId,
+        destinationType: meta.destinationType || (item.activityType === "room_reply" ? "room_conversation" : "room"),
+      },
+    });
+    if (forumHref) return { kind: "href", href: forumHref };
     if (item.href) return { kind: "href", href: item.href };
   }
 

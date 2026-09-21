@@ -15,6 +15,7 @@ import { rememberBoardUploadSession } from "@/lib/board/boardUploadSession";
 
 import { POWER_EVENT, readPower, togglePower, setPower } from "@/lib/board/powerBus";
 import { DROP_PAD_APP_EVENT, readDropPadApp, setDropPadApp } from "@/lib/board/dropPadNavBus";
+import { openProjectNotebook } from "@/lib/board/projectNotebookBus";
 
 export default function WorkPage() {
   // ✅ single supabase client instance for the page lifetime
@@ -94,11 +95,11 @@ export default function WorkPage() {
   const goHome = () => setDropPadApp("home");
   const openProjects = () => {
     setPower(true, "project_notebook");
-    setDropPadApp("projects");
+    openProjectNotebook();
   };
   const createProjectDrop = () => {
     setPower(true, "project_notebook");
-    setDropPadApp("projects");
+    openProjectNotebook();
     if (typeof window !== "undefined") {
       window.dispatchEvent(new CustomEvent("board:projects:create"));
     }

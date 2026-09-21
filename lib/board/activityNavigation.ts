@@ -5,6 +5,7 @@ import {
   destinationForActivity,
   type BoardNotification,
 } from "@/lib/board/notifications";
+import { openForumRoom, parseForumHref } from "@/lib/board/boardAuthor";
 
 export type ActivityNavigationDetail = {
   notification: BoardNotification;
@@ -61,6 +62,10 @@ export function handleActivityNavigation(notification: BoardNotification) {
   }
 
   if (destination.kind === "href" && destination.href) {
+    if (parseForumHref(destination.href)) {
+      openForumRoom(destination.href);
+      return;
+    }
     if (destination.href.startsWith("/") && !destination.href.startsWith("//")) {
       window.location.assign(destination.href);
       return;

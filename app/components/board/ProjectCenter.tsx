@@ -760,6 +760,16 @@ export default function ProjectCenter() {
       };
   }, []);
 
+  useEffect(() => {
+    const onOpen = (event: Event) => {
+      const projectId = String((event as CustomEvent<{ projectId?: string }>).detail?.projectId || "").trim();
+      if (!projectId) return;
+      setActiveProjectId(projectId);
+    };
+    window.addEventListener("board:projects:open", onOpen as EventListener);
+    return () => window.removeEventListener("board:projects:open", onOpen as EventListener);
+  }, []);
+
   const activeProject = useMemo(() => {
     if (!activeProjectId) return null;
     const fromState =

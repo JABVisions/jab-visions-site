@@ -20,10 +20,14 @@ type ProjectTileLite = ReturnType<typeof syncResolvedProjectsToStorage>[number];
 
 export default function ProjectNotebook({
   onOpenProjects,
+  onOpenProject,
+  onCreateProject,
   bigger,
   limit = 10,
 }: {
-  onOpenProjects: () => void;
+  onOpenProjects?: () => void;
+  onOpenProject?: (projectId: string) => void;
+  onCreateProject?: () => void;
   bigger?: boolean;
   limit?: number;
 }) {
@@ -172,10 +176,10 @@ export default function ProjectNotebook({
           <div className="flex flex-wrap items-center justify-end gap-2">
             <button
               type="button"
-              onClick={onOpenProjects}
+              onClick={() => (onCreateProject || onOpenProjects)?.()}
               className="rounded-2xl border border-lime-300/25 bg-lime-400/15 px-4 py-2 text-sm text-lime-100/90 hover:bg-lime-400/20 transition"
             >
-              Project
+              + New Project Drop
             </button>
           </div>
         </div>
@@ -224,7 +228,10 @@ export default function ProjectNotebook({
                   <button
                     key={p.id}
                     type="button"
-                    onClick={onOpenProjects}
+                    onClick={() => {
+                      if (onOpenProject) onOpenProject(p.id);
+                      else onOpenProjects?.();
+                    }}
                     className="rounded-2xl border border-white/10 bg-white/5 p-3 text-left transition hover:bg-white/10"
                   >
                     <div className="flex items-start justify-between gap-3">
