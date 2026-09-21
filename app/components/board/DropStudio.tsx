@@ -4,9 +4,19 @@ import type React from "react";
 import { memo, useEffect, useRef, useState } from "react";
 import {
   compactDropCustomizations,
+  resolveLayerStack,
   type DropCustomization,
+  type DropStudioArtLayer,
   type DropStudioEffects,
+  type DropStudioLayerRef,
 } from "@/lib/board/dropCustomizations";
+import {
+  compositeArtLayers,
+  createEmptyArtLayer,
+  duplicateArtLayer,
+  flattenArtLayers,
+  mergeArtLayerDown,
+} from "@/lib/board/dropArtLayers";
 import {
   normalizeDropMediaRotation,
   resolveDropMediaFrame,
@@ -15,6 +25,7 @@ import {
 import { dropMediaRotationStyle } from "@/lib/board/dropMediaFrameDisplay";
 import DropChipWorkbench from "./DropChipWorkbench";
 import DropStudioArtPalette from "./DropStudioArtPalette";
+import DropStudioLayersPanel, { type LayerRow } from "./DropStudioLayersPanel";
 import DropStudioOverlay from "./DropStudioOverlay";
 import DropStudioPaletteDeck, { type ObjectTool } from "./DropStudioPaletteDeck";
 import {
@@ -61,10 +72,17 @@ const OVERLAYS = [
   { label: "Shimmer", value: "shimmer" },
 ];
 
+/** Stable id for the one implicit "Background" layer a brand-new drop starts with. */
+const DEFAULT_ART_LAYER_ID = "art-default";
+/** Stable id Drop Studio always used for the single flattened pre-layers art overlay. */
+const LEGACY_ART_LAYER_ID = "art-legacy";
+
 type Tool = ObjectTool;
 
 function toolLabel(item: Tool) {
   switch (item) {
+    case "layers":
+      return "Layers";
     case "text":
       return "Text";
     case "stickers":
@@ -216,6 +234,7 @@ function DropStudio({
     kind: "text" | "sticker";
     id: string;
   } | null>(null);
+  const [activeArtLayerId, setActiveArtLayerId] = useState<string | null>(null);
 
   const normalized = compactDropCustomizations(value) ?? {};
 
@@ -223,26 +242,164 @@ function DropStudio({
     onChange(compactDropCustomizations(next) ?? {});
   }
 
+  // ---- Art Mode layers -----------------------------------------------
+  // A brand-new drop implicitly has one empty "Background" layer; an older
+  // drop with only a flattened `artOverlayUrl` implicitly has one "Artwork"
+  // layer built from it. Neither is written to the customization until the
+  // user actually does something with it (draws, renames, reorders, …).
+  const effectiveArtLayers: DropStudioArtLayer[] = normalized.artLayers?.length
+    ? normalized.artLayers
+    : normalized.artOverlayUrl
+      ? [
+          {
+            id: LEGACY_ART_LAYER_ID,
+            name: "Artwork",
+            dataUrl: normalized.artOverlayUrl,
+            visible: true,
+            locked: false,
+            opacity: 1,
+          },
+        ]
+      : [
+          {
+            id: DEFAULT_ART_LAYER_ID,
+            name: "Background",
+            visible: true,
+            locked: false,
+            opacity: 1,
+          },
+        ];
+
+  const effectiveArtLayerIds = effectiveArtLayers.map((l) => l.id).join(",");
+  useEffect(() => {
+    setActiveArtLayerId((current) => {
+      if (current && effectiveArtLayers.some((l) => l.id === current)) return current;
+      return effectiveArtLayers[effectiveArtLayers.length - 1]?.id ?? null;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [effectiveArtLayerIds]);
+
+  const stackWithEffectiveArt = resolveLayerStack({ ...normalized, artLayers: effectiveArtLayers });
+  const artOnlyOrder = stackWithEffectiveArt.filter((r) => r.kind === "art").map((r) => r.id);
+  const artLayersInStackOrder = artOnlyOrder
+    .map((id) => effectiveArtLayers.find((l) => l.id === id))
+    .filter((l): l is DropStudioArtLayer => Boolean(l));
+
+  function freezeStack(nextStack?: DropStudioLayerRef[]) {
+    return nextStack ?? stackWithEffectiveArt;
+  }
+
+  async function commitArtLayers(nextArtLayers: DropStudioArtLayer[], nextStack?: DropStudioLayerRef[]) {
+    const layerStack = freezeStack(nextStack);
+    const artOverlayUrl = await compositeArtLayers(nextArtLayers);
+    update({ ...normalized, artLayers: nextArtLayers, layerStack, artOverlayUrl });
+  }
+
+  function mergeArtIntoStack(nextLayers: DropStudioArtLayer[], insertAfterId: string | null) {
+    const nextIds = new Set(nextLayers.map((l) => l.id));
+    const kept = stackWithEffectiveArt.filter((ref) => ref.kind !== "art" || nextIds.has(ref.id));
+    const keptArtIds = new Set(kept.filter((r) => r.kind === "art").map((r) => r.id));
+    const newRefs: DropStudioLayerRef[] = nextLayers
+      .filter((l) => !keptArtIds.has(l.id))
+      .map((l) => ({ id: l.id, kind: "art" as const }));
+    if (!newRefs.length) return kept;
+    const insertIndex = insertAfterId ? kept.findIndex((r) => r.id === insertAfterId) : -1;
+    if (insertIndex === -1) return [...newRefs, ...kept];
+    return [...kept.slice(0, insertIndex + 1), ...newRefs, ...kept.slice(insertIndex + 1)];
+  }
+
+  function handleArtStrokeCommit(nextLayers: DropStudioArtLayer[]) {
+    // Stroke commits never change membership, so the stack never needs remerging.
+    void commitArtLayers(nextLayers);
+  }
+
+  function handleNewArtLayer() {
+    const layer = createEmptyArtLayer(`Layer ${effectiveArtLayers.length + 1}`);
+    const next = [...effectiveArtLayers, layer];
+    const nextStack = mergeArtIntoStack(next, activeArtLayerId);
+    setActiveArtLayerId(layer.id);
+    void commitArtLayers(next, nextStack);
+  }
+
+  function handleDuplicateArtLayer(id: string) {
+    const original = effectiveArtLayers.find((l) => l.id === id);
+    if (!original) return;
+    const copy = duplicateArtLayer(original);
+    const next = [...effectiveArtLayers, copy];
+    const nextStack = mergeArtIntoStack(next, id);
+    setActiveArtLayerId(copy.id);
+    void commitArtLayers(next, nextStack);
+  }
+
+  function handleDeleteArtLayer(id: string) {
+    if (effectiveArtLayers.length <= 1) return; // always keep at least one layer
+    const next = effectiveArtLayers.filter((l) => l.id !== id);
+    const nextStack = stackWithEffectiveArt.filter((r) => r.id !== id);
+    void commitArtLayers(next, nextStack);
+  }
+
+  function handleRenameArtLayer(id: string, name: string) {
+    const next = effectiveArtLayers.map((l) => (l.id === id ? { ...l, name } : l));
+    void commitArtLayers(next);
+  }
+
+  function handleToggleArtVisible(id: string) {
+    const next = effectiveArtLayers.map((l) => (l.id === id ? { ...l, visible: !l.visible } : l));
+    void commitArtLayers(next);
+  }
+
+  function handleToggleArtLocked(id: string) {
+    const next = effectiveArtLayers.map((l) => (l.id === id ? { ...l, locked: !l.locked } : l));
+    void commitArtLayers(next);
+  }
+
+  function handleArtOpacity(id: string, opacity: number) {
+    const next = effectiveArtLayers.map((l) => (l.id === id ? { ...l, opacity } : l));
+    void commitArtLayers(next);
+  }
+
+  async function handleMergeArtDown(id: string) {
+    const merged = await mergeArtLayerDown(artLayersInStackOrder, id);
+    const nextStack = stackWithEffectiveArt.filter((r) => r.id !== id);
+    setActiveArtLayerId((current) => (current === id ? merged[merged.length - 1]?.id ?? null : current));
+    void commitArtLayers(merged, nextStack);
+  }
+
+  async function handleFlattenArt() {
+    const flat = await flattenArtLayers(artLayersInStackOrder);
+    if (flat.length === artLayersInStackOrder.length) return;
+    const nextStack = stackWithEffectiveArt.filter((r) => r.kind !== "art");
+    const finalStack = [{ id: flat[0].id, kind: "art" as const }, ...nextStack];
+    setActiveArtLayerId(flat[0].id);
+    void commitArtLayers(flat, finalStack);
+  }
+
+  // ---- Text / stickers (existing model, now layer-aware) --------------
+
   function addText() {
     const clean = text.trim().slice(0, 48);
     if (!clean) return;
+    const id = makeId("text");
+    const nextStack = [...stackWithEffectiveArt, { id, kind: "text" as const }];
     update({
       ...normalized,
-      textLabels: [
-        ...(normalized.textLabels ?? []),
-        { id: makeId("text"), text: clean, x: 50, y: 28 },
-      ],
+      artLayers: effectiveArtLayers,
+      textLabels: [...(normalized.textLabels ?? []), { id, text: clean, x: 50, y: 28, visible: true, locked: false, opacity: 1 }],
+      layerStack: nextStack,
     });
     setText("");
   }
 
   function addSticker(item: StickerItem, pack: StickerPack) {
+    const id = makeId("sticker");
+    const nextStack = [...stackWithEffectiveArt, { id, kind: "sticker" as const }];
     update({
       ...normalized,
+      artLayers: effectiveArtLayers,
       stickers: [
         ...(normalized.stickers ?? []),
         {
-          id: makeId("sticker"),
+          id,
           type: stickerTypeForPack(pack.kind),
           value: item.value,
           label: item.label,
@@ -250,8 +407,12 @@ function DropStudio({
           pack: pack.id,
           x: 50,
           y: 52,
+          visible: true,
+          locked: false,
+          opacity: 1,
         },
       ],
+      layerStack: nextStack,
     });
   }
 
@@ -303,7 +464,86 @@ function DropStudio({
       ...(kind === "text"
         ? { textLabels: normalized.textLabels?.filter((item) => item.id !== id) }
         : { stickers: normalized.stickers?.filter((item) => item.id !== id) }),
+      layerStack: stackWithEffectiveArt.filter((r) => r.id !== id),
     });
+  }
+
+  function duplicateItem(kind: "text" | "sticker", id: string) {
+    if (kind === "text") {
+      const original = normalized.textLabels?.find((t) => t.id === id);
+      if (!original) return;
+      const copy = { ...original, id: makeId("text"), x: Math.min(96, original.x + 4), y: Math.min(96, original.y + 4) };
+      const index = stackWithEffectiveArt.findIndex((r) => r.id === id);
+      const nextStack = [...stackWithEffectiveArt];
+      nextStack.splice(index + 1, 0, { id: copy.id, kind: "text" });
+      update({ ...normalized, textLabels: [...(normalized.textLabels ?? []), copy], layerStack: nextStack });
+    } else {
+      const original = normalized.stickers?.find((s) => s.id === id);
+      if (!original) return;
+      const copy = { ...original, id: makeId("sticker"), x: Math.min(96, original.x + 4), y: Math.min(96, original.y + 4) };
+      const index = stackWithEffectiveArt.findIndex((r) => r.id === id);
+      const nextStack = [...stackWithEffectiveArt];
+      nextStack.splice(index + 1, 0, { id: copy.id, kind: "sticker" });
+      update({ ...normalized, stickers: [...(normalized.stickers ?? []), copy], layerStack: nextStack });
+    }
+  }
+
+  function renameItem(kind: "text" | "sticker", id: string, name: string) {
+    const clean = name.trim().slice(0, 48);
+    if (!clean) return;
+    if (kind === "text") {
+      update({
+        ...normalized,
+        textLabels: normalized.textLabels?.map((t) => (t.id === id ? { ...t, text: clean } : t)),
+      });
+    } else {
+      update({
+        ...normalized,
+        stickers: normalized.stickers?.map((s) => (s.id === id ? { ...s, label: clean.slice(0, 24) } : s)),
+      });
+    }
+  }
+
+  function toggleItemVisible(kind: "text" | "sticker", id: string) {
+    if (kind === "text") {
+      update({
+        ...normalized,
+        textLabels: normalized.textLabels?.map((t) => (t.id === id ? { ...t, visible: t.visible === false } : t)),
+      });
+    } else {
+      update({
+        ...normalized,
+        stickers: normalized.stickers?.map((s) => (s.id === id ? { ...s, visible: s.visible === false } : s)),
+      });
+    }
+  }
+
+  function toggleItemLocked(kind: "text" | "sticker", id: string) {
+    if (kind === "text") {
+      update({
+        ...normalized,
+        textLabels: normalized.textLabels?.map((t) => (t.id === id ? { ...t, locked: !t.locked } : t)),
+      });
+    } else {
+      update({
+        ...normalized,
+        stickers: normalized.stickers?.map((s) => (s.id === id ? { ...s, locked: !s.locked } : s)),
+      });
+    }
+  }
+
+  function itemOpacity(kind: "text" | "sticker", id: string, opacity: number) {
+    if (kind === "text") {
+      update({
+        ...normalized,
+        textLabels: normalized.textLabels?.map((t) => (t.id === id ? { ...t, opacity } : t)),
+      });
+    } else {
+      update({
+        ...normalized,
+        stickers: normalized.stickers?.map((s) => (s.id === id ? { ...s, opacity } : s)),
+      });
+    }
   }
 
   function moveItem(event: React.PointerEvent<HTMLDivElement>) {
@@ -325,6 +565,108 @@ function DropStudio({
             ),
           }),
     });
+  }
+
+  // ---- Unified Layers panel rows ---------------------------------------
+
+  const layerRows: LayerRow[] = stackWithEffectiveArt
+    .map((ref): LayerRow | null => {
+      if (ref.kind === "art") {
+        const layer = effectiveArtLayers.find((l) => l.id === ref.id);
+        if (!layer) return null;
+        return {
+          id: layer.id,
+          kind: "art",
+          name: layer.name,
+          visible: layer.visible,
+          locked: layer.locked,
+          opacity: layer.opacity,
+          thumb: layer.dataUrl ? { type: "image", src: layer.dataUrl } : { type: "empty" },
+          isActive: layer.id === activeArtLayerId,
+          canMergeDown: artOnlyOrder.indexOf(layer.id) > 0,
+        };
+      }
+      if (ref.kind === "text") {
+        const label = normalized.textLabels?.find((t) => t.id === ref.id);
+        if (!label) return null;
+        return {
+          id: label.id,
+          kind: "text",
+          name: label.text,
+          visible: label.visible !== false,
+          locked: Boolean(label.locked),
+          opacity: label.opacity ?? 1,
+          thumb: { type: "text", value: label.text },
+          isActive: false,
+          canMergeDown: false,
+        };
+      }
+      const sticker = normalized.stickers?.find((s) => s.id === ref.id);
+      if (!sticker) return null;
+      return {
+        id: sticker.id,
+        kind: "sticker",
+        name: sticker.label || sticker.value,
+        visible: sticker.visible !== false,
+        locked: Boolean(sticker.locked),
+        opacity: sticker.opacity ?? 1,
+        thumb: sticker.src ? { type: "image", src: sticker.src } : { type: "emoji", value: sticker.value },
+        isActive: false,
+        canMergeDown: false,
+      };
+    })
+    .filter((row): row is LayerRow => Boolean(row));
+
+  function rowKind(id: string): "art" | "text" | "sticker" | undefined {
+    return layerRows.find((r) => r.id === id)?.kind;
+  }
+
+  function handleLayerSelect(id: string) {
+    const kind = rowKind(id);
+    if (kind === "art") setActiveArtLayerId(id);
+  }
+  function handleLayerRename(id: string, name: string) {
+    const kind = rowKind(id);
+    if (kind === "art") handleRenameArtLayer(id, name);
+    else if (kind === "text" || kind === "sticker") renameItem(kind, id, name);
+  }
+  function handleLayerToggleVisible(id: string) {
+    const kind = rowKind(id);
+    if (kind === "art") handleToggleArtVisible(id);
+    else if (kind === "text" || kind === "sticker") toggleItemVisible(kind, id);
+  }
+  function handleLayerToggleLock(id: string) {
+    const kind = rowKind(id);
+    if (kind === "art") handleToggleArtLocked(id);
+    else if (kind === "text" || kind === "sticker") toggleItemLocked(kind, id);
+  }
+  function handleLayerOpacity(id: string, opacity: number) {
+    const kind = rowKind(id);
+    if (kind === "art") handleArtOpacity(id, opacity);
+    else if (kind === "text" || kind === "sticker") itemOpacity(kind, id, opacity);
+  }
+  function handleLayerDuplicate(id: string) {
+    const kind = rowKind(id);
+    if (kind === "art") handleDuplicateArtLayer(id);
+    else if (kind === "text" || kind === "sticker") duplicateItem(kind, id);
+  }
+  function handleLayerDelete(id: string) {
+    const kind = rowKind(id);
+    if (kind === "art") handleDeleteArtLayer(id);
+    else if (kind === "text" || kind === "sticker") removeItem(kind, id);
+  }
+  function handleLayerMergeDown(id: string) {
+    if (rowKind(id) === "art") void handleMergeArtDown(id);
+  }
+  function handleLayerReorder(orderedIds: string[]) {
+    const kindById = new Map(layerRows.map((r) => [r.id, r.kind]));
+    const nextStack: DropStudioLayerRef[] = orderedIds
+      .map((id) => {
+        const kind = kindById.get(id);
+        return kind ? { id, kind } : null;
+      })
+      .filter((r): r is DropStudioLayerRef => Boolean(r));
+    update({ ...normalized, artLayers: effectiveArtLayers, layerStack: nextStack });
   }
 
   const headerEl = hideHeader ? null : (
@@ -371,12 +713,9 @@ function DropStudio({
         </div>
       ) : null}
       <DropStudioOverlay
-        customizations={
-          operatingTable && normalized.artOverlayUrl
-            ? { ...normalized, artOverlayUrl: undefined }
-            : normalized
-        }
+        customizations={{ ...normalized, artLayers: effectiveArtLayers }}
         editable
+        skipArtLayers={operatingTable && enableArtTools}
         onMove={(kind, id, event) => {
           event.currentTarget.setPointerCapture(event.pointerId);
           setDragging({ kind, id });
@@ -388,7 +727,7 @@ function DropStudio({
 
   const hintEl = (
     <div className={styles.hint}>
-      Drag labels and emojis. Use the layer list to remove anything on mobile.
+      Drag labels and emojis. Open Layers to reorder, hide, lock, or fine-tune anything on this drop.
     </div>
   );
 
@@ -398,7 +737,7 @@ function DropStudio({
 
   const toolbarEl = (
     <div className={toolsClassName} aria-label="Drop Studio tools">
-      {(["text", "stickers", "button", "effects", "filters", "enhance"] as Tool[]).map((item) => (
+      {(["layers", "text", "stickers", "button", "effects", "filters", "enhance"] as Tool[]).map((item) => (
         <button
           key={item}
           type="button"
@@ -415,6 +754,23 @@ function DropStudio({
 
   const drawerPanelsEl = (
     <>
+        {tool === "layers" ? (
+          <DropStudioLayersPanel
+            rows={layerRows}
+            onSelect={handleLayerSelect}
+            onRename={handleLayerRename}
+            onToggleVisible={handleLayerToggleVisible}
+            onToggleLock={handleLayerToggleLock}
+            onOpacityChange={handleLayerOpacity}
+            onDuplicate={handleLayerDuplicate}
+            onDelete={handleLayerDelete}
+            onMergeDown={handleLayerMergeDown}
+            onReorder={handleLayerReorder}
+            onNewArtLayer={handleNewArtLayer}
+            onFlattenArt={() => void handleFlattenArt()}
+          />
+        ) : null}
+
         {tool === "text" ? (
           <div className={styles.toolStack}>
             <div className={styles.textTool}>
@@ -623,10 +979,11 @@ function DropStudio({
       <>
         <DropStudioArtPalette
           hostRef={previewRef}
-          initialOverlayUrl={normalized.artOverlayUrl}
-          onOverlayChange={(artOverlayUrl) =>
-            update({ ...normalized, artOverlayUrl })
-          }
+          layers={effectiveArtLayers}
+          activeLayerId={activeArtLayerId}
+          onActiveLayerChange={setActiveArtLayerId}
+          onLayersChange={handleArtStrokeCommit}
+          onNewLayerAbove={handleNewArtLayer}
         />
         {artTools}
       </>
@@ -661,8 +1018,6 @@ function DropStudio({
       {hintEl}
       {toolbarEl}
       {drawerEl}
-
-      {/* Future Drop Studio layers: deeper Aura Effects and animated Board sticker assets. */}
     </section>
   );
 }

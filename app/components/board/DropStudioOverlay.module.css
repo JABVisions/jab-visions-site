@@ -348,3 +348,8 @@
 .lite.overlay_shimmer .effectLayer {
   animation: none;
 }
+
+.hiddenLayer {
+  outline: 1px dashed rgba(255, 255, 255, 0.4);
+  outline-offset: 2px;
+}

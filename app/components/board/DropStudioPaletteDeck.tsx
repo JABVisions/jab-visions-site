@@ -3,9 +3,10 @@
 import type { ReactNode } from "react";
 import styles from "./DropStudio.module.css";
 
-export type ObjectTool = "text" | "stickers" | "button" | "effects" | "filters" | "enhance";
+export type ObjectTool = "layers" | "text" | "stickers" | "button" | "effects" | "filters" | "enhance";
 
 export const OBJECT_TOOLS: ObjectTool[] = [
+  "layers",
   "text",
   "stickers",
   "button",
@@ -16,6 +17,8 @@ export const OBJECT_TOOLS: ObjectTool[] = [
 
 function objectToolLabel(item: ObjectTool) {
   switch (item) {
+    case "layers":
+      return "Layers";
     case "text":
       return "Text";
     case "stickers":
