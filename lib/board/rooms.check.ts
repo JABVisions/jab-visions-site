@@ -20,8 +20,8 @@ import {
   seedConversations,
   shouldEmitRoomActivity,
   upsertPresence,
-} from "./index";
-import type { RoomConversation, RoomDropShare, RoomPresence } from "./types";
+} from "./rooms";
+import type { RoomConversation, RoomDropShare, RoomPresence } from "./rooms/types";
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);

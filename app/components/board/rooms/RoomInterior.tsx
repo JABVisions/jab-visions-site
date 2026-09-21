@@ -15,7 +15,7 @@ import {
   conversationsForRoom,
   type Room,
   type RoomCallSession,
-  type RoomConversation,
+  type RoomConversation as RoomConversationRecord,
   type RoomDropShare,
   type RoomLiveSession,
   type RoomPresence as RoomPresencePerson,
@@ -38,8 +38,8 @@ import {
   writePresence,
   writeSessions,
   readSessions,
-  upsertPresence,
 } from "@/lib/board/rooms/storage";
+import { upsertPresence } from "@/lib/board/rooms/presence";
 import { shouldEmitRoomActivity } from "@/lib/board/rooms/activity";
 import { readForums } from "@/lib/boardStore";
 import RoomHeader from "./RoomHeader";
@@ -74,7 +74,7 @@ export default function RoomInterior({ roomId }: { roomId: string }) {
   const router = useRouter();
   const resolved = resolveRoomId(roomId);
   const [room, setRoom] = useState<Room | null>(resolved ? getRoomById(resolved) : null);
-  const [conversations, setConversations] = useState<RoomConversation[]>([]);
+  const [conversations, setConversations] = useState<RoomConversationRecord[]>([]);
   const [shares, setShares] = useState<RoomDropShare[]>([]);
   const [people, setPeople] = useState<RoomPresencePerson[]>([]);
   const [call, setCall] = useState<RoomCallSession | null>(null);
@@ -303,10 +303,12 @@ export default function RoomInterior({ roomId }: { roomId: string }) {
     );
   }
 
+  const currentRoom = room;
+
   function persistMembership(action: "join" | "follow" | "leave") {
     const nextRole: RoomRole = action === "follow" ? "viewer" : "member";
     upsertMembership({
-      roomId: room.id,
+      roomId: currentRoom.id,
       userId,
       role: nextRole,
       status: action === "leave" ? "left" : action === "follow" ? "following" : "joined",
@@ -318,23 +320,23 @@ export default function RoomInterior({ roomId }: { roomId: string }) {
     setJoined(action === "join");
     setFollowing(action !== "leave");
     setRole(action === "join" ? "member" : role);
-    void fetch(`/api/board/rooms/${room.id}/membership`, {
+    void fetch(`/api/board/rooms/${currentRoom.id}/membership`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ action, displayName: identity.displayName }),
     });
-    if (action === "join" && !hasEmittedJoinActivity(room.id, userId) && shouldEmitRoomActivity("room_joined")) {
-      markJoinActivity(room.id, userId);
+    if (action === "join" && !hasEmittedJoinActivity(currentRoom.id, userId) && shouldEmitRoomActivity("room_joined")) {
+      markJoinActivity(currentRoom.id, userId);
     }
   }
 
   function createConversation() {
     const title = composeTitle.trim();
     const body = composeBody.trim();
-    if (!title || !body || room.comingSoon) return;
-    const next: RoomConversation = {
+    if (!title || !body || currentRoom.comingSoon) return;
+    const next: RoomConversationRecord = {
       id: uid("th"),
-      roomId: room.id,
+      roomId: currentRoom.id,
       title,
       body,
       authorName: identity.displayName,
@@ -342,11 +344,11 @@ export default function RoomInterior({ roomId }: { roomId: string }) {
       replies: [],
     };
     upsertConversation(next);
-    setConversations(conversationsForRoom(readConversations(), room.id));
+    setConversations(conversationsForRoom(readConversations(), currentRoom.id));
     setComposeTitle("");
     setComposeBody("");
     setOpenThreadId(next.id);
-    void fetch(`/api/board/rooms/${room.id}/posts`, {
+    void fetch(`/api/board/rooms/${currentRoom.id}/posts`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ kind: "conversation", title, body, displayName: identity.displayName }),
@@ -373,8 +375,8 @@ export default function RoomInterior({ roomId }: { roomId: string }) {
         : thread
     );
     writeConversations(next);
-    setConversations(conversationsForRoom(next, room.id));
-    void fetch(`/api/board/rooms/${room.id}/posts`, {
+    setConversations(conversationsForRoom(next, currentRoom.id));
+    void fetch(`/api/board/rooms/${currentRoom.id}/posts`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
@@ -389,7 +391,7 @@ export default function RoomInterior({ roomId }: { roomId: string }) {
   function shareDrop(drop: DropItem) {
     const share: RoomDropShare = {
       id: uid("share"),
-      roomId: room.id,
+      roomId: currentRoom.id,
       dropId: drop.id,
       sharedBy: userId,
       sharedByName: identity.displayName,
@@ -397,9 +399,9 @@ export default function RoomInterior({ roomId }: { roomId: string }) {
       createdAt: new Date().toISOString(),
     };
     upsertShare(share);
-    setShares(readShares().filter((row) => resolveRoomId(row.roomId) === room.id));
+    setShares(readShares().filter((row) => resolveRoomId(row.roomId) === currentRoom.id));
     setShareOpen(false);
-    void fetch(`/api/board/rooms/${room.id}/shares`, {
+    void fetch(`/api/board/rooms/${currentRoom.id}/shares`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
@@ -415,7 +417,7 @@ export default function RoomInterior({ roomId }: { roomId: string }) {
     if (kind === "call") {
       const session: RoomCallSession = {
         id: uid("call"),
-        roomId: room.id,
+        roomId: currentRoom.id,
         kind: "call",
         provider: "none",
         status: "live",
@@ -424,13 +426,13 @@ export default function RoomInterior({ roomId }: { roomId: string }) {
         endedAt: null,
         participantIds: [userId],
       };
-      writeSessions([session, ...readSessions().filter((row) => row.roomId !== room.id || row.kind !== "call")]);
+      writeSessions([session, ...readSessions().filter((row) => row.roomId !== currentRoom.id || row.kind !== "call")]);
       setCall(session);
-      setRoom({ ...room, state: "ROOM" });
+      setRoom({ ...currentRoom, state: "ROOM" });
     } else {
       const session: RoomLiveSession = {
         id: uid("live"),
-        roomId: room.id,
+        roomId: currentRoom.id,
         kind: "live",
         provider: "none",
         status: "live",
@@ -441,11 +443,11 @@ export default function RoomInterior({ roomId }: { roomId: string }) {
         speakerIds: [userId],
         viewerCount: Math.max(1, people.length),
       };
-      writeSessions([session, ...readSessions().filter((row) => row.roomId !== room.id || row.kind !== "live")]);
+      writeSessions([session, ...readSessions().filter((row) => row.roomId !== currentRoom.id || row.kind !== "live")]);
       setLive(session);
-      setRoom({ ...room, state: "LIVE" });
+      setRoom({ ...currentRoom, state: "LIVE" });
     }
-    void fetch(`/api/board/rooms/${room.id}/sessions`, {
+    void fetch(`/api/board/rooms/${currentRoom.id}/sessions`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ kind, displayName: identity.displayName }),
