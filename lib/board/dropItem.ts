@@ -119,6 +119,8 @@ export type DropItem = {
   /** True only when the drop's text was authored in Descript mode. Drives the
    *  glossy Descript thumbnail; every other drop uses the description section. */
   fromDescript?: boolean;
+  /** True when this Drop is a Dropbook slide/book, not a single Vision still. */
+  fromDropbook?: boolean;
   /** Inline-formatted title/description (bold/italic/underline + field-level
    *  size & spacing). Plain `title`/`description` remain the fallback. */
   titleRich?: RichTextValue;

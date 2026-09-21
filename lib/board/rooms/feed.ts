@@ -1,5 +1,6 @@
 import { boardDropToActivity } from "@/lib/board/boardDropActivity";
 import type { BoardActivity } from "@/lib/board/activity";
+import { conversationDropPointers, roomFeedShares } from "@/lib/board/forumRoomDrop";
 import type { RoomConversation, RoomDropShare, RoomFeedItem, RoomSession } from "./types";
 
 function parseTime(value: string | number | null | undefined) {
@@ -59,7 +60,8 @@ export function mergeRoomFeed(input: {
 }): RoomFeedItem[] {
   const items: RoomFeedItem[] = [
     ...(input.conversations ?? []).map(conversationToFeedItem),
-    ...(input.shares ?? []).map(shareToFeedItem),
+    ...roomFeedShares(input.shares ?? []).map(shareToFeedItem),
+    ...conversationDropPointers(input.conversations ?? []),
     ...(input.sessions ?? []).map(sessionToFeedItem),
   ];
   return items.sort((a, b) => {

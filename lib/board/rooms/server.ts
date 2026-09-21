@@ -65,3 +65,24 @@ export function json(body: unknown, status = 200) {
     headers: { "content-type": "application/json" },
   });
 }
+
+export async function roomMembershipGate(
+  supabase: { from: (table: string) => any },
+  roomId: string,
+  userId: string
+): Promise<{ ok: true; setupRequired?: boolean } | { ok: false; status: number; message: string }> {
+  const { data, error } = await supabase
+    .from("room_members")
+    .select("role,status")
+    .eq("room_id", roomId)
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (error && isMissingRoomsTable(error)) return { ok: true, setupRequired: true };
+  if (error) return { ok: true };
+  const status = String(data?.status || "");
+  const role = String(data?.role || "viewer");
+  if (!data || status === "left" || role === "viewer") {
+    return { ok: false, status: 403, message: "Join this Room to post a Drop here." };
+  }
+  return { ok: true };
+}

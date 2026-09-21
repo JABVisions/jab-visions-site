@@ -7,3 +7,7 @@ export { default as RoomLivePreview } from "./RoomLivePreview";
 export { default as RoomCallPreview } from "./RoomCallPreview";
 export { default as RoomActivityFeed } from "./RoomActivityFeed";
 export { default as RoomShareDrop } from "./RoomShareDrop";
+export { default as RoomDropComposer } from "./RoomDropComposer";
+export { default as RoomQuickCreate } from "./RoomQuickCreate";
+export { default as RoomDropCard } from "./RoomDropCard";
+export { default as ConversationDropReply } from "./ConversationDropReply";

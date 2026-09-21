@@ -1,8 +1,9 @@
 import { supabaseServer } from "@/lib/supabase/server";
-import { resolveRoomId, getRoomById } from "@/lib/board/rooms/catalog";
-import { isMissingRoomsTable, json } from "@/lib/board/rooms/server";
+import { resolveRoomId, getRoomById, roomHref } from "@/lib/board/rooms/catalog";
+import { isMissingRoomsTable, json, roomMembershipGate } from "@/lib/board/rooms/server";
 import { describeRoomActivity, roomActivityGroupKey } from "@/lib/board/rooms/activity";
 import { createBoardNotification } from "@/lib/board/createNotification";
+import { isUuid } from "@/lib/board/forumRoomDrop";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -43,6 +44,9 @@ export async function POST(
   } = await supabase.auth.getUser();
   if (!user) return json({ ok: false, message: "Unauthorized" }, 401);
 
+  const gate = await roomMembershipGate(supabase, roomId, user.id);
+  if (!gate.ok) return json({ ok: false, message: gate.message }, gate.status);
+
   let body: Record<string, unknown> = {};
   try {
     body = (await req.json()) as Record<string, unknown>;
@@ -52,21 +56,50 @@ export async function POST(
 
   const kind = String(body.kind || "conversation");
   const title = String(body.title || "").trim();
-  const postBody = String(body.body || "").trim();
-  if (!postBody) return json({ ok: false, message: "body is required" }, 400);
+  const dropId = String(body.dropId || "").trim();
+  const postBody = String(body.body || "").trim() || (dropId ? "Replied with a Drop" : "");
+  if (!postBody && !dropId) return json({ ok: false, message: "body is required" }, 400);
 
-  const row = {
+  const rawParent = typeof body.parentId === "string" && body.parentId ? body.parentId : null;
+  const parentId = rawParent && isUuid(rawParent) ? rawParent : null;
+  if (kind === "reply" && rawParent && !parentId) {
+    return json({
+      ok: true,
+      persisted: "local",
+      post: {
+        room_id: roomId,
+        author_id: user.id,
+        parent_id: rawParent,
+        kind: "reply",
+        title: title || null,
+        body: postBody,
+        drop_id: dropId || null,
+        metadata: body.metadata && typeof body.metadata === "object" ? body.metadata : {},
+        id: `local_${Date.now()}`,
+      },
+    });
+  }
+
+  const row: Record<string, unknown> = {
     room_id: roomId,
     author_id: user.id,
-    parent_id: typeof body.parentId === "string" && body.parentId ? body.parentId : null,
+    parent_id: parentId,
     kind: ["conversation", "text_post", "reply", "announcement"].includes(kind) ? kind : "text_post",
     title: title || null,
     body: postBody,
     official: body.official === true,
     metadata: body.metadata && typeof body.metadata === "object" ? body.metadata : {},
+    drop_id: dropId || null,
   };
 
-  const { data, error } = await supabase.from("room_posts").insert(row).select("*").maybeSingle();
+  let { data, error } = await supabase.from("room_posts").insert(row).select("*").maybeSingle();
+  if (error && /drop_id|schema cache/i.test(String(error.message || ""))) {
+    const fallback = { ...row };
+    delete fallback.drop_id;
+    const retry = await supabase.from("room_posts").insert(fallback).select("*").maybeSingle();
+    data = retry.data;
+    error = retry.error;
+  }
   if (error && isMissingRoomsTable(error)) {
     return json({ ok: true, persisted: "local", post: { ...row, id: `local_${Date.now()}` } });
   }
@@ -75,9 +108,22 @@ export async function POST(
   if (kind === "reply" || kind === "announcement") {
     const activityType = kind === "announcement" ? "room_announcement" : "room_reply";
     const actorName = String(body.displayName || "Someone");
+    const conversationTitle = String(body.conversationTitle || "").trim();
+    const dropTitle = String(body.dropTitle || "").trim();
     const mentionIds = Array.isArray(body.mentionUserIds) ? body.mentionUserIds.map(String) : [];
     const recipientIds = new Set<string>(mentionIds);
     if (typeof body.notifyUserId === "string") recipientIds.add(body.notifyUserId);
+    if (dropId) {
+      const { data: followers } = await supabase
+        .from("room_members")
+        .select("user_id")
+        .eq("room_id", roomId)
+        .eq("following", true);
+      for (const follower of followers || []) {
+        const recipientId = String((follower as { user_id?: string }).user_id || "");
+        if (recipientId) recipientIds.add(recipientId);
+      }
+    }
 
     for (const recipientId of recipientIds) {
       if (!recipientId || recipientId === user.id) continue;
@@ -87,13 +133,15 @@ export async function POST(
         activityType: mentionIds.includes(recipientId) ? "room_mention" : activityType,
         entityType: "room",
         entityId: roomId,
-        href: `/board/forums/${roomId}`,
+        dropId: dropId || undefined,
+        href: roomHref(roomId),
         message: describeRoomActivity(
           mentionIds.includes(recipientId) ? "room_mention" : activityType,
           actorName,
-          room.name
+          room.name,
+          { conversationTitle, dropTitle }
         ),
-        metadata: { roomId, roomName: room.name, actorName },
+        metadata: { roomId, roomName: room.name, actorName, conversationTitle, dropTitle },
         groupKey: roomActivityGroupKey(
           mentionIds.includes(recipientId) ? "room_mention" : activityType,
           roomId

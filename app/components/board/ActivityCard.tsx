@@ -1408,7 +1408,7 @@ function ActivityCard({
     if (!id || !canRemoveDrop) return;
     if (isRemovingDrop) return;
     const confirmMessage = roomScoped
-      ? "Remove this drop from the project room?"
+      ? "Remove this Drop from the room? The original Drop stays on Board."
       : "Remove this drop from your Board?";
     if (!window.confirm(confirmMessage)) return;
 

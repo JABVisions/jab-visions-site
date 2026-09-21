@@ -131,6 +131,9 @@ import {
   type DropbookLinkKind,
   type ResolvedDropbookLink,
 } from "@/lib/board/dropbookLink";
+import DropDestinationBadge from "./DropDestinationBadge";
+import type { DropDestination } from "@/lib/board/dropDestination";
+import { dropPublishLabel } from "@/lib/board/dropDestination";
 
 type CaptureMode = "photo" | "video" | "audio" | "art" | "descript";
 type FacingMode = "user" | "environment";
@@ -484,6 +487,7 @@ export default function DropStudioStage({
   initialDescriptDoc = null,
   descriptReturnOnBack = false,
   descriptOnReturn,
+  destination,
 }: {
   open: boolean;
   initialFile: File | null;
@@ -509,6 +513,8 @@ export default function DropStudioStage({
   /** Return from Descript directly to the host Board surface. */
   descriptReturnOnBack?: boolean;
   descriptOnReturn?: () => void;
+  /** Contextual publish destination. One editor — Feed, Profile, Room, or Conversation. */
+  destination?: DropDestination;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -591,6 +597,7 @@ export default function DropStudioStage({
   const audioSessionRef = useRef<AudioSession | null>(null);
   const sessionHistoryRef = useRef<SessionHistory>(createSessionHistory());
   const [studioValue, setStudioValue] = useState<DropCustomization>(value);
+  const destinationPublishLabel = destination ? dropPublishLabel(destination) : null;
 
   const studioFrame = studioValue.effects?.frame;
   const captureMediaFrame = useMemo(
@@ -2862,6 +2869,7 @@ export default function DropStudioStage({
                       ? "Capture Mode"
                       : "New Drop"}
             </span>
+            <DropDestinationBadge destination={destination} />
           </div>
           <div className="studioBarRight">
             {isDropbookMode && dropbookCreating && !dropbookEditingCover ? (
@@ -3007,7 +3015,7 @@ export default function DropStudioStage({
                     !dropbookLinkDraft.trim()
                   }
                 >
-                  {dropbookLinkBusy ? "…" : isDropbookMode ? "Add →" : "Post →"}
+                  {dropbookLinkBusy ? "…" : isDropbookMode ? "Add →" : `${destinationPublishLabel || "Post"} →`}
                 </button>
               </form>
 
@@ -3843,12 +3851,14 @@ export default function DropStudioStage({
                             ? "Saving Drop"
                             : isDropbookMode
                             ? `Add ${mediaKind === "video" ? "Video" : "Vision"} to Dropbook`
-                            : `Add ${mediaKind === "video" ? "Video" : "Vision"} to Drop`
+                            : destinationPublishLabel ||
+                              `Add ${mediaKind === "video" ? "Video" : "Vision"} to Drop`
                         }
                         title={
                           isDropbookMode
                             ? `Add ${mediaKind === "video" ? "Video" : "Vision"} to Dropbook`
-                            : `Add ${mediaKind === "video" ? "Video" : "Vision"} to Drop`
+                            : destinationPublishLabel ||
+                              `Add ${mediaKind === "video" ? "Video" : "Vision"} to Drop`
                         }
                       >
                         <svg viewBox="0 0 24 24" aria-hidden="true">

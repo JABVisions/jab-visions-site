@@ -74,6 +74,35 @@
   align-items: center;
   gap: 10px;
   min-width: 0;
+  flex-wrap: wrap;
+}
+.studioDestinationBadge {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  max-width: 42vw;
+  padding: 4px 9px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(6, 18, 26, 0.45);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.studioDestinationPrefix {
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.48);
+}
+.studioDestinationLabel {
+  font-size: 10px;
+  font-weight: 850;
+  color: rgba(236, 255, 251, 0.92);
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .studioBrand {
   display: inline-flex;

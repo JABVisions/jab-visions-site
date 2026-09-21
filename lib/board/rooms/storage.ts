@@ -149,6 +149,11 @@ export function readConversations(): RoomConversation[] {
                 typeof reply.createdAt === "string"
                   ? reply.createdAt
                   : new Date(Number(reply.createdAt) || Date.now()).toISOString(),
+              dropId: typeof reply.dropId === "string" && reply.dropId.trim() ? reply.dropId : undefined,
+              dropSnapshot:
+                reply.dropSnapshot && typeof reply.dropSnapshot === "object"
+                  ? (reply.dropSnapshot as Record<string, unknown>)
+                  : undefined,
             }))
           : [],
       };

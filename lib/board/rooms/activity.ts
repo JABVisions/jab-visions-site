@@ -35,15 +35,27 @@ export function describeRoomActivity(
   type: RoomActivityEventType,
   actorName: string,
   roomName: string,
-  extras?: { dropTitle?: string }
+  extras?: { dropTitle?: string; conversationTitle?: string }
 ) {
   if (type === "room_joined") return `${actorName} joined ${roomName}.`;
   if (type === "room_drop_shared") {
+    if (extras?.conversationTitle) {
+      return extras.dropTitle
+        ? `${actorName} replied with ${extras.dropTitle} in ${extras.conversationTitle}.`
+        : `${actorName} replied with a Drop in ${extras.conversationTitle}.`;
+    }
     return extras?.dropTitle
       ? `${actorName} shared ${extras.dropTitle} in ${roomName}.`
       : `${actorName} shared a Drop in ${roomName}.`;
   }
-  if (type === "room_reply") return `${actorName} replied in ${roomName}.`;
+  if (type === "room_reply") {
+    if (extras?.conversationTitle && extras?.dropTitle) {
+      return `${actorName} replied with a Drop in ${extras.conversationTitle}.`;
+    }
+    return extras?.conversationTitle
+      ? `${actorName} replied in ${extras.conversationTitle}.`
+      : `${actorName} replied in ${roomName}.`;
+  }
   if (type === "room_mention") return `${actorName} mentioned you in ${roomName}.`;
   if (type === "room_call_started") return `A Room Call started in ${roomName}.`;
   if (type === "room_live_started") return `${roomName} went Live.`;
