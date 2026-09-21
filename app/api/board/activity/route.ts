@@ -1,6 +1,7 @@
 import { cookies } from "next/headers";
 import { createServerClient } from "@supabase/ssr";
 import { persistableMediaUrl, type BoardActivity, type BoardActivityKind } from "@/lib/board/activity";
+import { dedupeActivity } from "@/lib/board/activityMerge";
 import {
   applyForumDropNavigation,
   authorFromProfileRow,
@@ -272,137 +273,6 @@ function normalizeProfileBoardDrop(row: any): BoardActivity[] {
     .filter(Boolean) as BoardActivity[];
 }
 
-function mergeActivityRecords(
-  preferred: BoardActivity,
-  fallback: BoardActivity
-): BoardActivity {
-  const preferredMeta =
-    preferred.meta && typeof preferred.meta === "object" ? preferred.meta : {};
-  const fallbackMeta =
-    fallback.meta && typeof fallback.meta === "object" ? fallback.meta : {};
-  const preferredPreview =
-    preferredMeta.preview && typeof preferredMeta.preview === "object"
-      ? preferredMeta.preview
-      : {};
-  const fallbackPreview =
-    fallbackMeta.preview && typeof fallbackMeta.preview === "object"
-      ? fallbackMeta.preview
-      : {};
-
-  return {
-    ...fallback,
-    ...preferred,
-    title: preferred.title || fallback.title,
-    body: preferred.body || fallback.body,
-    href: persistableMediaUrl(preferred.href) || persistableMediaUrl(fallback.href),
-    image_url: preferred.image_url || fallback.image_url,
-    meta: {
-      ...fallbackMeta,
-      ...preferredMeta,
-      embedUrl: persistableMediaUrl(preferredMeta.embedUrl) || persistableMediaUrl(fallbackMeta.embedUrl),
-      preview: {
-        ...fallbackPreview,
-        ...preferredPreview,
-        embedUrl:
-          persistableMediaUrl(preferredPreview.embedUrl) ||
-          persistableMediaUrl(fallbackPreview.embedUrl) ||
-          persistableMediaUrl(preferredMeta.embedUrl) ||
-          persistableMediaUrl(fallbackMeta.embedUrl),
-      },
-    },
-  };
-}
-
-function dedupe(items: BoardActivity[]) {
-  const map = new Map<string, BoardActivity>();
-  const aliases = new Map<string, string>();
-  for (const item of items) {
-    if (!item?.id) continue;
-    const meta = item.meta && typeof item.meta === "object" ? item.meta : null;
-    const isRecipientActivity = meta?.activityAudience === "recipient";
-    const ownerKey =
-      typeof meta?.ownerUsername === "string" && meta.ownerUsername
-        ? meta.ownerUsername
-        : typeof meta?.authorUsername === "string" && meta.authorUsername
-          ? meta.authorUsername
-        : item.user_id
-          ? String(item.user_id)
-          : "";
-    const dropId =
-      typeof meta?.dropId === "string" && meta.dropId
-        ? `drop:${ownerKey}:${meta.dropId}`
-        : typeof meta?.projectId === "string" && meta.projectId
-          ? `project:${ownerKey}:${meta.projectId}`
-          : "";
-    const isProjectDrop =
-      String(meta?.kind ?? "").includes("project") ||
-      String(meta?.cardStyle ?? "").includes("project") ||
-      /^Project Drop:\s*/i.test(item.title ?? "");
-    const title = item.title ? `title:${item.kind}:${ownerKey}:${item.title.trim().toLowerCase()}` : "";
-    const href = item.href ? `href:${item.href}` : "";
-    const body = item.body ? `body:${item.kind}:${ownerKey}:${item.body.trim().toLowerCase()}` : "";
-    const image = item.image_url ? `image:${item.image_url}` : "";
-    const titleBody = title && body ? `${title}:${body}` : title || body;
-    const generatedCaption =
-      title && /^New .+ drop (added to Board|from .+)\.?$/i.test(item.body ?? "")
-        ? `generated:${item.kind}:${item.title?.trim().toLowerCase()}`
-        : "";
-    const isRecoveredMirror = /^New .+ drop from .+/i.test(item.body ?? "");
-    const hasStrongIdentity = Boolean(dropId || href || image);
-    const itemAliases = isRecipientActivity
-      ? [`recipient:${item.id}`]
-      : [
-          dropId,
-          href,
-          image,
-          isProjectDrop ? titleBody : "",
-          !dropId && !href && !image ? titleBody : "",
-        ].filter(Boolean);
-    const weakAliases = [generatedCaption].filter(Boolean);
-    const matchableAliases =
-      isRecipientActivity
-        ? itemAliases
-        : hasStrongIdentity && !isRecoveredMirror
-        ? itemAliases
-        : [...itemAliases, ...weakAliases];
-    const matchedAlias = matchableAliases.find((alias) => aliases.has(alias));
-    const key = matchedAlias
-      ? aliases.get(matchedAlias)!
-      : isRecipientActivity
-        ? itemAliases[0]
-        : dropId || href || image || item.id || titleBody;
-    const previous = map.get(key);
-    if (!previous) {
-      map.set(key, item);
-      for (const alias of itemAliases) aliases.set(alias, key);
-      for (const alias of weakAliases) {
-        if (!aliases.has(alias)) aliases.set(alias, key);
-      }
-      continue;
-    }
-
-    const previousScore =
-      (previous.image_url ? 3 : 0) + (previous.href ? 1 : 0) + (previous.meta ? 1 : 0);
-    const nextScore = (item.image_url ? 3 : 0) + (item.href ? 1 : 0) + (item.meta ? 1 : 0);
-    const preferNext =
-      nextScore > previousScore ||
-      (nextScore === previousScore && item.created_at > previous.created_at);
-    map.set(
-      key,
-      preferNext
-        ? mergeActivityRecords(item, previous)
-        : mergeActivityRecords(previous, item)
-    );
-    for (const alias of itemAliases) aliases.set(alias, key);
-    for (const alias of weakAliases) {
-      if (!aliases.has(alias)) aliases.set(alias, key);
-    }
-  }
-  return Array.from(map.values()).sort((a, b) =>
-    a.created_at < b.created_at ? 1 : -1
-  );
-}
-
 function filterProfileDeletedActivity(items: BoardActivity[], profileRows: any[]) {
   const deletedByUser = new Map<string, Set<string>>();
   for (const profile of profileRows) {
@@ -501,7 +371,7 @@ export async function GET(req: Request) {
       ),
     ]);
 
-  const items = dedupe(filterProfileDeletedActivity([
+  const items = dedupeActivity(filterProfileDeletedActivity([
     ...activityRows.map(normalizeActivityRow).filter(Boolean),
     ...legacyDropRows.map(normalizeLegacyBoardDrop).filter(Boolean),
     ...boardPostRows.map((row) => normalizePostRow(row, "board_posts")).filter(Boolean),

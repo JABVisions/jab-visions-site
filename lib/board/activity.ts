@@ -1,6 +1,6 @@
 // lib/board/activity.ts
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { looksLikePosterImageUrl } from "@/lib/board/feedDropMedia";
+import { activityLooksLikeStreamingMusicDrop, looksLikePosterImageUrl } from "@/lib/board/feedDropMedia";
 
 /* -------------------------------------------------------------------------- */
 /* types */
@@ -555,13 +555,11 @@ export async function fetchActivity(
           .filter(Boolean)
       );
       const keepLocal = getLocalActivity().filter((item) => {
-        if (!item.id.startsWith("local_") && !item.id.startsWith("private_drop_")) {
-          return false;
-        }
         if (remoteIds.has(item.id)) return false;
         const dropId = String(item.meta?.dropId || "").trim();
         if (dropId && remoteDropIds.has(dropId)) return false;
-        return true;
+        if (item.id.startsWith("local_") || item.id.startsWith("private_drop_")) return true;
+        return activityLooksLikeStreamingMusicDrop(item);
       });
       const merged = [...normalized, ...keepLocal].sort((a, b) =>
         a.created_at < b.created_at ? 1 : -1

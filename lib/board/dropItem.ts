@@ -545,12 +545,38 @@ export function normalizeDropItems(input: unknown, userId: string | null): DropI
 export function dropDedupeKey(drop: DropItem) {
   const id = String(drop.id || "").trim();
   if (id) return `id:${id}`;
+  const family = dropItemFamily(drop);
   const storage = drop.bucket && drop.storagePath ? `${drop.bucket}:${drop.storagePath}` : "";
-  if (storage) return `storage:${storage}`;
+  if (storage) return `storage:${family}:${storage}`;
   const url = String(drop.url || drop.linkUrl || drop.embedUrl || "").trim().toLowerCase();
-  if (url) return `url:${drop.type}:${url}`;
+  if (url) return `url:${family}:${drop.type}:${url}`;
   const title = drop.title.trim().toLowerCase();
-  return title ? `${drop.type}:${title}` : "";
+  return title ? `${family}:${drop.type}:${title}` : "";
+}
+
+function dropItemFamily(drop: Pick<DropItem, "type" | "url" | "embedUrl" | "linkUrl" | "mediaKind" | "mediaUrl" | "bucket" | "storagePath">): "streaming_music" | "stored_video" | "other" {
+  if (drop.mediaKind === "video" || (drop.bucket && drop.storagePath && /\.(mp4|webm|mov|m4v)(\?|#|$)/i.test(drop.storagePath))) {
+    return "stored_video";
+  }
+  const href = String(drop.url || drop.embedUrl || drop.linkUrl || drop.mediaUrl || "").toLowerCase();
+  if (
+    drop.type === "Music" ||
+    href.includes("soundcloud.com") ||
+    href.includes("spotify.com") ||
+    href.includes("music.apple.com")
+  ) {
+    return "streaming_music";
+  }
+  return "other";
+}
+
+export function dropFamiliesCompatible(left: DropItem, right: DropItem) {
+  const a = dropItemFamily(left);
+  const b = dropItemFamily(right);
+  if (a === b) return true;
+  if (a === "streaming_music" || b === "streaming_music") return false;
+  if (a === "stored_video" || b === "stored_video") return a === "other" || b === "other";
+  return true;
 }
 
 export function dropCompletenessScore(drop: DropItem) {
@@ -562,6 +588,14 @@ export function dropCompletenessScore(drop: DropItem) {
   );
 }
 
+function preferMusicDropField(preferred?: string | null, fallback?: string | null) {
+  const a = String(preferred || "");
+  const b = String(fallback || "");
+  if (/soundcloud\.com|spotify\.com|music\.apple\.com/i.test(a)) return a || undefined;
+  if (/soundcloud\.com|spotify\.com|music\.apple\.com/i.test(b)) return b || undefined;
+  return preferred || fallback || undefined;
+}
+
 function mergeDropCopies(previous: DropItem, next: DropItem): DropItem {
   const richer =
     dropCompletenessScore(next) > dropCompletenessScore(previous) ? next : previous;
@@ -569,11 +603,11 @@ function mergeDropCopies(previous: DropItem, next: DropItem): DropItem {
   return {
     ...other,
     ...richer,
-    url: richer.url || other.url,
-    embedUrl: richer.embedUrl || other.embedUrl,
+    url: preferMusicDropField(richer.url, other.url),
+    embedUrl: preferMusicDropField(richer.embedUrl, other.embedUrl) ?? null,
     linkUrl: richer.linkUrl || other.linkUrl,
     hostLabel: richer.hostLabel || other.hostLabel,
-    mediaUrl: richer.mediaUrl || other.mediaUrl,
+    mediaUrl: preferMusicDropField(richer.mediaUrl, other.mediaUrl),
     previewImage: richer.previewImage || other.previewImage,
     previewImages: richer.previewImages || other.previewImages,
     bucket: richer.bucket || other.bucket,
@@ -589,7 +623,19 @@ export function dedupeDropItems(items: DropItem[]) {
     if (!key) continue;
     const previous = map.get(key);
     if (!previous) {
+      const clash = [...map.values()].find(
+        (existing) =>
+          existing.id && item.id && existing.id === item.id && !dropFamiliesCompatible(existing, item)
+      );
+      if (clash) {
+        map.set(`${key}#keep`, item);
+        continue;
+      }
       map.set(key, item);
+      continue;
+    }
+    if (!dropFamiliesCompatible(previous, item)) {
+      map.set(`${key}#${item.id || "keep"}`, item);
       continue;
     }
     map.set(key, mergeDropCopies(previous, item));

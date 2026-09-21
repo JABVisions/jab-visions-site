@@ -7,17 +7,15 @@ import type {
 import { readDrops, type UniversalDrop } from "@/lib/board/drops/storage";
 import { resolveBoardProjects } from "@/lib/board/projects";
 import type { FeedDrop } from "@/lib/boardStore";
-import {
-  persistableFeedMediaHref,
-  preferFeedMediaUrl,
-  preferStreamingHref,
-  isStreamingDropHref,
-} from "@/lib/board/feedDropMedia";
+import { persistableFeedMediaHref, preferStreamingHref, isStreamingDropHref } from "@/lib/board/feedDropMedia";
 import {
   activityFromProjectRoomPost,
   projectRoomPostHasMedia,
 } from "@/lib/board/projectRoomDrop";
 import { projectDropInfoHref } from "@/lib/board/projectNotebookBus";
+import { dedupeActivity } from "@/lib/board/activityMerge";
+
+export { dedupeActivity };
 
 function safeIso(value: unknown) {
   const fallback = Date.now();
@@ -34,81 +32,6 @@ function safeIso(value: unknown) {
     }
   }
   return new Date(time).toISOString();
-}
-
-function activitySortTime(item: BoardActivity) {
-  const meta = item.meta && typeof item.meta === "object" ? item.meta : null;
-  const value = meta?.pushedAt ?? item.created_at;
-  const time = new Date(String(value || "")).getTime();
-  return Number.isFinite(time) ? time : 0;
-}
-
-function mergeActivityRecords(
-  preferred: BoardActivity,
-  fallback: BoardActivity
-): BoardActivity {
-  const preferredMeta =
-    preferred.meta && typeof preferred.meta === "object" ? preferred.meta : {};
-  const fallbackMeta =
-    fallback.meta && typeof fallback.meta === "object" ? fallback.meta : {};
-  const preferredPreview =
-    preferredMeta.preview && typeof preferredMeta.preview === "object"
-      ? preferredMeta.preview
-      : {};
-  const fallbackPreview =
-    fallbackMeta.preview && typeof fallbackMeta.preview === "object"
-      ? fallbackMeta.preview
-      : {};
-
-  return {
-    ...fallback,
-    ...preferred,
-    title: preferred.title || fallback.title,
-    body: preferred.body || fallback.body,
-    href:
-      preferStreamingHref(preferred.href, fallback.href) ||
-      preferFeedMediaUrl(preferred.href, fallback.href),
-    image_url: preferred.image_url || fallback.image_url,
-    meta: {
-      ...fallbackMeta,
-      ...preferredMeta,
-      origin: preferredMeta.origin || fallbackMeta.origin || null,
-      dropId: preferredMeta.dropId || fallbackMeta.dropId || null,
-      mediaKind: preferredMeta.mediaKind || fallbackMeta.mediaKind || null,
-      embedUrl:
-        preferredMeta.embedUrl ||
-        fallbackMeta.embedUrl ||
-        preferredPreview.embedUrl ||
-        fallbackPreview.embedUrl ||
-        null,
-      mediaUrl:
-        preferStreamingHref(preferredMeta.mediaUrl, fallbackMeta.mediaUrl) ||
-        preferFeedMediaUrl(preferredMeta.mediaUrl, fallbackMeta.mediaUrl) ||
-        preferredMeta.mediaUrl ||
-        fallbackMeta.mediaUrl ||
-        null,
-      bucket: preferredMeta.bucket || fallbackMeta.bucket || null,
-      storagePath: preferredMeta.storagePath || fallbackMeta.storagePath || null,
-      cardStyle: preferredMeta.cardStyle || fallbackMeta.cardStyle || null,
-      preview: {
-        ...fallbackPreview,
-        ...preferredPreview,
-        bucket: preferredPreview.bucket || fallbackPreview.bucket || preferredMeta.bucket || fallbackMeta.bucket,
-        storagePath:
-          preferredPreview.storagePath ||
-          fallbackPreview.storagePath ||
-          preferredMeta.storagePath ||
-          fallbackMeta.storagePath,
-        mediaKind: preferredPreview.mediaKind || fallbackPreview.mediaKind || preferredMeta.mediaKind,
-        embedUrl:
-          preferredPreview.embedUrl ||
-          fallbackPreview.embedUrl ||
-          preferredMeta.embedUrl ||
-          fallbackMeta.embedUrl ||
-          null,
-      },
-    },
-  };
 }
 
 export function feedDropToActivity(drop: FeedDrop): BoardActivity {
@@ -138,143 +61,6 @@ export function feedDropToActivity(drop: FeedDrop): BoardActivity {
       ...(drop.meta ?? {}),
     },
   };
-}
-
-export function dedupeActivity(items: BoardActivity[]) {
-  const map = new Map<string, BoardActivity>();
-  const aliases = new Map<string, string>();
-
-  for (const item of items) {
-    if (!item?.id) continue;
-    const meta = item.meta && typeof item.meta === "object" ? item.meta : null;
-    const isPushed = Boolean(meta?.isPushed);
-    const isRecipientActivity = meta?.activityAudience === "recipient";
-    const ownerKey =
-      typeof meta?.ownerUsername === "string" && meta.ownerUsername
-        ? meta.ownerUsername
-        : item.user_id
-          ? String(item.user_id)
-          : "";
-    const dropId =
-      typeof meta?.dropId === "string" && meta.dropId
-        ? `drop:${ownerKey}:${meta.dropId}`
-        : "";
-    const projectNotebookKey =
-      (String(meta?.kind ?? "") === "project_drop" ||
-        String(meta?.cardStyle ?? "") === "project_drop" ||
-        /^Project Drop:\s*/i.test(item.title ?? "")) &&
-      typeof meta?.projectId === "string" &&
-      meta.projectId
-        ? `project:${ownerKey}:${meta.projectId}`
-        : "";
-    const isProjectDrop = Boolean(projectNotebookKey);
-    const storagePath = String(meta?.storagePath || meta?.preview?.storagePath || "").trim();
-    const storageKey = storagePath
-      ? `storage:${storagePath.split("?")[0].replace(/^\/+/, "")}`
-      : "";
-    const roomDropKey =
-      typeof meta?.dropId === "string" && meta.dropId
-        ? `dropid:${meta.dropId}`
-        : "";
-    const titleKey = item.title
-      ? `title:${item.kind}:${ownerKey}:${item.title.trim().toLowerCase()}`
-      : "";
-    const bodyKey = item.body
-      ? `body:${item.kind}:${ownerKey}:${item.body.trim().toLowerCase()}`
-      : "";
-    const hrefKey = item.href ? `href:${item.href}` : "";
-    const normalizedTitle = item.title?.trim().toLowerCase() ?? "";
-    const normalizedBodyPrefix = item.body
-      ?.trim()
-      .toLowerCase()
-      .replace(/\s+/g, " ")
-      .slice(0, 240) ?? "";
-    const isHtmlDocument =
-      meta?.fromDescript === true ||
-      /\.html?(?:$|[?#])/i.test(item.href ?? "") ||
-      /\.html?$/i.test(typeof meta?.fileName === "string" ? meta.fileName : "");
-    // Descript used to create a plain Thought mirror before its uploaded HTML
-    // record was recovered. Give both records the same content identity so a
-    // chapter appears once, while retaining the richer HTML-backed record.
-    const descriptContentKey =
-      normalizedTitle && normalizedBodyPrefix &&
-      (isHtmlDocument || (item.kind === "board_drop" && normalizedBodyPrefix.length >= 120))
-        ? `descript-content:${ownerKey}:${normalizedTitle}:${normalizedBodyPrefix}`
-        : "";
-    const imageKey = item.image_url ? `image:${item.image_url}` : "";
-    const titleBodyKey =
-      titleKey && bodyKey ? `${titleKey}:${bodyKey}` : titleKey || bodyKey;
-    const generatedCaptionKey =
-      titleKey && /^New .+ drop (added to Board|from .+)\.?$/i.test(item.body ?? "")
-        ? `generated:${item.kind}:${item.title?.trim().toLowerCase()}`
-        : "";
-    const isRecoveredMirror = /^New .+ drop from .+/i.test(item.body ?? "");
-    const hasStrongIdentity = Boolean(dropId || roomDropKey || hrefKey || imageKey || storageKey);
-    const pushKey = isPushed
-      ? `push:${meta?.originalDropId || item.id}:${meta?.pushedByUserId || ""}`
-      : "";
-    const itemAliases = isRecipientActivity
-      ? [`recipient:${item.id}`]
-      : isPushed
-      ? [pushKey || item.id]
-      : [
-          dropId,
-          roomDropKey,
-          projectNotebookKey,
-          storageKey,
-          hrefKey,
-          imageKey,
-          descriptContentKey,
-          isProjectDrop ? titleBodyKey : "",
-          !dropId && !hrefKey && !imageKey && !storageKey ? titleBodyKey : "",
-        ].filter(Boolean);
-    const weakAliases = [generatedCaptionKey].filter(Boolean);
-    const matchableAliases =
-      isRecipientActivity
-        ? itemAliases
-        : isPushed
-        ? itemAliases
-        : hasStrongIdentity && !isRecoveredMirror
-        ? itemAliases
-        : [...itemAliases, ...weakAliases];
-    const matchedAlias = matchableAliases.find((alias) => aliases.has(alias));
-    const key = matchedAlias
-      ? aliases.get(matchedAlias)!
-      : isRecipientActivity
-        ? itemAliases[0]
-        : isPushed
-        ? pushKey || item.id
-        : dropId || roomDropKey || storageKey || hrefKey || imageKey || item.id || titleBodyKey;
-    const previous = map.get(key);
-    if (!previous) {
-      map.set(key, item);
-      for (const alias of itemAliases) aliases.set(alias, key);
-      for (const alias of weakAliases) {
-        if (!aliases.has(alias)) aliases.set(alias, key);
-      }
-      continue;
-    }
-
-    const previousScore =
-      (previous.image_url ? 2 : 0) + (previous.href ? 1 : 0) + (previous.meta ? 1 : 0);
-    const nextScore = (item.image_url ? 2 : 0) + (item.href ? 1 : 0) + (item.meta ? 1 : 0);
-    const preferNext =
-      nextScore > previousScore ||
-      (nextScore === previousScore &&
-        activitySortTime(item) > activitySortTime(previous));
-    map.set(
-      key,
-      preferNext
-        ? mergeActivityRecords(item, previous)
-        : mergeActivityRecords(previous, item)
-    );
-    for (const alias of itemAliases) aliases.set(alias, key);
-    for (const alias of weakAliases) {
-      if (!aliases.has(alias)) aliases.set(alias, key);
-    }
-  }
-
-  return Array.from(map.values()).sort((a, b) => activitySortTime(b) - activitySortTime(a));
 }
 
 export function projectToActivity(project: ReturnType<typeof resolveBoardProjects>[number]): BoardActivity {
@@ -424,7 +210,11 @@ export function notebookRoomDropActivities(): BoardActivity[] {
 }
 
 export function hydrateFeedWithNotebook(items: BoardActivity[]): BoardActivity[] {
-  return dedupeActivity([...items.filter(Boolean), ...notebookRoomDropActivities()]);
+  return dedupeActivity([
+    ...items.filter(Boolean),
+    ...(readDrops().map(universalDropToActivity).filter(Boolean) as BoardActivity[]),
+    ...notebookRoomDropActivities(),
+  ]);
 }
 
 export function mergeActivityWithFeed(

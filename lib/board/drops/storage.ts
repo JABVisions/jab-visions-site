@@ -50,14 +50,11 @@ export type UniversalDrop = {
 export const DROPS_KEY = "jab_board_drops_v2";
 export const DROPS_UPDATED_EVENT = "board:drops:updated";
 
-export function readDrops(): UniversalDrop[] {
-  if (typeof window === "undefined") return [];
+function parseStoredDrops(raw: string | null): UniversalDrop[] {
+  if (!raw) return [];
   try {
-    const raw = window.localStorage.getItem(DROPS_KEY);
-    if (!raw) return [];
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
-
     return parsed
       .filter((x) => x && typeof x === "object")
       .map((x: any) => ({
@@ -118,6 +115,111 @@ export function readDrops(): UniversalDrop[] {
   }
 }
 
+function dropFamily(drop: UniversalDrop): "streaming_music" | "stored_video" | "other" {
+  const origin = String(drop.origin || drop.meta?.origin || "").toLowerCase();
+  if (origin === "project_room" || drop.mediaKind === "video" || drop.type === "video") {
+    return "stored_video";
+  }
+  const href = String(drop.url || drop.embedUrl || drop.mediaUrl || "").toLowerCase();
+  if (
+    drop.type === "music" ||
+    href.includes("soundcloud.com") ||
+    href.includes("spotify.com") ||
+    href.includes("music.apple.com")
+  ) {
+    return "streaming_music";
+  }
+  return "other";
+}
+
+function dropFamiliesCompatible(left: UniversalDrop, right: UniversalDrop) {
+  const a = dropFamily(left);
+  const b = dropFamily(right);
+  if (a === b) return true;
+  if (a === "streaming_music" || b === "streaming_music") return false;
+  if (a === "stored_video" || b === "stored_video") return a === "other" || b === "other";
+  return true;
+}
+
+function preferMusicField(preferred?: string, fallback?: string) {
+  const a = String(preferred || "");
+  const b = String(fallback || "");
+  if (/soundcloud\.com|spotify\.com|music\.apple\.com/i.test(a)) return a || undefined;
+  if (/soundcloud\.com|spotify\.com|music\.apple\.com/i.test(b)) return b || undefined;
+  return preferred || fallback;
+}
+
+function mergeUniversalDropCopies(previous: UniversalDrop, next: UniversalDrop): UniversalDrop {
+  return {
+    ...previous,
+    ...next,
+    url: preferMusicField(next.url, previous.url),
+    embedUrl: preferMusicField(next.embedUrl, previous.embedUrl),
+    mediaUrl: preferMusicField(next.mediaUrl, previous.mediaUrl),
+    imageUrl: next.imageUrl || previous.imageUrl,
+    meta: {
+      ...(previous.meta && typeof previous.meta === "object" ? previous.meta : {}),
+      ...(next.meta && typeof next.meta === "object" ? next.meta : {}),
+      embedUrl:
+        preferMusicField(
+          next.meta?.embedUrl,
+          previous.meta?.embedUrl
+        ) || next.embedUrl || previous.embedUrl,
+    },
+  };
+}
+
+export function mergeUniversalDrops(items: UniversalDrop[]): UniversalDrop[] {
+  const map = new Map<string, UniversalDrop>();
+  for (const item of items) {
+    const id = String(item.id || "").trim();
+    if (!id) continue;
+    const family = dropFamily(item);
+    const key = `${family}:${id}`;
+    const previous = map.get(key);
+    if (!previous) {
+      const clash = [...map.values()].find(
+        (existing) => existing.id === id && !dropFamiliesCompatible(existing, item)
+      );
+      if (clash) {
+        map.set(key, item);
+        continue;
+      }
+      const sameId = [...map.entries()].find(([, existing]) => existing.id === id);
+      if (sameId && dropFamiliesCompatible(sameId[1], item)) {
+        map.set(sameId[0], mergeUniversalDropCopies(sameId[1], item));
+        continue;
+      }
+      map.set(key, item);
+      continue;
+    }
+    map.set(key, mergeUniversalDropCopies(previous, item));
+  }
+  return Array.from(map.values()).sort((a, b) => b.createdAt - a.createdAt);
+}
+
+export function readDrops(): UniversalDrop[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const collected: UniversalDrop[] = [];
+    const keys = new Set<string>([DROPS_KEY]);
+    try {
+      for (let i = 0; i < window.localStorage.length; i += 1) {
+        const key = window.localStorage.key(i);
+        if (key === DROPS_KEY || key?.startsWith(`${DROPS_KEY}:`)) keys.add(key);
+      }
+    } catch {
+      // keep the unscoped key
+    }
+    for (const key of keys) {
+      collected.push(...parseStoredDrops(window.localStorage.getItem(key)));
+    }
+    return mergeUniversalDrops(collected);
+  } catch {
+    return [];
+  }
+}
+
 export function writeDrops(drops: UniversalDrop[]) {
   if (typeof window === "undefined") return;
   try {
@@ -135,8 +237,7 @@ export function writeDrops(drops: UniversalDrop[]) {
 
 export function pushDrop(drop: UniversalDrop) {
   const current = readDrops();
-  const next = [drop, ...current].slice(0, 250);
-  writeDrops(next);
+  writeDrops(mergeUniversalDrops([drop, ...current]));
 }
 
 export function removeDrops(matcher: (drop: UniversalDrop) => boolean) {

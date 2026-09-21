@@ -567,6 +567,30 @@ function dropDedupeKey(drop: DropItem) {
   return title ? `${drop.type}:${title}` : "";
 }
 
+function dropItemFamily(drop: DropItem): "streaming_music" | "stored_video" | "other" {
+  if (drop.mediaKind === "video" || (drop.storagePath && /\.(mp4|webm|mov|m4v)(\?|#|$)/i.test(drop.storagePath))) {
+    return "stored_video";
+  }
+  const href = String(drop.url || drop.embedUrl || drop.linkUrl || drop.mediaUrl || "").toLowerCase();
+  if (
+    drop.type === "Music" ||
+    href.includes("soundcloud.com") ||
+    href.includes("spotify.com") ||
+    href.includes("music.apple.com")
+  ) {
+    return "streaming_music";
+  }
+  return "other";
+}
+
+function dropFamiliesCompatible(left: DropItem, right: DropItem) {
+  const a = dropItemFamily(left);
+  const b = dropItemFamily(right);
+  if (a === b) return true;
+  if (a === "streaming_music" || b === "streaming_music") return false;
+  return true;
+}
+
 function dropCompletenessScore(drop: DropItem) {
   return (
     (drop.bucket && drop.storagePath ? 4 : 0) +
@@ -580,14 +604,19 @@ function mergeDropCopies(previous: DropItem, next: DropItem): DropItem {
   const richer =
     dropCompletenessScore(next) > dropCompletenessScore(previous) ? next : previous;
   const other = richer === next ? previous : next;
+  const preferMusic = (a?: string, b?: string) => {
+    if (a && /soundcloud\.com|spotify\.com|music\.apple\.com/i.test(a)) return a;
+    if (b && /soundcloud\.com|spotify\.com|music\.apple\.com/i.test(b)) return b;
+    return a || b;
+  };
   return {
     ...other,
     ...richer,
-    url: richer.url || other.url,
-    embedUrl: richer.embedUrl || other.embedUrl,
+    url: preferMusic(richer.url, other.url),
+    embedUrl: preferMusic(richer.embedUrl || undefined, other.embedUrl || undefined) ?? null,
     linkUrl: richer.linkUrl || other.linkUrl,
     hostLabel: richer.hostLabel || other.hostLabel,
-    mediaUrl: richer.mediaUrl || other.mediaUrl,
+    mediaUrl: preferMusic(richer.mediaUrl, other.mediaUrl),
     previewImage: richer.previewImage || other.previewImage,
     previewImages: richer.previewImages || other.previewImages,
     bucket: richer.bucket || other.bucket,
@@ -604,6 +633,10 @@ function dedupeDropItems(items: DropItem[]) {
     const previous = map.get(key);
     if (!previous) {
       map.set(key, item);
+      continue;
+    }
+    if (!dropFamiliesCompatible(previous, item)) {
+      map.set(`${key}#${item.id || "keep"}`, item);
       continue;
     }
     map.set(key, mergeDropCopies(previous, item));

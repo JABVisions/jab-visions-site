@@ -27,7 +27,7 @@ import {
   type BoardActivity,
   type BoardActivityKind,
 } from "@/lib/board/activity";
-import { dedupeActivity, mergeActivityWithFeed, hydrateFeedWithNotebook } from "@/lib/board/feedActivity";
+import { dedupeActivity, mergeActivityWithFeed } from "@/lib/board/feedActivity";
 import {
   BOARD_PROJECTS_UPDATED_EVENT,
   syncResolvedProjectsToStorage,
@@ -313,12 +313,11 @@ export default function HomeBoardFeedPage() {
         if (!alive) return;
 
         const cleaned = Array.isArray(data) ? data : [];
-        // A successful API response is the shared, cross-device source of truth.
-        // Device-local caches are used only by syncFromLocal when this request fails.
-        const nextItems = hydrateFeedWithNotebook(
+        const nextItems = mergeActivityWithFeed(
           (cleaned.length ? cleaned : visibleFallbackItems).filter(
-          (item) => !isHiddenPrivateDrop(item, viewerUserId)
-          )
+            (item) => !isHiddenPrivateDrop(item, viewerUserId)
+          ),
+          readFeed()
         );
 
         setItems(nextItems);
@@ -496,7 +495,7 @@ export default function HomeBoardFeedPage() {
 
           const cleaned = Array.isArray(next) ? next : [];
 
-          setItems((prev) => hydrateFeedWithNotebook([...prev, ...cleaned]));
+          setItems((prev) => mergeActivityWithFeed([...prev, ...cleaned], readFeed()));
           setHasMore(cleaned.length === PAGE_SIZE);
           setOffset((p) => p + cleaned.length);
         } finally {
