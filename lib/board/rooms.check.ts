@@ -1,4 +1,5 @@
 import {
+  activityFromRoomShare,
   BOARD_ROOM_CATALOG,
   canGoLive,
   canStartCall,
@@ -93,11 +94,16 @@ assert(
   "drop-share copy names the room"
 );
 assert(
+  describeRoomActivity("room_drop_shared", "Maya", "Music", { dropTitle: "IMG_1234.MOV" }) ===
+    "Maya shared a Drop in Music.",
+  "filename drop titles are not used in Activity Channel copy"
+);
+assert(
   describeRoomActivity("room_reply", "John", "JAB Comics", {
     conversationTitle: "Comic Character Design",
     dropTitle: "Rewritten scene",
-  }) === "John replied with a Drop in Comic Character Design.",
-  "conversation drop reply copy names the thread"
+  }) === "John replied with a Drop in Comic Character Design in JAB Comics.",
+  "conversation drop reply copy names the thread and the Forum Room"
 );
 
 const presence: RoomPresence[] = [
@@ -168,6 +174,50 @@ const feed = mergeRoomFeed({
 assert(feed.some((item) => item.kind === "drop_share"), "shared drops appear in the room feed");
 assert(feed.some((item) => item.kind === "live"), "live placeholder sessions appear in the room feed");
 assert(feed.some((item) => item.kind === "conversation"), "existing discussions remain a room component");
+
+const filenameShare: RoomDropShare = {
+  id: "share_file",
+  roomId: "music",
+  dropId: "drop_clip",
+  sharedBy: "user-1",
+  sharedByName: "John Andy",
+  snapshot: { title: "IMG_1234.MOV", type: "Media", mediaKind: "video", fileName: "IMG_1234.MOV" },
+  createdAt: new Date().toISOString(),
+  origin: "create",
+};
+const filenameActivity = activityFromRoomShare(filenameShare);
+assert(filenameActivity?.title === "Added a Drop to Music", "room feed headline names Music, not the file");
+assert(filenameActivity?.title?.includes("IMG_") === false, "filename is not used as the room feed title");
+assert(
+  filenameActivity?.body === "John Andy added a Drop to 🎧 Music.",
+  "room feed body names the author and Forum Room"
+);
+
+const conversationShareActivity = activityFromRoomShare({
+  id: "share_convo",
+  roomId: "jab-comics",
+  dropId: "drop_scene",
+  sharedBy: "user-1",
+  sharedByName: "John",
+  snapshot: {
+    title: "audio.m4a",
+    type: "Music",
+    mediaKind: "audio",
+    conversationTitle: "Comic Character Design",
+  },
+  createdAt: new Date().toISOString(),
+  origin: "conversation",
+  conversationId: "com1",
+});
+assert(
+  conversationShareActivity?.title === "Added a Drop to JAB Comics",
+  "conversation feed headline names the Forum Room"
+);
+assert(
+  conversationShareActivity?.body === "John replied with a Drop in Comic Character Design in JAB Comics.",
+  "conversation feed body names the thread and the Forum Room"
+);
+assert(conversationShareActivity?.title?.includes("audio") === false, "conversation feed title is not the audio filename");
 
 const staleSql = mapRoomRow({
   id: "those-ryderz",

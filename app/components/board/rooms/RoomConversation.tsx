@@ -83,7 +83,15 @@ export default function RoomConversation({
               <div className="text-[11px] font-black uppercase tracking-[0.18em] text-white/55">Replies</div>
               <div className="mt-4 space-y-3">
                 {thread.replies.length ? (
-                  thread.replies.map((reply) => <ConversationDropReply key={reply.id} reply={reply} />)
+                  thread.replies.map((reply) => (
+                    <ConversationDropReply
+                      key={reply.id}
+                      reply={reply}
+                      roomId={room.id}
+                      roomName={room.name}
+                      conversationTitle={thread.title}
+                    />
+                  ))
                 ) : (
                   <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4 text-sm text-white/55">
                     No replies yet. Be the first voice in this conversation.

@@ -31,6 +31,11 @@ import { readCurrentBoardIdentity } from "@/lib/board/currentProfile";
 import { supabaseBrowser } from "@/lib/supabase/browser";
 import type { DropDestination } from "@/lib/board/dropDestination";
 import { isForumRoomDestination, isProjectRoomDestination } from "@/lib/board/dropDestination";
+import {
+  copyFromDropDestination,
+  forumRoomDropItemTitle,
+  looksLikeMediaFileName,
+} from "@/lib/board/forumRoomFeedCopy";
 
 function dropTypeForFile(file: File): { type: DropType; mediaKind?: MediaKind; fromDescript?: boolean; fromDropbook?: boolean } {
   if (isDropbookSlideFile({ name: file.name, type: file.type })) {
@@ -103,6 +108,31 @@ async function persistDropToProfile(drop: DropItem, userId: string): Promise<boo
   }
 }
 
+function applyForumActivityCopy(
+  activity: ReturnType<typeof boardDropToActivity>,
+  destination: DropDestination | null | undefined,
+  actorName: string
+) {
+  const roomCopy = copyFromDropDestination(destination, { actorName });
+  const forumDestination = isForumRoomDestination(destination) ? destination : null;
+  if (roomCopy) {
+    activity.title = roomCopy.title;
+    activity.body = roomCopy.body;
+  }
+  activity.meta = {
+    ...(activity.meta || {}),
+    source: forumDestination ? "forum_room_studio" : "drop_studio",
+    destinationType: destination?.type || "feed",
+    roomId: forumDestination?.roomId || null,
+    roomName: forumDestination?.roomName || null,
+    roomIcon: forumDestination?.roomIcon || null,
+    conversationTitle:
+      forumDestination?.type === "room_conversation" ? forumDestination.conversationTitle || null : null,
+    conversationId: forumDestination?.type === "room_conversation" ? forumDestination.conversationId : null,
+  };
+  return activity;
+}
+
 function assertNotWorkBoard(destination: DropDestination | null | undefined) {
   if (isProjectRoomDestination(destination)) {
     throw new Error("Forum Room publish must not write a Project Room / Work Board Drop.");
@@ -134,9 +164,23 @@ export async function publishStudioFileDrop(input: {
   const mediaUrl = preferredCommitPlaybackUrl(uploaded) || uploaded.signedUrl || uploaded.publicUrl;
   const customizations = compactDropCustomizations(input.customizations);
   const typeLabel = kind.fromDropbook ? "Dropbook" : kind.type === "Media" ? "Vision" : kind.type;
+  const fileStem = input.file.name.replace(/\.[^.]+$/, "");
+  const roomCopy = copyFromDropDestination(input.destination, { actorName: identity.displayName });
+  const dropTitle =
+    input.title?.trim() && !looksLikeMediaFileName(input.title)
+      ? input.title.trim()
+      : roomCopy
+        ? forumRoomDropItemTitle({
+            roomId: isForumRoomDestination(input.destination) ? input.destination.roomId : null,
+            roomName: isForumRoomDestination(input.destination) ? input.destination.roomName : null,
+            fallback: `${typeLabel} Drop`,
+          })
+        : fileStem && !looksLikeMediaFileName(fileStem)
+          ? fileStem
+          : `${typeLabel} Drop`;
   const drop: DropItem = {
     id,
-    title: input.title?.trim() || input.file.name.replace(/\.[^.]+$/, "") || `${typeLabel} Drop`,
+    title: dropTitle,
     type: kind.type,
     createdAt: Date.now(),
     bucket: uploaded.bucket,
@@ -159,21 +203,19 @@ export async function publishStudioFileDrop(input: {
     void persistDropToProfile(drop, userId);
   }
 
-  const activity = boardDropToActivity(drop, {
-    userId,
-    activityId: `room_drop_${drop.id}`,
-    author: {
-      displayName: identity.displayName,
-      username: identity.username,
-      avatarSrc: identity.avatar,
-    },
-  });
-  activity.meta = {
-    ...(activity.meta || {}),
-    source: isForumRoomDestination(input.destination) ? "forum_room_studio" : "drop_studio",
-    destinationType: input.destination?.type || "feed",
-    roomId: isForumRoomDestination(input.destination) ? input.destination.roomId : null,
-  };
+  const activity = applyForumActivityCopy(
+    boardDropToActivity(drop, {
+      userId,
+      activityId: `room_drop_${drop.id}`,
+      author: {
+        displayName: identity.displayName,
+        username: identity.username,
+        avatarSrc: identity.avatar,
+      },
+    }),
+    input.destination,
+    identity.displayName
+  );
 
   try {
     const sb = supabaseBrowser();
@@ -195,10 +237,11 @@ export async function publishStudioFileDrop(input: {
     type: "drop_created",
     dropId: drop.id,
     userId,
-    title: drop.title,
+    title: activity.title || drop.title,
     meta: {
-      source: "forum_room_studio",
+      source: isForumRoomDestination(input.destination) ? "forum_room_studio" : "drop_studio",
       destinationType: input.destination?.type || "feed",
+      roomId: isForumRoomDestination(input.destination) ? input.destination.roomId : null,
     },
   });
 
@@ -213,9 +256,16 @@ export async function publishStudioLinkDrop(input: {
   const identity = readCurrentBoardIdentity();
   const userId = (await getCurrentUserId()) || identity.id || null;
   const type = dropTypeForLink(input.link.kind);
+  const roomCopy = copyFromDropDestination(input.destination);
   const drop: DropItem = {
     id: safeId(),
-    title: input.link.title || `${type} Drop`,
+    title: roomCopy
+      ? forumRoomDropItemTitle({
+          roomId: isForumRoomDestination(input.destination) ? input.destination.roomId : null,
+          roomName: isForumRoomDestination(input.destination) ? input.destination.roomName : null,
+          fallback: input.link.title || `${type} Drop`,
+        })
+      : input.link.title || `${type} Drop`,
     type,
     createdAt: Date.now(),
     url: input.link.url,
@@ -234,21 +284,19 @@ export async function publishStudioLinkDrop(input: {
     void persistDropToProfile(drop, userId);
   }
 
-  const activity = boardDropToActivity(drop, {
-    userId,
-    activityId: `room_drop_${drop.id}`,
-    author: {
-      displayName: identity.displayName,
-      username: identity.username,
-      avatarSrc: identity.avatar,
-    },
-  });
-  activity.meta = {
-    ...(activity.meta || {}),
-    source: isForumRoomDestination(input.destination) ? "forum_room_studio" : "drop_studio",
-    destinationType: input.destination?.type || "feed",
-    roomId: isForumRoomDestination(input.destination) ? input.destination.roomId : null,
-  };
+  const activity = applyForumActivityCopy(
+    boardDropToActivity(drop, {
+      userId,
+      activityId: `room_drop_${drop.id}`,
+      author: {
+        displayName: identity.displayName,
+        username: identity.username,
+        avatarSrc: identity.avatar,
+      },
+    }),
+    input.destination,
+    identity.displayName
+  );
   try {
     const sb = supabaseBrowser();
     const result = await createActivity(sb, {
@@ -268,8 +316,12 @@ export async function publishStudioLinkDrop(input: {
     type: "drop_created",
     dropId: drop.id,
     userId,
-    title: drop.title,
-    meta: { source: "forum_room_studio", destinationType: input.destination?.type || "feed" },
+    title: activity.title || drop.title,
+    meta: {
+      source: isForumRoomDestination(input.destination) ? "forum_room_studio" : "drop_studio",
+      destinationType: input.destination?.type || "feed",
+      roomId: isForumRoomDestination(input.destination) ? input.destination.roomId : null,
+    },
   });
   return drop;
 }

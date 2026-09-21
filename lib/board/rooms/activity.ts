@@ -1,6 +1,7 @@
 import type { ActivityType } from "@/lib/board/notifications";
 import { isPresenceEvent } from "./presence";
 import type { RoomActivityEventType } from "./types";
+import { looksLikeMediaFileName } from "@/lib/board/forumRoomFeedCopy";
 
 export const ROOM_ACTIVITY_TYPES: RoomActivityEventType[] = [
   "room_joined",
@@ -37,24 +38,22 @@ export function describeRoomActivity(
   roomName: string,
   extras?: { dropTitle?: string; conversationTitle?: string }
 ) {
+  const namedDrop =
+    extras?.dropTitle && !looksLikeMediaFileName(extras.dropTitle) ? extras.dropTitle : "";
   if (type === "room_joined") return `${actorName} joined ${roomName}.`;
   if (type === "room_drop_shared") {
     if (extras?.conversationTitle) {
-      return extras.dropTitle
-        ? `${actorName} replied with ${extras.dropTitle} in ${extras.conversationTitle}.`
-        : `${actorName} replied with a Drop in ${extras.conversationTitle}.`;
+      return `${actorName} replied with a Drop in ${extras.conversationTitle} in ${roomName}.`;
     }
-    return extras?.dropTitle
-      ? `${actorName} shared ${extras.dropTitle} in ${roomName}.`
+    return namedDrop
+      ? `${actorName} shared ${namedDrop} in ${roomName}.`
       : `${actorName} shared a Drop in ${roomName}.`;
   }
   if (type === "room_reply") {
-    if (extras?.conversationTitle && extras?.dropTitle) {
-      return `${actorName} replied with a Drop in ${extras.conversationTitle}.`;
+    if (extras?.conversationTitle) {
+      return `${actorName} replied with a Drop in ${extras.conversationTitle} in ${roomName}.`;
     }
-    return extras?.conversationTitle
-      ? `${actorName} replied in ${extras.conversationTitle}.`
-      : `${actorName} replied in ${roomName}.`;
+    return `${actorName} replied in ${roomName}.`;
   }
   if (type === "room_mention") return `${actorName} mentioned you in ${roomName}.`;
   if (type === "room_call_started") return `A Room Call started in ${roomName}.`;

@@ -92,8 +92,23 @@ const pointer = conversationDropPointerItem({
 assert(pointer?.kind === "reply", "conversation drop appears as a reply pointer");
 assert(pointer?.share === undefined, "pointer does not duplicate the Drop card");
 assert(
-  pointer?.body === "John shared a Drop in Comic Character Design",
-  "pointer names the conversation instead of cloning media"
+  pointer?.body === "John replied with a Drop in Comic Character Design in JAB Comics.",
+  "pointer names the conversation and the Forum Room instead of cloning media"
+);
+assert(
+  pointer?.title === "Drop in Comic Character Design",
+  "conversation pointer title is the thread, not a filename"
+);
+
+const filenameReply = conversationReplyFromDrop({
+  id: "sig_file",
+  threadId: "com1",
+  drop: { ...drop, id: "drop_clip", title: "IMG_1234.MOV" },
+  authorName: "John",
+});
+assert(
+  filenameReply.body === "Replied with a Drop",
+  "conversation reply body does not interpolate a filename"
 );
 
 const feed = mergeRoomFeed({

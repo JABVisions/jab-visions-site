@@ -518,7 +518,13 @@ export default function RoomInterior({ roomId }: { roomId: string }) {
       sharedByName: identity.displayName,
       origin,
     });
-    share.snapshot = { ...dropSnapshotFromItem(drop), authorName: identity.displayName };
+    share.snapshot = {
+      ...dropSnapshotFromItem(drop),
+      authorName: identity.displayName,
+      roomId: currentRoom.id,
+      roomName: currentRoom.name,
+      roomIcon: currentRoom.icon,
+    };
     upsertShare(share);
     setShares(readShares().filter((row) => resolveRoomId(row.roomId) === currentRoom.id));
     setShareOpen(false);
@@ -544,6 +550,14 @@ export default function RoomInterior({ roomId }: { roomId: string }) {
       authorName: identity.displayName,
       authorAvatar: identity.avatarUrl,
     });
+    reply.dropSnapshot = {
+      ...(reply.dropSnapshot || dropSnapshotFromItem(drop)),
+      authorName: identity.displayName,
+      roomId: currentRoom.id,
+      roomName: currentRoom.name,
+      roomIcon: currentRoom.icon,
+      conversationTitle: thread?.title || "",
+    };
     const next = current.map((item) =>
       item.id === threadId ? { ...item, replies: [reply, ...item.replies] } : item
     );
