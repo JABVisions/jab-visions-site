@@ -472,7 +472,7 @@ export default function RoomInterior({
 
   const currentRoom = room;
 
-  function persistMembership(action: "join" | "follow" | "leave") {
+  async function persistMembership(action: "join" | "follow" | "leave") {
     const nextRole: RoomRole = action === "follow" ? "viewer" : "member";
     upsertMembership({
       roomId: currentRoom.id,
@@ -487,14 +487,22 @@ export default function RoomInterior({
     setJoined(action === "join");
     setFollowing(action !== "leave");
     setRole(action === "join" ? "member" : role);
-    void fetch(`/api/board/rooms/${currentRoom.id}/membership`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ action, displayName: identity.displayName }),
-    });
+    let ok = true;
+    try {
+      const response = await fetch(`/api/board/rooms/${currentRoom.id}/membership`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action, displayName: identity.displayName }),
+      });
+      const payload = await response.json().catch(() => null);
+      ok = Boolean(response.ok && payload?.ok);
+    } catch {
+      ok = false;
+    }
     if (action === "join" && !hasEmittedJoinActivity(currentRoom.id, userId) && shouldEmitRoomActivity("room_joined")) {
       markJoinActivity(currentRoom.id, userId);
     }
+    return ok;
   }
 
   function createConversation() {
@@ -704,8 +712,12 @@ export default function RoomInterior({
   }
 
   async function startSession(kind: "call" | "live") {
-    if (!ensureJoined()) return;
-    const startedAt = new Date().toISOString();
+    if (!permissions.join && !permissions.post && !joined) return;
+    const membershipOk = await persistMembership("join");
+    if (!membershipOk) {
+      flashSuccess("Could not confirm your membership in this Room. Try again.");
+      return;
+    }
     try {
       const response = await fetch(`/api/board/rooms/${currentRoom.id}/sessions`, {
         method: "POST",
@@ -807,6 +819,7 @@ export default function RoomInterior({
         onRemoveShare={removeDropShare}
         userId={userId}
         canModerate={permissions.moderate}
+        people={people}
       />
 
       <RoomShareDrop open={shareOpen} onClose={() => setShareOpen(false)} onShare={(drop) => shareDrop(drop, "share")} />

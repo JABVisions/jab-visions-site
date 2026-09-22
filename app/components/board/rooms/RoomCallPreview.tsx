@@ -2,7 +2,6 @@
 
 import React from "react";
 import type { Room, RoomCallSession } from "@/lib/board/rooms";
-import RoomMediaSession from "./RoomMediaSession";
 
 export default function RoomCallPreview({
   room,
@@ -28,12 +27,11 @@ export default function RoomCallPreview({
           Room Call
         </div>
         <p className="mt-3 text-sm text-white/70">
-          Small-group call is open. Joined Room members can connect with camera and microphone.
+          Small-group call is open. Joined Room members can connect with camera and microphone in the Call Drop below.
         </p>
         <div className="mt-3 text-xs text-white/45">
           {session.participantIds.length || 1} in the call · provider {session.provider}
         </div>
-        {session.provider === "livekit" ? <RoomMediaSession roomId={room.id} session={session} /> : null}
       </div>
     </section>
   );

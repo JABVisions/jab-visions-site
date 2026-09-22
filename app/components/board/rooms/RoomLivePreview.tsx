@@ -2,7 +2,6 @@
 
 import React from "react";
 import type { Room, RoomLiveSession } from "@/lib/board/rooms";
-import RoomMediaSession from "./RoomMediaSession";
 
 export default function RoomLivePreview({
   room,
@@ -32,13 +31,7 @@ export default function RoomLivePreview({
           </div>
           <span className="text-xs text-white/55">{session.viewerCount} watching</span>
         </div>
-        {session.provider === "livekit" ? (
-          <RoomMediaSession roomId={room.id} session={session} />
-        ) : (
-          <div className="mt-4 grid min-h-[160px] place-items-center rounded-[1.2rem] border border-white/10 bg-black/50">
-            <div className="px-6 text-center text-sm font-semibold text-white/85">Preparing broadcast stage…</div>
-          </div>
-        )}
+        <p className="mt-3 text-sm text-white/70">Watch and speak in the Live Drop below.</p>
       </div>
     </section>
   );

@@ -1,11 +1,12 @@
 "use client";
 
 import React from "react";
-import type { RoomFeedItem } from "@/lib/board/rooms";
+import type { RoomFeedItem, RoomPresence as RoomPresencePerson } from "@/lib/board/rooms";
 import { canRemoveFromRoom } from "@/lib/board/forumRoomDrop";
 import { pickBoardDisplayName } from "@/lib/board/boardAuthor";
 import RoomDropCard from "./RoomDropCard";
 import RoomMemberOrb from "./RoomMemberOrb";
+import RoomSessionDropCard from "./RoomSessionDropCard";
 
 function clsx(...parts: Array<string | false | null | undefined>) {
   return parts.filter(Boolean).join(" ");
@@ -28,6 +29,7 @@ export default function RoomActivityFeed({
   onRemoveShare,
   userId,
   canModerate,
+  people,
 }: {
   items: RoomFeedItem[];
   color?: string;
@@ -35,6 +37,7 @@ export default function RoomActivityFeed({
   onRemoveShare?: (dropId: string) => void;
   userId?: string | null;
   canModerate?: boolean;
+  people?: RoomPresencePerson[];
 }) {
   if (!items.length) {
     return (
@@ -63,6 +66,10 @@ export default function RoomActivityFeed({
               })}
             />
           );
+        }
+
+        if ((item.kind === "live" || item.kind === "call") && item.session) {
+          return <RoomSessionDropCard key={item.id} session={item.session} people={people} />;
         }
 
         const conversationDropPointer = item.kind === "reply" && item.id.startsWith("conversation_drop:");
