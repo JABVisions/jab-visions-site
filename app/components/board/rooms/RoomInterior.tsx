@@ -17,11 +17,14 @@ import {
   conversationsForRoom,
   type Room,
   type RoomCallSession,
+  type RoomCallProvider,
   type RoomConversation as RoomConversationRecord,
   type RoomDropShare,
   type RoomLiveSession,
   type RoomPresence as RoomPresencePerson,
   type RoomRole,
+  type RoomSession,
+  type RoomSessionStatus,
   ROOM_PRESENCE_HEARTBEAT_MS,
 } from "@/lib/board/rooms";
 import {
@@ -68,6 +71,34 @@ import {
 
 function uid(prefix: string) {
   return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function sessionFromApiRow(
+  row: Record<string, unknown>,
+  roomId: string,
+  viewerCount = 1
+): RoomCallSession | RoomLiveSession | null {
+  const kind = row.kind === "live" ? "live" : row.kind === "call" ? "call" : null;
+  const id = typeof row.id === "string" ? row.id : "";
+  if (!kind || !id) return null;
+  const common = {
+    id,
+    roomId,
+    provider: (row.provider === "livekit" ? "livekit" : "none") as RoomCallProvider,
+    status: (row.status === "starting" ? "starting" : "live") as RoomSessionStatus,
+    startedBy: typeof row.started_by === "string" ? row.started_by : null,
+    startedAt: typeof row.started_at === "string" ? row.started_at : null,
+    endedAt: typeof row.ended_at === "string" ? row.ended_at : null,
+  };
+  return kind === "call"
+    ? { ...common, kind, participantIds: common.startedBy ? [common.startedBy] : [] }
+    : {
+        ...common,
+        kind,
+        mode: row.mode === "STAGE" ? "STAGE" : "LIVE",
+        speakerIds: common.startedBy ? [common.startedBy] : [],
+        viewerCount,
+      };
 }
 
 function readLocalIdentity() {
@@ -215,6 +246,13 @@ export default function RoomInterior({
               .map((row: Record<string, unknown>) => presenceFromApiRow(row, resolved))
               .filter((row: ReturnType<typeof presenceFromApiRow>): row is NonNullable<typeof row> => Boolean(row))
           );
+        }
+        if (Array.isArray(payload.sessions)) {
+          const sessions: RoomSession[] = payload.sessions
+            .map((row: Record<string, unknown>) => sessionFromApiRow(row, resolved, payload.presence?.length || 1))
+            .filter((session: RoomSession | null): session is RoomSession => Boolean(session));
+          setCall((sessions.find((session) => session.kind === "call") as RoomCallSession | undefined) || null);
+          setLive((sessions.find((session) => session.kind === "live") as RoomLiveSession | undefined) || null);
         }
       })
       .catch(() => undefined);
@@ -665,46 +703,30 @@ export default function RoomInterior({
     });
   }
 
-  function startPlaceholder(kind: "call" | "live") {
+  async function startSession(kind: "call" | "live") {
+    if (!ensureJoined()) return;
     const startedAt = new Date().toISOString();
-    if (kind === "call") {
-      const session: RoomCallSession = {
-        id: uid("call"),
-        roomId: currentRoom.id,
-        kind: "call",
-        provider: "none",
-        status: "live",
-        startedBy: userId,
-        startedAt,
-        endedAt: null,
-        participantIds: [userId],
-      };
-      writeSessions([session, ...readSessions().filter((row) => row.roomId !== currentRoom.id || row.kind !== "call")]);
-      setCall(session);
-      setRoom({ ...currentRoom, state: "ROOM" });
-    } else {
-      const session: RoomLiveSession = {
-        id: uid("live"),
-        roomId: currentRoom.id,
-        kind: "live",
-        provider: "none",
-        status: "live",
-        mode: "LIVE",
-        startedBy: userId,
-        startedAt,
-        endedAt: null,
-        speakerIds: [userId],
-        viewerCount: Math.max(1, people.length),
-      };
-      writeSessions([session, ...readSessions().filter((row) => row.roomId !== currentRoom.id || row.kind !== "live")]);
-      setLive(session);
-      setRoom({ ...currentRoom, state: "LIVE" });
+    try {
+      const response = await fetch(`/api/board/rooms/${currentRoom.id}/sessions`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ kind, displayName: identity.displayName }),
+      });
+      const payload = await response.json();
+      if (!response.ok || !payload?.session) throw new Error(payload?.message || "Could not start this session.");
+      const session = sessionFromApiRow(payload.session, currentRoom.id, Math.max(1, people.length));
+      if (!session) throw new Error("The session response was invalid.");
+      writeSessions([session, ...readSessions().filter((row) => row.roomId !== currentRoom.id || row.kind !== kind)]);
+      if (session.kind === "call") {
+        setCall(session);
+        setRoom({ ...currentRoom, state: "ROOM" });
+      } else {
+        setLive(session);
+        setRoom({ ...currentRoom, state: "LIVE" });
+      }
+    } catch (error) {
+      flashSuccess(error instanceof Error ? error.message : "Could not start this session.");
     }
-    void fetch(`/api/board/rooms/${currentRoom.id}/sessions`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ kind, displayName: identity.displayName }),
-    });
   }
 
   return (
@@ -717,8 +739,8 @@ export default function RoomInterior({
         permissions={permissions}
         onJoin={() => persistMembership(joined ? "leave" : "join")}
         onFollow={() => persistMembership(following ? "leave" : "follow")}
-        onStartCall={() => startPlaceholder("call")}
-        onGoLive={() => startPlaceholder("live")}
+        onStartCall={() => void startSession("call")}
+        onGoLive={() => void startSession("live")}
       />
 
       <RoomLivePreview room={room} session={live} />
