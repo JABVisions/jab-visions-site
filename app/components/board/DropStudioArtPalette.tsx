@@ -9,8 +9,9 @@
 // pointer strokes onto the ACTIVE layer's own canvas and (b) stay visually in
 // sync with whatever `layers` it's handed.
 
-import { useEffect, useRef, useState, type RefObject } from "react";
+import { useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
+import { Layers3 } from "lucide-react";
 import ArtPaletteTools, { type ArtBrushMode } from "./ArtPaletteTools";
 import styles from "./DropStudio.module.css";
 import type { DropStudioArtLayer } from "@/lib/board/dropCustomizations";
@@ -35,6 +36,9 @@ export default function DropStudioArtPalette({
   onActiveLayerChange,
   onLayersChange,
   onNewLayerAbove,
+  layersOpen,
+  onToggleLayers,
+  layerPanel,
 }: {
   hostRef: RefObject<HTMLDivElement | null>;
   /** Ordered bottom → top. Source of truth lives in the parent's DropCustomization. */
@@ -45,6 +49,9 @@ export default function DropStudioArtPalette({
   onLayersChange: (layers: DropStudioArtLayer[]) => void;
   /** "New layer for blend" — non-destructive branch for the Blend Brush. */
   onNewLayerAbove: () => void;
+  layersOpen: boolean;
+  onToggleLayers: () => void;
+  layerPanel: ReactNode;
 }) {
   const stageCanvasRef = useRef<HTMLCanvasElement>(null);
   const stageCtxRef = useRef<CanvasRenderingContext2D | null>(null);
@@ -516,6 +523,15 @@ export default function DropStudioArtPalette({
           {activeMeta ? <span className={styles.inlineArtActiveLayer}>· {activeMeta.name}</span> : null}
           {activeMeta?.locked ? <span className={styles.inlineArtLockedTag}>locked</span> : null}
         </div>
+        <button
+          type="button"
+          className={`${styles.artLayerToggle} ${layersOpen ? styles.artLayerToggleActive : ""}`}
+          aria-expanded={layersOpen}
+          onClick={onToggleLayers}
+        >
+          <Layers3 aria-hidden size={15} strokeWidth={2.2} />
+          Layers
+        </button>
         {brushMode === "blend" && activeHasContent ? (
           <div className={styles.blendLayerChoice}>
             <span>Blending existing art on “{activeMeta?.name}.”</span>
@@ -559,6 +575,7 @@ export default function DropStudioArtPalette({
           onClear={clearActiveLayer}
           onSave={commitActiveLayer}
         />
+        {layersOpen ? <div className={styles.artLayersTray}>{layerPanel}</div> : null}
       </div>
     </>
   );

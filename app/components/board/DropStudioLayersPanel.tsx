@@ -6,6 +6,7 @@
 // opacity — a compact chip list, not a Photoshop sidebar.
 
 import { useEffect, useRef, useState } from "react";
+import { Eye, EyeOff, GripVertical, Lock, LockOpen, Plus } from "lucide-react";
 import styles from "./DropStudio.module.css";
 
 export type LayerRowKind = "art" | "text" | "sticker";
@@ -22,10 +23,8 @@ export type LayerRow = {
   name: string;
   visible: boolean;
   locked: boolean;
-  opacity: number;
   thumb: LayerRowThumb;
   isActive: boolean;
-  canMergeDown: boolean;
 };
 
 function kindLabel(kind: LayerRowKind) {
@@ -53,13 +52,8 @@ export default function DropStudioLayersPanel({
   onRename,
   onToggleVisible,
   onToggleLock,
-  onOpacityChange,
-  onDuplicate,
-  onDelete,
-  onMergeDown,
   onReorder,
   onNewArtLayer,
-  onFlattenArt,
 }: {
   /** Bottom → top. */
   rows: LayerRow[];
@@ -67,16 +61,12 @@ export default function DropStudioLayersPanel({
   onRename: (id: string, name: string) => void;
   onToggleVisible: (id: string) => void;
   onToggleLock: (id: string) => void;
-  onOpacityChange: (id: string, opacity: number) => void;
-  onDuplicate: (id: string) => void;
-  onDelete: (id: string) => void;
-  onMergeDown: (id: string) => void;
   /** Final commit only — a full id order, bottom → top. */
   onReorder: (orderedIds: string[]) => void;
   onNewArtLayer: () => void;
-  onFlattenArt: () => void;
 }) {
   const [order, setOrder] = useState<string[]>(() => rows.map((r) => r.id));
+  const orderRef = useRef(order);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [draftName, setDraftName] = useState("");
   const draggingIdRef = useRef<string | null>(null);
@@ -86,23 +76,28 @@ export default function DropStudioLayersPanel({
 
   useEffect(() => {
     if (draggingIdRef.current) return; // don't fight an in-flight drag
-    setOrder(rows.map((r) => r.id));
+    const nextOrder = rows.map((r) => r.id);
+    orderRef.current = nextOrder;
+    setOrder(nextOrder);
   }, [rows]);
 
   const byId = new Map(rows.map((r) => [r.id, r]));
   // Render top → bottom (most-on-top first) so the list visually matches the stack.
   const displayOrder = [...order].reverse();
-  const artCount = rows.filter((r) => r.kind === "art").length;
-
   function startDrag(id: string) {
     draggingIdRef.current = id;
     setDragId(id);
   }
 
   function endDrag() {
-    if (draggingIdRef.current) onReorder(order);
     draggingIdRef.current = null;
     setDragId(null);
+  }
+
+  function updateOrder(nextOrder: string[]) {
+    orderRef.current = nextOrder;
+    setOrder(nextOrder);
+    onReorder(nextOrder);
   }
 
   function pointerMoveWhileDragging(clientY: number) {
@@ -124,31 +119,26 @@ export default function DropStudioLayersPanel({
     const targetId = entries[targetTopToBottomIndex].rowId;
     if (targetId === id) return;
 
-    setOrder((current) => {
-      const from = current.indexOf(id);
-      // displayOrder is reversed (top-first); convert to bottom-up index.
-      const to = current.indexOf(targetId);
-      if (from === -1 || to === -1 || from === to) return current;
-      const next = [...current];
-      next.splice(from, 1);
-      next.splice(to, 0, id);
-      return next;
-    });
+    const current = orderRef.current;
+    const from = current.indexOf(id);
+    // displayOrder is reversed (top-first); convert to bottom-up index.
+    const to = current.indexOf(targetId);
+    if (from === -1 || to === -1 || from === to) return;
+    const next = [...current];
+    next.splice(from, 1);
+    next.splice(to, 0, id);
+    updateOrder(next);
   }
 
   return (
     <div className={styles.layersPanel}>
       <div className={styles.layersPanelHead}>
-        <span>Layers stack top → bottom. Drag the ⠿ handle to restack.</span>
+        <span>Top layers appear first. Drag to restack your artwork.</span>
         <div className={styles.layersPanelHeadActions}>
-          <button type="button" onClick={onNewArtLayer}>
-            + Layer
+          <button type="button" onClick={onNewArtLayer} aria-label="Add a new drawing layer">
+            <Plus aria-hidden size={14} strokeWidth={2.5} />
+            Layer
           </button>
-          {artCount > 1 ? (
-            <button type="button" onClick={onFlattenArt}>
-              Flatten Art
-            </button>
-          ) : null}
         </div>
       </div>
 
@@ -191,7 +181,7 @@ export default function DropStudioLayersPanel({
                 }}
                 onClick={(e) => e.stopPropagation()}
               >
-                ⠿
+                <GripVertical aria-hidden size={15} />
               </button>
 
               <div className={styles.layerThumbWrap}>
@@ -234,15 +224,6 @@ export default function DropStudioLayersPanel({
               </div>
 
               <div className={styles.layerControls} onClick={(e) => e.stopPropagation()}>
-                <input
-                  type="range"
-                  className={styles.opacitySlider}
-                  min={0}
-                  max={100}
-                  value={Math.round(row.opacity * 100)}
-                  aria-label={`${row.name} opacity`}
-                  onChange={(e) => onOpacityChange(row.id, Number(e.target.value) / 100)}
-                />
                 <button
                   type="button"
                   className={[styles.iconToggle, row.visible ? styles.iconToggleOn : ""].join(" ")}
@@ -250,7 +231,7 @@ export default function DropStudioLayersPanel({
                   aria-label={row.visible ? "Hide layer" : "Show layer"}
                   onClick={() => onToggleVisible(row.id)}
                 >
-                  {row.visible ? "👁" : "—"}
+                  {row.visible ? <Eye aria-hidden size={14} /> : <EyeOff aria-hidden size={14} />}
                 </button>
                 <button
                   type="button"
@@ -259,33 +240,7 @@ export default function DropStudioLayersPanel({
                   aria-label={row.locked ? "Unlock layer" : "Lock layer"}
                   onClick={() => onToggleLock(row.id)}
                 >
-                  {row.locked ? "🔒" : "🔓"}
-                </button>
-                <button
-                  type="button"
-                  className={styles.iconToggle}
-                  aria-label={`Duplicate ${row.name}`}
-                  onClick={() => onDuplicate(row.id)}
-                >
-                  ⧉
-                </button>
-                {row.kind === "art" && row.canMergeDown ? (
-                  <button
-                    type="button"
-                    className={styles.iconToggle}
-                    aria-label={`Merge ${row.name} down`}
-                    onClick={() => onMergeDown(row.id)}
-                  >
-                    ⇩
-                  </button>
-                ) : null}
-                <button
-                  type="button"
-                  className={`${styles.iconToggle} ${styles.iconToggleDanger}`}
-                  aria-label={`Delete ${row.name}`}
-                  onClick={() => onDelete(row.id)}
-                >
-                  ✕
+                  {row.locked ? <Lock aria-hidden size={14} /> : <LockOpen aria-hidden size={14} />}
                 </button>
               </div>
             </div>
