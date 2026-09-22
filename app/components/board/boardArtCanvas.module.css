@@ -131,6 +131,52 @@
   overflow: visible;
 }
 
+.artTools {
+  display: grid;
+  gap: 8px;
+}
+
+.layersToggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.42rem;
+  width: fit-content;
+  padding: 0.48rem 0.7rem;
+  border: 1px solid rgba(255, 157, 231, 0.46);
+  border-radius: 999px;
+  background:
+    radial-gradient(circle at top, rgba(255, 255, 255, 0.12), transparent 62%),
+    rgba(255, 79, 216, 0.12);
+  color: #ffd5f3;
+  font: inherit;
+  font-size: 0.64rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+  box-shadow: 0 0 14px rgba(255, 79, 216, 0.12);
+}
+
+.layersToggle:hover,
+.layersToggleActive {
+  border-color: rgba(255, 157, 231, 0.82);
+  background: rgba(255, 79, 216, 0.22);
+  box-shadow: 0 0 18px rgba(255, 79, 216, 0.24);
+}
+
+.layersTray {
+  display: grid;
+  gap: 8px;
+  padding: 0.65rem;
+  border: 1px solid rgba(255, 157, 231, 0.3);
+  border-radius: 16px;
+  background:
+    radial-gradient(circle at top left, rgba(255, 79, 216, 0.11), transparent 58%),
+    rgba(5, 16, 26, 0.72);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.24);
+}
+
 .toolsDeck {
   flex: unset;
   width: 100%;

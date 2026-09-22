@@ -10,11 +10,14 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { Layers3 } from "lucide-react";
 import ArtPaletteTools, { type ArtBrushMode } from "./ArtPaletteTools";
 import DropChipWorkbench from "./DropChipWorkbench";
 import DropStudioPaletteDeck, { type ObjectTool } from "./DropStudioPaletteDeck";
+import DropStudioLayersPanel, { type LayerRow } from "./DropStudioLayersPanel";
 import styles from "./boardArtCanvas.module.css";
 import { scaleCanvasToMinLongEdge } from "@/lib/board/imageQuality";
+import type { DropStudioArtLayer } from "@/lib/board/dropCustomizations";
 
 function hslToHex(h: number, s: number, l: number) {
   const sN = s / 100;
@@ -31,6 +34,11 @@ function hslToHex(h: number, s: number, l: number) {
 
 const DARK_BG = "#0b0f16";
 const PAPER_BG = "#fdfaf2";
+const BASE_LAYER_ID = "artwork";
+
+function makeLayer(id: string, name: string): DropStudioArtLayer {
+  return { id, name, visible: true, locked: false, opacity: 1 };
+}
 export default function BoardArtCanvas({
   onSave,
   backgroundImageUrl,
@@ -56,6 +64,8 @@ export default function BoardArtCanvas({
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const ctxRef = useRef<CanvasRenderingContext2D | null>(null);
+  const layerCanvasesRef = useRef<Map<string, HTMLCanvasElement>>(new Map());
+  const layersRef = useRef<DropStudioArtLayer[]>([]);
   const bgImgRef = useRef<HTMLImageElement>(null);
   const drawingRef = useRef(false);
   const undoRef = useRef<ImageData[]>([]);
@@ -71,6 +81,9 @@ export default function BoardArtCanvas({
   const blendDiamRef = useRef(0);
 
   const [objectTool, setObjectTool] = useState<ObjectTool>("text");
+  const [layersOpen, setLayersOpen] = useState(false);
+  const [layers, setLayers] = useState<DropStudioArtLayer[]>(() => [makeLayer(BASE_LAYER_ID, "Artwork")]);
+  const [activeLayerId, setActiveLayerId] = useState(BASE_LAYER_ID);
   const [color, setColor] = useState("#FF4FD8");
   const [size, setSize] = useState(8);
   const [paper, setPaper] = useState(false); // dark by default
@@ -79,6 +92,41 @@ export default function BoardArtCanvas({
   const [wheelHue, setWheelHue] = useState(318);
   const [wheelSat, setWheelSat] = useState(100);
   const onPhoto = !!backgroundImageUrl || !!backgroundVideoUrl;
+  layersRef.current = layers;
+
+  function getLayerCanvas(id: string) {
+    let layer = layerCanvasesRef.current.get(id);
+    const stage = canvasRef.current;
+    if (!layer) {
+      layer = document.createElement("canvas");
+      layer.width = stage?.width || 1;
+      layer.height = stage?.height || 1;
+      layer.getContext("2d")?.setTransform(dprRef.current, 0, 0, dprRef.current, 0, 0);
+      layerCanvasesRef.current.set(id, layer);
+    }
+    return layer;
+  }
+
+  function activeLayerContext() {
+    return getLayerCanvas(activeLayerId).getContext("2d");
+  }
+
+  function recomposite() {
+    const stage = canvasRef.current;
+    const ctx = ctxRef.current;
+    if (!stage || !ctx) return;
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, stage.width, stage.height);
+    for (const layer of layersRef.current) {
+      if (!layer.visible) continue;
+      const source = layerCanvasesRef.current.get(layer.id);
+      if (!source) continue;
+      ctx.globalAlpha = layer.opacity;
+      ctx.drawImage(source, 0, 0);
+    }
+    ctx.restore();
+  }
 
   function pickFromWheel(clientX: number, clientY: number, nextLight = light) {
     const el = wheelRef.current;
@@ -111,15 +159,6 @@ export default function BoardArtCanvas({
     const nextH = Math.max(1, Math.round(rect.height * dpr));
     if (canvas.width === nextW && canvas.height === nextH && ctxRef.current) return;
 
-    // Preserve current strokes across the resize.
-    let prev: HTMLCanvasElement | null = null;
-    if (canvas.width > 0 && canvas.height > 0) {
-      prev = document.createElement("canvas");
-      prev.width = canvas.width;
-      prev.height = canvas.height;
-      prev.getContext("2d")?.drawImage(canvas, 0, 0);
-    }
-
     canvas.width = nextW;
     canvas.height = nextH;
     const ctx = canvas.getContext("2d");
@@ -131,16 +170,22 @@ export default function BoardArtCanvas({
     ctxRef.current = ctx;
     dprRef.current = dpr;
 
-    if (prev) {
-      ctx.save();
-      ctx.setTransform(1, 0, 0, 1, 0, 0);
-      ctx.drawImage(prev, 0, 0, prev.width, prev.height, 0, 0, nextW, nextH);
-      ctx.restore();
-    }
+    layerCanvasesRef.current.forEach((layer) => {
+      const previous = document.createElement("canvas");
+      previous.width = layer.width;
+      previous.height = layer.height;
+      previous.getContext("2d")?.drawImage(layer, 0, 0);
+      layer.width = nextW;
+      layer.height = nextH;
+      const layerCtx = layer.getContext("2d");
+      layerCtx?.drawImage(previous, 0, 0, previous.width, previous.height, 0, 0, nextW, nextH);
+      layerCtx?.setTransform(dpr, 0, 0, dpr, 0, 0);
+    });
     // Undo/redo snapshots are tied to the old backing-store dimensions, so reset
     // them on a real resize to avoid putImageData misalignment.
     undoRef.current = [];
     redoRef.current = [];
+    recomposite();
   }
 
   useEffect(() => {
@@ -155,10 +200,11 @@ export default function BoardArtCanvas({
 
   useEffect(() => {
     if (!initialOverlayUrl) return;
-    const canvas = canvasRef.current;
-    if (!canvas) return;
+    const stage = canvasRef.current;
+    if (!stage) return;
     syncCanvas();
-    const ctx = ctxRef.current;
+    const layer = getLayerCanvas(BASE_LAYER_ID);
+    const ctx = layer.getContext("2d");
     if (!ctx) return;
 
     let cancelled = false;
@@ -168,11 +214,17 @@ export default function BoardArtCanvas({
       if (cancelled || !image.naturalWidth || !image.naturalHeight) return;
       ctx.save();
       ctx.setTransform(1, 0, 0, 1, 0, 0);
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+      ctx.clearRect(0, 0, layer.width, layer.height);
+      ctx.drawImage(image, 0, 0, layer.width, layer.height);
       ctx.restore();
       undoRef.current = [];
       redoRef.current = [];
+      setLayers((current) =>
+        current.map((layer) =>
+          layer.id === BASE_LAYER_ID ? { ...layer, dataUrl: layerCanvasesRef.current.get(BASE_LAYER_ID)?.toDataURL() } : layer
+        )
+      );
+      recomposite();
     };
     image.src = initialOverlayUrl;
     return () => {
@@ -183,14 +235,20 @@ export default function BoardArtCanvas({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialOverlayUrl]);
 
+  useEffect(() => {
+    recomposite();
+    // The layer pixels live in refs; this redraw responds to structural changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [layers]);
+
   function pointFromXY(clientX: number, clientY: number) {
     const r = canvasRef.current!.getBoundingClientRect();
     return { x: clientX - r.left, y: clientY - r.top };
   }
 
   function pushUndo() {
-    const canvas = canvasRef.current;
-    const ctx = ctxRef.current;
+    const canvas = layerCanvasesRef.current.get(activeLayerId);
+    const ctx = activeLayerContext();
     if (!canvas || !ctx) return;
     undoRef.current.push(ctx.getImageData(0, 0, canvas.width, canvas.height));
     if (undoRef.current.length > 24) undoRef.current.shift();
@@ -275,7 +333,7 @@ export default function BoardArtCanvas({
   // Drag the carried paint from (x0,y0) to (x1,y1): stamp it down at each step,
   // then re-grab the (now blended) result so the color travels and merges.
   function blendSegment(x0: number, y0: number, x1: number, y1: number, strength: number) {
-    const ctx = ctxRef.current;
+    const ctx = activeLayerContext();
     const buf = smudgeBufRef.current;
     if (!ctx || !buf) return;
     const dpr = dprRef.current;
@@ -305,8 +363,10 @@ export default function BoardArtCanvas({
   }
 
   function onPointerDown(e: React.PointerEvent<HTMLCanvasElement>) {
-    const ctx = ctxRef.current;
+    const activeLayer = layersRef.current.find((layer) => layer.id === activeLayerId);
+    const ctx = activeLayerContext();
     if (!ctx) return;
+    if (activeLayer?.locked) return;
     e.preventDefault();
     e.currentTarget.setPointerCapture(e.pointerId);
     pushUndo();
@@ -340,11 +400,12 @@ export default function BoardArtCanvas({
     ctx.fill();
     ctx.beginPath();
     ctx.moveTo(x, y);
+    recomposite();
   }
 
   function onPointerMove(e: React.PointerEvent<HTMLCanvasElement>) {
     if (!drawingRef.current) return;
-    const ctx = ctxRef.current;
+    const ctx = activeLayerContext();
     if (!ctx) return;
     e.preventDefault();
 
@@ -384,11 +445,12 @@ export default function BoardArtCanvas({
       ctx.moveTo(midX, midY);
       lastPtRef.current = { x, y };
     }
+    recomposite();
   }
 
   function onPointerUp() {
     if (!drawingRef.current) return;
-    const ctx = ctxRef.current;
+    const ctx = activeLayerContext();
     const last = lastPtRef.current;
     // Finish the path at the final point so the very end of the stroke renders.
     // (Blend has no path — it stamps as it moves — so skip the line finish.)
@@ -402,35 +464,45 @@ export default function BoardArtCanvas({
       ctx.globalCompositeOperation = "source-over";
       ctx.globalAlpha = 1;
     }
+    const layer = layerCanvasesRef.current.get(activeLayerId);
+    if (layer) {
+      const dataUrl = layer.toDataURL();
+      setLayers((current) => current.map((item) => (item.id === activeLayerId ? { ...item, dataUrl } : item)));
+    }
+    recomposite();
   }
 
   function clearCanvas() {
-    const canvas = canvasRef.current;
-    const ctx = ctxRef.current;
+    const canvas = layerCanvasesRef.current.get(activeLayerId);
+    const ctx = activeLayerContext();
     if (!canvas || !ctx) return;
     pushUndo();
     ctx.clearRect(0, 0, canvas.width, canvas.height);
+    setLayers((current) => current.map((item) => (item.id === activeLayerId ? { ...item, dataUrl: undefined } : item)));
+    recomposite();
   }
 
   function undo() {
-    const canvas = canvasRef.current;
-    const ctx = ctxRef.current;
+    const canvas = layerCanvasesRef.current.get(activeLayerId);
+    const ctx = activeLayerContext();
     if (!canvas || !ctx) return;
     const prev = undoRef.current.pop();
     if (!prev) return;
     // Stash the current frame so it can be redone.
     redoRef.current.push(ctx.getImageData(0, 0, canvas.width, canvas.height));
     ctx.putImageData(prev, 0, 0);
+    recomposite();
   }
 
   function redo() {
-    const canvas = canvasRef.current;
-    const ctx = ctxRef.current;
+    const canvas = layerCanvasesRef.current.get(activeLayerId);
+    const ctx = activeLayerContext();
     if (!canvas || !ctx) return;
     const next = redoRef.current.pop();
     if (!next) return;
     undoRef.current.push(ctx.getImageData(0, 0, canvas.width, canvas.height));
     ctx.putImageData(next, 0, 0);
+    recomposite();
   }
 
   function save() {
@@ -457,6 +529,7 @@ export default function BoardArtCanvas({
       ctx.fillStyle = paper ? PAPER_BG : DARK_BG;
       ctx.fillRect(0, 0, out.width, out.height);
     }
+
     // …then the strokes on top.
     ctx.drawImage(canvas, 0, 0);
 
@@ -465,6 +538,68 @@ export default function BoardArtCanvas({
       if (blob) onSave(new File([blob], `board-art-${Date.now()}.png`, { type: "image/png" }));
     }, "image/png");
   }
+
+  const layerRows: LayerRow[] = layers.map((layer) => ({
+    id: layer.id,
+    kind: "art" as const,
+    name: layer.name,
+    visible: layer.visible,
+    locked: layer.locked,
+    thumb: layer.dataUrl ? { type: "image" as const, src: layer.dataUrl } : { type: "empty" as const },
+    isActive: layer.id === activeLayerId,
+  }));
+
+  function addLayer() {
+    const id = `art-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
+    const layer = makeLayer(id, `Layer ${layersRef.current.length + 1}`);
+    const activeIndex = layersRef.current.findIndex((item) => item.id === activeLayerId);
+    setLayers((current) => {
+      const next = [...current];
+      next.splice(activeIndex < 0 ? next.length : activeIndex + 1, 0, layer);
+      return next;
+    });
+    getLayerCanvas(id);
+    setActiveLayerId(id);
+    undoRef.current = [];
+    redoRef.current = [];
+  }
+
+  function renameLayer(id: string, name: string) {
+    setLayers((current) => current.map((layer) => (layer.id === id ? { ...layer, name } : layer)));
+  }
+
+  function toggleLayerVisible(id: string) {
+    setLayers((current) =>
+      current.map((layer) => (layer.id === id ? { ...layer, visible: !layer.visible } : layer))
+    );
+  }
+
+  function toggleLayerLocked(id: string) {
+    setLayers((current) =>
+      current.map((layer) => (layer.id === id ? { ...layer, locked: !layer.locked } : layer))
+    );
+  }
+
+  function reorderLayers(orderedIds: string[]) {
+    const byId = new Map(layersRef.current.map((layer) => [layer.id, layer]));
+    setLayers(orderedIds.map((id) => byId.get(id)).filter((layer): layer is DropStudioArtLayer => Boolean(layer)));
+  }
+
+  const layersPanel = (
+    <DropStudioLayersPanel
+      rows={layerRows}
+      onSelect={(id) => {
+        setActiveLayerId(id);
+        undoRef.current = [];
+        redoRef.current = [];
+      }}
+      onRename={renameLayer}
+      onToggleVisible={toggleLayerVisible}
+      onToggleLock={toggleLayerLocked}
+      onReorder={reorderLayers}
+      onNewArtLayer={addLayer}
+    />
+  );
 
   const stageEl = (
     <div
@@ -524,7 +659,17 @@ export default function BoardArtCanvas({
   );
 
   const artToolsEl = (
-    <ArtPaletteTools
+    <div className={styles.artTools}>
+      <button
+        type="button"
+        className={`${styles.layersToggle} ${layersOpen ? styles.layersToggleActive : ""}`}
+        onClick={() => setLayersOpen((open) => !open)}
+        aria-expanded={layersOpen}
+      >
+        <Layers3 aria-hidden size={15} strokeWidth={2.2} />
+        Layers
+      </button>
+      <ArtPaletteTools
       wheelRef={wheelRef}
       color={color}
       size={size}
@@ -560,8 +705,10 @@ export default function BoardArtCanvas({
       onUndo={undo}
       onRedo={redo}
       onClear={clearCanvas}
-      onSave={save}
-    />
+        onSave={save}
+      />
+      {layersOpen ? <div className={styles.layersTray}>{layersPanel}</div> : null}
+    </div>
   );
 
   const toolsEl = (
