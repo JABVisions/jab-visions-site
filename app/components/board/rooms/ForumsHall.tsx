@@ -129,7 +129,6 @@ export default function ForumsHall() {
             <p className="text-xs font-black uppercase tracking-[0.38em] text-emerald-200/70">Board · Live community layer</p>
             <OfficialRoomBadge compact />
           </div>
-          <h1 className="mt-3 text-4xl font-black tracking-tight text-white sm:text-6xl">FORUMS</h1>
           <p className="mt-3 max-w-2xl text-sm leading-6 text-white/55">
             Walk the hallway. Rooms are places — conversations, Drops, presence, and later calls live inside them.
           </p>

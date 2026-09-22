@@ -20,7 +20,7 @@ export default function OfficialRoomBadge({
         "text-[10px] font-black uppercase tracking-[0.18em]",
         comingSoon
           ? "border-white/15 bg-white/8 text-white/70"
-          : "border-amber-200/35 bg-[linear-gradient(135deg,rgba(255,214,102,0.28),rgba(255,77,166,0.16))] text-amber-50 shadow-[0_0_18px_rgba(255,214,102,0.28)]"
+          : "border-lime-300/45 bg-[linear-gradient(135deg,rgba(191,255,79,0.18),rgba(217,70,239,0.16))] text-lime-200 shadow-[0_0_18px_rgba(191,255,79,0.24)]"
       )}
       title="Official JAB Room"
     >
@@ -30,7 +30,7 @@ export default function OfficialRoomBadge({
           "grid h-3.5 w-3.5 place-items-center rounded-full",
           comingSoon
             ? "bg-white/20 text-[8px]"
-            : "bg-[radial-gradient(circle_at_30%_20%,#fff7d6,transparent_42%),linear-gradient(135deg,#f5d76e,#ff6b9d)] text-[8px] shadow-[0_0_10px_rgba(255,215,110,0.7)]"
+            : "bg-[radial-gradient(circle_at_30%_20%,#ffd8ff,transparent_42%),linear-gradient(135deg,#d946ef,#86198f)] text-[8px] shadow-[0_0_10px_rgba(217,70,239,0.72)]"
         )}
       >
         ◆
