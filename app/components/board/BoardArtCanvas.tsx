@@ -14,7 +14,6 @@ import { Layers3 } from "lucide-react";
 import ArtPaletteTools, { type ArtBrushMode } from "./ArtPaletteTools";
 import DropChipWorkbench from "./DropChipWorkbench";
 import DropStudioPaletteDeck, { type ObjectTool } from "./DropStudioPaletteDeck";
-import DropStudioLayersPanel, { type LayerRow } from "./DropStudioLayersPanel";
 import styles from "./boardArtCanvas.module.css";
 import { scaleCanvasToMinLongEdge } from "@/lib/board/imageQuality";
 import type { DropStudioArtLayer } from "@/lib/board/dropCustomizations";
@@ -81,7 +80,7 @@ export default function BoardArtCanvas({
   const blendDiamRef = useRef(0);
 
   const [objectTool, setObjectTool] = useState<ObjectTool>("text");
-  const [layersOpen, setLayersOpen] = useState(false);
+  const [layersOpen, setLayersOpen] = useState(true);
   const [layers, setLayers] = useState<DropStudioArtLayer[]>(() => [makeLayer(BASE_LAYER_ID, "Artwork")]);
   const [activeLayerId, setActiveLayerId] = useState(BASE_LAYER_ID);
   const [color, setColor] = useState("#FF4FD8");
@@ -539,16 +538,6 @@ export default function BoardArtCanvas({
     }, "image/png");
   }
 
-  const layerRows: LayerRow[] = layers.map((layer) => ({
-    id: layer.id,
-    kind: "art" as const,
-    name: layer.name,
-    visible: layer.visible,
-    locked: layer.locked,
-    thumb: layer.dataUrl ? { type: "image" as const, src: layer.dataUrl } : { type: "empty" as const },
-    isActive: layer.id === activeLayerId,
-  }));
-
   function addLayer() {
     const id = `art-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
     const layer = makeLayer(id, `Layer ${layersRef.current.length + 1}`);
@@ -564,97 +553,91 @@ export default function BoardArtCanvas({
     redoRef.current = [];
   }
 
-  function renameLayer(id: string, name: string) {
-    setLayers((current) => current.map((layer) => (layer.id === id ? { ...layer, name } : layer)));
+  function selectLayer(id: string) {
+    setActiveLayerId(id);
+    undoRef.current = [];
+    redoRef.current = [];
   }
-
-  function toggleLayerVisible(id: string) {
-    setLayers((current) =>
-      current.map((layer) => (layer.id === id ? { ...layer, visible: !layer.visible } : layer))
-    );
-  }
-
-  function toggleLayerLocked(id: string) {
-    setLayers((current) =>
-      current.map((layer) => (layer.id === id ? { ...layer, locked: !layer.locked } : layer))
-    );
-  }
-
-  function reorderLayers(orderedIds: string[]) {
-    const byId = new Map(layersRef.current.map((layer) => [layer.id, layer]));
-    setLayers(orderedIds.map((id) => byId.get(id)).filter((layer): layer is DropStudioArtLayer => Boolean(layer)));
-  }
-
-  const layersPanel = (
-    <DropStudioLayersPanel
-      rows={layerRows}
-      onSelect={(id) => {
-        setActiveLayerId(id);
-        undoRef.current = [];
-        redoRef.current = [];
-      }}
-      onRename={renameLayer}
-      onToggleVisible={toggleLayerVisible}
-      onToggleLock={toggleLayerLocked}
-      onReorder={reorderLayers}
-      onNewArtLayer={addLayer}
-    />
-  );
 
   const stageEl = (
-    <div
-      data-art-canvas-stage
-      className={[
-        styles.stage,
-        paper && !onPhoto ? styles.stagePaper : "",
-        operatingTable ? styles.stageInFrame : "",
-      ]
-        .filter(Boolean)
-        .join(" ")}
-    >
-      {backgroundVideoUrl ? (
-        <video
-          src={backgroundVideoUrl}
-          className={styles.bg}
-          autoPlay
-          loop
-          muted
-          playsInline
-          preload="auto"
-          controls={false}
-          aria-label="Video preview behind Art Palette"
-          onLoadedData={(event) => {
-            const el = event.currentTarget;
-            if (el.currentTime === 0) {
-              try {
-                el.currentTime = 0.05;
-              } catch {
-                // ignore
-              }
-            }
-            void el.play().catch(() => {});
-          }}
-        />
-      ) : backgroundImageUrl ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
-          ref={bgImgRef}
-          data-art-canvas-bg
-          src={backgroundImageUrl}
-          alt=""
-          className={styles.bg}
-          crossOrigin="anonymous"
-        />
+    <div className={styles.canvasEditor}>
+      {layersOpen ? (
+        <div className={styles.layerStrip} aria-label="Art layers">
+          <div className={styles.layerStripScroll}>
+            {layers.map((layer) => (
+              <button
+                key={layer.id}
+                type="button"
+                className={`${styles.layerTile} ${
+                  layer.id === activeLayerId ? styles.layerTileActive : styles.layerTileInactive
+                }`}
+                onClick={() => selectLayer(layer.id)}
+                aria-pressed={layer.id === activeLayerId}
+              >
+                {layer.dataUrl ? <img src={layer.dataUrl} alt="" aria-hidden /> : null}
+                <span>{layer.name}</span>
+              </button>
+            ))}
+          </div>
+          <button type="button" className={styles.addLayer} onClick={addLayer}>
+            + Layer
+          </button>
+        </div>
       ) : null}
-      <canvas
-        ref={canvasRef}
-        className={styles.canvas}
-        onPointerDown={onPointerDown}
-        onPointerMove={onPointerMove}
-        onPointerUp={onPointerUp}
-        onPointerCancel={onPointerUp}
-        onPointerLeave={onPointerUp}
-      />
+      <div
+        data-art-canvas-stage
+        className={[
+          styles.stage,
+          paper && !onPhoto ? styles.stagePaper : "",
+          operatingTable ? styles.stageInFrame : "",
+        ]
+          .filter(Boolean)
+          .join(" ")}
+      >
+        {backgroundVideoUrl ? (
+          <video
+            src={backgroundVideoUrl}
+            className={styles.bg}
+            autoPlay
+            loop
+            muted
+            playsInline
+            preload="auto"
+            controls={false}
+            aria-label="Video preview behind Art Palette"
+            onLoadedData={(event) => {
+              const el = event.currentTarget;
+              if (el.currentTime === 0) {
+                try {
+                  el.currentTime = 0.05;
+                } catch {
+                  // ignore
+                }
+              }
+              void el.play().catch(() => {});
+            }}
+          />
+        ) : backgroundImageUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            ref={bgImgRef}
+            data-art-canvas-bg
+            src={backgroundImageUrl}
+            alt=""
+            className={styles.bg}
+            crossOrigin="anonymous"
+          />
+        ) : null}
+        <canvas
+          ref={canvasRef}
+          className={styles.canvas}
+          onPointerDown={onPointerDown}
+          onPointerMove={onPointerMove}
+          onPointerUp={onPointerUp}
+          onPointerCancel={onPointerUp}
+          onPointerLeave={onPointerUp}
+        />
+      </div>
     </div>
   );
 
@@ -707,7 +690,6 @@ export default function BoardArtCanvas({
       onClear={clearCanvas}
         onSave={save}
       />
-      {layersOpen ? <div className={styles.layersTray}>{layersPanel}</div> : null}
     </div>
   );
 

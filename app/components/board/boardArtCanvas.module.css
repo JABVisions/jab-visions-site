@@ -39,6 +39,112 @@
   justify-content: center;
 }
 
+.canvasEditor {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  gap: 7px;
+}
+
+.layerStrip {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  padding: 5px 6px;
+  border: 1px solid rgba(255, 209, 45, 0.42);
+  border-radius: 14px;
+  background: rgba(10, 14, 20, 0.74);
+  box-shadow: 0 0 16px rgba(255, 209, 45, 0.12);
+}
+
+.layerStripScroll {
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scroll-behavior: smooth;
+  scrollbar-width: thin;
+  -webkit-overflow-scrolling: touch;
+}
+
+.layerTile {
+  position: relative;
+  display: grid;
+  place-items: end start;
+  flex: 0 0 76px;
+  height: 42px;
+  overflow: hidden;
+  padding: 5px 7px;
+  border-radius: 8px;
+  color: #251b00;
+  font: inherit;
+  font-size: 0.55rem;
+  font-weight: 950;
+  letter-spacing: 0.04em;
+  text-align: left;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.layerTile img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0.42;
+}
+
+.layerTile span {
+  position: relative;
+  overflow: hidden;
+  max-width: 100%;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-shadow: 0 1px 0 rgba(255, 247, 186, 0.45);
+}
+
+.layerTileActive {
+  border: 2px solid #ffd12d;
+  background: #ffd12d;
+  box-shadow: 0 0 16px rgba(255, 209, 45, 0.52);
+}
+
+.layerTileInactive {
+  border: 2px dotted #ffd12d;
+  background: rgba(255, 209, 45, 0.09);
+  color: #ffe99c;
+}
+
+.layerTileInactive span {
+  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.88);
+}
+
+.addLayer {
+  flex: 0 0 auto;
+  padding: 0.44rem 0.6rem;
+  border: 1px solid rgba(255, 209, 45, 0.72);
+  border-radius: 999px;
+  background: rgba(255, 209, 45, 0.15);
+  color: #ffe99c;
+  font: inherit;
+  font-size: 0.57rem;
+  font-weight: 950;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.addLayer:hover {
+  background: rgba(255, 209, 45, 0.28);
+}
+
 .modeStack .stageWrap {
   flex: 1 1 auto;
   min-height: 0;
@@ -59,6 +165,12 @@
   border: 1px solid rgba(255, 255, 255, 0.16);
   background: #0b0f16;
   box-shadow: inset 0 0 30px rgba(0, 0, 0, 0.5);
+}
+
+.canvasEditor .stage {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
 }
 
 .modeStack .stage {
