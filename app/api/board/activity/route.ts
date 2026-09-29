@@ -5,6 +5,7 @@ import { dedupeActivity } from "@/lib/board/activityMerge";
 import {
   applyForumDropNavigation,
   authorFromProfileRow,
+  forumRoomFromTitle,
   hydrateActivityAuthor,
   pickBoardDisplayName,
 } from "@/lib/board/boardAuthor";
@@ -52,6 +53,7 @@ function normalizeActivityRow(row: any): BoardActivity | null {
   const body = String(row.body ?? row.text ?? row.content ?? "").trim();
   const title = String(row.title ?? "").trim();
   if (!body && !title) return null;
+  const inferredForumRoom = meta.roomId ? null : forumRoomFromTitle(title);
 
   const created =
     typeof row.created_at === "string" && row.created_at
@@ -76,7 +78,21 @@ function normalizeActivityRow(row: any): BoardActivity | null {
       meta.previewImage ??
       meta?.preview?.image ??
       null,
-    meta: Object.keys(meta).length ? meta : null,
+    meta:
+      Object.keys(meta).length || inferredForumRoom
+        ? {
+            ...meta,
+            ...(inferredForumRoom
+              ? {
+                  roomId: inferredForumRoom.roomId,
+                  roomName: inferredForumRoom.roomName,
+                  roomIcon: inferredForumRoom.roomIcon,
+                  forumHref: inferredForumRoom.forumHref,
+                  destinationType: "room",
+                }
+              : {}),
+          }
+        : null,
   };
 }
 
@@ -194,6 +210,7 @@ function normalizeProfileBoardDrop(row: any): BoardActivity[] {
         drop.meta && typeof drop.meta === "object" && !Array.isArray(drop.meta)
           ? drop.meta
           : {};
+      const inferredForumRoom = dropMeta.roomId ? null : forumRoomFromTitle(title);
       const hostName =
         (typeof drop.contactName === "string" && drop.contactName.trim()) ||
         (typeof dropMeta.contactName === "string" && dropMeta.contactName.trim()) ||
@@ -219,6 +236,15 @@ function normalizeProfileBoardDrop(row: any): BoardActivity[] {
         image_url: previewImage || null,
         meta: {
           ...dropMeta,
+          ...(inferredForumRoom
+            ? {
+                roomId: inferredForumRoom.roomId,
+                roomName: inferredForumRoom.roomName,
+                roomIcon: inferredForumRoom.roomIcon,
+                forumHref: inferredForumRoom.forumHref,
+                destinationType: "room",
+              }
+            : {}),
           source: dropMeta.source || "profiles.board_style.boardDrops",
           kind: isProjectDrop ? "project_drop" : dropMeta.kind ?? null,
           cardStyle: isProjectDrop ? "project_drop" : dropMeta.cardStyle ?? null,

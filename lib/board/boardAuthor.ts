@@ -1,5 +1,5 @@
 import type { BoardActivity } from "@/lib/board/activity";
-import { roomHref } from "@/lib/board/rooms/catalog";
+import { getRoomByName, roomHref } from "@/lib/board/rooms/catalog";
 import type { RoomPresence } from "@/lib/board/rooms/types";
 
 const PLACEHOLDER_NAMES = new Set([
@@ -121,8 +121,33 @@ export function forumDropPathFromMeta(
   return forumDropPath({ roomId, conversationId });
 }
 
+/**
+ * Some historical Drops never got `meta.roomId` stamped at all (they only
+ * ever lived as a raw `profiles.board_style.boardDrops` entry, created
+ * before Rooms had a database, or through an upload path that skipped the
+ * meta stamp) — but their stored title still literally says "Drop in
+ * {Room Name}" or "Added a Drop to {Room Name}". Recover the Room link from
+ * that title so the Feed's Open Room button survives regardless of any
+ * local-storage/backfill state.
+ */
+export function forumRoomFromTitle(
+  title: unknown
+): { roomId: string; roomName: string; roomIcon: string; forumHref: string } | null {
+  const raw = String(title || "").trim();
+  if (!raw) return null;
+  const match = raw.match(/^(?:drop in|added a drop to|shared a drop in|posted (?:a |to )?drop (?:in|to))\s+(.+)$/i);
+  if (!match) return null;
+  const name = match[1].trim();
+  if (!name) return null;
+  const room = getRoomByName(name);
+  if (!room) return null;
+  const forumHref = forumDropPath({ roomId: room.id });
+  if (!forumHref) return null;
+  return { roomId: room.id, roomName: room.name, roomIcon: room.icon, forumHref };
+}
+
 export function activityForumPath(
-  item: Pick<BoardActivity, "meta"> & { href?: string | null }
+  item: Pick<BoardActivity, "meta"> & { href?: string | null; title?: string | null }
 ): string | null {
   const meta = item.meta && typeof item.meta === "object" ? item.meta : null;
   const fromMeta =
@@ -131,7 +156,7 @@ export function activityForumPath(
   if (fromMeta) return fromMeta;
   const href = String(item.href || "").trim();
   if (/^\/board\/forums\//i.test(href)) return href;
-  return null;
+  return forumRoomFromTitle(item.title)?.forumHref ?? null;
 }
 
 export type ProfileAuthorRow = {

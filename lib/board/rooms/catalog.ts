@@ -333,6 +333,21 @@ export function getRoomById(id: unknown): Room | null {
   return BOARD_ROOM_CATALOG.find((item) => item.id === resolved) ?? null;
 }
 
+/**
+ * Match a Room by its display name (e.g. a title like "Drop in JAB Comics"
+ * carries the name, not an id). Case-insensitive, ignores a leading emoji.
+ */
+export function getRoomByName(name: unknown): Room | null {
+  const raw = String(name || "")
+    .replace(/^[\p{Emoji_Presentation}\p{Extended_Pictographic}\uFE0F\s]+/u, "")
+    .trim()
+    .toLowerCase();
+  if (!raw) return null;
+  return (
+    BOARD_ROOM_CATALOG.find((item) => item.name.trim().toLowerCase() === raw) ?? null
+  );
+}
+
 export function roomsByKind(kind: RoomKind) {
   return BOARD_ROOM_CATALOG.filter((item) => item.kind === kind);
 }
