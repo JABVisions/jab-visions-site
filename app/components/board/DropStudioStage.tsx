@@ -83,6 +83,8 @@ import {
   removeTrackById,
   renameTrack,
   renderSessionFile,
+  mixRenderTimeoutMs,
+  mixTakeDurationMs,
   restoreClipOriginal,
   sessionDurationMs,
   sessionHasLane,
@@ -766,13 +768,14 @@ export default function DropStudioStage({
     mixAbortRef.current = false;
     const engine = studioEngine();
     const shouldAbort = () => mixAbortRef.current;
+    const outerTimeoutMs = mixRenderTimeoutMs(mixTakeDurationMs(session));
     return withAudioTimeout(
       (async () => {
         await engine.hydrateSession(session);
         if (shouldAbort()) throw new Error("Audio session mix aborted");
         return renderSessionFile(session, await engine.ensureContext(), shouldAbort);
       })(),
-      20_000,
+      outerTimeoutMs,
       "mix"
     );
   };

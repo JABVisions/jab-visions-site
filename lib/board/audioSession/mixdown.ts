@@ -4,11 +4,25 @@ import type { AudioSession, SessionTrack, TrackClip } from "./types";
 import { decodeAudioFile, getAudioContextConstructor, withAudioTimeout } from "./wav";
 
 const TAKE_TAIL_MS = 320;
-const MIX_MAX_MS = 120_000;
-const MIX_RENDER_TIMEOUT_MS = 20_000;
+/**
+ * Sanity ceiling only — NOT an intended cutoff. This used to be 120_000
+ * (2 minutes), which silently truncated every voice drop longer than that.
+ * Raised to 45 minutes so a full-length recording always survives the
+ * Mix to Drop bounce; 45 min of mono-ish PCM at MIX_SAMPLE_RATE_MAX still
+ * lands well under the 250MB audio upload limit.
+ */
+const MIX_MAX_MS = 45 * 60_000;
+const MIX_RENDER_TIMEOUT_FLOOR_MS = 20_000;
+/** Render is plain array math, not real-time synthesis, so this is generous headroom. */
+const MIX_RENDER_TIMEOUT_CAP_MS = 5 * 60_000;
 const MIX_RESUME_TIMEOUT_MS = 2_000;
 const MIX_SAMPLE_RATE_MAX = 24_000;
 const OVERLAY_YIELD_FRAMES = 24_000;
+
+/** Scale the render timeout with how much audio is actually being mixed. */
+export function mixRenderTimeoutMs(mixMs: number) {
+  return Math.min(MIX_RENDER_TIMEOUT_CAP_MS, Math.max(MIX_RENDER_TIMEOUT_FLOOR_MS, Math.ceil(mixMs * 1.5)));
+}
 
 function throwIfAborted(shouldAbort?: () => boolean) {
   if (shouldAbort?.()) throw new Error("Audio session mix aborted");
@@ -293,7 +307,8 @@ export async function renderSessionFile(
   decodeCtx?: BaseAudioContext,
   shouldAbort?: () => boolean
 ): Promise<File> {
-  return withAudioTimeout(bounceSession(session, decodeCtx, shouldAbort), MIX_RENDER_TIMEOUT_MS, "mix");
+  const timeoutMs = mixRenderTimeoutMs(mixTakeDurationMs(session));
+  return withAudioTimeout(bounceSession(session, decodeCtx, shouldAbort), timeoutMs, "mix");
 }
 
 /** Phase 1 debug hook: bounce a vocal + beat to one wav with no UI. */

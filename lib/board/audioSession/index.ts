@@ -1,6 +1,6 @@
 export { AudioSessionEngine } from "./engine";
 export { connectScheduledClip, isVoicePreset } from "./graph";
-export { mixTwoFiles, mixTakeDurationMs, renderSessionFile } from "./mixdown";
+export { mixTwoFiles, mixTakeDurationMs, mixRenderTimeoutMs, renderSessionFile } from "./mixdown";
 export {
   addTrack,
   createAudioSession,
