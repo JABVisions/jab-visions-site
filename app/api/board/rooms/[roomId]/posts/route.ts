@@ -3,6 +3,7 @@ import { resolveRoomId, getRoomById, roomHref } from "@/lib/board/rooms/catalog"
 import { hydrateAuthorRows } from "@/lib/board/rooms/authors";
 import { isMissingRoomsTable, json, roomMembershipGate } from "@/lib/board/rooms/server";
 import { describeRoomActivity, roomActivityGroupKey } from "@/lib/board/rooms/activity";
+import { linkDropActivityToRoom } from "@/lib/board/rooms/dropActivityLink";
 import { createBoardNotification } from "@/lib/board/createNotification";
 import { isUuid } from "@/lib/board/forumRoomDrop";
 import { pickBoardDisplayName } from "@/lib/board/boardAuthor";
@@ -117,6 +118,15 @@ export async function POST(
     const actorName = pickBoardDisplayName(body.displayName) || "Someone";
     const conversationTitle = String(body.conversationTitle || "").trim();
     const dropTitle = String(body.dropTitle || "").trim();
+    if (dropId && kind === "reply" && parentId) {
+      await linkDropActivityToRoom(supabase, {
+        dropId,
+        roomId,
+        roomName: room.name,
+        conversationId: parentId,
+        conversationTitle,
+      });
+    }
     const mentionIds = Array.isArray(body.mentionUserIds) ? body.mentionUserIds.map(String) : [];
     const recipientIds = new Set<string>(mentionIds);
     if (typeof body.notifyUserId === "string") recipientIds.add(body.notifyUserId);

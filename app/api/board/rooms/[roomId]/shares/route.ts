@@ -3,6 +3,7 @@ import { resolveRoomId, getRoomById, roomHref } from "@/lib/board/rooms/catalog"
 import { hydrateAuthorRows } from "@/lib/board/rooms/authors";
 import { isMissingRoomsTable, json, roomMembershipGate } from "@/lib/board/rooms/server";
 import { describeRoomActivity, roomActivityGroupKey } from "@/lib/board/rooms/activity";
+import { linkDropActivityToRoom } from "@/lib/board/rooms/dropActivityLink";
 import { createBoardNotification } from "@/lib/board/createNotification";
 import { pickBoardDisplayName } from "@/lib/board/boardAuthor";
 
@@ -193,6 +194,13 @@ async function finishShare(input: {
       ? { conversation: input.conversationId }
       : undefined
   );
+  await linkDropActivityToRoom(input.supabase, {
+    dropId: input.dropId,
+    roomId: input.roomId,
+    roomName: input.room.name,
+    conversationId: input.origin === "conversation" ? input.conversationId : null,
+    conversationTitle: input.origin === "conversation" ? input.conversationTitle : null,
+  });
   const { data: followers } = await input.supabase
     .from("room_members")
     .select("user_id")
