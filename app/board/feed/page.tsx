@@ -36,6 +36,8 @@ import { EVENTS, readFeed, seedForumsIfEmpty } from "@/lib/boardStore";
 
 import { installBucketBrainBridge } from "@/lib/board/bucketBrain";
 import { recoverOrphanedDescriptDrops } from "@/lib/board/descriptRecovery";
+import { resolveCurrentBoardIdentity } from "@/lib/board/currentProfile";
+import { backfillLocalRoomLinks } from "@/lib/board/rooms/resyncLocalRoomShares";
 
 function clsx(...parts: Array<string | false | null | undefined>) {
   return parts.filter(Boolean).join(" ");
@@ -302,6 +304,11 @@ export default function HomeBoardFeedPage() {
         if (auth.user?.id) {
           void reconcileLocalActivityToRemote(sb, auth.user.id).catch(() => {});
           void recoverOrphanedDescriptDrops(sb, auth.user.id).catch(() => {});
+          void resolveCurrentBoardIdentity(auth.user.id)
+            .then((identity) =>
+              backfillLocalRoomLinks(sb, auth.user!.id, identity.displayName || identity.username || "")
+            )
+            .catch(() => {});
         }
         const data = await Promise.race([
           fetchSupabaseActivity({ limit: PAGE_SIZE, offset: 0, kinds }),
