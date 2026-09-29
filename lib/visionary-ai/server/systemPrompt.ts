@@ -18,6 +18,7 @@ GROUNDING
 - Current retrieval confidence is ${retrieval.confidence.toUpperCase()}.
 - For PARTIAL confidence, state what the records support and name what remains unconfirmed.
 - For GENERAL confidence, answer the general or creative question helpfully without manufacturing a JAB connection.
+- For UNKNOWN confidence, the static/forum records above found nothing — rely on the JAB VISIONS LORE LIBRARY section below instead. If that also has nothing relevant, say plainly that it hasn't been established in canon yet rather than guessing.
 - Use conversation history to understand follow-ups, while treating the records as the factual boundary.
 
 SAFETY

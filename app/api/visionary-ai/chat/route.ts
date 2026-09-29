@@ -10,6 +10,8 @@ import {
 } from "@/lib/visionary-ai/knowledge";
 import { loadForumKnowledgeDocuments } from "@/lib/visionary-ai/forumKnowledge";
 import { supabaseServer } from "@/lib/supabase/server";
+import { retrieveLoreContext } from "@/lib/lore/server/retrieval";
+import { formatLoreContext, LORE_ANTI_HALLUCINATION_FALLBACK } from "@/lib/lore/server/formatContext";
 import {
   createVisionaryModelResponse,
   isVisionaryModelConfigured,
@@ -134,7 +136,12 @@ export async function POST(request: NextRequest) {
 
   const forumDocuments = await loadForumKnowledgeDocuments(supabaseServer()).catch(() => []);
   const retrieval = retrieveVisionaryKnowledge(messages, { extraDocuments: forumDocuments });
-  if (retrieval.confidence === "unknown") {
+  const loreRetrieval = await retrieveLoreContext(retrieval.latestQuery).catch(() => ({
+    entries: [],
+    hasCanonMatch: false,
+  }));
+
+  if (retrieval.confidence === "unknown" && !loreRetrieval.entries.length) {
     return NextResponse.json<VisionaryChatResponse>({
       ok: true,
       answer: unknownVisionaryAnswer(),
@@ -145,6 +152,19 @@ export async function POST(request: NextRequest) {
   }
 
   if (!isVisionaryModelConfigured()) {
+    if (retrieval.confidence === "unknown") {
+      // Static/forum knowledge found nothing, but the Lore Library did, and
+      // there's no model configured to weave it into prose — answer directly
+      // from the strongest lore match rather than inventing anything.
+      const top = loreRetrieval.entries[0];
+      return NextResponse.json<VisionaryChatResponse>({
+        ok: true,
+        answer: top.entry.summary?.trim() || top.entry.content?.trim() || unknownVisionaryAnswer(),
+        mode: "knowledge",
+        confidence: loreRetrieval.hasCanonMatch ? "grounded" : "partial",
+        sources: [],
+      });
+    }
     return NextResponse.json<VisionaryChatResponse>({
       ok: true,
       answer: buildGroundedKnowledgeAnswer(retrieval),
@@ -155,7 +175,8 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const instructions = `${buildVisionarySystemPrompt(retrieval)}\n\nRETRIEVED KNOWLEDGE\n${formatKnowledgeContext(retrieval)}`;
+    const loreContext = formatLoreContext(loreRetrieval) || LORE_ANTI_HALLUCINATION_FALLBACK;
+    const instructions = `${buildVisionarySystemPrompt(retrieval)}\n\nRETRIEVED KNOWLEDGE\n${formatKnowledgeContext(retrieval)}\n\n${loreContext}`;
     const modelAnswer = await createVisionaryModelResponse({
       instructions,
       messages,
