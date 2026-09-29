@@ -668,6 +668,7 @@ export default function BoardProfileHubPage() {
   const [payCheckoutBusyId, setPayCheckoutBusyId] = useState<string | null>(null);
   const [orbitState, setOrbitState] = useState<"idle" | "requested" | "connected">("idle");
   const [bucketStats, setBucketStats] = useState<BucketStats | null>(null);
+  const [imageSaveError, setImageSaveError] = useState<string | null>(null);
   const [remoteUserId, setRemoteUserId] = useState<string | null>(null);
   const [selfUser, setSelfUser] = useState("");
   const [visitWhispers, setVisitWhispers] = useState<ProfileWhisper[]>([]);
@@ -1937,11 +1938,11 @@ export default function BoardProfileHubPage() {
     file: File,
     bucket: "board-avatars" | "board-images",
     label: string
-  ) {
+  ): Promise<{ path: string; error?: string }> {
     const sb = supabaseBrowser();
     const { data: auth } = await sb.auth.getUser();
     const userId = auth?.user?.id;
-    if (!userId) return "";
+    if (!userId) return { path: "", error: "You need to be signed in to save photos to your Board." };
 
     const path = `${userId}/${label}-${Date.now()}.${fileExtension(file)}`;
     const { error } = await sb.storage
@@ -1952,8 +1953,8 @@ export default function BoardProfileHubPage() {
         contentType: file.type || "image/jpeg",
       });
 
-    if (error) return "";
-    return path;
+    if (error) return { path: "", error: error.message || "Could not save this photo." };
+    return { path };
   }
 
   async function handleAvatarFile(file: File | null) {
@@ -1961,12 +1962,16 @@ export default function BoardProfileHubPage() {
     const dataUrl = await readFileAsDataUrl(file);
     setProfile((prev) => ({ ...prev, avatarDataUrl: dataUrl }));
 
-    const path = await uploadProfileImagePath(file, "board-avatars", "avatar");
+    const { path, error } = await uploadProfileImagePath(file, "board-avatars", "avatar");
     if (path) {
+      setImageSaveError(null);
       setProfile((prev) => ({ ...prev, avatarPath: path }));
       writeLocalProfilePatch({ avatarDataUrl: null, avatarPath: path });
       void persistBoardStylePatch({ avatarDataUrl: null, avatarPath: path });
     } else {
+      setImageSaveError(
+        `Your avatar could not be saved permanently (${error || "unknown error"}). It will disappear after you leave this page.`
+      );
       writeLocalProfilePatch({ avatarDataUrl: null });
       void persistBoardStylePatch({ avatarDataUrl: null });
     }
@@ -1977,12 +1982,16 @@ export default function BoardProfileHubPage() {
     const dataUrl = await readFileAsDataUrl(file);
     setProfile((prev) => ({ ...prev, coverDataUrl: dataUrl }));
 
-    const path = await uploadProfileImagePath(file, "board-images", "cover");
+    const { path, error } = await uploadProfileImagePath(file, "board-images", "cover");
     if (path) {
+      setImageSaveError(null);
       setProfile((prev) => ({ ...prev, coverPath: path }));
       writeLocalProfilePatch({ coverDataUrl: null, coverPath: path });
       void persistBoardStylePatch({ coverDataUrl: null, coverPath: path });
     } else {
+      setImageSaveError(
+        `Your cover poster could not be saved permanently (${error || "unknown error"}). It will disappear after you leave this page.`
+      );
       writeLocalProfilePatch({ coverDataUrl: null });
       void persistBoardStylePatch({ coverDataUrl: null });
     }
@@ -2001,14 +2010,17 @@ export default function BoardProfileHubPage() {
 
     setProfile((prev) => ({ ...prev, visionSlots: nextSlots }));
 
-    const path = await uploadProfileImagePath(file, "board-images", `vision-${index + 1}`);
+    const { path, error } = await uploadProfileImagePath(file, "board-images", `vision-${index + 1}`);
     if (path) {
+      setImageSaveError(null);
       nextPaths[index] = path;
       setProfile((prev) => ({ ...prev, visionSlotPaths: nextPaths }));
       writeLocalProfilePatch({ visionSlots: nextSlots, visionSlotPaths: nextPaths });
       void persistBoardStylePatch({ visionSlotPaths: nextPaths });
     } else {
-      writeLocalProfilePatch({ visionSlots: nextSlots });
+      setImageSaveError(
+        `This Vision Wall photo could not be saved permanently (${error || "unknown error"}). It will disappear after you leave this page.`
+      );
     }
   }
 
@@ -2077,6 +2089,35 @@ export default function BoardProfileHubPage() {
               </Link>
             </div>
           </div>
+
+          {imageSaveError ? (
+            <div
+              role="alert"
+              style={{
+                margin: "0 0 16px",
+                padding: "10px 14px",
+                borderRadius: 12,
+                border: "1px solid rgba(244,63,94,0.4)",
+                background: "rgba(244,63,94,0.12)",
+                color: "#fecdd3",
+                fontSize: 13,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 12,
+              }}
+            >
+              <span>{imageSaveError}</span>
+              <button
+                type="button"
+                onClick={() => setImageSaveError(null)}
+                style={{ background: "none", border: "none", color: "#fecdd3", fontWeight: 700, cursor: "pointer" }}
+                aria-label="Dismiss"
+              >
+                ×
+              </button>
+            </div>
+          ) : null}
 
           <div className="profile-grid">
             <div className="left-column">
