@@ -9,7 +9,7 @@
 
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { Layers3 } from "lucide-react";
 import ArtPaletteTools, { type ArtBrushMode } from "./ArtPaletteTools";
 import DropChipWorkbench from "./DropChipWorkbench";
@@ -34,6 +34,14 @@ function hslToHex(h: number, s: number, l: number) {
 const DARK_BG = "#0b0f16";
 const PAPER_BG = "#fdfaf2";
 const BASE_LAYER_ID = "artwork";
+// Layer-strip drag tuning: how far a pointer must move before a press counts as
+// a drag (vs. a tap), and how long a touch must hold still before we hand it a
+// drag instead of letting the browser scroll the strip.
+const LAYER_DRAG_JITTER_PX = 6;
+const LAYER_DRAG_LONG_PRESS_MS = 260;
+// A drag centered within this fraction of a target tile's half-width counts as
+// "onto" the tile (merge); outside that band counts as "between tiles" (reorder).
+const LAYER_MERGE_ZONE_RATIO = 0.5;
 
 function makeLayer(id: string, name: string): DropStudioArtLayer {
   return { id, name, visible: true, locked: false, opacity: 1 };
@@ -78,6 +86,23 @@ export default function BoardArtCanvas({
   const smudgeBufRef = useRef<HTMLCanvasElement | null>(null);
   const smudgeCtxRef = useRef<CanvasRenderingContext2D | null>(null);
   const blendDiamRef = useRef(0);
+  // Layer-strip drag state (reorder / merge). A ref (not state) so pointermove
+  // handlers always see the live gesture without waiting on a re-render.
+  const layerDragRef = useRef<{
+    id: string;
+    pointerId: number;
+    startX: number;
+    startY: number;
+    pointerType: string;
+    moved: boolean;
+    armed: boolean;
+    longPressTimer: ReturnType<typeof setTimeout> | null;
+  } | null>(null);
+  const mergeTargetIdRef = useRef<string | null>(null);
+  const suppressLayerClickRef = useRef(false);
+  const layerTileElsRef = useRef<Map<string, HTMLDivElement>>(new Map());
+  const [draggingLayerId, setDraggingLayerId] = useState<string | null>(null);
+  const [mergeTargetId, setMergeTargetId] = useState<string | null>(null);
 
   const [objectTool, setObjectTool] = useState<ObjectTool>("text");
   const [layersOpen, setLayersOpen] = useState(true);
@@ -559,24 +584,261 @@ export default function BoardArtCanvas({
     redoRef.current = [];
   }
 
+  function deleteLayer(id: string) {
+    if (layersRef.current.length <= 1) return; // always keep one editable layer
+    layerCanvasesRef.current.delete(id);
+    setLayers((current) => {
+      const removedIndex = current.findIndex((l) => l.id === id);
+      const next = current.filter((l) => l.id !== id);
+      if (id === activeLayerId) {
+        const fallback = next[removedIndex - 1] || next[0];
+        if (fallback) {
+          setActiveLayerId(fallback.id);
+          undoRef.current = [];
+          redoRef.current = [];
+        }
+      }
+      return next;
+    });
+  }
+
+  /** Merge `draggedId`'s pixels into `targetId` (target survives), respecting stack order. */
+  function mergeLayerInto(draggedId: string, targetId: string) {
+    const current = layersRef.current;
+    const draggedIndex = current.findIndex((l) => l.id === draggedId);
+    const targetIndex = current.findIndex((l) => l.id === targetId);
+    if (draggedIndex === -1 || targetIndex === -1) return;
+    const dragged = current[draggedIndex];
+    const target = current[targetIndex];
+    const draggedCanvas = layerCanvasesRef.current.get(draggedId);
+    const targetCanvas = getLayerCanvas(targetId);
+    const ctx = targetCanvas.getContext("2d");
+
+    if (ctx && draggedCanvas) {
+      const width = targetCanvas.width;
+      const height = targetCanvas.height;
+      const merged = document.createElement("canvas");
+      merged.width = width;
+      merged.height = height;
+      const mctx = merged.getContext("2d");
+      if (mctx) {
+        // Whichever layer sat lower in the stack paints first (bottom), the
+        // other paints on top, so the merged pixels read the same as before.
+        const targetIsBottom = targetIndex < draggedIndex;
+        const bottomCanvas = targetIsBottom ? targetCanvas : draggedCanvas;
+        const bottomOpacity = targetIsBottom ? target.opacity : dragged.opacity;
+        const topCanvas = targetIsBottom ? draggedCanvas : targetCanvas;
+        const topOpacity = targetIsBottom ? dragged.opacity : target.opacity;
+        mctx.globalAlpha = bottomOpacity;
+        mctx.drawImage(bottomCanvas, 0, 0, width, height);
+        mctx.globalAlpha = topOpacity;
+        mctx.drawImage(topCanvas, 0, 0, width, height);
+        mctx.globalAlpha = 1;
+
+        ctx.save();
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.clearRect(0, 0, width, height);
+        ctx.drawImage(merged, 0, 0);
+        ctx.restore();
+      }
+    }
+
+    layerCanvasesRef.current.delete(draggedId);
+    const mergedDataUrl = targetCanvas.toDataURL();
+    setLayers((prev) =>
+      prev
+        .filter((l) => l.id !== draggedId)
+        .map((l) => (l.id === targetId ? { ...l, opacity: 1, dataUrl: mergedDataUrl } : l))
+    );
+    setActiveLayerId(targetId);
+    undoRef.current = [];
+    redoRef.current = [];
+  }
+
+  function reorderLayer(draggedId: string, beforeId: string, placeAfter: boolean) {
+    const current = layersRef.current;
+    const fromIndex = current.findIndex((l) => l.id === draggedId);
+    let toIndex = current.findIndex((l) => l.id === beforeId);
+    if (fromIndex === -1 || toIndex === -1 || fromIndex === toIndex) return;
+    if (placeAfter) toIndex += 1;
+    if (fromIndex < toIndex) toIndex -= 1; // account for the removal shift
+    if (toIndex === fromIndex) return;
+    const next = [...current];
+    const [moved] = next.splice(fromIndex, 1);
+    next.splice(toIndex, 0, moved);
+    setLayers(next);
+  }
+
+  function handleLayerPointerDown(id: string, e: ReactPointerEvent<HTMLDivElement>) {
+    if (e.button !== undefined && e.button !== 0 && e.pointerType === "mouse") return;
+    const wrap = e.currentTarget;
+    const state = {
+      id,
+      pointerId: e.pointerId,
+      startX: e.clientX,
+      startY: e.clientY,
+      pointerType: e.pointerType,
+      moved: false,
+      // Mouse/pen arm immediately on movement; touch waits for a deliberate
+      // hold so a normal horizontal swipe just scrolls the strip.
+      armed: e.pointerType !== "touch",
+      longPressTimer: null as ReturnType<typeof setTimeout> | null,
+    };
+    layerDragRef.current = state;
+
+    if (e.pointerType === "touch") {
+      state.longPressTimer = setTimeout(() => {
+        if (layerDragRef.current !== state) return;
+        state.armed = true;
+        try {
+          wrap.setPointerCapture(state.pointerId);
+        } catch {
+          /* pointer may have already left the element */
+        }
+      }, LAYER_DRAG_LONG_PRESS_MS);
+    } else {
+      try {
+        wrap.setPointerCapture(state.pointerId);
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+
+  function handleLayerPointerMove(e: ReactPointerEvent<HTMLDivElement>) {
+    const state = layerDragRef.current;
+    if (!state || state.pointerId !== e.pointerId) return;
+    const dx = e.clientX - state.startX;
+    const dy = e.clientY - state.startY;
+    const dist = Math.hypot(dx, dy);
+
+    if (!state.armed) {
+      // Still deciding: if it moves before the long-press fires, that's a scroll.
+      if (dist > LAYER_DRAG_JITTER_PX) {
+        if (state.longPressTimer) clearTimeout(state.longPressTimer);
+        layerDragRef.current = null;
+      }
+      return;
+    }
+
+    if (!state.moved && dist > LAYER_DRAG_JITTER_PX) {
+      state.moved = true;
+      setDraggingLayerId(state.id);
+    }
+    if (!state.moved) return;
+
+    e.preventDefault();
+
+    const entries = layersRef.current
+      .map((l) => ({ id: l.id, el: layerTileElsRef.current.get(l.id) }))
+      .filter((entry): entry is { id: string; el: HTMLDivElement } => Boolean(entry.el));
+    let hovered: { id: string; rect: DOMRect } | null = null;
+    for (const entry of entries) {
+      if (entry.id === state.id) continue;
+      const rect = entry.el.getBoundingClientRect();
+      if (e.clientX >= rect.left && e.clientX <= rect.right) {
+        hovered = { id: entry.id, rect };
+        break;
+      }
+    }
+
+    if (!hovered) {
+      if (mergeTargetIdRef.current) {
+        mergeTargetIdRef.current = null;
+        setMergeTargetId(null);
+      }
+      return;
+    }
+
+    const center = hovered.rect.left + hovered.rect.width / 2;
+    const distFromCenter = Math.abs(e.clientX - center);
+    const overlapRatio = 1 - distFromCenter / (hovered.rect.width / 2);
+
+    if (overlapRatio >= LAYER_MERGE_ZONE_RATIO) {
+      if (mergeTargetIdRef.current !== hovered.id) {
+        mergeTargetIdRef.current = hovered.id;
+        setMergeTargetId(hovered.id);
+      }
+      return; // hovering the "onto" zone — hold for merge, don't live-reorder
+    }
+
+    if (mergeTargetIdRef.current) {
+      mergeTargetIdRef.current = null;
+      setMergeTargetId(null);
+    }
+    reorderLayer(state.id, hovered.id, e.clientX >= center);
+  }
+
+  function endLayerDrag(e: ReactPointerEvent<HTMLDivElement>) {
+    const state = layerDragRef.current;
+    if (!state || state.pointerId !== e.pointerId) return;
+    if (state.longPressTimer) clearTimeout(state.longPressTimer);
+    layerDragRef.current = null;
+    const target = mergeTargetIdRef.current;
+    mergeTargetIdRef.current = null;
+    setDraggingLayerId(null);
+    setMergeTargetId(null);
+    suppressLayerClickRef.current = state.moved;
+    if (state.moved && target && target !== state.id) {
+      mergeLayerInto(state.id, target);
+    }
+  }
+
   const stageEl = (
     <div className={styles.canvasEditor}>
       {layersOpen ? (
         <div className={styles.layerStrip} aria-label="Art layers">
           <div className={styles.layerStripScroll}>
             {layers.map((layer) => (
-              <button
+              <div
                 key={layer.id}
-                type="button"
-                className={`${styles.layerTile} ${
-                  layer.id === activeLayerId ? styles.layerTileActive : styles.layerTileInactive
-                }`}
-                onClick={() => selectLayer(layer.id)}
-                aria-pressed={layer.id === activeLayerId}
+                ref={(el) => {
+                  if (el) layerTileElsRef.current.set(layer.id, el);
+                  else layerTileElsRef.current.delete(layer.id);
+                }}
+                className={[
+                  styles.layerTileWrap,
+                  draggingLayerId === layer.id ? styles.layerTileWrapDragging : "",
+                  mergeTargetId === layer.id ? styles.layerTileWrapMergeTarget : "",
+                ]
+                  .filter(Boolean)
+                  .join(" ")}
+                onPointerDown={(e) => handleLayerPointerDown(layer.id, e)}
+                onPointerMove={handleLayerPointerMove}
+                onPointerUp={endLayerDrag}
+                onPointerCancel={endLayerDrag}
               >
-                {layer.dataUrl ? <img src={layer.dataUrl} alt="" aria-hidden /> : null}
-                <span>{layer.name}</span>
-              </button>
+                <button
+                  type="button"
+                  className={`${styles.layerTile} ${
+                    layer.id === activeLayerId ? styles.layerTileActive : styles.layerTileInactive
+                  }`}
+                  onClick={() => {
+                    if (suppressLayerClickRef.current) {
+                      suppressLayerClickRef.current = false;
+                      return;
+                    }
+                    selectLayer(layer.id);
+                  }}
+                  aria-pressed={layer.id === activeLayerId}
+                >
+                  {layer.dataUrl ? <img src={layer.dataUrl} alt="" aria-hidden /> : null}
+                  <span>{layer.name}</span>
+                </button>
+                {layers.length > 1 ? (
+                  <button
+                    type="button"
+                    className={styles.layerDelete}
+                    aria-label={`Delete ${layer.name}`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      deleteLayer(layer.id);
+                    }}
+                  >
+                    ×
+                  </button>
+                ) : null}
+              </div>
             ))}
           </div>
           <button type="button" className={styles.addLayer} onClick={addLayer}>
