@@ -125,6 +125,7 @@ export async function POST(
         roomName: room.name,
         conversationId: parentId,
         conversationTitle,
+        userId: user.id,
       });
     }
     const mentionIds = Array.isArray(body.mentionUserIds) ? body.mentionUserIds.map(String) : [];

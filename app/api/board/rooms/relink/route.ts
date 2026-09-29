@@ -50,6 +50,7 @@ export async function POST(req: Request) {
     roomIcon: room.icon,
     conversationId,
     conversationTitle,
+    userId: user.id,
   });
 
   return json({ ok: true });

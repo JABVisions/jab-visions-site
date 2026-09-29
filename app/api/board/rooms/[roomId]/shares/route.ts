@@ -200,6 +200,7 @@ async function finishShare(input: {
     roomName: input.room.name,
     conversationId: input.origin === "conversation" ? input.conversationId : null,
     conversationTitle: input.origin === "conversation" ? input.conversationTitle : null,
+    userId: input.userId,
   });
   const { data: followers } = await input.supabase
     .from("room_members")
