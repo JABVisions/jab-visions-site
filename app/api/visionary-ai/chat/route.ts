@@ -8,6 +8,8 @@ import {
   retrieveVisionaryKnowledge,
   toVisionarySources,
 } from "@/lib/visionary-ai/knowledge";
+import { loadForumKnowledgeDocuments } from "@/lib/visionary-ai/forumKnowledge";
+import { supabaseServer } from "@/lib/supabase/server";
 import {
   createVisionaryModelResponse,
   isVisionaryModelConfigured,
@@ -130,7 +132,8 @@ export async function POST(request: NextRequest) {
     });
   }
 
-  const retrieval = retrieveVisionaryKnowledge(messages);
+  const forumDocuments = await loadForumKnowledgeDocuments(supabaseServer()).catch(() => []);
+  const retrieval = retrieveVisionaryKnowledge(messages, { extraDocuments: forumDocuments });
   if (retrieval.confidence === "unknown") {
     return NextResponse.json<VisionaryChatResponse>({
       ok: true,

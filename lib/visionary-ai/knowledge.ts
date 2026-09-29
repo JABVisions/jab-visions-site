@@ -100,12 +100,15 @@ export type VisionaryRetrieval = {
 
 export function retrieveVisionaryKnowledge(
   messages: VisionaryMessage[],
-  limit = 4
+  options?: { limit?: number; extraDocuments?: VisionaryKnowledgeDocument[] }
 ): VisionaryRetrieval {
+  const limit = options?.limit ?? 4;
+  const extraDocuments = options?.extraDocuments ?? [];
   const userMessages = messages.filter((message) => message.role === "user");
   const latestQuery = userMessages.at(-1)?.content ?? "";
   const contextQuery = userMessages.slice(-3, -1).map((message) => message.content).join(" ");
-  const ranked = PUBLIC_KNOWLEDGE_DOCUMENTS.map((document, index) => ({
+  const candidatePool = [...PUBLIC_KNOWLEDGE_DOCUMENTS, ...extraDocuments];
+  const ranked = candidatePool.map((document, index) => ({
     document,
     index,
     score: scoreDocument(latestQuery, contextQuery, document),
