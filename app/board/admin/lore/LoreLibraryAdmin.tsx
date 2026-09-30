@@ -6,6 +6,7 @@
 // graph visualization, no bulk tooling — just enough for a creator to keep
 // the canon database populated.
 
+import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import type { CanonStatus, LoreEntry, LoreProject } from "@/lib/lore/types";
 
@@ -129,7 +130,12 @@ export default function LoreLibraryAdmin() {
 
   return (
     <div style={{ maxWidth: 960, margin: "0 auto", padding: "32px 20px", color: "#f5f5f5" }}>
-      <h1 style={{ fontSize: 24, marginBottom: 4 }}>Lore Library</h1>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+        <h1 style={{ fontSize: 24, marginBottom: 4 }}>Lore Library</h1>
+        <Link href="/board/admin/lore/ingest" style={{ fontSize: 13, opacity: 0.8 }}>
+          Ingestion Studio →
+        </Link>
+      </div>
       <p style={{ opacity: 0.7, marginBottom: 24 }}>
         Canon database powering Visionary AI. Changes here are visible to the AI immediately.
       </p>
