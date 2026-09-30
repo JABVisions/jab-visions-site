@@ -15,14 +15,15 @@ import ProjectNotebookWindow from "@/app/components/board/ProjectNotebookWindow"
 export default function BoardLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname() || "";
 
-  // Work + Forums should be dark/focused
+  // Work + Forums + admin tools should be dark/focused
   const isDark =
     pathname === "/board/work" ||
     pathname.startsWith("/board/work/") ||
     pathname === "/board/forums" ||
     pathname.startsWith("/board/forums/") ||
     pathname === "/board/explore" ||
-    pathname.startsWith("/board/explore/");
+    pathname.startsWith("/board/explore/") ||
+    pathname.startsWith("/board/admin/");
 
   const isAuthRoute =
     pathname === "/board/login" ||
