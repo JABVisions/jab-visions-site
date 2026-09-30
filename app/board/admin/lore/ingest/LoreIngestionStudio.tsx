@@ -204,8 +204,30 @@ export default function LoreIngestionStudio() {
   }
 
   async function handleFileUpload(file: File) {
-    const text = await file.text();
-    setForm((f) => ({ ...f, raw_text: text, title: f.title || file.name.replace(/\.txt$/i, "") }));
+    const name = file.name.toLowerCase();
+    const bareTitle = file.name.replace(/\.[^.]+$/, "");
+
+    // Plain text formats can be read directly in the browser.
+    if (name.endsWith(".txt") || name.endsWith(".md")) {
+      const text = await file.text();
+      setForm((f) => ({ ...f, raw_text: text, title: f.title || bareTitle }));
+      return;
+    }
+
+    // Word (.docx) and PDF need server-side extraction — send the raw file
+    // to the extract-text route and drop the resulting text into the same
+    // textarea a paste would use.
+    setStatus(`Reading ${file.name}…`);
+    try {
+      const body = new FormData();
+      body.set("file", file);
+      const res = await fetch("/api/lore/ingestion/extract-text", { method: "POST", body }).then((r) => r.json());
+      if (res.error) throw new Error(res.error);
+      setForm((f) => ({ ...f, raw_text: res.text, title: f.title || bareTitle }));
+      setStatus(null);
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : "Could not read that file.");
+    }
   }
 
   async function applyDecision(proposalId: string, decision: ApprovalDecision) {
@@ -316,12 +338,15 @@ export default function LoreIngestionStudio() {
           </div>
           <input
             type="file"
-            accept=".txt"
+            accept=".txt,.md,.docx,.pdf"
             onChange={(e) => {
               const file = e.target.files?.[0];
               if (file) handleFileUpload(file);
             }}
           />
+          <p style={{ fontSize: 12, opacity: 0.6, margin: 0 }}>
+            Accepts .txt, .md, .docx (Word), or .pdf. Legacy .doc files: re-save as .docx first.
+          </p>
           <textarea
             required
             placeholder="Or paste text here…"
