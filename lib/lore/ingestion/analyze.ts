@@ -88,6 +88,25 @@ export async function analyzeIngestionSource(sessionId: string): Promise<void> {
     const truncated = allChunks.length > chunks.length;
     await supabase.from("lore_ingestion_sessions").update({ chunk_count: allChunks.length }).eq("id", sessionId);
 
+    // extractLoreFromChunk degrades to an empty result (by design) when
+    // OPENAI_API_KEY isn't configured, so a missing key previously looked
+    // identical to "the AI genuinely found nothing" — completed, 0
+    // candidates, no explanation. Catch that case explicitly so the creator
+    // gets a clear reason instead of a silent no-op.
+    if (!process.env.OPENAI_API_KEY?.trim()) {
+      await supabase
+        .from("lore_ingestion_sessions")
+        .update({
+          status: "completed",
+          extracted_count: 0,
+          conflict_count: 0,
+          note: "AI extraction is not configured (missing OPENAI_API_KEY) — no analysis was actually run. Add the key and re-run analysis.",
+          completed_at: new Date().toISOString(),
+        })
+        .eq("id", sessionId);
+      return;
+    }
+
     const chunkExtractions: ChunkExtraction[] = await mapWithConcurrency(chunks, EXTRACTION_CONCURRENCY, async (chunk, i) => ({
       chunkIndex: i,
       result: await extractLoreFromChunk(chunk, {
