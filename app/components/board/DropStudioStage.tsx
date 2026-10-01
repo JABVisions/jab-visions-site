@@ -18,7 +18,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import DropStudio from "./DropStudio";
-import BoardArtCanvas from "./BoardArtCanvas";
+import BoardArtCanvas, { type BoardArtCanvasHandle } from "./BoardArtCanvas";
 import BoardUploadProgressBar from "./BoardUploadProgressBar";
 import { DropChipStage } from "./DropChipWorkbench";
 import chooseStyles from "./dropStudioChoose.module.css";
@@ -58,7 +58,7 @@ import {
 import type { BoardUploadProgress, BoardUploadProgressHandler } from "@/lib/board/uploadProgress";
 import { preparingUploadProgress, studioVisibleUploadProgress } from "@/lib/board/uploadProgress";
 import { guessUploadBytes, isBoardStorageLimitMessage } from "@/lib/board/boardMediaUpload";
-import { saveDropDraft, draftToFile, ensureVoiceStudioDraftCard, type DropDraft } from "@/lib/board/dropDrafts";
+import { saveDropDraft, draftToFile, draftCustomizations, ensureVoiceStudioDraftCard, type DropDraft } from "@/lib/board/dropDrafts";
 import DropDraftsDrawer from "./DropDraftsDrawer";
 import BoardClientErrorBoundary from "./BoardClientErrorBoundary";
 import VocalVisualizer from "./VocalVisualizer";
@@ -544,6 +544,7 @@ export default function DropStudioStage({
   const [drawOpen, setDrawOpen] = useState(false);
   // Save feature: device download, Drafts, and auto-save on capture.
   const draftIdRef = useRef<string>("");
+  const artCanvasRef = useRef<BoardArtCanvasHandle>(null);
   const previewErrorRetriesRef = useRef(0);
   const wasStudioOpenRef = useRef(false);
   const dropbookPageSeqRef = useRef(0);
@@ -641,6 +642,9 @@ export default function DropStudioStage({
   );
 
   const persistVoiceProjectRef = useRef<() => void>(() => {});
+  /** Auto-save any in-progress Photo/Video/Art work (not Voice — that's above)
+   * when the studio is closing or the tab is being hidden/unloaded. */
+  const persistNonAudioWorkRef = useRef<() => void>(() => {});
   const lastSavedVoiceSignatureRef = useRef("");
   const wasVoiceStudioOpenRef = useRef(false);
   const mixAbortRef = useRef(false);
@@ -649,6 +653,7 @@ export default function DropStudioStage({
 
   const handleClose = useCallback(() => {
     persistVoiceProjectRef.current();
+    persistNonAudioWorkRef.current();
     flushStudioValue();
     onClose();
   }, [flushStudioValue, onClose]);
@@ -1334,10 +1339,22 @@ export default function DropStudioStage({
   const saveToDrafts = useCallback(
     async (auto = false, quiet = false) => {
       const session = audioSessionRef.current;
-      const file =
+      let file =
         fileRef.current ??
         session?.tracks.flatMap((track) => track.clips).find((clip) => clip.file)?.file;
-      if (!file && !sessionHasClips(session)) return false;
+
+      // Art mode draws on top of (or instead of) the base file — if there are
+      // unsaved strokes, export a fresh snapshot so the drawing itself is what
+      // gets saved, not just the untouched photo/video underneath it.
+      if (mode === "art" && artCanvasRef.current?.hasUnsavedStrokes()) {
+        const snapshot = await artCanvasRef.current.exportSnapshot();
+        if (snapshot) file = snapshot;
+      }
+
+      if (!file && !sessionHasClips(session)) {
+        if (!auto) flashSaveNote("Nothing to save yet");
+        return false;
+      }
       if (!draftIdRef.current) {
         draftIdRef.current = `draft_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
       }
@@ -1345,7 +1362,10 @@ export default function DropStudioStage({
       else if (auto) setVoiceAutoSaving(true);
       let saved = false;
       if (file) {
-        saved = Boolean(await saveDropDraft(file, draftIdRef.current));
+        // Stickers/text/frame/art-layer state travels with the media so
+        // reopening the draft restores the edit, not just the bare file.
+        const customizations = mode !== "audio" ? studioValue : undefined;
+        saved = Boolean(await saveDropDraft(file, draftIdRef.current, customizations));
       }
       let projectSaved = false;
       if (sessionHasClips(session) && session) {
@@ -1375,13 +1395,21 @@ export default function DropStudioStage({
       );
       return projectSaved || saved;
     },
-    [flashSaveNote]
+    [flashSaveNote, mode, studioValue]
   );
 
   persistVoiceProjectRef.current = () => {
     const session = audioSessionRef.current;
     if (!sessionHasClips(session)) return;
     if (voiceStudioEditSignature(session) === lastSavedVoiceSignatureRef.current) return;
+    void saveToDrafts(true, true);
+  };
+
+  persistNonAudioWorkRef.current = () => {
+    if (mode === "audio") return;
+    const hasArtStrokes = mode === "art" && Boolean(artCanvasRef.current?.hasUnsavedStrokes());
+    const hasCapturedFile = phase === "edit" && Boolean(fileRef.current);
+    if (!hasArtStrokes && !hasCapturedFile) return;
     void saveToDrafts(true, true);
   };
 
@@ -1392,24 +1420,28 @@ export default function DropStudioStage({
       if (voiceStudioEditSignature(session) === lastSavedVoiceSignatureRef.current) return;
       void saveToDrafts(true, true);
     };
+    const persistAllWork = () => {
+      persistVoiceProject();
+      persistNonAudioWorkRef.current();
+    };
     const resumeMixer = () => {
       void studioEngineRef.current?.resumeContext();
     };
     const onVisibility = () => {
       if (document.visibilityState === "hidden") {
-        persistVoiceProject();
+        persistAllWork();
         return;
       }
       resumeMixer();
     };
-    window.addEventListener("pagehide", persistVoiceProject);
-    window.addEventListener("beforeunload", persistVoiceProject);
+    window.addEventListener("pagehide", persistAllWork);
+    window.addEventListener("beforeunload", persistAllWork);
     window.addEventListener("pageshow", resumeMixer);
     window.addEventListener("pointerdown", resumeMixer, { passive: true });
     document.addEventListener("visibilitychange", onVisibility);
     return () => {
-      window.removeEventListener("pagehide", persistVoiceProject);
-      window.removeEventListener("beforeunload", persistVoiceProject);
+      window.removeEventListener("pagehide", persistAllWork);
+      window.removeEventListener("beforeunload", persistAllWork);
       window.removeEventListener("pageshow", resumeMixer);
       window.removeEventListener("pointerdown", resumeMixer);
       document.removeEventListener("visibilitychange", onVisibility);
@@ -1531,9 +1563,18 @@ export default function DropStudioStage({
             })
           );
         })();
+      } else {
+        const restored = draftCustomizations<DropCustomization>(draft);
+        if (restored) {
+          const compacted = compactDropCustomizations(restored) ?? {};
+          setStudioValue(compacted);
+          writeStudioDraft(compacted);
+          onChange(compacted);
+          flashSaveNote("Draft restored with your edits");
+        }
       }
     },
-    [flashSaveNote, stopCamera, syncMediaPreview, voicePreset]
+    [flashSaveNote, onChange, stopCamera, syncMediaPreview, voicePreset, writeStudioDraft]
   );
 
   const startCamera = useCallback(
@@ -2962,6 +3003,20 @@ export default function DropStudioStage({
             >
               🗂 Drafts
             </button>
+            {!isDropbookMode &&
+            mode !== "descript" &&
+            mode !== "audio" &&
+            (phase === "edit" || (phase === "capture" && mode === "art")) ? (
+              <button
+                type="button"
+                className="studioGhost"
+                onClick={() => void saveToDrafts(false)}
+                disabled={voiceAutoSaving}
+                aria-label="Save current work to Drafts"
+              >
+                {voiceAutoSaving ? "Saving…" : "💾 Save Draft"}
+              </button>
+            ) : null}
             {phase === "edit" && mode !== "descript" && !voiceSessionActive ? (
               <button type="button" className="studioGhost" onClick={retake}>
                 Retake
@@ -3684,6 +3739,7 @@ export default function DropStudioStage({
                 <div className="capMonitorHost">
                   {mode === "art" ? (
                     <BoardArtCanvas
+                      ref={artCanvasRef}
                       operatingTable
                       onSave={(f) => commitBlob(f, "image", "capture")}
                     />
@@ -3856,6 +3912,7 @@ export default function DropStudioStage({
                   ) : drawOpen && mode === "art" ? (
                     <div className="capMonitorHost">
                       <BoardArtCanvas
+                        ref={artCanvasRef}
                         operatingTable
                         backgroundImageUrl={
                           mediaKind === "image" && !editingFlattenedArtwork

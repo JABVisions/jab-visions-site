@@ -23,7 +23,17 @@ export type DropDraft = {
   createdAt: number;
   /** How many times this draft has been saved (revision count). */
   count?: number;
+  /**
+   * Drop Studio customizations (stickers, text, frame, art layers) captured
+   * alongside the media, serialized as JSON. Optional and best-effort — if
+   * it's too large to store safely, the raw media is still saved on its own.
+   */
+  customizationsJson?: string;
 };
+
+// Customizations can carry data-URL art layers; cap how much of that we'll
+// duplicate into a draft record so one huge drawing can't blow the quota.
+const MAX_DRAFT_CUSTOMIZATIONS_JSON_BYTES = 2_000_000;
 
 function canUseStorage() {
   return typeof window !== "undefined" && typeof window.localStorage !== "undefined";
@@ -78,8 +88,14 @@ function kindForMime(type: string): DropDraftKind {
 /**
  * Save (or replace, when `id` is provided) a Drop Studio draft. Returns the
  * saved draft, or null if it couldn't be stored (too large / no storage).
+ * `customizations` (stickers/frame/art layers) is optional best-effort
+ * metadata — dropped silently if it doesn't fit, without failing the save.
  */
-export async function saveDropDraft(file: File, id?: string): Promise<DropDraft | null> {
+export async function saveDropDraft(
+  file: File,
+  id?: string,
+  customizations?: unknown
+): Promise<DropDraft | null> {
   if (!canUseStorage()) return null;
   let dataUrl = "";
   try {
@@ -88,6 +104,16 @@ export async function saveDropDraft(file: File, id?: string): Promise<DropDraft 
     return null;
   }
   if (!dataUrl || dataUrl.length > MAX_DRAFT_DATAURL_BYTES) return null;
+
+  let customizationsJson: string | undefined;
+  if (customizations && typeof customizations === "object" && Object.keys(customizations).length) {
+    try {
+      const json = JSON.stringify(customizations);
+      if (json && json.length <= MAX_DRAFT_CUSTOMIZATIONS_JSON_BYTES) customizationsJson = json;
+    } catch {
+      customizationsJson = undefined;
+    }
+  }
 
   const draftId = id || `draft_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
   const prior = readDropDrafts().find((d) => d.id === draftId);
@@ -100,11 +126,22 @@ export async function saveDropDraft(file: File, id?: string): Promise<DropDraft 
     createdAt: Date.now(),
     // Re-saving the same draft bumps its revision count.
     count: (prior?.count ?? 0) + 1,
+    customizationsJson,
   };
 
   const next = [draft, ...readDropDrafts().filter((d) => d.id !== draft.id)];
   writeDropDrafts(next);
   return draft;
+}
+
+/** Parse a draft's stored customizations back out, if any were saved. */
+export function draftCustomizations<T = unknown>(draft: DropDraft): T | null {
+  if (!draft.customizationsJson) return null;
+  try {
+    return JSON.parse(draft.customizationsJson) as T;
+  } catch {
+    return null;
+  }
 }
 
 export function removeDropDraft(id: string) {

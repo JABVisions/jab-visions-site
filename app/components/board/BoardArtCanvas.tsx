@@ -9,7 +9,14 @@
 
 "use client";
 
-import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import {
+  forwardRef,
+  useEffect,
+  useImperativeHandle,
+  useRef,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
 import { Layers3 } from "lucide-react";
 import ArtPaletteTools, { type ArtBrushMode } from "./ArtPaletteTools";
 import DropChipWorkbench from "./DropChipWorkbench";
@@ -17,6 +24,16 @@ import DropStudioPaletteDeck, { type ObjectTool } from "./DropStudioPaletteDeck"
 import styles from "./boardArtCanvas.module.css";
 import { scaleCanvasToMinLongEdge } from "@/lib/board/imageQuality";
 import type { DropStudioArtLayer } from "@/lib/board/dropCustomizations";
+
+/** Imperative handle so a parent (Drop Studio) can silently export an
+ * in-progress drawing as a draft without going through the "Apply drawing"
+ * button flow (which also closes the canvas / applies the layer). */
+export type BoardArtCanvasHandle = {
+  /** Export the current composite as a PNG File, or null if nothing to export. */
+  exportSnapshot: () => Promise<File | null>;
+  /** True when strokes have been drawn since the last save/export. */
+  hasUnsavedStrokes: () => boolean;
+};
 
 function hslToHex(h: number, s: number, l: number) {
   const sN = s / 100;
@@ -46,16 +63,8 @@ const LAYER_MERGE_ZONE_RATIO = 0.5;
 function makeLayer(id: string, name: string): DropStudioArtLayer {
   return { id, name, visible: true, locked: false, opacity: 1 };
 }
-export default function BoardArtCanvas({
-  onSave,
-  backgroundImageUrl,
-  backgroundVideoUrl,
-  initialOverlayUrl,
-  exportMode = "composite",
-  saveLabel = "Use art →",
-  operatingTable = false,
-  layout = "side",
-}: {
+
+type BoardArtCanvasProps = {
   onSave: (file: File) => void;
   /** When set, strokes draw on top of this image (draw-on-photo for Vision). */
   backgroundImageUrl?: string;
@@ -68,13 +77,30 @@ export default function BoardArtCanvas({
   operatingTable?: boolean;
   /** Dropbook cover — tools below the chip instead of beside it. */
   layout?: "side" | "stack";
-}) {
+};
+
+const BoardArtCanvas = forwardRef<BoardArtCanvasHandle, BoardArtCanvasProps>(function BoardArtCanvas(
+  {
+    onSave,
+    backgroundImageUrl,
+    backgroundVideoUrl,
+    initialOverlayUrl,
+    exportMode = "composite",
+    saveLabel = "Use art →",
+    operatingTable = false,
+    layout = "side",
+  },
+  ref
+) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const ctxRef = useRef<CanvasRenderingContext2D | null>(null);
   const layerCanvasesRef = useRef<Map<string, HTMLCanvasElement>>(new Map());
   const layersRef = useRef<DropStudioArtLayer[]>([]);
   const bgImgRef = useRef<HTMLImageElement>(null);
   const drawingRef = useRef(false);
+  // Tracks whether any stroke has landed since the last export (save/auto-save),
+  // so the parent can know there's unsaved work worth draft-saving on close.
+  const hasDrawnRef = useRef(false);
   const undoRef = useRef<ImageData[]>([]);
   const redoRef = useRef<ImageData[]>([]);
   const dprRef = useRef(1);
@@ -278,6 +304,7 @@ export default function BoardArtCanvas({
     if (undoRef.current.length > 24) undoRef.current.shift();
     // A fresh edit invalidates the redo stack.
     redoRef.current = [];
+    hasDrawnRef.current = true;
   }
 
   // ---- Smudge / blend brush -------------------------------------------------
@@ -529,14 +556,16 @@ export default function BoardArtCanvas({
     recomposite();
   }
 
-  function save() {
+  /** Composite the background + strokes into a PNG File. Shared by the manual
+   * "Apply drawing" save and the silent auto-save/draft export. */
+  function exportComposite(): Promise<File | null> {
     const canvas = canvasRef.current;
-    if (!canvas) return;
+    if (!canvas) return Promise.resolve(null);
     const out = document.createElement("canvas");
     out.width = canvas.width;
     out.height = canvas.height;
     const ctx = out.getContext("2d");
-    if (!ctx) return;
+    if (!ctx) return Promise.resolve(null);
 
     // Paint the background first…
     if (exportMode === "overlay") {
@@ -558,10 +587,38 @@ export default function BoardArtCanvas({
     ctx.drawImage(canvas, 0, 0);
 
     const exportCanvas = scaleCanvasToMinLongEdge(out);
-    exportCanvas.toBlob((blob) => {
-      if (blob) onSave(new File([blob], `board-art-${Date.now()}.png`, { type: "image/png" }));
-    }, "image/png");
+    return new Promise((resolve) => {
+      exportCanvas.toBlob((blob) => {
+        resolve(blob ? new File([blob], `board-art-${Date.now()}.png`, { type: "image/png" }) : null);
+      }, "image/png");
+    });
   }
+
+  function save() {
+    void exportComposite().then((file) => {
+      if (file) {
+        hasDrawnRef.current = false;
+        onSave(file);
+      }
+    });
+  }
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      exportSnapshot: async () => {
+        const file = await exportComposite();
+        if (file) hasDrawnRef.current = false;
+        return file;
+      },
+      hasUnsavedStrokes: () => hasDrawnRef.current,
+    }),
+    // exportComposite closes over state (exportMode/onPhoto/paper) that's stable
+    // enough per-render; re-creating the handle each render is cheap and keeps
+    // it from ever going stale.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [exportMode, paper]
+  );
 
   function addLayer() {
     const id = `art-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
@@ -984,4 +1041,6 @@ export default function BoardArtCanvas({
       {toolsEl}
     </div>
   );
-}
+});
+
+export default BoardArtCanvas;
