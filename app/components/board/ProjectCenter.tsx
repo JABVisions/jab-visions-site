@@ -2118,16 +2118,6 @@ export default function ProjectCenter() {
                           type="button"
                           onClick={(event) => {
                             event.stopPropagation();
-                            setCommentsProject(project);
-                          }}
-                          className="rounded-full border border-cyan-200/25 bg-cyan-400/15 px-3 py-1 text-[11px] tracking-[0.16em] text-cyan-50/90 transition hover:bg-cyan-400/22"
-                        >
-                          Comment
-                        </button>
-                        <button
-                          type="button"
-                          onClick={(event) => {
-                            event.stopPropagation();
                             openProjectRoom(project.id);
                           }}
                           className="rounded-full border border-white/15 bg-black/45 px-3 py-1 text-[11px] tracking-[0.16em] text-white/80 transition hover:bg-black/60"
