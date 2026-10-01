@@ -20,11 +20,6 @@ function json(body: unknown, status = 200) {
   });
 }
 
-function requireClient() {
-  const supabase = loreServiceClient();
-  if (!supabase) throw new LoreAdminError("Lore Library service credentials are not configured.");
-  return supabase;
-}
 
 async function currentUserId(): Promise<string | null> {
   try {
@@ -48,7 +43,8 @@ export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const sourceId = searchParams.get("source_id");
 
-  const supabase = requireClient();
+  const supabase = loreServiceClient();
+  if (!supabase) return json({ error: "Lore Library service credentials are not configured." }, 500);
   let query = supabase
     .from("lore_ingestion_sessions")
     .select("*, lore_ingestion_sources(title, source_type)")
@@ -71,7 +67,8 @@ export async function POST(request: NextRequest) {
   const sourceId = body?.source_id;
   if (!sourceId) return json({ error: "source_id is required." }, 400);
 
-  const supabase = requireClient();
+  const supabase = loreServiceClient();
+  if (!supabase) return json({ error: "Lore Library service credentials are not configured." }, 500);
   const createdBy = await currentUserId();
   const { data, error } = await supabase
     .from("lore_ingestion_sessions")

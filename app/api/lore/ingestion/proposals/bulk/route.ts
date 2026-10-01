@@ -35,6 +35,11 @@ export async function POST(request: NextRequest) {
   }
   if (!decision?.action) return json({ error: "A review decision is required." }, 400);
 
-  const result = await bulkReviewProposals(ids as string[], decision);
-  return json(result);
+  try {
+    const result = await bulkReviewProposals(ids as string[], decision);
+    return json(result);
+  } catch (error) {
+    if (error instanceof LoreAdminError) return json({ error: error.message }, 403);
+    return json({ error: error instanceof Error ? error.message : "Bulk review failed." }, 500);
+  }
 }
