@@ -2548,7 +2548,9 @@ export default function DropTile() {
         allowedModes={
           mode === "Thought"
             ? ["audio", "art", "descript"]
-            : ["photo", "video", "audio", "art", "descript"]
+            : mode === "Media"
+              ? ["photo", "video", "art", "descript"]
+              : ["photo", "video", "audio", "art", "descript"]
         }
         descriptDestination="doc"
         value={dropCustomizations}

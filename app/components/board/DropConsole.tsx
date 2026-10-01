@@ -2083,7 +2083,9 @@ function BoardDropConsoleFields({
         allowedModes={
           dropFlavor === "thought"
             ? ["audio", "art", "descript"]
-            : ["photo", "video", "audio", "art", "descript"]
+            : dropFlavor === "media"
+              ? ["photo", "video", "art", "descript"]
+              : ["photo", "video", "audio", "art", "descript"]
         }
         descriptDestination="doc"
         value={customizations}
