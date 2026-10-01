@@ -41,6 +41,28 @@ const APPROVE_STATUSES: Extract<CanonStatus, "CANON" | "DRAFT" | "CONCEPT" | "SE
   "SECRET_CANON",
 ];
 
+// Reads the response body as text first, so a non-JSON response (a platform
+// error page, an oversized-body rejection, etc.) surfaces as a clear
+// "Request failed (status): ..." message instead of a cryptic
+// "The string did not match the expected pattern" parse error (Safari's
+// generic wording when res.json() is called on non-JSON body text).
+async function parseJsonResponse(res: Response) {
+  const text = await res.text();
+  let data: any = null;
+  try {
+    data = text ? JSON.parse(text) : null;
+  } catch {
+    throw new Error(
+      `Request failed (${res.status} ${res.statusText || ""}).`.trim() +
+        (text ? ` ${text.slice(0, 200)}` : "")
+    );
+  }
+  if (!res.ok && !data?.error) {
+    throw new Error(`Request failed (${res.status}).`);
+  }
+  return data ?? {};
+}
+
 type SourceRow = {
   id: string;
   title: string;
@@ -121,22 +143,22 @@ export default function LoreIngestionStudio() {
   });
 
   const loadProjects = useCallback(async () => {
-    const res = await fetch("/api/lore/projects").then((r) => r.json()).catch(() => null);
+    const res = await fetch("/api/lore/projects").then(parseJsonResponse).catch(() => null);
     if (res?.projects) setProjects(res.projects);
   }, []);
 
   const loadSources = useCallback(async () => {
-    const res = await fetch("/api/lore/ingestion/sources").then((r) => r.json()).catch(() => null);
+    const res = await fetch("/api/lore/ingestion/sources").then(parseJsonResponse).catch(() => null);
     if (res?.sources) setSources(res.sources);
   }, []);
 
   const loadSessions = useCallback(async () => {
-    const res = await fetch("/api/lore/ingestion/sessions").then((r) => r.json()).catch(() => null);
+    const res = await fetch("/api/lore/ingestion/sessions").then(parseJsonResponse).catch(() => null);
     if (res?.sessions) setSessions(res.sessions);
   }, []);
 
   const loadProposals = useCallback(async (sessionId: string) => {
-    const res = await fetch(`/api/lore/ingestion/proposals?session_id=${sessionId}`).then((r) => r.json()).catch(() => null);
+    const res = await fetch(`/api/lore/ingestion/proposals?session_id=${sessionId}`).then(parseJsonResponse).catch(() => null);
     if (res?.proposals) setProposals(res.proposals);
   }, []);
 
@@ -154,7 +176,7 @@ export default function LoreIngestionStudio() {
     setAnalyzing(true);
     setStatus("Analyzing lore… this can take a little while for long documents.");
     try {
-      const res = await fetch(`/api/lore/ingestion/sessions/${sessionId}/analyze`, { method: "POST" }).then((r) => r.json());
+      const res = await fetch(`/api/lore/ingestion/sessions/${sessionId}/analyze`, { method: "POST" }).then(parseJsonResponse);
       if (res.error) throw new Error(res.error);
       setStatus(
         res.session?.note ? res.session.note : `Analysis complete — ${res.session?.extracted_count ?? 0} candidates found.`
@@ -185,14 +207,14 @@ export default function LoreIngestionStudio() {
           raw_text: form.raw_text,
           project_ids: Array.from(form.project_ids),
         }),
-      }).then((r) => r.json());
+      }).then(parseJsonResponse);
       if (sourceRes.error) throw new Error(sourceRes.error);
 
       const sessionRes = await fetch("/api/lore/ingestion/sessions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ source_id: sourceRes.source.id }),
-      }).then((r) => r.json());
+      }).then(parseJsonResponse);
       if (sessionRes.error) throw new Error(sessionRes.error);
 
       setForm({ title: "", source_type: "screenplay", project_ids: new Set(), raw_text: "" });
@@ -221,7 +243,7 @@ export default function LoreIngestionStudio() {
     try {
       const body = new FormData();
       body.set("file", file);
-      const res = await fetch("/api/lore/ingestion/extract-text", { method: "POST", body }).then((r) => r.json());
+      const res = await fetch("/api/lore/ingestion/extract-text", { method: "POST", body }).then(parseJsonResponse);
       if (res.error) throw new Error(res.error);
       setForm((f) => ({ ...f, raw_text: res.text, title: f.title || bareTitle }));
       setStatus(null);
@@ -237,7 +259,7 @@ export default function LoreIngestionStudio() {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "review", decision }),
-      }).then((r) => r.json());
+      }).then(parseJsonResponse);
       if (res.error) throw new Error(res.error);
       setProposals((prev) => prev.map((p) => (p.id === proposalId ? res.proposal : p)));
     } catch (err) {
@@ -250,7 +272,7 @@ export default function LoreIngestionStudio() {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: "edit", payload: editDraft }),
-    }).then((r) => r.json());
+    }).then(parseJsonResponse);
     if (res.error) setStatus(res.error);
     else {
       setProposals((prev) => prev.map((p) => (p.id === proposal.id ? res.proposal : p)));
@@ -280,7 +302,7 @@ export default function LoreIngestionStudio() {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ proposal_ids: Array.from(selectedIds), decision }),
-    }).then((r) => r.json());
+    }).then(parseJsonResponse);
     setStatus(`Updated ${res.succeeded?.length ?? 0}, failed ${res.failed?.length ?? 0}.`);
     setSelectedIds(new Set());
     if (selectedSessionId) loadProposals(selectedSessionId);
@@ -289,7 +311,39 @@ export default function LoreIngestionStudio() {
   const selectedSession = useMemo(() => sessions.find((s) => s.id === selectedSessionId) ?? null, [sessions, selectedSessionId]);
 
   return (
-    <div style={{ maxWidth: 1100, margin: "0 auto", padding: "32px 20px", color: "#f5f5f5" }}>
+    <div className="lore-admin-page" style={{ maxWidth: 1100, margin: "0 auto", padding: "32px 20px", color: "#f5f5f5" }}>
+      <style jsx global>{`
+        .lore-admin-page input,
+        .lore-admin-page select,
+        .lore-admin-page textarea {
+          background: #16161c;
+          color: #f5f5f5;
+          border: 1px solid #333;
+          border-radius: 6px;
+          padding: 8px 10px;
+          font-size: 14px;
+        }
+        .lore-admin-page input::placeholder,
+        .lore-admin-page textarea::placeholder {
+          color: #8a8a92;
+        }
+        .lore-admin-page input:focus,
+        .lore-admin-page select:focus,
+        .lore-admin-page textarea:focus {
+          outline: 1px solid #38bdf8;
+        }
+        .lore-admin-page button {
+          background: #22222b;
+          color: #f5f5f5;
+          border: 1px solid #333;
+          border-radius: 6px;
+          padding: 8px 14px;
+          cursor: pointer;
+        }
+        .lore-admin-page button:hover {
+          background: #2c2c36;
+        }
+      `}</style>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
         <h1 style={{ fontSize: 24, marginBottom: 4 }}>Lore Ingestion Studio</h1>
         <Link href="/board/admin/lore" style={{ fontSize: 13, opacity: 0.8 }}>

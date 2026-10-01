@@ -12,6 +12,28 @@ import type { CanonStatus, LoreEntry, LoreProject } from "@/lib/lore/types";
 
 const CANON_STATUSES: CanonStatus[] = ["CANON", "DRAFT", "CONCEPT", "SECRET_CANON", "RETIRED"];
 
+// Reads the response body as text first, so a non-JSON response (a platform
+// error page, an oversized-body rejection, etc.) surfaces as a clear
+// "Request failed (status): ..." message instead of a cryptic
+// "The string did not match the expected pattern" parse error (Safari's
+// generic wording when res.json() is called on non-JSON body text).
+async function parseJsonResponse(res: Response) {
+  const text = await res.text();
+  let data: any = null;
+  try {
+    data = text ? JSON.parse(text) : null;
+  } catch {
+    throw new Error(
+      `Request failed (${res.status} ${res.statusText || ""}).`.trim() +
+        (text ? ` ${text.slice(0, 200)}` : "")
+    );
+  }
+  if (!res.ok && !data?.error) {
+    throw new Error(`Request failed (${res.status}).`);
+  }
+  return data ?? {};
+}
+
 function canonBadgeStyle(status: CanonStatus): React.CSSProperties {
   const colors: Record<CanonStatus, string> = {
     CANON: "#facc15",
@@ -62,13 +84,13 @@ export default function LoreLibraryAdmin() {
   const [loading, setLoading] = useState(false);
 
   const loadProjects = useCallback(async () => {
-    const res = await fetch("/api/lore/projects").then((r) => r.json()).catch(() => null);
+    const res = await fetch("/api/lore/projects").then(parseJsonResponse).catch(() => null);
     if (res?.projects) setProjects(res.projects);
   }, []);
 
   const loadEntries = useCallback(async (q: string) => {
     const url = q ? `/api/lore/entries?q=${encodeURIComponent(q)}` : "/api/lore/entries";
-    const res = await fetch(url).then((r) => r.json()).catch(() => null);
+    const res = await fetch(url).then(parseJsonResponse).catch(() => null);
     if (res?.entries) setEntries(res.entries);
   }, []);
 
@@ -92,7 +114,7 @@ export default function LoreLibraryAdmin() {
         method,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
-      }).then((r) => r.json());
+      }).then(parseJsonResponse);
       if (res.error) throw new Error(res.error);
       setStatus(form.id ? "Entry updated." : "Entry created.");
       setForm(EMPTY_FORM);
@@ -110,7 +132,7 @@ export default function LoreLibraryAdmin() {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: "retire" }),
-    }).then((r) => r.json());
+    }).then(parseJsonResponse);
     if (res.error) setStatus(res.error);
     else loadEntries(query);
   }
@@ -129,7 +151,39 @@ export default function LoreLibraryAdmin() {
   }
 
   return (
-    <div style={{ maxWidth: 960, margin: "0 auto", padding: "32px 20px", color: "#f5f5f5" }}>
+    <div className="lore-admin-page" style={{ maxWidth: 960, margin: "0 auto", padding: "32px 20px", color: "#f5f5f5" }}>
+      <style jsx global>{`
+        .lore-admin-page input,
+        .lore-admin-page select,
+        .lore-admin-page textarea {
+          background: #16161c;
+          color: #f5f5f5;
+          border: 1px solid #333;
+          border-radius: 6px;
+          padding: 8px 10px;
+          font-size: 14px;
+        }
+        .lore-admin-page input::placeholder,
+        .lore-admin-page textarea::placeholder {
+          color: #8a8a92;
+        }
+        .lore-admin-page input:focus,
+        .lore-admin-page select:focus,
+        .lore-admin-page textarea:focus {
+          outline: 1px solid #38bdf8;
+        }
+        .lore-admin-page button {
+          background: #22222b;
+          color: #f5f5f5;
+          border: 1px solid #333;
+          border-radius: 6px;
+          padding: 8px 14px;
+          cursor: pointer;
+        }
+        .lore-admin-page button:hover {
+          background: #2c2c36;
+        }
+      `}</style>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
         <h1 style={{ fontSize: 24, marginBottom: 4 }}>Lore Library</h1>
         <Link href="/board/admin/lore/ingest" style={{ fontSize: 13, opacity: 0.8 }}>
