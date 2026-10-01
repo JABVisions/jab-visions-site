@@ -58,7 +58,15 @@ import {
 import type { BoardUploadProgress, BoardUploadProgressHandler } from "@/lib/board/uploadProgress";
 import { preparingUploadProgress, studioVisibleUploadProgress } from "@/lib/board/uploadProgress";
 import { guessUploadBytes, isBoardStorageLimitMessage } from "@/lib/board/boardMediaUpload";
-import { saveDropDraft, draftToFile, draftCustomizations, ensureVoiceStudioDraftCard, type DropDraft } from "@/lib/board/dropDrafts";
+import {
+  saveDropDraft,
+  draftToFile,
+  draftCustomizations,
+  ensureVoiceStudioDraftCard,
+  type DropDraft,
+  type DropDraftType,
+} from "@/lib/board/dropDrafts";
+import { queueDraftCloudSync } from "@/lib/board/dropDraftsCloud";
 import DropDraftsDrawer from "./DropDraftsDrawer";
 import BoardClientErrorBoundary from "./BoardClientErrorBoundary";
 import VocalVisualizer from "./VocalVisualizer";
@@ -475,6 +483,15 @@ function modeGlyph(mode: CaptureMode) {
   if (mode === "art") return "🎨";
   if (mode === "descript") return "📝";
   return "👁️";
+}
+
+/** Maps Drop Studio's internal capture mode to Drafts Deck's drop type tag. */
+function dropDraftTypeForMode(mode: CaptureMode): DropDraftType {
+  if (mode === "audio") return "voice";
+  if (mode === "video") return "video";
+  if (mode === "art") return "art";
+  if (mode === "descript") return "descript";
+  return "photo";
 }
 
 export default function DropStudioStage({
@@ -1337,7 +1354,7 @@ export default function DropStudioStage({
   }, [audioSession, flashSaveNote, studioLatencyMs, voicePreset]);
 
   const saveToDrafts = useCallback(
-    async (auto = false, quiet = false) => {
+    async (auto = false, quiet = false, cloudImmediate = false) => {
       const session = audioSessionRef.current;
       let file =
         fileRef.current ??
@@ -1365,7 +1382,13 @@ export default function DropStudioStage({
         // Stickers/text/frame/art-layer state travels with the media so
         // reopening the draft restores the edit, not just the bare file.
         const customizations = mode !== "audio" ? studioValue : undefined;
-        saved = Boolean(await saveDropDraft(file, draftIdRef.current, customizations));
+        const savedDraft = await saveDropDraft(file, draftIdRef.current, customizations, {
+          dropType: dropDraftTypeForMode(mode),
+        });
+        saved = Boolean(savedDraft);
+        if (savedDraft) {
+          queueDraftCloudSync(savedDraft, dropDraftTypeForMode(mode), { immediate: cloudImmediate });
+        }
       }
       let projectSaved = false;
       if (sessionHasClips(session) && session) {
@@ -1402,7 +1425,7 @@ export default function DropStudioStage({
     const session = audioSessionRef.current;
     if (!sessionHasClips(session)) return;
     if (voiceStudioEditSignature(session) === lastSavedVoiceSignatureRef.current) return;
-    void saveToDrafts(true, true);
+    void saveToDrafts(true, true, true);
   };
 
   persistNonAudioWorkRef.current = () => {
@@ -1410,7 +1433,7 @@ export default function DropStudioStage({
     const hasArtStrokes = mode === "art" && Boolean(artCanvasRef.current?.hasUnsavedStrokes());
     const hasCapturedFile = phase === "edit" && Boolean(fileRef.current);
     if (!hasArtStrokes && !hasCapturedFile) return;
-    void saveToDrafts(true, true);
+    void saveToDrafts(true, true, true);
   };
 
   useEffect(() => {
@@ -1418,7 +1441,7 @@ export default function DropStudioStage({
       const session = audioSessionRef.current;
       if (!sessionHasClips(session)) return;
       if (voiceStudioEditSignature(session) === lastSavedVoiceSignatureRef.current) return;
-      void saveToDrafts(true, true);
+      void saveToDrafts(true, true, true);
     };
     const persistAllWork = () => {
       persistVoiceProject();

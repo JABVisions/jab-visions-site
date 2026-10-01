@@ -14,6 +14,11 @@ const MAX_DRAFTS = 40;
 
 export type DropDraftKind = "image" | "video" | "audio";
 
+/** Drafts Deck's finer-grained Drop Studio mode — a superset of `kind` (e.g. both Photo and Art are `kind: "image"`). */
+export type DropDraftType = "photo" | "video" | "art" | "voice" | "descript" | "dropbook";
+
+export type DropDraftStatus = "sketching" | "editing" | "ready";
+
 export type DropDraft = {
   id: string;
   kind: DropDraftKind;
@@ -29,6 +34,13 @@ export type DropDraft = {
    * it's too large to store safely, the raw media is still saved on its own.
    */
   customizationsJson?: string;
+  /** User-facing name shown on the Draft Card. Falls back to a generic label when empty. */
+  title?: string;
+  /** Drafts Deck mode tag (more specific than `kind`). */
+  dropType?: DropDraftType;
+  status?: DropDraftStatus;
+  /** Set once this draft has been synced to Supabase (Drafts Deck cloud copy). */
+  syncedAt?: number;
 };
 
 // Customizations can carry data-URL art layers; cap how much of that we'll
@@ -53,7 +65,7 @@ export function readDropDrafts(): DropDraft[] {
   }
 }
 
-function writeDropDrafts(drafts: DropDraft[]) {
+export function writeDropDrafts(drafts: DropDraft[]) {
   if (!canUseStorage()) return;
   const ordered = [...drafts]
     .sort((a, b) => b.createdAt - a.createdAt)
@@ -94,7 +106,8 @@ function kindForMime(type: string): DropDraftKind {
 export async function saveDropDraft(
   file: File,
   id?: string,
-  customizations?: unknown
+  customizations?: unknown,
+  meta?: { title?: string; dropType?: DropDraftType }
 ): Promise<DropDraft | null> {
   if (!canUseStorage()) return null;
   let dataUrl = "";
@@ -127,11 +140,47 @@ export async function saveDropDraft(
     // Re-saving the same draft bumps its revision count.
     count: (prior?.count ?? 0) + 1,
     customizationsJson,
+    title: meta?.title ?? prior?.title,
+    dropType: meta?.dropType ?? prior?.dropType,
+    status: prior?.status ?? "editing",
   };
 
   const next = [draft, ...readDropDrafts().filter((d) => d.id !== draft.id)];
   writeDropDrafts(next);
   return draft;
+}
+
+/** Rename a draft's Draft Card title (local copy). */
+export function renameDropDraft(id: string, title: string) {
+  const next = readDropDrafts().map((d) => (d.id === id ? { ...d, title: title.trim().slice(0, 160) } : d));
+  writeDropDrafts(next);
+}
+
+/** Update a draft's Drafts Deck status (Sketching / Editing / Ready). */
+export function setDropDraftStatus(id: string, status: DropDraftStatus) {
+  const next = readDropDrafts().map((d) => (d.id === id ? { ...d, status } : d));
+  writeDropDrafts(next);
+}
+
+/** Create a fully independent copy of a draft with its own id (local copy). */
+export function duplicateDropDraft(id: string): DropDraft | null {
+  const source = readDropDrafts().find((d) => d.id === id);
+  if (!source) return null;
+  const copy: DropDraft = {
+    ...source,
+    id: `draft_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`,
+    title: source.title ? `${source.title} copy` : undefined,
+    createdAt: Date.now(),
+    count: 1,
+    syncedAt: undefined,
+  };
+  writeDropDrafts([copy, ...readDropDrafts()]);
+  return copy;
+}
+
+/** Insert or replace a single draft (used to merge in a cloud draft pulled from another device). */
+export function upsertDropDraft(draft: DropDraft) {
+  writeDropDrafts([draft, ...readDropDrafts().filter((d) => d.id !== draft.id)]);
 }
 
 /** Parse a draft's stored customizations back out, if any were saved. */

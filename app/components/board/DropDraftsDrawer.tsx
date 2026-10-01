@@ -1,14 +1,27 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   DROP_DRAFTS_UPDATED_EVENT,
   readDropDrafts,
   removeDropDraft,
+  renameDropDraft,
+  setDropDraftStatus,
+  duplicateDropDraft,
   type DropDraft,
   type DropDraftKind,
+  type DropDraftStatus,
 } from "@/lib/board/dropDrafts";
+import {
+  listCloudDropDrafts,
+  hydrateCloudDropDraft,
+  renameCloudDropDraft,
+  setCloudDropDraftStatus,
+  deleteCloudDropDraft,
+  duplicateCloudDropDraft,
+  type CloudDropDraft,
+} from "@/lib/board/dropDraftsCloud";
 
 type FilterKey = "all" | DropDraftKind;
 
@@ -18,6 +31,13 @@ const FILTERS: { key: FilterKey; label: string }[] = [
   { key: "video", label: "Videos" },
   { key: "audio", label: "Voice" },
 ];
+
+const STATUS_CYCLE: DropDraftStatus[] = ["sketching", "editing", "ready"];
+const STATUS_LABEL: Record<DropDraftStatus, string> = {
+  sketching: "Sketching",
+  editing: "Editing",
+  ready: "Ready",
+};
 
 function formatWhen(ts: number) {
   try {
@@ -36,6 +56,64 @@ function kindLabel(kind: DropDraftKind) {
   return kind === "audio" ? "Voice" : kind === "video" ? "Video" : "Photo / Art";
 }
 
+/** A card in the deck — either a local draft, a cloud-only draft from another device, or both merged. */
+type DeckCard = {
+  id: string;
+  kind: DropDraftKind;
+  title: string;
+  status: DropDraftStatus;
+  createdAt: number;
+  count?: number;
+  previewUrl?: string;
+  local?: DropDraft;
+  cloud?: CloudDropDraft;
+  cloudOnly: boolean;
+};
+
+function kindForCloud(dropType: CloudDropDraft["dropType"]): DropDraftKind {
+  if (dropType === "voice") return "audio";
+  if (dropType === "video") return "video";
+  return "image";
+}
+
+function mergeDecks(local: DropDraft[], cloud: CloudDropDraft[]): DeckCard[] {
+  const byId = new Map<string, DeckCard>();
+  for (const d of local) {
+    byId.set(d.id, {
+      id: d.id,
+      kind: d.kind,
+      title: d.title || "",
+      status: d.status || "editing",
+      createdAt: d.createdAt,
+      count: d.count,
+      previewUrl: d.dataUrl,
+      local: d,
+      cloudOnly: false,
+    });
+  }
+  for (const c of cloud) {
+    const existing = byId.get(c.id);
+    if (existing) {
+      existing.cloud = c;
+      if (!existing.title) existing.title = c.title;
+      continue;
+    }
+    const status: DropDraftStatus =
+      c.status === "converted" || c.status === "archived" ? "ready" : c.status;
+    byId.set(c.id, {
+      id: c.id,
+      kind: kindForCloud(c.dropType),
+      title: c.title || "",
+      status,
+      createdAt: Date.parse(c.createdAt) || Date.now(),
+      previewUrl: c.previewDataUrl,
+      cloud: c,
+      cloudOnly: true,
+    });
+  }
+  return Array.from(byId.values()).sort((a, b) => b.createdAt - a.createdAt);
+}
+
 export default function DropDraftsDrawer({
   open,
   onClose,
@@ -47,7 +125,9 @@ export default function DropDraftsDrawer({
 }) {
   const [mounted, setMounted] = useState(false);
   const [drafts, setDrafts] = useState<DropDraft[]>([]);
+  const [cloudDrafts, setCloudDrafts] = useState<CloudDropDraft[]>([]);
   const [filter, setFilter] = useState<FilterKey>("all");
+  const [openingId, setOpeningId] = useState<string | null>(null);
 
   useEffect(() => setMounted(true), []);
 
@@ -65,6 +145,17 @@ export default function DropDraftsDrawer({
 
   useEffect(() => {
     if (!open) return;
+    let cancelled = false;
+    void listCloudDropDrafts().then((rows) => {
+      if (!cancelled) setCloudDrafts(rows);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
     };
@@ -72,16 +163,67 @@ export default function DropDraftsDrawer({
     return () => window.removeEventListener("keydown", onKey);
   }, [open, onClose]);
 
+  const deck = useMemo(() => mergeDecks(drafts, cloudDrafts), [drafts, cloudDrafts]);
+
   const counts = useMemo(() => {
-    const base: Record<FilterKey, number> = { all: drafts.length, image: 0, video: 0, audio: 0 };
-    for (const d of drafts) base[d.kind] += 1;
+    const base: Record<FilterKey, number> = { all: deck.length, image: 0, video: 0, audio: 0 };
+    for (const d of deck) base[d.kind] += 1;
     return base;
-  }, [drafts]);
+  }, [deck]);
 
   const visible = useMemo(
-    () => (filter === "all" ? drafts : drafts.filter((d) => d.kind === filter)),
-    [drafts, filter]
+    () => (filter === "all" ? deck : deck.filter((d) => d.kind === filter)),
+    [deck, filter]
   );
+
+  const handleOpen = useCallback(
+    async (card: DeckCard) => {
+      if (card.local) {
+        onOpenDraft?.(card.local);
+        return;
+      }
+      if (!card.cloud) return;
+      setOpeningId(card.id);
+      const hydrated = await hydrateCloudDropDraft(card.cloud);
+      setOpeningId(null);
+      if (hydrated) onOpenDraft?.(hydrated);
+    },
+    [onOpenDraft]
+  );
+
+  const handleRename = useCallback((card: DeckCard) => {
+    const next = window.prompt("Rename draft", card.title || "")?.trim();
+    if (next === undefined || next === "") return;
+    if (card.local) renameDropDraft(card.id, next);
+    void renameCloudDropDraft(card.id, next);
+    setCloudDrafts((prev) => prev.map((c) => (c.id === card.id ? { ...c, title: next } : c)));
+  }, []);
+
+  const handleStatusCycle = useCallback((card: DeckCard) => {
+    const nextStatus = STATUS_CYCLE[(STATUS_CYCLE.indexOf(card.status) + 1) % STATUS_CYCLE.length];
+    if (card.local) setDropDraftStatus(card.id, nextStatus);
+    void setCloudDropDraftStatus(card.id, nextStatus);
+    setCloudDrafts((prev) => prev.map((c) => (c.id === card.id ? { ...c, status: nextStatus } : c)));
+  }, []);
+
+  const handleDuplicate = useCallback(async (card: DeckCard) => {
+    if (card.cloud) {
+      const copy = await duplicateCloudDropDraft(card.id);
+      if (copy) {
+        await hydrateCloudDropDraft(copy);
+        setCloudDrafts((prev) => [copy, ...prev]);
+      }
+      return;
+    }
+    duplicateDropDraft(card.id);
+  }, []);
+
+  const handleDelete = useCallback((card: DeckCard) => {
+    if (!window.confirm(`Delete "${card.title || "this draft"}"? This can't be undone.`)) return;
+    if (card.local) removeDropDraft(card.id);
+    void deleteCloudDropDraft(card.id);
+    setCloudDrafts((prev) => prev.filter((c) => c.id !== card.id));
+  }, []);
 
   if (!mounted || !open) return null;
 
@@ -91,11 +233,11 @@ export default function DropDraftsDrawer({
       role="presentation"
       onMouseDown={(e) => e.target === e.currentTarget && onClose()}
     >
-      <aside className="draftsDrawer" role="dialog" aria-modal="true" aria-label="Drop Studio drafts">
+      <aside className="draftsDrawer" role="dialog" aria-modal="true" aria-label="Drop Studio Drafts Deck">
         <header className="draftsHead">
           <div>
             <p className="draftsEyebrow">Drop Studio</p>
-            <h2 className="draftsTitle">Drafts</h2>
+            <h2 className="draftsTitle">Drafts Deck</h2>
           </div>
           <button type="button" className="draftsClose" onClick={onClose} aria-label="Close drafts">
             ✕
@@ -118,50 +260,77 @@ export default function DropDraftsDrawer({
           ))}
         </div>
 
-        <div className="draftsList">
+        <div className="draftsDeck">
           {visible.length === 0 ? (
             <div className="draftsEmpty">
-              {drafts.length === 0
+              {deck.length === 0
                 ? "No drafts yet. Captures in Drop Studio auto-save here."
                 : "No drafts of this type."}
             </div>
           ) : (
-            visible.map((draft) => (
-              <article className="draftCard" key={draft.id}>
+            visible.map((card) => (
+              <article className="draftCard" key={card.id}>
                 <div className="draftPreview">
-                  {draft.kind === "audio" ? (
-                    <audio src={draft.dataUrl} controls preload="metadata" />
-                  ) : draft.kind === "video" ? (
-                    <video src={draft.dataUrl} controls playsInline preload="metadata" />
-                  ) : (
+                  {card.kind === "audio" ? (
+                    card.previewUrl ? (
+                      <audio src={card.previewUrl} controls preload="metadata" />
+                    ) : (
+                      <div className="draftFallback">🎙️</div>
+                    )
+                  ) : card.kind === "video" ? (
+                    card.previewUrl ? (
+                      <video src={card.previewUrl} controls playsInline preload="metadata" />
+                    ) : (
+                      <div className="draftFallback">🎬</div>
+                    )
+                  ) : card.previewUrl ? (
                     // eslint-disable-next-line @next/next/no-img-element
-                    <img src={draft.dataUrl} alt={draft.fileName} />
+                    <img src={card.previewUrl} alt={card.title || "Draft preview"} />
+                  ) : (
+                    <div className="draftFallback">🎨</div>
                   )}
                 </div>
                 <div className="draftMeta">
-                  <span className="draftKind">{kindLabel(draft.kind)}</span>
-                  {draft.count && draft.count > 1 ? (
+                  <span className="draftKind">{kindLabel(card.kind)}</span>
+                  {card.count && card.count > 1 ? (
                     <span className="draftCount" title="Times this draft was saved">
-                      🗂 {draft.count}×
+                      🗂 {card.count}×
                     </span>
                   ) : null}
-                  <span className="draftWhen">{formatWhen(draft.createdAt)}</span>
+                  <span className="draftWhen">{formatWhen(card.createdAt)}</span>
                 </div>
+                <button
+                  type="button"
+                  className="draftNameBtn"
+                  onClick={() => handleRename(card)}
+                  title="Rename draft"
+                >
+                  {card.title || "Untitled draft"}
+                </button>
+                <button
+                  type="button"
+                  className={`draftStatus status-${card.status}`}
+                  onClick={() => handleStatusCycle(card)}
+                  title="Cycle draft status"
+                >
+                  {STATUS_LABEL[card.status]}
+                </button>
                 <div className="draftActions">
                   <button
                     type="button"
                     className="draftBtn open"
-                    onClick={() => onOpenDraft?.(draft)}
+                    disabled={openingId === card.id}
+                    onClick={() => void handleOpen(card)}
                   >
-                    Open
+                    {openingId === card.id ? "Opening…" : "Open"}
                   </button>
-                  <a className="draftBtn" href={draft.dataUrl} download={draft.fileName}>
-                    Save
-                  </a>
+                  <button type="button" className="draftBtn" onClick={() => void handleDuplicate(card)}>
+                    Duplicate
+                  </button>
                   <button
                     type="button"
                     className="draftBtn danger"
-                    onClick={() => removeDropDraft(draft.id)}
+                    onClick={() => handleDelete(card)}
                   >
                     Delete
                   </button>
@@ -182,7 +351,7 @@ export default function DropDraftsDrawer({
             backdrop-filter: blur(8px);
           }
           .draftsDrawer {
-            width: min(420px, 100vw);
+            width: min(640px, 100vw);
             height: 100%;
             display: flex;
             flex-direction: column;
@@ -252,42 +421,55 @@ export default function DropDraftsDrawer({
             font-size: 10px;
             opacity: 0.8;
           }
-          .draftsList {
+          .draftsDeck {
             flex: 1 1 auto;
             min-height: 0;
-            overflow-y: auto;
-            display: grid;
-            gap: 12px;
-            padding-right: 2px;
-            align-content: start;
+            overflow-x: auto;
+            overflow-y: hidden;
+            display: flex;
+            gap: 14px;
+            padding: 2px 2px 10px;
+            scroll-snap-type: x proximity;
+            -webkit-overflow-scrolling: touch;
           }
           .draftsEmpty {
             margin-top: 24px;
             text-align: center;
             font-size: 13px;
             color: rgba(220, 255, 248, 0.55);
+            width: 100%;
           }
           .draftCard {
+            flex: 0 0 auto;
+            width: min(240px, 72vw);
+            scroll-snap-align: start;
             border-radius: 18px;
             border: 1px solid rgba(167, 244, 232, 0.16);
             background: rgba(255, 255, 255, 0.04);
             overflow: hidden;
+            display: flex;
+            flex-direction: column;
           }
           .draftPreview {
             background: #02070a;
             display: grid;
             place-items: center;
+            height: 150px;
           }
           .draftPreview img,
           .draftPreview video {
             display: block;
             width: 100%;
-            max-height: 220px;
+            height: 100%;
             object-fit: contain;
           }
           .draftPreview audio {
             width: 100%;
             padding: 14px;
+          }
+          .draftFallback {
+            font-size: 34px;
+            opacity: 0.6;
           }
           .draftMeta {
             display: flex;
@@ -310,7 +492,45 @@ export default function DropDraftsDrawer({
           .draftWhen {
             color: rgba(220, 255, 248, 0.5);
           }
+          .draftNameBtn {
+            margin: 8px 12px 0;
+            text-align: left;
+            background: none;
+            border: none;
+            padding: 0;
+            color: #e8fff8;
+            font-size: 13px;
+            font-weight: 800;
+            cursor: pointer;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+          }
+          .draftStatus {
+            align-self: flex-start;
+            margin: 6px 12px 0;
+            border-radius: 999px;
+            padding: 3px 10px;
+            font-size: 10px;
+            font-weight: 900;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            border: 1px solid rgba(167, 244, 232, 0.25);
+            background: rgba(255, 255, 255, 0.06);
+            color: rgba(232, 255, 248, 0.75);
+            cursor: pointer;
+          }
+          .draftStatus.status-ready {
+            color: #06121a;
+            background: radial-gradient(circle at 30% 20%, #d9ffb0, #7ee28a);
+            border-color: rgba(255, 255, 255, 0.5);
+          }
+          .draftStatus.status-sketching {
+            color: #ffe9b0;
+            border-color: rgba(255, 201, 102, 0.4);
+          }
           .draftActions {
+            margin-top: auto;
             display: flex;
             gap: 8px;
             padding: 10px 12px 12px;
