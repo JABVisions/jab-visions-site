@@ -3,6 +3,14 @@ const { PHASE_DEVELOPMENT_SERVER } = require("next/constants")
 /** @type {import('next').NextConfig} */
 const baseConfig = {
   staticPageGenerationTimeout: 300,
+  async headers() {
+    return [
+      {
+        source: '/assets/those-ryderz/models/:file.glb',
+        headers: [{ key: 'Content-Type', value: 'model/gltf-binary' }],
+      },
+    ];
+  },
 }
 
 /** @type {import('next').NextConfig} */

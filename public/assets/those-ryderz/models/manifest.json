@@ -1,0 +1,54 @@
+{
+  "format": "model/gltf-binary",
+  "generated": "2026-10-02T11:32:22.779Z",
+  "figures": [
+    {
+      "id": "rubi",
+      "filename": "rubi-wong.glb",
+      "bytes": 44784,
+      "name": "Rubi Wong",
+      "slug": "rubi-wong",
+      "href": "/assets/those-ryderz/models/rubi-wong.glb"
+    },
+    {
+      "id": "leo",
+      "filename": "leo-montana.glb",
+      "bytes": 49128,
+      "name": "Leo Montana",
+      "slug": "leo-montana",
+      "href": "/assets/those-ryderz/models/leo-montana.glb"
+    },
+    {
+      "id": "aaron",
+      "filename": "aaron-addams.glb",
+      "bytes": 47264,
+      "name": "Aaron Addams",
+      "slug": "aaron-addams",
+      "href": "/assets/those-ryderz/models/aaron-addams.glb"
+    },
+    {
+      "id": "zoe",
+      "filename": "zoe-folie.glb",
+      "bytes": 59432,
+      "name": "Zoe Folie",
+      "slug": "zoe-folie",
+      "href": "/assets/those-ryderz/models/zoe-folie.glb"
+    },
+    {
+      "id": "keven",
+      "filename": "keven-hart.glb",
+      "bytes": 43512,
+      "name": "Keven Hart",
+      "slug": "keven-hart",
+      "href": "/assets/those-ryderz/models/keven-hart.glb"
+    }
+  ],
+  "pack": {
+    "href": "/assets/those-ryderz/models/those-ryderz.glb",
+    "bytes": 114300
+  },
+  "zip": {
+    "href": "/assets/those-ryderz/models/those-ryderz-glb.zip",
+    "bytes": 88223
+  }
+}
