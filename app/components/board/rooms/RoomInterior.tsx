@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabaseBrowser } from "@/lib/supabase/browser";
 import { hostedOrbAvatarUrl } from "@/lib/board/friendZoneOrbs";
@@ -12,16 +12,18 @@ import {
   applyLiveVisibilityToReply,
   applyLiveVisibilityToShare,
   buildLiveSession,
+  conversationsFromPostRows,
   endLiveSession,
   getRoomById,
   goLiveBlockedReason,
   isLiveHost,
-  mergeRoomFeed,
+  mergeConversationSources,
+  mergeShareSources,
   overlaySharesWithVisibilityMap,
   permissionsForRole,
   resolveRoomId,
-  seedConversations,
-  conversationsForRoom,
+  roomFeedFromSources,
+  sharesFromApiRows,
   type Room,
   type RoomCallSession,
   type RoomConversation as RoomConversationRecord,
@@ -125,7 +127,9 @@ export default function RoomInterior({
   const router = useRouter();
   const resolved = resolveRoomId(roomId);
   const [room, setRoom] = useState<Room | null>(resolved ? getRoomById(resolved) : null);
-  const [conversations, setConversations] = useState<RoomConversationRecord[]>([]);
+  const [conversations, setConversations] = useState<RoomConversationRecord[]>(() =>
+    resolved ? mergeConversationSources({ roomId: resolved, local: [], remote: [] }) : []
+  );
   const [shares, setShares] = useState<RoomDropShare[]>([]);
   const [people, setPeople] = useState<RoomPresencePerson[]>([]);
   const [call, setCall] = useState<RoomCallSession | null>(null);
@@ -145,6 +149,8 @@ export default function RoomInterior({
 
   const [identity, setIdentity] = useState(readLocalIdentity);
   const userId = authUserId || identity.userId;
+  const remoteConversationsRef = useRef<RoomConversationRecord[]>([]);
+  const remoteSharesRef = useRef<RoomDropShare[]>([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -163,14 +169,19 @@ export default function RoomInterior({
     };
   }, []);
 
-  const hydrateLocal = useCallback((id: string) => {
-    const seeded = seedConversations(readConversations());
+  const readLocalConversations = useCallback(() => {
+    let local: RoomConversationRecord[] = [];
+    try {
+      local = readConversations();
+    } catch {
+      local = [];
+    }
     try {
       const db = readForums();
       for (const thread of db.threads || []) {
         const mappedRoom = resolveRoomId(thread.forumId) || thread.forumId;
-        if (seeded.some((item) => item.id === thread.id)) continue;
-        seeded.push({
+        if (local.some((item) => item.id === thread.id)) continue;
+        local.push({
           id: thread.id,
           roomId: mappedRoom,
           title: thread.title,
@@ -189,20 +200,56 @@ export default function RoomInterior({
         });
       }
     } catch {
-      // boardStore is optional during first paint
+      // boardStore is optional — catalog seeds still stand
     }
-    writeConversations(seeded);
-    setConversations(conversationsForRoom(seeded, id));
-    setShares(overlayLocalLivePrivacy(readShares().filter((row) => resolveRoomId(row.roomId) === id)));
-    setPeople(readPresence().filter((row) => resolveRoomId(row.roomId) === id));
-    const sessions = activeSessionsFor(id);
-    setCall((sessions.find((row) => row.kind === "call") as RoomCallSession | undefined) || null);
-    setLive((sessions.find((row) => row.kind === "live") as RoomLiveSession | undefined) || null);
-    const mine = membershipFor(id, userId);
-    setJoined(mine?.status === "joined");
-    setFollowing(Boolean(mine?.following));
-    setRole(mine?.role || "viewer");
-  }, [userId]);
+    return local;
+  }, []);
+
+  const applyRoomSources = useCallback(
+    (id: string) => {
+      const local = readLocalConversations();
+      const merged = mergeConversationSources({
+        roomId: id,
+        local,
+        remote: remoteConversationsRef.current,
+      });
+      setConversations(merged);
+      let localShares: RoomDropShare[] = [];
+      try {
+        localShares = readShares();
+      } catch {
+        localShares = [];
+      }
+      setShares(
+        overlayLocalLivePrivacy(
+          mergeShareSources({
+            roomId: id,
+            local: localShares,
+            remote: remoteSharesRef.current,
+          })
+        )
+      );
+      try {
+        setPeople(readPresence().filter((row) => resolveRoomId(row.roomId) === id));
+      } catch {
+        setPeople([]);
+      }
+      const sessions = activeSessionsFor(id);
+      setCall(
+        (current) =>
+          current || (sessions.find((row) => row.kind === "call") as RoomCallSession | undefined) || null
+      );
+      setLive(
+        (current) =>
+          current || (sessions.find((row) => row.kind === "live") as RoomLiveSession | undefined) || null
+      );
+      const mine = membershipFor(id, userId);
+      setJoined(mine?.status === "joined");
+      setFollowing(Boolean(mine?.following));
+      setRole(mine?.role || "viewer");
+    },
+    [readLocalConversations, userId]
+  );
 
   useEffect(() => {
     function onDropUpdated(event: Event) {
@@ -231,13 +278,13 @@ export default function RoomInterior({
   useEffect(() => {
     if (!resolved || !room) return;
     rememberRecentRoom(resolved);
-    hydrateLocal(resolved);
+    applyRoomSources(resolved);
     const fromUrl =
       conversationId ||
       new URLSearchParams(window.location.search).get("conversation") ||
       new URLSearchParams(window.location.search).get("thread");
     if (fromUrl) setOpenThreadId(fromUrl);
-  }, [resolved, room, hydrateLocal, conversationId]);
+  }, [resolved, room, applyRoomSources, conversationId]);
 
   useEffect(() => {
     const onOpenForum = (event: Event) => {
@@ -298,111 +345,30 @@ export default function RoomInterior({
     fetch(`/api/board/rooms/${resolved}/shares`)
       .then((res) => res.json())
       .then((payload) => {
-        if (cancelled || !Array.isArray(payload?.shares) || !payload.shares.length) return;
-        setShares((current) => {
-          const local = readShares().filter((row) => resolveRoomId(row.roomId) === resolved);
-          const remote: RoomDropShare[] = payload.shares.map((row: any) => ({
-            id: String(row.id),
-            roomId: resolved,
-            dropId: String(row.drop_id || row.dropId),
-            sharedBy: String(row.shared_by || row.sharedBy || ""),
-            sharedByName: pickBoardDisplayName(
-              row.shared_by_name,
-              row.display_name,
-              row.snapshot?.authorName
-            ),
-            snapshot: {
-              ...(row.snapshot && typeof row.snapshot === "object" ? row.snapshot : {}),
-              authorName: pickBoardDisplayName(
-                row.shared_by_name,
-                row.display_name,
-                row.snapshot?.authorName
-              ),
-              authorAvatar: row.avatar_url || row.snapshot?.authorAvatar,
-              authorUsername: row.username || row.snapshot?.authorUsername,
-            },
-            createdAt: String(row.created_at || row.createdAt || new Date().toISOString()),
-            origin:
-              row.origin === "create" || row.origin === "conversation" || row.origin === "share"
-                ? row.origin
-                : "share",
-            conversationId: typeof row.conversation_id === "string" ? row.conversation_id : row.conversationId || null,
-          }));
-          const byKey = new Map<string, RoomDropShare>();
-          for (const share of [...remote, ...local]) byKey.set(`${share.dropId}:${share.sharedBy}`, share);
-          return overlayLocalLivePrivacy([...byKey.values()]);
-        });
+        if (cancelled || !Array.isArray(payload?.shares)) return;
+        remoteSharesRef.current = sharesFromApiRows(resolved, payload.shares);
+        applyRoomSources(resolved);
       })
       .catch(() => undefined);
     fetch(`/api/board/rooms/${resolved}/posts`)
       .then((res) => res.json())
       .then((payload) => {
-        if (cancelled || !Array.isArray(payload?.posts) || !payload.posts.length) return;
-        const remoteConversations = new Map<string, RoomConversationRecord>();
-        const replies: Array<{ parentId: string; reply: RoomConversationRecord["replies"][number] }> = [];
-        for (const row of payload.posts) {
-          const id = String(row.id || "");
-          const kind = String(row.kind || "conversation");
-          const parentId = typeof row.parent_id === "string" ? row.parent_id : "";
-          if (kind === "reply" && parentId) {
-            replies.push({
-              parentId,
-              reply: {
-                id,
-                threadId: parentId,
-                authorName: pickBoardDisplayName(row.author_name, row.display_name, row.username) || "Board",
-                authorAvatar: String(row.avatar_url || row.author_avatar || ""),
-                body: String(row.body || ""),
-                createdAt: String(row.created_at || new Date().toISOString()),
-                dropId: typeof row.drop_id === "string" && row.drop_id ? row.drop_id : undefined,
-                dropSnapshot: (() => {
-                  const snapshot =
-                    row.metadata && typeof row.metadata === "object"
-                      ? (row.metadata.dropSnapshot as Record<string, unknown> | undefined)
-                      : undefined;
-                  const dropId = typeof row.drop_id === "string" ? row.drop_id : "";
-                  const live = dropId ? liveVisibilityForDrop(dropId) : null;
-                  if (!snapshot) return snapshot;
-                  return live ? { ...snapshot, visibility: live } : snapshot;
-                })(),
-              },
-            });
-            continue;
-          }
-          if (kind === "conversation" || kind === "text_post" || kind === "announcement") {
-            remoteConversations.set(id, {
-              id,
-              roomId: resolved,
-              title: String(row.title || "Conversation"),
-              body: String(row.body || ""),
-              authorName: pickBoardDisplayName(row.author_name, row.display_name, row.username) || "Board",
-              authorAvatar: String(row.avatar_url || ""),
-              createdAt: String(row.created_at || new Date().toISOString()),
-              replies: [],
-              isPinned: row.pinned === true,
-            });
-          }
-        }
-        for (const item of replies) {
-          const thread = remoteConversations.get(item.parentId);
-          if (thread) thread.replies = [item.reply, ...thread.replies];
-        }
-        if (!remoteConversations.size) return;
-        const seeded = seedConversations(readConversations());
-        const byId = new Map(seeded.map((item) => [item.id, item]));
-        for (const remote of remoteConversations.values()) {
-          const current = byId.get(remote.id);
-          byId.set(remote.id, current ? { ...current, ...remote, replies: remote.replies.length ? remote.replies : current.replies } : remote);
-        }
-        const merged = [...byId.values()];
-        writeConversations(merged);
-        setConversations(conversationsForRoom(merged, resolved));
+        if (cancelled || !Array.isArray(payload?.posts)) return;
+        remoteConversationsRef.current = conversationsFromPostRows(resolved, payload.posts).map((thread) => ({
+          ...thread,
+          replies: thread.replies.map((reply) => {
+            const live = reply.dropId ? liveVisibilityForDrop(reply.dropId) : null;
+            if (!live || !reply.dropSnapshot) return reply;
+            return { ...reply, dropSnapshot: { ...reply.dropSnapshot, visibility: live } };
+          }),
+        }));
+        applyRoomSources(resolved);
       })
       .catch(() => undefined);
     return () => {
       cancelled = true;
     };
-  }, [resolved]);
+  }, [resolved, applyRoomSources]);
 
   useEffect(() => {
     if (!resolved || !room || room.comingSoon) return;
@@ -493,12 +459,15 @@ export default function RoomInterior({
   const permissions = permissionsForRole(role, room);
   const feed = useMemo(
     () =>
-      mergeRoomFeed({
-        conversations,
-        shares,
+      roomFeedFromSources({
+        roomId: resolved || roomId,
+        localConversations: conversations,
+        remoteConversations: remoteConversationsRef.current,
+        localShares: shares,
+        remoteShares: remoteSharesRef.current,
         sessions: [call, live].filter(Boolean) as Array<RoomCallSession | RoomLiveSession>,
       }),
-    [conversations, shares, call, live]
+    [conversations, shares, call, live, resolved, roomId]
   );
   const openThread = conversations.find((item) => item.id === openThreadId) || null;
 
@@ -557,7 +526,13 @@ export default function RoomInterior({
       replies: [],
     };
     upsertConversation(next);
-    setConversations(conversationsForRoom(readConversations(), currentRoom.id));
+    setConversations(
+      mergeConversationSources({
+        roomId: currentRoom.id,
+        local: readConversations(),
+        remote: remoteConversationsRef.current,
+      })
+    );
     setComposeTitle("");
     setComposeBody("");
     setOpenThreadId(next.id);
@@ -589,7 +564,13 @@ export default function RoomInterior({
         : thread
     );
     writeConversations(next);
-    setConversations(conversationsForRoom(next, currentRoom.id));
+    setConversations(
+      mergeConversationSources({
+        roomId: currentRoom.id,
+        local: next,
+        remote: remoteConversationsRef.current,
+      })
+    );
     void fetch(`/api/board/rooms/${currentRoom.id}/posts`, {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -706,7 +687,13 @@ export default function RoomInterior({
       item.id === threadId ? { ...item, replies: [reply, ...item.replies] } : item
     );
     writeConversations(next);
-    setConversations(conversationsForRoom(next, currentRoom.id));
+    setConversations(
+      mergeConversationSources({
+        roomId: currentRoom.id,
+        local: next,
+        remote: remoteConversationsRef.current,
+      })
+    );
     void fetch(`/api/board/rooms/${currentRoom.id}/posts`, {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -959,6 +946,23 @@ export default function RoomInterior({
           onPublished={onStudioPublished}
         />
       ) : null}
+      <style>{`
+        .forumsHall,
+        .forumsRoomInterior,
+        .forumsRoomFeed,
+        .forumsRoomCard {
+          display: block;
+          visibility: visible;
+        }
+        @media (min-width: 721px) {
+          .forumsRoomFeed {
+            display: block;
+            visibility: visible;
+            height: auto;
+            overflow: visible;
+          }
+        }
+      `}</style>
     </div>
   );
 }

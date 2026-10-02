@@ -11,6 +11,25 @@ export function isBoardAuthRoute(pathname: string) {
   );
 }
 
+/** Hallway + Room interiors stay readable without a session or cached store. */
+export function isPublicForumsRoute(pathname: string) {
+  return pathname === "/board/forums" || pathname.startsWith("/board/forums/");
+}
+
+export function isPublicBoardRoute(pathname: string) {
+  if (
+    pathname === "/board" ||
+    isBoardAuthRoute(pathname) ||
+    isPublicForumsRoute(pathname) ||
+    pathname === "/board/onboarding" ||
+    pathname === "/board/preview"
+  ) {
+    return true;
+  }
+
+  return /^\/board\/profile\/[^/]+$/.test(pathname);
+}
+
 export function safeBoardNext(
   raw: string | null | undefined,
   fallback = "/board/feed"

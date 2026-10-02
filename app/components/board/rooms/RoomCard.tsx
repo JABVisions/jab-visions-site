@@ -23,6 +23,8 @@ export default function RoomCard({
 
   const body = (
     <article
+      data-forums-room={room.id}
+      data-room-id={room.id}
       className={clsx(
         "forumsRoomCard group relative overflow-hidden rounded-[1.6rem] border text-left transition",
         "border-white/10 bg-black/30 backdrop-blur-xl",

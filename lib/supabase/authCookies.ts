@@ -2,7 +2,7 @@ import { createChunks, stringToBase64URL } from "@supabase/ssr";
 import type { NextRequest, NextResponse } from "next/server";
 import { supabaseAuthCookieName } from "@/lib/supabase/config";
 
-export { isBoardAuthRoute, safeBoardNext } from "@/lib/supabase/boardPaths";
+export { isBoardAuthRoute, isPublicBoardRoute, isPublicForumsRoute, safeBoardNext } from "@/lib/supabase/boardPaths";
 
 export type PendingAuthCookie = {
   name: string;

@@ -38,7 +38,7 @@ export default function RoomActivityFeed({
 }) {
   if (!items.length) {
     return (
-      <div className="rounded-[1.5rem] border border-white/10 bg-white/[0.03] p-6">
+      <div className="forumsRoomFeed rounded-[1.5rem] border border-white/10 bg-white/[0.03] p-6" data-forums-feed="empty">
         <div className="text-base font-semibold text-white/85">This room is holding a quiet pulse.</div>
         <p className="mt-1 text-sm text-white/50">
           Conversations, Room Drops, and future Live activity will gather here.
@@ -48,7 +48,7 @@ export default function RoomActivityFeed({
   }
 
   return (
-    <div className="space-y-3">
+    <div className="forumsRoomFeed space-y-3" data-forums-feed="1">
       {items.map((item) => {
         if (item.kind === "drop_share" && item.share) {
           return (

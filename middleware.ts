@@ -3,22 +3,10 @@ import { NextRequest, NextResponse } from "next/server";
 import {
   applyAuthCookies,
   isBoardAuthRoute,
+  isPublicBoardRoute,
   safeBoardNext,
 } from "@/lib/supabase/authCookies";
 import { getSupabasePublicConfig } from "@/lib/supabase/config";
-
-function isPublicBoardRoute(pathname: string) {
-  if (
-    pathname === "/board" ||
-    isBoardAuthRoute(pathname) ||
-    pathname === "/board/onboarding" ||
-    pathname === "/board/preview"
-  ) {
-    return true;
-  }
-
-  return /^\/board\/profile\/[^/]+$/.test(pathname);
-}
 
 function copyCookies(from: NextResponse, to: NextResponse) {
   from.cookies.getAll().forEach((cookie) => {

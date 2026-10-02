@@ -7,12 +7,15 @@ import {
   describeRoomActivity,
   forumPickerRooms,
   getRoomById,
+  hallwayMissingRequiredIds,
+  hallwayRoomsForClient,
   isPresenceEvent,
   isRoomActivityType,
   liveOfficialRooms,
   livePresence,
   FORUMS_HALL_SECTION_ORDER,
   mergeRoomFeed,
+  roomFeedFromSources,
   officialRooms,
   permissionsForRole,
   presenceLabel,
@@ -298,6 +301,18 @@ assert(
     getRoomById("music")?.comingSoon === false &&
     getRoomById("lobby")?.comingSoon === false,
   "existing Forums rooms stay enterable"
+);
+
+assert(
+  hallwayRoomsForClient([]).length >= 6 &&
+    hallwayMissingRequiredIds(hallwayRoomsForClient(null)).length === 0,
+  "hallway catalog renders without a cached store"
+);
+assert(
+  roomFeedFromSources({ roomId: "music", localConversations: [], remoteConversations: [] }).some(
+    (item) => item.kind === "conversation"
+  ),
+  "desktop and mobile share the same seed-backed room posts source"
 );
 
 console.log("forums rooms architecture checks passed");

@@ -7,5 +7,7 @@ export * from "./activity";
 export * from "./storage";
 export * from "./feed";
 export * from "./conversations";
+export * from "./publicHall";
+export * from "./roomPostsSource";
 export * from "./livePrivacy";
 export * from "./liveWebRtc";

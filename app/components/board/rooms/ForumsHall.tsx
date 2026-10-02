@@ -3,8 +3,9 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
-  BOARD_ROOM_CATALOG,
+  catalogHallwayRooms,
   FORUMS_HALL_SECTIONS,
+  hallwayRoomsForClient,
   resolveRoomId,
   roomHref,
   type Room,
@@ -69,7 +70,7 @@ function decorate(rooms: Room[], liveIds: Set<string>, presenceByRoom: Map<strin
 
 export default function ForumsHall() {
   const router = useRouter();
-  const [rooms, setRooms] = useState<Room[]>(BOARD_ROOM_CATALOG);
+  const [rooms, setRooms] = useState<Room[]>(() => catalogHallwayRooms());
   const [userId, setUserId] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
 
@@ -91,7 +92,7 @@ export default function ForumsHall() {
       .then((res) => res.json())
       .then((payload) => {
         if (cancelled || !Array.isArray(payload?.rooms)) return;
-        setRooms(payload.rooms);
+        setRooms(hallwayRoomsForClient(payload.rooms));
       })
       .catch(() => undefined);
     return () => {
@@ -105,18 +106,22 @@ export default function ForumsHall() {
   }, []);
 
   const models = useMemo(() => {
-    const liveIds = liveRoomsFromSessions(readSessions());
-    const presenceByRoom = new Map<string, number>();
-    for (const row of livePresence(readPresence())) {
-      presenceByRoom.set(row.roomId, (presenceByRoom.get(row.roomId) || 0) + 1);
-    }
-    for (const room of rooms) {
-      if (room.presenceCount) {
-        presenceByRoom.set(room.id, Math.max(presenceByRoom.get(room.id) || 0, room.presenceCount));
+    try {
+      const liveIds = liveRoomsFromSessions(readSessions());
+      const presenceByRoom = new Map<string, number>();
+      for (const row of livePresence(readPresence())) {
+        presenceByRoom.set(row.roomId, (presenceByRoom.get(row.roomId) || 0) + 1);
       }
-      if (room.state === "LIVE" || room.state === "STAGE") liveIds.add(room.id);
+      for (const room of rooms) {
+        if (room.presenceCount) {
+          presenceByRoom.set(room.id, Math.max(presenceByRoom.get(room.id) || 0, room.presenceCount));
+        }
+        if (room.state === "LIVE" || room.state === "STAGE") liveIds.add(room.id);
+      }
+      return decorate(rooms, liveIds, presenceByRoom, readMemberships(), readRecentRoomIds(), userId);
+    } catch {
+      return decorate(rooms, new Set(), new Map(), [], [], userId);
     }
-    return decorate(rooms, liveIds, presenceByRoom, readMemberships(), readRecentRoomIds(), userId);
   }, [rooms, userId, tick]);
 
   const liveNow = models.filter((room) => room.live && !room.comingSoon);
@@ -127,7 +132,7 @@ export default function ForumsHall() {
   const jabOfficial = models.filter((room) => room.isOfficial);
 
   return (
-    <div className="forumsHall mx-auto w-full max-w-6xl px-4 py-6 sm:px-6">
+    <div className="forumsHall mx-auto w-full max-w-6xl px-4 py-6 sm:px-6" data-forums-hall="1">
       <header className="relative mb-7 overflow-hidden rounded-[2rem] border border-white/10 bg-white/[0.04] p-5 shadow-[0_24px_90px_rgba(0,0,0,0.4)] backdrop-blur-xl sm:p-8">
         <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_16%_12%,rgba(124,92,255,0.22),transparent_28%),radial-gradient(circle_at_86%_18%,rgba(255,107,157,0.16),transparent_24%),radial-gradient(circle_at_50%_100%,rgba(52,211,153,0.12),transparent_32%)]" />
         <div className="relative">
@@ -191,6 +196,13 @@ export default function ForumsHall() {
           ))}
         </HallSection>
       </div>
+      <style>{`
+        .forumsHall,
+        .forumsRoomCard {
+          display: block;
+          visibility: visible;
+        }
+      `}</style>
     </div>
   );
 }

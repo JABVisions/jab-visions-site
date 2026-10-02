@@ -1,5 +1,6 @@
 import { supabaseServer } from "@/lib/supabase/server";
 import { BOARD_ROOM_CATALOG } from "@/lib/board/rooms/catalog";
+import { publicHallwayRooms } from "@/lib/board/rooms/publicHall";
 import { isMissingRoomsTable, json, mergeCatalogWithRows } from "@/lib/board/rooms/server";
 import { ROOM_PRESENCE_TTL_MS } from "@/lib/board/rooms/types";
 
@@ -23,7 +24,7 @@ export async function GET() {
     if (roomsError && isMissingRoomsTable(roomsError)) {
       return json({
         ok: true,
-        rooms: catalog.map((room) => ({ ...room, title: room.name })),
+        rooms: publicHallwayRooms(catalog).map((room) => ({ ...room, title: room.name })),
         liveRoomIds: [],
         setupRequired: true,
         source: "catalog",
@@ -32,7 +33,7 @@ export async function GET() {
     if (roomsError) {
       return json({
         ok: true,
-        rooms: catalog.map((room) => ({ ...room, title: room.name })),
+        rooms: publicHallwayRooms(catalog).map((room) => ({ ...room, title: room.name })),
         liveRoomIds: [],
         source: "catalog",
         warning: roomsError.message,
@@ -68,11 +69,19 @@ export async function GET() {
           : room.state,
     }));
 
-    return json({ ok: true, rooms: roomsWithPresence, liveRoomIds, source: "db" });
+    return json({
+      ok: true,
+      rooms: publicHallwayRooms(roomsWithPresence).map((room) => ({
+        ...room,
+        title: room.name,
+      })),
+      liveRoomIds,
+      source: "db",
+    });
   } catch (error: any) {
     return json({
       ok: true,
-      rooms: catalog.map((room) => ({ ...room, title: room.name })),
+      rooms: publicHallwayRooms(catalog).map((room) => ({ ...room, title: room.name })),
       liveRoomIds: [],
       source: "catalog",
       warning: error?.message || "rooms catalog fallback",

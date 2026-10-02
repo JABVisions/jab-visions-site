@@ -13,7 +13,7 @@ function ForumRoomPageInner({ roomId }: { roomId: string }) {
 export default function ForumRoomPage({ params }: { params: { roomId: string } }) {
   return (
     <div className="min-h-screen w-full text-white">
-      <Suspense fallback={<div className="min-h-screen w-full text-white" />}>
+      <Suspense fallback={<div className="min-h-screen w-full px-4 py-8 text-white">Opening this Room…</div>}>
         <ForumRoomPageInner roomId={params.roomId} />
       </Suspense>
     </div>
