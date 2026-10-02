@@ -117,6 +117,8 @@ const _ray = new THREE.Raycaster();
 const _aimRay = new THREE.Ray();
 
 const SPRINT_MULTIPLIER = 1.28;
+const KEY_YAW_RATE = 2.4; // rad/s while holding A/D
+const KEY_PITCH_RATE = 1.3; // rad/s while holding W/S
 const COMBAT_LINGER = 2.6;
 const COMBAT_PROXIMITY = 9;
 const ABILITY_LINGER = 0.45;
@@ -502,8 +504,20 @@ export class RaidEngine {
   private update(dt: number, time: number) {
     const cam = this.rig.config;
     const sens = cam.lookSensitivity;
+    // Keyboard camera: A/D orbit, W/S tilt. Mouse look still applies on top.
+    let keyYaw = 0;
+    let keyPitch = 0;
+    if (this.keys.has('a')) keyYaw += 1;
+    if (this.keys.has('d')) keyYaw -= 1;
+    if (this.keys.has('w')) keyPitch -= 1;
+    if (this.keys.has('s')) keyPitch += 1;
+    this.yaw += keyYaw * KEY_YAW_RATE * sens * dt;
     this.yaw -= this.lookAcc.x * 0.0024 * sens;
-    this.pitch = clamp(this.pitch - this.lookAcc.y * 0.0018 * sens, cam.pitchMin, cam.pitchMax);
+    this.pitch = clamp(
+      this.pitch + keyPitch * KEY_PITCH_RATE * sens * dt - this.lookAcc.y * 0.0018 * sens,
+      cam.pitchMin,
+      cam.pitchMax,
+    );
     this.lookAcc.x = 0;
     this.lookAcc.y = 0;
     this.combatT = Math.max(0, this.combatT - dt);
@@ -592,10 +606,10 @@ export class RaidEngine {
 
     let x = this.moveAxis.x;
     let z = this.moveAxis.z;
-    if (this.keys.has('w') || this.keys.has('arrowup')) z -= 1;
-    if (this.keys.has('s') || this.keys.has('arrowdown')) z += 1;
-    if (this.keys.has('a') || this.keys.has('arrowleft')) x -= 1;
-    if (this.keys.has('d') || this.keys.has('arrowright')) x += 1;
+    if (this.keys.has('arrowup')) z -= 1;
+    if (this.keys.has('arrowdown')) z += 1;
+    if (this.keys.has('arrowleft')) x -= 1;
+    if (this.keys.has('arrowright')) x += 1;
     const len = Math.hypot(x, z);
     if (len > 1) {
       x /= len;

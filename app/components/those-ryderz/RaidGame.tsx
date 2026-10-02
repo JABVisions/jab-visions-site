@@ -336,7 +336,7 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
 
           <div className={styles.bottomHud}>
             <p className={styles.hint}>
-              WASD move · Shift sprint · Mouse aim · Click fire · F / RMB melee · Q E R moves · Esc pause
+              Arrows move · WASD camera · Shift sprint · Mouse aim · Click fire · F / RMB melee · Q E R moves · Esc pause
               {phase === 'intermission' ? ' · Hold the spire to buy strength' : ''}
             </p>
             <div className={styles.moveRow}>
@@ -454,7 +454,7 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
           <button type="button" onClick={() => engineRef.current?.requestPointerLock()}>
             Click to capture aim
           </button>
-          <p>Mouse moves the camera. Click to fire. Esc pauses.</p>
+          <p>Mouse or WASD moves the camera. Arrows move. Click to fire. Esc pauses.</p>
         </div>
       )}
 

@@ -61,7 +61,8 @@ function wrapGltfAsHumanoid(template: THREE.Group, height = 1.88): Humanoid {
     -box.min.y * scale,
     -(box.min.z + box.max.z) * 0.5 * scale,
   );
-  figure.rotation.y = Math.PI;
+  // Tripo exports face +Z, which is this game's forward; no yaw correction needed.
+  figure.rotation.y = 0;
   figure.name = 'TripoFigure';
   group.add(figure);
 
