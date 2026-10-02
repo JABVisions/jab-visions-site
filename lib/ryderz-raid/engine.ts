@@ -659,6 +659,7 @@ export class RaidEngine {
     }
 
     this.player.humanoid.group.position.copy(this.pos);
+    this.player.humanoid.group.position.y = this.world.heightAt(this.pos.x, this.pos.z);
     this.player.humanoid.group.rotation.y = this.yaw;
     const moving = Math.min(1, len);
     this.anim += dt * (8 + moving * (this.sprinting ? 9 : 6));
@@ -960,8 +961,9 @@ export class RaidEngine {
     _right.set(-_fwd.z, 0, _fwd.x);
     for (const clone of this.clones) {
       _tmp.copy(this.pos).addScaledVector(_right, clone.side * 1.65).addScaledVector(_fwd, -0.4);
-      clone.fighter.humanoid.group.position.lerp(_tmp.setY(0), 0.25);
-      clone.fighter.humanoid.group.position.y = 0;
+      const cp = clone.fighter.humanoid.group.position;
+      cp.lerp(_tmp.setY(0), 0.25);
+      cp.y = this.world.heightAt(cp.x, cp.z);
       const target = this.nearestHost(clone.fighter.humanoid.group.position);
       if (target) {
         const dx = target.pos.x - clone.fighter.humanoid.group.position.x;
@@ -1034,6 +1036,7 @@ export class RaidEngine {
     pos.z += -alley.inward.x * lateral;
     const fighter = buildHost(kind);
     fighter.humanoid.group.position.copy(pos);
+    fighter.humanoid.group.position.y = this.world.heightAt(pos.x, pos.z);
     this.scene.add(fighter.humanoid.group);
     this.hosts.push({
       kind,
@@ -1087,7 +1090,7 @@ export class RaidEngine {
 
       if (host.stun > 0) {
         host.fighter.humanoid.group.position.copy(host.pos);
-        host.fighter.humanoid.group.position.y = Math.min(1.5, host.stun * 0.7);
+        host.fighter.humanoid.group.position.y = this.world.heightAt(host.pos.x, host.pos.z) + Math.min(1.5, host.stun * 0.7);
         animateHumanoid(host.fighter.humanoid, host.anim, 0.12, time);
         if (host.hit > 0) flashEmissive(host.fighter.humanoid, 0xffffff, host.hit * 2.4);
         else flashEmissive(host.fighter.humanoid, 0x66cfff, 0.45);
@@ -1119,6 +1122,7 @@ export class RaidEngine {
       resolveCircle(host.pos, host.radius, this.world.obstacles);
 
       host.fighter.humanoid.group.position.copy(host.pos);
+      host.fighter.humanoid.group.position.y = this.world.heightAt(host.pos.x, host.pos.z);
       host.fighter.humanoid.group.rotation.y = Math.atan2(dirx, dirz);
       animateHumanoid(host.fighter.humanoid, host.anim, Math.min(1, host.speed / 5), time);
       if (host.hit > 0) flashEmissive(host.fighter.humanoid, 0xffffff, host.hit * 2.4);

@@ -64,6 +64,24 @@ export interface RyderSpec {
 }
 
 export const ARENA_HALF = 30;
+export interface CarModel {
+  url: string;
+  /** Length in metres; the model is rescaled to this. */
+  length: number;
+  /** Resulting width in metres (for collision footprints before the model loads). */
+  width: number;
+}
+/**
+ * glTF binaries used for parked cars. Slots pick from this list; when it is
+ * empty the arena falls back to procedural toon cars. Any scale/orientation is
+ * accepted: models are normalised to `length` metres along +X (nose forward),
+ * centred, wheels on the ground. The Tripo cars are stockier than real ones, so
+ * lengths are chosen to land the width around 2.2 m (the parking lane is 2.4 m).
+ */
+export const CAR_MODELS: CarModel[] = [
+  { url: '/assets/those-ryderz/models/car-hatch.glb', length: 3.9, width: 2.17 },
+  { url: '/assets/those-ryderz/models/car-pickup.glb', length: 4.9, width: 2.19 },
+];
 export const MAX_ALIVE_HOSTS = 26;
 export const BURNOUT_RECOVERY = 0.35;
 export const KILL_AURA_SIPHON = 7;

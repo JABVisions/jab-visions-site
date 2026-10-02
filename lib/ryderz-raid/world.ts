@@ -1,5 +1,6 @@
 import * as THREE from 'three';
-import { ARENA_HALF } from './config';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { ARENA_HALF, CAR_MODELS } from './config';
 import { addOutline, glow, toon } from './toon';
 
 export type Obstacle =
@@ -13,12 +14,171 @@ export interface World {
   alleys: { position: THREE.Vector3; inward: THREE.Vector3 }[];
   spireRing: THREE.Mesh;
   alleyNodes: THREE.Mesh[];
+  /** Walkable surface height at a point (roads are 0, sidewalks sit on a curb). */
+  heightAt: (x: number, z: number) => number;
   animate: (time: number) => void;
   dispose: () => void;
 }
 
+/*
+ * Arena layout (metres, +X east, +Z south):
+ *
+ *   - A north–south avenue, |x| < AVENUE_HALF, runs the full length of the block.
+ *   - An east–west cross street, |z| < STREET_HALF.
+ *   - They meet in a circular plaza of radius PLAZA_R around the signal spire.
+ *   - Everything else is raised sidewalk (CURB high) up to the building line
+ *     at ARENA_HALF, where the perimeter buildings stand.
+ *   - The four quadrant blocks are dressed differently: a mid-block building
+ *     with an alley (+x,+z), a surface parking lot (-x,-z), a pocket park
+ *     (-x,+z) and an open storefront corner (+x,-z).
+ */
 const BUILDING_DEPTH = 9;
-const ALLEY_WIDTH = 5.2;
+const AVENUE_HALF = 8;
+const STREET_HALF = 7;
+const PLAZA_R = 12;
+const CURB = 0.14;
+const PARKING_LANE = 2.4;
+const GROUND_HALF = ARENA_HALF + BUILDING_DEPTH + 6;
+const CAR_LENGTH = 4.5;
+
+interface AlleyGap {
+  at: number;
+  width: number;
+}
+
+// Spawn gaps between the perimeter buildings. Road-aligned gaps are street
+// width so the avenue and cross street visibly continue out of the block.
+const SIDES: { axis: 'x' | 'z'; sign: 1 | -1; gaps: AlleyGap[] }[] = [
+  { axis: 'z', sign: -1, gaps: [{ at: 0, width: AVENUE_HALF * 2 }, { at: 18, width: 5.2 }] },
+  { axis: 'x', sign: 1, gaps: [{ at: 0, width: STREET_HALF * 2 }, { at: -16, width: 5.2 }] },
+  { axis: 'z', sign: 1, gaps: [{ at: 0, width: AVENUE_HALF * 2 }, { at: -18, width: 5.2 }] },
+  { axis: 'x', sign: -1, gaps: [{ at: 0, width: STREET_HALF * 2 }, { at: 16, width: 5.2 }] },
+];
+
+export function groundHeight(x: number, z: number) {
+  if (x * x + z * z < PLAZA_R * PLAZA_R) return 0;
+  if (Math.abs(x) < AVENUE_HALF || Math.abs(z) < STREET_HALF) return 0;
+  return CURB;
+}
+
+// ---------------------------------------------------------------------------
+// Procedural textures
+// ---------------------------------------------------------------------------
+
+function seededRandom(seed: number) {
+  let rand = seed * 9301 + 49297;
+  return () => {
+    rand = (rand * 9301 + 49297) % 233280;
+    return rand / 233280;
+  };
+}
+
+function canvasTexture(size: number, paint: (ctx: CanvasRenderingContext2D, size: number) => void) {
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return null;
+  paint(ctx, size);
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.RepeatWrapping;
+  tex.anisotropy = 8;
+  return tex;
+}
+
+function speckle(ctx: CanvasRenderingContext2D, size: number, count: number, rgb: [number, number, number], spread: number, next: () => number) {
+  for (let i = 0; i < count; i += 1) {
+    const d = Math.floor((next() - 0.5) * spread);
+    ctx.fillStyle = `rgb(${rgb[0] + d}, ${rgb[1] + d}, ${rgb[2] + d})`;
+    ctx.fillRect(next() * size, next() * size, 1 + next() * 2, 1 + next() * 2);
+  }
+}
+
+/** Worn asphalt: dark blue-grey with grain, patches and a few hairline cracks. One tile ≈ 6 m. */
+function makeAsphaltTexture() {
+  return canvasTexture(512, (ctx, size) => {
+    const next = seededRandom(11);
+    ctx.fillStyle = '#2a2a33';
+    ctx.fillRect(0, 0, size, size);
+    for (let i = 0; i < 9; i += 1) {
+      ctx.fillStyle = `rgba(${18 + next() * 10}, ${18 + next() * 10}, ${26 + next() * 10}, ${0.25 + next() * 0.3})`;
+      ctx.beginPath();
+      ctx.ellipse(next() * size, next() * size, 40 + next() * 90, 25 + next() * 60, next() * Math.PI, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    speckle(ctx, size, 2600, [46, 46, 56], 26, next);
+    ctx.strokeStyle = 'rgba(12, 12, 18, 0.7)';
+    ctx.lineWidth = 1.5;
+    for (let c = 0; c < 4; c += 1) {
+      let x = next() * size;
+      let y = next() * size;
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      for (let s = 0; s < 7; s += 1) {
+        x += (next() - 0.5) * 70;
+        y += (next() - 0.5) * 70;
+        ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+    }
+  });
+}
+
+/** Concrete sidewalk panels with expansion joints. One tile = 3 m = 2 × 2 panels. */
+function makeSidewalkTexture() {
+  return canvasTexture(512, (ctx, size) => {
+    const next = seededRandom(23);
+    ctx.fillStyle = '#6d6a78';
+    ctx.fillRect(0, 0, size, size);
+    const panel = size / 2;
+    for (let py = 0; py < 2; py += 1) {
+      for (let px = 0; px < 2; px += 1) {
+        const d = Math.floor((next() - 0.5) * 10);
+        ctx.fillStyle = `rgb(${109 + d}, ${106 + d}, ${120 + d})`;
+        ctx.fillRect(px * panel + 3, py * panel + 3, panel - 6, panel - 6);
+      }
+    }
+    speckle(ctx, size, 1800, [118, 114, 128], 30, next);
+    ctx.strokeStyle = 'rgba(40, 36, 50, 0.9)';
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.moveTo(panel, 0);
+    ctx.lineTo(panel, size);
+    ctx.moveTo(0, panel);
+    ctx.lineTo(size, panel);
+    ctx.stroke();
+    ctx.strokeStyle = 'rgba(40, 36, 50, 0.9)';
+    ctx.strokeRect(2, 2, size - 4, size - 4);
+  });
+}
+
+/** Plaza paving: two-tone square setts with the Ryderz signal rings painted on. Mapped once across the plaza disc. */
+function makePlazaTexture() {
+  return canvasTexture(1024, (ctx, size) => {
+    const next = seededRandom(5);
+    const tile = size / 24;
+    for (let y = 0; y < 24; y += 1) {
+      for (let x = 0; x < 24; x += 1) {
+        const alt = (x + y) % 2 === 0;
+        const d = Math.floor((next() - 0.5) * 8);
+        ctx.fillStyle = alt ? `rgb(${88 + d}, ${78 + d}, ${104 + d})` : `rgb(${74 + d}, ${66 + d}, ${90 + d})`;
+        ctx.fillRect(x * tile, y * tile, tile, tile);
+        ctx.strokeStyle = 'rgba(30, 24, 40, 0.55)';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(x * tile + 1, y * tile + 1, tile - 2, tile - 2);
+      }
+    }
+    ctx.strokeStyle = 'rgba(120, 255, 190, 0.42)';
+    ctx.lineWidth = 10;
+    [0.33, 0.66, 0.95].forEach((f) => {
+      ctx.beginPath();
+      ctx.arc(size / 2, size / 2, (size / 2) * f, 0, Math.PI * 2);
+      ctx.stroke();
+    });
+  });
+}
 
 function makeFacadeTexture(seed: number) {
   const canvas = document.createElement('canvas');
@@ -29,11 +189,7 @@ function makeFacadeTexture(seed: number) {
   const palette = ['#2a2136', '#1f2434', '#332430', '#26302b'];
   ctx.fillStyle = palette[seed % palette.length];
   ctx.fillRect(0, 0, 256, 512);
-  let rand = seed * 9301 + 49297;
-  const next = () => {
-    rand = (rand * 9301 + 49297) % 233280;
-    return rand / 233280;
-  };
+  const next = seededRandom(seed + 1);
   const cols = 5;
   const rows = 12;
   const w = 256 / cols;
@@ -51,54 +207,209 @@ function makeFacadeTexture(seed: number) {
   return tex;
 }
 
-function makeGroundTexture() {
-  const canvas = document.createElement('canvas');
-  canvas.width = 1024;
-  canvas.height = 1024;
-  const ctx = canvas.getContext('2d');
-  if (!ctx) return null;
-  ctx.fillStyle = '#2b2634';
-  ctx.fillRect(0, 0, 1024, 1024);
-  const tile = 64;
-  for (let y = 0; y < 1024; y += tile) {
-    for (let x = 0; x < 1024; x += tile) {
-      const shade = ((x / tile + y / tile) % 2 === 0 ? 0 : 6) + Math.floor(Math.random() * 5);
-      ctx.fillStyle = `rgb(${46 + shade}, ${40 + shade}, ${58 + shade})`;
-      ctx.fillRect(x + 2, y + 2, tile - 4, tile - 4);
-    }
-  }
-  ctx.strokeStyle = 'rgba(120, 255, 190, 0.35)';
-  ctx.lineWidth = 6;
-  ctx.beginPath();
-  ctx.arc(512, 512, 200, 0, Math.PI * 2);
-  ctx.stroke();
-  ctx.beginPath();
-  ctx.arc(512, 512, 340, 0, Math.PI * 2);
-  ctx.stroke();
-  const tex = new THREE.CanvasTexture(canvas);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  tex.wrapS = THREE.RepeatWrapping;
-  tex.wrapT = THREE.RepeatWrapping;
-  tex.repeat.set(2, 2);
-  tex.anisotropy = 4;
-  return tex;
-}
+// ---------------------------------------------------------------------------
+// Geometry helpers
+// ---------------------------------------------------------------------------
 
-function box(
-  w: number,
-  h: number,
-  d: number,
-  material: THREE.Material,
-  x: number,
-  y: number,
-  z: number,
-  outline = 0.06,
-) {
+function box(w: number, h: number, d: number, material: THREE.Material, x: number, y: number, z: number, outline = 0.06) {
   const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), material);
   mesh.position.set(x, y, z);
   addOutline(mesh, outline);
   return mesh;
 }
+
+/** Flat decal lying on the ground (markings, grates). Lifted a hair and offset to avoid z-fighting. */
+function decalMaterial(color: THREE.ColorRepresentation, opacity = 1) {
+  return new THREE.MeshBasicMaterial({
+    color,
+    transparent: opacity < 1,
+    opacity,
+    depthWrite: false,
+    polygonOffset: true,
+    polygonOffsetFactor: -2,
+    polygonOffsetUnits: -4,
+    toneMapped: false,
+  });
+}
+
+function stripe(parent: THREE.Object3D, x: number, z: number, w: number, d: number, material: THREE.Material, y = 0.02) {
+  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(w, d), material);
+  mesh.rotation.x = -Math.PI / 2;
+  mesh.position.set(x, y, z);
+  parent.add(mesh);
+  return mesh;
+}
+
+function dashedLine(parent: THREE.Object3D, axis: 'x' | 'z', at: number, from: number, to: number, material: THREE.Material, dash = 3, gap = 3, width = 0.14) {
+  for (let s = from; s < to; s += dash + gap) {
+    const len = Math.min(dash, to - s);
+    const center = s + len / 2;
+    if (axis === 'z') stripe(parent, at, center, width, len, material);
+    else stripe(parent, center, at, len, width, material);
+  }
+}
+
+/** Zebra crossing: bars run parallel to traffic, laid side by side across the road. */
+function crosswalk(parent: THREE.Object3D, trafficAxis: 'x' | 'z', center: number, roadHalf: number, material: THREE.Material) {
+  const barLen = 3;
+  const barW = 0.55;
+  const pitch = 1.1;
+  for (let a = -roadHalf + pitch / 2; a < roadHalf; a += pitch) {
+    if (trafficAxis === 'z') stripe(parent, a, center, barW, barLen, material);
+    else stripe(parent, center, a, barLen, barW, material);
+  }
+}
+
+/** Quadrant sidewalk slab: the block rectangle minus the plaza circle, extruded to curb height. */
+function quadrantSlab(sx: 1 | -1, sz: 1 | -1, materials: THREE.Material[]) {
+  const zc = Math.sqrt(PLAZA_R * PLAZA_R - AVENUE_HALF * AVENUE_HALF);
+  const xc = Math.sqrt(PLAZA_R * PLAZA_R - STREET_HALF * STREET_HALF);
+  const outer = GROUND_HALF;
+  // Shape space is (u, v) = (x, -z); the extrusion is then rotated flat.
+  const pts: [number, number][] = [
+    [sx * AVENUE_HALF, sz * outer],
+    [sx * AVENUE_HALF, sz * zc],
+  ];
+  const shape = new THREE.Shape();
+  shape.moveTo(pts[0][0], -pts[0][1]);
+  shape.lineTo(pts[1][0], -pts[1][1]);
+  const a0 = Math.atan2(-sz * zc, sx * AVENUE_HALF);
+  const a1 = Math.atan2(-sz * STREET_HALF, sx * xc);
+  const delta = ((a1 - a0) % (Math.PI * 2) + Math.PI * 3) % (Math.PI * 2) - Math.PI;
+  shape.absarc(0, 0, PLAZA_R, a0, a1, delta < 0);
+  shape.lineTo(sx * outer, -sz * STREET_HALF);
+  shape.lineTo(sx * outer, -sz * outer);
+  shape.closePath();
+  const geometry = new THREE.ExtrudeGeometry(shape, { depth: CURB, bevelEnabled: false, curveSegments: 24 });
+  const mesh = new THREE.Mesh(geometry, materials);
+  mesh.rotation.x = -Math.PI / 2;
+  return mesh;
+}
+
+function treeAt(parent: THREE.Object3D, x: number, z: number, y: number, scale = 1) {
+  const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.16 * scale, 0.22 * scale, 3.2 * scale, 8), toon(0x3a2a22));
+  trunk.position.set(x, y + 1.6 * scale, z);
+  addOutline(trunk, 0.03);
+  const canopy = new THREE.Mesh(new THREE.IcosahedronGeometry(1.9 * scale, 1), toon(0x2f7a46));
+  canopy.position.set(x, y + 4.2 * scale, z);
+  addOutline(canopy, 0.06);
+  const canopy2 = new THREE.Mesh(new THREE.IcosahedronGeometry(1.3 * scale, 1), toon(0x37904f));
+  canopy2.position.set(x + 0.7 * scale, y + 5.1 * scale, z - 0.4 * scale);
+  addOutline(canopy2, 0.05);
+  parent.add(trunk, canopy, canopy2);
+  return trunk;
+}
+
+// ---------------------------------------------------------------------------
+// Cars
+// ---------------------------------------------------------------------------
+
+interface CarSlot {
+  x: number;
+  z: number;
+  /** Yaw in radians; 0 faces +X (parallel to the cross street), π/2 faces -Z. */
+  rot: number;
+  color: number;
+  /** Index into CAR_MODELS. */
+  model: number;
+}
+
+const PROCEDURAL_CAR = { length: CAR_LENGTH, width: 1.9 };
+
+function carModelFor(slot: CarSlot) {
+  return CAR_MODELS.length ? CAR_MODELS[slot.model % CAR_MODELS.length] : null;
+}
+
+/** Footprint used for collision of the car in a slot. */
+function carFootprint(slot: CarSlot) {
+  const model = carModelFor(slot);
+  return model ? { length: model.length, width: model.width } : PROCEDURAL_CAR;
+}
+
+/** Procedural toon sedan, 4.5 m long, facing +X, wheels on y = 0. */
+function buildToonCar(color: number) {
+  const car = new THREE.Group();
+  const paint = toon(color);
+  const glass = toon(0x0e1018);
+  const trim = toon(0x16161e);
+  const body = box(4.5, 0.74, 1.85, paint, 0, 0.53, 0, 0.05);
+  const cabin = box(2.15, 0.56, 1.7, glass, -0.25, 1.18, 0, 0.05);
+  const roof = box(1.7, 0.08, 1.74, paint, -0.3, 1.5, 0, 0.04);
+  const bumperF = box(0.25, 0.3, 1.9, trim, 2.2, 0.42, 0, 0.04);
+  const bumperR = box(0.25, 0.3, 1.9, trim, -2.2, 0.42, 0, 0.04);
+  car.add(body, cabin, roof, bumperF, bumperR);
+  const wheelGeo = new THREE.CylinderGeometry(0.34, 0.34, 0.26, 14);
+  const hubGeo = new THREE.CylinderGeometry(0.17, 0.17, 0.28, 10);
+  const wheelMat = toon(0x0c0c12);
+  const hubMat = toon(0x5a5a68);
+  [
+    [-1.45, 0.86],
+    [1.45, 0.86],
+    [-1.45, -0.86],
+    [1.45, -0.86],
+  ].forEach(([wx, wz]) => {
+    const wheel = new THREE.Mesh(wheelGeo, wheelMat);
+    wheel.rotation.x = Math.PI / 2;
+    wheel.position.set(wx, 0.34, wz);
+    addOutline(wheel, 0.035);
+    const hub = new THREE.Mesh(hubGeo, hubMat);
+    hub.rotation.x = Math.PI / 2;
+    hub.position.set(wx, 0.34, wz);
+    car.add(wheel, hub);
+  });
+  [-0.62, 0.62].forEach((wz) => {
+    const head = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.16, 0.42), glow(0xfff0c2, 1.15));
+    head.position.set(2.27, 0.72, wz);
+    const tail = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.14, 0.4), glow(0xff3a3a, 0.9));
+    tail.position.set(-2.27, 0.72, wz);
+    car.add(head, tail);
+  });
+  return { car, solids: [body, cabin] as THREE.Mesh[] };
+}
+
+/**
+ * Normalise an imported car model: longest horizontal axis along +X, `length`
+ * metres long, centred, wheels on the ground. Returns the wrapper and its meshes.
+ * Models are assumed to be authored nose-forward along their long axis (+Z or +X).
+ */
+function normaliseCarModel(scene: THREE.Object3D, length: number) {
+  const wrapper = new THREE.Group();
+  wrapper.add(scene);
+  scene.updateWorldMatrix(true, true);
+  let bounds = new THREE.Box3().setFromObject(scene);
+  let size = bounds.getSize(new THREE.Vector3());
+  if (size.z > size.x) {
+    // +Z → +X
+    scene.rotation.y = Math.PI / 2;
+    scene.updateWorldMatrix(true, true);
+    bounds = new THREE.Box3().setFromObject(scene);
+    size = bounds.getSize(new THREE.Vector3());
+  }
+  const scale = length / Math.max(size.x, 0.001);
+  scene.scale.multiplyScalar(scale);
+  scene.updateWorldMatrix(true, true);
+  bounds = new THREE.Box3().setFromObject(scene);
+  const center = bounds.getCenter(new THREE.Vector3());
+  scene.position.x -= center.x;
+  scene.position.z -= center.z;
+  scene.position.y -= bounds.min.y;
+  const meshes: THREE.Mesh[] = [];
+  scene.traverse((o) => {
+    const mesh = o as THREE.Mesh;
+    if (!mesh.isMesh) return;
+    mesh.castShadow = false;
+    const list = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+    list.forEach((m) => {
+      if (m) m.userData.retain = true;
+    });
+    meshes.push(mesh);
+  });
+  return { wrapper, meshes };
+}
+
+// ---------------------------------------------------------------------------
+// World
+// ---------------------------------------------------------------------------
 
 function makeSky() {
   const geo = new THREE.SphereGeometry(260, 24, 16);
@@ -128,39 +439,124 @@ export function buildWorld(): World {
   const alleys: World['alleys'] = [];
   const alleyNodes: THREE.Mesh[] = [];
   const textures: THREE.Texture[] = [];
+  let disposed = false;
 
   group.add(makeSky());
-
   const moon = new THREE.Mesh(new THREE.SphereGeometry(14, 24, 16), glow(0x9dffc9, 0.9));
   moon.position.set(-90, 95, -150);
   group.add(moon);
 
-  const groundTex = makeGroundTexture();
-  if (groundTex) textures.push(groundTex);
-  const groundMat = toon(0xffffff, { map: groundTex });
-  const ground = new THREE.Mesh(
-    new THREE.PlaneGeometry((ARENA_HALF + BUILDING_DEPTH + 6) * 2, (ARENA_HALF + BUILDING_DEPTH + 6) * 2),
-    groundMat,
-  );
+  // --- Ground: asphalt everywhere, sidewalk slabs on top ---------------------
+  const asphaltTex = makeAsphaltTexture();
+  const sidewalkTex = makeSidewalkTexture();
+  const plazaTex = makePlazaTexture();
+  [asphaltTex, sidewalkTex, plazaTex].forEach((t) => t && textures.push(t));
+  if (asphaltTex) asphaltTex.repeat.set((GROUND_HALF * 2) / 6, (GROUND_HALF * 2) / 6);
+  if (sidewalkTex) sidewalkTex.repeat.set(1 / 3, 1 / 3);
+
+  const asphaltMat = toon(0xffffff, { map: asphaltTex });
+  const ground = new THREE.Mesh(new THREE.PlaneGeometry(GROUND_HALF * 2, GROUND_HALF * 2), asphaltMat);
   ground.rotation.x = -Math.PI / 2;
   ground.name = 'ground';
   group.add(ground);
   occluders.push(ground);
 
+  const sidewalkMat = toon(0xffffff, { map: sidewalkTex });
+  const curbMat = toon(0x8a8694);
+  const quadrants: [1 | -1, 1 | -1][] = [
+    [1, 1],
+    [1, -1],
+    [-1, 1],
+    [-1, -1],
+  ];
+  quadrants.forEach(([sx, sz]) => {
+    const slab = quadrantSlab(sx, sz, [sidewalkMat, curbMat]);
+    slab.name = 'sidewalk';
+    group.add(slab);
+    occluders.push(slab);
+  });
+
+  // Plaza disc, flush with the road, with the signal rings painted in.
+  const plaza = new THREE.Mesh(new THREE.CircleGeometry(PLAZA_R, 72), toon(0xffffff, { map: plazaTex }));
+  plaza.rotation.x = -Math.PI / 2;
+  plaza.position.y = 0.012;
+  plaza.material.polygonOffset = true;
+  plaza.material.polygonOffsetFactor = -1;
+  plaza.material.polygonOffsetUnits = -2;
+  group.add(plaza);
+  // Plaza curb: a thin kerb ring so the paving reads as a defined space.
+  const plazaKerb = new THREE.Mesh(new THREE.RingGeometry(PLAZA_R - 0.3, PLAZA_R, 72), decalMaterial(0x7c7886));
+  plazaKerb.rotation.x = -Math.PI / 2;
+  plazaKerb.position.y = 0.018;
+  group.add(plazaKerb);
+
+  // --- Road markings ----------------------------------------------------------
+  const paintWhite = decalMaterial(0xcbc5d6, 0.82);
+  const paintYellow = decalMaterial(0xd9b24a, 0.85);
+  // Avenue (traffic along Z): dashed centre line, solid parking-lane lines.
+  [1, -1].forEach((s) => {
+    const from = PLAZA_R + 5.5;
+    dashedLine(group, 'z', 0, s > 0 ? from : -GROUND_HALF, s > 0 ? GROUND_HALF : -from, paintYellow);
+    [AVENUE_HALF - PARKING_LANE, -(AVENUE_HALF - PARKING_LANE)].forEach((x) => {
+      const len = GROUND_HALF - from;
+      stripe(group, x, s * (from + len / 2), 0.12, len, paintWhite);
+    });
+    // Cross street (traffic along X).
+    dashedLine(group, 'x', 0, s > 0 ? from : -GROUND_HALF, s > 0 ? GROUND_HALF : -from, paintYellow);
+    [STREET_HALF - PARKING_LANE, -(STREET_HALF - PARKING_LANE)].forEach((z) => {
+      const len = GROUND_HALF - from;
+      stripe(group, s * (from + len / 2), z, len, 0.12, paintWhite);
+    });
+    // Crosswalks where each road meets the plaza, with stop lines behind them.
+    crosswalk(group, 'z', s * (PLAZA_R + 2), AVENUE_HALF, paintWhite);
+    stripe(group, s * AVENUE_HALF * 0.5, s * (PLAZA_R + 4.1), AVENUE_HALF, 0.4, paintWhite);
+    crosswalk(group, 'x', s * (PLAZA_R + 2), STREET_HALF, paintWhite);
+    stripe(group, s * (PLAZA_R + 4.1), -s * STREET_HALF * 0.5, 0.4, STREET_HALF, paintWhite);
+  });
+
+  // Manholes and drains.
+  const ironMat = decalMaterial(0x1c1b24);
+  const ironRim = decalMaterial(0x3a3844);
+  [
+    [2.6, -19],
+    [-3.4, 22.5],
+    [-18, 2.8],
+    [20.5, -2.6],
+    [5.2, 6.8],
+  ].forEach(([x, z]) => {
+    const rim = new THREE.Mesh(new THREE.CircleGeometry(0.5, 20), ironRim);
+    rim.rotation.x = -Math.PI / 2;
+    rim.position.set(x, 0.016, z);
+    const lid = new THREE.Mesh(new THREE.CircleGeometry(0.42, 20), ironMat);
+    lid.rotation.x = -Math.PI / 2;
+    lid.position.set(x, 0.02, z);
+    group.add(rim, lid);
+  });
+  // Storm drains along the avenue curbs.
+  [
+    [AVENUE_HALF - 0.45, 16],
+    [-(AVENUE_HALF - 0.45), -17],
+    [AVENUE_HALF - 0.45, -24],
+    [-(AVENUE_HALF - 0.45), 24],
+  ].forEach(([x, z]) => stripe(group, x, z, 0.5, 1.1, ironMat, 0.02));
+
+  // --- Perimeter buildings & spawn alleys -----------------------------------
   const facades = [0, 1, 2, 3].map((s) => makeFacadeTexture(s));
   facades.forEach((t) => t && textures.push(t));
   const buildingMat = (i: number) => toon(0xffffff, { map: facades[i % facades.length] });
 
-  const sides: { axis: 'x' | 'z'; sign: 1 | -1; gaps: number[] }[] = [
-    { axis: 'z', sign: -1, gaps: [-13, 12] },
-    { axis: 'x', sign: 1, gaps: [-9, 13] },
-    { axis: 'z', sign: 1, gaps: [0] },
-    { axis: 'x', sign: -1, gaps: [-14, 7] },
-  ];
+  const addBuilding = (w: number, h: number, d: number, x: number, z: number, facade: number) => {
+    const b = box(w, h, d, buildingMat(facade), x, h / 2, z, 0.1);
+    group.add(b);
+    occluders.push(b);
+    obstacles.push({ kind: 'box', minX: x - w / 2, maxX: x + w / 2, minZ: z - d / 2, maxZ: z + d / 2 });
+    return b;
+  };
 
   let facadeIndex = 0;
-  sides.forEach((side) => {
-    const edges = [-ARENA_HALF, ...side.gaps.flatMap((g) => [g - ALLEY_WIDTH / 2, g + ALLEY_WIDTH / 2]), ARENA_HALF];
+  SIDES.forEach((side) => {
+    const sorted = [...side.gaps].sort((a, b) => a.at - b.at);
+    const edges = [-ARENA_HALF, ...sorted.flatMap((g) => [g.at - g.width / 2, g.at + g.width / 2]), ARENA_HALF];
     for (let i = 0; i < edges.length; i += 2) {
       const start = edges[i];
       const end = edges[i + 1];
@@ -169,39 +565,34 @@ export function buildWorld(): World {
       const segments = Math.max(1, Math.round(length / 11));
       const segLength = length / segments;
       for (let s = 0; s < segments; s += 1) {
-        const a = start + s * segLength;
-        const center = a + segLength / 2;
+        const center = start + s * segLength + segLength / 2;
         const height = 11 + ((facadeIndex * 7) % 13) + (s % 2) * 4;
         const offset = side.sign * (ARENA_HALF + BUILDING_DEPTH / 2);
         const w = side.axis === 'z' ? segLength - 0.3 : BUILDING_DEPTH;
         const d = side.axis === 'z' ? BUILDING_DEPTH : segLength - 0.3;
         const x = side.axis === 'z' ? center : offset;
         const z = side.axis === 'z' ? offset : center;
-        const b = box(w, height, d, buildingMat(facadeIndex), x, height / 2, z, 0.1);
-        group.add(b);
-        occluders.push(b);
-        obstacles.push({ kind: 'box', minX: x - w / 2, maxX: x + w / 2, minZ: z - d / 2, maxZ: z + d / 2 });
+        addBuilding(w, height, d, x, z, facadeIndex);
         facadeIndex += 1;
       }
     }
 
     side.gaps.forEach((g) => {
       const outward = side.sign * (ARENA_HALF + 4.5);
-      const position =
-        side.axis === 'z' ? new THREE.Vector3(g, 0, outward) : new THREE.Vector3(outward, 0, g);
+      const position = side.axis === 'z' ? new THREE.Vector3(g.at, 0, outward) : new THREE.Vector3(outward, 0, g.at);
       const inward = position.clone().multiplyScalar(-1).setY(0).normalize();
       alleys.push({ position, inward });
 
       const nodeY = 4.2;
       const nodePos =
         side.axis === 'z'
-          ? new THREE.Vector3(g, nodeY, side.sign * ARENA_HALF)
-          : new THREE.Vector3(side.sign * ARENA_HALF, nodeY, g);
+          ? new THREE.Vector3(g.at, nodeY, side.sign * ARENA_HALF)
+          : new THREE.Vector3(side.sign * ARENA_HALF, nodeY, g.at);
       const node = new THREE.Mesh(new THREE.IcosahedronGeometry(0.55, 0), glow(0x6dff9e, 1.6));
       node.position.copy(nodePos);
       group.add(node);
       alleyNodes.push(node);
-      const arch = new THREE.Mesh(new THREE.TorusGeometry(2.7, 0.14, 8, 28), glow(0x36c56e, 1.1));
+      const arch = new THREE.Mesh(new THREE.TorusGeometry(g.width > 6 ? 4.2 : 2.7, 0.14, 8, 36), glow(0x36c56e, 1.1));
       arch.position.copy(nodePos).setY(0.6);
       if (side.axis === 'x') arch.rotation.y = Math.PI / 2;
       group.add(arch);
@@ -209,124 +600,225 @@ export function buildWorld(): World {
   });
 
   const cornerHeights = [22, 17, 26, 19];
-  [
-    [1, 1],
-    [1, -1],
-    [-1, 1],
-    [-1, -1],
-  ].forEach(([sx, sz], i) => {
+  quadrants.forEach(([sx, sz], i) => {
     const size = BUILDING_DEPTH;
-    const x = sx * (ARENA_HALF + size / 2);
-    const z = sz * (ARENA_HALF + size / 2);
-    const h = cornerHeights[i];
-    const b = box(size, h, size, buildingMat(i + 2), x, h / 2, z, 0.1);
-    group.add(b);
-    occluders.push(b);
-    obstacles.push({
-      kind: 'box',
-      minX: x - size / 2,
-      maxX: x + size / 2,
-      minZ: z - size / 2,
-      maxZ: z + size / 2,
-    });
+    addBuilding(size, cornerHeights[i], size, sx * (ARENA_HALF + size / 2), sz * (ARENA_HALF + size / 2), i + 2);
   });
 
-  const spireBase = new THREE.Mesh(new THREE.CylinderGeometry(2.6, 2.9, 1.1, 24), toon(0x3a3350));
-  spireBase.position.y = 0.55;
+  // --- Quadrant blocks --------------------------------------------------------
+  // (+x,+z): mid-block building with an alley behind it.
+  addBuilding(9, 14, 9, 19.5, 17.5, 1);
+  const awning = box(9.6, 0.18, 1.6, toon(0x6b2a3a), 19.5, 3.2, 12.3, 0.04);
+  group.add(awning);
+
+  // (-x,-z): surface parking lot on the sidewalk level.
+  const lotMat = toon(0xffffff, { map: asphaltTex ? asphaltTex.clone() : null });
+  if (lotMat.map) {
+    lotMat.map.repeat.set(13 / 6, 14 / 6);
+    lotMat.map.needsUpdate = true;
+    textures.push(lotMat.map);
+  }
+  const lot = new THREE.Mesh(new THREE.PlaneGeometry(13, 14), lotMat);
+  lot.rotation.x = -Math.PI / 2;
+  lot.position.set(-17.5, CURB + 0.012, -17);
+  lotMat.polygonOffset = true;
+  lotMat.polygonOffsetFactor = -1;
+  lotMat.polygonOffsetUnits = -2;
+  group.add(lot);
+  for (let i = 0; i < 5; i += 1) {
+    stripe(group, -23.5 + i * 2.7, -21.4, 0.1, 5.2, paintWhite, CURB + 0.02);
+  }
+  stripe(group, -18.1, -18.8, 10.8, 0.1, paintWhite, CURB + 0.02);
+  // Bollards along the lot's street edge.
+  const bollardMat = toon(0x3a3848);
+  [-13, -16.5, -20, -23.5].forEach((z) => {
+    const b = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.16, 0.95, 10), bollardMat);
+    b.position.set(-11.4, CURB + 0.475, z);
+    addOutline(b, 0.03);
+    const cap = new THREE.Mesh(new THREE.SphereGeometry(0.12, 8, 6), glow(0xffd28a, 0.8));
+    cap.position.set(-11.4, CURB + 0.98, z);
+    group.add(b, cap);
+    obstacles.push({ kind: 'circle', x: -11.4, z, r: 0.2 });
+  });
+
+  // (-x,+z): pocket park.
+  const grass = new THREE.Mesh(new THREE.PlaneGeometry(12.5, 13), toon(0x2f5a3a));
+  grass.rotation.x = -Math.PI / 2;
+  grass.position.set(-18, CURB + 0.012, 17.5);
+  (grass.material as THREE.Material).polygonOffset = true;
+  (grass.material as THREE.Material).polygonOffsetFactor = -1;
+  (grass.material as THREE.Material).polygonOffsetUnits = -2;
+  group.add(grass);
+  const parkPath = new THREE.Mesh(new THREE.PlaneGeometry(2.2, 13), sidewalkMat.clone());
+  parkPath.rotation.x = -Math.PI / 2;
+  parkPath.position.set(-16, CURB + 0.016, 17.5);
+  group.add(parkPath);
+  [
+    [-21, 21, 1],
+    [-13.5, 13.5, 0.85],
+    [-22, 13, 0.9],
+    [-19.5, 24.5, 0.75],
+  ].forEach(([x, z, s]) => {
+    treeAt(group, x, z, CURB, s);
+    obstacles.push({ kind: 'circle', x, z, r: 0.42 });
+  });
+
+  // (+x,-z): open storefront corner — kept clear for combat, framed by planters.
+
+  // --- Signal spire on a raised island ---------------------------------------
+  const islandMat = toon(0x4a425c);
+  const step = new THREE.Mesh(new THREE.CylinderGeometry(3.9, 4.1, 0.18, 32), toon(0x5a526c));
+  step.position.y = 0.09;
+  addOutline(step, 0.05);
+  const island = new THREE.Mesh(new THREE.CylinderGeometry(3.2, 3.3, 0.36, 32), islandMat);
+  island.position.y = 0.36;
+  addOutline(island, 0.05);
+  const spireBase = new THREE.Mesh(new THREE.CylinderGeometry(2.4, 2.7, 1.1, 24), toon(0x3a3350));
+  spireBase.position.y = 0.54 + 0.55;
   addOutline(spireBase, 0.07);
-  const spire = box(1.1, 8.5, 1.1, toon(0x1d1828), 0, 1.1 + 4.25, 0, 0.07);
+  const spire = box(1.1, 8.5, 1.1, toon(0x1d1828), 0, 1.64 + 4.25, 0, 0.07);
   const spireRing = new THREE.Mesh(new THREE.TorusGeometry(1.4, 0.12, 8, 32), glow(0x6dff9e, 1.8));
-  spireRing.position.y = 9.2;
+  spireRing.position.y = 9.7;
   spireRing.rotation.x = Math.PI / 2;
   const spireTip = new THREE.Mesh(new THREE.OctahedronGeometry(0.6, 0), glow(0x9dffc9, 2.4));
-  spireTip.position.y = 10.6;
-  group.add(spireBase, spire, spireRing, spireTip);
-  occluders.push(spireBase, spire);
-  obstacles.push({ kind: 'circle', x: 0, z: 0, r: 2.7 });
+  spireTip.position.y = 11.1;
+  group.add(step, island, spireBase, spire, spireRing, spireTip);
+  occluders.push(step, island, spireBase, spire);
+  obstacles.push({ kind: 'circle', x: 0, z: 0, r: 3.5 });
 
-  const carColors = [0xd94a3d, 0x3c7bd9, 0xe0c341, 0xf2f2f2, 0x2f9e6d, 0xd97e3d];
-  const cars: { x: number; z: number; rot: number }[] = [
-    { x: -14, z: -6, rot: 0 },
-    { x: 15, z: -12, rot: Math.PI / 2 },
-    { x: 12, z: 14, rot: 0 },
-    { x: -17, z: 12, rot: Math.PI / 2 },
-    { x: 4, z: -19, rot: 0.25 },
-    { x: -5, z: 20, rot: -0.2 },
+  // --- Cars -------------------------------------------------------------------
+  const parkedAlongAvenue = Math.PI / 2;
+  const slots: CarSlot[] = [
+    // Avenue parking lanes, nose-to-tail along the curbs.
+    { x: AVENUE_HALF - 1.25, z: 16, rot: parkedAlongAvenue, color: 0x8a2f2a, model: 0 },
+    { x: AVENUE_HALF - 1.25, z: 22.2, rot: parkedAlongAvenue, color: 0x2c4f8a, model: 1 },
+    { x: -(AVENUE_HALF - 1.25), z: -15.5, rot: -parkedAlongAvenue, color: 0xcfc7b8, model: 1 },
+    { x: -(AVENUE_HALF - 1.25), z: -21.8, rot: -parkedAlongAvenue, color: 0x2e2e36, model: 0 },
+    { x: -(AVENUE_HALF - 1.25), z: 19, rot: -parkedAlongAvenue, color: 0x5f7f4a, model: 0 },
+    // Cross street curbs.
+    { x: 18.5, z: -(STREET_HALF - 1.25), rot: 0, color: 0xb8782f, model: 1 },
+    { x: -20, z: -(STREET_HALF - 1.25), rot: Math.PI, color: 0x3f3f4a, model: 0 },
+    { x: -16.5, z: STREET_HALF - 1.25, rot: 0, color: 0x7a2f5a, model: 1 },
+    // One abandoned mid-lane as the signal hit — skewed across the avenue.
+    { x: -2.2, z: -18.5, rot: Math.PI / 2 + 0.55, color: 0xd9c46a, model: 0 },
+    // Surface lot.
+    { x: -22.15, z: -21.6, rot: parkedAlongAvenue, color: 0x8f8fa0, model: 1 },
+    { x: -16.75, z: -21.6, rot: parkedAlongAvenue, color: 0x3c6b9c, model: 0 },
   ];
-  cars.forEach((c, i) => {
-    const car = new THREE.Group();
-    const bodyMat = toon(carColors[i % carColors.length]);
-    const body = box(4.2, 1, 1.9, bodyMat, 0, 0.75, 0, 0.05);
-    const cabin = box(2.1, 0.75, 1.7, toon(0x141420), -0.2, 1.62, 0, 0.05);
-    car.add(body, cabin);
-    const wheelGeo = new THREE.CylinderGeometry(0.38, 0.38, 0.3, 12);
-    const wheelMat = toon(0x0d0d14);
-    [
-      [-1.4, 0.95],
-      [1.4, 0.95],
-      [-1.4, -0.95],
-      [1.4, -0.95],
-    ].forEach(([wx, wz]) => {
-      const wheel = new THREE.Mesh(wheelGeo, wheelMat);
-      wheel.rotation.x = Math.PI / 2;
-      wheel.position.set(wx, 0.38, wz);
-      addOutline(wheel, 0.04);
-      car.add(wheel);
-    });
-    car.position.set(c.x, 0, c.z);
-    car.rotation.y = c.rot;
-    group.add(car);
-    occluders.push(body, cabin);
-    const halfW = Math.abs(Math.cos(c.rot)) * 2.1 + Math.abs(Math.sin(c.rot)) * 0.95;
-    const halfD = Math.abs(Math.sin(c.rot)) * 2.1 + Math.abs(Math.cos(c.rot)) * 0.95;
-    obstacles.push({ kind: 'box', minX: c.x - halfW, maxX: c.x + halfW, minZ: c.z - halfD, maxZ: c.z + halfD });
+
+  const carRoots: THREE.Group[] = [];
+  slots.forEach((slot) => {
+    const root = new THREE.Group();
+    root.position.set(slot.x, groundHeight(slot.x, slot.z), slot.z);
+    root.rotation.y = slot.rot;
+    const { car, solids } = buildToonCar(slot.color);
+    root.add(car);
+    group.add(root);
+    carRoots.push(root);
+    occluders.push(...solids);
+    const { length, width } = carFootprint(slot);
+    const halfL = length / 2 + 0.05;
+    const halfW = width / 2 + 0.05;
+    const c = Math.abs(Math.cos(slot.rot));
+    const s = Math.abs(Math.sin(slot.rot));
+    // Axis-aligned bounds of the rotated footprint.
+    const extX = c * halfL + s * halfW;
+    const extZ = s * halfL + c * halfW;
+    obstacles.push({ kind: 'box', minX: slot.x - extX, maxX: slot.x + extX, minZ: slot.z - extZ, maxZ: slot.z + extZ });
   });
 
+  // Swap in real car models when configured; procedural cars stay until then.
+  if (CAR_MODELS.length) {
+    const loader = new GLTFLoader();
+    const templates = CAR_MODELS.map((model) => loader.loadAsync(model.url).catch((error) => {
+      console.warn('[raid] car model failed to load', model.url, error);
+      return null;
+    }));
+    Promise.all(templates).then((loaded) => {
+      if (disposed) return;
+      carRoots.forEach((root, i) => {
+        const wanted = slots[i].model % CAR_MODELS.length;
+        const index = loaded[wanted] ? wanted : loaded.findIndex(Boolean);
+        const template = loaded[index];
+        if (!template) return;
+        const { wrapper, meshes } = normaliseCarModel(template.scene.clone(true), CAR_MODELS[index].length);
+        const old = root.children[0];
+        root.remove(old);
+        old.traverse((o) => {
+          const idx = occluders.indexOf(o);
+          if (idx >= 0) occluders.splice(idx, 1);
+        });
+        root.add(wrapper);
+        occluders.push(...meshes);
+      });
+    });
+  }
+
+  // --- Planters on the sidewalks ---------------------------------------------
   const planters = [
-    [-8, -12],
-    [9, -6],
-    [-10, 8],
-    [7, 8],
-    [20, 3],
-    [-22, -3],
-    [0, -26],
-    [-24, 22],
-    [22, -22],
+    [10.8, 10.8],
+    [-10.8, 10.8],
+    [10.8, -10.8],
+    [-10.8, -10.8],
+    [22, -10.2],
+    [27, -22],
+    [13, 26],
+    [26.5, 9.8],
   ];
   planters.forEach(([x, z]) => {
-    const base = box(1.8, 0.9, 1.8, toon(0x4b4360), x, 0.45, z, 0.05);
+    const y = groundHeight(x, z);
+    const base = box(1.8, 0.8, 1.8, toon(0x4b4360), x, y + 0.4, z, 0.05);
     const bush = new THREE.Mesh(new THREE.SphereGeometry(0.85, 12, 10), toon(0x2f8a4f));
-    bush.position.set(x, 1.35, z);
+    bush.position.set(x, y + 1.2, z);
     addOutline(bush, 0.05);
     group.add(base, bush);
     occluders.push(base);
     obstacles.push({ kind: 'box', minX: x - 0.9, maxX: x + 0.9, minZ: z - 0.9, maxZ: z + 0.9 });
   });
 
-  const lampPositions = [
-    [-18, -18],
-    [18, -18],
-    [-18, 18],
-    [18, 18],
-    [0, -12],
-    [0, 12],
-    [-12, 0],
-    [12, 0],
-  ];
+  // --- Street lights: cobra-head poles on the curb line, arms over the road ---
   const lampMat = toon(0x22202c);
-  lampPositions.forEach(([x, z], i) => {
-    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.12, 5.2, 8), lampMat);
-    pole.position.set(x, 2.6, z);
+  const lamps: { x: number; z: number; arm: 'x' | 'z'; lit: boolean }[] = [
+    { x: 9.4, z: 14.5, arm: 'x', lit: true },
+    { x: -9.4, z: -14.5, arm: 'x', lit: true },
+    { x: 9.4, z: -22.5, arm: 'x', lit: false },
+    { x: -9.4, z: 22.5, arm: 'x', lit: false },
+    { x: 15.5, z: -8.4, arm: 'z', lit: true },
+    { x: -15.5, z: 8.4, arm: 'z', lit: true },
+    { x: 24, z: 8.4, arm: 'z', lit: false },
+    { x: -24, z: -8.4, arm: 'z', lit: false },
+    // Plaza perimeter.
+    { x: 13.2, z: 13.2, arm: 'x', lit: false },
+    { x: -13.2, z: -13.2, arm: 'x', lit: false },
+  ];
+  lamps.forEach((lamp) => {
+    const y = groundHeight(lamp.x, lamp.z);
+    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.14, 7.4, 10), lampMat);
+    pole.position.set(lamp.x, y + 3.7, lamp.z);
     addOutline(pole, 0.03);
-    const head = new THREE.Mesh(new THREE.SphereGeometry(0.32, 12, 10), glow(0xffd28a, 1.5));
-    head.position.set(x, 5.3, z);
-    group.add(pole, head);
-    if (i < 4) {
-      const light = new THREE.PointLight(0xffc478, 26, 24, 2);
-      light.position.set(x, 5.1, z);
+    const dir = lamp.arm === 'x' ? -Math.sign(lamp.x) : -Math.sign(lamp.z);
+    const armLen = 2.3;
+    const arm = new THREE.Mesh(new THREE.BoxGeometry(lamp.arm === 'x' ? armLen : 0.14, 0.14, lamp.arm === 'x' ? 0.14 : armLen), lampMat);
+    arm.position.set(
+      lamp.x + (lamp.arm === 'x' ? (dir * armLen) / 2 : 0),
+      y + 7.3,
+      lamp.z + (lamp.arm === 'z' ? (dir * armLen) / 2 : 0),
+    );
+    addOutline(arm, 0.025);
+    const hx = lamp.x + (lamp.arm === 'x' ? dir * armLen : 0);
+    const hz = lamp.z + (lamp.arm === 'z' ? dir * armLen : 0);
+    const head = new THREE.Mesh(new THREE.BoxGeometry(lamp.arm === 'x' ? 0.9 : 0.4, 0.2, lamp.arm === 'x' ? 0.4 : 0.9), lampMat);
+    head.position.set(hx, y + 7.2, hz);
+    addOutline(head, 0.025);
+    const lens = new THREE.Mesh(new THREE.BoxGeometry(lamp.arm === 'x' ? 0.7 : 0.3, 0.06, lamp.arm === 'x' ? 0.3 : 0.7), glow(0xffd28a, lamp.lit ? 1.6 : 1.1));
+    lens.position.set(hx, y + 7.08, hz);
+    group.add(pole, arm, head, lens);
+    if (lamp.lit) {
+      const light = new THREE.PointLight(0xffc478, 34, 30, 2);
+      light.position.set(hx, y + 6.9, hz);
       group.add(light);
     }
-    obstacles.push({ kind: 'circle', x, z, r: 0.25 });
+    obstacles.push({ kind: 'circle', x: lamp.x, z: lamp.z, r: 0.25 });
   });
 
   const animate = (time: number) => {
@@ -342,10 +834,11 @@ export function buildWorld(): World {
   };
 
   const dispose = () => {
+    disposed = true;
     textures.forEach((t) => t.dispose());
   };
 
-  return { group, obstacles, occluders, alleys, spireRing, alleyNodes, animate, dispose };
+  return { group, obstacles, occluders, alleys, spireRing, alleyNodes, heightAt: groundHeight, animate, dispose };
 }
 
 const closest = new THREE.Vector2();
