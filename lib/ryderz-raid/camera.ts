@@ -55,8 +55,8 @@ export interface CameraConfig {
 
 export const CAMERA_DEFAULTS: CameraConfig = {
   fov: 78,
-  distance: 4.2,
-  height: 0.42,
+  distance: 4.5,
+  height: 0.6,
   targetHeight: 1.3,
   shoulderX: 0.42,
   shoulderY: 0,
@@ -156,6 +156,22 @@ export class ThirdPersonCamera {
 
   getState(): CameraState {
     return this.forcedState ?? this.state;
+  }
+
+  /** Current pivot-to-camera distance after collision. */
+  getCollisionDistance() {
+    return this.collisionDist;
+  }
+
+  /**
+   * 1 when the camera has room; falls toward 0 as collision pushes the camera
+   * into the character so the engine can fade the player instead of filling
+   * the frame with torso.
+   */
+  getCharacterVisibility() {
+    const fadeStart = this.config.minDistance + 0.9;
+    const fadeEnd = this.config.minDistance + 0.15;
+    return THREE.MathUtils.clamp((this.collisionDist - fadeEnd) / (fadeStart - fadeEnd), 0, 1);
   }
 
   snapshot(): CameraSnapshot {
@@ -263,7 +279,8 @@ export class ThirdPersonCamera {
     const cy = Math.cos(this.smoothYaw);
     const sp = Math.sin(this.smoothPitch);
     const cp = Math.cos(this.smoothPitch);
-    _right.set(cy, 0, -sy);
+    // forward = (sin yaw, 0, cos yaw); right = forward x up.
+    _right.set(-cy, 0, sy);
     _back.set(-sy * cp, sp, -cy * cp);
 
     _origin.copy(this.smoothPivot).addScaledVector(_up, f.targetHeight);
@@ -323,7 +340,7 @@ export class ThirdPersonCamera {
     }
 
     // --- Look at the pivot, nudged a little forward so the Ryder sits low-centre
-    _look.copy(_pivot).addScaledVector(_back, -1.5);
+    _look.copy(_pivot).addScaledVector(_back, -1.0);
     this.camera.lookAt(_look);
     if (this.trauma > 0) {
       const t = this.trauma * this.trauma;

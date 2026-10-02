@@ -79,9 +79,23 @@ export default function CameraTuningPanel({
   }));
   const [preview, setPreview] = useState<CameraState | ''>('');
   const [copied, setCopied] = useState(false);
+  const [live, setLive] = useState({ collision: 0, vfov: 0, distance: 0 });
 
   useEffect(() => {
     if (engine) setConfig(engine.getCameraConfig());
+  }, [engine]);
+
+  useEffect(() => {
+    if (!engine) return;
+    const id = window.setInterval(() => {
+      const snap = engine.getCameraSnapshot();
+      setLive({
+        collision: snap.collisionDistance,
+        vfov: snap.verticalFov,
+        distance: snap.framing.distance,
+      });
+    }, 120);
+    return () => window.clearInterval(id);
   }, [engine]);
 
   const apply = (patch: Partial<CameraConfig>) => {
@@ -138,6 +152,10 @@ export default function CameraTuningPanel({
           <strong>
             State <em>{preview ? `${preview} (preview)` : liveState}</em>
           </strong>
+          <small className={styles.camLive} data-testid="cam-live">
+            dist {live.distance.toFixed(2)} · cam {live.collision.toFixed(2)}m · vfov{' '}
+            {live.vfov.toFixed(0)}°
+          </small>
         </div>
         <button type="button" onClick={onClose} aria-label="Close camera panel">
           ×

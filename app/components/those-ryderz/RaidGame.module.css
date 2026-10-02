@@ -792,6 +792,13 @@
   color: #9effc4;
 }
 
+.camHeader .camLive {
+  margin-top: 4px;
+  text-transform: none;
+  letter-spacing: 0.04em;
+  color: rgba(233, 255, 242, 0.6);
+}
+
 .camHeader button {
   appearance: none;
   width: 26px;

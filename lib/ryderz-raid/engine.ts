@@ -609,7 +609,7 @@ export class RaidEngine {
       (this.burnout ? 0.82 : 1);
 
     _fwd.set(Math.sin(this.yaw), 0, Math.cos(this.yaw));
-    _right.set(_fwd.z, 0, -_fwd.x);
+    _right.set(-_fwd.z, 0, _fwd.x);
     _tmp.copy(_fwd).multiplyScalar(-z).add(_right.multiplyScalar(x));
     if (_tmp.lengthSq() > 0) _tmp.normalize();
     this.pos.addScaledVector(_tmp, speed * dt);
@@ -656,7 +656,8 @@ export class RaidEngine {
       this.shield.scale.setScalar(pulse);
     }
 
-    setHumanoidOpacity(this.player.humanoid, phased ? 0.28 : 1);
+    const camFade = 0.12 + 0.88 * this.rig.getCharacterVisibility();
+    setHumanoidOpacity(this.player.humanoid, Math.min(phased ? 0.28 : 1, camFade));
     if (phased) {
       this.particles.emit(this.pos.clone().setY(1), this.spec.color, 1, {
         speed: 1.4,
@@ -680,7 +681,7 @@ export class RaidEngine {
     this.spendAura(volleyCost);
     this.combatT = COMBAT_LINGER;
     this.lookDir(_look);
-    _right.set(Math.cos(this.yaw), 0, -Math.sin(this.yaw));
+    _right.set(-Math.cos(this.yaw), 0, Math.sin(this.yaw));
     const origin = this.muzzle();
     const dmg = this.shotDamage();
     const count = this.spec.projectileCount;
@@ -799,7 +800,7 @@ export class RaidEngine {
 
   private fireSpread(count: number, spread: number, damageMul: number) {
     this.lookDir(_look);
-    _right.set(Math.cos(this.yaw), 0, -Math.sin(this.yaw));
+    _right.set(-Math.cos(this.yaw), 0, Math.sin(this.yaw));
     const origin = this.muzzle();
     const dmg = this.shotDamage() * damageMul;
     for (let i = 0; i < count; i += 1) {
@@ -933,7 +934,7 @@ export class RaidEngine {
   private updateClones(dt: number) {
     if (!this.player || this.clones.length === 0) return;
     _fwd.set(Math.sin(this.yaw), 0, Math.cos(this.yaw));
-    _right.set(_fwd.z, 0, -_fwd.x);
+    _right.set(-_fwd.z, 0, _fwd.x);
     for (const clone of this.clones) {
       _tmp.copy(this.pos).addScaledVector(_right, clone.side * 1.65).addScaledVector(_fwd, -0.4);
       clone.fighter.humanoid.group.position.lerp(_tmp.setY(0), 0.25);
