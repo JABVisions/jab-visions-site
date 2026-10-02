@@ -24,7 +24,7 @@ export default function RoomDropComposer({
   const suggested = suggestedStudioModeForRoom(room.id);
 
   return (
-    <section className="rounded-[1.5rem] border border-white/10 bg-white/[0.035] p-4">
+    <section className="forumsRoomComposer rounded-[1.5rem] border border-white/10 bg-white/[0.035] p-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="text-[11px] font-black uppercase tracking-[0.16em] text-white/50">
           Create Room Drop

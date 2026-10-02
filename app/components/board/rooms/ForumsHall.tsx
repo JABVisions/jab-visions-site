@@ -4,6 +4,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   BOARD_ROOM_CATALOG,
+  FORUMS_HALL_SECTIONS,
   resolveRoomId,
   roomHref,
   type Room,
@@ -19,25 +20,30 @@ import {
 import { livePresence } from "@/lib/board/rooms/presence";
 import RoomCard from "./RoomCard";
 import OfficialRoomBadge from "./OfficialRoomBadge";
+import "./forumsLayout.css";
 
-function Carousel({
+function HallSection({
+  id,
   title,
+  layout,
   hint,
   children,
   empty,
 }: {
+  id: (typeof FORUMS_HALL_SECTIONS)[number]["id"];
   title: string;
+  layout: "rail" | "stack";
   hint?: React.ReactNode;
   children: React.ReactNode;
   empty?: React.ReactNode;
 }) {
   return (
-    <section className="space-y-3">
-      <div className="flex flex-wrap items-end justify-between gap-2 px-1">
-        <h2 className="text-sm font-black uppercase tracking-[0.22em] text-white/80">{title}</h2>
+    <section className="forumsHallSection" data-forums-section={id} data-layout={layout}>
+      <div className="forumsHallSectionHead">
+        <h2>{title}</h2>
         {hint}
       </div>
-      <div className="flex gap-3 overflow-x-auto pb-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+      <div className="forumsHallTrack">
         {children}
         {empty}
       </div>
@@ -121,7 +127,7 @@ export default function ForumsHall() {
   const jabOfficial = models.filter((room) => room.isOfficial);
 
   return (
-    <div className="mx-auto w-full max-w-6xl px-4 py-6 sm:px-6">
+    <div className="forumsHall mx-auto w-full max-w-6xl px-4 py-6 sm:px-6">
       <header className="relative mb-7 overflow-hidden rounded-[2rem] border border-white/10 bg-white/[0.04] p-5 shadow-[0_24px_90px_rgba(0,0,0,0.4)] backdrop-blur-xl sm:p-8">
         <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_16%_12%,rgba(124,92,255,0.22),transparent_28%),radial-gradient(circle_at_86%_18%,rgba(255,107,157,0.16),transparent_24%),radial-gradient(circle_at_50%_100%,rgba(52,211,153,0.12),transparent_32%)]" />
         <div className="relative">
@@ -129,62 +135,61 @@ export default function ForumsHall() {
             <p className="text-xs font-black uppercase tracking-[0.38em] text-emerald-200/70">Board · Live community layer</p>
             <OfficialRoomBadge compact />
           </div>
-          <h1 className="mt-3 text-4xl font-black tracking-tight text-white sm:text-6xl">FORUMS</h1>
+          <h1 className="forumsHallTitle mt-3 text-4xl font-black tracking-tight text-white sm:text-6xl">FORUMS</h1>
           <p className="mt-3 max-w-2xl text-sm leading-6 text-white/55">
             Walk the hallway. Rooms are places — conversations, Drops, presence, and later calls live inside them.
           </p>
         </div>
       </header>
 
-      <div className="space-y-8">
-        <Carousel
-          title="Live Now"
+      <div className="forumsHallLog">
+        <HallSection
+          id="live-now"
+          title={FORUMS_HALL_SECTIONS[0].title}
+          layout={FORUMS_HALL_SECTIONS[0].layout}
           hint={<span className="text-[11px] uppercase tracking-[0.18em] text-white/35">Broadcast portals</span>}
           empty={
             liveNow.length ? null : (
-              <div className="min-w-[240px] rounded-[1.4rem] border border-white/8 bg-white/[0.025] px-4 py-6 text-sm text-white/40">
-                No rooms are broadcasting right now.
-              </div>
+              <div className="forumsHallEmpty">No rooms are broadcasting right now.</div>
             )
           }
         >
           {liveNow.map((room) => (
             <RoomCard key={room.id} room={room} compact />
           ))}
-        </Carousel>
+        </HallSection>
 
-        <Carousel
-          title="Your Rooms"
+        <HallSection
+          id="your-rooms"
+          title={FORUMS_HALL_SECTIONS[1].title}
+          layout={FORUMS_HALL_SECTIONS[1].layout}
           empty={
             yourRooms.length ? null : (
-              <div className="min-w-[260px] rounded-[1.4rem] border border-white/8 bg-white/[0.025] px-4 py-6 text-sm text-white/40">
-                Rooms you join, follow, or step into will gather here.
-              </div>
+              <div className="forumsHallEmpty">Rooms you join, follow, or step into will gather here.</div>
             )
           }
         >
           {yourRooms.map((room) => (
             <RoomCard key={room.id} room={room} />
           ))}
-        </Carousel>
+        </HallSection>
 
-        <Carousel title="Board Rooms">
+        <HallSection id="board-rooms" title={FORUMS_HALL_SECTIONS[2].title} layout={FORUMS_HALL_SECTIONS[2].layout}>
           {boardRooms.map((room) => (
             <RoomCard key={room.id} room={room} />
           ))}
-        </Carousel>
+        </HallSection>
 
-        <section className="space-y-3">
-          <div className="flex flex-wrap items-center gap-2 px-1">
-            <h2 className="text-sm font-black uppercase tracking-[0.22em] text-amber-100/90">JAB Official</h2>
-            <OfficialRoomBadge />
-          </div>
-          <div className="flex gap-3 overflow-x-auto pb-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-            {jabOfficial.map((room) => (
-              <RoomCard key={room.id} room={room} />
-            ))}
-          </div>
-        </section>
+        <HallSection
+          id="jab-official"
+          title={FORUMS_HALL_SECTIONS[3].title}
+          layout={FORUMS_HALL_SECTIONS[3].layout}
+          hint={<OfficialRoomBadge />}
+        >
+          {jabOfficial.map((room) => (
+            <RoomCard key={room.id} room={room} />
+          ))}
+        </HallSection>
       </div>
     </div>
   );

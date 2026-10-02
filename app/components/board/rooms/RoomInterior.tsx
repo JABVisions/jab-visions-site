@@ -62,6 +62,7 @@ import RoomActivityFeed from "./RoomActivityFeed";
 import RoomShareDrop from "./RoomShareDrop";
 import RoomConversation from "./RoomConversation";
 import RoomDropComposer from "./RoomDropComposer";
+import "./forumsLayout.css";
 import DropStudioLauncher from "@/app/components/board/DropStudioLauncher";
 import type { DropDestination } from "@/lib/board/dropDestination";
 import { suggestedStudioModeForRoom } from "@/lib/board/dropDestination";
@@ -842,7 +843,7 @@ export default function RoomInterior({
   }
 
   return (
-    <div className="mx-auto w-full max-w-5xl space-y-4 px-4 py-5 sm:px-6">
+    <div className="forumsRoomInterior mx-auto w-full max-w-5xl space-y-4 px-4 py-5 sm:px-6">
       <RoomHeader
         room={room}
         people={people}

@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import type { Room, RoomConversation } from "@/lib/board/rooms";
 import ConversationDropReply from "./ConversationDropReply";
 import RoomMemberOrb from "./RoomMemberOrb";
+import "./forumsLayout.css";
 
 function clsx(...parts: Array<string | false | null | undefined>) {
   return parts.filter(Boolean).join(" ");
@@ -42,10 +43,10 @@ export default function RoomConversation({
   if (!mounted) return null;
 
   return createPortal(
-    <div className="fixed inset-0 z-[90]">
+    <div className="forumsConversationLayer">
       <button type="button" aria-label="Leave conversation" onClick={onClose} className="absolute inset-0 bg-black/80 backdrop-blur-sm" />
-      <div className="absolute inset-x-0 bottom-[calc(104px+env(safe-area-inset-bottom))] top-[104px] overflow-y-auto px-3 py-3 sm:top-[112px] sm:px-5">
-        <section className="relative mx-auto grid min-h-[min(640px,calc(100vh-244px))] max-w-5xl grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden rounded-[1.5rem] border border-white/10 bg-[#071016]/92 shadow-[0_28px_110px_rgba(0,0,0,0.78)] backdrop-blur-2xl">
+      <div className="forumsConversationShell">
+        <section className="forumsConversationPanel relative mx-auto max-w-5xl rounded-[1.5rem] border border-white/10 bg-[#071016]/92 shadow-[0_28px_110px_rgba(0,0,0,0.78)] backdrop-blur-2xl">
           <div
             className="pointer-events-none absolute inset-0 opacity-70"
             style={{
@@ -78,7 +79,7 @@ export default function RoomConversation({
               </button>
             </div>
           </header>
-          <div className="relative min-h-0 overflow-auto px-4 py-4 sm:px-7">
+          <div className="forumsConversationBody relative px-4 py-4 sm:px-7">
             <article className="rounded-3xl border border-white/10 bg-black/24 p-5">
               <div className="text-[11px] font-black uppercase tracking-[0.18em] text-emerald-200/70">Original Signal</div>
               <p className="mt-3 whitespace-pre-wrap text-sm leading-7 text-white/82">{thread.body}</p>
@@ -104,7 +105,7 @@ export default function RoomConversation({
               </div>
             </section>
           </div>
-          <footer className="relative border-t border-white/10 p-4 sm:p-5">
+          <footer className="forumsConversationComposer border-t border-white/10 p-4 sm:p-5">
             {locked ? (
               <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white/55">
                 This conversation is locked. New Drops cannot be added here.
@@ -114,6 +115,7 @@ export default function RoomConversation({
                 <input
                   value={signal}
                   onChange={(e) => setSignal(e.target.value)}
+                  onFocus={(e) => e.currentTarget.scrollIntoView({ block: "nearest", inline: "nearest" })}
                   placeholder="Reply in this conversation..."
                   className="min-w-0 flex-1 rounded-2xl border border-white/10 bg-black/35 px-4 py-3 text-sm text-white outline-none"
                 />

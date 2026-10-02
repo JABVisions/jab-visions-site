@@ -1,5 +1,6 @@
 export * from "./types";
 export * from "./catalog";
+export * from "./hallway";
 export * from "./permissions";
 export * from "./presence";
 export * from "./activity";

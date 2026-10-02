@@ -11,6 +11,7 @@ import {
   isRoomActivityType,
   liveOfficialRooms,
   livePresence,
+  FORUMS_HALL_SECTION_ORDER,
   mergeRoomFeed,
   officialRooms,
   permissionsForRole,
@@ -51,6 +52,10 @@ assert(getRoomById("jab-visions")?.kind === "official", "JAB Visions is a first-
 assert(getRoomById("jab-visions")?.isOfficial === true, "JAB Visions keeps JAB Official treatment");
 assert(officialRooms().length >= 5, "official architecture can grow beyond the first three rooms");
 assert(liveOfficialRooms().every((room) => !room.comingSoon), "live official rooms are enterable");
+assert(
+  FORUMS_HALL_SECTION_ORDER.join(">") === "live-now>your-rooms>board-rooms>jab-official",
+  "Forums hallway log order matches desktop Forums 2.0"
+);
 assert(
   liveOfficialRooms().some((room) => room.id === "those-ryderz") &&
     liveOfficialRooms().some((room) => room.id === "jab-visions"),

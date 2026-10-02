@@ -8,6 +8,7 @@ import RoomPresence from "./RoomPresence";
 import type { RoomPresence as RoomPresencePerson } from "@/lib/board/rooms";
 import { goLiveBlockedReason } from "@/lib/board/rooms/liveWebRtc";
 import type { RoomRole } from "@/lib/board/rooms/types";
+import "./forumsLayout.css";
 
 function clsx(...parts: Array<string | false | null | undefined>) {
   return parts.filter(Boolean).join(" ");
@@ -45,9 +46,9 @@ export default function RoomHeader({
   const goLiveDisabled = canEndLive ? false : Boolean(blocked) || liveActive;
 
   return (
-    <header className="relative overflow-hidden rounded-[1.75rem] border border-white/10 bg-white/[0.04] p-4 shadow-[0_20px_80px_rgba(0,0,0,0.35)] backdrop-blur-xl sm:p-6">
+    <header className="forumsRoomHeader relative rounded-[1.75rem] border border-white/10 bg-white/[0.04] p-4 shadow-[0_20px_80px_rgba(0,0,0,0.35)] backdrop-blur-xl sm:p-6">
       <div
-        className="pointer-events-none absolute inset-0 opacity-80"
+        className="forumsRoomHeaderBleed opacity-80"
         style={{
           background: `radial-gradient(720px 280px at 12% 0%, ${room.color}40, transparent 60%),
             radial-gradient(520px 240px at 92% 10%, ${room.accent}28, transparent 68%)`,
@@ -99,12 +100,12 @@ export default function RoomHeader({
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="forumsRoomMeta">
           <div className="space-y-2">
             <div className="text-xs font-semibold text-white/55">{room.memberCount} members</div>
             <RoomPresence people={people} color={room.color} />
           </div>
-          <div className="flex flex-wrap gap-2">
+          <div className="forumsRoomActions">
             <button
               type="button"
               onClick={onFollow}

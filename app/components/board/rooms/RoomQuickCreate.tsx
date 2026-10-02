@@ -12,7 +12,7 @@ export default function RoomQuickCreate({
   suggested?: StudioCaptureMode;
 }) {
   return (
-    <div className="flex flex-wrap gap-2" aria-label="Quick create Drop modes">
+    <div className="forumsRoomQuickCreate flex flex-wrap gap-2" aria-label="Quick create Drop modes">
       {ROOM_QUICK_CREATE_MODES.map((mode) => {
         const active = suggested === mode.studioMode && mode.id !== "link";
         return (

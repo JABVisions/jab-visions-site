@@ -1,0 +1,280 @@
+/* Shared Forums 2.0 hallway + Room interior.
+   Desktop and mobile use the same component tree. Narrow screens only
+   change density (stacked cards, wrapping actions, full-screen conversation).
+   Do not hide, reorder, or swap in the old sidebar / thread list. */
+
+.forumsHall,
+.forumsRoomInterior {
+  width: 100%;
+  min-width: 0;
+}
+
+.forumsHallLog,
+.forumsRoomInterior {
+  display: flex;
+  flex-direction: column;
+}
+
+.forumsHallSection,
+.forumsRoomComposer,
+.forumsRoomHeader,
+.forumsRoomQuickCreate,
+[data-forums-section] {
+  display: block;
+}
+
+.forumsHallLog {
+  gap: 2rem;
+}
+
+.forumsHallSection {
+  min-width: 0;
+}
+
+.forumsHallSectionHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0 0.25rem;
+  margin-bottom: 0.75rem;
+}
+
+.forumsHallSectionHead h2 {
+  margin: 0;
+  font-size: 0.875rem;
+  font-weight: 900;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.forumsHallSection[data-forums-section="jab-official"] .forumsHallSectionHead h2 {
+  color: rgba(254, 243, 199, 0.9);
+}
+
+.forumsHallTrack {
+  display: flex;
+  gap: 0.75rem;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 0.5rem;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+  scroll-snap-type: x proximity;
+}
+
+.forumsHallTrack::-webkit-scrollbar {
+  display: none;
+}
+
+.forumsHallEmpty {
+  min-width: 240px;
+  border-radius: 1.4rem;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.025);
+  padding: 1.5rem 1rem;
+  font-size: 0.875rem;
+  color: rgba(255, 255, 255, 0.4);
+}
+
+.forumsRoomCardLink {
+  display: block;
+  flex: 0 0 auto;
+  min-width: 0;
+  scroll-snap-align: start;
+}
+
+.forumsRoomCard {
+  width: 260px;
+  min-width: 260px;
+  height: 210px;
+}
+
+.forumsRoomCard--compact {
+  width: 220px;
+  min-width: 220px;
+  height: 168px;
+}
+
+.forumsRoomOpen {
+  display: none;
+}
+
+.forumsRoomHeader {
+  overflow: visible;
+}
+
+.forumsRoomHeaderBleed {
+  pointer-events: none;
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  border-radius: inherit;
+}
+
+.forumsRoomMeta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.forumsRoomActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.forumsRoomActions > a,
+.forumsRoomActions > button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  white-space: nowrap;
+}
+
+.forumsConversationLayer {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+}
+
+.forumsConversationShell {
+  position: absolute;
+  inset: 104px 0 calc(104px + env(safe-area-inset-bottom));
+  overflow: hidden;
+  padding: 0.75rem 1.25rem;
+}
+
+.forumsConversationPanel {
+  position: relative;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  overflow: hidden;
+  min-height: min(640px, calc(100vh - 244px));
+  max-height: 100%;
+  height: 100%;
+}
+
+.forumsConversationBody {
+  min-height: 0;
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.forumsConversationComposer {
+  position: relative;
+}
+
+@media (max-width: 720px) {
+  .forumsHall {
+    padding-left: 1rem;
+    padding-right: 1rem;
+  }
+
+  .forumsHallLog {
+    gap: 1.5rem;
+  }
+
+  .forumsHallSection[data-layout="rail"] .forumsHallTrack {
+    margin: 0 -0.25rem;
+    padding-left: 0.25rem;
+    padding-right: 1rem;
+  }
+
+  .forumsHallSection[data-layout="stack"] .forumsHallTrack {
+    display: flex;
+    flex-direction: column;
+    overflow: visible;
+    padding-bottom: 0;
+    scroll-snap-type: none;
+  }
+
+  .forumsHallSection[data-layout="stack"] .forumsRoomCardLink,
+  .forumsHallSection[data-layout="stack"] .forumsHallEmpty {
+    width: 100%;
+    min-width: 0;
+    flex: none;
+  }
+
+  .forumsHallSection[data-layout="stack"] .forumsRoomCard,
+  .forumsHallSection[data-layout="stack"] .forumsRoomCard--compact {
+    width: 100%;
+    min-width: 0;
+    height: auto;
+    min-height: 148px;
+  }
+
+  .forumsHallSection[data-layout="stack"] .forumsRoomOpen {
+    display: inline-flex;
+    margin-left: auto;
+    border-radius: 999px;
+    border: 1px solid rgba(52, 211, 153, 0.28);
+    background: rgba(52, 211, 153, 0.12);
+    padding: 0.2rem 0.65rem;
+    font-size: 10px;
+    font-weight: 900;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: rgb(236 253 245);
+  }
+
+  .forumsRoomInterior {
+    padding-left: 1rem;
+    padding-right: 1rem;
+  }
+
+  .forumsRoomMeta {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .forumsRoomActions {
+    width: 100%;
+  }
+
+  .forumsRoomActions > a,
+  .forumsRoomActions > button {
+    flex: 1 1 calc(50% - 0.5rem);
+    min-width: min(100%, 148px);
+  }
+
+  .forumsConversationShell {
+    inset: 0;
+    padding: max(8px, env(safe-area-inset-top)) 8px
+      max(8px, env(safe-area-inset-bottom));
+  }
+
+  .forumsConversationPanel {
+    min-height: 0;
+    height: 100%;
+    max-height: none;
+    border-radius: 1.25rem;
+  }
+
+  .forumsConversationComposer {
+    padding-bottom: max(0px, env(keyboard-inset-bottom, 0px));
+  }
+}
+
+@media (max-width: 430px) {
+  .forumsRoomActions > a,
+  .forumsRoomActions > button {
+    flex-basis: calc(50% - 0.5rem);
+  }
+}
+
+@media (max-width: 390px) {
+  .forumsHallTitle {
+    font-size: 2.25rem;
+  }
+
+  .forumsRoomActions > a,
+  .forumsRoomActions > button {
+    flex-basis: 100%;
+  }
+}

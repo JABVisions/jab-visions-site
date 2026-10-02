@@ -5,6 +5,7 @@ import React from "react";
 import type { RoomCardModel } from "@/lib/board/rooms";
 import { roomHref } from "@/lib/board/rooms";
 import OfficialRoomBadge from "./OfficialRoomBadge";
+import "./forumsLayout.css";
 
 function clsx(...parts: Array<string | false | null | undefined>) {
   return parts.filter(Boolean).join(" ");
@@ -23,9 +24,9 @@ export default function RoomCard({
   const body = (
     <article
       className={clsx(
-        "group relative overflow-hidden rounded-[1.6rem] border text-left transition",
+        "forumsRoomCard group relative overflow-hidden rounded-[1.6rem] border text-left transition",
         "border-white/10 bg-black/30 backdrop-blur-xl",
-        compact ? "h-[168px] w-[220px] min-w-[220px]" : "h-[210px] w-[260px] min-w-[260px]",
+        compact && "forumsRoomCard--compact",
         room.comingSoon ? "opacity-80" : "hover:-translate-y-0.5 hover:border-white/25"
       )}
       style={{
@@ -73,17 +74,18 @@ export default function RoomCard({
             <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
             {room.presenceCount} inside
           </span>
+          {href ? <span className="forumsRoomOpen">Open Room</span> : null}
         </div>
       </div>
     </article>
   );
 
   if (!href) {
-    return <div className="cursor-default">{body}</div>;
+    return <div className="forumsRoomCardLink cursor-default">{body}</div>;
   }
 
   return (
-    <Link href={href} className="block shrink-0">
+    <Link href={href} className="forumsRoomCardLink">
       {body}
     </Link>
   );
