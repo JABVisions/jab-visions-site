@@ -11,6 +11,7 @@ import { ActivityProvider } from "@/app/components/board/activity/ActivityProvid
 import ActivityNavigationHost from "@/app/components/board/activity/ActivityNavigationHost";
 import BoardCloudSync from "@/app/components/board/BoardCloudSync";
 import ProjectNotebookWindow from "@/app/components/board/ProjectNotebookWindow";
+import "@/app/components/board/rooms/forumsLayout.css";
 
 export default function BoardLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname() || "";

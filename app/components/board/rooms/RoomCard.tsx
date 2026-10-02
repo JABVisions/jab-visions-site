@@ -26,7 +26,7 @@ export default function RoomCard({
       className={clsx(
         "forumsRoomCard group relative overflow-hidden rounded-[1.6rem] border text-left transition",
         "border-white/10 bg-black/30 backdrop-blur-xl",
-        compact && "forumsRoomCard--compact",
+        compact ? "forumsRoomCard--compact h-[168px] w-[220px] min-w-[220px]" : "h-[210px] w-[260px] min-w-[260px]",
         room.comingSoon ? "opacity-80" : "hover:-translate-y-0.5 hover:border-white/25"
       )}
       style={{

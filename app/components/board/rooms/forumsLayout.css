@@ -196,16 +196,17 @@
 
   .forumsHallSection[data-layout="stack"] .forumsRoomCardLink,
   .forumsHallSection[data-layout="stack"] .forumsHallEmpty {
-    width: 100%;
-    min-width: 0;
+    width: 100% !important;
+    min-width: 0 !important;
     flex: none;
   }
 
   .forumsHallSection[data-layout="stack"] .forumsRoomCard,
   .forumsHallSection[data-layout="stack"] .forumsRoomCard--compact {
-    width: 100%;
-    min-width: 0;
-    height: auto;
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: 100%;
+    height: auto !important;
     min-height: 148px;
   }
 

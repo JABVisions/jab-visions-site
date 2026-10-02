@@ -25,6 +25,7 @@ const card = source("app/components/board/rooms/RoomCard.tsx");
 const css = source("app/components/board/rooms/forumsLayout.css");
 const forumsPage = source("app/board/forums/page.tsx");
 const roomPage = source("app/board/forums/[roomId]/page.tsx");
+const boardLayout = source("app/board/layout.tsx");
 
 assert(FORUMS_HALL_SECTION_ORDER.join(">") === "live-now>your-rooms>board-rooms>jab-official", "hallway log order is Live Now → Your Rooms → Board Rooms → JAB Official");
 assert(FORUMS_HALL_SECTIONS[0].layout === "rail", "Live Now stays a horizontal rail");
@@ -36,6 +37,7 @@ assert(
 const hallSectionHits = [...hall.matchAll(/<HallSection[\s\S]*?id="([^"]+)"/g)].map((match) => match[1]);
 assert(hallSectionHits.join(">") === FORUMS_HALL_SECTION_ORDER.join(">"), "ForumsHall renders the desktop section log in order");
 assert(!/RoomsPanel|ThreadDropPanel|ThreadDropTile/.test(hall + forumsPage + roomPage + interior), "Forums routes do not mount the old Reddit-style thread / sidebar UI");
+assert(boardLayout.includes("forumsLayout.css"), "Board layout loads the shared Forums CSS on every Forums route");
 assert(/from "@\/app\/components\/board\/rooms\/ForumsHall"/.test(forumsPage), "Forums home shares ForumsHall");
 assert(/from "@\/app\/components\/board\/rooms\/RoomInterior"/.test(roomPage), "Room pages share RoomInterior");
 
