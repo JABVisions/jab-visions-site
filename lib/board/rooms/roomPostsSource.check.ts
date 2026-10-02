@@ -6,6 +6,7 @@ import {
   roomFeedFromSources,
   sharesFromApiRows,
 } from "./roomPostsSource";
+import { sharesFromActivityRows } from "./cloudHydrate";
 import type { RoomConversation, RoomDropShare } from "./types";
 
 function assert(condition: unknown, message: string): asserts condition {
@@ -145,6 +146,40 @@ const shares = mergeShareSources({
   ]),
 });
 assert(shares.length === 1, "Room Drops hydrate from SQL without localStorage");
+
+const activityPhone = sharesFromActivityRows("jab-comics", [
+  {
+    id: "act_phone",
+    created_at: new Date().toISOString(),
+    user_id: "user-phone",
+    kind: "board_drop",
+    title: "Added a Drop to JAB Comics",
+    body: "Maya added a Drop to JAB Comics.",
+    href: "https://example.com/phone.png",
+    meta: {
+      dropId: "drop_phone_incognito",
+      roomId: "jab-comics",
+      destinationType: "room",
+      origin: "create",
+      visibility: "public",
+    },
+  },
+]);
+const incognito = roomFeedFromSources({
+  roomId: "jab-comics",
+  localConversations: [],
+  remoteConversations: [],
+  localShares: [],
+  remoteShares: activityPhone,
+});
+assert(
+  incognito.some((item) => item.kind === "drop_share" && item.share?.dropId === "drop_phone_incognito"),
+  "incognito desktop sees phone Room Drops from board_activity"
+);
+assert(
+  incognito.some((item) => item.kind === "conversation" && /Character sheets/.test(String(item.title || ""))),
+  "incognito desktop still shows the JAB Comics seed conversation"
+);
 
 assert(
   conversationsForRoom(seedConversations([]), "lobby").length >= 2,

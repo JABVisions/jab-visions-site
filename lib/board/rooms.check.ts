@@ -22,6 +22,7 @@ import {
   resolveRoomId,
   roomActivityGroupKey,
   roomHref,
+  roomIdCandidates,
   seedConversations,
   shouldEmitRoomActivity,
   upsertPresence,
@@ -41,6 +42,10 @@ assert(resolveRoomId("jab-news") === "announcements", "jab-news aliases to Annou
 assert(resolveRoomId("general") === "lobby", "general aliases to Lobby");
 assert(getRoomById("jab-lit")?.name === "JAB LIT", "JAB LIT is in the catalog");
 assert(getRoomById("jab-comics")?.isOfficial === true, "JAB Comics is official");
+assert(
+  roomIdCandidates("jab-comics").includes("jab-comics"),
+  "JAB Comics activity hydrates under the canonical room id"
+);
 assert(getRoomById("music")?.chips.includes("Beats") === true, "Music room keeps Voice Studio chips");
 assert(getRoomById("those-ryderz")?.name === "Those Ryderz", "Those Ryderz display name is title case");
 assert(

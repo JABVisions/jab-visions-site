@@ -333,6 +333,17 @@ export function getRoomById(id: unknown): Room | null {
   return BOARD_ROOM_CATALOG.find((item) => item.id === resolved) ?? null;
 }
 
+/** Canonical id plus aliases so activity.meta.roomId matches the Room on every device. */
+export function roomIdCandidates(roomId: string): string[] {
+  const resolved = resolveRoomId(roomId) || String(roomId || "").trim();
+  if (!resolved) return [];
+  const room = getRoomById(resolved);
+  const aliased = Object.entries(ROOM_ALIASES)
+    .filter(([, id]) => id === resolved)
+    .map(([alias]) => alias);
+  return [...new Set([resolved, String(roomId || "").trim(), ...(room?.aliases || []), ...aliased].filter(Boolean))];
+}
+
 export function roomsByKind(kind: RoomKind) {
   return BOARD_ROOM_CATALOG.filter((item) => item.kind === kind);
 }

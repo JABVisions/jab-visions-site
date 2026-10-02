@@ -63,6 +63,24 @@ function dropTypeForLink(kind: ResolvedDropbookLink["kind"]): DropType {
   return "Link";
 }
 
+function stampForumDrop(drop: DropItem, destination: DropDestination | null | undefined): DropItem {
+  if (!isForumRoomDestination(destination)) return drop;
+  return {
+    ...drop,
+    forumRoomId: destination.roomId,
+    forumDestinationType: destination.type === "room_conversation" ? "room_conversation" : "room",
+    forumConversationId:
+      destination.type === "room_conversation" ? destination.conversationId : undefined,
+  };
+}
+
+async function persistPublishedDrop(drop: DropItem, userId: string | null) {
+  persistLocalDrop(drop, userId);
+  if (userId && userId !== "local") {
+    await persistDropToProfile(drop, userId);
+  }
+}
+
 function persistLocalDrop(drop: DropItem, userId: string | null) {
   const existing = readBestLocalDropItems();
   const next = dedupeDropItems([drop, ...existing]);
@@ -122,6 +140,7 @@ function applyForumActivityCopy(
     source: forumDestination ? "forum_room_studio" : "drop_studio",
     origin: forumDestination ? "create" : null,
     destinationType: destination?.type || "feed",
+    forumRoomId: forumDestination?.roomId || null,
     roomId: forumDestination?.roomId || null,
     roomName: forumDestination?.roomName || null,
     roomIcon: forumDestination?.roomIcon || null,
@@ -212,14 +231,12 @@ export async function publishStudioFileDrop(input: {
     ...(kind.fromDropbook ? { fromDropbook: true } : {}),
     ...(customizations ? { customizations } : {}),
   };
+  const published = stampForumDrop(drop, input.destination);
 
-  persistLocalDrop(drop, userId);
-  if (userId && userId !== "local") {
-    void persistDropToProfile(drop, userId);
-  }
+  await persistPublishedDrop(published, userId);
 
   const activity = applyForumActivityCopy(
-    boardDropToActivity(drop, {
+    boardDropToActivity(published, {
       userId,
       activityId: `room_drop_${drop.id}`,
       author: {
@@ -250,9 +267,9 @@ export async function publishStudioFileDrop(input: {
 
   emitBoardDropSignal({
     type: "drop_created",
-    dropId: drop.id,
+    dropId: published.id,
     userId,
-    title: activity.title || drop.title,
+    title: activity.title || published.title,
     meta: {
       source: isForumRoomDestination(input.destination) ? "forum_room_studio" : "drop_studio",
       destinationType: input.destination?.type || "feed",
@@ -260,7 +277,7 @@ export async function publishStudioFileDrop(input: {
     },
   });
 
-  return drop;
+  return published;
 }
 
 export async function publishStudioLinkDrop(input: {
@@ -296,16 +313,14 @@ export async function publishStudioLinkDrop(input: {
     linkUrl: input.link.url,
     visibility: "public",
   };
+  const published = stampForumDrop(drop, input.destination);
 
-  persistLocalDrop(drop, userId);
-  if (userId && userId !== "local") {
-    void persistDropToProfile(drop, userId);
-  }
+  await persistPublishedDrop(published, userId);
 
   const activity = applyForumActivityCopy(
-    boardDropToActivity(drop, {
+    boardDropToActivity(published, {
       userId,
-      activityId: `room_drop_${drop.id}`,
+      activityId: `room_drop_${published.id}`,
       author: {
         displayName: identity.displayName,
         username: identity.username,
@@ -332,14 +347,14 @@ export async function publishStudioLinkDrop(input: {
   }
   emitBoardDropSignal({
     type: "drop_created",
-    dropId: drop.id,
+    dropId: published.id,
     userId,
-    title: activity.title || drop.title,
+    title: activity.title || published.title,
     meta: {
       source: isForumRoomDestination(input.destination) ? "forum_room_studio" : "drop_studio",
       destinationType: input.destination?.type || "feed",
       roomId: isForumRoomDestination(input.destination) ? input.destination.roomId : null,
     },
   });
-  return drop;
+  return published;
 }

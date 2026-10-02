@@ -24,6 +24,8 @@ import {
   resolveRoomId,
   roomFeedFromSources,
   sharesFromApiRows,
+  sharesFromActivityRows,
+  conversationsFromActivityRows,
   type Room,
   type RoomCallSession,
   type RoomConversation as RoomConversationRecord,
@@ -346,7 +348,11 @@ export default function RoomInterior({
       .then((res) => res.json())
       .then((payload) => {
         if (cancelled || !Array.isArray(payload?.shares)) return;
-        remoteSharesRef.current = sharesFromApiRows(resolved, payload.shares);
+        remoteSharesRef.current = mergeShareSources({
+          roomId: resolved,
+          local: remoteSharesRef.current,
+          remote: sharesFromApiRows(resolved, payload.shares),
+        });
         applyRoomSources(resolved);
       })
       .catch(() => undefined);
@@ -354,14 +360,35 @@ export default function RoomInterior({
       .then((res) => res.json())
       .then((payload) => {
         if (cancelled || !Array.isArray(payload?.posts)) return;
-        remoteConversationsRef.current = conversationsFromPostRows(resolved, payload.posts).map((thread) => ({
-          ...thread,
-          replies: thread.replies.map((reply) => {
-            const live = reply.dropId ? liveVisibilityForDrop(reply.dropId) : null;
-            if (!live || !reply.dropSnapshot) return reply;
-            return { ...reply, dropSnapshot: { ...reply.dropSnapshot, visibility: live } };
-          }),
-        }));
+        remoteConversationsRef.current = mergeConversationSources({
+          roomId: resolved,
+          local: remoteConversationsRef.current,
+          remote: conversationsFromPostRows(resolved, payload.posts).map((thread) => ({
+            ...thread,
+            replies: thread.replies.map((reply) => {
+              const live = reply.dropId ? liveVisibilityForDrop(reply.dropId) : null;
+              if (!live || !reply.dropSnapshot) return reply;
+              return { ...reply, dropSnapshot: { ...reply.dropSnapshot, visibility: live } };
+            }),
+          })),
+        });
+        applyRoomSources(resolved);
+      })
+      .catch(() => undefined);
+    fetch(`/api/board/activity?roomId=${encodeURIComponent(resolved)}&limit=80`)
+      .then((res) => res.json())
+      .then((payload) => {
+        if (cancelled || !Array.isArray(payload?.items)) return;
+        remoteSharesRef.current = mergeShareSources({
+          roomId: resolved,
+          local: sharesFromActivityRows(resolved, payload.items),
+          remote: remoteSharesRef.current,
+        });
+        remoteConversationsRef.current = mergeConversationSources({
+          roomId: resolved,
+          local: conversationsFromActivityRows(resolved, payload.items),
+          remote: remoteConversationsRef.current,
+        });
         applyRoomSources(resolved);
       })
       .catch(() => undefined);
@@ -643,8 +670,19 @@ export default function RoomInterior({
       roomIcon: currentRoom.icon,
     };
     upsertShare(share);
+    remoteSharesRef.current = mergeShareSources({
+      roomId: currentRoom.id,
+      local: remoteSharesRef.current,
+      remote: [share],
+    });
     setShares(
-      overlayLocalLivePrivacy(readShares().filter((row) => resolveRoomId(row.roomId) === currentRoom.id))
+      overlayLocalLivePrivacy(
+        mergeShareSources({
+          roomId: currentRoom.id,
+          local: readShares(),
+          remote: remoteSharesRef.current,
+        })
+      )
     );
     setShareOpen(false);
     void fetch(`/api/board/rooms/${currentRoom.id}/shares`, {
@@ -655,8 +693,21 @@ export default function RoomInterior({
         snapshot: share.snapshot,
         displayName: identity.displayName,
         origin,
+        conversationId: share.conversationId,
       }),
-    });
+    })
+      .then((res) => res.json())
+      .then((payload) => {
+        if (!payload?.share) return;
+        const remote = sharesFromApiRows(currentRoom.id, [payload.share]);
+        remoteSharesRef.current = mergeShareSources({
+          roomId: currentRoom.id,
+          local: remoteSharesRef.current,
+          remote,
+        });
+        applyRoomSources(currentRoom.id);
+      })
+      .catch(() => undefined);
   }
 
   function replyWithDrop(drop: DropItem, threadId: string) {

@@ -6,6 +6,13 @@ import { describeRoomActivity, roomActivityGroupKey } from "@/lib/board/rooms/ac
 import { createBoardNotification } from "@/lib/board/createNotification";
 import { pickBoardDisplayName } from "@/lib/board/boardAuthor";
 import { normalizeDropVisibility, type DropVisibility } from "@/lib/board/rooms/livePrivacy";
+import { shareRowsFromActivity } from "@/lib/board/rooms/cloudHydrate";
+import { mergeShareSources, sharesFromApiRows } from "@/lib/board/rooms/roomPostsSource";
+import {
+  ensureJoinedRoomMember,
+  ensureRoomShareActivity,
+  selectRoomActivities,
+} from "@/lib/board/rooms/cloudPersist";
 
 async function overlayLiveSharePrivacy(
   supabase: ReturnType<typeof supabaseServer>,
@@ -72,6 +79,30 @@ async function overlayLiveSharePrivacy(
   });
 }
 
+function unionShareApiRows(
+  roomId: string,
+  sqlRows: Record<string, unknown>[],
+  activityRows: Record<string, unknown>[]
+) {
+  const merged = mergeShareSources({
+    roomId,
+    local: sharesFromApiRows(roomId, activityRows),
+    remote: sharesFromApiRows(roomId, sqlRows),
+  });
+  return merged.map((share) => ({
+    id: share.id,
+    room_id: share.roomId,
+    drop_id: share.dropId,
+    shared_by: share.sharedBy,
+    shared_by_name: share.sharedByName,
+    activity_id: share.activityId,
+    snapshot: share.snapshot,
+    created_at: share.createdAt,
+    origin: share.origin,
+    conversation_id: share.conversationId,
+  }));
+}
+
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
@@ -83,19 +114,32 @@ export async function GET(
   if (!roomId) return json({ ok: false, message: "Room not found" }, 404);
   try {
     const supabase = supabaseServer();
-    const { data, error } = await supabase
-      .from("room_drop_shares")
-      .select("*")
-      .eq("room_id", roomId)
-      .order("created_at", { ascending: false })
-      .limit(80);
-    if (error && isMissingRoomsTable(error)) return json({ ok: true, shares: [], setupRequired: true });
-    if (error) return json({ ok: true, shares: [], warning: error.message });
+    const {
+      data: { user: viewer },
+    } = await supabase.auth.getUser();
+    const [{ data, error }, activities] = await Promise.all([
+      supabase
+        .from("room_drop_shares")
+        .select("*")
+        .eq("room_id", roomId)
+        .order("created_at", { ascending: false })
+        .limit(80),
+      selectRoomActivities(supabase, roomId),
+    ]);
+    const setupRequired = Boolean(error && isMissingRoomsTable(error));
+    const sqlRows = error && !setupRequired ? [] : ((data || []) as Record<string, unknown>[]);
+    const activityRows = shareRowsFromActivity(roomId, activities, viewer?.id || null);
+    const unioned = unionShareApiRows(roomId, sqlRows, activityRows);
     const shares = await overlayLiveSharePrivacy(
       supabase,
-      await hydrateAuthorRows(supabase, (data || []) as Record<string, unknown>[], "shared_by")
+      await hydrateAuthorRows(supabase, unioned, "shared_by")
     );
-    return json({ ok: true, shares });
+    return json({
+      ok: true,
+      shares,
+      setupRequired: setupRequired || undefined,
+      source: setupRequired ? "activity" : "union",
+    });
   } catch {
     return json({ ok: true, shares: [] });
   }
@@ -115,8 +159,15 @@ export async function POST(
   } = await supabase.auth.getUser();
   if (!user) return json({ ok: false, message: "Unauthorized" }, 401);
 
-  const gate = await roomMembershipGate(supabase, roomId, user.id);
-  if (!gate.ok) return json({ ok: false, message: gate.message }, gate.status);
+  let gate = await roomMembershipGate(supabase, roomId, user.id);
+  if (!gate.ok) {
+    const joined = await ensureJoinedRoomMember(supabase, roomId, user.id);
+    if (joined.ok) gate = { ok: true, setupRequired: joined.setupRequired };
+  }
+  if (!gate.ok) {
+    // Still persist board_activity so a phone Drop is not trapped in localStorage.
+    // SQL room_drop_shares stays gated.
+  }
 
   let body: Record<string, unknown> = {};
   try {
@@ -147,25 +198,50 @@ export async function POST(
     conversation_id: conversationId,
   };
 
-  const { data, error } = await supabase
-    .from("room_drop_shares")
-    .upsert(row, { onConflict: "room_id,drop_id,shared_by" })
-    .select("*")
-    .maybeSingle();
+  const activity = await ensureRoomShareActivity(supabase, {
+    userId: user.id,
+    roomId,
+    dropId,
+    snapshot,
+    displayName: pickBoardDisplayName(body.displayName, snapshot.authorName),
+    origin,
+    conversationId,
+    conversationTitle: typeof body.conversationTitle === "string" ? body.conversationTitle : "",
+    activityId: typeof body.activityId === "string" ? body.activityId : null,
+  });
+
+  const sqlAttempt = gate.ok
+    ? await supabase.from("room_drop_shares").upsert(row, { onConflict: "room_id,drop_id,shared_by" }).select("*").maybeSingle()
+    : { data: null, error: { message: "Join this Room to post a Drop here.", code: "42501" } };
+  let data = sqlAttempt.data;
+  let error = sqlAttempt.error;
 
   if (error && isMissingRoomsTable(error)) {
-    return json({ ok: true, persisted: "local", share: { ...row, id: `local_${dropId}` } });
+    return json({
+      ok: true,
+      persisted: activity.ok ? "activity" : "local",
+      share: { ...row, id: `activity_${dropId}`, activity_id: activity.ok ? activity.id : null },
+    });
   }
   if (error) {
     const fallback = { ...row };
     delete (fallback as { origin?: string }).origin;
     delete (fallback as { conversation_id?: string | null }).conversation_id;
-    const retry = await supabase
-      .from("room_drop_shares")
-      .upsert(fallback, { onConflict: "room_id,drop_id,shared_by" })
-      .select("*")
-      .maybeSingle();
-    if (retry.error) return json({ ok: false, message: retry.error.message }, 500);
+    const retry = gate.ok
+      ? await supabase
+          .from("room_drop_shares")
+          .upsert(fallback, { onConflict: "room_id,drop_id,shared_by" })
+          .select("*")
+          .maybeSingle()
+      : { data: null, error };
+    if (retry.error) {
+      return json({
+        ok: true,
+        persisted: activity.ok ? "activity" : "local",
+        share: { ...row, id: `activity_${dropId}`, activity_id: activity.ok ? activity.id : null },
+        warning: retry.error.message,
+      });
+    }
     return finishShare({
       supabase,
       userId: user.id,

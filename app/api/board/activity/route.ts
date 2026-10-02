@@ -8,6 +8,8 @@ import {
   hydrateActivityAuthor,
   pickBoardDisplayName,
 } from "@/lib/board/boardAuthor";
+import { resolveRoomId } from "@/lib/board/rooms/catalog";
+import { activityMatchesRoom, roomActivityOrFilter } from "@/lib/board/rooms/cloudHydrate";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -324,12 +326,22 @@ export async function GET(req: Request) {
     .getAll("kind")
     .map((kind) => cleanKind(kind))
     .filter(Boolean);
+  const roomId = resolveRoomId(url.searchParams.get("roomId") || "");
 
   let activityQuery = supabase
     .from("board_activity")
     .select("*")
     .order("created_at", { ascending: false })
     .range(offset, offset + limit - 1);
+
+  if (roomId) {
+    activityQuery = supabase
+      .from("board_activity")
+      .select("*")
+      .or(roomActivityOrFilter(roomId))
+      .order("created_at", { ascending: false })
+      .range(offset, offset + limit - 1);
+  }
 
   if (kinds.length) {
     activityQuery = activityQuery.in("kind", kinds);
@@ -338,30 +350,36 @@ export async function GET(req: Request) {
   const [activityRows, legacyDropRows, boardPostRows, postRows, profileRows] =
     await Promise.all([
       selectRows<any>(activityQuery, "board_activity"),
-      selectRows<any>(
-        supabase
-          .from("board_drops")
-          .select("*")
-          .order("created_at", { ascending: false })
-          .limit(limit),
-        "board_drops"
-      ),
-      selectRows<any>(
-        supabase
-          .from("board_posts")
-          .select("*")
-          .order("created_at", { ascending: false })
-          .limit(limit),
-        "board_posts"
-      ),
-      selectRows<any>(
-        supabase
-          .from("posts")
-          .select("*")
-          .order("created_at", { ascending: false })
-          .limit(limit),
-        "posts"
-      ),
+      roomId
+        ? Promise.resolve([])
+        : selectRows<any>(
+            supabase
+              .from("board_drops")
+              .select("*")
+              .order("created_at", { ascending: false })
+              .limit(limit),
+            "board_drops"
+          ),
+      roomId
+        ? Promise.resolve([])
+        : selectRows<any>(
+            supabase
+              .from("board_posts")
+              .select("*")
+              .order("created_at", { ascending: false })
+              .limit(limit),
+            "board_posts"
+          ),
+      roomId
+        ? Promise.resolve([])
+        : selectRows<any>(
+            supabase
+              .from("posts")
+              .select("*")
+              .order("created_at", { ascending: false })
+              .limit(limit),
+            "posts"
+          ),
       selectRows<any>(
         supabase
           .from("profiles")
@@ -393,7 +411,10 @@ export async function GET(req: Request) {
   const scoped = kinds.length
     ? named.filter((item) => kinds.includes(item.kind))
     : named;
-  const visible = scoped.filter((item) => {
+  const roomScoped = roomId
+    ? scoped.filter((item) => activityMatchesRoom(item, roomId))
+    : scoped;
+  const visible = roomScoped.filter((item) => {
     const meta = item.meta && typeof item.meta === "object" ? item.meta : null;
     if (meta?.visibility !== "private") return true;
     if (!viewer?.id) return false;

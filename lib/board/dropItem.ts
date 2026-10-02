@@ -128,6 +128,10 @@ export type DropItem = {
   /** When editing from the feed Activity Channel (announcements, etc.). */
   editSource?: "board_drop" | "announcement";
   sourceActivityId?: string;
+  /** Forum Room this Drop was published into. Cloud hydrate uses this when rooms SQL is missing. */
+  forumRoomId?: string;
+  forumDestinationType?: "room" | "room_conversation";
+  forumConversationId?: string;
 };
 
 export const STORAGE_KEY = "jab_board_drops_v2";

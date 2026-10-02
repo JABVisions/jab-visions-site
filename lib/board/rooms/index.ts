@@ -9,5 +9,6 @@ export * from "./feed";
 export * from "./conversations";
 export * from "./publicHall";
 export * from "./roomPostsSource";
+export * from "./cloudHydrate";
 export * from "./livePrivacy";
 export * from "./liveWebRtc";
