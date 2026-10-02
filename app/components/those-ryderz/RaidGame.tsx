@@ -128,7 +128,11 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
       if (cancelled || !canvas) return;
       engine = new RaidEngine(canvas, syncHud);
       engineRef.current = engine;
-      engine.start(selected);
+      await engine.start(selected);
+      if (cancelled) {
+        engine.dispose();
+        if (engineRef.current === engine) engineRef.current = null;
+      }
     })();
     const onResize = () => engineRef.current?.resize();
     window.addEventListener('resize', onResize);
@@ -212,7 +216,7 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
 
   const replay = () => {
     if (!selected) return;
-    engineRef.current?.start(selected);
+    void engineRef.current?.start(selected);
     engineRef.current?.setPaused(false);
   };
 

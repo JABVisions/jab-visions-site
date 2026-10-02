@@ -59,6 +59,8 @@ export interface RyderSpec {
   meleeDamage: number;
   meleeRate: number;
   moves: [AbilitySpec, AbilitySpec, AbilitySpec];
+  /** Optional Tripo (or other) glTF binary used as the in-game figure. */
+  glb?: string;
 }
 
 export const ARENA_HALF = 30;
@@ -185,6 +187,7 @@ export const RYDERZ: Record<RyderId, RyderSpec> = {
     accent: 0xc9b8ff,
     weapon: 'Black aura axe',
     portrait: '/assets/hadi-taloustan-headshot.jpg',
+    glb: '/assets/those-ryderz/models/aaron-addams.glb',
     maxHp: 125,
     speed: 6.9,
     fireRate: 2.2,

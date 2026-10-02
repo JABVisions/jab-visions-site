@@ -101,7 +101,7 @@ export interface Humanoid {
   handR: THREE.Object3D;
   handL: THREE.Object3D;
   eyeMaterial: THREE.MeshBasicMaterial;
-  materials: THREE.MeshToonMaterial[];
+  materials: THREE.Material[];
   height: number;
 }
 
@@ -236,8 +236,9 @@ export function setHumanoidOpacity(h: Humanoid, opacity: number) {
 
 export function flashEmissive(h: Humanoid, color: THREE.ColorRepresentation, intensity: number) {
   h.materials.forEach((m) => {
+    if (!('emissive' in m) || !(m.emissive instanceof THREE.Color)) return;
     m.emissive.set(color);
-    m.emissiveIntensity = intensity;
+    if ('emissiveIntensity' in m) m.emissiveIntensity = intensity;
   });
 }
 
@@ -246,10 +247,11 @@ export function disposeObject(root: THREE.Object3D) {
     const mesh = o as THREE.Mesh;
     if (!mesh.isMesh) return;
     const material = mesh.material;
-    if (Array.isArray(material)) {
-      material.forEach((m) => m !== OUTLINE_MATERIAL && m.dispose());
-    } else if (material && material !== OUTLINE_MATERIAL) {
-      material.dispose();
-    }
+    const drop = (m: THREE.Material) => {
+      if (m === OUTLINE_MATERIAL || m.userData.retain) return;
+      m.dispose();
+    };
+    if (Array.isArray(material)) material.forEach(drop);
+    else if (material) drop(material);
   });
 }

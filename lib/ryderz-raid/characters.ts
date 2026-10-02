@@ -1,5 +1,6 @@
 import * as THREE from 'three';
-import type { EnemyKind, RyderSpec } from './config';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import type { EnemyKind, RyderId, RyderSpec } from './config';
 import { addOutline, buildHumanoid, glow, toon, type Humanoid } from './toon';
 
 const BLADE = new THREE.BoxGeometry(0.08, 0.95, 0.08);
@@ -20,9 +21,100 @@ export interface Fighter {
   humanoid: Humanoid;
   weapons: THREE.Object3D[];
   glowMeshes: THREE.Mesh[];
+  meshSource: 'procedural' | 'gltf';
+}
+
+const gltfLoader = new GLTFLoader();
+const gltfTemplates = new Map<RyderId, THREE.Group>();
+
+export async function preloadRyderGltf(spec: RyderSpec) {
+  if (!spec.glb || gltfTemplates.has(spec.id)) return;
+  const gltf = await gltfLoader.loadAsync(spec.glb);
+  gltf.scene.traverse((object) => {
+    const mesh = object as THREE.Mesh;
+    if (!mesh.isMesh) return;
+    const mark = (material: THREE.Material) => {
+      material.userData.retain = true;
+    };
+    if (Array.isArray(mesh.material)) mesh.material.forEach(mark);
+    else if (mesh.material) mark(mesh.material);
+  });
+  gltfTemplates.set(spec.id, gltf.scene);
+}
+
+function dummyPart(name: string) {
+  const mesh = new THREE.Mesh(new THREE.BoxGeometry(0.01, 0.01, 0.01));
+  mesh.name = name;
+  mesh.visible = false;
+  return mesh;
+}
+
+function wrapGltfAsHumanoid(template: THREE.Group, height = 1.88): Humanoid {
+  const group = new THREE.Group();
+  const figure = template.clone(true);
+  const box = new THREE.Box3().setFromObject(figure);
+  const size = box.getSize(new THREE.Vector3());
+  const scale = height / Math.max(size.y, 0.001);
+  figure.scale.setScalar(scale);
+  figure.position.set(
+    -(box.min.x + box.max.x) * 0.5 * scale,
+    -box.min.y * scale,
+    -(box.min.z + box.max.z) * 0.5 * scale,
+  );
+  figure.rotation.y = Math.PI;
+  figure.name = 'TripoFigure';
+  group.add(figure);
+
+  const materials: THREE.Material[] = [];
+  figure.traverse((object) => {
+    const mesh = object as THREE.Mesh;
+    if (!mesh.isMesh) return;
+    mesh.castShadow = false;
+    const list = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+    list.forEach((material) => {
+      if (material && !materials.includes(material)) materials.push(material);
+    });
+  });
+
+  const torso = dummyPart('Torso');
+  const head = dummyPart('Head');
+  const armL = dummyPart('ArmL');
+  const armR = dummyPart('ArmR');
+  const legL = dummyPart('LegL');
+  const legR = dummyPart('LegR');
+  const handL = new THREE.Object3D();
+  const handR = new THREE.Object3D();
+  armL.add(handL);
+  armR.add(handR);
+  group.add(torso, head, armL, armR, legL, legR);
+
+  return {
+    group,
+    torso,
+    head,
+    armL,
+    armR,
+    legL,
+    legR,
+    handL,
+    handR,
+    eyeMaterial: new THREE.MeshBasicMaterial({ visible: false }),
+    materials,
+    height,
+  };
 }
 
 export function buildRyder(spec: RyderSpec, options: { clone?: boolean } = {}): Fighter {
+  const template = gltfTemplates.get(spec.id);
+  if (template) {
+    return {
+      humanoid: wrapGltfAsHumanoid(template, options.clone ? 1.72 : 1.88),
+      weapons: [],
+      glowMeshes: [],
+      meshSource: 'gltf',
+    };
+  }
+
   const humanoid = buildHumanoid({
     skin: spec.id === 'aaron' ? 0xc9a882 : spec.id === 'keven' ? 0xe8c4a0 : 0xf0c8a8,
     top: spec.color,
@@ -98,7 +190,7 @@ export function buildRyder(spec: RyderSpec, options: { clone?: boolean } = {}): 
     });
   }
 
-  return { humanoid, weapons, glowMeshes };
+  return { humanoid, weapons, glowMeshes, meshSource: 'procedural' };
 }
 
 export function buildHost(kind: EnemyKind): Fighter {
@@ -140,7 +232,7 @@ export function buildHost(kind: EnemyKind): Fighter {
     glowMeshes.push(orb);
   }
 
-  return { humanoid, weapons, glowMeshes };
+  return { humanoid, weapons, glowMeshes, meshSource: 'procedural' };
 }
 
 export function setWeaponGlow(fighter: Fighter, on: boolean, color: THREE.ColorRepresentation) {

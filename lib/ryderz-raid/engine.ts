@@ -22,7 +22,7 @@ import {
   type RyderSpec,
   type UpgradeId,
 } from './config';
-import { BOLT_GEOMETRY, buildHost, buildRyder, type Fighter } from './characters';
+import { BOLT_GEOMETRY, buildHost, buildRyder, preloadRyderGltf, type Fighter } from './characters';
 import { ParticleSystem } from './particles';
 import {
   animateHumanoid,
@@ -209,7 +209,7 @@ export class RaidEngine {
     this.raf = requestAnimationFrame(this.loop);
   }
 
-  start(id: RyderId) {
+  async start(id: RyderId) {
     this.clearCombat();
     this.spec = RYDERZ[id];
     this.upgrades = emptyUpgrades();
@@ -232,6 +232,15 @@ export class RaidEngine {
     this.pitch = 0.28;
     this.paused = false;
     this.phase = 'playing';
+
+    if (this.spec.glb) {
+      try {
+        await preloadRyderGltf(this.spec);
+      } catch (error) {
+        console.warn('[raid] failed to load Ryder GLB, using block figure', error);
+      }
+    }
+    if (this.disposed) return;
 
     this.player = buildRyder(this.spec);
     this.scene.add(this.player.humanoid.group);
@@ -554,9 +563,13 @@ export class RaidEngine {
     this.player.humanoid.group.rotation.y = this.yaw;
     const moving = Math.min(1, len);
     this.anim += dt * (8 + moving * 6);
-    animateHumanoid(this.player.humanoid, this.anim, moving, time);
-    if (this.meleeT > 0) poseMelee(this.player.humanoid, 1 - this.meleeT);
-    else poseAim(this.player.humanoid, this.pitch);
+    if (this.player.meshSource === 'gltf') {
+      this.player.humanoid.group.position.y = this.pos.y + Math.abs(Math.sin(this.anim)) * 0.04 * moving;
+    } else {
+      animateHumanoid(this.player.humanoid, this.anim, moving, time);
+      if (this.meleeT > 0) poseMelee(this.player.humanoid, 1 - this.meleeT);
+      else poseAim(this.player.humanoid, this.pitch);
+    }
 
     if (this.shield) {
       this.shield.visible = this.isActive('forcefield');
