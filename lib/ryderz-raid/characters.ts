@@ -11,6 +11,7 @@ const AXE_HEAD = new THREE.BoxGeometry(0.08, 0.38, 0.55);
 const ORB = new THREE.SphereGeometry(0.16, 12, 10);
 const DART_GUN = new THREE.BoxGeometry(0.12, 0.12, 0.42);
 const HALO = new THREE.TorusGeometry(0.55, 0.045, 8, 24);
+const GLB_HALO = new THREE.TorusGeometry(0.24, 0.022, 8, 28);
 const VEIN = new THREE.BoxGeometry(0.18, 0.42, 0.06);
 
 const SKINS = [0xf3d2b5, 0xe0b48a, 0xc58c62, 0x8d5524, 0xf6e0c8, 0xb07a52];
@@ -339,12 +340,25 @@ export function buildRyder(spec: RyderSpec, options: { clone?: boolean } = {}): 
     const { humanoid, rig } = wrapGltfAsHumanoid(template, options.clone ? 1.72 : 1.88);
     const weapons: THREE.Object3D[] = [];
     const glowMeshes: THREE.Mesh[] = [];
+    const aura = glow(spec.color, options.clone ? 1.4 : 2);
     if (spec.id === 'aaron') {
       const { axe, edge } = buildBlackAxe(spec.color, options.clone ? 0.7 : 1.1);
       rig.weaponSocket.add(axe);
       weapons.push(axe);
       glowMeshes.push(edge);
+    } else if (spec.id === 'zoe') {
+      // Orb hovers just off the raised fingertip; halo floats above the head.
+      const orb = new THREE.Mesh(ORB, aura);
+      orb.position.set(0, 0.12, 0.04);
+      rig.weaponSocket.add(orb);
+      const halo = new THREE.Mesh(GLB_HALO, glow(spec.color, options.clone ? 1 : 1.4));
+      halo.rotation.x = Math.PI / 2;
+      halo.position.y = humanoid.height + 0.12;
+      humanoid.group.add(halo);
+      weapons.push(orb, halo);
+      glowMeshes.push(orb, halo);
     }
+    // Keven's Tripo mesh already models his pink dart, so no socketed weapon.
     return { humanoid, weapons, glowMeshes, meshSource: 'gltf', rig };
   }
 
