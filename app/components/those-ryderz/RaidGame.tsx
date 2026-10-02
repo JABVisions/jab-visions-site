@@ -13,7 +13,9 @@ import {
   type RyderId,
   type UpgradeId,
 } from '@/lib/ryderz-raid/config';
+import type { CameraState } from '@/lib/ryderz-raid/camera';
 import type { HudState, RaidEngine } from '@/lib/ryderz-raid/engine';
+import CameraTuningPanel, { loadStoredCameraConfig } from './CameraTuningPanel';
 import styles from './RaidGame.module.css';
 
 const AURA: Record<RyderId, { aura: string; soft: string }> = {
@@ -58,6 +60,9 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
   const [intermissionLeft, setIntermissionLeft] = useState(0);
   const [coarse, setCoarse] = useState(false);
   const [focus, setFocus] = useState(0);
+  const [camPanel, setCamPanel] = useState(false);
+  const [cameraState, setCameraState] = useState<CameraState>('EXPLORATION');
+  const [engineReady, setEngineReady] = useState<RaidEngine | null>(null);
   const cardRefs = useRef<Array<HTMLButtonElement | null>>([]);
 
   const syncHud = useCallback((next: HudState) => {
@@ -104,6 +109,7 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
       setBanner(next.banner);
       setUpgrades(next.upgrades);
     }
+    if (!prev || prev.cameraState !== next.cameraState) setCameraState(next.cameraState);
     if (!prev || Math.abs(prev.points - next.points) > 0.5) setPoints(next.points);
     if (!prev || Math.abs(prev.intermissionLeft - next.intermissionLeft) > 0.2) {
       setIntermissionLeft(next.intermissionLeft);
@@ -128,6 +134,9 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
       if (cancelled || !canvas) return;
       engine = new RaidEngine(canvas, syncHud);
       engineRef.current = engine;
+      const stored = loadStoredCameraConfig();
+      if (stored) engine.setCameraConfig(stored);
+      setEngineReady(engine);
       await engine.start(selected);
       if (cancelled) {
         engine.dispose();
@@ -141,8 +150,17 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
       window.removeEventListener('resize', onResize);
       engine?.dispose();
       engineRef.current = null;
+      setEngineReady(null);
     };
   }, [selected, syncHud]);
+
+  useEffect(() => {
+    const engine = engineRef.current;
+    if (!engine) return;
+    engine.setTuneMode(camPanel);
+    if (camPanel && document.pointerLockElement) document.exitPointerLock();
+    if (!camPanel) engine.setCameraPreviewState(null);
+  }, [camPanel, engineReady]);
 
   const pick = (id: RyderId) => {
     setSelected(id);
@@ -193,6 +211,11 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
         }
         return;
       }
+      if (e.code === 'Backquote') {
+        e.preventDefault();
+        setCamPanel((open) => !open);
+        return;
+      }
       if (isScrollKey(e)) e.preventDefault();
     };
     window.addEventListener('keydown', onKey, { capture: true });
@@ -202,6 +225,7 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
   const changeRyder = () => {
     engineRef.current?.dispose();
     engineRef.current = null;
+    setCamPanel(false);
     setSelected(null);
     setPhase('select');
     setPaused(false);
@@ -288,6 +312,14 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
               <div className={styles.chip}>
                 Signal pts <strong ref={pointsRef}>0</strong>
               </div>
+              <button
+                type="button"
+                className={`${styles.chip} ${styles.chipBtn} ${camPanel ? styles.chipOn : ''}`}
+                onClick={() => setCamPanel((open) => !open)}
+                title="Camera tuning (dev) · `"
+              >
+                Cam <strong>{cameraState}</strong>
+              </button>
             </div>
           </div>
 
@@ -304,7 +336,7 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
 
           <div className={styles.bottomHud}>
             <p className={styles.hint}>
-              WASD move · Mouse aim · Click fire · F / RMB melee · Q E R moves · Esc pause
+              WASD move · Shift sprint · Mouse aim · Click fire · F / RMB melee · Q E R moves · Esc pause
               {phase === 'intermission' ? ' · Hold the spire to buy strength' : ''}
             </p>
             <div className={styles.moveRow}>
@@ -409,7 +441,15 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
         </aside>
       )}
 
-      {playing && phase === 'playing' && !paused && !locked && !coarse && (
+      {playing && camPanel && phase !== 'dead' && (
+        <CameraTuningPanel
+          engine={engineReady}
+          liveState={cameraState}
+          onClose={() => setCamPanel(false)}
+        />
+      )}
+
+      {playing && phase === 'playing' && !paused && !locked && !coarse && !camPanel && (
         <div className={styles.lock}>
           <button type="button" onClick={() => engineRef.current?.requestPointerLock()}>
             Click to capture aim
@@ -418,7 +458,7 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
         </div>
       )}
 
-      {playing && paused && phase !== 'dead' && (
+      {playing && paused && phase !== 'dead' && !camPanel && (
         <div className={styles.modal}>
           <div className={styles.modalCard}>
             <p>Raid paused</p>

@@ -22,6 +22,12 @@ import {
   type RyderSpec,
   type UpgradeId,
 } from './config';
+import {
+  ThirdPersonCamera,
+  type CameraConfig,
+  type CameraSnapshot,
+  type CameraState,
+} from './camera';
 import { BOLT_GEOMETRY, buildHost, buildRyder, preloadRyderGltf, type Fighter } from './characters';
 import { ParticleSystem } from './particles';
 import {
@@ -61,6 +67,7 @@ export interface HudState {
   ryderId: RyderId;
   ryderName: string;
   meleeOnly: boolean;
+  cameraState: CameraState;
 }
 
 interface Host {
@@ -105,10 +112,31 @@ const _right = new THREE.Vector3();
 const _look = new THREE.Vector3();
 const _tmp = new THREE.Vector3();
 const _tmp2 = new THREE.Vector3();
+const _aimPoint = new THREE.Vector3();
 const _ray = new THREE.Raycaster();
+const _aimRay = new THREE.Ray();
+
+const SPRINT_MULTIPLIER = 1.28;
+const COMBAT_LINGER = 2.6;
+const COMBAT_PROXIMITY = 9;
+const ABILITY_LINGER = 0.45;
 
 function clamp(v: number, a: number, b: number) {
   return Math.max(a, Math.min(b, v));
+}
+
+/** Distance along `ray` to the first intersection with a sphere, or -1. */
+function raySphere(ray: THREE.Ray, center: THREE.Vector3, radius: number) {
+  const ox = ray.origin.x - center.x;
+  const oy = ray.origin.y - center.y;
+  const oz = ray.origin.z - center.z;
+  const d = ray.direction;
+  const b = ox * d.x + oy * d.y + oz * d.z;
+  const c = ox * ox + oy * oy + oz * oz - radius * radius;
+  const disc = b * b - c;
+  if (disc < 0) return -1;
+  const t = -b - Math.sqrt(disc);
+  return t > 0 ? t : -1;
 }
 
 function emptyUpgrades(): Record<UpgradeId, number> {
@@ -121,6 +149,7 @@ export class RaidEngine {
   private renderer: THREE.WebGLRenderer;
   private scene: THREE.Scene;
   private camera: THREE.PerspectiveCamera;
+  private rig: ThirdPersonCamera;
   private world: World;
   private particles: ParticleSystem;
   private clock = new THREE.Clock();
@@ -140,7 +169,11 @@ export class RaidEngine {
   private shield: THREE.Mesh | null = null;
   private pos = new THREE.Vector3(9, 0, 11);
   private yaw = Math.PI * 0.2;
-  private pitch = 0.28;
+  private pitch = 0.12;
+  private combatT = 0;
+  private abilityT = 0;
+  private sprinting = false;
+  private tuneMode = false;
   private hp = 100;
   private maxHp = 100;
   private aura = 100;
@@ -166,7 +199,6 @@ export class RaidEngine {
   private clones: Clone[] = [];
   private bolts: Bolt[] = [];
   private boltPool: Bolt[] = [];
-  private camDist = 7.2;
 
   constructor(canvas: HTMLCanvasElement, onHud: (hud: HudState) => void) {
     this.canvas = canvas;
@@ -186,7 +218,7 @@ export class RaidEngine {
     this.scene = new THREE.Scene();
     this.scene.fog = new THREE.FogExp2(0x1a0c22, 0.011);
 
-    this.camera = new THREE.PerspectiveCamera(58, 1, 0.1, 280);
+    this.camera = new THREE.PerspectiveCamera(58, 1, 0.08, 280);
     this.scene.add(new THREE.HemisphereLight(0xffd4b8, 0x1a1430, 1.35));
     const sun = new THREE.DirectionalLight(0xffe6c8, 1.55);
     sun.position.set(-18, 42, 12);
@@ -198,6 +230,7 @@ export class RaidEngine {
     this.world = buildWorld();
     this.scene.add(this.world.group);
     this.scene.updateMatrixWorld(true);
+    this.rig = new ThirdPersonCamera(this.camera, this.world.occluders);
 
     this.particles = new ParticleSystem();
     this.scene.add(this.particles.points);
@@ -229,9 +262,13 @@ export class RaidEngine {
     this.iframes = 0;
     this.pos.set(9, 0, 11);
     this.yaw = Math.PI * 0.85;
-    this.pitch = 0.28;
+    this.pitch = 0.12;
+    this.combatT = 0;
+    this.abilityT = 0;
+    this.sprinting = false;
     this.paused = false;
     this.phase = 'playing';
+    this.rig.snap(this.pos, this.yaw, this.pitch);
 
     if (this.spec.glb) {
       try {
@@ -268,6 +305,28 @@ export class RaidEngine {
 
   requestPointerLock() {
     this.canvas.requestPointerLock();
+  }
+
+  /** Dev-only: while tuning, Escape releases the pointer without pausing the raid. */
+  setTuneMode(value: boolean) {
+    this.tuneMode = value;
+    if (value) this.paused = false;
+  }
+
+  getCameraConfig(): CameraConfig {
+    return { ...this.rig.config };
+  }
+
+  setCameraConfig(patch: Partial<CameraConfig>) {
+    this.rig.setConfig(patch);
+  }
+
+  setCameraPreviewState(state: CameraState | null) {
+    this.rig.forcedState = state;
+  }
+
+  getCameraSnapshot(): CameraSnapshot {
+    return this.rig.snapshot();
   }
 
   setMoveAxis(x: number, z: number) {
@@ -370,8 +429,11 @@ export class RaidEngine {
   };
 
   private onKeyDown = (e: KeyboardEvent) => {
-    const tag = (e.target as HTMLElement | null)?.tagName;
-    if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+    const target = e.target as HTMLElement | null;
+    const tag = target?.tagName;
+    const inputType = (target as HTMLInputElement | null)?.type;
+    if (tag === 'TEXTAREA' || tag === 'SELECT') return;
+    if (tag === 'INPUT' && inputType !== 'range' && inputType !== 'checkbox') return;
     const code = e.code;
     if (
       code === 'ArrowUp' ||
@@ -393,7 +455,13 @@ export class RaidEngine {
     if (e.key === 'f' || e.key === 'F' || e.code === 'Space') {
       this.meleeQueued = true;
     }
-    if (e.key === 'Escape') this.setPaused(true);
+    if (e.key === 'Escape') {
+      if (this.tuneMode) {
+        if (document.pointerLockElement === this.canvas) document.exitPointerLock();
+      } else {
+        this.setPaused(true);
+      }
+    }
   };
 
   private onKeyUp = (e: KeyboardEvent) => {
@@ -424,7 +492,7 @@ export class RaidEngine {
     const dt = Math.min(0.05, this.clock.getDelta());
     const time = this.clock.elapsedTime;
     if (!this.paused && this.player && this.phase !== 'dead') this.update(dt, time);
-    else if (this.player) this.updateCamera();
+    else if (this.player) this.updateCamera(dt);
     this.world.animate(time);
     this.particles.update(dt);
     this.renderer.render(this.scene, this.camera);
@@ -432,10 +500,14 @@ export class RaidEngine {
   }
 
   private update(dt: number, time: number) {
-    this.yaw -= this.lookAcc.x * 0.0024;
-    this.pitch = clamp(this.pitch - this.lookAcc.y * 0.0018, -0.12, 0.82);
+    const cam = this.rig.config;
+    const sens = cam.lookSensitivity;
+    this.yaw -= this.lookAcc.x * 0.0024 * sens;
+    this.pitch = clamp(this.pitch - this.lookAcc.y * 0.0018 * sens, cam.pitchMin, cam.pitchMax);
     this.lookAcc.x = 0;
     this.lookAcc.y = 0;
+    this.combatT = Math.max(0, this.combatT - dt);
+    this.abilityT = Math.max(0, this.abilityT - dt);
 
     this.fireCd = Math.max(0, this.fireCd - dt);
     this.meleeCd = Math.max(0, this.meleeCd - dt);
@@ -467,7 +539,7 @@ export class RaidEngine {
     this.updateHosts(dt, time);
     this.updateBolts(dt);
     this.updateRound(dt);
-    this.updateCamera();
+    this.updateCamera(dt);
   }
 
   private updateAura(dt: number) {
@@ -517,7 +589,6 @@ export class RaidEngine {
     if (!this.player) return;
     const overdrive = this.isActive('overdrive');
     const phased = this.isActive('phase');
-    const speed = this.spec.speed * (overdrive ? 1.85 : 1) * (this.burnout ? 0.82 : 1);
 
     let x = this.moveAxis.x;
     let z = this.moveAxis.z;
@@ -530,6 +601,12 @@ export class RaidEngine {
       x /= len;
       z /= len;
     }
+    this.sprinting = this.keys.has('shift') && len > 0.1 && !this.fireHeld && this.meleeT <= 0;
+    const speed =
+      this.spec.speed *
+      (overdrive ? 1.85 : 1) *
+      (this.sprinting ? SPRINT_MULTIPLIER : 1) *
+      (this.burnout ? 0.82 : 1);
 
     _fwd.set(Math.sin(this.yaw), 0, Math.cos(this.yaw));
     _right.set(_fwd.z, 0, -_fwd.x);
@@ -562,7 +639,7 @@ export class RaidEngine {
     this.player.humanoid.group.position.copy(this.pos);
     this.player.humanoid.group.rotation.y = this.yaw;
     const moving = Math.min(1, len);
-    this.anim += dt * (8 + moving * 6);
+    this.anim += dt * (8 + moving * (this.sprinting ? 9 : 6));
     if (this.player.meshSource === 'gltf') {
       this.player.humanoid.group.position.y = this.pos.y + Math.abs(Math.sin(this.anim)) * 0.04 * moving;
     } else {
@@ -601,6 +678,7 @@ export class RaidEngine {
     const rate = this.spec.fireRate * (overdrive ? 1.85 : 1);
     this.fireCd = 1 / rate;
     this.spendAura(volleyCost);
+    this.combatT = COMBAT_LINGER;
     this.lookDir(_look);
     _right.set(Math.cos(this.yaw), 0, -Math.sin(this.yaw));
     const origin = this.muzzle();
@@ -628,6 +706,8 @@ export class RaidEngine {
     const rate = this.spec.meleeRate * (this.burnout ? 0.75 : 1);
     this.meleeCd = 1 / rate;
     this.meleeT = 1;
+    this.combatT = COMBAT_LINGER;
+    this.rig.addKick(-0.12);
     const dmg = this.meleeDamage();
     _fwd.set(Math.sin(this.yaw), 0, Math.cos(this.yaw));
     this.particles.emit(this.muzzle(), this.burnout ? 0x8899aa : this.spec.color, 12, {
@@ -668,6 +748,8 @@ export class RaidEngine {
       }
       if (this.aura < 2) return;
       this.moveT[slot] = 1;
+      this.abilityT = ABILITY_LINGER;
+      this.rig.addKick(0.3);
       if (move.id === 'duplicate') this.spawnClones([-1, 1]);
       if (move.id === 'decoy') this.spawnClones([0]);
       if (move.id === 'lift') this.liftHosts(2.2);
@@ -682,6 +764,10 @@ export class RaidEngine {
 
     if (this.aura < move.auraCost) return;
     this.spendAura(move.auraCost);
+    this.abilityT = ABILITY_LINGER;
+    this.combatT = COMBAT_LINGER;
+    this.rig.addKick(0.35);
+    this.rig.addShake(0.18);
     const id = move.id;
     if (id === 'bladeFan') this.fireSpread(5, 0.22, 1.2);
     if (id === 'envyPulse') this.pulse(6.6, 24, -8);
@@ -1043,6 +1129,9 @@ export class RaidEngine {
     if (this.iframes > 0 || this.phase === 'dead') return;
     this.hp = Math.max(0, this.hp - amount);
     this.iframes = 0.55;
+    this.combatT = COMBAT_LINGER;
+    this.rig.addShake(0.4);
+    this.rig.addKick(0.22);
     this.pos.addScaledVector(dir, 0.35);
     this.particles.emit(this.pos.clone().setY(1.2), 0xff5570, 14, { speed: 6, size: 0.28, life: 0.4, up: 0.5 });
     if (this.hp <= 0) {
@@ -1178,12 +1267,29 @@ export class RaidEngine {
     return this.spec.meleeDamage * fists * burned;
   }
 
+  /**
+   * Direction from the muzzle to whatever the crosshair is over. The camera
+   * sits over the shoulder, so projectiles must converge on the crosshair ray
+   * rather than travel parallel to it.
+   */
   private lookDir(out: THREE.Vector3) {
-    out.set(
-      Math.sin(this.yaw) * Math.cos(this.pitch * 0.6),
-      -this.pitch * 0.85,
-      Math.cos(this.yaw) * Math.cos(this.pitch * 0.6),
-    );
+    this.rig.aimRay(_aimRay);
+    let range = 60;
+    _ray.ray.copy(_aimRay);
+    _ray.near = 0;
+    _ray.far = range;
+    const hits = _ray.intersectObjects(this.world.occluders, false);
+    if (hits.length) range = Math.min(range, hits[0].distance);
+    for (const host of this.hosts) {
+      _tmp.copy(host.pos).setY(1.1);
+      const hitDist = raySphere(_aimRay, _tmp, host.radius + 0.35);
+      if (hitDist > 0 && hitDist < range) range = hitDist;
+    }
+    _aimRay.at(range, _aimPoint);
+    const muzzle = this.muzzle();
+    out.copy(_aimPoint).sub(muzzle);
+    // If the aim point ended up behind the muzzle (camera pinned to a wall), fall back to the view direction.
+    if (out.lengthSq() < 0.25 || out.dot(_aimRay.direction) <= 0) out.copy(_aimRay.direction);
     return out.normalize();
   }
 
@@ -1212,23 +1318,20 @@ export class RaidEngine {
     this.particles.emit(pos, color, count, { speed: 8, size: 0.32, life: 0.55, up: 1.2, gravity: 6 });
   }
 
-  private updateCamera() {
-    const dist = this.camDist;
-    _tmp.set(
-      this.pos.x - Math.sin(this.yaw) * Math.cos(this.pitch) * dist,
-      1.55 + Math.sin(this.pitch) * dist * 0.9 + 1.1,
-      this.pos.z - Math.cos(this.yaw) * Math.cos(this.pitch) * dist,
-    );
-    const target = _tmp2.copy(this.pos).setY(1.45);
-    _ray.set(target, _tmp.clone().sub(target).normalize());
-    const hits = _ray.intersectObjects(this.world.occluders, false);
-    const desired = target.distanceTo(_tmp);
-    if (hits.length && hits[0].distance < desired - 0.4) {
-      _tmp.copy(hits[0].point).add(_ray.ray.direction.clone().multiplyScalar(-0.45));
+  private cameraState(): CameraState {
+    if (this.phase === 'dead') return 'EXPLORATION';
+    if (this.fireHeld && !this.burnout) return 'AIM';
+    if (this.abilityT > 0 || this.moveT.some((t) => t > 0)) return 'ABILITY';
+    if (this.sprinting) return 'SPRINT';
+    if (this.combatT > 0) return 'COMBAT';
+    for (const host of this.hosts) {
+      if (host.pos.distanceToSquared(this.pos) < COMBAT_PROXIMITY * COMBAT_PROXIMITY) return 'COMBAT';
     }
-    if (_tmp.y < 0.6) _tmp.y = 0.6;
-    this.camera.position.lerp(_tmp, 0.22);
-    this.camera.lookAt(target.x, target.y + 0.2, target.z);
+    return 'EXPLORATION';
+  }
+
+  private updateCamera(dt: number) {
+    this.rig.update(dt, this.pos, this.yaw, this.pitch, this.cameraState());
   }
 
   private emitHud() {
@@ -1261,6 +1364,7 @@ export class RaidEngine {
       ryderId: this.spec.id,
       ryderName: this.spec.name,
       meleeOnly: this.burnout,
+      cameraState: this.rig.getState(),
     });
   }
 
