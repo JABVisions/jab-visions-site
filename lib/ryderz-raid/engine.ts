@@ -33,6 +33,7 @@ import {
   BOLT_GEOMETRY,
   buildHost,
   buildRyder,
+  preloadHostGltf,
   preloadRyderGltf,
   type Fighter,
 } from './characters';
@@ -95,6 +96,8 @@ interface Host {
   points: number;
   summon: number;
   stun: number;
+  /** Set when the host lands a melee; consumed by the next animation tick. */
+  swing: boolean;
 }
 
 interface Bolt {
@@ -280,13 +283,14 @@ export class RaidEngine {
     this.phase = 'playing';
     this.rig.snap(this.pos, this.yaw, this.pitch);
 
-    if (this.spec.glb) {
-      try {
-        await preloadRyderGltf(this.spec);
-      } catch (error) {
-        console.warn('[raid] failed to load Ryder GLB, using block figure', error);
-      }
-    }
+    await Promise.all([
+      this.spec.glb
+        ? preloadRyderGltf(this.spec).catch((error) => {
+            console.warn('[raid] failed to load Ryder GLB, using block figure', error);
+          })
+        : Promise.resolve(),
+      preloadHostGltf(),
+    ]);
     if (this.disposed) return;
 
     this.player = buildRyder(this.spec);
@@ -1058,6 +1062,7 @@ export class RaidEngine {
       points: spec.points,
       summon: 6,
       stun: 0,
+      swing: false,
     });
   }
 
@@ -1093,7 +1098,7 @@ export class RaidEngine {
       if (host.stun > 0) {
         host.fighter.humanoid.group.position.copy(host.pos);
         host.fighter.humanoid.group.position.y = this.world.heightAt(host.pos.x, host.pos.z) + Math.min(1.5, host.stun * 0.7);
-        animateHumanoid(host.fighter.humanoid, host.anim, 0.12, time);
+        this.animateHost(host, dt, 0.12, time);
         if (host.hit > 0) flashEmissive(host.fighter.humanoid, 0xffffff, host.hit * 2.4);
         else flashEmissive(host.fighter.humanoid, 0x66cfff, 0.45);
         continue;
@@ -1126,7 +1131,7 @@ export class RaidEngine {
       host.fighter.humanoid.group.position.copy(host.pos);
       host.fighter.humanoid.group.position.y = this.world.heightAt(host.pos.x, host.pos.z);
       host.fighter.humanoid.group.rotation.y = Math.atan2(dirx, dirz);
-      animateHumanoid(host.fighter.humanoid, host.anim, Math.min(1, host.speed / 5), time);
+      this.animateHost(host, dt, Math.min(1, host.speed / 5), time);
       if (host.hit > 0) flashEmissive(host.fighter.humanoid, 0xffffff, host.hit * 2.4);
       else flashEmissive(host.fighter.humanoid, 0x000000, 0);
 
@@ -1149,6 +1154,7 @@ export class RaidEngine {
       if (!phased && dist < host.radius + PLAYER_RADIUS + 0.55 && host.cooldown <= 0) {
         host.cooldown = host.kind === 'heavy' || host.kind === 'broadcaster' ? 1.35 : 0.85;
         poseMelee(host.fighter.humanoid, 0.6);
+        host.swing = true;
         if (shielded) {
           this.particles.emit(this.pos.clone().setY(1.2), 0x66e7ff, 10, { speed: 6, size: 0.22, life: 0.3 });
           host.knock.set(-dirx * 10, 0, -dirz * 10);
@@ -1156,6 +1162,16 @@ export class RaidEngine {
           this.hurtPlayer(host.damage, _tmp.set(-dirx, 0, -dirz));
         }
       }
+    }
+  }
+
+  /** Block figures swing their limbs; GLB hosts run the skeleton and fire a strike after a hit. */
+  private animateHost(host: Host, dt: number, moving: number, time: number) {
+    if (host.fighter.meshSource === 'gltf') {
+      animateGltfFighter(host.fighter, dt, host.anim, moving, host.speed > 5, 0, host.swing);
+      host.swing = false;
+    } else {
+      animateHumanoid(host.fighter.humanoid, host.anim, moving, time);
     }
   }
 

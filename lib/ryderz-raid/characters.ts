@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { clone as cloneSkeleton } from 'three/examples/jsm/utils/SkeletonUtils.js';
-import type { EnemyKind, RyderId, RyderSpec } from './config';
+import { HOST_MODELS, type EnemyKind, type RyderId, type RyderSpec } from './config';
 import { ProceduralSkeleton, assessSkinning, bakeSkinnedMeshes, extractStrikes, poseSkeleton } from './skeletal';
 import { addOutline, buildHumanoid, glow, toon, type Humanoid } from './toon';
 
@@ -65,10 +65,10 @@ interface GltfTemplate {
 
 const gltfLoader = new GLTFLoader();
 const gltfTemplates = new Map<RyderId, GltfTemplate>();
+const hostTemplates: GltfTemplate[] = [];
 
-export async function preloadRyderGltf(spec: RyderSpec) {
-  if (!spec.glb || gltfTemplates.has(spec.id)) return;
-  const gltf = await gltfLoader.loadAsync(spec.glb);
+async function loadGltfTemplate(url: string, label: string): Promise<GltfTemplate> {
+  const gltf = await gltfLoader.loadAsync(url);
   let skinned = false;
   gltf.scene.traverse((object) => {
     const mesh = object as THREE.Mesh;
@@ -88,16 +88,37 @@ export async function preloadRyderGltf(spec: RyderSpec) {
     if (broken.length) {
       bakeSkinnedMeshes(gltf.scene);
       skinned = false;
-      console.info('[raid] %s: untrusted rig (%s), using static mesh', spec.id, broken.join(', '));
+      console.info('[raid] %s: untrusted rig (%s), using static mesh', label, broken.join(', '));
     }
   }
   const clips = gltf.animations ?? [];
   const strikes = skinned && clips.length ? extractStrikes(gltf.scene, clips) : [];
-  gltfTemplates.set(spec.id, { scene: gltf.scene, clips, strikes, skinned });
   if (clips.length) {
-    console.info('[raid] %s clips:', spec.id, clips.map((c) => c.name).join(', '));
-    if (strikes.length) console.info('[raid] %s strikes:', spec.id, strikes.length);
+    console.info('[raid] %s clips:', label, clips.map((c) => c.name).join(', '));
+    if (strikes.length) console.info('[raid] %s strikes:', label, strikes.length);
   }
+  return { scene: gltf.scene, clips, strikes, skinned };
+}
+
+export async function preloadRyderGltf(spec: RyderSpec) {
+  if (!spec.glb || gltfTemplates.has(spec.id)) return;
+  gltfTemplates.set(spec.id, await loadGltfTemplate(spec.glb, spec.id));
+}
+
+/** Load the host mob models; failures are logged and that model is skipped. */
+export async function preloadHostGltf() {
+  if (hostTemplates.length || !HOST_MODELS.length) return;
+  const loaded = await Promise.all(
+    HOST_MODELS.map((url) =>
+      loadGltfTemplate(url, `host ${url.split('/').pop()}`).catch((error) => {
+        console.warn('[raid] host model failed to load', url, error);
+        return null;
+      }),
+    ),
+  );
+  loaded.forEach((template) => {
+    if (template) hostTemplates.push(template);
+  });
 }
 
 const CLIP_PATTERNS: Record<ClipRole, RegExp> = {
@@ -173,7 +194,11 @@ function measureFigure(figure: THREE.Object3D) {
   return new THREE.Box3().setFromObject(figure);
 }
 
-function wrapGltfAsHumanoid(template: GltfTemplate, height = 1.88): { humanoid: Humanoid; rig: GltfRig } {
+function wrapGltfAsHumanoid(
+  template: GltfTemplate,
+  height = 1.88,
+  options: { ownMaterials?: boolean } = {},
+): { humanoid: Humanoid; rig: GltfRig } {
   const group = new THREE.Group();
   const figure = template.skinned ? (cloneSkeleton(template.scene) as THREE.Group) : template.scene.clone(true);
 
@@ -203,11 +228,26 @@ function wrapGltfAsHumanoid(template: GltfTemplate, height = 1.88): { humanoid: 
   figure.name = 'TripoFigure';
   group.add(figure);
 
+  // Materials are shared with the template (and every other instance) unless
+  // the caller needs to tint or flash this figure on its own.
   const materials: THREE.Material[] = [];
+  const owned = new Map<THREE.Material, THREE.Material>();
   figure.traverse((object) => {
     const mesh = object as THREE.Mesh;
     if (!mesh.isMesh) return;
     mesh.castShadow = false;
+    if (options.ownMaterials) {
+      const own = (material: THREE.Material) => {
+        let copy = owned.get(material);
+        if (!copy) {
+          copy = material.clone();
+          copy.userData.retain = false;
+          owned.set(material, copy);
+        }
+        return copy;
+      };
+      mesh.material = Array.isArray(mesh.material) ? mesh.material.map(own) : own(mesh.material);
+    }
     const list = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
     list.forEach((material) => {
       if (material && !materials.includes(material)) materials.push(material);
@@ -577,10 +617,66 @@ export function buildRyder(spec: RyderSpec, options: { clone?: boolean } = {}): 
   return { humanoid, weapons, glowMeshes, meshSource: 'procedural' };
 }
 
+/** Albedo tint per host kind so the mob reads at a glance even on one shared model. */
+const HOST_TINT: Record<EnemyKind, number> = {
+  walker: 0xffffff,
+  sprinter: 0xc9ffd2,
+  heavy: 0xffc9a6,
+  thrower: 0xd6f0ff,
+  broadcaster: 0xd9b3ff,
+};
+
 export function buildHost(kind: EnemyKind): Fighter {
   const scale = kind === 'broadcaster' ? 2.05 : kind === 'heavy' ? 1.42 : kind === 'sprinter' ? 0.9 : 1;
   const eye =
     kind === 'broadcaster' ? 0xb84dff : kind === 'sprinter' ? 0xb6ff3a : kind === 'heavy' ? 0xff7a1a : 0x5dff9a;
+
+  if (hostTemplates.length) {
+    const template = hostTemplates[Math.floor(Math.random() * hostTemplates.length)];
+    const { humanoid, rig } = wrapGltfAsHumanoid(template, 1.9 * scale, { ownMaterials: true });
+    humanoid.materials.forEach((material) => {
+      const m = material as THREE.MeshStandardMaterial;
+      if (m.color) m.color.set(HOST_TINT[kind]);
+    });
+
+    // Signal vein on the chest: ride the chest bone when rigged so it follows the torso.
+    const vein = new THREE.Mesh(VEIN, glow(eye, 1.6));
+    const chest = rig.skeleton?.bone('chest');
+    if (chest) {
+      const socket = new THREE.Object3D();
+      socket.scale.setScalar(1 / rig.figure.scale.x);
+      chest.add(socket);
+      rig.skeleton?.alignSocket('chest', socket);
+      vein.position.set(0, 0.07 * scale, 0.15 * scale);
+      vein.scale.setScalar(0.55 * scale);
+      socket.add(vein);
+    } else {
+      vein.position.set(0, 1.25 * scale, 0.15 * scale);
+      vein.scale.setScalar(0.55 * scale);
+      humanoid.group.add(vein);
+    }
+
+    const glowMeshes: THREE.Mesh[] = [vein];
+    const weapons: THREE.Object3D[] = [];
+    if (kind === 'broadcaster') {
+      const crown = new THREE.Mesh(HALO, glow(0xb84dff, 1.8));
+      crown.rotation.x = Math.PI / 2;
+      crown.position.y = humanoid.height + 0.08;
+      crown.scale.setScalar(scale * 0.6);
+      humanoid.group.add(crown);
+      glowMeshes.push(crown);
+      weapons.push(crown);
+    }
+    if (kind === 'thrower') {
+      const orb = new THREE.Mesh(ORB, glow(0x5dff9a, 1.4));
+      orb.position.set(0, 0.1, 0.05);
+      rig.weaponSocket.add(orb);
+      weapons.push(orb);
+      glowMeshes.push(orb);
+    }
+    return { humanoid, weapons, glowMeshes, meshSource: 'gltf', rig };
+  }
+
   const humanoid = buildHumanoid({
     skin: SKINS[Math.floor(Math.random() * SKINS.length)],
     top: kind === 'broadcaster' ? 0x2a1038 : TOPS[Math.floor(Math.random() * TOPS.length)],

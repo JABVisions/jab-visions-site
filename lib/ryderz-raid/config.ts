@@ -83,6 +83,12 @@ export const CAR_MODELS: CarModel[] = [
   { url: '/assets/those-ryderz/models/car-pickup.glb', length: 4.9, width: 2.19 },
 ];
 export const MAX_ALIVE_HOSTS = 26;
+/**
+ * Rigged glTF binaries for the host mob. Each spawn picks one at random; when
+ * the list is empty (or nothing loads) hosts fall back to block figures.
+ * Locomotion is procedural, fight clips in the file become melee strikes.
+ */
+export const HOST_MODELS: string[] = ['/assets/those-ryderz/models/host-male.glb'];
 export const BURNOUT_RECOVERY = 0.35;
 export const KILL_AURA_SIPHON = 7;
 export const MELEE_RANGE = 2.55;
