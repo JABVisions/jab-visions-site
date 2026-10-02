@@ -55,6 +55,8 @@ export function activityMatchesRoom(row: RoomActivityLike, roomId: string): bool
   for (const id of candidates) {
     if (href.includes(`/board/forums/${id}`)) return true;
   }
+  const room = getRoomById(resolved);
+  if (room && text(row.title) === `Drop in ${room.name}`) return true;
   return false;
 }
 
@@ -320,4 +322,89 @@ export function roomActivityOrFilter(roomId: string): string {
 
 export function forumRoomActivityHref(roomId: string, conversationId?: string | null): string {
   return roomHref(roomId, conversationId ? { conversation: conversationId } : undefined);
+}
+
+/** Recover Forum Room Drops that only landed in profiles.board_style.boardDrops. */
+export function activityFromStoredDrop(
+  drop: Record<string, unknown>,
+  owner: { id?: unknown; username?: unknown; displayName?: unknown }
+): RoomActivityLike | null {
+  const dropId = text(drop.id);
+  if (!dropId) return null;
+  if (text(drop.visibility).toLowerCase() === "private") return null;
+  const dropMeta = asRecord(drop.meta);
+  const roomId = text(drop.forumRoomId || drop.roomId || dropMeta.roomId);
+  const destinationType =
+    text(drop.forumDestinationType || dropMeta.destinationType) || (roomId ? "room" : "");
+  const createdAt = drop.createdAt
+    ? new Date(typeof drop.createdAt === "number" ? drop.createdAt : String(drop.createdAt)).toISOString()
+    : new Date().toISOString();
+  const href =
+    persistableMediaUrl(drop.url) ||
+    persistableMediaUrl(drop.mediaUrl) ||
+    persistableMediaUrl(drop.embedUrl) ||
+    persistableMediaUrl(drop.linkUrl);
+  const mediaUrl = persistableMediaUrl(drop.mediaUrl) || persistableMediaUrl(drop.url);
+  const ownerId = text(owner.id);
+  return {
+    id: `profile_board_drop_${ownerId || "user"}_${dropId}`,
+    created_at: createdAt,
+    user_id: ownerId || null,
+    kind: "board_drop",
+    title: text(drop.title) || "Shared Drop",
+    body: text(drop.description) || text(drop.body) || "Board Drop",
+    href: href || undefined,
+    image_url: persistableMediaUrl(drop.previewImage) || (text(drop.mediaKind) === "image" ? mediaUrl : null),
+    meta: {
+      ...dropMeta,
+      source: text(dropMeta.source) || "profiles.board_style.boardDrops",
+      origin: text(dropMeta.origin) || "create",
+      destinationType: destinationType || dropMeta.destinationType || null,
+      roomId: roomId || dropMeta.roomId || null,
+      roomName: text(drop.forumRoomName || dropMeta.roomName) || null,
+      roomIcon: text(dropMeta.roomIcon) || null,
+      forumRoomId: text(drop.forumRoomId) || roomId || null,
+      conversationId: text(drop.forumConversationId || dropMeta.conversationId) || null,
+      dropId,
+      dropType: text(drop.type) || text(dropMeta.dropType) || "Media",
+      mediaKind: drop.mediaKind ?? dropMeta.mediaKind ?? null,
+      mediaUrl: mediaUrl,
+      bucket: drop.bucket ?? dropMeta.bucket ?? null,
+      storagePath: drop.storagePath ?? dropMeta.storagePath ?? null,
+      fileName: drop.fileName ?? null,
+      mime: drop.mime ?? null,
+      embedUrl: persistableMediaUrl(drop.embedUrl),
+      previewImage: persistableMediaUrl(drop.previewImage),
+      visibility: text(drop.visibility) === "private" ? "private" : "public",
+      authorName: pickBoardDisplayName(owner.displayName, owner.username, dropMeta.authorName),
+      authorUsername: text(owner.username) || null,
+    },
+  };
+}
+
+export function activitiesFromProfileBoardStyle(
+  profiles: Array<Record<string, unknown>> | null | undefined
+): RoomActivityLike[] {
+  if (!Array.isArray(profiles) || !profiles.length) return [];
+  const out: RoomActivityLike[] = [];
+  for (const profile of profiles) {
+    const boardStyle = asRecord(profile.board_style);
+    if (text(boardStyle.visibility).toLowerCase() === "private") continue;
+    const drops = Array.isArray(boardStyle.boardDrops) ? boardStyle.boardDrops : [];
+    const deleted = new Set(
+      (Array.isArray(boardStyle.boardDropsDeleted) ? boardStyle.boardDropsDeleted : []).map((id) => String(id))
+    );
+    for (const raw of drops) {
+      if (!raw || typeof raw !== "object") continue;
+      const drop = raw as Record<string, unknown>;
+      if (deleted.has(text(drop.id))) continue;
+      const activity = activityFromStoredDrop(drop, {
+        id: profile.id,
+        username: profile.username,
+        displayName: pickBoardDisplayName(boardStyle.displayName, profile.display_name, profile.username),
+      });
+      if (activity) out.push(activity);
+    }
+  }
+  return out;
 }

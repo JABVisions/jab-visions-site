@@ -132,6 +132,8 @@ export type DropItem = {
   forumRoomId?: string;
   forumDestinationType?: "room" | "room_conversation";
   forumConversationId?: string;
+  /** Placement bag so profiles.board_style hydrates Forum Room Drops without rooms SQL. */
+  meta?: Record<string, unknown>;
 };
 
 export const STORAGE_KEY = "jab_board_drops_v2";

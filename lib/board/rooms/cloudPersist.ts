@@ -4,6 +4,7 @@ import { forumRoomFeedCopy } from "@/lib/board/forumRoomFeedCopy";
 import { getRoomById, resolveRoomId } from "./catalog";
 import {
   activityMatchesRoom,
+  activitiesFromProfileBoardStyle,
   forumRoomActivityHref,
   roomActivityOrFilter,
   type RoomActivityLike,
@@ -33,6 +34,7 @@ export async function selectRoomActivities(
   const resolved = resolveRoomId(roomId) || String(roomId || "").trim();
   if (!resolved) return [];
   const orFilter = roomActivityOrFilter(resolved);
+  let fromTable: RoomActivityLike[] = [];
   try {
     const { data, error } = await supabase
       .from("board_activity")
@@ -41,23 +43,41 @@ export async function selectRoomActivities(
       .order("created_at", { ascending: false })
       .limit(80);
     if (!error && Array.isArray(data)) {
-      return data.filter((row) => activityMatchesRoom(row as RoomActivityLike, resolved));
+      fromTable = data.filter((row) => activityMatchesRoom(row as RoomActivityLike, resolved));
+    } else {
+      const fallback = await supabase
+        .from("board_activity")
+        .select("*")
+        .order("created_at", { ascending: false })
+        .limit(160);
+      fromTable = (Array.isArray(fallback.data) ? fallback.data : []).filter((row: RoomActivityLike) =>
+        activityMatchesRoom(row, resolved)
+      );
     }
   } catch {
-    // fall through to recent-page scan
+    fromTable = [];
   }
+
+  let fromProfiles: RoomActivityLike[] = [];
   try {
-    const { data } = await supabase
-      .from("board_activity")
-      .select("*")
-      .order("created_at", { ascending: false })
-      .limit(160);
-    return (Array.isArray(data) ? data : []).filter((row) =>
-      activityMatchesRoom(row as RoomActivityLike, resolved)
-    );
+    const { data: profiles } = await supabase
+      .from("profiles")
+      .select("id, username, display_name, board_style")
+      .limit(500);
+    fromProfiles = activitiesFromProfileBoardStyle(
+      (profiles || []) as Record<string, unknown>[]
+    ).filter((row) => activityMatchesRoom(row, resolved));
   } catch {
-    return [];
+    fromProfiles = [];
   }
+
+  const byDrop = new Map<string, RoomActivityLike>();
+  for (const row of [...fromProfiles, ...fromTable]) {
+    const dropId = text(asRecord(row.meta).dropId) || text(row.id);
+    if (!dropId) continue;
+    byDrop.set(dropId, row);
+  }
+  return [...byDrop.values()];
 }
 
 export async function findExistingRoomDropActivity(

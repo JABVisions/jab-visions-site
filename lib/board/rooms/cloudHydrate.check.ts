@@ -5,6 +5,7 @@ import {
   conversationsFromActivityRows,
   shareFromActivityRow,
   sharesFromActivityRows,
+  activitiesFromProfileBoardStyle,
 } from "./cloudHydrate";
 import { mergeConversationSources, mergeShareSources, roomFeedFromSources } from "./roomPostsSource";
 import type { RoomActivityLike } from "./cloudHydrate";
@@ -199,6 +200,49 @@ assert(
 assert(
   sharesFromActivityRows("jab-comics", [privatePhone], "user-phone").length === 1,
   "owner still sees their private Room Drop after login"
+);
+
+const profilePhone = activitiesFromProfileBoardStyle([
+  {
+    id: "297c8656-4613-4403-be69-84b45c25e666",
+    username: "johnandy",
+    display_name: "Johnandy",
+    board_style: {
+      boardDrops: [
+        {
+          id: "1790703225962_a400d502a5552",
+          title: "Drop in JAB Comics",
+          type: "Media",
+          mediaKind: "image",
+          createdAt: Date.parse("2026-09-29T17:33:55.311Z"),
+          url: "https://example.com/IMG_0511.jpeg",
+          mediaUrl: "https://example.com/IMG_0511.jpeg",
+          fileName: "IMG_0511.jpeg",
+          visibility: "public",
+          meta: {
+            roomId: "jab-comics",
+            roomName: "JAB Comics",
+            destinationType: "room",
+          },
+        },
+      ],
+    },
+  },
+]);
+const fromProfile = sharesFromActivityRows("jab-comics", profilePhone);
+assert(
+  fromProfile.some((share) => share.dropId === "1790703225962_a400d502a5552"),
+  "profiles.board_style Room Drops hydrate into JAB Comics without rooms SQL"
+);
+assert(
+  roomFeedFromSources({
+    roomId: "jab-comics",
+    localConversations: [],
+    remoteConversations: [],
+    localShares: [],
+    remoteShares: fromProfile,
+  }).some((item) => item.kind === "drop_share" && item.share?.dropId === "1790703225962_a400d502a5552"),
+  "desktop incognito shows the phone JAB Comics Drop that only hit the profile board"
 );
 
 console.log("forums room cloud hydrate checks passed");

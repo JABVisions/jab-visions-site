@@ -71,6 +71,16 @@ function stampForumDrop(drop: DropItem, destination: DropDestination | null | un
     forumDestinationType: destination.type === "room_conversation" ? "room_conversation" : "room",
     forumConversationId:
       destination.type === "room_conversation" ? destination.conversationId : undefined,
+    meta: {
+      ...(drop.meta && typeof drop.meta === "object" ? drop.meta : {}),
+      roomId: destination.roomId,
+      roomName: destination.roomName || null,
+      roomIcon: destination.roomIcon || null,
+      destinationType: destination.type === "room_conversation" ? "room_conversation" : "room",
+      conversationId: destination.type === "room_conversation" ? destination.conversationId : null,
+      source: "forum_room_studio",
+      origin: destination.type === "room_conversation" ? "conversation" : "create",
+    },
   };
 }
 
