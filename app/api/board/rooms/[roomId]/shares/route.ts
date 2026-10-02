@@ -5,6 +5,72 @@ import { isMissingRoomsTable, json, roomMembershipGate } from "@/lib/board/rooms
 import { describeRoomActivity, roomActivityGroupKey } from "@/lib/board/rooms/activity";
 import { createBoardNotification } from "@/lib/board/createNotification";
 import { pickBoardDisplayName } from "@/lib/board/boardAuthor";
+import { normalizeDropVisibility, type DropVisibility } from "@/lib/board/rooms/livePrivacy";
+
+async function overlayLiveSharePrivacy(
+  supabase: ReturnType<typeof supabaseServer>,
+  shares: Array<Record<string, unknown>>
+) {
+  const dropIds = [
+    ...new Set(
+      shares
+        .map((row) => String(row.drop_id || row.dropId || "").trim())
+        .filter(Boolean)
+    ),
+  ].slice(0, 40);
+  if (!dropIds.length) return shares;
+
+  const visibility = new Map<string, DropVisibility>();
+
+  const orFilter = dropIds.map((id) => `meta->>dropId.eq.${id}`).join(",");
+  try {
+    const { data: activities } = await supabase
+      .from("board_activity")
+      .select("meta")
+      .or(orFilter)
+      .limit(80);
+    for (const row of activities || []) {
+      const meta = (row as { meta?: Record<string, unknown> }).meta;
+      const dropId = String(meta?.dropId || "").trim();
+      const live = normalizeDropVisibility(meta?.visibility);
+      if (dropId && live) visibility.set(dropId, live);
+    }
+  } catch {
+    // activity lookup is optional
+  }
+
+  const ownerIds = [
+    ...new Set(shares.map((row) => String(row.shared_by || row.sharedBy || "").trim()).filter(Boolean)),
+  ].slice(0, 20);
+  if (ownerIds.length) {
+    try {
+      const { data: profiles } = await supabase.from("profiles").select("id, board_style").in("id", ownerIds);
+      for (const profile of profiles || []) {
+        const drops = Array.isArray((profile as { board_style?: { boardDrops?: unknown[] } }).board_style?.boardDrops)
+          ? ((profile as { board_style: { boardDrops: Array<Record<string, unknown>> } }).board_style.boardDrops || [])
+          : [];
+        for (const drop of drops) {
+          const dropId = String(drop.id || "").trim();
+          const live = normalizeDropVisibility(drop.visibility);
+          if (dropId && live && dropIds.includes(dropId)) visibility.set(dropId, live);
+        }
+      }
+    } catch {
+      // profile lookup is optional
+    }
+  }
+
+  return shares.map((share) => {
+    const dropId = String(share.drop_id || share.dropId || "").trim();
+    const live = visibility.get(dropId);
+    if (!live) return share;
+    const snapshot =
+      share.snapshot && typeof share.snapshot === "object"
+        ? { ...(share.snapshot as Record<string, unknown>), visibility: live }
+        : { visibility: live };
+    return { ...share, snapshot };
+  });
+}
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -25,10 +91,9 @@ export async function GET(
       .limit(80);
     if (error && isMissingRoomsTable(error)) return json({ ok: true, shares: [], setupRequired: true });
     if (error) return json({ ok: true, shares: [], warning: error.message });
-    const shares = await hydrateAuthorRows(
+    const shares = await overlayLiveSharePrivacy(
       supabase,
-      (data || []) as Record<string, unknown>[],
-      "shared_by"
+      await hydrateAuthorRows(supabase, (data || []) as Record<string, unknown>[], "shared_by")
     );
     return json({ ok: true, shares });
   } catch {

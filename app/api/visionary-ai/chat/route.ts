@@ -19,6 +19,12 @@ import {
   unknownVisionaryAnswer,
 } from "@/lib/visionary-ai/server/safety";
 import { buildVisionarySystemPrompt } from "@/lib/visionary-ai/server/systemPrompt";
+import {
+  forumContextDocument,
+  forumContextHasUsefulFacts,
+  mentionRoomIdFromQuery,
+} from "@/lib/visionary-ai/forumContext";
+import { loadForumRoomContext } from "@/lib/visionary-ai/loadForumContext";
 import type {
   VisionaryChatError,
   VisionaryChatResponse,
@@ -130,7 +136,22 @@ export async function POST(request: NextRequest) {
     });
   }
 
+  const requestedRoomId =
+    body && typeof body === "object" && "roomId" in body && typeof (body as { roomId?: unknown }).roomId === "string"
+      ? (body as { roomId: string }).roomId
+      : mentionRoomIdFromQuery(messages.at(-1)?.content || "");
+  const forumContext = await loadForumRoomContext(requestedRoomId);
+
   const retrieval = retrieveVisionaryKnowledge(messages);
+  if (forumContext && forumContextHasUsefulFacts(forumContext)) {
+    const forumDoc = forumContextDocument(forumContext);
+    if (!retrieval.documents.some((document) => document.id === forumDoc.id)) {
+      retrieval.documents = [forumDoc, ...retrieval.documents].slice(0, 5);
+    }
+    if (retrieval.confidence === "unknown" || retrieval.confidence === "general") {
+      retrieval.confidence = "partial";
+    }
+  }
   if (retrieval.confidence === "unknown") {
     return NextResponse.json<VisionaryChatResponse>({
       ok: true,
@@ -152,7 +173,7 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const instructions = `${buildVisionarySystemPrompt(retrieval)}\n\nRETRIEVED KNOWLEDGE\n${formatKnowledgeContext(retrieval)}`;
+    const instructions = `${buildVisionarySystemPrompt(retrieval, forumContext)}\n\nRETRIEVED KNOWLEDGE\n${formatKnowledgeContext(retrieval)}`;
     const modelAnswer = await createVisionaryModelResponse({
       instructions,
       messages,

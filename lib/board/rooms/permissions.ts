@@ -16,7 +16,7 @@ export function permissionsForRole(role: RoomRole, room?: Pick<Room, "comingSoon
     announce: (hostish || (modish && Boolean(room?.isOfficial))) && !closed,
     moderate: modish && !closed,
     startCall: memberish && !closed,
-    goLive: hostish && !closed,
+    goLive: memberish && !closed,
     setStage: hostish && !closed,
     editRoom: role === "owner",
   };

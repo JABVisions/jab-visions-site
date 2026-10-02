@@ -24,6 +24,7 @@ import {
 } from "./rooms";
 import { mapRoomRow } from "./rooms/server";
 import { activityForumPath } from "./boardAuthor";
+import { forumDropPrimaryTag } from "./forumRoomFeedCopy";
 import type { RoomConversation, RoomDropShare, RoomPresence } from "./rooms/types";
 
 function assert(condition: unknown, message: string): asserts condition {
@@ -71,7 +72,8 @@ assert(roomHref("music-drops") === "/board/forums/music", "forum thread hrefs re
 const viewer = permissionsForRole("viewer", getRoomById("music"));
 assert(viewer.post === false && viewer.follow === true, "viewers follow but do not post");
 assert(canStartCall("member", getRoomById("music")) === true, "members can start a Room Call placeholder");
-assert(canGoLive("member", getRoomById("music")) === false, "Go Live stays host/owner until media is wired");
+assert(canGoLive("member", getRoomById("music")) === true, "joined members can Go Live now that WebRTC is wired");
+assert(canGoLive("viewer", getRoomById("music")) === false, "viewers cannot Go Live");
 assert(canGoLive("host", getRoomById("music")) === true, "hosts can Go Live");
 assert(permissionsForRole("member", getRoomById("those-ryderz")).join === true, "Those Ryderz members can join");
 assert(permissionsForRole("member", getRoomById("those-ryderz")).shareDrop === true, "Those Ryderz members can share Drops");
@@ -173,7 +175,7 @@ const feed = mergeRoomFeed({
   ],
 });
 assert(feed.some((item) => item.kind === "drop_share"), "shared drops appear in the room feed");
-assert(feed.some((item) => item.kind === "live"), "live placeholder sessions appear in the room feed");
+assert(feed.some((item) => item.kind === "live"), "live sessions appear in the room feed");
 assert(feed.some((item) => item.kind === "conversation"), "existing discussions remain a room component");
 
 const filenameShare: RoomDropShare = {
@@ -188,6 +190,10 @@ const filenameShare: RoomDropShare = {
 };
 const filenameActivity = activityFromRoomShare(filenameShare);
 assert(filenameActivity?.title === "Added a Drop to Music", "room feed headline names Music, not the file");
+assert(
+  forumDropPrimaryTag(filenameActivity?.meta as Record<string, unknown>) === "MUSIC",
+  "Room Drop activity tag is MUSIC, not Vision Drop"
+);
 assert(filenameActivity?.title?.includes("IMG_") === false, "filename is not used as the room feed title");
 assert(
   filenameActivity?.body === "John Andy added a Drop to 🎧 Music.",
@@ -217,6 +223,10 @@ assert(
 assert(
   conversationShareActivity?.body === "John replied with a Drop in Comic Character Design in JAB Comics.",
   "conversation feed body names the thread and the Forum Room"
+);
+assert(
+  forumDropPrimaryTag(conversationShareActivity?.meta as Record<string, unknown>) === "Comic Character Design",
+  "Conversation Drop activity tag is the conversation, not Vision Drop"
 );
 assert(
   activityForumPath(conversationShareActivity!) === "/board/forums/jab-comics?conversation=com1",

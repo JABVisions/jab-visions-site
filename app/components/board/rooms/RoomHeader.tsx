@@ -6,6 +6,8 @@ import type { Room, RoomPermissions } from "@/lib/board/rooms";
 import OfficialRoomBadge from "./OfficialRoomBadge";
 import RoomPresence from "./RoomPresence";
 import type { RoomPresence as RoomPresencePerson } from "@/lib/board/rooms";
+import { goLiveBlockedReason } from "@/lib/board/rooms/liveWebRtc";
+import type { RoomRole } from "@/lib/board/rooms/types";
 
 function clsx(...parts: Array<string | false | null | undefined>) {
   return parts.filter(Boolean).join(" ");
@@ -21,6 +23,9 @@ export default function RoomHeader({
   onFollow,
   onStartCall,
   onGoLive,
+  role = "viewer",
+  liveActive = false,
+  canEndLive = false,
 }: {
   room: Room;
   people: RoomPresencePerson[];
@@ -31,8 +36,13 @@ export default function RoomHeader({
   onFollow?: () => void;
   onStartCall?: () => void;
   onGoLive?: () => void;
+  role?: RoomRole;
+  liveActive?: boolean;
+  canEndLive?: boolean;
 }) {
-  const live = room.state === "LIVE" || room.state === "STAGE";
+  const live = room.state === "LIVE" || room.state === "STAGE" || liveActive;
+  const blocked = goLiveBlockedReason(role, room, permissions);
+  const goLiveDisabled = canEndLive ? false : Boolean(blocked) || liveActive;
 
   return (
     <header className="relative overflow-hidden rounded-[1.75rem] border border-white/10 bg-white/[0.04] p-4 shadow-[0_20px_80px_rgba(0,0,0,0.35)] backdrop-blur-xl sm:p-6">
@@ -126,11 +136,24 @@ export default function RoomHeader({
             <button
               type="button"
               onClick={onGoLive}
-              disabled={!permissions.goLive}
+              disabled={goLiveDisabled}
+              title={
+                canEndLive
+                  ? "End the Live Room"
+                  : liveActive
+                    ? "A Live Room is already on."
+                    : blocked || "Broadcast camera and mic to this Room"
+              }
               className="rounded-full border border-rose-300/30 bg-rose-400/15 px-3 py-2 text-[11px] font-black uppercase tracking-[0.14em] text-rose-50 disabled:opacity-40"
             >
-              Go Live
+              {canEndLive ? "End Live" : "Go Live"}
             </button>
+            <Link
+              href={`/visionary-ai?room=${encodeURIComponent(room.id)}`}
+              className="rounded-full border border-violet-200/25 bg-violet-300/12 px-3 py-2 text-[11px] font-black uppercase tracking-[0.14em] text-violet-50"
+            >
+              Ask Visionary
+            </Link>
           </div>
         </div>
       </div>

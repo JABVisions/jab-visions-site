@@ -9,8 +9,15 @@ import { resolveCurrentBoardIdentity } from "@/lib/board/currentProfile";
 import { PROFILE_STORAGE_KEY } from "@/lib/board/dropItem";
 import type { DropItem } from "@/lib/board/dropItem";
 import {
+  applyLiveVisibilityToReply,
+  applyLiveVisibilityToShare,
+  buildLiveSession,
+  endLiveSession,
   getRoomById,
+  goLiveBlockedReason,
+  isLiveHost,
   mergeRoomFeed,
+  overlaySharesWithVisibilityMap,
   permissionsForRole,
   resolveRoomId,
   seedConversations,
@@ -24,6 +31,9 @@ import {
   type RoomRole,
   ROOM_PRESENCE_HEARTBEAT_MS,
 } from "@/lib/board/rooms";
+import { findLocalDropByAnyId } from "@/lib/board/boardDropEditStore";
+import { activityMatchesDropId, getLocalActivity } from "@/lib/board/activity";
+import { normalizeDropVisibility, type DropVisibility } from "@/lib/board/rooms/livePrivacy";
 import {
   activeSessionsFor,
   hasEmittedJoinActivity,
@@ -68,6 +78,23 @@ import {
 
 function uid(prefix: string) {
   return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function liveVisibilityForDrop(dropId: string): DropVisibility | null {
+  const local = findLocalDropByAnyId(dropId);
+  const fromDrop = normalizeDropVisibility(local?.visibility);
+  if (fromDrop) return fromDrop;
+  const activity = getLocalActivity().find((row) => activityMatchesDropId(row, dropId));
+  return normalizeDropVisibility(activity?.meta?.visibility);
+}
+
+function overlayLocalLivePrivacy(shares: RoomDropShare[]): RoomDropShare[] {
+  const map = new Map<string, DropVisibility>();
+  for (const share of shares) {
+    const live = liveVisibilityForDrop(share.dropId);
+    if (live) map.set(share.dropId, live);
+  }
+  return overlaySharesWithVisibilityMap(shares, map);
 }
 
 function readLocalIdentity() {
@@ -165,7 +192,7 @@ export default function RoomInterior({
     }
     writeConversations(seeded);
     setConversations(conversationsForRoom(seeded, id));
-    setShares(readShares().filter((row) => resolveRoomId(row.roomId) === id));
+    setShares(overlayLocalLivePrivacy(readShares().filter((row) => resolveRoomId(row.roomId) === id)));
     setPeople(readPresence().filter((row) => resolveRoomId(row.roomId) === id));
     const sessions = activeSessionsFor(id);
     setCall((sessions.find((row) => row.kind === "call") as RoomCallSession | undefined) || null);
@@ -175,6 +202,30 @@ export default function RoomInterior({
     setFollowing(Boolean(mine?.following));
     setRole(mine?.role || "viewer");
   }, [userId]);
+
+  useEffect(() => {
+    function onDropUpdated(event: Event) {
+      const detail = (event as CustomEvent).detail;
+      const dropId = String(detail?.dropId || detail?.drop?.id || "");
+      const visibility = normalizeDropVisibility(detail?.drop?.visibility);
+      if (!dropId || !visibility) return;
+      setShares((current) =>
+        current.map((share) =>
+          share.dropId === dropId ? applyLiveVisibilityToShare(share, visibility) : share
+        )
+      );
+      setConversations((current) =>
+        current.map((thread) => ({
+          ...thread,
+          replies: thread.replies.map((reply) =>
+            reply.dropId === dropId ? applyLiveVisibilityToReply(reply, visibility) : reply
+          ),
+        }))
+      );
+    }
+    window.addEventListener("board:drop:updated", onDropUpdated as EventListener);
+    return () => window.removeEventListener("board:drop:updated", onDropUpdated as EventListener);
+  }, []);
 
   useEffect(() => {
     if (!resolved || !room) return;
@@ -218,6 +269,31 @@ export default function RoomInterior({
         }
       })
       .catch(() => undefined);
+    fetch(`/api/board/rooms/${resolved}/sessions`)
+      .then((res) => res.json())
+      .then((payload) => {
+        if (cancelled || !Array.isArray(payload?.sessions)) return;
+        const remoteLive = payload.sessions.find(
+          (row: Record<string, unknown>) =>
+            row.kind === "live" && (row.status === "live" || row.status === "starting")
+        );
+        if (!remoteLive) return;
+        setLive({
+          id: String(remoteLive.id),
+          roomId: resolved,
+          kind: "live",
+          provider: remoteLive.provider === "webrtc" ? "webrtc" : "webrtc",
+          status: "live",
+          mode: "LIVE",
+          startedBy: remoteLive.started_by ? String(remoteLive.started_by) : null,
+          startedAt: String(remoteLive.started_at || new Date().toISOString()),
+          endedAt: null,
+          speakerIds: remoteLive.started_by ? [String(remoteLive.started_by)] : [],
+          viewerCount: Math.max(1, people.length),
+        });
+        setRoom((current) => (current ? { ...current, state: "LIVE" } : current));
+      })
+      .catch(() => undefined);
     fetch(`/api/board/rooms/${resolved}/shares`)
       .then((res) => res.json())
       .then((payload) => {
@@ -253,7 +329,7 @@ export default function RoomInterior({
           }));
           const byKey = new Map<string, RoomDropShare>();
           for (const share of [...remote, ...local]) byKey.set(`${share.dropId}:${share.sharedBy}`, share);
-          return [...byKey.values()];
+          return overlayLocalLivePrivacy([...byKey.values()]);
         });
       })
       .catch(() => undefined);
@@ -278,10 +354,16 @@ export default function RoomInterior({
                 body: String(row.body || ""),
                 createdAt: String(row.created_at || new Date().toISOString()),
                 dropId: typeof row.drop_id === "string" && row.drop_id ? row.drop_id : undefined,
-                dropSnapshot:
-                  row.metadata && typeof row.metadata === "object"
-                    ? (row.metadata.dropSnapshot as Record<string, unknown> | undefined)
-                    : undefined,
+                dropSnapshot: (() => {
+                  const snapshot =
+                    row.metadata && typeof row.metadata === "object"
+                      ? (row.metadata.dropSnapshot as Record<string, unknown> | undefined)
+                      : undefined;
+                  const dropId = typeof row.drop_id === "string" ? row.drop_id : "";
+                  const live = dropId ? liveVisibilityForDrop(dropId) : null;
+                  if (!snapshot) return snapshot;
+                  return live ? { ...snapshot, visibility: live } : snapshot;
+                })(),
               },
             });
             continue;
@@ -579,7 +661,9 @@ export default function RoomInterior({
       roomIcon: currentRoom.icon,
     };
     upsertShare(share);
-    setShares(readShares().filter((row) => resolveRoomId(row.roomId) === currentRoom.id));
+    setShares(
+      overlayLocalLivePrivacy(readShares().filter((row) => resolveRoomId(row.roomId) === currentRoom.id))
+    );
     setShareOpen(false);
     void fetch(`/api/board/rooms/${currentRoom.id}/shares`, {
       method: "POST",
@@ -658,53 +742,103 @@ export default function RoomInterior({
     if (share && !canRemoveFromRoom({ share, userId, moderate: permissions.moderate })) return;
     const next = removeShareFromRoom(readShares(), { roomId: currentRoom.id, dropId });
     writeShares(next);
-    setShares(next.filter((row) => resolveRoomId(row.roomId) === currentRoom.id));
+    setShares(overlayLocalLivePrivacy(next.filter((row) => resolveRoomId(row.roomId) === currentRoom.id)));
     flashSuccess("Removed from Room");
     void fetch(`/api/board/rooms/${currentRoom.id}/shares?dropId=${encodeURIComponent(dropId)}`, {
       method: "DELETE",
     });
   }
 
-  function startPlaceholder(kind: "call" | "live") {
+  function startPlaceholder(kind: "call") {
     const startedAt = new Date().toISOString();
-    if (kind === "call") {
-      const session: RoomCallSession = {
-        id: uid("call"),
-        roomId: currentRoom.id,
-        kind: "call",
-        provider: "none",
-        status: "live",
-        startedBy: userId,
-        startedAt,
-        endedAt: null,
-        participantIds: [userId],
-      };
-      writeSessions([session, ...readSessions().filter((row) => row.roomId !== currentRoom.id || row.kind !== "call")]);
-      setCall(session);
-      setRoom({ ...currentRoom, state: "ROOM" });
-    } else {
-      const session: RoomLiveSession = {
-        id: uid("live"),
-        roomId: currentRoom.id,
-        kind: "live",
-        provider: "none",
-        status: "live",
-        mode: "LIVE",
-        startedBy: userId,
-        startedAt,
-        endedAt: null,
-        speakerIds: [userId],
-        viewerCount: Math.max(1, people.length),
-      };
-      writeSessions([session, ...readSessions().filter((row) => row.roomId !== currentRoom.id || row.kind !== "live")]);
-      setLive(session);
-      setRoom({ ...currentRoom, state: "LIVE" });
-    }
+    const session: RoomCallSession = {
+      id: uid("call"),
+      roomId: currentRoom.id,
+      kind: "call",
+      provider: "none",
+      status: "live",
+      startedBy: userId,
+      startedAt,
+      endedAt: null,
+      participantIds: [userId],
+    };
+    writeSessions([session, ...readSessions().filter((row) => row.roomId !== currentRoom.id || row.kind !== "call")]);
+    setCall(session);
+    setRoom({ ...currentRoom, state: currentRoom.state === "LIVE" ? "LIVE" : "ROOM" });
     void fetch(`/api/board/rooms/${currentRoom.id}/sessions`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ kind, displayName: identity.displayName }),
     });
+  }
+
+  function persistLiveSession(session: RoomLiveSession | null) {
+    const others = readSessions().filter((row) => row.roomId !== currentRoom.id || row.kind !== "live");
+    writeSessions(session ? [session, ...others] : others);
+    setLive(session);
+  }
+
+  async function startLive() {
+    const blocked = goLiveBlockedReason(role, currentRoom, permissions);
+    if (blocked) {
+      flashSuccess(blocked);
+      return;
+    }
+    if (!ensureJoined()) {
+      flashSuccess("Join this Room to Go Live.");
+      return;
+    }
+    if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) {
+      flashSuccess("This browser cannot open a camera or microphone.");
+      return;
+    }
+    const session = buildLiveSession({
+      id: uid("live"),
+      roomId: currentRoom.id,
+      startedBy: userId,
+      viewerCount: Math.max(1, people.length),
+    });
+    persistLiveSession(session);
+    setRoom({ ...currentRoom, state: "LIVE" });
+    try {
+      const response = await fetch(`/api/board/rooms/${currentRoom.id}/sessions`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          kind: "live",
+          provider: "webrtc",
+          displayName: identity.displayName,
+        }),
+      });
+      const payload = await response.json().catch(() => null);
+      const remoteId = payload?.session?.id;
+      if (remoteId && typeof remoteId === "string") {
+        const next = { ...session, id: remoteId };
+        persistLiveSession(next);
+      }
+    } catch {
+      // local webrtc session still stands
+    }
+  }
+
+  function stopLive() {
+    if (!live) return;
+    persistLiveSession(endLiveSession(live));
+    persistLiveSession(null);
+    setRoom({ ...currentRoom, state: "ROOM" });
+    void fetch(`/api/board/rooms/${currentRoom.id}/sessions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ action: "end", sessionId: live.id, kind: "live" }),
+    });
+  }
+
+  function onGoLive() {
+    if (live && isLiveHost(live, userId)) {
+      stopLive();
+      return;
+    }
+    void startLive();
   }
 
   return (
@@ -715,13 +849,27 @@ export default function RoomInterior({
         joined={joined}
         following={following}
         permissions={permissions}
+        role={role}
+        liveActive={Boolean(live)}
+        canEndLive={Boolean(live && isLiveHost(live, userId))}
         onJoin={() => persistMembership(joined ? "leave" : "join")}
         onFollow={() => persistMembership(following ? "leave" : "follow")}
         onStartCall={() => startPlaceholder("call")}
-        onGoLive={() => startPlaceholder("live")}
+        onGoLive={onGoLive}
       />
 
-      <RoomLivePreview room={room} session={live} />
+      <RoomLivePreview
+        room={room}
+        session={live}
+        userId={userId}
+        displayName={identity.displayName}
+        onSessionChange={(next) => persistLiveSession(next)}
+        onFailed={(message) => {
+          flashSuccess(message);
+          stopLive();
+        }}
+        onEnded={stopLive}
+      />
       <RoomCallPreview room={room} session={call} />
 
       {!room.comingSoon ? (

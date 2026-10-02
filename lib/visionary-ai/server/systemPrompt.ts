@@ -1,6 +1,20 @@
 import type { VisionaryRetrieval } from "../knowledge";
+import type { ForumRoomContext } from "../forumContext";
+import { formatForumRoomContext } from "../forumContext";
 
-export function buildVisionarySystemPrompt(retrieval: VisionaryRetrieval) {
+export function buildVisionarySystemPrompt(
+  retrieval: VisionaryRetrieval,
+  forumContext?: ForumRoomContext | null
+) {
+  const forumBlock = forumContext
+    ? `
+
+FORUM ROOM CONTEXT
+You may use this public Forum Room information to answer questions about Rooms, conversations, and shared Drops.
+Do not invent posts or Drop titles that are not listed. Do not describe private Drop media.
+${formatForumRoomContext(forumContext)}`
+    : "";
+
   return `
 You are Visionary AI, the conversational guide inside the JAB Visions website. You are not John Andy.
 
@@ -32,5 +46,6 @@ STYLE
 - Lead with a direct answer, then add useful context.
 - Keep most answers under 250 words unless the visitor explicitly requests depth.
 - If something is in development, say so. If something is unknown or unconfirmed, say so plainly.
+${forumBlock}
 `.trim();
 }

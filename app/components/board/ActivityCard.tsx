@@ -5,6 +5,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Eye, EyeOff, SlidersHorizontal } from "lucide-react";
 import {
+  activityMatchesDropId,
   appendLocalActivity,
   getLocalActivity,
   persistActivityEdit,
@@ -63,7 +64,11 @@ import {
   playablePosterSrc,
   preferStreamingHref,
 } from "@/lib/board/feedDropMedia";
-import { applyForumRoomFeedCopy } from "@/lib/board/forumRoomFeedCopy";
+import {
+  applyForumRoomFeedCopy,
+  forumDropMediaChip,
+  forumDropPrimaryTag,
+} from "@/lib/board/forumRoomFeedCopy";
 import {
   activityForumPath,
   openForumRoom,
@@ -803,8 +808,22 @@ function ActivityCard({
   }, [id, storedCustomizationsKey]);
 
   useEffect(() => {
+    const dropId = String(meta?.dropId || meta?.originalDropId || "");
+    const localDrop = findLocalDropByAnyId(dropId, id);
+    if (localDrop?.visibility === "public" || localDrop?.visibility === "private") {
+      setDropPrivate(localDrop.visibility === "private");
+      return;
+    }
+    const localActivity = getLocalActivity().find(
+      (row) => activityMatchesDropId(row, dropId || id) || row.id === id
+    );
+    const liveMeta = localActivity?.meta?.visibility;
+    if (liveMeta === "public" || liveMeta === "private") {
+      setDropPrivate(liveMeta === "private");
+      return;
+    }
     setDropPrivate(meta?.visibility === "private");
-  }, [id, meta?.visibility]);
+  }, [id, meta?.visibility, meta?.dropId, meta?.originalDropId]);
 
   useEffect(() => {
     const dropId = String(meta?.dropId || meta?.originalDropId || "");
@@ -1097,6 +1116,8 @@ function ActivityCard({
   }, [authorUserId]);
 
   const kindLabel = useMemo(() => {
+    const forumTag = forumDropPrimaryTag(meta);
+    if (forumTag) return forumTag;
     if (isDropbookSlide) return "DROPBOOK";
     if (isYouTubeHref) return formatDropKindLabel("youtube");
 
@@ -1117,9 +1138,24 @@ function ActivityCard({
     return formatDropKindLabel(k);
   }, [item, meta, preview, isDropbookSlide, isYouTubeHref]);
   const isVoiceDrop =
-    isAudioFileDrop && /\b(?:thought|voice)(?: drop| memo)?\b/i.test(kindLabel);
-  const isNewsDrop = /\bnews(?: drop)?\b/i.test(kindLabel);
-  const badgeLabel = metaString(meta?.badgeLabel, preview?.badgeLabel);
+    isAudioFileDrop &&
+    (/\b(?:thought|voice)(?: drop| memo)?\b/i.test(kindLabel) ||
+      /\b(?:thought|voice)\b/i.test(metaString(meta?.dropType, meta?.drop_flavor, preview?.dropType)));
+  const isNewsDrop =
+    /\bnews(?: drop)?\b/i.test(kindLabel) ||
+    /\bnews\b/i.test(metaString(meta?.dropType, meta?.drop_flavor, preview?.dropType));
+  const badgeLabel =
+    metaString(meta?.badgeLabel, preview?.badgeLabel) ||
+    (forumDropPrimaryTag(meta)
+      ? forumDropMediaChip(
+          metaString(
+            meta?.dropType,
+            meta?.drop_flavor,
+            preview?.dropType,
+            preview?.drop_flavor
+          )
+        ) || null
+      : "");
 
   const payDropId = metaString(meta?.dropId, preview?.dropId, id);
   const payProvider = metaString(meta?.payProvider, preview?.payProvider);

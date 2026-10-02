@@ -1,13 +1,18 @@
 import type { VisionaryChatError, VisionaryChatResponse } from "@/lib/visionary-ai/types";
 import type { BucketBrainIntent, VisionaryEntity, WorkBoardEntity } from "./response";
 
-export async function askVisionary(question: string, signal?: AbortSignal): Promise<VisionaryEntity> {
+export async function askVisionary(
+  question: string,
+  signal?: AbortSignal,
+  extras?: { roomId?: string | null }
+): Promise<VisionaryEntity> {
   try {
     const response = await fetch("/api/visionary-ai/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         messages: [{ role: "user", content: question.slice(0, 1500) }],
+        ...(extras?.roomId ? { roomId: extras.roomId } : {}),
       }),
       signal,
     });

@@ -108,7 +108,65 @@ export function isForumRoomActivityMeta(meta: Record<string, unknown> | null | u
   const destinationType = String(meta.destinationType || "");
   const source = String(meta.source || "");
   if (destinationType === "room" || destinationType === "room_conversation") return true;
-  return source === "forum_room_studio";
+  return source === "forum_room_studio" || source === "forum_room_share";
+}
+
+/** Those Ryderz stays title case. Other Forum Room tags read as MUSIC / JAB LIT. */
+export function forumRoomTagName(name: string | null | undefined): string {
+  const trimmed = String(name || "").trim();
+  if (!trimmed) return "";
+  if (/th(?:ose|at)\s+ryderz/i.test(trimmed)) return "Those Ryderz";
+  return trimmed.toUpperCase();
+}
+
+/**
+ * Primary Activity / tile badge for Forum destinations.
+ * Room Drops show the Room name (not Vision Drop). Conversation Drops show
+ * CONVERSATION or the conversation title.
+ */
+export function forumDropPrimaryTag(
+  meta: Record<string, unknown> | null | undefined
+): string | null {
+  if (!isForumRoomActivityMeta(meta)) return null;
+  const destinationType = String(meta?.destinationType || "");
+  const conversation = String(meta?.conversationTitle || "").trim();
+  const room = forumRoomDisplayName({
+    roomId: typeof meta?.roomId === "string" ? meta.roomId : null,
+    roomName: typeof meta?.roomName === "string" ? meta.roomName : null,
+    roomIcon: typeof meta?.roomIcon === "string" ? meta.roomIcon : null,
+  });
+  const roomTag = forumRoomTagName(room.name !== "a Room" ? room.name : "");
+
+  if (destinationType === "room_conversation" || String(meta?.origin || "") === "conversation") {
+    if (conversation) return conversation;
+    if (roomTag) return `CONVERSATION · ${roomTag}`;
+    return "CONVERSATION";
+  }
+
+  if (roomTag) return roomTag;
+  return "ROOM DROP";
+}
+
+/** Short media chip once the primary badge is the Room / conversation. */
+export function forumDropMediaChip(rawType: string | null | undefined): string | null {
+  const t = String(rawType || "").trim();
+  if (!t) return null;
+  const lower = t.toLowerCase();
+  if (lower.includes("vision") || lower.includes("media") || lower.includes("photo") || lower.includes("image") || lower.includes("video")) {
+    return "Vision";
+  }
+  if (lower.includes("music") || lower.includes("spotify") || lower.includes("soundcloud") || lower.includes("audio")) {
+    return "Music";
+  }
+  if (lower.includes("youtube") || lower.includes("youtu.be")) return "YouTube";
+  if (lower.includes("thought") || lower.includes("voice")) return "Thought";
+  if (lower.includes("doc") || lower.includes("descript")) return "Doc";
+  if (lower.includes("dropbook") || lower.includes("slide")) return "Dropbook";
+  if (lower.includes("news")) return "News";
+  if (lower.includes("pay")) return "Pay";
+  if (lower.includes("link")) return "Link";
+  if (/\bdrop\b/i.test(t)) return t.replace(/\s+drop$/i, "").trim() || null;
+  return t;
 }
 
 function metaFlag(meta: Record<string, unknown> | null | undefined, key: string): boolean {

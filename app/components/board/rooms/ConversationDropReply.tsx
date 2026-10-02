@@ -46,7 +46,7 @@ export default function ConversationDropReply({
               {authorName}
             </span>
             <span className="text-[10px] font-black uppercase tracking-[0.14em] text-emerald-100/80">
-              Drop
+              {conversationTitle || "CONVERSATION"}
             </span>
           </div>
           <ActivityCard item={activity} compact roomScoped />

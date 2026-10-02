@@ -1,9 +1,12 @@
 import {
   applyForumRoomFeedCopy,
   copyFromDropDestination,
+  forumDropMediaChip,
+  forumDropPrimaryTag,
   forumRoomDisplayName,
   forumRoomDropItemTitle,
   forumRoomFeedCopy,
+  forumRoomTagName,
   isStudioCreatedForumDrop,
   keepOriginalForumFeedTitle,
   looksLikeMediaFileName,
@@ -215,5 +218,33 @@ assert(
   studioConversation?.body === "John replied with a Drop in Comic Character Design in JAB Comics.",
   "untitled studio conversation body names the thread"
 );
+
+assert(forumRoomTagName("Music") === "MUSIC", "Music room tag is MUSIC");
+assert(forumRoomTagName("JAB LIT") === "JAB LIT", "JAB LIT stays JAB LIT");
+assert(forumRoomTagName("Those Ryderz") === "Those Ryderz", "Those Ryderz stays title case");
+assert(forumRoomTagName("THAT RYDERZ") === "Those Ryderz", "THAT RYDERZ normalizes to Those Ryderz");
+assert(
+  forumDropPrimaryTag({ destinationType: "room", roomId: "music", source: "forum_room_studio" }) === "MUSIC",
+  "Room Drop primary tag is the Room name, not Vision Drop"
+);
+assert(
+  forumDropPrimaryTag({ destinationType: "room", roomId: "those-ryderz" }) === "Those Ryderz",
+  "Those Ryderz Room Drop tag stays Those Ryderz"
+);
+assert(
+  forumDropPrimaryTag({
+    destinationType: "room_conversation",
+    roomId: "jab-comics",
+    conversationTitle: "Comic Character Design",
+  }) === "Comic Character Design",
+  "Conversation Drop tag uses the conversation title"
+);
+assert(
+  forumDropPrimaryTag({ destinationType: "room_conversation", roomId: "jab-lit" }) === "CONVERSATION · JAB LIT",
+  "untitled Conversation Drop tag is CONVERSATION plus the Room"
+);
+assert(forumDropPrimaryTag({ destinationType: "feed", dropType: "Media" }) === null, "feed Vision Drops keep the type tag");
+assert(forumDropMediaChip("Media") === "Vision", "media type can stay as a secondary Vision chip");
+assert(!/vision drop/i.test(forumDropPrimaryTag({ destinationType: "room", roomId: "jab-lit" }) || ""), "Room tag is not Vision Drop");
 
 console.log("forumRoomFeedCopy.check.ts: ok");

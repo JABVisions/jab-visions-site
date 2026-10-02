@@ -2,6 +2,7 @@ import type { BucketBrainEntity, BucketBrainIntent, BucketBrainPhase, BucketBrai
 import { routeBucketBrainQuery } from "./intents";
 import { personalSearchNotice } from "./personal";
 import { askVisionary, searchBucketBrain } from "./visionary";
+import { mentionRoomIdFromQuery } from "@/lib/visionary-ai/forumContext";
 
 export type QueryProgress = {
   phase: BucketBrainPhase;
@@ -78,7 +79,9 @@ export async function executeBucketBrainQuery(
       phase: "thinking",
       status: "Thinking…",
     });
-    const visionary = await askVisionary(query, options?.signal);
+    const visionary = await askVisionary(query, options?.signal, {
+      roomId: mentionRoomIdFromQuery(query),
+    });
     entities.unshift(visionary);
   }
 

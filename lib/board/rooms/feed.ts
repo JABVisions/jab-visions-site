@@ -6,6 +6,8 @@ import {
 import { applyForumRoomFeedCopy, looksLikeMediaFileName } from "@/lib/board/forumRoomFeedCopy";
 import type { BoardActivity } from "@/lib/board/activity";
 import { conversationDropPointers, roomFeedShares } from "@/lib/board/forumRoomDrop";
+import { getRoomById } from "./catalog";
+import { resolveLiveDropVisibility } from "./livePrivacy";
 import type { RoomConversation, RoomDropShare, RoomFeedItem, RoomSession } from "./types";
 
 function parseTime(value: string | number | null | undefined) {
@@ -113,7 +115,13 @@ export function activityFromRoomShare(share: RoomDropShare): BoardActivity | nul
       linkUrl: typeof snapshot.linkUrl === "string" ? snapshot.linkUrl : undefined,
       fromDescript: snapshot.fromDescript === true,
       fromDropbook: snapshot.fromDropbook === true,
-      visibility: snapshot.visibility === "private" ? "private" : "public",
+      visibility: resolveLiveDropVisibility({
+        snapshot,
+        live:
+          snapshot.liveVisibility === "private" || snapshot.liveVisibility === "public"
+            ? { visibility: snapshot.liveVisibility }
+            : snapshot,
+      }),
       customizations: snapshot.customizations,
     },
     {
@@ -141,8 +149,14 @@ export function activityFromRoomShare(share: RoomDropShare): BoardActivity | nul
     origin,
     destinationType: origin === "conversation" ? "room_conversation" : "room",
     roomId: share.roomId,
-    roomName: typeof snapshot.roomName === "string" ? snapshot.roomName : null,
-    roomIcon: typeof snapshot.roomIcon === "string" ? snapshot.roomIcon : null,
+    roomName:
+      (typeof snapshot.roomName === "string" && snapshot.roomName) ||
+      getRoomById(share.roomId)?.name ||
+      null,
+    roomIcon:
+      (typeof snapshot.roomIcon === "string" && snapshot.roomIcon) ||
+      getRoomById(share.roomId)?.icon ||
+      null,
     conversationId: share.conversationId || null,
     conversationTitle: snapshotConversationTitle || null,
     fromDescript: snapshot.fromDescript === true,

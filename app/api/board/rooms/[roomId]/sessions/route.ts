@@ -72,15 +72,30 @@ export async function POST(
     return json({ ok: true, ended: true });
   }
 
+  const provider =
+    body.provider === "livekit" ||
+    body.provider === "daily" ||
+    body.provider === "agora" ||
+    body.provider === "webrtc" ||
+    body.provider === "none"
+      ? body.provider
+      : kind === "live"
+        ? "webrtc"
+        : "none";
+
   const row = {
     room_id: roomId,
     kind,
     status: "live",
     mode,
-    provider: "none",
+    provider,
     started_by: user.id,
     started_at: new Date().toISOString(),
-    metadata: { placeholder: true, vendor: "none" },
+    metadata: {
+      placeholder: kind !== "live",
+      vendor: provider,
+      signals: [],
+    },
   };
 
   const { data, error } = await supabase.from("room_sessions").insert(row).select("*").maybeSingle();
@@ -89,7 +104,7 @@ export async function POST(
       ok: true,
       persisted: "local",
       session: { ...row, id: `local_${kind}_${Date.now()}` },
-      placeholder: true,
+      placeholder: kind !== "live",
     });
   }
   if (error) return json({ ok: false, message: error.message }, 500);
@@ -119,10 +134,10 @@ export async function POST(
       entityId: roomId,
       href: `/board/forums/${roomId}`,
       message: describeRoomActivity(activityType, actorName, room.name),
-      metadata: { roomId, roomName: room.name, actorName, placeholder: true },
+      metadata: { roomId, roomName: room.name, actorName, placeholder: kind !== "live", provider },
       groupKey: roomActivityGroupKey(activityType, roomId),
     }).catch(() => undefined);
   }
 
-  return json({ ok: true, persisted: "db", session: data || row, placeholder: true });
+  return json({ ok: true, persisted: "db", session: data || row, placeholder: kind !== "live" });
 }

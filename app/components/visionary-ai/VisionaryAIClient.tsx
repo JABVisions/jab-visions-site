@@ -40,7 +40,17 @@ export default function VisionaryAIClient() {
   const [busy, setBusy] = useState(false);
   const [mode, setMode] = useState<"ready" | "openai" | "knowledge" | "safety">("ready");
   const [error, setError] = useState("");
+  const [roomId, setRoomId] = useState("");
   const conversationEndRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      setRoomId(params.get("room") || "");
+    } catch {
+      setRoomId("");
+    }
+  }, []);
 
   useEffect(() => {
     conversationEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
@@ -72,6 +82,7 @@ export default function VisionaryAIClient() {
               role,
               content: messageContent,
             })),
+          ...(roomId ? { roomId } : {}),
         }),
       });
       const payload = (await response.json()) as VisionaryChatResponse | VisionaryChatError;
@@ -142,6 +153,7 @@ export default function VisionaryAIClient() {
           <p>
             Responses are anchored to a curated JAB Visions knowledge base. Private
             Board data is not connected.
+            {roomId ? " Public Forum Room context is attached for this conversation." : ""}
           </p>
         </div>
 

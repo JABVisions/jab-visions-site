@@ -3,6 +3,7 @@
 import React from "react";
 import ActivityCard from "@/app/components/board/ActivityCard";
 import { activityFromRoomShare, type RoomDropShare } from "@/lib/board/rooms";
+import { forumDropPrimaryTag } from "@/lib/board/forumRoomFeedCopy";
 
 export default function RoomDropCard({
   share,
@@ -19,7 +20,16 @@ export default function RoomDropCard({
   return (
     <div className="overflow-hidden rounded-[1.5rem] border border-white/10">
       <div className="flex items-center justify-between gap-2 border-b border-white/10 bg-white/[0.04] px-4 py-2 text-[10px] font-black uppercase tracking-[0.16em] text-emerald-100/80">
-        <span>{share.origin === "create" ? "Room Drop" : "Shared Drop"}</span>
+        <span>
+          {forumDropPrimaryTag({
+            destinationType: share.origin === "conversation" ? "room_conversation" : "room",
+            source: share.origin === "share" ? "forum_room_share" : "forum_room_studio",
+            origin: share.origin,
+            roomId: share.roomId,
+            roomName: share.snapshot?.roomName,
+            conversationTitle: share.snapshot?.conversationTitle,
+          }) || (share.origin === "create" ? "Room Drop" : "Shared Drop")}
+        </span>
       </div>
       <ActivityCard item={activity} compact roomScoped onRemove={canRemove ? onRemove : undefined} />
     </div>
