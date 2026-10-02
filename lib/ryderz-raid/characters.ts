@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { clone as cloneSkeleton } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import type { EnemyKind, RyderId, RyderSpec } from './config';
+import { ProceduralSkeleton, assessSkinning, bakeSkinnedMeshes, poseSkeleton } from './skeletal';
 import { addOutline, buildHumanoid, glow, toon, type Humanoid } from './toon';
 
 const BLADE = new THREE.BoxGeometry(0.08, 0.95, 0.08);
@@ -22,15 +23,17 @@ const BOTTOMS = [0x1c1c28, 0x243044, 0x2c241c, 0x1a2220];
 export type ClipRole = 'idle' | 'walk' | 'run' | 'attack';
 
 /**
- * Runtime state for a GLB-driven Ryder. If the GLB ships a skeleton and clips
- * we drive it with an AnimationMixer; otherwise we fall back to "puppet"
- * motion (lean / bob / sway / chop) applied to the whole figure.
+ * Runtime state for a GLB-driven Ryder.
+ * - Skeleton + clips: driven with an AnimationMixer.
+ * - Skeleton, no clips (Tripo auto-rig): bones posed procedurally.
+ * - Static mesh: "puppet" motion (lean / bob / sway / chop) on the whole figure.
  */
 export interface GltfRig {
   figure: THREE.Object3D;
   basePosition: THREE.Vector3;
   skinned: boolean;
   mixer: THREE.AnimationMixer | null;
+  skeleton: ProceduralSkeleton | null;
   actions: Partial<Record<ClipRole, THREE.AnimationAction>>;
   current: ClipRole | null;
   attackLeft: number;
@@ -70,6 +73,16 @@ export async function preloadRyderGltf(spec: RyderSpec) {
     if (Array.isArray(mesh.material)) mesh.material.forEach(mark);
     else if (mesh.material) mark(mesh.material);
   });
+  if (skinned) {
+    // A rig whose weights do not match its geometry would tear apart when
+    // posed; freeze it in its export pose and animate it as a puppet instead.
+    const broken = assessSkinning(gltf.scene);
+    if (broken.length) {
+      bakeSkinnedMeshes(gltf.scene);
+      skinned = false;
+      console.info('[raid] %s: untrusted rig (%s), using static mesh', spec.id, broken.join(', '));
+    }
+  }
   gltfTemplates.set(spec.id, { scene: gltf.scene, clips: gltf.animations ?? [], skinned });
   if (gltf.animations?.length) {
     console.info('[raid] %s clips:', spec.id, gltf.animations.map((c) => c.name).join(', '));
@@ -137,10 +150,34 @@ function dummyPart(name: string) {
   return mesh;
 }
 
+/** Figure-space bounds, re-evaluating skinned meshes against their current pose. */
+function measureFigure(figure: THREE.Object3D) {
+  figure.updateWorldMatrix(true, true);
+  figure.traverse((object) => {
+    const mesh = object as THREE.SkinnedMesh;
+    if (!mesh.isSkinnedMesh) return;
+    mesh.skeleton.update();
+    mesh.computeBoundingBox();
+  });
+  return new THREE.Box3().setFromObject(figure);
+}
+
 function wrapGltfAsHumanoid(template: GltfTemplate, height = 1.88): { humanoid: Humanoid; rig: GltfRig } {
   const group = new THREE.Group();
   const figure = template.skinned ? (cloneSkeleton(template.scene) as THREE.Group) : template.scene.clone(true);
-  const box = new THREE.Box3().setFromObject(figure);
+
+  // Rigged but clipless exports get a procedural skeleton, which also squares
+  // up whatever pose the model was exported in before we measure it.
+  let skeleton: ProceduralSkeleton | null = null;
+  if (template.skinned && !template.clips.length) {
+    const candidate = new ProceduralSkeleton(figure);
+    if (candidate.isUsable) {
+      skeleton = candidate;
+      skeleton.apply();
+    }
+  }
+
+  const box = measureFigure(figure);
   const size = box.getSize(new THREE.Vector3());
   const scale = height / Math.max(size.y, 0.001);
   figure.scale.setScalar(scale);
@@ -167,13 +204,15 @@ function wrapGltfAsHumanoid(template: GltfTemplate, height = 1.88): { humanoid: 
 
   // Weapon socket: hand bone when rigged, otherwise the raised fist of the static pose.
   let weaponSocket: THREE.Object3D;
-  const bone = template.skinned ? findHandBone(figure) : null;
+  const bone = template.skinned ? (skeleton?.bone('handR') ?? findHandBone(figure)) : null;
   if (bone) {
     weaponSocket = new THREE.Object3D();
     weaponSocket.name = 'WeaponSocket';
     // Bones live inside the scaled figure; undo that so weapons keep metre sizes.
     weaponSocket.scale.setScalar(1 / scale);
     bone.add(weaponSocket);
+    // Weapons are authored in figure space (grip at origin, blade along +Y).
+    skeleton?.alignSocket('handR', weaponSocket);
   } else {
     // Anchor on the figure (so it follows puppet lean/twist), then step back
     // into metre space for the weapon itself.
@@ -209,6 +248,7 @@ function wrapGltfAsHumanoid(template: GltfTemplate, height = 1.88): { humanoid: 
     basePosition: figure.position.clone(),
     skinned: template.skinned,
     mixer,
+    skeleton,
     actions,
     current: null,
     attackLeft: 0,
@@ -316,6 +356,18 @@ export function animateGltfFighter(
     return;
   }
 
+  // --- Procedural skeleton: real strides, arm swing and an arm-driven chop ---
+  if (rig.skeleton) {
+    poseSkeleton(rig.skeleton, { phase, moving, sprinting, meleeT });
+    const f = rig.figure;
+    const swing = meleeT > 0 ? Math.sin((1 - meleeT) * Math.PI) : 0;
+    f.position.copy(rig.basePosition);
+    f.position.y += Math.abs(Math.sin(phase)) * (sprinting ? 0.045 : 0.025) * moving;
+    f.position.z += swing * 0.22;
+    f.rotation.set(0, 0, 0);
+    return;
+  }
+
   // --- Puppet fallback for an unrigged mesh -------------------------------
   const f = rig.figure;
   const swing = meleeT > 0 ? Math.sin((1 - meleeT) * Math.PI) : 0;
@@ -358,7 +410,8 @@ export function buildRyder(spec: RyderSpec, options: { clone?: boolean } = {}): 
       weapons.push(orb, halo);
       glowMeshes.push(orb, halo);
     }
-    // Keven's Tripo mesh already models his pink dart, so no socketed weapon.
+    // Keven's dart and Rubi's blade are modelled into their Tripo meshes, and Leo
+    // fights bare-knuckled, so none of them get a socketed weapon.
     return { humanoid, weapons, glowMeshes, meshSource: 'gltf', rig };
   }
 
