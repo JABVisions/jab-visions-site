@@ -535,22 +535,11 @@
   box-shadow: 0 0 10px var(--aura, #31ff96);
 }
 
-.selectActions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  margin-top: 16px;
-}
-
-.dropIn,
-.glbLink {
+.dropIn {
   appearance: none;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
+  display: block;
   width: fit-content;
+  margin: 16px auto 0;
   padding: 12px 18px;
   border: 1px solid rgba(49, 255, 150, 0.45);
   border-radius: 999px;
@@ -560,17 +549,10 @@
   font: 800 0.72rem/1 monospace;
   letter-spacing: 0.14em;
   text-transform: uppercase;
-  text-decoration: none;
-}
-
-.glbLink {
-  background: rgba(0, 0, 0, 0.34);
 }
 
 .dropIn:hover,
-.dropIn:focus-visible,
-.glbLink:hover,
-.glbLink:focus-visible {
+.dropIn:focus-visible {
   box-shadow: 0 0 22px rgba(49, 255, 150, 0.32);
   outline: none;
 }

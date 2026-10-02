@@ -5,8 +5,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint",
-    "export:ryderz-glb": "npx --yes tsx scripts/export-ryderz-glb.ts"
+    "lint": "next lint"
   },
   "dependencies": {
     "@supabase/auth-helpers-nextjs": "^0.15.0",

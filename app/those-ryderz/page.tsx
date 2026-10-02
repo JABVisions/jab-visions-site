@@ -26,7 +26,6 @@ const RYDERZ = [
       'Rubi carries confidence like armor, but underneath the shine is the ache of feeling overlooked. Her power splits her into multiples, forcing her to face every version of herself she tries to outrun.',
     signal:
       'Unstable brilliance, multiplied desire, emotional precision.',
-    glb: '/assets/those-ryderz/models/rubi-wong.glb',
   },
   {
     id: 'leo',
@@ -42,7 +41,6 @@ const RYDERZ = [
       'Leo is fashion, pressure, ego, and command wrapped into one dangerous spark. She moves faster than most people can understand her, but pride keeps her from slowing down long enough to be truly seen.',
     signal:
       'High velocity aura, elevated self-image, fracture risk under humiliation.',
-    glb: '/assets/those-ryderz/models/leo-montana.glb',
   },
   {
     id: 'aaron',
@@ -58,7 +56,6 @@ const RYDERZ = [
       'Aaron is soft-spoken, observant, and harder to read than he looks. His greed is not just about wanting more. It is about wanting to keep what makes him feel safe, even when his heart is split between loyalty and longing.',
     signal:
       'Spatial distortion, guarded attachment, emotional concealment.',
-    glb: '/assets/those-ryderz/models/aaron-addams.glb',
   },
   {
     id: 'zoe',
@@ -74,7 +71,6 @@ const RYDERZ = [
       'Zoe is bubbly, reckless, romantic, and louder than the pain she refuses to explain. Her aura protects her body before she learns how to protect her spirit.',
     signal:
       'Defensive glamour, unstable longing, high-impact emotional discharge.',
-    glb: '/assets/those-ryderz/models/zoe-folie.glb',
   },
   {
     id: 'keven',
@@ -90,16 +86,8 @@ const RYDERZ = [
       'Keven looks unserious until the room needs saving. His stillness is mistaken for weakness, but his power lives in patience, timing, and the strange courage to disappear before striking back.',
     signal:
       'Phantom pulse, delayed activation, redeemer-class anomaly.',
-    glb: '/assets/those-ryderz/models/keven-hart.glb',
   },
 ] as const;
-
-const GLB_PACK = '/assets/those-ryderz/models/those-ryderz.glb';
-const GLB_ZIP = '/assets/those-ryderz/models/those-ryderz-glb.zip';
-
-function glbFilename(path: string) {
-  return path.split('/').pop() ?? 'ryder.glb';
-}
 
 const statusItems = [
   ['Feature Film', 'The first story'],
@@ -364,67 +352,8 @@ export default function ThoseRyderz() {
                 <span>Signal reading</span>
                 {selectedRyder.signal}
               </p>
-              <a className="glb-download" href={selectedRyder.glb} download={glbFilename(selectedRyder.glb)}>
-                Download {selectedRyder.name} GLB
-              </a>
             </aside>
           )}
-        </section>
-
-        <section className="models-tile" id="models">
-          <div className="section-heading">
-            <div>
-              <p>SIGNAL MESH / 003</p>
-              <h2>Download the Ryderz</h2>
-            </div>
-            <p className="section-intro">
-              Cel-shaded raid figures as GLB files — the binary glTF format
-              Blender, Unity, Unreal, and most 3D viewers open. Each file is
-              the same mesh used in Those Ryderz: Raid.
-            </p>
-          </div>
-
-          <div className="model-grid">
-            {RYDERZ.map((ryder) => (
-              <article className={`model-card aura-${ryder.aura}`} key={`${ryder.id}-glb`}>
-                <div
-                  className="model-portrait"
-                  style={{
-                    position: 'relative',
-                    width: 72,
-                    height: 72,
-                    overflow: 'hidden',
-                  }}
-                >
-                  <Image
-                    src={ryder.img}
-                    alt=""
-                    fill
-                    unoptimized
-                    className="character-image"
-                    style={{ objectFit: 'cover' }}
-                  />
-                </div>
-                <div className="model-copy">
-                  <span>{ryder.title}</span>
-                  <h3>{ryder.name}</h3>
-                  <p>glTF binary · .glb</p>
-                </div>
-                <a className="glb-download" href={ryder.glb} download={glbFilename(ryder.glb)}>
-                  Download GLB
-                </a>
-              </article>
-            ))}
-          </div>
-
-          <div className="model-pack">
-            <a className="glb-download" href={GLB_PACK} download="those-ryderz.glb">
-              All five in one GLB
-            </a>
-            <a className="glb-download glb-download-ghost" href={GLB_ZIP} download="those-ryderz-glb.zip">
-              ZIP pack
-            </a>
-          </div>
         </section>
 
         <section className="game-tile" id="raid">
@@ -516,7 +445,6 @@ export default function ThoseRyderz() {
         .hero-tile,
         .character-tile,
         .game-tile,
-        .models-tile,
         .status-tile {
           position: relative;
           overflow: hidden;
@@ -532,7 +460,6 @@ export default function ThoseRyderz() {
         .hero-tile::before,
         .character-tile::before,
         .game-tile::before,
-        .models-tile::before,
         .status-tile::before {
           content: '';
           position: absolute;
@@ -710,99 +637,8 @@ export default function ThoseRyderz() {
         }
 
         .character-tile,
-        .game-tile,
-        .models-tile {
+        .game-tile {
           padding: 28px;
-        }
-
-        .model-grid {
-          position: relative;
-          z-index: 1;
-          display: grid;
-          grid-template-columns: repeat(5, minmax(0, 1fr));
-          gap: 12px;
-        }
-
-        .model-card {
-          display: flex;
-          flex-direction: column;
-          gap: 12px;
-          min-width: 0;
-          padding: 16px 14px 14px;
-          border: 1px solid rgba(255, 255, 255, 0.13);
-          border-radius: 16px;
-          background: rgba(0, 0, 0, 0.42);
-        }
-
-        .model-portrait {
-          border: 2px solid var(--aura);
-          border-radius: 50%;
-          box-shadow: 0 0 16px var(--aura-soft);
-        }
-
-        .model-copy span {
-          color: var(--aura);
-          font: 800 0.58rem/1.2 monospace;
-          letter-spacing: 0.1em;
-          text-transform: uppercase;
-        }
-
-        .model-copy h3 {
-          margin: 6px 0 4px;
-          overflow-wrap: anywhere;
-          color: white;
-          font-size: 0.95rem;
-        }
-
-        .model-copy p {
-          margin: 0;
-          color: rgba(228, 239, 232, 0.47);
-          font: 700 0.58rem/1.2 monospace;
-          letter-spacing: 0.1em;
-          text-transform: uppercase;
-        }
-
-        .model-pack {
-          position: relative;
-          z-index: 1;
-          display: flex;
-          flex-wrap: wrap;
-          gap: 10px;
-          margin-top: 16px;
-        }
-
-        .glb-download {
-          position: relative;
-          z-index: 1;
-          display: inline-flex;
-          align-items: center;
-          justify-content: center;
-          width: fit-content;
-          margin-top: 16px;
-          padding: 10px 14px;
-          border: 1px solid color-mix(in srgb, var(--aura, #31ff96) 55%, transparent);
-          border-radius: 999px;
-          background: color-mix(in srgb, var(--aura, #31ff96) 16%, transparent);
-          color: #f7fff9;
-          text-decoration: none;
-          font: 800 0.62rem/1 monospace;
-          letter-spacing: 0.12em;
-          text-transform: uppercase;
-        }
-
-        .model-card .glb-download {
-          margin-top: auto;
-          width: 100%;
-        }
-
-        .glb-download:hover,
-        .glb-download:focus-visible {
-          box-shadow: 0 0 18px var(--aura-soft, rgba(49, 255, 150, 0.32));
-          outline: none;
-        }
-
-        .glb-download-ghost {
-          background: rgba(0, 0, 0, 0.28);
         }
 
         .raid-loading {
@@ -1357,10 +1193,6 @@ export default function ThoseRyderz() {
             grid-template-columns: 1fr;
           }
 
-          .model-grid {
-            grid-template-columns: repeat(3, minmax(0, 1fr));
-          }
-
           .logo-frame {
             min-height: 440px;
           }
@@ -1399,7 +1231,6 @@ export default function ThoseRyderz() {
           .hero-layout,
           .character-tile,
           .game-tile,
-          .models-tile,
           .status-tile {
             padding: 14px;
           }
@@ -1419,7 +1250,6 @@ export default function ThoseRyderz() {
           }
 
           .character-grid,
-          .model-grid,
           .status-grid,
           .profile-stats {
             grid-template-columns: repeat(2, minmax(0, 1fr));

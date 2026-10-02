@@ -331,27 +331,6 @@ export const RYDERZ: Record<RyderId, RyderSpec> = {
 
 export const RYDER_ORDER: RyderId[] = ['rubi', 'leo', 'aaron', 'zoe', 'keven'];
 
-export const RYDER_GLB_SLUG: Record<RyderId, string> = {
-  rubi: 'rubi-wong',
-  leo: 'leo-montana',
-  aaron: 'aaron-addams',
-  zoe: 'zoe-folie',
-  keven: 'keven-hart',
-};
-
-export const RYDER_GLB_DIR = '/assets/those-ryderz/models';
-
-export function ryderGlbPath(id: RyderId) {
-  return `${RYDER_GLB_DIR}/${RYDER_GLB_SLUG[id]}.glb`;
-}
-
-export function ryderGlbFilename(id: RyderId) {
-  return `${RYDER_GLB_SLUG[id]}.glb`;
-}
-
-export const RYDER_GLB_PACK = `${RYDER_GLB_DIR}/those-ryderz.glb`;
-export const RYDER_GLB_ZIP = `${RYDER_GLB_DIR}/those-ryderz-glb.zip`;
-
 export type EnemyKind = 'walker' | 'sprinter' | 'heavy' | 'thrower' | 'broadcaster';
 
 export interface EnemySpec {

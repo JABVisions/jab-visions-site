@@ -7,8 +7,6 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   RYDERZ,
   RYDER_ORDER,
-  ryderGlbFilename,
-  ryderGlbPath,
   UPGRADE_ORDER,
   UPGRADES,
   upgradeCost,
@@ -541,22 +539,13 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
                 />
               ))}
             </div>
-            <div className={styles.selectActions}>
-              <button
-                type="button"
-                className={styles.dropIn}
-                onClick={() => pick(RYDER_ORDER[focus])}
-              >
-                Drop in as {RYDERZ[RYDER_ORDER[focus]].name}
-              </button>
-              <a
-                className={styles.glbLink}
-                href={ryderGlbPath(RYDER_ORDER[focus])}
-                download={ryderGlbFilename(RYDER_ORDER[focus])}
-              >
-                Download {RYDERZ[RYDER_ORDER[focus]].name} GLB
-              </a>
-            </div>
+            <button
+              type="button"
+              className={styles.dropIn}
+              onClick={() => pick(RYDER_ORDER[focus])}
+            >
+              Drop in as {RYDERZ[RYDER_ORDER[focus]].name}
+            </button>
           </div>
         </div>
       )}
