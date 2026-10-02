@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { clone as cloneSkeleton } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import type { EnemyKind, RyderId, RyderSpec } from './config';
-import { ProceduralSkeleton, assessSkinning, bakeSkinnedMeshes, poseSkeleton } from './skeletal';
+import { ProceduralSkeleton, assessSkinning, bakeSkinnedMeshes, extractStrikes, poseSkeleton } from './skeletal';
 import { addOutline, buildHumanoid, glow, toon, type Humanoid } from './toon';
 
 const BLADE = new THREE.BoxGeometry(0.08, 0.95, 0.08);
@@ -24,8 +24,9 @@ export type ClipRole = 'idle' | 'walk' | 'run' | 'attack';
 
 /**
  * Runtime state for a GLB-driven Ryder.
- * - Skeleton + clips: driven with an AnimationMixer.
- * - Skeleton, no clips (Tripo auto-rig): bones posed procedurally.
+ * - Skeleton + locomotion clips: driven with an AnimationMixer.
+ * - Skeleton, no locomotion clips (Tripo auto-rig): bones posed procedurally;
+ *   any fight clips are cut into strikes and layered on top for melee.
  * - Static mesh: "puppet" motion (lean / bob / sway / chop) on the whole figure.
  */
 export interface GltfRig {
@@ -37,6 +38,12 @@ export interface GltfRig {
   actions: Partial<Record<ClipRole, THREE.AnimationAction>>;
   current: ClipRole | null;
   attackLeft: number;
+  /** Short in-place melee clips played over the procedural skeleton. */
+  strikes: THREE.AnimationAction[];
+  strikeIndex: number;
+  strike: THREE.AnimationAction | null;
+  /** Seconds left before the finished strike releases its bones back to the skeleton. */
+  strikeRelease: number;
   /** Socket the weapon hangs from. A hand bone when rigged, a fixed point otherwise. */
   weaponSocket: THREE.Object3D;
 }
@@ -52,6 +59,7 @@ export interface Fighter {
 interface GltfTemplate {
   scene: THREE.Group;
   clips: THREE.AnimationClip[];
+  strikes: THREE.AnimationClip[];
   skinned: boolean;
 }
 
@@ -83,9 +91,12 @@ export async function preloadRyderGltf(spec: RyderSpec) {
       console.info('[raid] %s: untrusted rig (%s), using static mesh', spec.id, broken.join(', '));
     }
   }
-  gltfTemplates.set(spec.id, { scene: gltf.scene, clips: gltf.animations ?? [], skinned });
-  if (gltf.animations?.length) {
-    console.info('[raid] %s clips:', spec.id, gltf.animations.map((c) => c.name).join(', '));
+  const clips = gltf.animations ?? [];
+  const strikes = skinned && clips.length ? extractStrikes(gltf.scene, clips) : [];
+  gltfTemplates.set(spec.id, { scene: gltf.scene, clips, strikes, skinned });
+  if (clips.length) {
+    console.info('[raid] %s clips:', spec.id, clips.map((c) => c.name).join(', '));
+    if (strikes.length) console.info('[raid] %s strikes:', spec.id, strikes.length);
   }
 }
 
@@ -166,10 +177,11 @@ function wrapGltfAsHumanoid(template: GltfTemplate, height = 1.88): { humanoid: 
   const group = new THREE.Group();
   const figure = template.skinned ? (cloneSkeleton(template.scene) as THREE.Group) : template.scene.clone(true);
 
-  // Rigged but clipless exports get a procedural skeleton, which also squares
-  // up whatever pose the model was exported in before we measure it.
+  // Rigged exports without locomotion clips get a procedural skeleton, which
+  // also squares up whatever pose the model was exported in before we measure it.
+  const hasLocomotion = (['idle', 'walk', 'run'] as ClipRole[]).some((role) => pickClip(template.clips, role));
   let skeleton: ProceduralSkeleton | null = null;
-  if (template.skinned && !template.clips.length) {
+  if (template.skinned && !hasLocomotion) {
     const candidate = new ProceduralSkeleton(figure);
     if (candidate.isUsable) {
       skeleton = candidate;
@@ -228,7 +240,16 @@ function wrapGltfAsHumanoid(template: GltfTemplate, height = 1.88): { humanoid: 
 
   let mixer: THREE.AnimationMixer | null = null;
   const actions: GltfRig['actions'] = {};
-  if (template.skinned && template.clips.length) {
+  const strikes: THREE.AnimationAction[] = [];
+  if (skeleton && template.strikes.length) {
+    mixer = new THREE.AnimationMixer(figure);
+    template.strikes.forEach((clip) => {
+      const action = mixer!.clipAction(clip);
+      action.setLoop(THREE.LoopOnce, 1);
+      action.clampWhenFinished = true;
+      strikes.push(action);
+    });
+  } else if (template.skinned && template.clips.length) {
     mixer = new THREE.AnimationMixer(figure);
     (['idle', 'walk', 'run', 'attack'] as ClipRole[]).forEach((role) => {
       const clip = pickClip(template.clips, role);
@@ -252,6 +273,10 @@ function wrapGltfAsHumanoid(template: GltfTemplate, height = 1.88): { humanoid: 
     actions,
     current: null,
     attackLeft: 0,
+    strikes,
+    strikeIndex: 0,
+    strike: null,
+    strikeRelease: 0,
     weaponSocket,
   };
 
@@ -315,6 +340,60 @@ function fitRigAction(rig: GltfRig, role: ClipRole, fade = 0.16) {
   rig.current = role;
 }
 
+/** Melee duration the strike clips are fitted to; matches the engine's swing window. */
+const STRIKE_TIME = 0.45;
+const STRIKE_RELEASE = 0.12;
+
+/**
+ * Procedural locomotion with baked strikes layered on top. The skeleton is
+ * posed every frame; while a strike plays the mixer overrides the bones it
+ * animates, blending from (and back to) the pose it found when it started.
+ * The action is stopped once released so the mixer lets go of the bones.
+ */
+function animateSkeletonWithStrikes(
+  rig: GltfRig,
+  dt: number,
+  phase: number,
+  moving: number,
+  sprinting: boolean,
+  meleeStarted: boolean,
+) {
+  const skeleton = rig.skeleton!;
+  const mixer = rig.mixer!;
+  // The clip supplies the swing, so the procedural chop stays off.
+  poseSkeleton(skeleton, { phase, moving, sprinting, meleeT: 0 });
+  const f = rig.figure;
+  f.position.copy(rig.basePosition);
+  f.position.y += Math.abs(Math.sin(phase)) * (sprinting ? 0.045 : 0.025) * moving;
+  f.rotation.set(0, 0, 0);
+
+  if (meleeStarted) {
+    rig.strike?.stop();
+    const strike = rig.strikes[rig.strikeIndex % rig.strikes.length];
+    rig.strikeIndex += 1;
+    const length = strike.getClip().duration || STRIKE_TIME;
+    strike.timeScale = length / STRIKE_TIME;
+    strike.reset().fadeIn(0.05).play();
+    rig.strike = strike;
+    rig.attackLeft = STRIKE_TIME;
+    rig.strikeRelease = STRIKE_RELEASE;
+  }
+  if (!rig.strike) return;
+
+  if (rig.attackLeft > 0) {
+    rig.attackLeft -= dt;
+    if (rig.attackLeft <= 0) rig.strike.fadeOut(STRIKE_RELEASE);
+  } else {
+    rig.strikeRelease -= dt;
+    if (rig.strikeRelease <= 0) {
+      rig.strike.stop();
+      rig.strike = null;
+      return;
+    }
+  }
+  mixer.update(dt);
+}
+
 /**
  * Per-frame animation for a GLB Ryder.
  * - Rigged: crossfades idle / walk / run clips and fires the attack clip on melee.
@@ -331,6 +410,11 @@ export function animateGltfFighter(
 ) {
   const rig = fighter.rig;
   if (!rig) return;
+
+  if (rig.skeleton && rig.mixer && rig.strikes.length) {
+    animateSkeletonWithStrikes(rig, dt, phase, moving, sprinting, meleeStarted);
+    return;
+  }
 
   if (rig.mixer) {
     if (meleeStarted && rig.actions.attack) {

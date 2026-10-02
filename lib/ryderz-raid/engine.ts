@@ -731,6 +731,7 @@ export class RaidEngine {
     const rate = this.spec.meleeRate * (this.burnout ? 0.75 : 1);
     this.meleeCd = 1 / rate;
     this.meleeT = 1;
+    this.meleeStarted = true;
     this.combatT = COMBAT_LINGER;
     this.rig.addKick(-0.12);
     const dmg = this.meleeDamage();
@@ -873,6 +874,7 @@ export class RaidEngine {
 
   private cleave() {
     this.meleeT = 1;
+    this.meleeStarted = true;
     _fwd.set(Math.sin(this.yaw), 0, Math.cos(this.yaw));
     const dmg = this.meleeDamage() * 1.45;
     for (const host of this.hosts) {

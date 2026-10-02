@@ -306,6 +306,92 @@ export function bakeSkinnedMeshes(root: THREE.Object3D) {
   return skinned.length;
 }
 
+/** Clips that are not strikes: locomotion and emotes. */
+const NON_STRIKE_CLIP = /idle|breath|stand|rest|walk|run|jog|sprint|angry|taunt|emote|gesture|cheer|dance|wave|death|die|hit_?react/i;
+const ROOT_BONE = /^(mixamorig)?[_:]?(root|hips?|pelvis|waist)$/i;
+
+/**
+ * Cut short, in-place melee strikes out of long fight clips.
+ *
+ * Mocap-style exports often ship multi-second combos ("jab, cross, jab") with
+ * root motion baked into the hips. The game's melee lasts about half a second
+ * and the fighter is moved by gameplay, so we sample hand speed through each
+ * clip, take a window around every speed peak and drop the hip translation
+ * tracks from the result. Clips that read as locomotion are left alone.
+ */
+export function extractStrikes(root: THREE.Object3D, clips: THREE.AnimationClip[], window = { before: 0.22, after: 0.3 }) {
+  const limbs: THREE.Object3D[] = [];
+  root.traverse((o) => {
+    if (!(o as THREE.Bone).isBone) return;
+    if ((['handL', 'handR', 'footL', 'footR'] as BoneKey[]).some((key) => BONE_PATTERNS[key].test(o.name))) limbs.push(o);
+  });
+  if (!limbs.length) return [];
+
+  const mixer = new THREE.AnimationMixer(root);
+  const saved = new Map<THREE.Object3D, { p: THREE.Vector3; q: THREE.Quaternion; s: THREE.Vector3 }>();
+  root.traverse((o) => saved.set(o, { p: o.position.clone(), q: o.quaternion.clone(), s: o.scale.clone() }));
+
+  // Pass 1: limb speed profile per clip (fastest hand or foot at each sample).
+  const rate = 60;
+  const p = new THREE.Vector3();
+  const profiles: { clip: THREE.AnimationClip; speed: Float32Array }[] = [];
+  let max = 0;
+  for (const clip of clips) {
+    if (NON_STRIKE_CLIP.test(clip.name) || clip.duration < window.before + window.after) continue;
+    const action = mixer.clipAction(clip);
+    action.play();
+    const steps = Math.floor(clip.duration * rate);
+    const speed = new Float32Array(steps + 1);
+    const prev = limbs.map(() => new THREE.Vector3(NaN, NaN, NaN));
+    for (let i = 0; i <= steps; i += 1) {
+      mixer.setTime(i / rate);
+      root.updateMatrixWorld(true);
+      limbs.forEach((limb, k) => {
+        p.setFromMatrixPosition(limb.matrixWorld);
+        if (!Number.isNaN(prev[k].x)) speed[i] = Math.max(speed[i], p.distanceTo(prev[k]) * rate);
+        prev[k].copy(p);
+      });
+    }
+    action.stop();
+    mixer.uncacheClip(clip);
+    // Ignore the wrap-around sample at the very end.
+    for (let i = 1; i < steps - 1; i += 1) max = Math.max(max, speed[i]);
+    profiles.push({ clip, speed });
+  }
+
+  saved.forEach((state, o) => {
+    o.position.copy(state.p);
+    o.quaternion.copy(state.q);
+    o.scale.copy(state.s);
+  });
+  root.updateMatrixWorld(true);
+  if (max <= 0) return [];
+
+  // Pass 2: a strike per prominent speed peak, judged against the fastest
+  // move in the whole set so half-hearted shuffles do not count.
+  const strikes: THREE.AnimationClip[] = [];
+  const threshold = max * 0.4;
+  const gap = Math.round(rate * 0.35);
+  for (const { clip, speed } of profiles) {
+    const steps = speed.length - 1;
+    let lastPeak = -Infinity;
+    for (let i = 2; i < steps - 1; i += 1) {
+      const v = speed[i];
+      if (v < threshold || v < speed[i - 1] || v < speed[i + 1] || i - lastPeak < gap) continue;
+      lastPeak = i;
+      const t = i / rate;
+      const start = Math.max(0, t - window.before);
+      const end = Math.min(clip.duration, t + window.after);
+      const tracks = clip.tracks
+        .filter((track) => !(track.name.endsWith('.position') && ROOT_BONE.test(track.name.split('.')[0])))
+        .map((track) => track.clone().trim(start, end).shift(-start))
+        .filter((track) => track.times.length > 0);
+      if (tracks.length) strikes.push(new THREE.AnimationClip(`${clip.name} @${t.toFixed(2)}`, end - start, tracks));
+    }
+  }
+  return strikes;
+}
+
 export class ProceduralSkeleton {
   readonly figure: THREE.Object3D;
   readonly entries: BoneEntry[] = [];
