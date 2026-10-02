@@ -28,7 +28,14 @@ import {
   type CameraSnapshot,
   type CameraState,
 } from './camera';
-import { BOLT_GEOMETRY, buildHost, buildRyder, preloadRyderGltf, type Fighter } from './characters';
+import {
+  animateGltfFighter,
+  BOLT_GEOMETRY,
+  buildHost,
+  buildRyder,
+  preloadRyderGltf,
+  type Fighter,
+} from './characters';
 import { ParticleSystem } from './particles';
 import {
   animateHumanoid,
@@ -175,6 +182,7 @@ export class RaidEngine {
   private combatT = 0;
   private abilityT = 0;
   private sprinting = false;
+  private meleeStarted = false;
   private tuneMode = false;
   private hp = 100;
   private maxHp = 100;
@@ -655,7 +663,8 @@ export class RaidEngine {
     const moving = Math.min(1, len);
     this.anim += dt * (8 + moving * (this.sprinting ? 9 : 6));
     if (this.player.meshSource === 'gltf') {
-      this.player.humanoid.group.position.y = this.pos.y + Math.abs(Math.sin(this.anim)) * 0.04 * moving;
+      animateGltfFighter(this.player, dt, this.anim, moving, this.sprinting, this.meleeT, this.meleeStarted);
+      this.meleeStarted = false;
     } else {
       animateHumanoid(this.player.humanoid, this.anim, moving, time);
       if (this.meleeT > 0) poseMelee(this.player.humanoid, 1 - this.meleeT);
@@ -961,8 +970,12 @@ export class RaidEngine {
       } else {
         clone.fighter.humanoid.group.rotation.y = this.yaw;
       }
-      animateHumanoid(clone.fighter.humanoid, this.anim + clone.side, 0.6, this.clock.elapsedTime);
-      poseAim(clone.fighter.humanoid, 0.1);
+      if (clone.fighter.meshSource === 'gltf') {
+        animateGltfFighter(clone.fighter, dt, this.anim + clone.side, 0.6, false, 0, false);
+      } else {
+        animateHumanoid(clone.fighter.humanoid, this.anim + clone.side, 0.6, this.clock.elapsedTime);
+        poseAim(clone.fighter.humanoid, 0.1);
+      }
       clone.fireCd -= dt;
       if (clone.fireCd <= 0 && target && !this.burnout) {
         clone.fireCd = 1 / Math.max(2, this.spec.fireRate * 0.75);
