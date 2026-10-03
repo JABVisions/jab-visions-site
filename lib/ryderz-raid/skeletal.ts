@@ -128,6 +128,8 @@ interface NeutralTarget {
    * the rest vector from `from` to the centroid of `to` should end up along `dir`.
    */
   axis?: { from: BoneKey; to: BoneKey[]; dir: THREE.Vector3 };
+  /** Leave the bone as exported when the feature axis cannot be measured. */
+  axisOnly?: boolean;
   /**
    * Roll references, tried in order: a rest-pose vector between two bones and
    * where its component perpendicular to the bone should point. A reference is
@@ -141,6 +143,7 @@ function dir(x: number, y: number, z: number) {
 }
 
 const BACK = new THREE.Vector3(0, 0, -1);
+const FOOT_DIR = dir(0, -0.4, 0.92);
 const SHOULDER_LINE = { from: 'shoulderR' as BoneKey, to: 'shoulderL' as BoneKey, target: LEFT };
 
 const NEUTRAL: Partial<Record<BoneKey, NeutralTarget>> = {
@@ -182,8 +185,11 @@ const NEUTRAL: Partial<Record<BoneKey, NeutralTarget>> = {
   },
   lowerLegL: { dir: dir(0.02, -1, -0.03) },
   lowerLegR: { dir: dir(-0.02, -1, -0.03) },
-  // Feet and toes keep their exported ankle angle: auto-rigs place those bones
-  // too inconsistently to correct blindly.
+  // Feet are levelled from where the toes actually are (ankle → toes points
+  // forward and a little down). Without toe bones the ankle angle is left as
+  // exported: auto-rigs place foot bones too inconsistently to correct blindly.
+  footL: { dir: FOOT_DIR, axis: { from: 'footL', to: ['toesL'], dir: FOOT_DIR }, axisOnly: true },
+  footR: { dir: FOOT_DIR, axis: { from: 'footR', to: ['toesR'], dir: FOOT_DIR }, axisOnly: true },
 };
 
 interface BoneSegment {
@@ -470,11 +476,6 @@ export class ProceduralSkeleton {
       inherited.multiply(entry.restLocal);
       entry.baseFig.copy(inherited);
 
-      if (entry.key === 'footL' || entry.key === 'footR') {
-        this.plantFoot(entry);
-        continue;
-      }
-
       const target = entry.key ? NEUTRAL[entry.key] : undefined;
       if (!target) continue;
 
@@ -494,6 +495,7 @@ export class ProceduralSkeleton {
           }
         }
       }
+      if (!gotAxis && target.axisOnly) continue;
       if (!gotAxis) _v.copy(Y_AXIS).applyQuaternion(inherited);
       const m1 = new THREE.Quaternion().setFromUnitVectors(_v, primaryDir);
       entry.baseFig.premultiply(m1);
@@ -526,23 +528,6 @@ export class ProceduralSkeleton {
         break;
       }
     }
-  }
-
-  /**
-   * A foot under a near-vertical shin was planted on the ground when the model
-   * was exported, so when that shin still had to swing noticeably to stand
-   * straight, the foot keeps its exported world orientation instead of
-   * following the shin (otherwise a back-leaning shin leaves the toes pointing
-   * at the sky). Feet under raised or barely-corrected shins keep the exported
-   * ankle angle.
-   */
-  private plantFoot(entry: BoneEntry) {
-    const shin = entry.parent;
-    if (!shin) return;
-    const tilt = Math.acos(Math.min(1, -_v.copy(Y_AXIS).applyQuaternion(shin.restFig).y));
-    const swing = 2 * Math.acos(Math.min(1, Math.abs(_q2.copy(shin.restFig).invert().premultiply(shin.baseFig).w)));
-    const weight = smooth((0.6 - tilt) / 0.2) * smooth((swing - 0.15) / 0.25);
-    if (weight > 0) entry.baseFig.slerp(entry.restFig, weight);
   }
 
   /**
