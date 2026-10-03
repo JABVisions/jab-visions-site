@@ -23,6 +23,10 @@ export type MoveKey = 'Q' | 'E' | 'R';
 
 export const MOVE_KEYS: MoveKey[] = ['Q', 'E', 'R'];
 
+/** Keys (lower-case `KeyboardEvent.key`) that use the interactable the player is standing at. */
+export const INTERACT_KEYS = ['enter', 'x'];
+export const INTERACT_LABEL = 'Enter / X';
+
 export interface AbilitySpec {
   id: AbilityId;
   name: string;
@@ -34,6 +38,21 @@ export interface AbilitySpec {
   drain: number;
 }
 
+/**
+ * Everything the power VFX needs to dress a Ryder: aura and electricity colours
+ * plus how bright the aura runs when powered versus burnt out. Read by
+ * `RyderPowerVFX` from whichever Ryder is active, so switching just re-reads it.
+ */
+export interface RyderVisualProfile {
+  primaryColor: number;
+  auraColor: number;
+  electricityColor: number;
+  /** Aura glow multiplier when power is gone (0 switches the aura off). */
+  depletedAuraIntensity: number;
+  /** Aura glow multiplier at full power. */
+  poweredAuraIntensity: number;
+}
+
 export interface RyderSpec {
   id: RyderId;
   name: string;
@@ -43,6 +62,7 @@ export interface RyderSpec {
   color: number;
   colorHex: string;
   accent: number;
+  visual: RyderVisualProfile;
   weapon: string;
   /** Cast headshot. */
   portrait: string;
@@ -114,6 +134,7 @@ export const RYDERZ: Record<RyderId, RyderSpec> = {
     color: 0xff2e44,
     colorHex: '#ff5c66',
     accent: 0xffb3b8,
+    visual: { primaryColor: 0xff2e44, auraColor: 0xff3d55, electricityColor: 0xff6a7a, depletedAuraIntensity: 0.18, poweredAuraIntensity: 1.8 },
     weapon: 'Red light blades',
     portrait: '/assets/chaeyeon-kim-headshot.jpeg',
     icon: '/assets/those-ryderz/icons/rubi.webp',
@@ -169,6 +190,7 @@ export const RYDERZ: Record<RyderId, RyderSpec> = {
     color: 0xffd400,
     colorHex: '#ffe85c',
     accent: 0xfff7b0,
+    visual: { primaryColor: 0xffd400, auraColor: 0xffc81e, electricityColor: 0xffe766, depletedAuraIntensity: 0.18, poweredAuraIntensity: 1.8 },
     weapon: 'Spiked knuckle bolts',
     portrait: '/assets/haylee-brown-headshot.jpeg',
     icon: '/assets/those-ryderz/icons/leo.webp',
@@ -222,6 +244,7 @@ export const RYDERZ: Record<RyderId, RyderSpec> = {
     color: 0x7b4dff,
     colorHex: '#c9b8ff',
     accent: 0xc9b8ff,
+    visual: { primaryColor: 0x7b4dff, auraColor: 0x4a1aa8, electricityColor: 0x8a3dff, depletedAuraIntensity: 0.15, poweredAuraIntensity: 1.9 },
     weapon: 'Black aura axe',
     portrait: '/assets/hadi-taloustan-headshot.jpg',
     icon: '/assets/those-ryderz/icons/aaron.webp',
@@ -276,6 +299,7 @@ export const RYDERZ: Record<RyderId, RyderSpec> = {
     color: 0x24b4ff,
     colorHex: '#66cfff',
     accent: 0xb8e8ff,
+    visual: { primaryColor: 0x24b4ff, auraColor: 0x2aa9ff, electricityColor: 0x7ad6ff, depletedAuraIntensity: 0.18, poweredAuraIntensity: 1.8 },
     weapon: 'Blue energy projection',
     portrait: '/assets/aria-patterson-headshot.jpg',
     icon: '/assets/those-ryderz/icons/zoe.webp',
@@ -330,6 +354,7 @@ export const RYDERZ: Record<RyderId, RyderSpec> = {
     color: 0xff3fcf,
     colorHex: '#ff68d7',
     accent: 0xffc2ee,
+    visual: { primaryColor: 0xff3fcf, auraColor: 0xff4ad2, electricityColor: 0xff8ae6, depletedAuraIntensity: 0.18, poweredAuraIntensity: 1.8 },
     weapon: 'Pink energy darts',
     portrait: '/assets/john_andy_headshot.jpg',
     icon: '/assets/those-ryderz/icons/keven.webp',
