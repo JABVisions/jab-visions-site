@@ -397,7 +397,7 @@ function fitRigAction(rig: GltfRig, role: ClipRole, fade = 0.16) {
 /** Melee duration the strike clips are fitted to; matches the engine's swing window. */
 const STRIKE_TIME = 0.45;
 /** How far the figure steps into each procedural melee style, in metres. */
-const STRIKE_LUNGE: Record<MeleeStyle, number> = { chop: 0.22, slash: 0.18, punch: 0.3, kick: 0.1 };
+const STRIKE_LUNGE: Record<MeleeStyle, number> = { chop: 0.22, slash: 0.18, punch: 0.3, kick: 0.1, slap: 0.2, blast: 0.35 };
 const STRIKE_RELEASE = 0.12;
 
 /**

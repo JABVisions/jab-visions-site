@@ -470,6 +470,11 @@ export class ProceduralSkeleton {
       inherited.multiply(entry.restLocal);
       entry.baseFig.copy(inherited);
 
+      if (entry.key === 'footL' || entry.key === 'footR') {
+        this.plantFoot(entry);
+        continue;
+      }
+
       const target = entry.key ? NEUTRAL[entry.key] : undefined;
       if (!target) continue;
 
@@ -521,6 +526,23 @@ export class ProceduralSkeleton {
         break;
       }
     }
+  }
+
+  /**
+   * A foot under a near-vertical shin was planted on the ground when the model
+   * was exported, so when that shin still had to swing noticeably to stand
+   * straight, the foot keeps its exported world orientation instead of
+   * following the shin (otherwise a back-leaning shin leaves the toes pointing
+   * at the sky). Feet under raised or barely-corrected shins keep the exported
+   * ankle angle.
+   */
+  private plantFoot(entry: BoneEntry) {
+    const shin = entry.parent;
+    if (!shin) return;
+    const tilt = Math.acos(Math.min(1, -_v.copy(Y_AXIS).applyQuaternion(shin.restFig).y));
+    const swing = 2 * Math.acos(Math.min(1, Math.abs(_q2.copy(shin.restFig).invert().premultiply(shin.baseFig).w)));
+    const weight = smooth((0.6 - tilt) / 0.2) * smooth((swing - 0.15) / 0.25);
+    if (weight > 0) entry.baseFig.slerp(entry.restFig, weight);
   }
 
   /**
@@ -600,7 +622,7 @@ function track(p: number, keys: Array<[number, number]>) {
 }
 
 /** Authored melee animations the procedural skeleton can perform. */
-export type MeleeStyle = 'chop' | 'slash' | 'punch' | 'kick';
+export type MeleeStyle = 'chop' | 'slash' | 'punch' | 'kick' | 'slap' | 'blast';
 
 export interface SkeletalMotion {
   phase: number;
@@ -680,6 +702,12 @@ export function poseSkeleton(skel: ProceduralSkeleton, motion: SkeletalMotion) {
         break;
       case 'kick':
         poseKick(A, p);
+        break;
+      case 'slap':
+        poseSlap(A, p);
+        break;
+      case 'blast':
+        poseBlast(A, p);
         break;
       default:
         poseChop(A, p);
@@ -976,4 +1004,169 @@ function poseKick(A: Angles, p: number) {
   A.upperArmR.x += 0.45 * lean;
   A.upperArmR.z -= 0.35 * lean;
   A.lowerArmR.x -= 0.6 * lean;
+}
+
+/** Open-hand slap: right arm cocked out wide at head height, whipped across the face. */
+function poseSlap(A: Angles, p: number) {
+  // Cock out to the right (0.28) → contact in front of the face (0.52) →
+  // follow-through across to the left (0.72) → recover.
+  A.upperArmR.x += track(p, [
+    [0, 0],
+    [0.28, -0.75],
+    [0.52, -1.55],
+    [0.72, -1.3],
+    [1, 0],
+  ]);
+  A.upperArmR.z += track(p, [
+    [0, 0],
+    [0.28, -1.45],
+    [0.52, 0.15],
+    [0.72, 0.9],
+    [1, 0],
+  ]);
+  A.lowerArmR.x += track(p, [
+    [0, 0],
+    [0.28, -0.95],
+    [0.52, -0.25],
+    [0.72, -0.75],
+    [1, -0.2],
+  ]);
+  // Palm open and facing the target through the swing.
+  A.handR.x += track(p, [
+    [0, 0],
+    [0.28, 0.35],
+    [0.52, 0.45],
+    [0.72, 0.1],
+    [1, 0],
+  ]);
+  A.handR.z += track(p, [
+    [0, 0],
+    [0.28, -0.4],
+    [0.52, 0.3],
+    [0.72, 0.5],
+    [1, 0],
+  ]);
+  // Torso winds to the right and whips left behind the hand.
+  A.spine.y += track(p, [
+    [0, 0],
+    [0.28, -0.5],
+    [0.52, 0.4],
+    [0.72, 0.7],
+    [1, 0],
+  ]);
+  A.spine.x += track(p, [
+    [0, 0],
+    [0.28, -0.08],
+    [0.52, 0.15],
+    [1, 0],
+  ]);
+  A.hips.y += track(p, [
+    [0, 0],
+    [0.28, -0.2],
+    [0.52, 0.2],
+    [0.72, 0.3],
+    [1, 0],
+  ]);
+  // Off hand stays up as a guard, then drops as the weight comes through.
+  A.upperArmL.x += track(p, [
+    [0, 0],
+    [0.28, -0.4],
+    [0.52, -0.3],
+    [0.72, 0.2],
+    [1, 0],
+  ]);
+  A.lowerArmL.x += track(p, [
+    [0, 0],
+    [0.28, -1.4],
+    [0.52, -1.1],
+    [0.72, -0.4],
+    [1, -0.2],
+  ]);
+  const step = track(p, [
+    [0, 0],
+    [0.52, 1],
+    [1, 0],
+  ]);
+  A.upperLegL.x -= 0.22 * step;
+  A.lowerLegL.x += 0.35 * step;
+  A.upperLegR.x += 0.12 * step;
+  A.head.y -= A.spine.y * 0.5;
+}
+
+/** Two-palm energy blast: gather at the hips, lunge and thrust both hands forward. */
+function poseBlast(A: Angles, p: number) {
+  // Gather low and back (0.3) → release (0.55) → hold the push (0.72) → recover.
+  const armX = track(p, [
+    [0, 0],
+    [0.3, 0.5],
+    [0.55, -1.55],
+    [0.72, -1.45],
+    [1, 0],
+  ]);
+  const armSpread = track(p, [
+    [0, 0],
+    [0.3, 0.2],
+    [0.55, -0.28],
+    [0.72, -0.25],
+    [1, 0],
+  ]);
+  const elbow = track(p, [
+    [0, 0],
+    [0.3, -1.7],
+    [0.55, -0.1],
+    [0.72, -0.15],
+    [1, -0.2],
+  ]);
+  // Palms flex back so they face the target when the arms are out.
+  const palm = track(p, [
+    [0, 0],
+    [0.3, -0.3],
+    [0.55, 0.85],
+    [0.72, 0.8],
+    [1, 0],
+  ]);
+  A.upperArmL.x += armX;
+  A.upperArmR.x += armX;
+  A.upperArmL.z += armSpread;
+  A.upperArmR.z -= armSpread;
+  A.lowerArmL.x += elbow;
+  A.lowerArmR.x += elbow;
+  A.handL.x += palm;
+  A.handR.x += palm;
+
+  // Coil back, then drive the whole body into the push.
+  A.spine.x += track(p, [
+    [0, 0],
+    [0.3, -0.22],
+    [0.55, 0.28],
+    [0.72, 0.18],
+    [1, 0],
+  ]);
+  A.hips.x += track(p, [
+    [0, 0],
+    [0.3, -0.1],
+    [0.55, 0.12],
+    [1, 0],
+  ]);
+  A.head.x -= A.spine.x * 0.7;
+
+  // Deep gathering crouch that opens into a front lunge on the release.
+  const crouch = track(p, [
+    [0, 0],
+    [0.3, 1],
+    [0.55, 0.3],
+    [1, 0],
+  ]);
+  const lunge = track(p, [
+    [0, 0],
+    [0.3, 0],
+    [0.55, 1],
+    [0.72, 0.9],
+    [1, 0],
+  ]);
+  A.upperLegL.x -= 0.35 * crouch + 0.2 * lunge;
+  A.lowerLegL.x += 0.6 * crouch + 0.3 * lunge;
+  A.upperLegR.x -= 0.35 * crouch - 0.25 * lunge;
+  A.lowerLegR.x += 0.6 * crouch + 0.05 * lunge;
+  A.footR.x -= 0.2 * lunge;
 }
