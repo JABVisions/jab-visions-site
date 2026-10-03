@@ -113,7 +113,8 @@ export const RYDERZ: Record<RyderId, RyderSpec> = {
     accent: 0xffb3b8,
     weapon: 'Red light blades',
     portrait: '/assets/chaeyeon-kim-headshot.jpeg',
-    glb: '/assets/those-ryderz/models/rubi-wong.glb',
+    // Version query busts browser caches of the earlier (unrigged) export at this path.
+    glb: '/assets/those-ryderz/models/rubi-wong.glb?v=2',
     strikes: ['slash', 'punch', 'slash', 'kick'],
     maxHp: 110,
     speed: 7.4,
