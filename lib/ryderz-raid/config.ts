@@ -1,3 +1,5 @@
+import type { MeleeStyle } from './skeletal';
+
 export type RyderId = 'rubi' | 'leo' | 'aaron' | 'zoe' | 'keven';
 
 export type AbilityId =
@@ -61,6 +63,8 @@ export interface RyderSpec {
   moves: [AbilitySpec, AbilitySpec, AbilitySpec];
   /** Optional Tripo (or other) glTF binary used as the in-game figure. */
   glb?: string;
+  /** Melee animations cycled per swing when the figure is driven by the procedural skeleton. */
+  strikes?: MeleeStyle[];
 }
 
 export const ARENA_HALF = 30;
@@ -110,6 +114,7 @@ export const RYDERZ: Record<RyderId, RyderSpec> = {
     weapon: 'Red light blades',
     portrait: '/assets/chaeyeon-kim-headshot.jpeg',
     glb: '/assets/those-ryderz/models/rubi-wong.glb',
+    strikes: ['slash', 'punch', 'slash', 'kick'],
     maxHp: 110,
     speed: 7.4,
     fireRate: 4.4,

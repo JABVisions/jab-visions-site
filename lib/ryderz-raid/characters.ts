@@ -2,7 +2,14 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { clone as cloneSkeleton } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { HOST_MODELS, type EnemyKind, type RyderId, type RyderSpec } from './config';
-import { ProceduralSkeleton, assessSkinning, bakeSkinnedMeshes, extractStrikes, poseSkeleton } from './skeletal';
+import {
+  ProceduralSkeleton,
+  assessSkinning,
+  bakeSkinnedMeshes,
+  extractStrikes,
+  poseSkeleton,
+  type MeleeStyle,
+} from './skeletal';
 import { addOutline, buildHumanoid, glow, toon, type Humanoid } from './toon';
 
 const BLADE = new THREE.BoxGeometry(0.08, 0.95, 0.08);
@@ -44,6 +51,10 @@ export interface GltfRig {
   strike: THREE.AnimationAction | null;
   /** Seconds left before the finished strike releases its bones back to the skeleton. */
   strikeRelease: number;
+  /** Authored procedural melee styles, cycled per swing; `style` is the one in flight. */
+  styles: MeleeStyle[];
+  styleIndex: number;
+  style: MeleeStyle;
   /** Socket the weapon hangs from. A hand bone when rigged, a fixed point otherwise. */
   weaponSocket: THREE.Object3D;
 }
@@ -197,7 +208,7 @@ function measureFigure(figure: THREE.Object3D) {
 function wrapGltfAsHumanoid(
   template: GltfTemplate,
   height = 1.88,
-  options: { ownMaterials?: boolean } = {},
+  options: { ownMaterials?: boolean; strikes?: MeleeStyle[] } = {},
 ): { humanoid: Humanoid; rig: GltfRig } {
   const group = new THREE.Group();
   const figure = template.skinned ? (cloneSkeleton(template.scene) as THREE.Group) : template.scene.clone(true);
@@ -317,6 +328,9 @@ function wrapGltfAsHumanoid(
     strikeIndex: 0,
     strike: null,
     strikeRelease: 0,
+    styles: options.strikes?.length ? options.strikes : ['chop'],
+    styleIndex: 0,
+    style: options.strikes?.[0] ?? 'chop',
     weaponSocket,
   };
 
@@ -382,6 +396,8 @@ function fitRigAction(rig: GltfRig, role: ClipRole, fade = 0.16) {
 
 /** Melee duration the strike clips are fitted to; matches the engine's swing window. */
 const STRIKE_TIME = 0.45;
+/** How far the figure steps into each procedural melee style, in metres. */
+const STRIKE_LUNGE: Record<MeleeStyle, number> = { chop: 0.22, slash: 0.18, punch: 0.3, kick: 0.1 };
 const STRIKE_RELEASE = 0.12;
 
 /**
@@ -480,14 +496,18 @@ export function animateGltfFighter(
     return;
   }
 
-  // --- Procedural skeleton: real strides, arm swing and an arm-driven chop ---
+  // --- Procedural skeleton: real strides, arm swing and authored melee styles ---
   if (rig.skeleton) {
-    poseSkeleton(rig.skeleton, { phase, moving, sprinting, meleeT });
+    if (meleeStarted) {
+      rig.style = rig.styles[rig.styleIndex % rig.styles.length];
+      rig.styleIndex += 1;
+    }
+    poseSkeleton(rig.skeleton, { phase, moving, sprinting, meleeT, meleeStyle: rig.style });
     const f = rig.figure;
     const swing = meleeT > 0 ? Math.sin((1 - meleeT) * Math.PI) : 0;
     f.position.copy(rig.basePosition);
     f.position.y += Math.abs(Math.sin(phase)) * (sprinting ? 0.045 : 0.025) * moving;
-    f.position.z += swing * 0.22;
+    f.position.z += swing * STRIKE_LUNGE[rig.style];
     f.rotation.set(0, 0, 0);
     return;
   }
@@ -513,7 +533,7 @@ export function animateGltfFighter(
 export function buildRyder(spec: RyderSpec, options: { clone?: boolean } = {}): Fighter {
   const template = gltfTemplates.get(spec.id);
   if (template) {
-    const { humanoid, rig } = wrapGltfAsHumanoid(template, options.clone ? 1.72 : 1.88);
+    const { humanoid, rig } = wrapGltfAsHumanoid(template, options.clone ? 1.72 : 1.88, { strikes: spec.strikes });
     const weapons: THREE.Object3D[] = [];
     const glowMeshes: THREE.Mesh[] = [];
     const aura = glow(spec.color, options.clone ? 1.4 : 2);
