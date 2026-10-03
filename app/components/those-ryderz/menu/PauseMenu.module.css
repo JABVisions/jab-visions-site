@@ -436,9 +436,14 @@
   display: grid;
   gap: 5px;
   padding: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid color-mix(in srgb, var(--card, #5a5a6e) 45%, transparent);
   border-radius: 16px;
-  background: rgba(8, 6, 16, 0.55);
+  /* Each roster card wears its Ryder's power colour. */
+  background: linear-gradient(
+    170deg,
+    color-mix(in srgb, var(--card, #5a5a6e) 55%, #0b0814) 0%,
+    color-mix(in srgb, var(--card, #5a5a6e) 22%, #07040f) 100%
+  );
   color: #f5fff8;
   text-align: left;
   cursor: pointer;
@@ -454,10 +459,10 @@
 
 .ryderFocused,
 .ryderFocused:hover {
-  border-color: var(--card);
+  border-color: color-mix(in srgb, var(--card) 55%, #fff);
   box-shadow:
-    0 0 0 1px color-mix(in srgb, var(--card) 40%, transparent),
-    0 18px 48px -24px var(--card);
+    0 0 0 1px color-mix(in srgb, var(--card) 50%, transparent),
+    0 18px 48px -20px var(--card);
   transform: translateY(-4px) scale(1.02);
 }
 
@@ -466,17 +471,24 @@
   aspect-ratio: 2 / 1;
   overflow: hidden;
   border-radius: 10px;
-  background: linear-gradient(160deg, color-mix(in srgb, var(--card) 35%, #0b0814), #07040f);
+  /* Transparent head render over a glow in the power colour. */
+  background: radial-gradient(
+    ellipse 55% 110% at 50% 60%,
+    color-mix(in srgb, var(--card, #5a5a6e) 60%, #fff) 0%,
+    var(--card, #5a5a6e) 45%,
+    color-mix(in srgb, var(--card, #5a5a6e) 45%, #000) 100%
+  );
 }
 
 .ryderPortrait img {
-  object-fit: cover;
-  object-position: center 18%;
-  filter: saturate(0.9);
+  object-fit: contain;
+  object-position: center 30%;
+  transform: scale(1.12);
+  filter: drop-shadow(0 4px 8px rgba(0, 0, 0, 0.45));
 }
 
 .ryderCard small {
-  color: var(--card);
+  color: color-mix(in srgb, var(--card, #5a5a6e) 30%, #fff);
   font: 800 0.58rem/1.2 monospace;
   letter-spacing: 0.16em;
   text-transform: uppercase;

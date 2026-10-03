@@ -107,7 +107,7 @@ export default function RyderSelector({
                 onClick={() => (focused ? choose(i) : setFocus(i))}
               >
                 <div className={styles.ryderPortrait}>
-                  <Image src={ryder.portrait} alt="" fill unoptimized sizes="200px" />
+                  <Image src={ryder.icon} alt="" fill unoptimized sizes="200px" />
                 </div>
                 <small>{theme.label} Ryder</small>
                 <strong>{ryder.name}</strong>

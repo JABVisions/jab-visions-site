@@ -44,7 +44,10 @@ export interface RyderSpec {
   colorHex: string;
   accent: number;
   weapon: string;
+  /** Cast headshot. */
   portrait: string;
+  /** Transparent render of the in-game figure's head, used on roster and select cards. */
+  icon: string;
   maxHp: number;
   speed: number;
   /** Aura shots per second while holding fire. */
@@ -113,6 +116,7 @@ export const RYDERZ: Record<RyderId, RyderSpec> = {
     accent: 0xffb3b8,
     weapon: 'Red light blades',
     portrait: '/assets/chaeyeon-kim-headshot.jpeg',
+    icon: '/assets/those-ryderz/icons/rubi.webp',
     // Version query busts browser caches of the earlier (unrigged) export at this path.
     glb: '/assets/those-ryderz/models/rubi-wong.glb?v=2',
     strikes: ['slash', 'punch', 'slash', 'kick'],
@@ -167,6 +171,7 @@ export const RYDERZ: Record<RyderId, RyderSpec> = {
     accent: 0xfff7b0,
     weapon: 'Spiked knuckle bolts',
     portrait: '/assets/haylee-brown-headshot.jpeg',
+    icon: '/assets/those-ryderz/icons/leo.webp',
     glb: '/assets/those-ryderz/models/leo-montana.glb',
     maxHp: 95,
     speed: 8.6,
@@ -219,6 +224,7 @@ export const RYDERZ: Record<RyderId, RyderSpec> = {
     accent: 0xc9b8ff,
     weapon: 'Black aura axe',
     portrait: '/assets/hadi-taloustan-headshot.jpg',
+    icon: '/assets/those-ryderz/icons/aaron.webp',
     glb: '/assets/those-ryderz/models/aaron-addams.glb',
     maxHp: 125,
     speed: 6.9,
@@ -271,6 +277,7 @@ export const RYDERZ: Record<RyderId, RyderSpec> = {
     accent: 0xb8e8ff,
     weapon: 'Blue energy projection',
     portrait: '/assets/aria-patterson-headshot.jpg',
+    icon: '/assets/those-ryderz/icons/zoe.webp',
     glb: '/assets/those-ryderz/models/zoe-folie.glb?v=2',
     strikes: ['slap', 'kick', 'blast'],
     maxHp: 105,
@@ -324,6 +331,7 @@ export const RYDERZ: Record<RyderId, RyderSpec> = {
     accent: 0xffc2ee,
     weapon: 'Pink energy darts',
     portrait: '/assets/john_andy_headshot.jpg',
+    icon: '/assets/those-ryderz/icons/keven.webp',
     glb: '/assets/those-ryderz/models/keven-hart.glb',
     maxHp: 100,
     speed: 7.6,

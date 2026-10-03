@@ -546,7 +546,7 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
                         }}
                       >
                         <div className={styles.portrait}>
-                          <Image src={ryder.portrait} alt={ryder.name} fill unoptimized sizes="220px" />
+                          <Image src={ryder.icon} alt={ryder.name} fill unoptimized sizes="220px" />
                         </div>
                         <small>
                           {ryder.role} · {ryder.title}
