@@ -1,8 +1,8 @@
 export const FORUMS_HALL_SECTIONS = [
   { id: "live-now", title: "Live Now", layout: "rail" },
-  { id: "your-rooms", title: "Your Rooms", layout: "stack" },
-  { id: "board-rooms", title: "Board Rooms", layout: "stack" },
-  { id: "jab-official", title: "JAB Official", layout: "stack" },
+  { id: "your-rooms", title: "Your Rooms", layout: "rail" },
+  { id: "board-rooms", title: "Board Rooms", layout: "rail" },
+  { id: "jab-official", title: "JAB Official", layout: "rail" },
 ] as const;
 
 export const FORUMS_HALL_SECTION_ORDER = FORUMS_HALL_SECTIONS.map((section) => section.id);

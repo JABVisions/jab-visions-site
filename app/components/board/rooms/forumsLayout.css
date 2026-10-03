@@ -1,6 +1,7 @@
 /* Shared Forums 2.0 hallway + Room interior.
-   Desktop and mobile use the same component tree. Narrow screens only
-   change density (stacked cards, wrapping actions, full-screen conversation).
+   Desktop and mobile use the same component tree. Room sections stay
+   horizontal swipeable rails on every width. Narrow screens only
+   change density (wrapping actions, full-screen conversation).
    Do not hide, reorder, or swap in the old sidebar / thread list. */
 
 .forumsHall,
@@ -56,6 +57,8 @@
 
 .forumsHallTrack {
   display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
   gap: 0.75rem;
   overflow-x: auto;
   overflow-y: hidden;
@@ -180,37 +183,38 @@
     gap: 1.5rem;
   }
 
-  .forumsHallSection[data-layout="rail"] .forumsHallTrack {
+  .forumsHallTrack {
+    flex-direction: row;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overflow-y: hidden;
     margin: 0 -0.25rem;
     padding-left: 0.25rem;
     padding-right: 1rem;
+    scroll-snap-type: x proximity;
   }
 
-  .forumsHallSection[data-layout="stack"] .forumsHallTrack {
-    display: flex;
-    flex-direction: column;
-    overflow: visible;
-    padding-bottom: 0;
-    scroll-snap-type: none;
+  .forumsRoomCardLink,
+  .forumsHallEmpty {
+    flex: 0 0 auto;
   }
 
-  .forumsHallSection[data-layout="stack"] .forumsRoomCardLink,
-  .forumsHallSection[data-layout="stack"] .forumsHallEmpty {
-    width: 100% !important;
-    min-width: 0 !important;
-    flex: none;
+  .forumsRoomCard,
+  .forumsRoomCard--compact {
+    width: 260px;
+    min-width: 260px;
+    max-width: 260px;
+    height: 210px;
   }
 
-  .forumsHallSection[data-layout="stack"] .forumsRoomCard,
-  .forumsHallSection[data-layout="stack"] .forumsRoomCard--compact {
-    width: 100% !important;
-    min-width: 0 !important;
-    max-width: 100%;
-    height: auto !important;
-    min-height: 148px;
+  .forumsRoomCard--compact {
+    width: 220px;
+    min-width: 220px;
+    max-width: 220px;
+    height: 168px;
   }
 
-  .forumsHallSection[data-layout="stack"] .forumsRoomOpen {
+  .forumsRoomOpen {
     display: inline-flex;
     margin-left: auto;
     border-radius: 999px;

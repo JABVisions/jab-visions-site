@@ -28,10 +28,9 @@ const roomPage = source("app/board/forums/[roomId]/page.tsx");
 const boardLayout = source("app/board/layout.tsx");
 
 assert(FORUMS_HALL_SECTION_ORDER.join(">") === "live-now>your-rooms>board-rooms>jab-official", "hallway log order is Live Now → Your Rooms → Board Rooms → JAB Official");
-assert(FORUMS_HALL_SECTIONS[0].layout === "rail", "Live Now stays a horizontal rail");
 assert(
-  FORUMS_HALL_SECTIONS.slice(1).every((section) => section.layout === "stack"),
-  "Your Rooms, Board Rooms, and JAB Official stack on a narrow screen"
+  FORUMS_HALL_SECTIONS.every((section) => section.layout === "rail"),
+  "Live Now, Your Rooms, Board Rooms, and JAB Official stay horizontal rails"
 );
 
 const hallSectionHits = [...hall.matchAll(/<HallSection[\s\S]*?id="([^"]+)"/g)].map((match) => match[1]);
@@ -48,7 +47,7 @@ assert(composer.includes("Create Room Drop"), "Room interior keeps Create Room D
 assert(conversation.includes("Add Drop"), "conversations keep Add Drop");
 assert(interior.includes("DropStudioLauncher"), "Room Drop Studio still launches from the Room");
 assert(interior.includes("onGoLive={onGoLive}"), "Go Live is wired on the shared Room header");
-assert(card.includes("Open Room"), "Room cards expose Open Room on the stacked mobile log");
+assert(card.includes("Open Room"), "Room cards expose Open Room on the hallway rails");
 assert(card.includes("room.comingSoon ? undefined : roomHref"), "coming soon rooms stay unlinked; live official rooms use roomHref");
 
 const official = liveOfficialRooms();
@@ -61,7 +60,19 @@ assert(
 assert(!/\.forumsHallSection[^{]*\{[^}]*display:\s*none/.test(css), "hallway sections are not display:none");
 assert(!/\.forumsRoomActions[^{]*\{[^}]*display:\s*none/.test(css), "Room actions are not hidden");
 assert(!/(?:^|[^\w-])order:\s*-?\d+/.test(css), "mobile CSS does not reorder hallway sections");
-assert(css.includes('data-layout="stack"'), "narrow screens stack the room log");
+assert(!/data-layout="stack"/.test(css), "hallway CSS does not stack room cards into a column list");
+assert(/\.forumsHallTrack\s*\{[^}]*flex-direction:\s*row/.test(css), "hallway tracks stay a horizontal row");
+assert(/\.forumsHallTrack\s*\{[^}]*overflow-x:\s*auto/.test(css), "hallway tracks scroll sideways");
+assert(!/\.forumsHallTrack\s*\{[^}]*flex-direction:\s*column/.test(css), "hallway tracks are not a vertical list");
+assert(!/width:\s*100%\s*!important/.test(css), "room cards keep carousel widths instead of full-width list cards");
+
+const trackBlocks = [...css.matchAll(/\.forumsHallTrack\s*\{([^}]+)\}/g)].map((match) => match[1]);
+assert(trackBlocks.length >= 2, "hallway tracks declare a row rail at the base and phone breakpoints");
+for (const block of trackBlocks) {
+  assert(/overflow-x:\s*auto/.test(block), "390px and 1280px hallway tracks keep overflow-x auto");
+  assert(!/flex-direction:\s*column/.test(block), "390px and 1280px hallway tracks stay a row, not a column list");
+  assert(!/overflow:\s*visible/.test(block), "hallway tracks do not drop horizontal scroll");
+}
 assert(css.includes("@media (max-width: 720px)"), "Forums layout has a phone breakpoint");
 assert(css.includes("@media (max-width: 390px)"), "Forums layout has a 390px wrap");
 assert(css.includes("@media (max-width: 430px)"), "Forums layout has a 430px wrap");
