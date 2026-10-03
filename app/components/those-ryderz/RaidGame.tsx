@@ -2,8 +2,7 @@
 
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import Image from 'next/image';
-import Link from 'next/link';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import {
   RYDERZ,
   RYDER_ORDER,
@@ -15,16 +14,11 @@ import {
 } from '@/lib/ryderz-raid/config';
 import type { CameraState } from '@/lib/ryderz-raid/camera';
 import type { HudState, RaidEngine } from '@/lib/ryderz-raid/engine';
+import { RyderManager } from '@/lib/ryderz-raid/ryder-manager';
 import CameraTuningPanel, { loadStoredCameraConfig } from './CameraTuningPanel';
+import PauseMenu from './menu/PauseMenu';
+import { NEUTRAL_THEME, RYDER_THEME as AURA } from './menu/theme';
 import styles from './RaidGame.module.css';
-
-const AURA: Record<RyderId, { aura: string; soft: string }> = {
-  rubi: { aura: '#ff5c66', soft: 'rgba(255, 48, 64, 0.32)' },
-  leo: { aura: '#ffe85c', soft: 'rgba(255, 230, 0, 0.3)' },
-  aaron: { aura: '#c9b8ff', soft: 'rgba(123, 77, 255, 0.35)' },
-  zoe: { aura: '#66cfff', soft: 'rgba(40, 180, 255, 0.32)' },
-  keven: { aura: '#ff68d7', soft: 'rgba(255, 85, 204, 0.32)' },
-};
 
 export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'page' }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -41,7 +35,16 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
   const nubRef = useRef<HTMLDivElement>(null);
   const lookLast = useRef<{ x: number; y: number; id: number } | null>(null);
 
+  // `selected` is the Ryder the raid booted with (it owns the engine's lifetime);
+  // the Ryder currently in play lives in the RyderManager and can change mid-raid.
   const [selected, setSelected] = useState<RyderId | null>(null);
+  const manager = useMemo(() => new RyderManager(), []);
+  const subscribe = useCallback((listener: () => void) => manager.subscribe(listener), [manager]);
+  const getSnapshot = useCallback(() => manager.getState(), [manager]);
+  const managerState = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+  const activeRyder = managerState.activeRyder;
+  const [hudMoves, setHudMoves] = useState<HudState['moves']>([]);
+  const [round, setRound] = useState(0);
   const [phase, setPhase] = useState<HudState['phase'] | 'select'>('select');
   const [paused, setPaused] = useState(false);
   const [burnout, setBurnout] = useState(false);
@@ -98,9 +101,11 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
       prev.nearShop !== next.nearShop ||
       prev.pointerLocked !== next.pointerLocked ||
       prev.banner?.title !== next.banner?.title ||
-      prev.moves.some((m, i) => m.ready !== next.moves[i]?.ready || m.name !== next.moves[i]?.name)
+      prev.moves.length !== next.moves.length ||
+      prev.moves.some((m, i) => m.ready !== next.moves[i]?.ready || m.id !== next.moves[i]?.id)
     ) {
       setPhase(next.phase);
+      setHudMoves(next.moves);
       setPaused(next.paused);
       setBurnout(next.burnout);
       setNearShop(next.nearShop);
@@ -111,6 +116,7 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
     }
     if (!prev || prev.cameraState !== next.cameraState) setCameraState(next.cameraState);
     if (!prev || Math.abs(prev.points - next.points) > 0.5) setPoints(next.points);
+    if (!prev || prev.round !== next.round) setRound(next.round);
     if (!prev || Math.abs(prev.intermissionLeft - next.intermissionLeft) > 0.2) {
       setIntermissionLeft(next.intermissionLeft);
     }
@@ -134,10 +140,11 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
       if (cancelled || !canvas) return;
       engine = new RaidEngine(canvas, syncHud);
       engineRef.current = engine;
+      manager.attach(engine);
       const stored = loadStoredCameraConfig();
       if (stored) engine.setCameraConfig(stored);
       setEngineReady(engine);
-      await engine.start(selected);
+      await engine.start(selected, manager.loadoutSpecs(selected));
       if (cancelled) {
         engine.dispose();
         if (engineRef.current === engine) engineRef.current = null;
@@ -148,11 +155,12 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
     return () => {
       cancelled = true;
       window.removeEventListener('resize', onResize);
+      if (engine) manager.detach(engine);
       engine?.dispose();
       engineRef.current = null;
       setEngineReady(null);
     };
-  }, [selected, syncHud]);
+  }, [selected, syncHud, manager]);
 
   useEffect(() => {
     const engine = engineRef.current;
@@ -163,6 +171,7 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
   }, [camPanel, engineReady]);
 
   const pick = (id: RyderId) => {
+    manager.setActiveRyder(id);
     setSelected(id);
     setPhase('playing');
     setPaused(false);
@@ -240,7 +249,7 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
 
   const replay = () => {
     if (!selected) return;
-    void engineRef.current?.start(selected);
+    void engineRef.current?.start(activeRyder, manager.loadoutSpecs(activeRyder));
     engineRef.current?.setPaused(false);
   };
 
@@ -260,7 +269,7 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
     }
   };
 
-  const aura = selected ? AURA[selected] : { aura: '#31ff96', soft: 'rgba(49,255,150,0.3)' };
+  const aura = selected ? AURA[activeRyder] : NEUTRAL_THEME;
   const playing = Boolean(selected);
 
   return (
@@ -340,9 +349,9 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
               {phase === 'intermission' ? ' · Hold the spire to buy strength' : ''}
             </p>
             <div className={styles.moveRow}>
-              {(selected ? RYDERZ[selected].moves : []).map((move, i) => (
+              {hudMoves.map((move, i) => (
                 <div
-                  key={move.id}
+                  key={`${move.key}-${move.id}`}
                   className={`${styles.ability} ${moveReady[i] ? styles.ready : ''}`}
                 >
                   <span
@@ -459,24 +468,19 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
       )}
 
       {playing && paused && phase !== 'dead' && !camPanel && (
-        <div className={styles.modal}>
-          <div className={styles.modalCard}>
-            <p>Raid paused</p>
-            <h3>Signal held</h3>
-            <p>Hosts freeze until you step back onto the block.</p>
-            <div className={styles.actions}>
-              <button type="button" onClick={resume}>
-                Resume
-              </button>
-              <button type="button" onClick={changeRyder}>
-                Change Ryder
-              </button>
-              {layout === 'embed' && (
-                <Link href="/those-ryderz/raid">Fullscreen</Link>
-              )}
-            </div>
-          </div>
-        </div>
+        <PauseMenu
+          manager={manager}
+          engine={engineReady}
+          activeRyder={activeRyder}
+          gameMode={managerState.gameMode}
+          arenaId={managerState.arenaId}
+          round={round}
+          points={points}
+          layout={layout}
+          onResume={resume}
+          onExit={changeRyder}
+          onOpenCameraTuning={() => setCamPanel(true)}
+        />
       )}
 
       {playing && phase === 'dead' && (

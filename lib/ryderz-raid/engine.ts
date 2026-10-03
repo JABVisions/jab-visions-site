@@ -17,11 +17,13 @@ import {
   upgradeCost,
   UPGRADES,
   type AbilityId,
+  type AbilitySpec,
   type EnemyKind,
   type RyderId,
   type RyderSpec,
   type UpgradeId,
 } from './config';
+import { GameMode } from './game-mode';
 import {
   ThirdPersonCamera,
   type CameraConfig,
@@ -56,6 +58,7 @@ export interface HudState {
   maxAura: number;
   burnout: boolean;
   moves: Array<{
+    id: AbilityId;
     key: string;
     name: string;
     ready: boolean;
@@ -177,6 +180,10 @@ export class RaidEngine {
   private pointerLocked = false;
 
   private spec: RyderSpec = RYDERZ.rubi;
+  /** Powers bound to Q / E / R. Defaults to the Ryder's signature moves; the Power Deck can rebind them. */
+  private moves: AbilitySpec[] = RYDERZ.rubi.moves;
+  private gameMode: GameMode = GameMode.PVE;
+  private switchToken = 0;
   private player: Fighter | null = null;
   private shield: THREE.Mesh | null = null;
   private pos = new THREE.Vector3(9, 0, 11);
@@ -255,9 +262,10 @@ export class RaidEngine {
     this.raf = requestAnimationFrame(this.loop);
   }
 
-  async start(id: RyderId) {
+  async start(id: RyderId, moves?: AbilitySpec[]) {
     this.clearCombat();
     this.spec = RYDERZ[id];
+    this.moves = moves?.length === 3 ? moves : this.spec.moves;
     this.upgrades = emptyUpgrades();
     this.maxHp = this.spec.maxHp;
     this.hp = this.maxHp;
@@ -315,6 +323,78 @@ export class RaidEngine {
     if (value && document.pointerLockElement === this.canvas) {
       document.exitPointerLock();
     }
+  }
+
+  /** Rebind Q / E / R. Sustained powers that leave the deck are switched off first. */
+  setLoadout(moves: AbilitySpec[]) {
+    if (moves.length !== 3) return;
+    for (let i = 0; i < 3; i += 1) {
+      if (this.moves[i]?.id !== moves[i].id && this.moveT[i] > 0) this.endMove(i);
+    }
+    this.moves = moves;
+    this.moveCd = [0, 0, 0];
+    this.queuedMoves = [false, false, false];
+  }
+
+  getLoadout(): AbilitySpec[] {
+    return [...this.moves];
+  }
+
+  setGameMode(mode: GameMode) {
+    // Rules do not branch on the mode yet; it is stored so spawning and damage can.
+    this.gameMode = mode;
+  }
+
+  getGameMode() {
+    return this.gameMode;
+  }
+
+  /**
+   * Swap the playable Ryder mid-raid. Round, Signal and upgrades carry over;
+   * Vital and aura keep their fractions so switching is never a free heal.
+   */
+  async switchRyder(id: RyderId, moves?: AbilitySpec[]) {
+    if (this.spec.id === id && !moves) return;
+    const token = ++this.switchToken;
+    const spec = RYDERZ[id];
+    if (spec.glb) {
+      await preloadRyderGltf(spec).catch((error) => {
+        console.warn('[raid] failed to load Ryder GLB, using block figure', error);
+      });
+    }
+    if (this.disposed || token !== this.switchToken) return;
+
+    this.endAllMoves();
+    const hpFrac = this.maxHp > 0 ? this.hp / this.maxHp : 1;
+    const auraFrac = this.maxAura > 0 ? this.aura / this.maxAura : 1;
+    this.spec = spec;
+    this.moves = moves?.length === 3 ? moves : spec.moves;
+    this.maxHp = spec.maxHp + this.upgrades.vitality * 25;
+    this.hp = Math.max(1, this.maxHp * hpFrac);
+    this.maxAura = spec.maxAura + this.upgrades.capacity * 20;
+    this.aura = this.maxAura * auraFrac;
+    this.moveCd = [0, 0, 0];
+    this.moveT = [0, 0, 0];
+    this.queuedMoves = [false, false, false];
+    this.meleeT = 0;
+    this.meleeCd = 0;
+
+    if (this.player) {
+      this.scene.remove(this.player.humanoid.group);
+      disposeObject(this.player.humanoid.group);
+    }
+    this.player = buildRyder(spec);
+    this.player.humanoid.group.position.copy(this.pos);
+    this.player.humanoid.group.position.y = this.world.heightAt(this.pos.x, this.pos.z);
+    this.player.humanoid.group.rotation.y = this.yaw;
+    this.scene.add(this.player.humanoid.group);
+    this.syncWeaponGlow();
+    this.particles.emit(this.pos.clone().setY(1.1), spec.color, 30, {
+      speed: 7,
+      size: 0.32,
+      life: 0.6,
+      up: 1.2,
+    });
   }
 
   requestPointerLock() {
@@ -463,6 +543,8 @@ export class RaidEngine {
       e.preventDefault();
     }
     this.keys.add(e.key.toLowerCase());
+    // Menus own the keyboard while paused; only Escape reaches the raid.
+    if (this.paused && e.key !== 'Escape') return;
     if (e.key === 'q' || e.key === 'Q' || e.key === '1') this.queuedMoves[0] = true;
     if (e.key === 'e' || e.key === 'E' || e.key === '2') this.queuedMoves[1] = true;
     if (e.key === 'r' || e.key === 'R' || e.key === '3') this.queuedMoves[2] = true;
@@ -489,6 +571,7 @@ export class RaidEngine {
   };
 
   private onMouseDown = (e: MouseEvent) => {
+    if (this.paused) return;
     if (e.button === 0) this.fireHeld = true;
     if (e.button === 2) {
       e.preventDefault();
@@ -571,7 +654,7 @@ export class RaidEngine {
   private updateAura(dt: number) {
     let drain = 0;
     for (let i = 0; i < 3; i += 1) {
-      if (this.moveT[i] > 0) drain += this.spec.moves[i].drain;
+      if (this.moveT[i] > 0) drain += this.moves[i].drain;
     }
     if (drain > 0) {
       this.spendAura(drain * dt);
@@ -762,12 +845,12 @@ export class RaidEngine {
   }
 
   private isActive(id: AbilityId) {
-    return this.spec.moves.some((move, i) => move.id === id && this.moveT[i] > 0);
+    return this.moves.some((move, i) => move.id === id && this.moveT[i] > 0);
   }
 
   private tryMove(slot: number) {
     if (!this.player || this.burnout) return;
-    const move = this.spec.moves[slot];
+    const move = this.moves[slot];
     if (!move || this.moveCd[slot] > 0) return;
     this.moveCd[slot] = 0.16;
 
@@ -817,7 +900,7 @@ export class RaidEngine {
   }
 
   private endMove(slot: number) {
-    const id = this.spec.moves[slot]?.id;
+    const id = this.moves[slot]?.id;
     this.moveT[slot] = 0;
     if (id === 'duplicate' || id === 'decoy') this.clearClones();
     if (id === 'phase' && this.player) setHumanoidOpacity(this.player.humanoid, 1);
@@ -1391,7 +1474,8 @@ export class RaidEngine {
       aura: this.aura,
       maxAura: this.maxAura,
       burnout: this.burnout,
-      moves: this.spec.moves.map((move, i) => ({
+      moves: this.moves.map((move, i) => ({
+        id: move.id,
         key: MOVE_KEYS[i],
         name: move.name,
         ready:
