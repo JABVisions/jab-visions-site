@@ -29,7 +29,7 @@ export default function PowerDeck({
   const deck = manager.loadout(ryderId);
   const pool = manager.abilityPool(ryderId);
   const spec = RYDERZ[ryderId];
-  const poolColumns = 2;
+  const poolColumns = 3;
 
   const equip = (ability: RyderAbility) => {
     if (!ability.unlocked) return;
@@ -46,29 +46,29 @@ export default function PowerDeck({
       return true;
     }
     if (column === 'slots') {
-      if (key === 'up' || key === 'down') {
+      if (key === 'left' || key === 'right') {
         const i = INPUT_SLOTS.indexOf(slot);
-        setSlot(INPUT_SLOTS[wrap(i + (key === 'down' ? 1 : -1), INPUT_SLOTS.length)]);
+        setSlot(INPUT_SLOTS[wrap(i + (key === 'right' ? 1 : -1), INPUT_SLOTS.length)]);
         return true;
       }
-      if (key === 'right' || key === 'confirm') {
+      if (key === 'down' || key === 'confirm') {
         setColumn('pool');
         setPoolIndex(Math.max(0, pool.findIndex((p) => p.inputSlot === slot)));
         return true;
       }
-      return false;
+      return key === 'up';
     }
-    if (key === 'up' || key === 'down') {
-      setPoolIndex((i) => wrap(i + (key === 'down' ? poolColumns : -poolColumns), pool.length));
+    if (key === 'up') {
+      if (poolIndex < poolColumns) setColumn('slots');
+      else setPoolIndex((i) => i - poolColumns);
       return true;
     }
-    if (key === 'left') {
-      if (poolIndex % poolColumns === 0) setColumn('slots');
-      else setPoolIndex((i) => i - 1);
+    if (key === 'down') {
+      setPoolIndex((i) => Math.min(pool.length - 1, i + poolColumns));
       return true;
     }
-    if (key === 'right') {
-      setPoolIndex((i) => wrap(i + 1, pool.length));
+    if (key === 'left' || key === 'right') {
+      setPoolIndex((i) => wrap(i + (key === 'right' ? 1 : -1), pool.length));
       return true;
     }
     if (key === 'confirm') {
@@ -114,9 +114,6 @@ export default function PowerDeck({
               </button>
             );
           })}
-          <button type="button" className={styles.ghostBtn} onClick={() => manager.resetLoadout(ryderId)}>
-            Reset to signature kit
-          </button>
         </div>
 
         <div className={styles.scroll}>
@@ -125,6 +122,9 @@ export default function PowerDeck({
             <p className={styles.eyebrow} style={{ color: 'rgba(229,246,234,0.45)' }}>
               {pool.filter((p) => p.unlocked).length} / {pool.length} unlocked
             </p>
+            <button type="button" className={styles.ghostBtn} onClick={() => manager.resetLoadout(ryderId)}>
+              Reset deck
+            </button>
           </div>
           <div className={styles.pool} role="listbox" aria-label={`Powers for slot ${slot}`}>
             {pool.map((ability, i) => (

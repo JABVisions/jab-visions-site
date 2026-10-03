@@ -131,10 +131,6 @@ export default function RyderSelector({
                 <strong>{ryder.flaw}</strong>
               </div>
               <div className={styles.summaryRow}>
-                <span>Weapon</span>
-                <strong>{ryder.weapon}</strong>
-              </div>
-              <div className={styles.summaryRow}>
                 <span>Vital · Aura · Speed</span>
                 <strong>
                   {ryder.maxHp} · {ryder.maxAura} · {ryder.speed}
