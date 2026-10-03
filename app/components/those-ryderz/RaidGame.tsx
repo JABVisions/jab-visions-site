@@ -4,6 +4,7 @@ import { ChevronLeft, ChevronRight } from 'lucide-react';
 import Image from 'next/image';
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import {
+  INTERACT_LABEL,
   RYDERZ,
   RYDER_ORDER,
   UPGRADE_ORDER,
@@ -50,6 +51,10 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
   const [burnout, setBurnout] = useState(false);
   const [banner, setBanner] = useState<HudState['banner']>(null);
   const [nearShop, setNearShop] = useState(false);
+  const [beacon, setBeacon] = useState<HudState['beacon']>(null);
+  const [recovering, setRecovering] = useState(false);
+  const beaconCooldown = useRef<HTMLSpanElement>(null);
+  const beaconTrack = useRef<HTMLElement>(null);
   const [locked, setLocked] = useState(false);
   const [moveReady, setMoveReady] = useState([false, false, false]);
   const [points, setPoints] = useState(0);
@@ -80,6 +85,13 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
         : `${Math.ceil(next.aura)} / ${next.maxAura}`;
     }
     if (pointsRef.current) pointsRef.current.textContent = String(next.points);
+    if (next.beacon && beaconCooldown.current) {
+      beaconCooldown.current.textContent = `${Math.ceil(next.beacon.cooldownLeft)}s`;
+    }
+    if (next.beacon && beaconTrack.current) {
+      const frac = next.beacon.cooldownDuration > 0 ? 1 - next.beacon.cooldownLeft / next.beacon.cooldownDuration : 1;
+      beaconTrack.current.style.width = `${Math.round(frac * 100)}%`;
+    }
     if (remainingRef.current) remainingRef.current.textContent = String(next.remaining);
     if (roundRef.current) roundRef.current.textContent = String(next.round);
     next.moves.forEach((move, i) => {
@@ -99,6 +111,10 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
       prev.paused !== next.paused ||
       prev.burnout !== next.burnout ||
       prev.nearShop !== next.nearShop ||
+      prev.recovering !== next.recovering ||
+      (prev.beacon?.near ?? false) !== (next.beacon?.near ?? false) ||
+      (prev.beacon?.ready ?? false) !== (next.beacon?.ready ?? false) ||
+      (prev.beacon?.recharging ?? false) !== (next.beacon?.recharging ?? false) ||
       prev.pointerLocked !== next.pointerLocked ||
       prev.banner?.title !== next.banner?.title ||
       prev.moves.length !== next.moves.length ||
@@ -109,6 +125,8 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
       setPaused(next.paused);
       setBurnout(next.burnout);
       setNearShop(next.nearShop);
+      setBeacon(next.beacon);
+      setRecovering(next.recovering);
       setLocked(next.pointerLocked);
       setMoveReady(next.moves.map((m) => m.ready));
       setBanner(next.banner);
@@ -240,6 +258,8 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
     setPaused(false);
     setBanner(null);
     setNearShop(false);
+    setBeacon(null);
+    setRecovering(false);
   };
 
   const resume = () => {
@@ -341,11 +361,33 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
             </div>
           )}
 
-          {burnout && <div className={styles.burnout}>Aura empty · melee only · weaker blows</div>}
+          {burnout && !recovering && <div className={styles.burnout}>Aura empty · melee only · weaker blows</div>}
+
+          {recovering && <div className={styles.recovering} />}
+
+          {beacon?.near && !recovering && (
+            <div className={`${styles.beacon} ${beacon.ready ? '' : styles.beaconCooling}`}>
+              <strong>Ryder Beacon</strong>
+              <span>Restore Health</span>
+              <span>Restore Power</span>
+              {beacon.ready ? (
+                <em>{INTERACT_LABEL} · Activate</em>
+              ) : (
+                <>
+                  <em>
+                    Recharging · <span ref={beaconCooldown}>{Math.ceil(beacon.cooldownLeft)}s</span>
+                  </em>
+                  <div className={styles.beaconTrack}>
+                    <i ref={beaconTrack} />
+                  </div>
+                </>
+              )}
+            </div>
+          )}
 
           <div className={styles.bottomHud}>
             <p className={styles.hint}>
-              Arrows move · WASD camera · Shift sprint · Mouse aim · Click fire · F / RMB melee · Q E R moves · Esc pause
+              Arrows move · WASD camera · Shift sprint · Mouse aim · Click fire · F / RMB melee · Q E R moves · {INTERACT_LABEL} use · Esc pause
               {phase === 'intermission' ? ' · Hold the spire to buy strength' : ''}
             </p>
             <div className={styles.moveRow}>
@@ -423,6 +465,11 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
               <button type="button" onClick={() => engineRef.current?.queueAbility(2)}>
                 R
               </button>
+              {beacon?.near && beacon.ready && (
+                <button type="button" onClick={() => engineRef.current?.queueInteract()}>
+                  USE
+                </button>
+              )}
             </div>
           </>
         )}

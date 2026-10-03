@@ -172,6 +172,7 @@ export class RyderManager {
   attach(engine: RaidEngine) {
     this.engine = engine;
     engine.setGameMode(this.state.gameMode);
+    if (engine.getArena().id !== this.state.arenaId) engine.loadArena(this.state.arenaId);
   }
 
   detach(engine?: RaidEngine) {
@@ -279,6 +280,7 @@ export class RyderManager {
   setArena(id: ArenaId) {
     if (!arenaSpec(id)?.available) return false;
     this.commit({ arenaId: id });
+    this.engine?.loadArena(id);
     return true;
   }
 }

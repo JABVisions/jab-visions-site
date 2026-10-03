@@ -3,6 +3,7 @@ import {
   BOUNDARY,
   BURNOUT_RECOVERY,
   ENEMIES,
+  INTERACT_KEYS,
   INTERMISSION,
   KILL_AURA_SIPHON,
   MAX_ALIVE_HOSTS,
@@ -24,6 +25,9 @@ import {
   type UpgradeId,
 } from './config';
 import { GameMode } from './game-mode';
+import { DEFAULT_ARENA, arenaSpec, type ArenaDefinition, type ArenaId } from './arenas';
+import { RyderBeacon, type BeaconHudState } from './beacon';
+import { RyderPowerVFX, type PowerState } from './power-vfx';
 import {
   ThirdPersonCamera,
   type CameraConfig,
@@ -79,6 +83,12 @@ export interface HudState {
   ryderName: string;
   meleeOnly: boolean;
   cameraState: CameraState;
+  /** HIGH / LOW / DEPLETED, as the electricity system reads it. */
+  powerState: PowerState;
+  /** The arena's Ryder Beacon, relative to the player. */
+  beacon: BeaconHudState | null;
+  /** True for the moment the Beacon is pouring energy back into the Ryder. */
+  recovering: boolean;
 }
 
 interface Host {
@@ -135,6 +145,8 @@ const KEY_PITCH_RATE = 1.3; // rad/s while holding W/S
 const COMBAT_LINGER = 2.6;
 const COMBAT_PROXIMITY = 9;
 const ABILITY_LINGER = 0.45;
+/** Seconds the Ryder stands in the Beacon's recovery state while the bars refill. */
+const RECOVERY_DURATION = 1.15;
 
 function clamp(v: number, a: number, b: number) {
   return Math.max(a, Math.min(b, v));
@@ -219,6 +231,12 @@ export class RaidEngine {
   private clones: Clone[] = [];
   private bolts: Bolt[] = [];
   private boltPool: Bolt[] = [];
+  private powerVfx: RyderPowerVFX;
+  private arena: ArenaDefinition;
+  private beacon: RyderBeacon | null = null;
+  private interactQueued = false;
+  private recoveryT = 0;
+  private recoveryFrom = { hp: 0, aura: 0 };
 
   constructor(canvas: HTMLCanvasElement, onHud: (hud: HudState) => void) {
     this.canvas = canvas;
@@ -254,6 +272,10 @@ export class RaidEngine {
 
     this.particles = new ParticleSystem();
     this.scene.add(this.particles.points);
+    this.powerVfx = new RyderPowerVFX(this.scene, this.particles);
+
+    this.arena = arenaSpec(DEFAULT_ARENA)!;
+    this.loadArena(this.arena.id);
 
     this.resize();
     this.bind();
@@ -281,7 +303,9 @@ export class RaidEngine {
     this.moveT = [0, 0, 0];
     this.queuedMoves = [false, false, false];
     this.iframes = 0;
-    this.pos.set(9, 0, 11);
+    this.recoveryT = 0;
+    this.interactQueued = false;
+    this.pos.set(this.arena.spawnPoint.x, 0, this.arena.spawnPoint.z);
     this.yaw = Math.PI * 0.85;
     this.pitch = 0.12;
     this.combatT = 0;
@@ -303,6 +327,8 @@ export class RaidEngine {
 
     this.player = buildRyder(this.spec);
     this.scene.add(this.player.humanoid.group);
+    this.powerVfx.attach(this.player, this.spec.visual);
+    this.beacon?.reset();
 
     const shieldMat = new THREE.MeshBasicMaterial({
       color: 0x66e7ff,
@@ -388,7 +414,7 @@ export class RaidEngine {
     this.player.humanoid.group.position.y = this.world.heightAt(this.pos.x, this.pos.z);
     this.player.humanoid.group.rotation.y = this.yaw;
     this.scene.add(this.player.humanoid.group);
-    this.syncWeaponGlow();
+    this.powerVfx.attach(this.player, spec.visual);
     this.particles.emit(this.pos.clone().setY(1.1), spec.color, 30, {
       speed: 7,
       size: 0.32,
@@ -479,6 +505,8 @@ export class RaidEngine {
     cancelAnimationFrame(this.raf);
     this.unbind();
     this.clearCombat();
+    this.powerVfx.dispose();
+    this.unloadBeacon();
     this.world.dispose();
     this.particles.dispose();
     this.renderer.dispose();
@@ -551,6 +579,7 @@ export class RaidEngine {
     if (e.key === 'f' || e.key === 'F' || e.code === 'Space') {
       this.meleeQueued = true;
     }
+    if (INTERACT_KEYS.includes(e.key.toLowerCase())) this.interactQueued = true;
     if (e.key === 'Escape') {
       if (this.tuneMode) {
         if (document.pointerLockElement === this.canvas) document.exitPointerLock();
@@ -630,25 +659,117 @@ export class RaidEngine {
       if (this.bannerT <= 0) this.banner = null;
     }
 
+    this.updateRecovery(dt);
     this.updateAura(dt);
     this.updatePlayerMove(dt, time);
+    const recovering = this.recoveryT > 0;
     for (let i = 0; i < 3; i += 1) {
       if (this.queuedMoves[i]) {
         this.queuedMoves[i] = false;
-        this.tryMove(i);
+        if (!recovering) this.tryMove(i);
       }
     }
     if (this.meleeQueued) {
       this.meleeQueued = false;
-      this.tryMelee();
+      if (!recovering) this.tryMelee();
     }
-    if (this.fireHeld) this.tryFire();
+    if (this.fireHeld && !recovering) this.tryFire();
+    if (this.interactQueued) {
+      this.interactQueued = false;
+      this.tryInteract();
+    }
 
     this.updateClones(dt);
     this.updateHosts(dt, time);
     this.updateBolts(dt);
     this.updateRound(dt);
     this.updateCamera(dt);
+    this.beacon?.update(dt, time, this.pos, this.spec.visual.auraColor, this.camera);
+    this.powerVfx.update(dt, time, this.aura, this.maxAura, !this.burnout, this.camera);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Arena + Ryder Beacon
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Point the raid at an arena definition. The world geometry is still the
+   * city block for every arena; what changes is the fixed points: where the
+   * Ryder drops in and where the single Ryder Beacon stands. Any Beacon from a
+   * previous arena is torn down first so there is never more than one.
+   */
+  loadArena(id: ArenaId) {
+    const def = arenaSpec(id) ?? arenaSpec(DEFAULT_ARENA)!;
+    this.arena = def;
+    this.unloadBeacon();
+    const point = def.ryderBeaconPoint;
+    const position = new THREE.Vector3(point.x, this.world.heightAt(point.x, point.z), point.z);
+    this.beacon = new RyderBeacon(position, this.particles, { cooldownDuration: def.beaconCooldown });
+    this.scene.add(this.beacon.group);
+  }
+
+  getArena(): ArenaDefinition {
+    return this.arena;
+  }
+
+  /** Read-only view of the Beacon for menus; null when the arena has none. */
+  getBeaconState(): BeaconHudState | null {
+    return this.beacon ? this.beacon.hudState(this.clock.elapsedTime, this.pos) : null;
+  }
+
+  /** Touch / menu entry point for the interact control. */
+  queueInteract() {
+    this.interactQueued = true;
+  }
+
+  private unloadBeacon() {
+    if (!this.beacon) return;
+    this.scene.remove(this.beacon.group);
+    this.beacon.dispose();
+    this.beacon = null;
+  }
+
+  private tryInteract() {
+    if (!this.player || this.phase === 'dead' || this.recoveryT > 0) return;
+    const beacon = this.beacon;
+    if (!beacon || !beacon.isPlayerInRange(this.pos)) return;
+    const time = this.clock.elapsedTime;
+    const chest = this.player.rig?.skeleton?.bone('chest') ?? this.player.humanoid.torso;
+    if (!beacon.activate(time, { object: chest, offset: new THREE.Vector3() }, this.spec.visual.auraColor)) return;
+
+    // Recovery: the Ryder holds still while the Beacon pours energy back in.
+    // Bars ramp over the sequence (so the HUD visibly fills) and land on max.
+    this.recoveryT = RECOVERY_DURATION;
+    this.recoveryFrom = { hp: this.hp, aura: this.aura };
+    this.burnout = false;
+    this.iframes = Math.max(this.iframes, RECOVERY_DURATION + 0.3);
+    this.abilityT = Math.max(this.abilityT, RECOVERY_DURATION);
+    this.fireHeld = false;
+    this.rig.addKick(0.25);
+  }
+
+  private updateRecovery(dt: number) {
+    if (this.recoveryT <= 0) return;
+    this.recoveryT = Math.max(0, this.recoveryT - dt);
+    const p = 1 - this.recoveryT / RECOVERY_DURATION;
+    const eased = p * p * (3 - 2 * p);
+    this.hp = Math.max(this.hp, this.recoveryFrom.hp + (this.maxHp - this.recoveryFrom.hp) * eased);
+    this.aura = Math.max(this.aura, this.recoveryFrom.aura + (this.maxAura - this.recoveryFrom.aura) * eased);
+    this.burnout = false;
+    if (this.recoveryT <= 0) {
+      this.hp = this.maxHp;
+      this.aura = this.maxAura;
+      // Finish: a bright surge across the Ryder and a shock ring from the feet.
+      this.powerVfx.surge(1.2);
+      this.rig.addShake(0.16);
+      this.particles.emit(this.pos.clone().setY(0.3), this.spec.visual.electricityColor, 26, {
+        speed: 9,
+        size: 0.3,
+        life: 0.5,
+        up: 0.25,
+        gravity: 2,
+      });
+    }
   }
 
   private updateAura(dt: number) {
@@ -672,7 +793,6 @@ export class RaidEngine {
       }
     }
     if (this.isActive('lift')) this.liftHosts(0.4);
-    this.syncWeaponGlow();
   }
 
   private spendAura(amount: number) {
@@ -682,16 +802,6 @@ export class RaidEngine {
       this.burnout = true;
       this.particles.emit(this.muzzle(), 0x8899aa, 18, { speed: 4, size: 0.28, life: 0.45, up: 0.4 });
     }
-  }
-
-  private syncWeaponGlow() {
-    if (!this.player) return;
-    const on = !this.burnout;
-    this.player.glowMeshes.forEach((mesh) => {
-      const mat = mesh.material as THREE.MeshBasicMaterial;
-      mat.color.setHex(this.spec.color);
-      mat.color.multiplyScalar(on ? 1.8 : 0.18);
-    });
   }
 
   private updatePlayerMove(dt: number, time: number) {
@@ -705,6 +815,10 @@ export class RaidEngine {
     if (this.keys.has('arrowdown')) z += 1;
     if (this.keys.has('arrowleft')) x -= 1;
     if (this.keys.has('arrowright')) x += 1;
+    if (this.recoveryT > 0) {
+      x = 0;
+      z = 0;
+    }
     const len = Math.hypot(x, z);
     if (len > 1) {
       x /= len;
@@ -1499,6 +1613,9 @@ export class RaidEngine {
       ryderName: this.spec.name,
       meleeOnly: this.burnout,
       cameraState: this.rig.getState(),
+      powerState: this.powerVfx.currentState,
+      beacon: this.beacon ? this.beacon.hudState(this.clock.elapsedTime, this.pos) : null,
+      recovering: this.recoveryT > 0,
     });
   }
 
@@ -1519,6 +1636,8 @@ export class RaidEngine {
       disposeObject(this.player.humanoid.group);
       this.player = null;
     }
+    this.powerVfx.detach();
+    this.recoveryT = 0;
     if (this.shield) {
       this.scene.remove(this.shield);
       this.shield.geometry.dispose();
