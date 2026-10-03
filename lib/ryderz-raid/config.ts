@@ -333,7 +333,9 @@ export const RYDERZ: Record<RyderId, RyderSpec> = {
     weapon: 'Pink energy darts',
     portrait: '/assets/john_andy_headshot.jpg',
     icon: '/assets/those-ryderz/icons/keven.webp',
-    glb: '/assets/those-ryderz/models/keven-hart.glb',
+    glb: '/assets/those-ryderz/models/keven-hart.glb?v=2',
+    // Dart hand is the left: jab with it, kick, then a backhand with the free hand.
+    strikes: ['punch', 'kick', 'slap'],
     maxHp: 100,
     speed: 7.6,
     fireRate: 5,
