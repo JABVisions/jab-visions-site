@@ -6,7 +6,7 @@ import type { Room, RoomPermissions } from "@/lib/board/rooms";
 import OfficialRoomBadge from "./OfficialRoomBadge";
 import RoomPresence from "./RoomPresence";
 import type { RoomPresence as RoomPresencePerson } from "@/lib/board/rooms";
-import { goLiveBlockedReason } from "@/lib/board/rooms/liveWebRtc";
+import { goLiveBlockedReason, startCallBlockedReason } from "@/lib/board/rooms/liveWebRtc";
 import type { RoomRole } from "@/lib/board/rooms/types";
 import "./forumsLayout.css";
 
@@ -27,6 +27,8 @@ export default function RoomHeader({
   role = "viewer",
   liveActive = false,
   canEndLive = false,
+  callActive = false,
+  callAction = "start",
 }: {
   room: Room;
   people: RoomPresencePerson[];
@@ -40,10 +42,19 @@ export default function RoomHeader({
   role?: RoomRole;
   liveActive?: boolean;
   canEndLive?: boolean;
+  callActive?: boolean;
+  callAction?: "start" | "join" | "leave" | "end";
 }) {
   const live = room.state === "LIVE" || room.state === "STAGE" || liveActive;
   const blocked = goLiveBlockedReason(role, room, permissions);
   const goLiveDisabled = canEndLive ? false : Boolean(blocked) || liveActive;
+  const callBlocked = startCallBlockedReason(role, room, permissions);
+  const callDisabled =
+    callAction === "end" || callAction === "leave" || callAction === "join"
+      ? false
+      : Boolean(callBlocked) || callActive;
+  const callLabel =
+    callAction === "end" ? "End Call" : callAction === "leave" ? "Leave Call" : callAction === "join" ? "Join Call" : "Start Call";
 
   return (
     <header className="forumsRoomHeader relative rounded-[1.75rem] border border-white/10 bg-white/[0.04] p-4 shadow-[0_20px_80px_rgba(0,0,0,0.35)] backdrop-blur-xl sm:p-6">
@@ -129,10 +140,19 @@ export default function RoomHeader({
             <button
               type="button"
               onClick={onStartCall}
-              disabled={!permissions.startCall}
+              disabled={callDisabled}
+              title={
+                callAction === "end"
+                  ? "End the Room Call for everyone"
+                  : callAction === "leave"
+                    ? "Leave this Room Call"
+                    : callAction === "join"
+                      ? "Join the open Room Call"
+                      : callBlocked || "Start a small-group Room Call"
+              }
               className="rounded-full border border-cyan-200/25 bg-cyan-300/12 px-3 py-2 text-[11px] font-black uppercase tracking-[0.14em] text-cyan-50 disabled:opacity-40"
             >
-              Start Call
+              {callLabel}
             </button>
             <button
               type="button"

@@ -47,6 +47,9 @@ assert(composer.includes("Create Room Drop"), "Room interior keeps Create Room D
 assert(conversation.includes("Add Drop"), "conversations keep Add Drop");
 assert(interior.includes("DropStudioLauncher"), "Room Drop Studio still launches from the Room");
 assert(interior.includes("onGoLive={onGoLive}"), "Go Live is wired on the shared Room header");
+assert(interior.includes("onStartCall={onStartCall}"), "Start Call is wired on the shared Room header");
+assert(interior.includes("RoomCallPreview"), "Room Call preview stays on the interior");
+assert(!interior.includes("startPlaceholder"), "Room Call is no longer a placeholder session");
 assert(card.includes("Open Room"), "Room cards expose Open Room on the hallway rails");
 assert(card.includes("room.comingSoon ? undefined : roomHref"), "coming soon rooms stay unlinked; live official rooms use roomHref");
 

@@ -79,9 +79,7 @@ export async function POST(
     body.provider === "webrtc" ||
     body.provider === "none"
       ? body.provider
-      : kind === "live"
-        ? "webrtc"
-        : "none";
+      : "webrtc";
 
   const row = {
     room_id: roomId,
@@ -92,9 +90,10 @@ export async function POST(
     started_by: user.id,
     started_at: new Date().toISOString(),
     metadata: {
-      placeholder: kind !== "live",
+      placeholder: false,
       vendor: provider,
       signals: [],
+      participantIds: kind === "call" ? [user.id] : [],
     },
   };
 
@@ -104,7 +103,7 @@ export async function POST(
       ok: true,
       persisted: "local",
       session: { ...row, id: `local_${kind}_${Date.now()}` },
-      placeholder: kind !== "live",
+      placeholder: false,
     });
   }
   if (error) return json({ ok: false, message: error.message }, 500);
@@ -134,10 +133,10 @@ export async function POST(
       entityId: roomId,
       href: `/board/forums/${roomId}`,
       message: describeRoomActivity(activityType, actorName, room.name),
-      metadata: { roomId, roomName: room.name, actorName, placeholder: kind !== "live", provider },
+      metadata: { roomId, roomName: room.name, actorName, placeholder: false, provider },
       groupKey: roomActivityGroupKey(activityType, roomId),
     }).catch(() => undefined);
   }
 
-  return json({ ok: true, persisted: "db", session: data || row, placeholder: kind !== "live" });
+  return json({ ok: true, persisted: "db", session: data || row, placeholder: false });
 }

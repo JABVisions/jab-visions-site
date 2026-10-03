@@ -9,14 +9,22 @@ import { resolveCurrentBoardIdentity } from "@/lib/board/currentProfile";
 import { PROFILE_STORAGE_KEY } from "@/lib/board/dropItem";
 import type { DropItem } from "@/lib/board/dropItem";
 import {
+  addCallParticipant,
   applyLiveVisibilityToReply,
   applyLiveVisibilityToShare,
+  buildCallSession,
   buildLiveSession,
   conversationsFromPostRows,
+  endCallSession,
   endLiveSession,
   getRoomById,
   goLiveBlockedReason,
+  isCallHost,
+  isCallParticipant,
   isLiveHost,
+  joinCallBlockedReason,
+  removeCallParticipant,
+  startCallBlockedReason,
   mergeConversationSources,
   mergeShareSources,
   overlaySharesWithVisibilityMap,
@@ -327,6 +335,31 @@ export default function RoomInterior({
           (row: Record<string, unknown>) =>
             row.kind === "live" && (row.status === "live" || row.status === "starting")
         );
+        const remoteCall = payload.sessions.find(
+          (row: Record<string, unknown>) =>
+            row.kind === "call" && (row.status === "live" || row.status === "starting")
+        );
+        if (remoteCall) {
+          const startedBy = remoteCall.started_by ? String(remoteCall.started_by) : "";
+          const metadata =
+            remoteCall.metadata && typeof remoteCall.metadata === "object"
+              ? (remoteCall.metadata as { participantIds?: unknown })
+              : {};
+          const fromMeta = Array.isArray(metadata.participantIds)
+            ? metadata.participantIds.map((id) => String(id || "")).filter(Boolean)
+            : [];
+          setCall({
+            id: String(remoteCall.id),
+            roomId: resolved,
+            kind: "call",
+            provider: "webrtc",
+            status: "live",
+            startedBy: startedBy || null,
+            startedAt: String(remoteCall.started_at || new Date().toISOString()),
+            endedAt: null,
+            participantIds: fromMeta.length ? fromMeta : startedBy ? [startedBy] : [],
+          });
+        }
         if (!remoteLive) return;
         setLive({
           id: String(remoteLive.id),
@@ -788,27 +821,100 @@ export default function RoomInterior({
     });
   }
 
-  function startPlaceholder(kind: "call") {
-    const startedAt = new Date().toISOString();
-    const session: RoomCallSession = {
+  function persistCallSession(session: RoomCallSession | null) {
+    const others = readSessions().filter((row) => row.roomId !== currentRoom.id || row.kind !== "call");
+    writeSessions(session ? [session, ...others] : others);
+    setCall(session);
+  }
+
+  async function startCall() {
+    const blocked = startCallBlockedReason(role, currentRoom, permissions);
+    if (blocked) {
+      flashSuccess(blocked);
+      return;
+    }
+    if (!ensureJoined()) {
+      flashSuccess("Join this Room to start a Call.");
+      return;
+    }
+    if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) {
+      flashSuccess("This browser cannot open a camera or microphone.");
+      return;
+    }
+    const session = buildCallSession({
       id: uid("call"),
       roomId: currentRoom.id,
-      kind: "call",
-      provider: "none",
-      status: "live",
       startedBy: userId,
-      startedAt,
-      endedAt: null,
-      participantIds: [userId],
-    };
-    writeSessions([session, ...readSessions().filter((row) => row.roomId !== currentRoom.id || row.kind !== "call")]);
-    setCall(session);
-    setRoom({ ...currentRoom, state: currentRoom.state === "LIVE" ? "LIVE" : "ROOM" });
+    });
+    persistCallSession({ ...session, status: "starting" });
+    try {
+      const response = await fetch(`/api/board/rooms/${currentRoom.id}/sessions`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          kind: "call",
+          provider: "webrtc",
+          displayName: identity.displayName,
+        }),
+      });
+      const payload = await response.json().catch(() => null);
+      const remoteId = payload?.session?.id;
+      persistCallSession(remoteId && typeof remoteId === "string" ? { ...session, id: remoteId } : session);
+    } catch {
+      persistCallSession(session);
+    }
+  }
+
+  function joinCall() {
+    if (!call) return;
+    const blocked = joinCallBlockedReason(call, userId);
+    if (blocked) {
+      flashSuccess(blocked);
+      return;
+    }
+    if (!ensureJoined()) {
+      flashSuccess("Join this Room to enter the Call.");
+      return;
+    }
+    persistCallSession(addCallParticipant(call, userId));
+  }
+
+  function leaveCall() {
+    if (!call) return;
+    if (isCallHost(call, userId)) {
+      stopCall();
+      return;
+    }
+    const next = removeCallParticipant(call, userId);
+    persistCallSession(next.participantIds.length ? next : endCallSession(next));
+    if (!next.participantIds.length) persistCallSession(null);
+  }
+
+  function stopCall() {
+    if (!call) return;
+    persistCallSession(endCallSession(call));
+    persistCallSession(null);
     void fetch(`/api/board/rooms/${currentRoom.id}/sessions`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ kind, displayName: identity.displayName }),
+      body: JSON.stringify({ action: "end", sessionId: call.id, kind: "call" }),
     });
+  }
+
+  function onStartCall() {
+    if (call && isCallHost(call, userId)) {
+      stopCall();
+      return;
+    }
+    if (call && isCallParticipant(call, userId)) {
+      leaveCall();
+      return;
+    }
+    if (call) {
+      joinCall();
+      return;
+    }
+    void startCall();
   }
 
   function persistLiveSession(session: RoomLiveSession | null) {
@@ -891,9 +997,19 @@ export default function RoomInterior({
         role={role}
         liveActive={Boolean(live)}
         canEndLive={Boolean(live && isLiveHost(live, userId))}
+        callActive={Boolean(call)}
+        callAction={
+          call && isCallHost(call, userId)
+            ? "end"
+            : call && isCallParticipant(call, userId)
+              ? "leave"
+              : call
+                ? "join"
+                : "start"
+        }
         onJoin={() => persistMembership(joined ? "leave" : "join")}
         onFollow={() => persistMembership(following ? "leave" : "follow")}
-        onStartCall={() => startPlaceholder("call")}
+        onStartCall={onStartCall}
         onGoLive={onGoLive}
       />
 
@@ -909,7 +1025,19 @@ export default function RoomInterior({
         }}
         onEnded={stopLive}
       />
-      <RoomCallPreview room={room} session={call} />
+      <RoomCallPreview
+        room={room}
+        session={call}
+        userId={userId}
+        displayName={identity.displayName}
+        onJoin={joinCall}
+        onSessionChange={(next) => persistCallSession(next)}
+        onFailed={(message) => {
+          flashSuccess(message);
+          leaveCall();
+        }}
+        onEnded={stopCall}
+      />
 
       {!room.comingSoon ? (
         <>

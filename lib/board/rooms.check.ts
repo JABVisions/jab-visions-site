@@ -84,13 +84,13 @@ assert(roomHref("music-drops") === "/board/forums/music", "forum thread hrefs re
 
 const viewer = permissionsForRole("viewer", getRoomById("music"));
 assert(viewer.post === false && viewer.follow === true, "viewers follow but do not post");
-assert(canStartCall("member", getRoomById("music")) === true, "members can start a Room Call placeholder");
+assert(canStartCall("member", getRoomById("music")) === true, "members can start a Room Call");
 assert(canGoLive("member", getRoomById("music")) === true, "joined members can Go Live now that WebRTC is wired");
 assert(canGoLive("viewer", getRoomById("music")) === false, "viewers cannot Go Live");
 assert(canGoLive("host", getRoomById("music")) === true, "hosts can Go Live");
 assert(permissionsForRole("member", getRoomById("those-ryderz")).join === true, "Those Ryderz members can join");
 assert(permissionsForRole("member", getRoomById("those-ryderz")).shareDrop === true, "Those Ryderz members can share Drops");
-assert(canStartCall("member", getRoomById("those-ryderz")) === true, "Those Ryderz members can start a Room Call placeholder");
+assert(canStartCall("member", getRoomById("those-ryderz")) === true, "Those Ryderz members can start a Room Call");
 assert(canGoLive("host", getRoomById("jab-visions")) === true, "JAB Visions hosts can Go Live");
 assert(permissionsForRole("member", getRoomById("jab-visions")).post === true, "JAB Visions members can post");
 

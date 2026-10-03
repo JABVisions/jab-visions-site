@@ -1,10 +1,13 @@
--- Forums Go Live (Board-native WebRTC)
+-- Forums Go Live + Room Call (Board-native WebRTC)
 -- Paste into Supabase Dashboard -> SQL Editor if room_sessions already exists.
 -- Safe to re-run. Does not change storage RLS.
 --
 -- Go Live uses:
---   1. public.room_sessions (provider = webrtc, metadata.signals mailbox)
+--   1. public.room_sessions kind=live (provider = webrtc, metadata.signals mailbox)
 --   2. Supabase Realtime broadcast on channel room-live:{roomId}
+-- Room Call reuses the same mailbox with:
+--   1. public.room_sessions kind=call (provider = webrtc)
+--   2. Supabase Realtime broadcast on channel room-call:{roomId}
 -- No LiveKit / Daily / Agora keys are required.
 --
 -- Optional env (Vercel):

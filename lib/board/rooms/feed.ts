@@ -59,7 +59,7 @@ export function sessionToFeedItem(session: RoomSession): RoomFeedItem {
     body:
       session.kind === "live"
         ? "A Live Room is broadcasting. Discussion stays open beside the stream."
-        : "A Room Call is open. Everyone in the room can speak when media is wired.",
+        : "A Room Call is open. Everyone in the Room can join and speak.",
     session,
   };
 }

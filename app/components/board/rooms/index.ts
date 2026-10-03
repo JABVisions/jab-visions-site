@@ -5,6 +5,7 @@ export { default as RoomCard } from "./RoomCard";
 export { default as RoomHeader } from "./RoomHeader";
 export { default as RoomLivePreview } from "./RoomLivePreview";
 export { default as RoomCallPreview } from "./RoomCallPreview";
+export { default as RoomCallStage } from "./RoomCallStage";
 export { default as RoomActivityFeed } from "./RoomActivityFeed";
 export { default as RoomShareDrop } from "./RoomShareDrop";
 export { default as RoomDropComposer } from "./RoomDropComposer";

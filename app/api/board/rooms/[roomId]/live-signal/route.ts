@@ -23,7 +23,7 @@ function asSignal(value: unknown): LiveSignal | null {
     roomId,
     from,
     to: typeof row.to === "string" ? row.to : null,
-    role: row.role === "host" ? "host" : "viewer",
+    role: row.role === "host" ? "host" : row.role === "caller" ? "caller" : "viewer",
     sdp: typeof row.sdp === "string" ? row.sdp : undefined,
     candidate: row.candidate,
     viewerCount: typeof row.viewerCount === "number" ? row.viewerCount : undefined,
@@ -39,6 +39,7 @@ export async function GET(
   if (!roomId) return json({ ok: false, message: "Room not found" }, 404);
   const url = new URL(req.url);
   const sessionId = String(url.searchParams.get("sessionId") || "").trim();
+  const kind = url.searchParams.get("kind") === "call" ? "call" : "live";
   const since = Number(url.searchParams.get("since") || 0);
 
   try {
@@ -47,11 +48,11 @@ export async function GET(
       .from("room_sessions")
       .select("id, metadata")
       .eq("room_id", roomId)
-      .eq("kind", "live")
       .in("status", ["starting", "live"])
       .order("created_at", { ascending: false })
       .limit(1);
     if (sessionId) query = query.eq("id", sessionId);
+    else query = query.eq("kind", kind);
     const { data, error } = await query.maybeSingle();
     if (error && isMissingRoomsTable(error)) return json({ ok: true, signals: [], setupRequired: true });
     if (error) return json({ ok: true, signals: [] });
@@ -91,17 +92,18 @@ export async function POST(
   if (!signal) return json({ ok: false, message: "signal is required" }, 400);
   signal.roomId = roomId;
   const sessionId = String(body.sessionId || signal.sessionId || "").trim();
+  const kind = body.kind === "call" || signal.role === "caller" ? "call" : "live";
 
   try {
     let query = supabase
       .from("room_sessions")
       .select("id, metadata")
       .eq("room_id", roomId)
-      .eq("kind", "live")
       .in("status", ["starting", "live"])
       .order("created_at", { ascending: false })
       .limit(1);
     if (sessionId) query = query.eq("id", sessionId);
+    else query = query.eq("kind", kind);
     const { data, error } = await query.maybeSingle();
     if (error && isMissingRoomsTable(error)) return json({ ok: true, persisted: "local" });
     if (error || !data) return json({ ok: true, persisted: "none" });
