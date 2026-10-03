@@ -253,9 +253,18 @@ export function assessSkinning(root: THREE.Object3D) {
     const rest = restPositions(mesh);
     let sumD = 0;
     let sumW = 0;
+    let samples = 0;
+    let rigid = 0;
+    let rigidBone = -1;
     const step = Math.max(1, Math.floor(index.count / 2500));
     for (let i = 0; i < index.count; i += step) {
       p.fromArray(rest, i * 3);
+      samples += 1;
+      if (weight.getComponent(i, 0) >= 0.999) {
+        const bone = index.getComponent(i, 0);
+        if (rigidBone < 0) rigidBone = bone;
+        if (bone === rigidBone) rigid += 1;
+      }
       for (let k = 0; k < 4; k += 1) {
         const w = weight.getComponent(i, k);
         if (w <= 0.05) continue;
@@ -263,6 +272,9 @@ export function assessSkinning(root: THREE.Object3D) {
         sumW += w;
       }
     }
+    // A part welded entirely to one bone is a held prop (sword, bat); it legitimately
+    // reaches far from that bone and is not evidence of scrambled weights.
+    if (samples > 0 && rigid / samples > 0.95) return;
     if (sumW > 0 && sumD / sumW > height * 0.14) broken.push(mesh.name);
   });
   return broken;
@@ -587,12 +599,17 @@ function track(p: number, keys: Array<[number, number]>) {
   return keys[keys.length - 1][1];
 }
 
+/** Authored melee animations the procedural skeleton can perform. */
+export type MeleeStyle = 'chop' | 'slash' | 'punch' | 'kick';
+
 export interface SkeletalMotion {
   phase: number;
   moving: number;
   sprinting: boolean;
   /** 1 → 0 across a melee swing; 0 when idle. */
   meleeT: number;
+  /** Which melee animation `meleeT` drives; defaults to the overhead chop. */
+  meleeStyle?: MeleeStyle;
 }
 
 /**
@@ -652,71 +669,311 @@ export function poseSkeleton(skel: ProceduralSkeleton, motion: SkeletalMotion) {
     A.head.y -= sL * 0.08 * moving;
   }
 
-  // --- Melee chop (right arm, torso drives it) --------------------------------
   if (meleeT > 0) {
-    // Windup overhead (0.26) → impact with the arm driven forward (0.55) →
-    // follow-through down and across the body (0.75) → recover.
     const p = 1 - meleeT;
-    A.upperArmR.x += track(p, [
-      [0, 0],
-      [0.26, -2.6],
-      [0.55, -1.35],
-      [0.75, -0.7],
-      [1, 0],
-    ]);
-    A.upperArmR.z += track(p, [
-      [0, 0],
-      [0.26, -0.4],
-      [0.55, 0.25],
-      [0.75, 0.6],
-      [1, 0],
-    ]);
-    A.lowerArmR.x += track(p, [
-      [0, 0],
-      [0.26, -1.6],
-      [0.55, -0.1],
-      [0.75, -0.3],
-      [1, -0.2],
-    ]);
-    A.handR.x += track(p, [
-      [0, 0],
-      [0.26, -0.5],
-      [0.55, 0.3],
-      [0.75, 0.5],
-      [1, 0],
-    ]);
-    A.spine.y += track(p, [
-      [0, 0],
-      [0.26, -0.42],
-      [0.6, 0.48],
-      [1, 0],
-    ]);
-    A.spine.x += track(p, [
-      [0, 0],
-      [0.26, -0.12],
-      [0.6, 0.3],
-      [1, 0],
-    ]);
-    A.hips.y += track(p, [
-      [0, 0],
-      [0.26, -0.18],
-      [0.6, 0.22],
-      [1, 0],
-    ]);
-    // Off arm counterbalances as a guard.
-    A.upperArmL.x += track(p, [
-      [0, 0],
-      [0.26, 0.3],
-      [0.6, -0.5],
-      [1, 0],
-    ]);
-    A.lowerArmL.x += track(p, [
-      [0, 0],
-      [0.6, -0.6],
-      [1, 0],
-    ]);
-    A.head.y -= A.spine.y * 0.7;
+    switch (motion.meleeStyle ?? 'chop') {
+      case 'slash':
+        poseSlash(A, p);
+        break;
+      case 'punch':
+        posePunch(A, p);
+        break;
+      case 'kick':
+        poseKick(A, p);
+        break;
+      default:
+        poseChop(A, p);
+    }
   }
 
   skel.apply();
+}
+
+type Angles = Record<BoneKey, PoseAngles>;
+
+/** Overhead chop: right arm, torso drives it. */
+function poseChop(A: Angles, p: number) {
+  // Windup overhead (0.26) → impact with the arm driven forward (0.55) →
+  // follow-through down and across the body (0.75) → recover.
+  A.upperArmR.x += track(p, [
+    [0, 0],
+    [0.26, -2.6],
+    [0.55, -1.35],
+    [0.75, -0.7],
+    [1, 0],
+  ]);
+  A.upperArmR.z += track(p, [
+    [0, 0],
+    [0.26, -0.4],
+    [0.55, 0.25],
+    [0.75, 0.6],
+    [1, 0],
+  ]);
+  A.lowerArmR.x += track(p, [
+    [0, 0],
+    [0.26, -1.6],
+    [0.55, -0.1],
+    [0.75, -0.3],
+    [1, -0.2],
+  ]);
+  A.handR.x += track(p, [
+    [0, 0],
+    [0.26, -0.5],
+    [0.55, 0.3],
+    [0.75, 0.5],
+    [1, 0],
+  ]);
+  A.spine.y += track(p, [
+    [0, 0],
+    [0.26, -0.42],
+    [0.6, 0.48],
+    [1, 0],
+  ]);
+  A.spine.x += track(p, [
+    [0, 0],
+    [0.26, -0.12],
+    [0.6, 0.3],
+    [1, 0],
+  ]);
+  A.hips.y += track(p, [
+    [0, 0],
+    [0.26, -0.18],
+    [0.6, 0.22],
+    [1, 0],
+  ]);
+  // Off arm counterbalances as a guard.
+  A.upperArmL.x += track(p, [
+    [0, 0],
+    [0.26, 0.3],
+    [0.6, -0.5],
+    [1, 0],
+  ]);
+  A.lowerArmL.x += track(p, [
+    [0, 0],
+    [0.6, -0.6],
+    [1, 0],
+  ]);
+  A.head.y -= A.spine.y * 0.7;
+}
+
+/** Horizontal sword slash: blade pulled back to the right, swept across the body. */
+function poseSlash(A: Angles, p: number) {
+  // Windup out to the side (0.3) → cut through centre (0.55) → follow-through
+  // across to the left (0.75) → recover.
+  A.upperArmR.x += track(p, [
+    [0, 0],
+    [0.3, -0.55],
+    [0.55, -1.5],
+    [0.75, -1.15],
+    [1, 0],
+  ]);
+  A.upperArmR.z += track(p, [
+    [0, 0],
+    [0.3, -1.25],
+    [0.55, 0.2],
+    [0.75, 0.75],
+    [1, 0],
+  ]);
+  A.lowerArmR.x += track(p, [
+    [0, 0],
+    [0.3, -0.7],
+    [0.55, -0.1],
+    [0.75, -0.45],
+    [1, -0.2],
+  ]);
+  // Blade stays level through the cut.
+  A.handR.x += track(p, [
+    [0, 0],
+    [0.3, -0.35],
+    [0.55, -0.3],
+    [0.75, -0.1],
+    [1, 0],
+  ]);
+  A.handR.z += track(p, [
+    [0, 0],
+    [0.3, 0.5],
+    [0.75, -0.3],
+    [1, 0],
+  ]);
+  A.spine.y += track(p, [
+    [0, 0],
+    [0.3, -0.55],
+    [0.65, 0.65],
+    [1, 0],
+  ]);
+  A.spine.x += track(p, [
+    [0, 0],
+    [0.3, -0.05],
+    [0.6, 0.18],
+    [1, 0],
+  ]);
+  A.hips.y += track(p, [
+    [0, 0],
+    [0.3, -0.25],
+    [0.65, 0.3],
+    [1, 0],
+  ]);
+  // Off arm tucks in as a guard, then opens for balance on the follow-through.
+  A.upperArmL.x += track(p, [
+    [0, 0],
+    [0.3, -0.45],
+    [0.75, 0.35],
+    [1, 0],
+  ]);
+  A.lowerArmL.x += track(p, [
+    [0, 0],
+    [0.3, -1.3],
+    [0.75, -0.4],
+    [1, 0],
+  ]);
+  // Light stance drop through the cut.
+  const crouch = track(p, [
+    [0, 0],
+    [0.55, 1],
+    [1, 0],
+  ]);
+  A.upperLegL.x -= 0.18 * crouch;
+  A.upperLegR.x -= 0.18 * crouch;
+  A.lowerLegL.x += 0.3 * crouch;
+  A.lowerLegR.x += 0.3 * crouch;
+  A.head.y -= A.spine.y * 0.6;
+}
+
+/** Straight left punch (the free hand) with the hips behind it; the weapon hand chambers back. */
+function posePunch(A: Angles, p: number) {
+  // Chamber the fist at the chin (0.25) → extend through the target (0.5) →
+  // snap back to guard.
+  A.upperArmL.x += track(p, [
+    [0, 0],
+    [0.25, -0.85],
+    [0.5, -1.55],
+    [0.8, -0.9],
+    [1, 0],
+  ]);
+  A.upperArmL.z += track(p, [
+    [0, 0],
+    [0.25, 0.25],
+    [0.5, -0.35],
+    [0.8, -0.1],
+    [1, 0],
+  ]);
+  A.lowerArmL.x += track(p, [
+    [0, 0],
+    [0.25, -2.2],
+    [0.5, -0.05],
+    [0.8, -1.6],
+    [1, -0.2],
+  ]);
+  A.handL.z += track(p, [
+    [0, 0],
+    [0.25, -0.3],
+    [0.5, 0.6],
+    [1, 0],
+  ]);
+  A.spine.y += track(p, [
+    [0, 0],
+    [0.25, 0.35],
+    [0.5, -0.6],
+    [0.8, -0.2],
+    [1, 0],
+  ]);
+  A.spine.x += track(p, [
+    [0, 0],
+    [0.25, -0.05],
+    [0.5, 0.2],
+    [1, 0],
+  ]);
+  A.hips.y += track(p, [
+    [0, 0],
+    [0.25, 0.2],
+    [0.5, -0.35],
+    [0.8, -0.1],
+    [1, 0],
+  ]);
+  // Rear leg drives, front knee softens.
+  const drive = track(p, [
+    [0, 0],
+    [0.5, 1],
+    [1, 0],
+  ]);
+  A.upperLegR.x -= 0.2 * drive;
+  A.lowerLegR.x += 0.35 * drive;
+  A.upperLegL.x += 0.15 * drive;
+  // Weapon hand pulls back low and out of the way, blade trailing.
+  A.upperArmR.x += track(p, [
+    [0, 0],
+    [0.25, -0.2],
+    [0.5, 0.55],
+    [0.8, 0.2],
+    [1, 0],
+  ]);
+  A.upperArmR.z += track(p, [
+    [0, 0],
+    [0.25, -0.2],
+    [0.8, -0.35],
+    [1, 0],
+  ]);
+  A.lowerArmR.x += track(p, [
+    [0, 0],
+    [0.25, -1.4],
+    [0.5, -0.9],
+    [0.8, -1.1],
+    [1, -0.2],
+  ]);
+  A.head.y -= A.spine.y * 0.8;
+}
+
+/** Right front kick: chamber the knee, snap the shin out, retract. */
+function poseKick(A: Angles, p: number) {
+  // Chamber (0.3) → extension (0.55) → re-chamber (0.78) → plant.
+  A.upperLegR.x += track(p, [
+    [0, 0],
+    [0.3, -1.45],
+    [0.55, -1.6],
+    [0.78, -1.0],
+    [1, 0],
+  ]);
+  A.lowerLegR.x += track(p, [
+    [0, 0],
+    [0.3, 1.9],
+    [0.55, 0.1],
+    [0.78, 1.4],
+    [1, 0],
+  ]);
+  A.footR.x += track(p, [
+    [0, 0],
+    [0.3, 0.35],
+    [0.55, -0.45],
+    [0.78, 0.2],
+    [1, 0],
+  ]);
+  A.upperLegR.z += track(p, [
+    [0, 0],
+    [0.3, -0.12],
+    [0.78, -0.12],
+    [1, 0],
+  ]);
+  // Lean back over the support leg; hips open toward the kick.
+  const lean = track(p, [
+    [0, 0],
+    [0.3, 0.7],
+    [0.55, 1],
+    [0.78, 0.6],
+    [1, 0],
+  ]);
+  A.spine.x -= 0.3 * lean;
+  A.hips.x -= 0.15 * lean;
+  A.hips.y += 0.22 * lean;
+  A.spine.y -= 0.12 * lean;
+  A.head.x += 0.25 * lean;
+  // Support knee softens so she does not stand bolt upright on one leg.
+  A.upperLegL.x -= 0.12 * lean;
+  A.lowerLegL.x += 0.25 * lean;
+  // Arms counterbalance: guard hand forward, sword hand back and low.
+  A.upperArmL.x -= 0.35 * lean;
+  A.lowerArmL.x -= 0.85 * lean;
+  A.upperArmL.z += 0.2 * lean;
+  A.upperArmR.x += 0.45 * lean;
+  A.upperArmR.z -= 0.35 * lean;
+  A.lowerArmR.x -= 0.6 * lean;
 }
