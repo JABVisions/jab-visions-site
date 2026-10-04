@@ -12,6 +12,8 @@ import {
     sanitizeProfileForStorage,
 } from "@/lib/board/profileStorage";
 import { supabaseBrowser } from "@/lib/supabase/browser";
+import BankingPanel from "@/app/components/board/banking/BankingPanel";
+import { useSearchParams } from "next/navigation";
 
 const PROFILE_STORAGE_KEY = BOARD_PROFILE_STORAGE_KEY;
 
@@ -22,13 +24,6 @@ type UiMode = "classic" | "night";
 type FriendDmMode = "open" | "requests" | "muted";
 type PresenceScope = "everyone" | "friend_zone" | "groups" | "hidden";
 type DefaultShareScope = "public" | "friend_zone" | "close_circle" | "private";
-type BankingStatus =
-    | "processor_setup_required"
-    | "bank_not_connected"
-    | "verification_needed"
-    | "ready_for_pay_drops"
-    | "cash_out_available";
-
 type AuraKey =
     | "sloth_pink"
     | "lust_blue"
@@ -160,27 +155,6 @@ const DEFAULT_SETTINGS: BoardSettings = {
 
     presenceOnline: true,
     presenceLastActive: true,
-};
-
-const bankingProfile = {
-    processor: "Stripe Connect",
-    status: "processor_setup_required" as BankingStatus,
-    availableBalance: 0,
-    pendingBalance: 0,
-    lifetimePayDrops: 0,
-    payoutsEnabled: false,
-    payDropsEnabled: true,
-    showPayDropsOnProfile: true,
-    notifyOnPayDrop: true,
-    bankName: null as string | null,
-    bankLast4: null as string | null,
-    recentPayDrops: [] as Array<{
-        id: string;
-        from: string;
-        amount: number;
-        createdAt: string;
-        status: string;
-    }>,
 };
 
 function clamp(n: number, min: number, max: number) {
@@ -917,339 +891,22 @@ function AuroraDrift({ enabled }: { enabled: boolean }) {
     );
 }
 
-const BANKING_STATUS_LABELS: Record<BankingStatus, string> = {
-    processor_setup_required: "Processor Setup Required",
-    bank_not_connected: "Bank Not Connected",
-    verification_needed: "Verification Needed",
-    ready_for_pay_drops: "Ready for Pay Drops",
-    cash_out_available: "Cash Out Available",
-};
-
-function formatMoney(cents: number) {
-    return new Intl.NumberFormat("en-US", {
-        style: "currency",
-        currency: "USD",
-    }).format(cents / 100);
-}
-
 function BankingPayDropsPanel({
     night,
-    settings,
-    setSettings,
 }: {
     night: boolean;
-    settings: BoardSettings;
-    setSettings: React.Dispatch<React.SetStateAction<BoardSettings>>;
+    settings?: BoardSettings;
+    setSettings?: React.Dispatch<React.SetStateAction<BoardSettings>>;
 }) {
-    const profile = {
-        ...bankingProfile,
-        payDropsEnabled: settings.payDropsEnabled,
-        showPayDropsOnProfile: settings.showPayDropsOnProfile,
-        notifyOnPayDrop: settings.notifyOnPayDrop,
-    };
-    const statusLabel = BANKING_STATUS_LABELS[profile.status];
-    const bankingConnected = Boolean(profile.bankName && profile.bankLast4);
-    const cashOutDisabled =
-        !profile.payoutsEnabled ||
-        !bankingConnected ||
-        profile.availableBalance <= 0 ||
-        profile.status !== "cash_out_available";
-
-    async function connectBanking() {
-        // Kick off Stripe Connect (Express) onboarding. The route creates/links the
-        // connected account and returns a one-time onboarding URL. Requires
-        // STRIPE_SECRET_KEY + Connect enabled (otherwise the route returns a
-        // helpful 503 surfaced below).
-        try {
-            const supabase = supabaseBrowser();
-            const { data: auth } = await supabase.auth.getUser();
-            const uid = auth?.user?.id;
-
-            // Reuse an existing connected account if onboarding was started before.
-            let currentStyle: Record<string, any> = {};
-            let existingAccountId: string | undefined;
-            if (uid) {
-                const { data: prof } = await supabase
-                    .from("profiles")
-                    .select("board_style")
-                    .eq("id", uid)
-                    .maybeSingle();
-                currentStyle =
-                    prof?.board_style && typeof prof.board_style === "object"
-                        ? (prof.board_style as Record<string, any>)
-                        : {};
-                if (typeof currentStyle.stripeAccountId === "string" && currentStyle.stripeAccountId.trim()) {
-                    existingAccountId = currentStyle.stripeAccountId.trim();
-                }
-            }
-
-            const res = await fetch("/api/paydrops/stripe/connect", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    accountId: existingAccountId,
-                    email: auth?.user?.email,
-                    returnPath: "/board/options",
-                    refreshPath: "/board/options",
-                }),
-            });
-            const data = await res.json().catch(() => null);
-            if (!res.ok || !data?.ok || !data.url) {
-                throw new Error(data?.error || "Could not start Stripe onboarding.");
-            }
-
-            // Persist the connected account id so checkout can route funds and we
-            // can reuse onboarding next time.
-            if (uid && data.accountId) {
-                await supabase
-                    .from("profiles")
-                    .upsert(
-                        { id: uid, board_style: { ...currentStyle, stripeAccountId: data.accountId } },
-                        { onConflict: "id" }
-                    );
-            }
-
-            window.location.href = data.url;
-        } catch (error) {
-            if (typeof window !== "undefined") {
-                window.alert(
-                    error instanceof Error ? error.message : "Could not start Stripe onboarding."
-                );
-            }
-        }
-    }
-
-    function cashOut() {
-        // TODO: Fetch payout status.
-        // TODO: Fetch Pay Drop balance.
-        // TODO: Create cash-out transfer.
-        // TODO: Listen for payment/payout webhooks.
-        // TODO: Store safe transaction records in Supabase.
-        console.log("Cash Out clicked", { processor: profile.processor });
-    }
-
-    const balanceCards = [
-        { label: "Available Balance", value: formatMoney(profile.availableBalance), accent: "seafoam" },
-        { label: "Pending Balance", value: formatMoney(profile.pendingBalance), accent: "gold" },
-        { label: "Lifetime Pay Drops", value: formatMoney(profile.lifetimePayDrops), accent: "pink" },
-    ];
-
-    return (
-        <div className="grid gap-4">
-            <div
-                className={cx(
-                    "relative overflow-hidden rounded-[26px] border p-5 sm:p-6",
-                    night
-                        ? "border-white/18 bg-[linear-gradient(135deg,rgba(185,255,221,0.12),rgba(255,216,101,0.08),rgba(255,255,255,0.05))] shadow-[0_24px_70px_rgba(0,0,0,0.22),inset_0_1px_0_rgba(255,255,255,0.12)]"
-                        : "border-white/70 bg-[linear-gradient(135deg,rgba(255,255,255,0.78),rgba(222,255,238,0.58),rgba(255,239,167,0.44))] shadow-[0_24px_70px_rgba(118,128,77,0.16),inset_0_1px_0_rgba(255,255,255,0.8)]"
-                )}
-            >
-                <div
-                    aria-hidden="true"
-                    className="pointer-events-none absolute -right-20 -top-24 h-56 w-56 rounded-full blur-3xl"
-                    style={{ background: "rgba(118,255,202,0.26)" }}
-                />
-                <div
-                    aria-hidden="true"
-                    className="pointer-events-none absolute -bottom-24 left-1/4 h-52 w-72 rounded-full blur-3xl"
-                    style={{ background: "rgba(255,214,74,0.20)" }}
-                />
-
-                <div className="relative z-10 flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-                    <div>
-                        <div className={cx("text-2xl font-black tracking-tight sm:text-3xl", night ? "text-white" : "text-black/82")}>
-                            Banking & Pay Drops
-                        </div>
-                        <p className={cx("mt-2 max-w-3xl text-sm", night ? "text-white/64" : "text-black/58")}>
-                            Connect your payout account, manage Pay Drop earnings, and transfer eligible balances to your bank.
-                        </p>
-                    </div>
-
-                    <div
-                        className={cx(
-                            "inline-flex w-fit items-center gap-2 rounded-full border px-3 py-2 text-[11px] font-black uppercase tracking-[0.14em]",
-                            night
-                                ? "border-[#ffe58c]/30 bg-[#ffe58c]/12 text-[#ffe58c]"
-                                : "border-[#d5ad25]/35 bg-[#fff1a8]/70 text-[#7a6417]"
-                        )}
-                    >
-                        <span className="h-2 w-2 rounded-full bg-[#ffd64a] shadow-[0_0_14px_rgba(255,214,74,0.75)]" />
-                        {statusLabel}
-                    </div>
-                </div>
-
-                <div className="relative z-10 mt-5 grid gap-3 md:grid-cols-3">
-                    {balanceCards.map((card) => (
-                        <div
-                            key={card.label}
-                            className={cx(
-                                "rounded-2xl border p-4",
-                                night ? "border-white/14 bg-black/18" : "border-white/70 bg-white/62"
-                            )}
-                        >
-                            <div className={cx("text-[11px] font-black uppercase tracking-[0.16em]", night ? "text-white/48" : "text-black/45")}>
-                                {card.label}
-                            </div>
-                            <div className={cx("mt-2 text-2xl font-black", night ? "text-white/90" : "text-black/80")}>
-                                {card.value}
-                            </div>
-                            <div
-                                className="mt-3 h-1.5 rounded-full"
-                                style={{
-                                    background:
-                                        card.accent === "seafoam"
-                                            ? "linear-gradient(90deg,#7cffcf,transparent)"
-                                            : card.accent === "gold"
-                                                ? "linear-gradient(90deg,#ffd64a,transparent)"
-                                                : "linear-gradient(90deg,#ff77dd,transparent)",
-                                }}
-                            />
-                        </div>
-                    ))}
-                </div>
-            </div>
-
-            <div className="grid gap-4 xl:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
-                <Card
-                    title="Payout Account"
-                    subtitle={`Processor: ${profile.processor}`}
-                    night={night}
-                >
-                    <div
-                        className={cx(
-                            "rounded-2xl border p-4",
-                            night ? "border-white/14 bg-white/6" : "border-black/10 bg-white/68"
-                        )}
-                    >
-                        <div className={cx("text-base font-black", night ? "text-white/88" : "text-black/80")}>
-                            {bankingConnected
-                                ? `${profile.bankName} ending in ${profile.bankLast4}`
-                                : "No payout account connected"}
-                        </div>
-                        <p className={cx("mt-2 text-xs leading-relaxed", night ? "text-white/55" : "text-black/55")}>
-                            Banking details are handled securely through our payment processor. Board only stores payout status and safe account metadata.
-                        </p>
-                        <button
-                            type="button"
-                            onClick={connectBanking}
-                            className={cx(
-                                "mt-4 rounded-full border px-4 py-2 text-xs font-black uppercase tracking-[0.14em] transition",
-                                night
-                                    ? "border-[#8fffd2]/30 bg-[#8fffd2]/12 text-[#b8ffe5] hover:bg-[#8fffd2]/18"
-                                    : "border-[#139b69]/25 bg-[#dffff1] text-[#146d50] hover:bg-[#cefde8]"
-                            )}
-                        >
-                            Connect Banking
-                        </button>
-                    </div>
-                </Card>
-
-                <Card title="Cash Out" subtitle="Transfer eligible balances." night={night}>
-                    <div
-                        className={cx(
-                            "rounded-2xl border p-4",
-                            night ? "border-white/14 bg-white/6" : "border-black/10 bg-white/68"
-                        )}
-                    >
-                        <button
-                            type="button"
-                            disabled={cashOutDisabled}
-                            onClick={cashOut}
-                            className={cx(
-                                "w-full rounded-full border px-4 py-3 text-xs font-black uppercase tracking-[0.14em] transition",
-                                cashOutDisabled
-                                    ? night
-                                        ? "cursor-not-allowed border-white/10 bg-white/6 text-white/32"
-                                        : "cursor-not-allowed border-black/8 bg-black/5 text-black/32"
-                                    : night
-                                        ? "border-[#ffd64a]/35 bg-[#ffd64a]/18 text-[#fff0ad] hover:bg-[#ffd64a]/25"
-                                        : "border-[#d5ad25]/35 bg-[#fff1a8] text-[#725a0f] hover:bg-[#ffe77b]"
-                            )}
-                        >
-                            Cash Out to Bank
-                        </button>
-                        <p className={cx("mt-3 text-xs leading-relaxed", night ? "text-white/55" : "text-black/55")}>
-                            Payout timing depends on the payment processor and the receiving bank.
-                        </p>
-                    </div>
-                </Card>
-            </div>
-
-            <Card title="Pay Drop Settings" subtitle="Control how Pay Drops appear and notify you." night={night}>
-                <Row
-                    night={night}
-                    label="Allow Pay Drops"
-                    hint="Let your Board receive eligible Pay Drops when processor setup is complete."
-                    right={
-                        <Toggle
-                            night={night}
-                            ariaLabel="Allow Pay Drops"
-                            checked={settings.payDropsEnabled}
-                            onChange={(v) => setSettings((s) => ({ ...s, payDropsEnabled: v }))}
-                        />
-                    }
-                />
-                <Row
-                    night={night}
-                    label="Show Pay Drops on my profile"
-                    hint="Display Pay Drop artifacts and earnings signals on your profile board."
-                    right={
-                        <Toggle
-                            night={night}
-                            ariaLabel="Show Pay Drops on my profile"
-                            checked={settings.showPayDropsOnProfile}
-                            onChange={(v) => setSettings((s) => ({ ...s, showPayDropsOnProfile: v }))}
-                        />
-                    }
-                />
-                <Row
-                    night={night}
-                    label="Notify me when I receive a Pay Drop"
-                    hint="Send a Board notification when a Pay Drop lands."
-                    right={
-                        <Toggle
-                            night={night}
-                            ariaLabel="Notify me when I receive a Pay Drop"
-                            checked={settings.notifyOnPayDrop}
-                            onChange={(v) => setSettings((s) => ({ ...s, notifyOnPayDrop: v }))}
-                        />
-                    }
-                />
-            </Card>
-
-            <Card title="Recent Pay Drops" subtitle="Transaction records will land here." night={night}>
-                {profile.recentPayDrops.length ? (
-                    <div className="grid gap-2">
-                        {profile.recentPayDrops.map((drop) => (
-                            <div
-                                key={drop.id}
-                                className={cx(
-                                    "flex items-center justify-between rounded-xl border p-3 text-sm",
-                                    night ? "border-white/14 bg-white/6" : "border-black/10 bg-white/68"
-                                )}
-                            >
-                                <span>{drop.from}</span>
-                                <span>{formatMoney(drop.amount)}</span>
-                            </div>
-                        ))}
-                    </div>
-                ) : (
-                    <div
-                        className={cx(
-                            "rounded-2xl border p-6 text-center text-sm font-semibold",
-                            night ? "border-white/14 bg-white/6 text-white/56" : "border-black/10 bg-white/62 text-black/48"
-                        )}
-                    >
-                        No Pay Drops have landed yet.
-                    </div>
-                )}
-            </Card>
-        </div>
-    );
+    return <BankingPanel night={night} />;
 }
 
 export default function OptionsClient() {
-    const [tab, setTab] = useState<TabKey>("profile");
+    const searchParams = useSearchParams();
+    const initialTab = searchParams.get("tab");
+    const [tab, setTab] = useState<TabKey>(
+        TABS.some((item) => item.key === initialTab) ? (initialTab as TabKey) : "profile"
+    );
 
     const [settings, setSettings] = useState<BoardSettings>(() => {
         if (typeof window === "undefined") return DEFAULT_SETTINGS;
@@ -1268,6 +925,14 @@ export default function OptionsClient() {
     useEffect(() => {
         setMounted(true);
     }, []);
+
+    useEffect(() => {
+        if (typeof window === "undefined") return;
+        const next = new URLSearchParams(window.location.search);
+        next.set("tab", tab);
+        const query = next.toString();
+        window.history.replaceState(null, "", `${window.location.pathname}${query ? `?${query}` : ""}`);
+    }, [tab]);
 
     useEffect(() => {
         let alive = true;
@@ -1640,7 +1305,11 @@ export default function OptionsClient() {
                                                 onClick={() => setTab(t.key)}
                                                 className={cx(
                                                     "flex items-center justify-between rounded-xl px-3 py-2 text-sm transition",
-                                                    isNight
+                                                    t.key === "banking"
+                                                      ? active
+                                                        ? "border border-emerald-300/45 bg-emerald-300/18"
+                                                        : "hover:bg-emerald-300/10"
+                                                      : isNight
                                                         ? active
                                                             ? "border border-white/25 bg-white/10"
                                                             : "hover:bg-white/7"
@@ -1652,7 +1321,13 @@ export default function OptionsClient() {
                                                 <span
                                                     className={cx(
                                                         "text-sm",
-                                                        active
+                                                        t.key === "banking"
+                                                          ? active
+                                                            ? "font-semibold text-emerald-50"
+                                                            : isNight
+                                                              ? "text-emerald-200/80"
+                                                              : "text-emerald-800"
+                                                          : active
                                                             ? isNight
                                                                 ? "font-semibold text-white"
                                                                 : "font-semibold text-black/80"
@@ -2410,11 +2085,7 @@ export default function OptionsClient() {
                                 ) : null}
 
                                 {tab === "banking" ? (
-                                    <BankingPayDropsPanel
-                                        night={isNight}
-                                        settings={settings}
-                                        setSettings={setSettings}
-                                    />
+                                    <BankingPayDropsPanel night={isNight} />
                                 ) : null}
 
                                 {tab === "security" ? (

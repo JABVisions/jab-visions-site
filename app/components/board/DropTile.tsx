@@ -8,7 +8,11 @@ import { DROPS_UPDATED_EVENT, pushDrop } from "@/lib/board/drops/storage";
 import { emitBoardDropSignal } from "@/lib/board/dropSignals";
 import { fetchLinkPreview } from "@/lib/board/linkPreview";
 import { resolveLinkPreviewImage } from "@/lib/board/linkPreviewImages";
-import { openHostedPayDropCheckout } from "@/lib/board/payCheckout";
+import { openHostedPayDropCheckout, registerPayDropOnServer } from "@/lib/board/payCheckout";
+import { fetchBankingReady } from "@/lib/board/banking/client";
+import { consumeResumePayDrop, markResumePayDrop, shouldResumePayDrop } from "@/lib/board/banking/resume";
+import { parseAmountToCents } from "@/lib/board/banking/status";
+import BankingSetupGate from "@/app/components/board/banking/BankingSetupGate";
 import {
   DROP_COMMENTS_UPDATED_EVENT,
   getDropCommentCount,
@@ -268,12 +272,7 @@ function formatPriceFromCents(cents?: number) {
 }
 
 function parsePriceToCents(raw: string): number | null {
-  const s = raw.trim().replace(/^\$/g, "");
-  if (!s) return null;
-  if (!/^\d+(\.\d{1,2})?$/.test(s)) return null;
-  const n = Number(s);
-  if (!Number.isFinite(n) || n < 0) return null;
-  return Math.round(n * 100);
+  return parseAmountToCents(raw);
 }
 
 function toMediaKind(value: unknown): MediaKind | undefined {
@@ -694,6 +693,7 @@ export default function DropTile() {
   const [commentsDropId, setCommentsDropId] = useState<string | null>(null);
   const [commentCountByDrop, setCommentCountByDrop] = useState<Record<string, number>>({});
   const [payCheckoutBusyId, setPayCheckoutBusyId] = useState<string | null>(null);
+  const [bankingGate, setBankingGate] = useState<string | null>(null);
   const [downloadBusyId, setDownloadBusyId] = useState<string | null>(null);
   const [studioOpen, setStudioOpen] = useState(false);
   const [mediaSource, setMediaSource] = useState<"upload" | "capture" | null>(null);
@@ -705,6 +705,22 @@ export default function DropTile() {
   // Tracks link/news drops we've already tried to back-fill a thumbnail for,
   // so the hydration effect never re-fetches the same drop in a loop.
   const previewHydrationRef = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    if (!shouldResumePayDrop()) return;
+    let alive = true;
+    void fetchBankingReady().then((banking) => {
+      if (!alive || !banking.ready) return;
+      consumeResumePayDrop();
+      if (banking.defaultAmountCents) {
+        setPayPrice((current) => current || (banking.defaultAmountCents! / 100).toFixed(2));
+      }
+      setMode("Pay");
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   useEffect(() => {
     if (!file || (mode !== "Media" && mode !== "Pay" && mode !== "Thought")) {
@@ -1654,6 +1670,14 @@ export default function DropTile() {
       return flash(setMsg, "Paste the checkout link for this Pay Drop.", 2200);
     }
 
+    if (payProvider === "stripe_connect") {
+      const banking = await fetchBankingReady();
+      if (!banking.ready) {
+        setBankingGate(banking.message);
+        return;
+      }
+    }
+
     const recipientUserId = userId ?? undefined;
     const recipientUsername = username ?? undefined;
     const recipientDisplayName = displayName ?? username ?? undefined;
@@ -1704,10 +1728,7 @@ export default function DropTile() {
         createdAt: Date.now(),
         updatedAt: Date.now(),
         provider: payProvider,
-        status:
-          payProvider === "stripe_connect"
-            ? "gateway_setup_required"
-            : "active",
+        status: "active",
         checkoutMode:
           payProvider === "stripe_connect"
             ? "embedded_hosted"
@@ -1724,6 +1745,22 @@ export default function DropTile() {
       },
       userId
     );
+    try {
+      await registerPayDropOnServer({
+        id,
+        title: t,
+        description: payDesc.trim() || undefined,
+        amountCents: cents,
+        provider: payProvider,
+        status: "active",
+      });
+    } catch (error) {
+      flash(
+        setMsg,
+        error instanceof Error ? error.message : "Pay Drop saved locally, but Banking could not register it.",
+        3200
+      );
+    }
 
     setTitle("");
     setFile(null);
@@ -2089,6 +2126,9 @@ export default function DropTile() {
 
   return (
     <div className="inner-tile drop-tile">
+      {bankingGate ? (
+        <BankingSetupGate message={bankingGate} onClose={() => setBankingGate(null)} />
+      ) : null}
       <div className="tile-head drop-tile-head">
         <div>
           <div className="tile-title">Board Drop</div>
@@ -2131,27 +2171,41 @@ export default function DropTile() {
             type="button"
             className={`mode-btn ${mode === m ? "on" : ""}`}
             onClick={() => {
-              setMode(m);
-              setMsg(null);
+              const applyMode = (next: typeof m) => {
+                setMode(next);
+                setMsg(null);
 
-              if (m === "Media" || m === "Doc" || m === "Pay" || m === "Thought") setUrl("");
-              if (m === "YouTube" || m === "News" || m === "Link") setFile(null);
-              if (m !== "Media" && m !== "Thought" && m !== "Pay") {
-                setDropCustomizations({});
+                if (next === "Media" || next === "Doc" || next === "Pay" || next === "Thought") setUrl("");
+                if (next === "YouTube" || next === "News" || next === "Link") setFile(null);
+                if (next !== "Media" && next !== "Thought" && next !== "Pay") {
+                  setDropCustomizations({});
+                }
+                setMediaSource(null);
+                setDropDesc("");
+                if (next !== "Thought") setThoughtText("");
+                if (next !== "Pay") {
+                  setPayPrice("");
+                  setPayDesc("");
+                  setPayLink("");
+                  setPayProvider("stripe_connect");
+                }
+                if (next !== "Doc") setDocDesc("");
+              };
+              if (m === "Pay") {
+                void fetchBankingReady().then((banking) => {
+                  if (!banking.ready) {
+                    markResumePayDrop();
+                    setBankingGate(banking.message);
+                    return;
+                  }
+                  if (banking.defaultAmountCents && !payPrice) {
+                    setPayPrice((banking.defaultAmountCents / 100).toFixed(2));
+                  }
+                  applyMode("Pay");
+                });
+                return;
               }
-              setMediaSource(null);
-              setDropDesc("");
-              if (m !== "Thought") {
-                setThoughtText("");
-              }
-
-              if (m !== "Pay") {
-                setPayPrice("");
-                setPayDesc("");
-                setPayLink("");
-                setPayProvider("stripe_connect");
-              }
-              if (m !== "Doc") setDocDesc("");
+              applyMode(m);
             }}
           >
             {displayDropType(m)}

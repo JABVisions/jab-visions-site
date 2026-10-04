@@ -6,6 +6,11 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { supabaseBrowser } from "@/lib/supabase/browser";
 
 import { createActivity, type BoardActivityKind } from "@/lib/board/activity";
+import { fetchBankingReady } from "@/lib/board/banking/client";
+import { consumeResumePayDrop, markResumePayDrop, shouldResumePayDrop } from "@/lib/board/banking/resume";
+import { parseAmountToCents } from "@/lib/board/banking/status";
+import { registerPayDropOnServer } from "@/lib/board/payCheckout";
+import BankingSetupGate from "@/app/components/board/banking/BankingSetupGate";
 import { readCurrentBoardIdentity } from "@/lib/board/currentProfile";
 import { newId, pushDrop } from "@/lib/board/drops/storage";
 import { emitBoardDropSignal } from "@/lib/board/dropSignals";
@@ -164,12 +169,7 @@ function parseTags(raw: string): string[] {
 }
 
 function parsePriceToCents(raw: string): number | null {
-  const s = raw.trim().replace(/^\$/g, "");
-  if (!s) return null;
-  if (!/^\d+(\.\d{1,2})?$/.test(s)) return null;
-  const n = Number(s);
-  if (!Number.isFinite(n) || n < 0) return null;
-  return Math.round(n * 100);
+  return parseAmountToCents(raw);
 }
 
 function fileAcceptForFlavor(flavor: DropFlavor) {
@@ -333,6 +333,7 @@ export default function DropConsole({
   const [payDesc, setPayDesc] = useState("");
   const [payLink, setPayLink] = useState("");
   const [docDesc, setDocDesc] = useState("");
+  const [bankingGate, setBankingGate] = useState<string | null>(null);
 
   // Forum Post mode
   const [forumId, setForumId] = useState<string>("lobby");
@@ -383,6 +384,25 @@ export default function DropConsole({
   useEffect(() => {
     if (!sleeping) setHasAwakened(true);
   }, [sleeping]);
+
+  useEffect(() => {
+    if (!shouldResumePayDrop()) return;
+    let alive = true;
+    void fetchBankingReady().then((banking) => {
+      if (!alive || !banking.ready) return;
+      consumeResumePayDrop();
+      setSleeping(false);
+      setHasAwakened(true);
+      setMode("board_drop");
+      setDropFlavor("pay");
+      if (banking.defaultAmountCents) {
+        setPayPrice((current) => current || (banking.defaultAmountCents! / 100).toFixed(2));
+      }
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   useEffect(() => {
     if (!posting) return;
@@ -708,6 +728,13 @@ export default function DropConsole({
       }
       if (dropFlavor === "pay" && mode === "board_drop" && payPrice.trim() && payPriceCents === null) {
         throw new Error("Enter a valid Pay Drop price.");
+      }
+      if (dropFlavor === "pay" && mode === "board_drop" && payProvider === "stripe_connect") {
+        const banking = await fetchBankingReady();
+        if (!banking.ready) {
+          setBankingGate(banking.message);
+          return;
+        }
       }
 
       // Forum Post: auto-create thread + href to thread
@@ -1093,6 +1120,21 @@ export default function DropConsole({
         });
       }
 
+      if (mode === "board_drop" && dropFlavor === "pay" && boardDropId && payPriceCents) {
+        try {
+          await registerPayDropOnServer({
+            id: boardDropId,
+            title: cleanTitle || "Pay Drop",
+            description: boardDropDescription || undefined,
+            amountCents: payPriceCents,
+            provider: payProvider,
+            status: "active",
+          });
+        } catch (error) {
+          throw error;
+        }
+      }
+
       setTitle("");
       setBody("");
       setAttachUrl("");
@@ -1313,23 +1355,40 @@ export default function DropConsole({
                   type="button"
                   className={clsx("dcTypeBtn", dropFlavor === t && "on")}
                   onClick={() => {
-                    setDropFlavor(t);
-                    setAttachUrl("");
-                    setUploadedFileName("");
-                    setAttachedStorage(null);
-                    setMediaPreviewUrl("");
-                    pendingMediaFileRef.current = null;
-                    setDropDesc("");
-                    setThoughtText("");
-                    setMediaSource(null);
-                    setDropCustomizations({});
-                    if (t !== "pay") {
-                      setPayPrice("");
-                      setPayDesc("");
-                      setPayLink("");
-                      setPayProvider("stripe_connect");
+                    const applyFlavor = (next: typeof t) => {
+                      setDropFlavor(next);
+                      setAttachUrl("");
+                      setUploadedFileName("");
+                      setAttachedStorage(null);
+                      setMediaPreviewUrl("");
+                      pendingMediaFileRef.current = null;
+                      setDropDesc("");
+                      setThoughtText("");
+                      setMediaSource(null);
+                      setDropCustomizations({});
+                      if (next !== "pay") {
+                        setPayPrice("");
+                        setPayDesc("");
+                        setPayLink("");
+                        setPayProvider("stripe_connect");
+                      }
+                      if (next !== "doc") setDocDesc("");
+                    };
+                    if (t === "pay") {
+                      void fetchBankingReady().then((banking) => {
+                        if (!banking.ready) {
+                          markResumePayDrop();
+                          setBankingGate(banking.message);
+                          return;
+                        }
+                        if (banking.defaultAmountCents && !payPrice) {
+                          setPayPrice((banking.defaultAmountCents / 100).toFixed(2));
+                        }
+                        applyFlavor("pay");
+                      });
+                      return;
                     }
-                    if (t !== "doc") setDocDesc("");
+                    applyFlavor(t);
                   }}
                 >
                   <span>{DROP_FLAVOR_LABEL[t].toUpperCase()}</span>
@@ -1987,6 +2046,9 @@ export default function DropConsole({
   const dock = <DropConsoleSleepDock onWake={() => setSleeping(false)} />;
   return (
     <>
+      {bankingGate ? (
+        <BankingSetupGate message={bankingGate} onClose={() => setBankingGate(null)} />
+      ) : null}
       {sleeping ? (variant === "bare" ? dock : <div style={{ width: "100%" }}>{dock}</div>) : null}
       <div hidden={sleeping}>{consoleBody}</div>
     </>

@@ -116,8 +116,9 @@ export default function WorkPage() {
         <div className="panel desk">
           <WorkDesk
             onToggleDropPadPower={() => { }}
-            // Future: wire Pay Drops to National Bank Card or another marketplace payout provider once payout routing is finalized.
-            onManagePayDrops={() => { }}
+            onManagePayDrops={() => {
+              window.location.href = "/board/options?tab=banking";
+            }}
           />
 
         </div>

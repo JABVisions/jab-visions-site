@@ -1,5 +1,5 @@
-// File: /app/board/options/page.tsx
 import type { Metadata } from "next";
+import { Suspense } from "react";
 import OptionsClient from "./OptionsClient";
 
 export const metadata: Metadata = {
@@ -7,5 +7,9 @@ export const metadata: Metadata = {
 };
 
 export default function BoardOptionsPage() {
-  return <OptionsClient />;
+  return (
+    <Suspense fallback={<div className="p-6 text-sm opacity-70">Loading Options…</div>}>
+      <OptionsClient />
+    </Suspense>
+  );
 }

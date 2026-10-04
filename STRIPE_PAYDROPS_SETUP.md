@@ -51,20 +51,21 @@ and set Connect branding (name/icon/color) — Express onboarding requires it.
 Stripe now recommends the **Accounts v2 API** for brand-new platforms; this uses
 the well-supported v1 Express path. Switch later if you want v2.
 
-## 4. Still TODO (not done here)
+## 4. Banking control center
 
-1. **Webhook for fulfillment** — add `POST /api/paydrops/stripe/webhook` handling
-   `checkout.session.completed` to mark a Pay Drop paid / record the transaction.
-   Don't rely on the browser redirect for fulfillment.
-2. **Store the connected account id** — persist the recipient's `acct_…` on their
-   profile when onboarding returns, and stamp it onto each Pay Drop so the buyer's
-   checkout can route funds (`destinationAccountId`). Until then, checkout returns
-   a friendly "recipient hasn't connected payout" message.
-3. **Consolidate duplicated provider logic** — `profile/page.tsx`,
-   `profile/[username]/page.tsx`, `PayDropsPanel`, `PayDropsMiniPanel`, and
-   `WorkDesk` still carry their own copies + a few "National Bankcard" strings in
-   non-critical labels. They compile and route through the new Stripe seam, but
-   should be unified onto `lib/board/paydrops.ts` + `dropFlavors`-style shared types.
+Options → Banking is now the Pay Drop control center:
+
+- Live Stripe Connect status, available/pending balances, and truthful automatic payouts (no fake cash-out).
+- `GET/PATCH /api/paydrops/banking`, `POST /api/paydrops/register`, `POST /api/paydrops/stripe/login-link`.
+- Checkout looks up the Pay Drop server-side. Do not send amount or destination from the client.
+- Webhook updates `pay_drop_transactions` on paid / failed / refunded / account.updated.
+- Paste `supabase/sql/board_pay_drops.sql` so profiles, Pay Drops, and history persist.
+
+## 5. Still TODO
+
+1. **Paste `supabase/sql/board_pay_drops.sql`** in the Board Supabase SQL editor so Banking profiles, Pay Drops, and history persist.
+2. **Stripe Dashboard webhook** — `https://www.jabvisions.com/api/paydrops/stripe/webhook` for `checkout.session.completed`, `checkout.session.async_payment_failed`, `checkout.session.expired`, `charge.refunded`, `charge.dispute.created`, `account.updated`.
+3. **Consolidate duplicated provider labels** — a few older "National Bankcard" strings remain in non-critical Work Desk copy.
 4. **Remove the legacy Authorize.Net routes** (`app/api/paydrops/authorize-net/**`)
    once you confirm nothing depends on them.
 

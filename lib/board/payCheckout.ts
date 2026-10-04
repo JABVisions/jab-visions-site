@@ -1,15 +1,10 @@
 "use client";
 
-// Pay Drop checkout — Stripe Connect destination charge.
-// Posts to /api/paydrops/stripe/checkout and redirects the buyer to the
-// Stripe-hosted Checkout page. Funds go to the recipient's connected account.
-
 export type HostedCheckoutInput = {
   payDropId: string;
-  title: string;
+  title?: string;
   description?: string;
-  amountCents: number;
-  /** Recipient's Stripe Connect account id (acct_…). Required to route funds. */
+  amountCents?: number;
   destinationAccountId?: string;
   recipientUserId?: string;
   recipientUsername?: string;
@@ -21,23 +16,15 @@ type CheckoutResponse =
   | { ok: false; error?: string };
 
 export async function openHostedPayDropCheckout(input: HostedCheckoutInput) {
-  if (!input.amountCents || input.amountCents <= 0) {
-    throw new Error("This Pay Drop is missing a valid price.");
+  if (!input.payDropId) {
+    throw new Error("This Pay Drop is missing an id.");
   }
-
-  const recipientLabel =
-    input.recipientDisplayName || input.recipientUsername || undefined;
 
   const response = await fetch("/api/paydrops/stripe/checkout", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       payDropId: input.payDropId,
-      title: input.title,
-      description: input.description,
-      amountCents: input.amountCents,
-      destinationAccountId: input.destinationAccountId,
-      recipientLabel,
     }),
   });
 
@@ -51,7 +38,25 @@ export async function openHostedPayDropCheckout(input: HostedCheckoutInput) {
     );
   }
 
-  // Redirect to the Stripe-hosted Checkout page.
   window.location.href = data.url;
   return data;
+}
+
+export async function registerPayDropOnServer(input: {
+  id: string;
+  title: string;
+  description?: string;
+  amountCents: number;
+  provider: "stripe_connect" | "payment_link";
+  status?: string;
+}) {
+  const response = await fetch("/api/paydrops/register", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const data = (await response.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
+  if (!response.ok || !data?.ok) {
+    throw new Error(data?.error || "Could not save this Pay Drop to Banking.");
+  }
 }
