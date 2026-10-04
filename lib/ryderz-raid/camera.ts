@@ -140,6 +140,7 @@ export class ThirdPersonCamera {
   private trauma = 0;
   private kick = 0;
   private kickVel = 0;
+  private fovPunch = 0;
   private time = 0;
   private initialized = false;
   private lastVerticalFov = -1;
@@ -193,6 +194,14 @@ export class ThirdPersonCamera {
     this.kickVel += meters * 18;
   }
 
+  /**
+   * Momentary widening of the horizontal field of view (degrees) that decays
+   * on its own; the speed sensation for dashes. Clamped so it never gets nauseating.
+   */
+  addFovPunch(degrees: number) {
+    this.fovPunch = Math.min(16, Math.max(this.fovPunch, degrees));
+  }
+
   /** Place the camera immediately (no smoothing). Use on spawn / respawn. */
   snap(playerPos: THREE.Vector3, yaw: number, pitch: number) {
     this.smoothYaw = yaw;
@@ -202,6 +211,7 @@ export class ThirdPersonCamera {
     this.trauma = 0;
     this.kick = 0;
     this.kickVel = 0;
+    this.fovPunch = 0;
     this.initialized = true;
     this.update(1 / 60, playerPos, yaw, pitch, 'EXPLORATION', true);
   }
@@ -348,7 +358,8 @@ export class ThirdPersonCamera {
     }
 
     // --- FOV (horizontal -> vertical) ---------------------------------------
-    this.applyFov(f.fov);
+    if (this.fovPunch > 0) this.fovPunch = Math.max(0, this.fovPunch - dt * 22);
+    this.applyFov(f.fov + this.fovPunch);
   }
 
   private applyFov(horizontalDeg: number) {

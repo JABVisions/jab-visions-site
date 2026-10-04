@@ -3,17 +3,18 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { clone as cloneSkeleton } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { HOST_MODELS, type EnemyKind, type RyderId, type RyderSpec } from './config';
 import {
+  POSE_ROOT_DROP,
   ProceduralSkeleton,
   assessSkinning,
   bakeSkinnedMeshes,
   extractStrikes,
   poseSkeleton,
   type MeleeStyle,
+  type PoseOverride,
 } from './skeletal';
 import { addOutline, buildHumanoid, glow, toon, type Humanoid } from './toon';
 
 const BLADE = new THREE.BoxGeometry(0.08, 0.95, 0.08);
-const SPIKE = new THREE.ConeGeometry(0.07, 0.28, 6);
 const AXE_HANDLE = new THREE.CylinderGeometry(0.05, 0.06, 1.15, 8);
 const AXE_HEAD = new THREE.BoxGeometry(0.08, 0.38, 0.55);
 const ORB = new THREE.SphereGeometry(0.16, 12, 10);
@@ -57,6 +58,15 @@ export interface GltfRig {
   style: MeleeStyle;
   /** Socket the weapon hangs from. A hand bone when rigged, a fixed point otherwise. */
   weaponSocket: THREE.Object3D;
+  /** Same for the free hand; null when the rig has no left hand bone. */
+  offhandSocket: THREE.Object3D | null;
+}
+
+/** Per-frame extras for `animateGltfFighter`: an ability stance and/or a chosen strike. */
+export interface AnimateExtras {
+  pose?: PoseOverride | null;
+  /** Strike to play for this `meleeStarted`, instead of cycling the authored list. */
+  style?: MeleeStyle;
 }
 
 export interface Fighter {
@@ -267,7 +277,16 @@ function wrapGltfAsHumanoid(
 
   // Weapon socket: hand bone when rigged, otherwise the raised fist of the static pose.
   let weaponSocket: THREE.Object3D;
+  let offhandSocket: THREE.Object3D | null = null;
   const bone = template.skinned ? (skeleton?.bone('handR') ?? findHandBone(figure)) : null;
+  const offBone = template.skinned ? skeleton?.bone('handL') ?? null : null;
+  if (offBone) {
+    offhandSocket = new THREE.Object3D();
+    offhandSocket.name = 'OffhandSocket';
+    offhandSocket.scale.setScalar(1 / scale);
+    offBone.add(offhandSocket);
+    skeleton?.alignSocket('handL', offhandSocket);
+  }
   if (bone) {
     weaponSocket = new THREE.Object3D();
     weaponSocket.name = 'WeaponSocket';
@@ -332,6 +351,7 @@ function wrapGltfAsHumanoid(
     styleIndex: 0,
     style: options.strikes?.[0] ?? 'chop',
     weaponSocket,
+    offhandSocket,
   };
 
   const torso = dummyPart('Torso');
@@ -340,8 +360,8 @@ function wrapGltfAsHumanoid(
   const armR = dummyPart('ArmR');
   const legL = dummyPart('LegL');
   const legR = dummyPart('LegR');
-  const handL = new THREE.Object3D();
-  armL.add(handL);
+  const handL: THREE.Object3D = offhandSocket ?? new THREE.Object3D();
+  if (!offhandSocket) armL.add(handL);
   group.add(torso, head, armL, armR, legL, legR);
 
   return {
@@ -384,6 +404,63 @@ function buildBlackAxe(auraColor: THREE.ColorRepresentation, intensity: number) 
   return { axe, edge };
 }
 
+const KNUCKLE_BAR = new THREE.BoxGeometry(0.096, 0.03, 0.078);
+const KNUCKLE_PLATE = new THREE.BoxGeometry(0.088, 0.016, 0.086);
+const KNUCKLE_SPIKE = new THREE.ConeGeometry(0.016, 0.07, 4);
+const KNUCKLE_SEAM = new THREE.BoxGeometry(0.092, 0.007, 0.012);
+const KNUCKLE_NODE = new THREE.BoxGeometry(0.013, 0.013, 0.013);
+const KNUCKLE_STRAP = new THREE.BoxGeometry(0.1, 0.04, 0.012);
+const DOWN = new THREE.Vector3(0, -1, 0);
+
+/**
+ * Ryder-tech spiked knuckles: a gunmetal bar over the fingers, four angular
+ * spikes, and emissive seams that the power system drives (bright with power,
+ * flaring on hits, dim when burnt out). Authored in hand space for a hanging
+ * arm — fingers along -Y, knuckle face toward -Y, hand width along X — and
+ * rotated onto the socket by the caller.
+ */
+export function buildSpikedKnuckles(auraColor: THREE.ColorRepresentation, intensity: number) {
+  const group = new THREE.Group();
+  group.name = 'SpikedKnuckles';
+  const metal = toon(0x2a2e38);
+  const dark = toon(0x16181f);
+  const seamMat = glow(auraColor, intensity);
+
+  const bar = new THREE.Mesh(KNUCKLE_BAR, metal);
+  addOutline(bar, 0.012);
+  const plate = new THREE.Mesh(KNUCKLE_PLATE, dark);
+  plate.position.set(0, 0.02, 0);
+  group.add(bar, plate);
+  // Straps band the fist on both faces just above the bar (toward the wrist).
+  for (const side of [-1, 1]) {
+    const strap = new THREE.Mesh(KNUCKLE_STRAP, dark);
+    strap.position.set(0, 0.04, side * 0.044);
+    group.add(strap);
+  }
+
+  const seams: THREE.Mesh[] = [];
+  const seamFront = new THREE.Mesh(KNUCKLE_SEAM, seamMat);
+  seamFront.position.set(0, -0.006, 0.042);
+  const seamBack = new THREE.Mesh(KNUCKLE_SEAM, seamMat);
+  seamBack.position.set(0, -0.006, -0.042);
+  group.add(seamFront, seamBack);
+  seams.push(seamFront, seamBack);
+
+  for (let i = 0; i < 4; i += 1) {
+    const x = (i - 1.5) * 0.025;
+    const spike = new THREE.Mesh(KNUCKLE_SPIKE, metal);
+    spike.position.set(x, -0.048, 0);
+    spike.rotation.set(Math.PI, Math.PI / 4, 0);
+    const node = new THREE.Mesh(KNUCKLE_NODE, seamMat);
+    node.position.set(x, -0.018, 0.034);
+    const nodeBack = new THREE.Mesh(KNUCKLE_NODE, seamMat);
+    nodeBack.position.set(x, -0.018, -0.034);
+    group.add(spike, node, nodeBack);
+    seams.push(node, nodeBack);
+  }
+  return { group, seams };
+}
+
 function fitRigAction(rig: GltfRig, role: ClipRole, fade = 0.16) {
   const next = rig.actions[role];
   if (!next || rig.current === role) return;
@@ -397,7 +474,17 @@ function fitRigAction(rig: GltfRig, role: ClipRole, fade = 0.16) {
 /** Melee duration the strike clips are fitted to; matches the engine's swing window. */
 const STRIKE_TIME = 0.45;
 /** How far the figure steps into each procedural melee style, in metres. */
-const STRIKE_LUNGE: Record<MeleeStyle, number> = { chop: 0.22, slash: 0.18, punch: 0.3, kick: 0.1, slap: 0.2, blast: 0.35 };
+const STRIKE_LUNGE: Record<MeleeStyle, number> = {
+  chop: 0.22,
+  slash: 0.18,
+  punch: 0.3,
+  punchR: 0.3,
+  kick: 0.1,
+  spinKick: 0.16,
+  slap: 0.2,
+  blast: 0.35,
+  smash: 0.38,
+};
 const STRIKE_RELEASE = 0.12;
 
 /**
@@ -463,9 +550,11 @@ export function animateGltfFighter(
   sprinting: boolean,
   meleeT: number,
   meleeStarted: boolean,
+  extras?: AnimateExtras,
 ) {
   const rig = fighter.rig;
   if (!rig) return;
+  const pose = extras?.pose && extras.pose.weight > 0 ? extras.pose : null;
 
   if (rig.skeleton && rig.mixer && rig.strikes.length) {
     animateSkeletonWithStrikes(rig, dt, phase, moving, sprinting, meleeStarted);
@@ -499,14 +588,19 @@ export function animateGltfFighter(
   // --- Procedural skeleton: real strides, arm swing and authored melee styles ---
   if (rig.skeleton) {
     if (meleeStarted) {
-      rig.style = rig.styles[rig.styleIndex % rig.styles.length];
-      rig.styleIndex += 1;
+      if (extras?.style) {
+        rig.style = extras.style;
+      } else {
+        rig.style = rig.styles[rig.styleIndex % rig.styles.length];
+        rig.styleIndex += 1;
+      }
     }
-    poseSkeleton(rig.skeleton, { phase, moving, sprinting, meleeT, meleeStyle: rig.style });
+    poseSkeleton(rig.skeleton, { phase, moving, sprinting, meleeT, meleeStyle: rig.style, pose });
     const f = rig.figure;
     const swing = meleeT > 0 ? Math.sin((1 - meleeT) * Math.PI) : 0;
     f.position.copy(rig.basePosition);
-    f.position.y += Math.abs(Math.sin(phase)) * (sprinting ? 0.045 : 0.025) * moving;
+    f.position.y += Math.abs(Math.sin(phase)) * (sprinting ? 0.045 : 0.025) * moving * (pose ? 1 - pose.weight : 1);
+    if (pose) f.position.y -= POSE_ROOT_DROP[pose.kind] * Math.min(1, pose.weight);
     f.position.z += swing * STRIKE_LUNGE[rig.style];
     f.rotation.set(0, 0, 0);
     return;
@@ -542,6 +636,25 @@ export function buildRyder(spec: RyderSpec, options: { clone?: boolean } = {}): 
       rig.weaponSocket.add(axe);
       weapons.push(axe);
       glowMeshes.push(edge);
+    } else if (spec.id === 'leo') {
+      // Spiked knuckles over both fists. Sockets sit at the wrist in figure
+      // space; the fist runs ~11 cm along the hand bone's axis, so the bar is
+      // slid down that axis to the knuckle line and the spikes point past it.
+      const sockets: Array<[THREE.Object3D | null, 'handR' | 'handL']> = [
+        [rig.weaponSocket, 'handR'],
+        [rig.offhandSocket, 'handL'],
+      ];
+      const fist = new THREE.Vector3();
+      for (const [socket, key] of sockets) {
+        if (!socket) continue;
+        const { group, seams } = buildSpikedKnuckles(spec.color, options.clone ? 0.9 : 1.5);
+        rig.skeleton?.boneAxis(key, fist) ?? fist.set(0, -1, 0);
+        group.quaternion.setFromUnitVectors(DOWN, fist);
+        group.position.copy(fist).multiplyScalar(0.082);
+        socket.add(group);
+        weapons.push(group);
+        glowMeshes.push(...seams);
+      }
     } else if (spec.id === 'zoe') {
       // Orb hovers just off the raised fingertip; halo floats above the head.
       const orb = new THREE.Mesh(ORB, aura);
@@ -554,8 +667,8 @@ export function buildRyder(spec: RyderSpec, options: { clone?: boolean } = {}): 
       weapons.push(orb, halo);
       glowMeshes.push(orb, halo);
     }
-    // Keven's dart and Rubi's blade are modelled into their Tripo meshes, and Leo
-    // fights bare-knuckled, so none of them get a socketed weapon.
+    // Keven's dart and Rubi's blade are modelled into their Tripo meshes, so
+    // neither gets a socketed weapon.
     return { humanoid, weapons, glowMeshes, meshSource: 'gltf', rig };
   }
 
@@ -592,12 +705,12 @@ export function buildRyder(spec: RyderSpec, options: { clone?: boolean } = {}): 
     addWeapon(r, 'R');
   } else if (spec.id === 'leo') {
     for (const hand of ['L', 'R'] as const) {
-      for (let i = 0; i < 3; i += 1) {
-        const s = new THREE.Mesh(SPIKE, i === 0 ? aura : aura.clone());
-        s.position.set((i - 1) * 0.08, -0.05, 0.08);
-        s.rotation.x = Math.PI / 2;
-        addWeapon(s, hand);
-      }
+      const { group, seams } = buildSpikedKnuckles(spec.color, options.clone ? 1 : 1.6);
+      group.position.set(0, -0.06, 0.06);
+      group.rotation.x = Math.PI / 2;
+      (hand === 'R' ? humanoid.handR : humanoid.handL).add(group);
+      weapons.push(group);
+      glowMeshes.push(...seams);
     }
   } else if (spec.id === 'aaron') {
     const axe = new THREE.Group();

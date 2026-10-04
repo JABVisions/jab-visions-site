@@ -586,6 +586,17 @@ export class ProceduralSkeleton {
   bone(key: BoneKey) {
     return this.byKey.get(key)?.bone ?? null;
   }
+
+  /**
+   * Direction the bone runs in figure space once neutralised (the axis a
+   * socket on that bone should hang equipment along). Falls back to straight
+   * down for unmapped bones.
+   */
+  boneAxis(key: BoneKey, out: THREE.Vector3) {
+    const entry = this.byKey.get(key);
+    if (!entry) return out.set(0, -1, 0);
+    return out.copy(Y_AXIS).applyQuaternion(entry.baseFig).normalize();
+  }
 }
 
 function smooth(t: number) {
@@ -607,7 +618,32 @@ function track(p: number, keys: Array<[number, number]>) {
 }
 
 /** Authored melee animations the procedural skeleton can perform. */
-export type MeleeStyle = 'chop' | 'slash' | 'punch' | 'kick' | 'slap' | 'blast';
+export type MeleeStyle = 'chop' | 'slash' | 'punch' | 'punchR' | 'kick' | 'spinKick' | 'slap' | 'blast' | 'smash';
+
+/**
+ * Full-body stances abilities hold the figure in (not timed like a melee
+ * swing). `t` runs 0 → 1 across the stance so it can carry a little motion.
+ */
+export type AbilityPose = 'crouch' | 'launch' | 'dive' | 'slam' | 'rush' | 'streak' | 'finish';
+
+export interface PoseOverride {
+  kind: AbilityPose;
+  /** 0 → 1 progress through the stance. */
+  t: number;
+  /** Blend weight against locomotion, 0 → 1. */
+  weight: number;
+}
+
+/** How far each stance drops the root toward the ground, in figure metres. */
+export const POSE_ROOT_DROP: Record<AbilityPose, number> = {
+  crouch: 0.34,
+  launch: 0,
+  dive: 0,
+  slam: 0.5,
+  rush: 0.12,
+  streak: 0.08,
+  finish: 0.06,
+};
 
 export interface SkeletalMotion {
   phase: number;
@@ -617,6 +653,8 @@ export interface SkeletalMotion {
   meleeT: number;
   /** Which melee animation `meleeT` drives; defaults to the overhead chop. */
   meleeStyle?: MeleeStyle;
+  /** Ability stance layered over (and weighted against) locomotion. */
+  pose?: PoseOverride | null;
 }
 
 /**
@@ -676,6 +714,40 @@ export function poseSkeleton(skel: ProceduralSkeleton, motion: SkeletalMotion) {
     A.head.y -= sL * 0.08 * moving;
   }
 
+  const pose = motion.pose;
+  if (pose && pose.weight > 0) {
+    // Stances fade the locomotion out underneath them so a dive does not
+    // keep jogging its legs; compute into scratch and add weighted.
+    const w = Math.min(1, pose.weight);
+    if (w >= 1) skel.resetAngles();
+    else scaleAngles(A, 1 - w);
+    resetScratch();
+    switch (pose.kind) {
+      case 'crouch':
+        poseCrouch(SCRATCH, pose.t);
+        break;
+      case 'launch':
+        poseLaunch(SCRATCH, pose.t);
+        break;
+      case 'dive':
+        poseDive(SCRATCH, pose.t);
+        break;
+      case 'slam':
+        poseSlam(SCRATCH, pose.t);
+        break;
+      case 'rush':
+        poseRush(SCRATCH, pose.t, phase);
+        break;
+      case 'streak':
+        poseStreak(SCRATCH, pose.t);
+        break;
+      case 'finish':
+        poseFinish(SCRATCH, pose.t);
+        break;
+    }
+    addAngles(A, SCRATCH, w);
+  }
+
   if (meleeT > 0) {
     const p = 1 - meleeT;
     switch (motion.meleeStyle ?? 'chop') {
@@ -685,14 +757,26 @@ export function poseSkeleton(skel: ProceduralSkeleton, motion: SkeletalMotion) {
       case 'punch':
         posePunch(A, p);
         break;
+      case 'punchR':
+        resetScratch();
+        posePunch(SCRATCH, p);
+        mirrorAngles(SCRATCH);
+        addAngles(A, SCRATCH, 1);
+        break;
       case 'kick':
         poseKick(A, p);
+        break;
+      case 'spinKick':
+        poseSpinKick(A, p);
         break;
       case 'slap':
         poseSlap(A, p);
         break;
       case 'blast':
         poseBlast(A, p);
+        break;
+      case 'smash':
+        poseSmash(A, p);
         break;
       default:
         poseChop(A, p);
@@ -703,6 +787,239 @@ export function poseSkeleton(skel: ProceduralSkeleton, motion: SkeletalMotion) {
 }
 
 type Angles = Record<BoneKey, PoseAngles>;
+
+const ALL_KEYS = Object.keys(BONE_PATTERNS) as BoneKey[];
+const SCRATCH: Angles = Object.fromEntries(ALL_KEYS.map((k) => [k, { x: 0, y: 0, z: 0 }])) as Angles;
+
+function resetScratch() {
+  for (const key of ALL_KEYS) {
+    const a = SCRATCH[key];
+    a.x = 0;
+    a.y = 0;
+    a.z = 0;
+  }
+}
+
+function scaleAngles(A: Angles, s: number) {
+  for (const key of ALL_KEYS) {
+    const a = A[key];
+    a.x *= s;
+    a.y *= s;
+    a.z *= s;
+  }
+}
+
+function addAngles(A: Angles, B: Angles, w: number) {
+  for (const key of ALL_KEYS) {
+    const a = A[key];
+    const b = B[key];
+    a.x += b.x * w;
+    a.y += b.y * w;
+    a.z += b.z * w;
+  }
+}
+
+const MIRROR_PAIRS: Array<[BoneKey, BoneKey]> = [
+  ['shoulderL', 'shoulderR'],
+  ['upperArmL', 'upperArmR'],
+  ['lowerArmL', 'lowerArmR'],
+  ['handL', 'handR'],
+  ['upperLegL', 'upperLegR'],
+  ['lowerLegL', 'lowerLegR'],
+  ['footL', 'footR'],
+  ['toesL', 'toesR'],
+  ['eyeL', 'eyeR'],
+];
+
+/** Swap left/right limbs and flip the yaw/roll components so a pose plays on the other side. */
+function mirrorAngles(A: Angles) {
+  for (const [l, r] of MIRROR_PAIRS) {
+    const a = A[l];
+    const b = A[r];
+    const ax = a.x;
+    const ay = a.y;
+    const az = a.z;
+    a.x = b.x;
+    a.y = -b.y;
+    a.z = -b.z;
+    b.x = ax;
+    b.y = -ay;
+    b.z = -az;
+  }
+  for (const key of ['hips', 'spine', 'chest', 'upperChest', 'neck', 'head'] as BoneKey[]) {
+    A[key].y = -A[key].y;
+    A[key].z = -A[key].z;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Ability stances
+// ---------------------------------------------------------------------------
+
+/** Compression before a launch: deep squat, fists pulled low and back, eyes forward. */
+function poseCrouch(A: Angles, t: number) {
+  const d = 0.75 + 0.25 * smooth(t);
+  A.upperLegL.x -= 1.0 * d;
+  A.upperLegR.x -= 1.0 * d;
+  A.lowerLegL.x += 1.7 * d;
+  A.lowerLegR.x += 1.7 * d;
+  A.footL.x -= 0.4 * d;
+  A.footR.x -= 0.4 * d;
+  A.spine.x += 0.55 * d;
+  A.hips.x += 0.15 * d;
+  A.head.x -= 0.55 * d;
+  A.upperArmL.x += 0.75 * d;
+  A.upperArmR.x += 0.75 * d;
+  A.upperArmL.z += 0.2 * d;
+  A.upperArmR.z -= 0.2 * d;
+  A.lowerArmL.x -= 0.9 * d;
+  A.lowerArmR.x -= 0.9 * d;
+}
+
+/** Rising through the air: arms thrown down and back, one knee tucked, chest open to the sky. */
+function poseLaunch(A: Angles, t: number) {
+  const tuck = track(t, [
+    [0, 0.2],
+    [0.4, 1],
+    [1, 0.6],
+  ]);
+  A.spine.x -= 0.22;
+  A.head.x -= 0.3;
+  A.upperArmL.x += 1.1;
+  A.upperArmR.x += 1.1;
+  A.upperArmL.z += 0.45;
+  A.upperArmR.z -= 0.45;
+  A.lowerArmL.x -= 0.35;
+  A.lowerArmR.x -= 0.35;
+  A.upperLegR.x -= 1.15 * tuck;
+  A.lowerLegR.x += 1.8 * tuck;
+  A.footR.x += 0.3 * tuck;
+  A.upperLegL.x += 0.25;
+  A.footL.x += 0.45;
+}
+
+/** Fist-first dive: the whole body pitches over the hips, lead arm driven straight down. */
+function poseDive(A: Angles, t: number) {
+  const pitch = track(t, [
+    [0, 0.6],
+    [0.5, 1.45],
+    [1, 1.55],
+  ]);
+  A.hips.x += pitch;
+  A.spine.x += 0.2;
+  A.head.x += 0.25;
+  A.upperArmR.x -= 2.85;
+  A.lowerArmR.x -= 0.05;
+  A.handR.x -= 0.3;
+  A.upperArmL.x += 0.85;
+  A.upperArmL.z += 0.35;
+  A.lowerArmL.x -= 0.6;
+  A.upperLegL.x += 0.15;
+  A.upperLegR.x += 0.3;
+  A.upperLegL.z += 0.15;
+  A.upperLegR.z -= 0.15;
+  A.footL.x += 0.5;
+  A.footR.x += 0.5;
+}
+
+/** Landing crouch: one knee down, lead fist planted, head coming up through the dust. */
+function poseSlam(A: Angles, t: number) {
+  const rise = track(t, [
+    [0, 0],
+    [0.6, 0],
+    [1, 0.45],
+  ]);
+  const d = 1 - rise;
+  A.upperLegL.x -= 0.55 * d;
+  A.lowerLegL.x += 2.3 * d;
+  A.upperLegR.x -= 1.45 * d;
+  A.lowerLegR.x += 1.9 * d;
+  A.footR.x -= 0.5 * d;
+  A.spine.x += 0.95 * d;
+  A.hips.x += 0.25 * d;
+  A.head.x -= 0.75 * d;
+  A.upperArmR.x -= 0.55 * d;
+  A.upperArmR.z -= 0.15 * d;
+  A.lowerArmR.x -= 0.05;
+  A.handR.x += 0.4 * d;
+  A.upperArmL.x += 0.9 * d;
+  A.upperArmL.z += 0.4 * d;
+  A.lowerArmL.x -= 1.0 * d;
+}
+
+/** Shoulder-first sprint: deep forward lean, lead fist out, rear fist chambered, legs mid-stride. */
+function poseRush(A: Angles, t: number, phase: number) {
+  const sL = Math.sin(phase * 1.6);
+  A.spine.x += 0.5;
+  A.hips.x += 0.18;
+  A.head.x -= 0.45;
+  A.spine.y += 0.25;
+  A.upperArmL.x -= 1.65;
+  A.upperArmL.z -= 0.15;
+  A.lowerArmL.x -= 0.25;
+  A.upperArmR.x += 0.85;
+  A.upperArmR.z -= 0.3;
+  A.lowerArmR.x -= 1.45;
+  A.upperLegL.x -= 0.55 + 0.25 * sL;
+  A.upperLegR.x += 0.65 - 0.25 * sL;
+  A.lowerLegL.x += 0.35;
+  A.lowerLegR.x += 1.25;
+  A.footR.x -= 0.4;
+}
+
+/** Overdrive pass: a flat backhand swept through the target as she streaks by. */
+function poseStreak(A: Angles, t: number) {
+  const sweep = track(t, [
+    [0, -1.0],
+    [0.5, 0.35],
+    [1, 0.9],
+  ]);
+  A.spine.x += 0.4;
+  A.hips.x += 0.1;
+  A.spine.y += track(t, [
+    [0, -0.5],
+    [0.5, 0.3],
+    [1, 0.55],
+  ]);
+  A.head.x -= 0.3;
+  A.head.y -= A.spine.y * 0.5;
+  A.upperArmR.x -= 1.5;
+  A.upperArmR.z += sweep;
+  A.lowerArmR.x -= 0.15;
+  A.handR.z += 0.3;
+  A.upperArmL.x += 0.4;
+  A.upperArmL.z += 0.5;
+  A.lowerArmL.x -= 1.2;
+  A.upperLegL.x += 0.45;
+  A.upperLegR.x += 0.3;
+  A.lowerLegL.x += 1.0;
+  A.lowerLegR.x += 0.7;
+}
+
+/** Overdrive finish: standing tall, arms thrown open as the marks detonate behind her. */
+function poseFinish(A: Angles, t: number) {
+  const open = track(t, [
+    [0, 0.2],
+    [0.3, 1],
+    [1, 0.85],
+  ]);
+  A.spine.x -= 0.18 * open;
+  A.head.x -= 0.15 * open;
+  A.upperArmL.x -= 0.35 * open;
+  A.upperArmR.x -= 0.35 * open;
+  A.upperArmL.z += 1.25 * open;
+  A.upperArmR.z -= 1.25 * open;
+  A.lowerArmL.x -= 0.45 * open;
+  A.lowerArmR.x -= 0.45 * open;
+  A.handL.z += 0.3 * open;
+  A.handR.z -= 0.3 * open;
+  A.upperLegL.x -= 0.12;
+  A.upperLegR.x -= 0.12;
+  A.lowerLegL.x += 0.2;
+  A.lowerLegR.x += 0.2;
+  A.upperLegL.z += 0.12;
+  A.upperLegR.z -= 0.12;
+}
 
 /** Overhead chop: right arm, torso drives it. */
 function poseChop(A: Angles, p: number) {
@@ -1154,4 +1471,134 @@ function poseBlast(A: Angles, p: number) {
   A.upperLegR.x -= 0.35 * crouch - 0.25 * lunge;
   A.lowerLegR.x += 0.6 * crouch + 0.05 * lunge;
   A.footR.x -= 0.2 * lunge;
+}
+
+/** Spinning back kick: the hips carry the whole body around once, right leg whipped out at the apex. */
+function poseSpinKick(A: Angles, p: number) {
+  // Load (0.15) → spin through the back (0.3–0.7), leg out at 0.5 → plant.
+  A.hips.y += track(p, [
+    [0.12, 0],
+    [0.7, -Math.PI * 2],
+    [1, -Math.PI * 2],
+  ]);
+  const leg = track(p, [
+    [0.2, 0],
+    [0.45, 1],
+    [0.6, 1],
+    [0.82, 0],
+  ]);
+  A.upperLegR.x -= 1.35 * leg;
+  A.upperLegR.z -= 0.55 * leg;
+  A.lowerLegR.x += track(p, [
+    [0.2, 0],
+    [0.38, 1.6],
+    [0.5, 0.1],
+    [0.62, 0.15],
+    [0.82, 0],
+  ]);
+  A.footR.x -= 0.4 * leg;
+  // Lean away from the kick over the support leg, knee soft.
+  A.spine.x -= 0.35 * leg;
+  A.spine.z -= 0.25 * leg;
+  A.hips.x -= 0.1 * leg;
+  A.upperLegL.x -= 0.15 * leg;
+  A.lowerLegL.x += 0.3 * leg;
+  A.head.x += 0.3 * leg;
+  // Arms flung wide for balance, fists closed.
+  A.upperArmL.x -= 0.4 * leg;
+  A.upperArmL.z += 0.9 * leg;
+  A.lowerArmL.x -= 0.5 * leg;
+  A.upperArmR.x -= 0.2 * leg;
+  A.upperArmR.z -= 0.9 * leg;
+  A.lowerArmR.x -= 0.7 * leg;
+  const load = track(p, [
+    [0, 0],
+    [0.15, 1],
+    [0.3, 0.3],
+    [1, 0],
+  ]);
+  A.upperLegL.x -= 0.2 * load;
+  A.upperLegR.x -= 0.2 * load;
+  A.lowerLegL.x += 0.35 * load;
+  A.lowerLegR.x += 0.35 * load;
+}
+
+/** Spiked-knuckle smash: huge overhand right driven down through the target, body dropping with it. */
+function poseSmash(A: Angles, p: number) {
+  // Wind the fist high behind the head (0.3) → hammer through (0.55) →
+  // hold low (0.72) → recover.
+  A.upperArmR.x += track(p, [
+    [0, 0],
+    [0.3, -2.9],
+    [0.55, -0.95],
+    [0.72, -0.6],
+    [1, 0],
+  ]);
+  A.upperArmR.z += track(p, [
+    [0, 0],
+    [0.3, -0.55],
+    [0.55, 0.1],
+    [1, 0],
+  ]);
+  A.lowerArmR.x += track(p, [
+    [0, 0],
+    [0.3, -1.9],
+    [0.55, -0.1],
+    [0.72, -0.25],
+    [1, -0.2],
+  ]);
+  A.handR.x += track(p, [
+    [0, 0],
+    [0.3, -0.5],
+    [0.55, 0.45],
+    [1, 0],
+  ]);
+  A.spine.x += track(p, [
+    [0, 0],
+    [0.3, -0.3],
+    [0.55, 0.55],
+    [0.72, 0.45],
+    [1, 0],
+  ]);
+  A.spine.y += track(p, [
+    [0, 0],
+    [0.3, -0.5],
+    [0.55, 0.45],
+    [1, 0],
+  ]);
+  A.hips.y += track(p, [
+    [0, 0],
+    [0.3, -0.25],
+    [0.55, 0.3],
+    [1, 0],
+  ]);
+  A.head.x -= A.spine.x * 0.8;
+  A.head.y -= A.spine.y * 0.6;
+  // Off arm pulls back hard for torque, then guards.
+  A.upperArmL.x += track(p, [
+    [0, 0],
+    [0.3, -0.6],
+    [0.55, 0.7],
+    [1, 0],
+  ]);
+  A.lowerArmL.x += track(p, [
+    [0, 0],
+    [0.3, -1.3],
+    [0.55, -0.9],
+    [1, -0.2],
+  ]);
+  // Rise on the windup, drop the whole stance into the impact.
+  const drop = track(p, [
+    [0, 0],
+    [0.3, -0.25],
+    [0.55, 1],
+    [0.72, 0.9],
+    [1, 0],
+  ]);
+  A.upperLegL.x -= 0.55 * drop;
+  A.upperLegR.x -= 0.55 * drop;
+  A.lowerLegL.x += 0.95 * drop;
+  A.lowerLegR.x += 0.95 * drop;
+  A.footL.x -= 0.25 * drop;
+  A.footR.x -= 0.25 * drop;
 }

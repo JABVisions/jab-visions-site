@@ -281,6 +281,7 @@ export class RyderPowerVFX {
   private hasState = false;
   private auraLevel = 0;
   private flash = 0;
+  private attackGlow = 0;
   private nextArc = 0;
   private nextSpark = 0;
   private glowColor = new THREE.Color();
@@ -314,6 +315,56 @@ export class RyderPowerVFX {
 
   get currentState() {
     return this.state;
+  }
+
+  /** Normalised aura brightness (0 depleted → 1 full power), for kits that scale their own effects. */
+  get auraNormalized() {
+    const powered = this.profile?.poweredAuraIntensity || 1;
+    return Math.max(0, Math.min(1, this.auraLevel / powered));
+  }
+
+  /** World position of a named anchor (bone / part) on the attached figure, or null. */
+  anchorPosition(key: string, out: THREE.Vector3) {
+    const anchor = this.anchors.get(key);
+    if (!anchor) return null;
+    return anchorWorld(anchor, out);
+  }
+
+  anchor(key: string): Anchor | null {
+    return this.anchors.get(key) ?? null;
+  }
+
+  /**
+   * Weapon glow kick for attacks: adds to the figure's glow meshes only and
+   * decays fast, so knuckles / blades flare on a hit without touching the aura state.
+   */
+  boost(amount: number) {
+    this.attackGlow = Math.min(2.5, Math.max(this.attackGlow, amount));
+  }
+
+  /**
+   * Light `count` arcs that start on the named anchors (feet, hands …) and run
+   * to a neighbouring anchor or the ground ring. Used by kits for sprint energy
+   * and ability wind-ups; silently does nothing while power is depleted.
+   */
+  arcAt(keys: string[], count: number, brightness = 0.8, life = 0.14, width = 0.035) {
+    if (!this.profile || this.state === 'DEPLETED') return;
+    for (let i = 0; i < count; i += 1) {
+      const key = keys[Math.floor(Math.random() * keys.length)];
+      const from = this.anchors.get(key);
+      if (!from) continue;
+      const neighbours = this.routes.filter((r) => r.from === from || r.to === from);
+      if (neighbours.length && Math.random() < 0.6) {
+        const route = neighbours[Math.floor(Math.random() * neighbours.length)];
+        const to = route.from === from ? route.to : route.from;
+        this.arcs.spawn(from, to, this.profile.electricityColor, { brightness, life, width, wobble: 0.12 });
+      } else {
+        anchorWorld(from, this._pos);
+        const angle = Math.random() * Math.PI * 2;
+        _b.set(this._pos.x + Math.cos(angle) * 0.5, this.ring.position.y + 0.02, this._pos.z + Math.sin(angle) * 0.5);
+        this.arcs.spawn(from, _b, this.profile.electricityColor, { brightness, life, width, wobble: 0.16 });
+      }
+    }
   }
 
   /** Point the system at a (new) figure. Safe to call on every Ryder switch. */
@@ -474,6 +525,7 @@ export class RyderPowerVFX {
     const ease = next === 'DEPLETED' ? 4 : 2.5;
     this.auraLevel += (target - this.auraLevel) * Math.min(1, dt * ease);
     this.flash = Math.max(0, this.flash - dt * 1.6);
+    this.attackGlow = Math.max(0, this.attackGlow - dt * 4.5);
     this.applyAura(time, pct);
     this.arcs.update(dt, camera);
   }
@@ -501,9 +553,11 @@ export class RyderPowerVFX {
     if (!fighter || !profile) return;
     const level = this.auraLevel + this.flash;
     // Weapon / orb glow: the existing "aura" meshes on the figure.
+    // Attack flare only lands while there is power to flare with.
+    const weaponLevel = level + (this.state === 'DEPLETED' ? 0 : this.attackGlow);
     fighter.glowMeshes.forEach((mesh) => {
       const mat = mesh.material as THREE.MeshBasicMaterial;
-      mat.color.copy(this.glowColor).multiplyScalar(Math.max(0.05, level));
+      mat.color.copy(this.glowColor).multiplyScalar(Math.max(0.05, weaponLevel));
     });
     // Block figures carry glowing eyes; GLB figures hide the material.
     const eyes = fighter.humanoid.eyeMaterial;
