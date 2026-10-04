@@ -195,6 +195,7 @@ export const RYDERZ: Record<RyderId, RyderSpec> = {
     portrait: '/assets/haylee-brown-headshot.jpeg',
     icon: '/assets/those-ryderz/icons/leo.webp',
     glb: '/assets/those-ryderz/models/leo-montana.glb',
+    strikes: ['punch', 'punchR', 'spinKick', 'smash'],
     maxHp: 95,
     speed: 8.6,
     fireRate: 6.2,
@@ -212,8 +213,9 @@ export const RYDERZ: Record<RyderId, RyderSpec> = {
         id: 'shockwave',
         name: 'Kinetic Crack',
         key: 'Q',
-        description: 'Stomp a shockwave that knocks hosts off their feet.',
-        auraCost: 8,
+        description:
+          'Launch skyward, hang, then dive fist-first at the crosshair. The landing cracks the ground and launches everything nearby.',
+        auraCost: 12,
         drain: 0,
       },
       {
@@ -221,15 +223,16 @@ export const RYDERZ: Record<RyderId, RyderSpec> = {
         name: 'Overdrive',
         key: 'E',
         description:
-          'Hold the kinetic burst. Speed and fire rate stay high while aura drains. Press again to cut it.',
-        auraCost: 0,
-        drain: 10,
+          'Become a yellow streak and zigzag through every host in reach, striking each one in passing. The marks detonate when she stops.',
+        auraCost: 18,
+        drain: 0,
       },
       {
         id: 'prideDash',
         name: 'Pride Rush',
         key: 'R',
-        description: 'Dash through the line. Anything in the path eats a spiked knuckle.',
+        description:
+          'Accelerate shoulder-first through the line, steering with the camera. Everything hit is thrown aside; the last one eats a spiked knuckle.',
         auraCost: 10,
         drain: 0,
       },

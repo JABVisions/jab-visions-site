@@ -29,6 +29,18 @@ import { DEFAULT_ARENA, arenaSpec, type ArenaDefinition, type ArenaId } from './
 import { RyderBeacon, type BeaconHudState } from './beacon';
 import { RyderPowerVFX, type PowerState } from './power-vfx';
 import {
+  CrackDecalPool,
+  HitScheduler,
+  ShockRingPool,
+  applyReaction,
+  stepReaction,
+  targetsInArc,
+  type HitReaction,
+} from './combat';
+import { AfterimagePool } from './speed-vfx';
+import { createRyderKit, type KitContext, type MeleeStep, type RyderKit } from './ryderz';
+import type { MeleeStyle } from './skeletal';
+import {
   ThirdPersonCamera,
   type CameraConfig,
   type CameraSnapshot,
@@ -111,6 +123,25 @@ interface Host {
   stun: number;
   /** Set when the host lands a melee; consumed by the next animation tick. */
   swing: boolean;
+  /** Hit-reaction state (see `combat.ts`): stagger window, airborne arc, visual lean / tumble. */
+  stagger: number;
+  airY: number;
+  airVel: number;
+  lean: number;
+  spin: number;
+  tumble: number;
+}
+
+/** A defeated host still flying from the blow that killed it. */
+interface Fallen {
+  fighter: Fighter;
+  pos: THREE.Vector3;
+  vel: THREE.Vector3;
+  airY: number;
+  airVel: number;
+  spin: number;
+  tumble: number;
+  life: number;
 }
 
 interface Bolt {
@@ -237,6 +268,21 @@ export class RaidEngine {
   private interactQueued = false;
   private recoveryT = 0;
   private recoveryFrom = { hp: 0, aura: 0 };
+  /** Per-Ryder combat kit (null for Ryderz still on the generic moves). */
+  private kit: RyderKit | null = null;
+  private kitContext: KitContext | null = null;
+  private scheduler = new HitScheduler();
+  private rings = new ShockRingPool(10);
+  private cracks = new CrackDecalPool(4);
+  private afterimages = new AfterimagePool(5);
+  private fallen: Fallen[] = [];
+  private hitStopT = 0;
+  /** Gameplay seconds actually simulated (sum of clamped dt); hit windows and combos run on this, not wall time. */
+  private simTime = 0;
+  private lastPos = new THREE.Vector3();
+  private playerSpeed = 0;
+  private strikeOverride: MeleeStyle | null = null;
+  private onSound: ((id: string) => void) | null = null;
 
   constructor(canvas: HTMLCanvasElement, onHud: (hud: HudState) => void) {
     this.canvas = canvas;
@@ -273,9 +319,14 @@ export class RaidEngine {
     this.particles = new ParticleSystem();
     this.scene.add(this.particles.points);
     this.powerVfx = new RyderPowerVFX(this.scene, this.particles);
+    this.scene.add(this.rings.group, this.cracks.group, this.afterimages.group);
 
     this.arena = arenaSpec(DEFAULT_ARENA)!;
     this.loadArena(this.arena.id);
+    // Dev-only handle for headless combat checks; stripped from production builds.
+    if (process.env.NODE_ENV !== 'production') {
+      (window as unknown as { __raidDebug?: RaidEngine }).__raidDebug = this;
+    }
 
     this.resize();
     this.bind();
@@ -328,6 +379,8 @@ export class RaidEngine {
     this.player = buildRyder(this.spec);
     this.scene.add(this.player.humanoid.group);
     this.powerVfx.attach(this.player, this.spec.visual);
+    this.lastPos.copy(this.pos);
+    this.bindKit();
     this.beacon?.reset();
 
     const shieldMat = new THREE.MeshBasicMaterial({
@@ -391,6 +444,7 @@ export class RaidEngine {
     if (this.disposed || token !== this.switchToken) return;
 
     this.endAllMoves();
+    this.unbindKit();
     const hpFrac = this.maxHp > 0 ? this.hp / this.maxHp : 1;
     const auraFrac = this.maxAura > 0 ? this.aura / this.maxAura : 1;
     this.spec = spec;
@@ -415,6 +469,7 @@ export class RaidEngine {
     this.player.humanoid.group.rotation.y = this.yaw;
     this.scene.add(this.player.humanoid.group);
     this.powerVfx.attach(this.player, spec.visual);
+    this.bindKit();
     this.particles.emit(this.pos.clone().setY(1.1), spec.color, 30, {
       speed: 7,
       size: 0.32,
@@ -425,6 +480,11 @@ export class RaidEngine {
 
   requestPointerLock() {
     this.canvas.requestPointerLock();
+  }
+
+  /** Receive combat audio cues (`leo.crack.impact`, …). Nothing plays until a listener is set. */
+  setSoundHook(hook: ((id: string) => void) | null) {
+    this.onSound = hook;
   }
 
   /** Dev-only: while tuning, Escape releases the pointer without pausing the raid. */
@@ -506,6 +566,9 @@ export class RaidEngine {
     this.unbind();
     this.clearCombat();
     this.powerVfx.dispose();
+    this.rings.dispose();
+    this.cracks.dispose();
+    this.afterimages.dispose();
     this.unloadBeacon();
     this.world.dispose();
     this.particles.dispose();
@@ -615,8 +678,13 @@ export class RaidEngine {
   private loop() {
     if (this.disposed) return;
     this.raf = requestAnimationFrame(this.loop);
-    const dt = Math.min(0.05, this.clock.getDelta());
+    let dt = Math.min(0.05, this.clock.getDelta());
     const time = this.clock.elapsedTime;
+    // Hit-stop: the world crawls for a few frames so a heavy impact has weight.
+    if (this.hitStopT > 0) {
+      this.hitStopT = Math.max(0, this.hitStopT - dt);
+      dt *= 0.06;
+    }
     if (!this.paused && this.player && this.phase !== 'dead') this.update(dt, time);
     else if (this.player) this.updateCamera(dt);
     this.world.animate(time);
@@ -661,19 +729,26 @@ export class RaidEngine {
 
     this.updateRecovery(dt);
     this.updateAura(dt);
+    this.simTime += dt;
+    this.scheduler.update(this.simTime);
+    if (this.kit) {
+      const moving = this.moveAxis.x !== 0 || this.moveAxis.z !== 0 || ['arrowup', 'arrowdown', 'arrowleft', 'arrowright'].some((k) => this.keys.has(k));
+      this.kit.update({ dt, time: this.simTime, speed: this.playerSpeed, sprinting: this.sprinting, moving });
+    }
     this.updatePlayerMove(dt, time);
     const recovering = this.recoveryT > 0;
+    const locked = recovering || (this.kit?.locked ?? false);
     for (let i = 0; i < 3; i += 1) {
       if (this.queuedMoves[i]) {
         this.queuedMoves[i] = false;
-        if (!recovering) this.tryMove(i);
+        if (!locked) this.tryMove(i);
       }
     }
     if (this.meleeQueued) {
       this.meleeQueued = false;
-      if (!recovering) this.tryMelee();
+      if (!locked) this.tryMelee();
     }
-    if (this.fireHeld && !recovering) this.tryFire();
+    if (this.fireHeld && !locked) this.tryFire();
     if (this.interactQueued) {
       this.interactQueued = false;
       this.tryInteract();
@@ -681,9 +756,13 @@ export class RaidEngine {
 
     this.updateClones(dt);
     this.updateHosts(dt, time);
+    this.updateFallen(dt);
     this.updateBolts(dt);
     this.updateRound(dt);
     this.updateCamera(dt);
+    this.rings.update(dt);
+    this.cracks.update(dt);
+    this.afterimages.update(dt);
     this.beacon?.update(dt, time, this.pos, this.spec.visual.auraColor, this.camera);
     this.powerVfx.update(dt, time, this.aura, this.maxAura, !this.burnout, this.camera);
   }
@@ -730,7 +809,7 @@ export class RaidEngine {
   }
 
   private tryInteract() {
-    if (!this.player || this.phase === 'dead' || this.recoveryT > 0) return;
+    if (!this.player || this.phase === 'dead' || this.recoveryT > 0 || this.kit?.locked) return;
     const beacon = this.beacon;
     if (!beacon || !beacon.isPlayerInRange(this.pos)) return;
     const time = this.clock.elapsedTime;
@@ -741,6 +820,7 @@ export class RaidEngine {
     // Bars ramp over the sequence (so the HUD visibly fills) and land on max.
     this.recoveryT = RECOVERY_DURATION;
     this.recoveryFrom = { hp: this.hp, aura: this.aura };
+    this.kit?.interrupt();
     this.burnout = false;
     this.iframes = Math.max(this.iframes, RECOVERY_DURATION + 0.3);
     this.abilityT = Math.max(this.abilityT, RECOVERY_DURATION);
@@ -806,8 +886,8 @@ export class RaidEngine {
 
   private updatePlayerMove(dt: number, time: number) {
     if (!this.player) return;
-    const overdrive = this.isActive('overdrive');
     const phased = this.isActive('phase');
+    const locked = this.kit?.locked ?? false;
 
     let x = this.moveAxis.x;
     let z = this.moveAxis.z;
@@ -815,7 +895,7 @@ export class RaidEngine {
     if (this.keys.has('arrowdown')) z += 1;
     if (this.keys.has('arrowleft')) x -= 1;
     if (this.keys.has('arrowright')) x += 1;
-    if (this.recoveryT > 0) {
+    if (this.recoveryT > 0 || locked) {
       x = 0;
       z = 0;
     }
@@ -827,7 +907,6 @@ export class RaidEngine {
     this.sprinting = this.keys.has('shift') && len > 0.1 && !this.fireHeld && this.meleeT <= 0;
     const speed =
       this.spec.speed *
-      (overdrive ? 1.85 : 1) *
       (this.sprinting ? SPRINT_MULTIPLIER : 1) *
       (this.burnout ? 0.82 : 1);
 
@@ -840,7 +919,9 @@ export class RaidEngine {
     this.pos.z = clamp(this.pos.z, -BOUNDARY, BOUNDARY);
     resolveCircle(this.pos, PLAYER_RADIUS, this.world.obstacles);
 
-    if (!phased) {
+    // Hosts shoulder the Ryder aside, except while a kit sequence is carrying
+    // her through them (dashes decide their own contact).
+    if (!phased && !locked) {
       for (const host of this.hosts) {
         const dx = this.pos.x - host.pos.x;
         const dz = this.pos.z - host.pos.z;
@@ -851,22 +932,27 @@ export class RaidEngine {
         const push = (min - d) * (host.mass / (host.mass + 1));
         this.pos.x += (dx / d) * push * 0.35;
         this.pos.z += (dz / d) * push * 0.35;
-        if (overdrive && host.cooldown <= 0) {
-          this.hurtHost(host, 16, _tmp);
-          host.cooldown = 0.35;
-        }
       }
       resolveCircle(this.pos, PLAYER_RADIUS, this.world.obstacles);
     }
 
+    // Horizontal speed for the kit's speed effects (measured, not commanded,
+    // so dashes count too).
+    this.playerSpeed = dt > 0 ? Math.hypot(this.pos.x - this.lastPos.x, this.pos.z - this.lastPos.z) / dt : 0;
+    this.lastPos.copy(this.pos);
+
     this.player.humanoid.group.position.copy(this.pos);
-    this.player.humanoid.group.position.y = this.world.heightAt(this.pos.x, this.pos.z);
+    this.player.humanoid.group.position.y = this.world.heightAt(this.pos.x, this.pos.z) + (this.kit?.airY ?? 0);
     this.player.humanoid.group.rotation.y = this.yaw;
     const moving = Math.min(1, len);
     this.anim += dt * (8 + moving * (this.sprinting ? 9 : 6));
     if (this.player.meshSource === 'gltf') {
-      animateGltfFighter(this.player, dt, this.anim, moving, this.sprinting, this.meleeT, this.meleeStarted);
+      animateGltfFighter(this.player, dt, this.anim, moving, this.sprinting, this.meleeT, this.meleeStarted, {
+        pose: this.kit?.pose ?? null,
+        style: this.meleeStarted ? this.strikeOverride ?? undefined : undefined,
+      });
       this.meleeStarted = false;
+      this.strikeOverride = null;
     } else {
       animateHumanoid(this.player.humanoid, this.anim, moving, time);
       if (this.meleeT > 0) poseMelee(this.player.humanoid, 1 - this.meleeT);
@@ -900,9 +986,7 @@ export class RaidEngine {
       this.spendAura(this.aura);
       return;
     }
-    const overdrive = this.isActive('overdrive');
-    const rate = this.spec.fireRate * (overdrive ? 1.85 : 1);
-    this.fireCd = 1 / rate;
+    this.fireCd = 1 / this.spec.fireRate;
     this.spendAura(volleyCost);
     this.combatT = COMBAT_LINGER;
     this.lookDir(_look);
@@ -929,6 +1013,11 @@ export class RaidEngine {
 
   private tryMelee() {
     if (!this.player || this.meleeCd > 0) return;
+    const step = this.kit?.melee(this.simTime) ?? null;
+    if (step) {
+      this.meleeStep(step);
+      return;
+    }
     const rate = this.spec.meleeRate * (this.burnout ? 0.75 : 1);
     this.meleeCd = 1 / rate;
     this.meleeT = 1;
@@ -956,6 +1045,118 @@ export class RaidEngine {
       if (Math.abs(diff) > MELEE_ARC) continue;
       this.hurtHost(host, dmg, _fwd);
     }
+  }
+
+  /**
+   * Kit-authored melee: the swing starts now, the damage lands when the fist
+   * does. Damage, range, cone and reaction all come from the step.
+   */
+  private meleeStep(step: MeleeStep) {
+    this.meleeCd = step.recovery * (this.burnout ? 1.3 : 1);
+    this.meleeT = 1;
+    this.meleeStarted = true;
+    this.strikeOverride = step.style;
+    this.combatT = COMBAT_LINGER;
+    this.rig.addKick(-0.1);
+    this.scheduler.schedule(this.simTime, step.hitDelay, () => {
+      if (!this.player || this.phase === 'dead') return;
+      _fwd.set(Math.sin(this.yaw), 0, Math.cos(this.yaw));
+      // Step into the hit.
+      this.pos.addScaledVector(_fwd, step.lunge);
+      this.pos.x = clamp(this.pos.x, -BOUNDARY, BOUNDARY);
+      this.pos.z = clamp(this.pos.z, -BOUNDARY, BOUNDARY);
+      resolveCircle(this.pos, PLAYER_RADIUS, this.world.obstacles);
+      const color = this.burnout ? 0x8899aa : this.spec.visual.electricityColor;
+      this.particles.emit(this.muzzle(), color, 10, { speed: 7, size: 0.26, life: 0.26, direction: _fwd, up: 0.2 });
+      const dmg = this.meleeDamage() * step.damageMul;
+      const hits = targetsInArc(this.hosts, this.pos, this.yaw, step.range, step.halfArc, [] as Host[]);
+      if (!hits.length) {
+        this.emitSound(`${step.sound}.whiff`);
+        return;
+      }
+      for (const host of hits) {
+        _tmp.set(host.pos.x - this.pos.x, 0, host.pos.z - this.pos.z);
+        if (_tmp.lengthSq() < 0.0001) _tmp.copy(_fwd);
+        _tmp.normalize();
+        this.hurtHost(host, dmg, _tmp, step.reaction, step.strength);
+        this.particles.emit(host.pos.clone().setY(1.1), 0xffffff, 4, { speed: 3, size: 0.3, life: 0.16 });
+      }
+      if (step.shake > 0) this.rig.addShake(step.shake);
+      if (step.hitStop > 0) this.hitStop(step.hitStop);
+      this.powerVfx.boost(0.9 + step.damageMul * 0.6);
+      this.emitSound(step.sound);
+    });
+  }
+
+  private hitStop(seconds: number) {
+    this.hitStopT = Math.max(this.hitStopT, seconds);
+  }
+
+  private emitSound(id: string) {
+    this.onSound?.(id);
+  }
+
+  private bindKit() {
+    this.unbindKit();
+    const kit = createRyderKit(this.spec.id);
+    if (!kit || !this.player) return;
+    this.kit = kit;
+    this.kitContext = this.makeKitContext();
+    kit.attach(this.kitContext);
+  }
+
+  private unbindKit() {
+    if (!this.kit) return;
+    this.kit.detach();
+    this.kit = null;
+    this.kitContext = null;
+    this.scheduler.clear();
+    this.hitStopT = 0;
+  }
+
+  /** The engine surface a kit may touch; everything else stays private. */
+  private makeKitContext(): KitContext {
+    const engine = this;
+    return {
+      pos: this.pos,
+      get spec() {
+        return engine.spec;
+      },
+      particles: this.particles,
+      camera: this.rig,
+      cameraObject: this.camera,
+      power: this.powerVfx,
+      rings: this.rings,
+      cracks: this.cracks,
+      afterimages: this.afterimages,
+      scene: this.scene,
+      yaw: () => this.yaw,
+      time: () => this.simTime,
+      fighter: () => this.player,
+      targets: () => this.hosts,
+      hurt: (target, damage, dir, reaction, strength) => this.hurtHost(target as Host, damage, dir, reaction, strength),
+      meleeDamage: () => this.meleeDamage(),
+      heightAt: (x, z) => this.world.heightAt(x, z),
+      resolve: (pos) => {
+        pos.x = clamp(pos.x, -BOUNDARY, BOUNDARY);
+        pos.z = clamp(pos.z, -BOUNDARY, BOUNDARY);
+        resolveCircle(pos, PLAYER_RADIUS, this.world.obstacles);
+      },
+      blocked: (x, z, radius) => Math.abs(x) > BOUNDARY || Math.abs(z) > BOUNDARY || pointBlocked(x, z, radius, this.world.obstacles),
+      lookDir: (out) => this.lookDir(out),
+      hitStop: (seconds) => this.hitStop(seconds),
+      iframes: (seconds) => {
+        this.iframes = Math.max(this.iframes, seconds);
+      },
+      strike: (style) => {
+        this.meleeT = 1;
+        this.meleeStarted = true;
+        this.strikeOverride = style;
+        this.combatT = COMBAT_LINGER;
+      },
+      schedule: (delay, fn) => this.scheduler.schedule(this.simTime, delay, fn),
+      sound: (id) => this.emitSound(id),
+    };
   }
 
   private isActive(id: AbilityId) {
@@ -993,12 +1194,19 @@ export class RaidEngine {
     this.spendAura(move.auraCost);
     this.abilityT = ABILITY_LINGER;
     this.combatT = COMBAT_LINGER;
+    const id = move.id;
+    // A Ryder kit that owns this power plays it out itself.
+    if (this.kit?.tryAbility(id)) {
+      this.abilityT = Math.max(this.abilityT, 0.9);
+      return;
+    }
     this.rig.addKick(0.35);
     this.rig.addShake(0.18);
-    const id = move.id;
     if (id === 'bladeFan') this.fireSpread(5, 0.22, 1.2);
     if (id === 'envyPulse') this.pulse(6.6, 24, -8);
     if (id === 'shockwave') this.pulse(6.2, 20, 11);
+    // Generic stand-in for Ryderz without a kit: a kinetic burst around her.
+    if (id === 'overdrive') this.pulse(5, 16, 7);
     if (id === 'prideDash') this.prideDash();
     if (id === 'cleave') this.cleave();
     if (id === 'blink') this.blink();
@@ -1260,6 +1468,12 @@ export class RaidEngine {
       summon: 6,
       stun: 0,
       swing: false,
+      stagger: 0,
+      airY: 0,
+      airVel: 0,
+      lean: 0,
+      spin: 0,
+      tumble: 0,
     });
   }
 
@@ -1291,6 +1505,34 @@ export class RaidEngine {
       host.knock.multiplyScalar(Math.max(0, 1 - dt * 6));
       host.anim += dt * (6 + host.speed);
       host.stun = Math.max(0, host.stun - dt);
+      const group = host.fighter.humanoid.group;
+      group.rotation.order = 'YXZ';
+
+      // Physical hit reactions: staggered hosts stop and reel, launched hosts
+      // arc through the air and tumble, and both still drift with the shove.
+      const landed = stepReaction(host, dt);
+      if (landed) {
+        host.stagger = Math.max(host.stagger, 0.35);
+        this.particles.emit(host.pos.clone().setY(0.15), 0x6a6070, 8, { speed: 3.5, size: 0.24, life: 0.4, up: 0.6, gravity: 6 });
+      }
+      if (host.airY > 0) host.tumble += host.spin * dt;
+      else host.tumble *= Math.max(0, 1 - dt * 10);
+      if (host.stagger > 0 || host.airY > 0) {
+        host.pos.x += host.knock.x * dt;
+        host.pos.z += host.knock.z * dt;
+        host.pos.x = clamp(host.pos.x, -BOUNDARY, BOUNDARY);
+        host.pos.z = clamp(host.pos.z, -BOUNDARY, BOUNDARY);
+        resolveCircle(host.pos, host.radius, this.world.obstacles);
+        group.position.copy(host.pos);
+        group.position.y = this.world.heightAt(host.pos.x, host.pos.z) + host.airY;
+        // Reel back from the blow; spin while airborne.
+        group.rotation.x = -host.lean * 0.5 - host.tumble;
+        this.animateHost(host, dt, 0, time);
+        if (host.hit > 0) flashEmissive(host.fighter.humanoid, 0xffffff, host.hit * 2.4);
+        else flashEmissive(host.fighter.humanoid, 0x000000, 0);
+        continue;
+      }
+      group.rotation.x = 0;
 
       if (host.stun > 0) {
         host.fighter.humanoid.group.position.copy(host.pos);
@@ -1384,32 +1626,95 @@ export class RaidEngine {
     if (this.hp <= 0) {
       this.hp = 0;
       this.phase = 'dead';
+      this.kit?.interrupt();
+      this.scheduler.clear();
       this.banner = { title: 'SIGNAL LOST', sub: 'THE BLOCK TOOK YOU' };
       this.bannerT = 8;
       document.exitPointerLock();
     }
   }
 
-  private hurtHost(host: Host, amount: number, dir: THREE.Vector3) {
+  /**
+   * Damage a host. With a `reaction` the host physically responds (stagger,
+   * knockback, launch …); without one it takes the classic light shove so the
+   * other Ryderz' moves behave exactly as before.
+   */
+  private hurtHost(host: Host, amount: number, dir: THREE.Vector3, reaction?: HitReaction, strength = 1) {
+    if (host.hp <= 0) return;
     host.hp -= amount;
     host.hit = 0.18;
-    host.knock.copy(dir).setY(0).multiplyScalar(8 / host.mass);
+    if (reaction) {
+      applyReaction(host, reaction, dir, strength);
+      if (reaction !== 'stagger') host.cooldown = Math.max(host.cooldown, 0.5);
+    } else {
+      host.knock.copy(dir).setY(0).multiplyScalar(8 / host.mass);
+    }
     this.particles.emit(host.pos.clone().setY(1.1), this.spec.color, 8, {
       speed: 7,
       size: 0.22,
       life: 0.28,
       direction: dir,
     });
-    if (host.hp <= 0) this.killHost(host);
+    if (host.hp <= 0) this.killHost(host, reaction && reaction !== 'stagger' ? dir : null, strength);
   }
 
-  private killHost(host: Host) {
+  /**
+   * Remove a host. If it died to a heavy blow it keeps flying as a tumbling
+   * body for a moment instead of vanishing on the spot.
+   */
+  private killHost(host: Host, flungBy: THREE.Vector3 | null = null, strength = 1) {
     this.points += host.points;
     this.aura = Math.min(this.maxAura, this.aura + KILL_AURA_SIPHON + this.upgrades.siphon * 4);
     this.burst(host.pos.clone().setY(1), host.kind === 'broadcaster' ? 0xb84dff : 0x7dff9a, host.kind === 'broadcaster' ? 40 : 16);
+    this.hosts = this.hosts.filter((h) => h !== host);
+    if (flungBy && this.fallen.length < 8) {
+      const vel = new THREE.Vector3(flungBy.x, 0, flungBy.z).normalize().multiplyScalar((9 * strength) / Math.max(0.6, host.mass));
+      vel.add(host.knock);
+      this.fallen.push({
+        fighter: host.fighter,
+        pos: host.pos.clone(),
+        vel,
+        airY: Math.max(host.airY, 0.05),
+        airVel: Math.max(host.airVel, (5 * strength) / Math.sqrt(Math.max(0.6, host.mass))),
+        spin: (Math.random() < 0.5 ? -1 : 1) * (6 + Math.random() * 4),
+        tumble: host.tumble,
+        life: 1.4,
+      });
+      flashEmissive(host.fighter.humanoid, 0xffffff, 0.6);
+      return;
+    }
     this.scene.remove(host.fighter.humanoid.group);
     disposeObject(host.fighter.humanoid.group);
-    this.hosts = this.hosts.filter((h) => h !== host);
+  }
+
+  private updateFallen(dt: number) {
+    for (let i = this.fallen.length - 1; i >= 0; i -= 1) {
+      const body = this.fallen[i];
+      body.life -= dt;
+      body.airVel -= 22 * dt;
+      body.airY += body.airVel * dt;
+      if (body.airY <= 0) {
+        body.airY = 0;
+        body.airVel = 0;
+        body.vel.multiplyScalar(Math.max(0, 1 - dt * 9));
+        body.spin *= Math.max(0, 1 - dt * 12);
+      }
+      body.pos.addScaledVector(body.vel, dt);
+      body.pos.x = clamp(body.pos.x, -BOUNDARY, BOUNDARY);
+      body.pos.z = clamp(body.pos.z, -BOUNDARY, BOUNDARY);
+      body.tumble += body.spin * dt;
+      const group = body.fighter.humanoid.group;
+      group.rotation.order = 'YXZ';
+      group.position.copy(body.pos);
+      group.position.y = this.world.heightAt(body.pos.x, body.pos.z) + body.airY;
+      group.rotation.x = -body.tumble;
+      setHumanoidOpacity(body.fighter.humanoid, Math.min(1, body.life * 2));
+      if (body.life <= 0) {
+        this.scene.remove(group);
+        disposeObject(group);
+        this.fallen.splice(i, 1);
+      }
+    }
   }
 
   private spawnBolt(
@@ -1568,7 +1873,7 @@ export class RaidEngine {
   private cameraState(): CameraState {
     if (this.phase === 'dead') return 'EXPLORATION';
     if (this.fireHeld && !this.burnout) return 'AIM';
-    if (this.abilityT > 0 || this.moveT.some((t) => t > 0)) return 'ABILITY';
+    if (this.abilityT > 0 || this.kit?.locked || this.moveT.some((t) => t > 0)) return 'ABILITY';
     if (this.sprinting) return 'SPRINT';
     if (this.combatT > 0) return 'COMBAT';
     for (const host of this.hosts) {
@@ -1625,6 +1930,12 @@ export class RaidEngine {
       disposeObject(h.fighter.humanoid.group);
     });
     this.hosts = [];
+    this.fallen.forEach((f) => {
+      this.scene.remove(f.fighter.humanoid.group);
+      disposeObject(f.fighter.humanoid.group);
+    });
+    this.fallen = [];
+    this.unbindKit();
     this.clearClones();
     this.bolts.forEach((b) => {
       b.mesh.visible = false;
