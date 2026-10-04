@@ -1,3 +1,4 @@
+import type { GlbRepair } from './mesh-repair';
 import type { MeleeStyle } from './skeletal';
 
 export type RyderId = 'rubi' | 'leo' | 'aaron' | 'zoe' | 'keven';
@@ -86,6 +87,8 @@ export interface RyderSpec {
   moves: [AbilitySpec, AbilitySpec, AbilitySpec];
   /** Optional Tripo (or other) glTF binary used as the in-game figure. */
   glb?: string;
+  /** Load-time geometry fixes for known defects in that export. */
+  glbRepair?: GlbRepair;
   /** Melee animations cycled per swing when the figure is driven by the procedural skeleton. */
   strikes?: MeleeStyle[];
 }
@@ -362,6 +365,8 @@ export const RYDERZ: Record<RyderId, RyderSpec> = {
     portrait: '/assets/john_andy_headshot.jpg',
     icon: '/assets/those-ryderz/icons/keven.webp',
     glb: '/assets/those-ryderz/models/keven-hart.glb?v=2',
+    // The export carries a second, detached pair of legs floating under the hips.
+    glbRepair: { dropDetachedBelow: 'Hips' },
     // Dart hand is the left: jab with it, kick, then a backhand with the free hand.
     strikes: ['punch', 'kick', 'slap'],
     maxHp: 100,

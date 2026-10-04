@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { clone as cloneSkeleton } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { HOST_MODELS, type EnemyKind, type RyderId, type RyderSpec } from './config';
+import { applyGlbRepair, type GlbRepair } from './mesh-repair';
 import {
   POSE_ROOT_DROP,
   ProceduralSkeleton,
@@ -88,8 +89,9 @@ const gltfLoader = new GLTFLoader();
 const gltfTemplates = new Map<RyderId, GltfTemplate>();
 const hostTemplates: GltfTemplate[] = [];
 
-async function loadGltfTemplate(url: string, label: string): Promise<GltfTemplate> {
+async function loadGltfTemplate(url: string, label: string, repair?: GlbRepair): Promise<GltfTemplate> {
   const gltf = await gltfLoader.loadAsync(url);
+  if (repair) applyGlbRepair(gltf.scene, repair, label);
   let skinned = false;
   gltf.scene.traverse((object) => {
     const mesh = object as THREE.Mesh;
@@ -123,7 +125,7 @@ async function loadGltfTemplate(url: string, label: string): Promise<GltfTemplat
 
 export async function preloadRyderGltf(spec: RyderSpec) {
   if (!spec.glb || gltfTemplates.has(spec.id)) return;
-  gltfTemplates.set(spec.id, await loadGltfTemplate(spec.glb, spec.id));
+  gltfTemplates.set(spec.id, await loadGltfTemplate(spec.glb, spec.id, spec.glbRepair));
 }
 
 /** Load the host mob models; failures are logged and that model is skipped. */
