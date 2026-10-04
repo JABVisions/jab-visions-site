@@ -23,7 +23,10 @@ export async function POST(req: NextRequest) {
   const stripe = getStripe();
   if (!stripe) return notConfigured();
 
-  const { supabase, user } = await requireBankingUser();
+  const { supabase, user, configured } = await requireBankingUser();
+  if (!configured || !supabase) {
+    return NextResponse.json({ ok: false, error: "Banking is not connected on this server yet." }, { status: 503 });
+  }
   if (!user) {
     return NextResponse.json({ ok: false, error: "Sign in to set up Banking." }, { status: 401 });
   }
@@ -81,7 +84,10 @@ export async function POST(req: NextRequest) {
 }
 
 export async function GET() {
-  const { user } = await requireBankingUser();
+  const { user, configured } = await requireBankingUser();
+  if (!configured) {
+    return NextResponse.json({ ok: false, error: "Banking is not connected on this server yet." }, { status: 503 });
+  }
   if (!user) {
     return NextResponse.json({ ok: false, error: "Sign in to check Banking." }, { status: 401 });
   }

@@ -1,6 +1,7 @@
 import { cookies } from "next/headers";
 import { createServerClient } from "@supabase/ssr";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { getSupabasePublicConfig } from "@/lib/supabase/config";
 import { applicationFeeCents, getStripe } from "@/lib/stripe/server";
 import {
   bankingCopy,
@@ -13,18 +14,22 @@ import {
 } from "@/lib/board/banking/status";
 
 export function bankingSupabaseFromCookies() {
+  const { url, key, configured } = getSupabasePublicConfig();
+  if (!configured) return null;
   const cookieStore = cookies();
-  return createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        getAll: () => cookieStore.getAll(),
-        setAll: (cs) =>
-          cs.forEach(({ name, value, options }) => cookieStore.set(name, value, options)),
-      },
-    }
-  );
+  return createServerClient(url, key, {
+    cookies: {
+      getAll: () => cookieStore.getAll(),
+      setAll: (cs) =>
+        cs.forEach(({ name, value, options }) => {
+          try {
+            cookieStore.set(name, value, options);
+          } catch {
+            // Route handlers can persist cookies; server components may not.
+          }
+        }),
+    },
+  });
 }
 
 export function bankingServiceSupabase(): SupabaseClient | null {
@@ -36,10 +41,11 @@ export function bankingServiceSupabase(): SupabaseClient | null {
 
 export async function requireBankingUser() {
   const supabase = bankingSupabaseFromCookies();
+  if (!supabase) return { supabase: null, user: null, configured: false as const };
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  return { supabase, user };
+  return { supabase, user, configured: true as const };
 }
 
 export function styleStripeAccountId(boardStyle: unknown) {
@@ -81,6 +87,7 @@ export async function upsertBankingProfileRow(input: {
   settings?: PayDropBankingSettings;
 }) {
   const db = bankingServiceSupabase() ?? (await requireBankingUser()).supabase;
+  if (!db) return;
   const settings = input.settings ?? DEFAULT_PAY_DROP_BANKING_SETTINGS;
   try {
   await db.from("board_banking_profiles").upsert(
@@ -106,6 +113,26 @@ export async function upsertBankingProfileRow(input: {
 
 export async function loadBankingSnapshot(userId: string): Promise<BankingSnapshot> {
   const { supabase } = await requireBankingUser();
+  if (!supabase) {
+    const copy = bankingCopy("not_connected");
+    return {
+      state: "not_connected",
+      label: copy.label,
+      message: "Banking is not connected on this server yet.",
+      readyForPayDrops: false,
+      chargesEnabled: false,
+      payoutsEnabled: false,
+      detailsSubmitted: false,
+      onboardingComplete: false,
+      stripeAccountId: null,
+      availableCents: 0,
+      pendingCents: 0,
+      lifetimeCents: 0,
+      payoutInterval: null,
+      nextPayoutHint: null,
+      requirementsDue: [],
+    };
+  }
   const [{ data: profile }, { data: bankingRow }] = await Promise.all([
     supabase.from("profiles").select("board_style").eq("id", userId).maybeSingle(),
     supabase.from("board_banking_profiles").select("*").eq("user_id", userId).maybeSingle(),
@@ -228,6 +255,7 @@ export async function registerBoardPayDrop(input: {
 }) {
   const db = bankingServiceSupabase();
   const client = db ?? (await requireBankingUser()).supabase;
+  if (!client) return;
   try {
   await client.from("board_pay_drops").upsert(
     {
@@ -252,6 +280,7 @@ export async function registerBoardPayDrop(input: {
 export async function lookupPayDropForCheckout(payDropId: string) {
   const db = bankingServiceSupabase();
   const client = db ?? (await requireBankingUser()).supabase;
+  if (!client) return null;
   const { data: drop } = await client
     .from("board_pay_drops")
     .select("*")

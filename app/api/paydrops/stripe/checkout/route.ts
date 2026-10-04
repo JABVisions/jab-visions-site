@@ -19,7 +19,13 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const { supabase, user } = await requireBankingUser();
+  const { supabase, user, configured } = await requireBankingUser();
+  if (!configured || !supabase) {
+    return NextResponse.json(
+      { ok: false, error: "Banking is not connected on this server yet." },
+      { status: 503 }
+    );
+  }
   const body = (await req.json().catch(() => ({}))) as {
     payDropId?: string;
     successPath?: string;

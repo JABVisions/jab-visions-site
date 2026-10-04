@@ -9,7 +9,10 @@ export async function POST() {
   if (!stripe) {
     return NextResponse.json({ ok: false, error: "Stripe is not configured." }, { status: 503 });
   }
-  const { user } = await requireBankingUser();
+  const { user, configured } = await requireBankingUser();
+  if (!configured) {
+    return NextResponse.json({ ok: false, error: "Banking is not connected on this server yet." }, { status: 503 });
+  }
   if (!user) {
     return NextResponse.json({ ok: false, error: "Sign in to manage Banking." }, { status: 401 });
   }

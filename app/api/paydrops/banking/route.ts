@@ -10,7 +10,10 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  const { supabase, user } = await requireBankingUser();
+  const { supabase, user, configured } = await requireBankingUser();
+  if (!configured || !supabase) {
+    return NextResponse.json({ ok: false, error: "Banking is not connected on this server yet." }, { status: 503 });
+  }
   if (!user) {
     return NextResponse.json({ ok: false, error: "Sign in to open Banking." }, { status: 401 });
   }
@@ -42,7 +45,10 @@ export async function GET() {
 }
 
 export async function PATCH(req: NextRequest) {
-  const { user } = await requireBankingUser();
+  const { user, configured } = await requireBankingUser();
+  if (!configured) {
+    return NextResponse.json({ ok: false, error: "Banking is not connected on this server yet." }, { status: 503 });
+  }
   if (!user) {
     return NextResponse.json({ ok: false, error: "Sign in to update Banking." }, { status: 401 });
   }
