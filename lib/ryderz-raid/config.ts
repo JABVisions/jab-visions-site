@@ -365,8 +365,14 @@ export const RYDERZ: Record<RyderId, RyderSpec> = {
     portrait: '/assets/john_andy_headshot.jpg',
     icon: '/assets/those-ryderz/icons/keven.webp',
     glb: '/assets/those-ryderz/models/keven-hart.glb?v=2',
-    // The export carries a second, detached pair of legs floating under the hips.
-    glbRepair: { dropDetachedBelow: 'Hips' },
+    // The export carries every leg twice (a second copy offset a step to the
+    // side); the rigger centred the leg bones between the copies.
+    glbRepair: {
+      dedupeLimbs: [
+        ['Left_UpperLeg', 'Left_LowerLeg', 'Left_Foot', 'Left_Toes'],
+        ['Right_UpperLeg', 'Right_LowerLeg', 'Right_Foot', 'Right_Toes'],
+      ],
+    },
     // Dart hand is the left: jab with it, kick, then a backhand with the free hand.
     strikes: ['punch', 'kick', 'slap'],
     maxHp: 100,
