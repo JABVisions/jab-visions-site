@@ -130,6 +130,11 @@ interface Host {
   lean: number;
   spin: number;
   tumble: number;
+  /** Grab state (see `combat.ts`): seconds held by the Ryder, metres pulled under the floor. */
+  held: number;
+  sink: number;
+  /** Colour of the current hit flash; hits reset it to white, kits can tint it. */
+  hitColor: number;
 }
 
 /** A defeated host still flying from the blow that killed it. */
@@ -281,6 +286,8 @@ export class RaidEngine {
   private simTime = 0;
   private lastPos = new THREE.Vector3();
   private playerSpeed = 0;
+  private playerGlow = 0;
+  private cameraPivot = new THREE.Vector3();
   private strikeOverride: MeleeStyle | null = null;
   private onSound: ((id: string) => void) | null = null;
 
@@ -886,7 +893,7 @@ export class RaidEngine {
 
   private updatePlayerMove(dt: number, time: number) {
     if (!this.player) return;
-    const phased = this.isActive('phase');
+    const phased = this.isPhased();
     const locked = this.kit?.locked ?? false;
 
     let x = this.moveAxis.x;
@@ -968,8 +975,19 @@ export class RaidEngine {
     }
 
     const camFade = 0.12 + 0.88 * this.rig.getCharacterVisibility();
-    setHumanoidOpacity(this.player.humanoid, Math.min(phased ? 0.28 : 1, camFade));
-    if (phased) {
+    // A kit owns its own translucency (and always restores 1 when it is done);
+    // the generic phase fade only applies to a Ryder without one.
+    const kitOpacity = this.kit?.opacity ?? 1;
+    const genericFade = phased && !this.kit ? 0.28 : 1;
+    setHumanoidOpacity(this.player.humanoid, Math.min(kitOpacity, genericFade, camFade));
+    // Kit-driven body glow (phasing, charging). Written every frame while lit and
+    // once more when it goes out so the materials never keep a stale tint.
+    const kitGlow = this.kit?.glow ?? 0;
+    if (kitGlow > 0 || this.playerGlow > 0) {
+      flashEmissive(this.player.humanoid, kitGlow > 0 ? this.spec.visual.auraColor : 0x000000, kitGlow * 0.9);
+      this.playerGlow = kitGlow;
+    }
+    if (phased && !this.kit) {
       this.particles.emit(this.pos.clone().setY(1), this.spec.color, 1, {
         speed: 1.4,
         size: 0.18,
@@ -1112,6 +1130,11 @@ export class RaidEngine {
     this.kitContext = null;
     this.scheduler.clear();
     this.hitStopT = 0;
+    if (this.player) {
+      setHumanoidOpacity(this.player.humanoid, 1);
+      if (this.playerGlow > 0) flashEmissive(this.player.humanoid, 0x000000, 0);
+    }
+    this.playerGlow = 0;
   }
 
   /** The engine surface a kit may touch; everything else stays private. */
@@ -1130,11 +1153,17 @@ export class RaidEngine {
       cracks: this.cracks,
       afterimages: this.afterimages,
       scene: this.scene,
+      radius: PLAYER_RADIUS,
       yaw: () => this.yaw,
       time: () => this.simTime,
       fighter: () => this.player,
       targets: () => this.hosts,
       hurt: (target, damage, dir, reaction, strength) => this.hurtHost(target as Host, damage, dir, reaction, strength),
+      flash: (target, color, seconds) => {
+        const host = target as Host;
+        host.hit = Math.max(host.hit, seconds);
+        host.hitColor = color;
+      },
       meleeDamage: () => this.meleeDamage(),
       heightAt: (x, z) => this.world.heightAt(x, z),
       resolve: (pos) => {
@@ -1163,6 +1192,11 @@ export class RaidEngine {
     return this.moves.some((move, i) => move.id === id && this.moveT[i] > 0);
   }
 
+  /** Hosts cannot touch, block or find the Ryder: the phase power, or a kit that has her intangible. */
+  private isPhased() {
+    return this.isActive('phase') || (this.kit?.intangible ?? false);
+  }
+
   private tryMove(slot: number) {
     if (!this.player || this.burnout) return;
     const move = this.moves[slot];
@@ -1178,9 +1212,12 @@ export class RaidEngine {
       this.moveT[slot] = 1;
       this.abilityT = ABILITY_LINGER;
       this.rig.addKick(0.3);
-      if (move.id === 'duplicate') this.spawnClones([-1, 1]);
-      if (move.id === 'decoy') this.spawnClones([0]);
-      if (move.id === 'lift') this.liftHosts(2.2);
+      // The toggle stays engine-owned (drain, HUD, switch-off); a kit that
+      // claims the power dresses it and plays its effects while it is on.
+      const kitOwned = this.kit?.tryAbility(move.id) ?? false;
+      if (!kitOwned && move.id === 'duplicate') this.spawnClones([-1, 1]);
+      if (!kitOwned && move.id === 'decoy') this.spawnClones([0]);
+      if (!kitOwned && move.id === 'lift') this.liftHosts(2.2);
       this.particles.emit(this.pos.clone().setY(1.1), this.spec.color, 22, {
         speed: 8,
         size: 0.3,
@@ -1223,7 +1260,9 @@ export class RaidEngine {
 
   private endMove(slot: number) {
     const id = this.moves[slot]?.id;
+    const wasOn = this.moveT[slot] > 0;
     this.moveT[slot] = 0;
+    if (wasOn && id) this.kit?.endAbility?.(id);
     if (id === 'duplicate' || id === 'decoy') this.clearClones();
     if (id === 'phase' && this.player) setHumanoidOpacity(this.player.humanoid, 1);
   }
@@ -1474,11 +1513,14 @@ export class RaidEngine {
       lean: 0,
       spin: 0,
       tumble: 0,
+      held: 0,
+      sink: 0,
+      hitColor: 0xffffff,
     });
   }
 
   private updateHosts(dt: number, time: number) {
-    const phased = this.isActive('phase');
+    const phased = this.isPhased();
     const shielded = this.isActive('forcefield');
 
     for (let i = 0; i < this.hosts.length; i += 1) {
@@ -1508,6 +1550,19 @@ export class RaidEngine {
       const group = host.fighter.humanoid.group;
       group.rotation.order = 'YXZ';
 
+      // In a Ryder's grip: the kit places the body (and pulls it under the
+      // floor); no AI, no reactions until it lets go or the hold times out.
+      if (host.held > 0) {
+        stepReaction(host, dt);
+        group.position.copy(host.pos);
+        group.position.y = this.world.heightAt(host.pos.x, host.pos.z) - host.sink;
+        group.rotation.x = -host.lean * 0.4;
+        this.animateHost(host, dt, 0, time);
+        if (host.hit > 0) flashEmissive(host.fighter.humanoid, host.hitColor, host.hit * 2.4);
+        else flashEmissive(host.fighter.humanoid, 0x000000, 0);
+        continue;
+      }
+
       // Physical hit reactions: staggered hosts stop and reel, launched hosts
       // arc through the air and tumble, and both still drift with the shove.
       const landed = stepReaction(host, dt);
@@ -1524,11 +1579,11 @@ export class RaidEngine {
         host.pos.z = clamp(host.pos.z, -BOUNDARY, BOUNDARY);
         resolveCircle(host.pos, host.radius, this.world.obstacles);
         group.position.copy(host.pos);
-        group.position.y = this.world.heightAt(host.pos.x, host.pos.z) + host.airY;
+        group.position.y = this.world.heightAt(host.pos.x, host.pos.z) + host.airY - host.sink;
         // Reel back from the blow; spin while airborne.
         group.rotation.x = -host.lean * 0.5 - host.tumble;
         this.animateHost(host, dt, 0, time);
-        if (host.hit > 0) flashEmissive(host.fighter.humanoid, 0xffffff, host.hit * 2.4);
+        if (host.hit > 0) flashEmissive(host.fighter.humanoid, host.hitColor, host.hit * 2.4);
         else flashEmissive(host.fighter.humanoid, 0x000000, 0);
         continue;
       }
@@ -1538,7 +1593,7 @@ export class RaidEngine {
         host.fighter.humanoid.group.position.copy(host.pos);
         host.fighter.humanoid.group.position.y = this.world.heightAt(host.pos.x, host.pos.z) + Math.min(1.5, host.stun * 0.7);
         this.animateHost(host, dt, 0.12, time);
-        if (host.hit > 0) flashEmissive(host.fighter.humanoid, 0xffffff, host.hit * 2.4);
+        if (host.hit > 0) flashEmissive(host.fighter.humanoid, host.hitColor, host.hit * 2.4);
         else flashEmissive(host.fighter.humanoid, 0x66cfff, 0.45);
         continue;
       }
@@ -1568,10 +1623,10 @@ export class RaidEngine {
       resolveCircle(host.pos, host.radius, this.world.obstacles);
 
       host.fighter.humanoid.group.position.copy(host.pos);
-      host.fighter.humanoid.group.position.y = this.world.heightAt(host.pos.x, host.pos.z);
+      host.fighter.humanoid.group.position.y = this.world.heightAt(host.pos.x, host.pos.z) - host.sink;
       host.fighter.humanoid.group.rotation.y = Math.atan2(dirx, dirz);
       this.animateHost(host, dt, Math.min(1, host.speed / 5), time);
-      if (host.hit > 0) flashEmissive(host.fighter.humanoid, 0xffffff, host.hit * 2.4);
+      if (host.hit > 0) flashEmissive(host.fighter.humanoid, host.hitColor, host.hit * 2.4);
       else flashEmissive(host.fighter.humanoid, 0x000000, 0);
 
       if (host.kind === 'broadcaster') {
@@ -1615,7 +1670,7 @@ export class RaidEngine {
   }
 
   private hurtPlayer(amount: number, dir: THREE.Vector3) {
-    if (this.iframes > 0 || this.phase === 'dead') return;
+    if (this.iframes > 0 || this.phase === 'dead' || this.kit?.intangible) return;
     this.hp = Math.max(0, this.hp - amount);
     this.iframes = 0.55;
     this.combatT = COMBAT_LINGER;
@@ -1643,6 +1698,7 @@ export class RaidEngine {
     if (host.hp <= 0) return;
     host.hp -= amount;
     host.hit = 0.18;
+    host.hitColor = 0xffffff;
     if (reaction) {
       applyReaction(host, reaction, dir, strength);
       if (reaction !== 'stagger') host.cooldown = Math.max(host.cooldown, 0.5);
@@ -1663,6 +1719,9 @@ export class RaidEngine {
    * body for a moment instead of vanishing on the spot.
    */
   private killHost(host: Host, flungBy: THREE.Vector3 | null = null, strength = 1) {
+    // Kits may still hold a reference; make sure it reads as dead.
+    host.hp = Math.min(host.hp, 0);
+    host.held = 0;
     this.points += host.points;
     this.aura = Math.min(this.maxAura, this.aura + KILL_AURA_SIPHON + this.upgrades.siphon * 4);
     this.burst(host.pos.clone().setY(1), host.kind === 'broadcaster' ? 0xb84dff : 0x7dff9a, host.kind === 'broadcaster' ? 40 : 16);
@@ -1883,7 +1942,11 @@ export class RaidEngine {
   }
 
   private updateCamera(dt: number) {
-    this.rig.update(dt, this.pos, this.yaw, this.pitch, this.cameraState());
+    // Ride part of a kit's airtime so a flip or leap stays in frame; descents
+    // (phasing underground) leave the pivot on the ground.
+    this.cameraPivot.copy(this.pos);
+    this.cameraPivot.y += Math.max(0, this.kit?.airY ?? 0) * 0.6;
+    this.rig.update(dt, this.cameraPivot, this.yaw, this.pitch, this.cameraState());
   }
 
   private emitHud() {

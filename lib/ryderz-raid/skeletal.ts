@@ -645,7 +645,18 @@ export type MeleeStyle = 'chop' | 'slash' | 'punch' | 'punchR' | 'kick' | 'spinK
  * Full-body stances abilities hold the figure in (not timed like a melee
  * swing). `t` runs 0 → 1 across the stance so it can carry a little motion.
  */
-export type AbilityPose = 'crouch' | 'launch' | 'dive' | 'slam' | 'rush' | 'streak' | 'finish';
+export type AbilityPose =
+  | 'crouch'
+  | 'launch'
+  | 'dive'
+  | 'slam'
+  | 'rush'
+  | 'streak'
+  | 'finish'
+  | 'sink'
+  | 'grab'
+  | 'heave'
+  | 'flip';
 
 export interface PoseOverride {
   kind: AbilityPose;
@@ -664,6 +675,10 @@ export const POSE_ROOT_DROP: Record<AbilityPose, number> = {
   rush: 0.12,
   streak: 0.08,
   finish: 0.06,
+  sink: 0,
+  grab: 0.3,
+  heave: 0.05,
+  flip: 0,
 };
 
 export interface SkeletalMotion {
@@ -764,6 +779,18 @@ export function poseSkeleton(skel: ProceduralSkeleton, motion: SkeletalMotion) {
         break;
       case 'finish':
         poseFinish(SCRATCH, pose.t);
+        break;
+      case 'sink':
+        poseSink(SCRATCH, pose.t);
+        break;
+      case 'grab':
+        poseGrab(SCRATCH, pose.t);
+        break;
+      case 'heave':
+        poseHeave(SCRATCH, pose.t);
+        break;
+      case 'flip':
+        poseFlip(SCRATCH, pose.t);
         break;
     }
     addAngles(A, SCRATCH, w);
@@ -1040,6 +1067,132 @@ function poseFinish(A: Angles, t: number) {
   A.lowerLegR.x += 0.2;
   A.upperLegL.z += 0.12;
   A.upperLegR.z -= 0.12;
+}
+
+// ---------------------------------------------------------------------------
+// Phantom stances (Keven)
+// ---------------------------------------------------------------------------
+
+/** Phasing into the floor: body straight, arms drifting up as the ground swallows him, chin down. */
+function poseSink(A: Angles, t: number) {
+  const rise = smooth(t);
+  A.upperArmL.x -= 0.6 + 1.6 * rise;
+  A.upperArmR.x -= 0.6 + 1.6 * rise;
+  A.upperArmL.z += 0.35 * rise;
+  A.upperArmR.z -= 0.35 * rise;
+  A.lowerArmL.x -= 0.3 * (1 - rise);
+  A.lowerArmR.x -= 0.3 * (1 - rise);
+  A.handL.x -= 0.4 * rise;
+  A.handR.x -= 0.4 * rise;
+  A.head.x += 0.45 * rise;
+  A.spine.x += 0.12 * rise;
+  A.upperLegL.z += 0.04;
+  A.upperLegR.z -= 0.04;
+  A.footL.x += 0.35 * rise;
+  A.footR.x += 0.35 * rise;
+}
+
+/** Hands erupt through the pavement, clamp the target, then yank it down. */
+function poseGrab(A: Angles, t: number) {
+  const reach = track(t, [
+    [0, -2.9],
+    [0.3, -1.55],
+    [0.6, -1.4],
+    [1, -0.5],
+  ]);
+  const clamp = track(t, [
+    [0, 0.5],
+    [0.3, 0.1],
+    [1, 0.1],
+  ]);
+  const yank = track(t, [
+    [0, 0],
+    [0.6, 0],
+    [1, 1],
+  ]);
+  A.upperArmL.x += reach;
+  A.upperArmR.x += reach;
+  A.upperArmL.z += clamp;
+  A.upperArmR.z -= clamp;
+  A.lowerArmL.x -= 0.35 + 0.5 * yank;
+  A.lowerArmR.x -= 0.35 + 0.5 * yank;
+  A.handL.x -= 0.4;
+  A.handR.x -= 0.4;
+  A.spine.x += 0.3 + 0.45 * yank;
+  A.hips.x += 0.1 * yank;
+  A.head.x -= 0.25 - 0.4 * yank;
+  A.upperLegL.x -= 0.7;
+  A.upperLegR.x -= 0.7;
+  A.lowerLegL.x += 1.3;
+  A.lowerLegR.x += 1.3;
+}
+
+/** Hurling the target back up: arms thrown overhead, back arched, legs straightening out of the crouch. */
+function poseHeave(A: Angles, t: number) {
+  const throwUp = track(t, [
+    [0, 0],
+    [0.45, 1],
+    [1, 0.85],
+  ]);
+  const stand = smooth(t * 1.4);
+  A.upperArmL.x -= 0.5 + 2.3 * throwUp;
+  A.upperArmR.x -= 0.5 + 2.3 * throwUp;
+  A.upperArmL.z += 0.4 * throwUp;
+  A.upperArmR.z -= 0.4 * throwUp;
+  A.lowerArmL.x -= 0.8 * (1 - throwUp);
+  A.lowerArmR.x -= 0.8 * (1 - throwUp);
+  A.handL.x -= 0.5 * throwUp;
+  A.handR.x -= 0.5 * throwUp;
+  A.spine.x += 0.6 * (1 - stand) - 0.35 * throwUp;
+  A.head.x -= 0.6 * throwUp;
+  A.upperLegL.x -= 0.6 * (1 - stand);
+  A.upperLegR.x -= 0.6 * (1 - stand);
+  A.lowerLegL.x += 1.1 * (1 - stand);
+  A.lowerLegR.x += 1.1 * (1 - stand);
+}
+
+/**
+ * Standing backflip: the whole figure rotates a full turn backward over the
+ * hips, tucking tight through the middle of the arc and opening out to land.
+ * Arms sweep overhead on take-off, come down to fire through the top of the
+ * flip, and settle for the landing.
+ */
+function poseFlip(A: Angles, t: number) {
+  const turn = track(t, [
+    [0, 0],
+    [0.12, 0.08],
+    [0.88, 0.94],
+    [1, 1],
+  ]);
+  const tuck = track(t, [
+    [0, 0],
+    [0.3, 1],
+    [0.65, 1],
+    [0.9, 0],
+  ]);
+  const arms = track(t, [
+    [0, -2.6],
+    [0.3, -1.9],
+    [0.7, -1.6],
+    [1, 0.2],
+  ]);
+  A.hips.x -= Math.PI * 2 * turn;
+  A.spine.x += 0.25 * tuck;
+  A.head.x += 0.3 * tuck - 0.25 * (1 - tuck);
+  A.upperLegL.x -= 1.7 * tuck;
+  A.upperLegR.x -= 1.7 * tuck;
+  A.lowerLegL.x += 2.2 * tuck;
+  A.lowerLegR.x += 2.2 * tuck;
+  A.footL.x += 0.4 * tuck;
+  A.footR.x += 0.4 * tuck;
+  A.upperArmL.x += arms;
+  A.upperArmR.x += arms;
+  A.upperArmL.z += 0.5 * tuck + 0.2;
+  A.upperArmR.z -= 0.5 * tuck + 0.2;
+  A.lowerArmL.x -= 0.4 + 0.5 * tuck;
+  A.lowerArmR.x -= 0.4 + 0.5 * tuck;
+  A.handL.x -= 0.3;
+  A.handR.x -= 0.3;
 }
 
 /** Overhead chop: right arm, torso drives it. */

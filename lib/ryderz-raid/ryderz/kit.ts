@@ -20,6 +20,9 @@ import type { MeleeStyle, PoseOverride } from '../skeletal';
 export interface KitTarget extends ReactiveBody {
   hp: number;
   maxHp: number;
+  /** Seconds of hit flash left and the colour it flashes. */
+  hit: number;
+  hitColor: number;
 }
 
 export interface KitContext {
@@ -34,12 +37,16 @@ export interface KitContext {
   readonly cracks: CrackDecalPool;
   readonly afterimages: AfterimagePool;
   readonly scene: THREE.Scene;
+  /** Player collision radius in metres. */
+  readonly radius: number;
   yaw(): number;
   time(): number;
   fighter(): Fighter | null;
   targets(): readonly KitTarget[];
   /** Hurt a target: damage, hit direction, how it should react. */
   hurt(target: KitTarget, damage: number, dir: THREE.Vector3, reaction?: HitReaction, strength?: number): void;
+  /** Flash a target a colour for `seconds` without hurting it. */
+  flash(target: KitTarget, color: number, seconds: number): void;
   /** Base melee damage after upgrades / burnout. */
   meleeDamage(): number;
   heightAt(x: number, z: number): number;
@@ -96,11 +103,22 @@ export interface RyderKit {
   readonly airY: number;
   /** Stance to blend over locomotion this frame, if any. */
   readonly pose: PoseOverride | null;
+  /** Body opacity the kit wants this frame (1 = solid). The engine restores 1 when the kit is gone. */
+  readonly opacity?: number;
+  /** Aura-coloured emissive glow over the body this frame (0 = none, 1 = fully lit). Restored to 0 when the kit is gone. */
+  readonly glow?: number;
+  /** True while enemies cannot touch, block or find the Ryder (phasing, underground). */
+  readonly intangible?: boolean;
   attach(ctx: KitContext): void;
   detach(): void;
   update(frame: KitFrame): void;
-  /** Start an ability this kit owns. Return false to let the engine's generic handler run. */
+  /**
+   * Start an ability this kit owns. Return false to let the engine's generic
+   * handler run. Toggled (drain) powers call this when switched on and
+   * `endAbility` when the engine switches them off.
+   */
   tryAbility(id: AbilityId): boolean;
+  endAbility?(id: AbilityId): void;
   /** Next melee step, or null to use the engine's default swing. */
   melee(time: number): MeleeStep | null;
   /** Cut any running sequence (death, Ryder switch, Beacon recovery). */

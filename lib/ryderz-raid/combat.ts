@@ -31,6 +31,13 @@ export interface ReactiveBody extends Targetable {
   lean: number;
   /** Visual tumble rate while airborne (rad/s). */
   spin: number;
+  /**
+   * Seconds the body is in an attacker's grip: no AI, no reactions, the
+   * grabber positions it. Always counts down so nothing stays held forever.
+   */
+  held: number;
+  /** Metres the body is pulled below the ground (grabs); eases back to 0 once released. */
+  sink: number;
 }
 
 /**
@@ -92,6 +99,11 @@ export function applyReaction(body: ReactiveBody, reaction: HitReaction, dir: TH
  */
 export function stepReaction(body: ReactiveBody, dt: number) {
   let landed = false;
+  if (body.held > 0) {
+    body.held = Math.max(0, body.held - dt);
+    return false;
+  }
+  if (body.sink > 0) body.sink = Math.max(0, body.sink - dt * 6);
   body.stagger = Math.max(0, body.stagger - dt);
   body.lean = Math.max(0, body.lean - dt * 2.2);
   if (body.airY > 0 || body.airVel > 0) {

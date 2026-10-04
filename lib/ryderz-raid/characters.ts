@@ -627,7 +627,12 @@ export function animateGltfFighter(
 export function buildRyder(spec: RyderSpec, options: { clone?: boolean } = {}): Fighter {
   const template = gltfTemplates.get(spec.id);
   if (template) {
-    const { humanoid, rig } = wrapGltfAsHumanoid(template, options.clone ? 1.72 : 1.88, { strikes: spec.strikes });
+    // Own materials: the player fades, glows and goes translucent per frame, and
+    // none of that may bleed into the template shared with clones and the showcase.
+    const { humanoid, rig } = wrapGltfAsHumanoid(template, options.clone ? 1.72 : 1.88, {
+      strikes: spec.strikes,
+      ownMaterials: true,
+    });
     const weapons: THREE.Object3D[] = [];
     const glowMeshes: THREE.Mesh[] = [];
     const aura = glow(spec.color, options.clone ? 1.4 : 2);
