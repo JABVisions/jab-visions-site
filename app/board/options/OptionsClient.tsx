@@ -1323,7 +1323,9 @@ export default function OptionsClient() {
                                                         "text-sm",
                                                         t.key === "banking"
                                                           ? active
-                                                            ? "font-semibold text-emerald-50"
+                                                            ? isNight
+                                                              ? "font-semibold text-emerald-50"
+                                                              : "font-semibold text-emerald-950"
                                                             : isNight
                                                               ? "text-emerald-200/80"
                                                               : "text-emerald-800"

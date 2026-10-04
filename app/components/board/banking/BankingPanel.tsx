@@ -133,7 +133,9 @@ export default function BankingPanel({ night }: { night: boolean }) {
             className={cx(
               "inline-flex w-fit items-center gap-2 rounded-full border px-3 py-2 text-[11px] font-black uppercase tracking-[0.14em]",
               snapshot?.readyForPayDrops
-                ? "border-emerald-300/40 bg-emerald-300/15 text-emerald-100"
+                ? night
+                  ? "border-emerald-300/40 bg-emerald-300/15 text-emerald-100"
+                  : "border-emerald-700/25 bg-emerald-100 text-emerald-900"
                 : night
                   ? "border-[#ffe58c]/30 bg-[#ffe58c]/12 text-[#ffe58c]"
                   : "border-[#d5ad25]/35 bg-[#fff1a8]/70 text-[#7a6417]"
@@ -194,7 +196,9 @@ export default function BankingPanel({ night }: { night: boolean }) {
               className={cx(
                 "rounded-full border px-3 py-2 text-[11px] font-black uppercase tracking-[0.12em]",
                 pane === key
-                  ? "border-emerald-300/50 bg-emerald-300/20 text-emerald-50"
+                  ? night
+                    ? "border-emerald-300/50 bg-emerald-300/20 text-emerald-50"
+                    : "border-emerald-700/25 bg-emerald-200/70 text-emerald-950"
                   : night
                     ? "border-white/15 text-white/70"
                     : "border-black/10 text-black/60"
