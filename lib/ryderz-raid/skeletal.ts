@@ -127,7 +127,7 @@ interface NeutralTarget {
    * Optional feature axis used instead of the bone axis when those bones exist:
    * the rest vector from `from` to the centroid of `to` should end up along `dir`.
    */
-  axis?: { from: BoneKey; to: BoneKey[]; dir: THREE.Vector3 };
+  axis?: { from: BoneKey | BoneKey[]; to: BoneKey[]; dir: THREE.Vector3 };
   /** Leave the bone as exported when the feature axis cannot be measured. */
   axisOnly?: boolean;
   /**
@@ -136,6 +136,12 @@ interface NeutralTarget {
    * skipped when that perpendicular component is too small to be trustworthy.
    */
   refs?: Array<{ from: BoneKey; to: BoneKey; target: THREE.Vector3 }>;
+  /**
+   * Apply the roll reference at full strength regardless of how far the
+   * primary swing went. Only for bones whose reference is unambiguous (the
+   * pelvis: the line between the hip joints always says which way is left).
+   */
+  trustRoll?: boolean;
 }
 
 function dir(x: number, y: number, z: number) {
@@ -147,7 +153,18 @@ const FOOT_DIR = dir(0, -0.4, 0.92);
 const SHOULDER_LINE = { from: 'shoulderR' as BoneKey, to: 'shoulderL' as BoneKey, target: LEFT };
 
 const NEUTRAL: Partial<Record<BoneKey, NeutralTarget>> = {
-  hips: { dir: dir(0, 1, 0), refs: [{ from: 'upperLegR', to: 'upperLegL', target: LEFT }] },
+  // The pelvis is levelled from the thigh line (knees → hip joints), not from
+  // the hips → spine joint offset: on a figure exported bent at the waist that
+  // offset leans forward, and swinging it upright pitched the pelvis back,
+  // dragging hips-weighted skin (shorts, seat) away from the thighs. Following
+  // the thighs keeps the exported hip-joint pose intact, and the spine chain
+  // below straightens the torso where the bend actually is.
+  hips: {
+    dir: dir(0, 1, 0),
+    axis: { from: ['lowerLegL', 'lowerLegR'], to: ['upperLegL', 'upperLegR'], dir: dir(0, 1, 0) },
+    refs: [{ from: 'upperLegR', to: 'upperLegL', target: LEFT }],
+    trustRoll: true,
+  },
   spine: { dir: dir(0, 1, 0.02), refs: [SHOULDER_LINE] },
   chest: { dir: dir(0, 1, 0), refs: [SHOULDER_LINE] },
   upperChest: { dir: dir(0, 1, -0.02), refs: [SHOULDER_LINE] },
@@ -483,12 +500,16 @@ export class ProceduralSkeleton {
       let primaryDir = target.dir;
       let gotAxis = false;
       if (target.axis) {
-        const from = this.byKey.get(target.axis.from);
+        const fromKeys = Array.isArray(target.axis.from) ? target.axis.from : [target.axis.from];
+        const froms = fromKeys.map((k) => this.byKey.get(k)).filter(Boolean) as BoneEntry[];
         const tos = target.axis.to.map((k) => this.byKey.get(k)).filter(Boolean) as BoneEntry[];
-        if (from && tos.length) {
+        if (froms.length === fromKeys.length && tos.length) {
           _v2.set(0, 0, 0);
           tos.forEach((t) => _v2.add(t.restPos));
-          _v2.multiplyScalar(1 / tos.length).sub(from.restPos);
+          _v2.multiplyScalar(1 / tos.length);
+          _v.set(0, 0, 0);
+          froms.forEach((f) => _v.add(f.restPos));
+          _v2.addScaledVector(_v, -1 / froms.length);
           if (this.carryRestVector(entry, _v2, _v)) {
             primaryDir = target.axis.dir;
             gotAxis = true;
@@ -507,7 +528,7 @@ export class ProceduralSkeleton {
       // between neighbouring parts.
       if (!target.refs) continue;
       const swing = 2 * Math.acos(Math.min(1, Math.abs(m1.w)));
-      const rollWeight = smooth((swing - 0.25) / 0.5);
+      const rollWeight = target.trustRoll ? 1 : smooth((swing - 0.25) / 0.5);
       if (rollWeight <= 0) continue;
       for (const ref of target.refs) {
         const a = this.byKey.get(ref.from);
