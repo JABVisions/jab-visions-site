@@ -165,16 +165,22 @@ const NEUTRAL: Partial<Record<BoneKey, NeutralTarget>> = {
     refs: [{ from: 'upperLegR', to: 'upperLegL', target: LEFT }],
     trustRoll: true,
   },
-  spine: { dir: dir(0, 1, 0.02), refs: [SHOULDER_LINE] },
-  chest: { dir: dir(0, 1, 0), refs: [SHOULDER_LINE] },
-  upperChest: { dir: dir(0, 1, -0.02), refs: [SHOULDER_LINE] },
+  // The shoulder line always says which way the torso faces, so its roll is
+  // trusted outright: a pelvis squared up from a yawed hip line (a lunging
+  // export) would otherwise hand that yaw down to a torso too straight to
+  // earn its own roll correction, leaving the chest twisted.
+  spine: { dir: dir(0, 1, 0.02), refs: [SHOULDER_LINE], trustRoll: true },
+  chest: { dir: dir(0, 1, 0), refs: [SHOULDER_LINE], trustRoll: true },
+  upperChest: { dir: dir(0, 1, -0.02), refs: [SHOULDER_LINE], trustRoll: true },
   neck: { dir: dir(0, 1, 0.08) },
   // Auto-rig head bones aim at the face, not the crown: level the head by
-  // putting the eyes up-and-forward of the skull base instead.
+  // putting the eyes up-and-forward of the skull base instead. Swinging the
+  // face forward tilts the eye line, and a level eye line is never ambiguous.
   head: {
     dir: dir(0, 1, 0),
     axis: { from: 'head', to: ['eyeL', 'eyeR'], dir: dir(0, 0.78, 0.63) },
     refs: [{ from: 'eyeR', to: 'eyeL', target: LEFT }],
+    trustRoll: true,
   },
   // Clavicles are left as exported: forcing them swings the whole arm chain.
   // Arm roll comes from a bent elbow (forearms bend forward); a straight arm
