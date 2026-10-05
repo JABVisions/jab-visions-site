@@ -745,17 +745,20 @@ export class RaidEngine {
     this.updatePlayerMove(dt, time);
     const recovering = this.recoveryT > 0;
     const locked = recovering || (this.kit?.locked ?? false);
+    // Busy hands (weapon thrown, spinning): only the power that is on may be
+    // pressed, to switch it off.
+    const busy = this.kit?.busy ?? false;
     for (let i = 0; i < 3; i += 1) {
       if (this.queuedMoves[i]) {
         this.queuedMoves[i] = false;
-        if (!locked) this.tryMove(i);
+        if (!locked && (!busy || this.moveT[i] > 0)) this.tryMove(i);
       }
     }
     if (this.meleeQueued) {
       this.meleeQueued = false;
-      if (!locked) this.tryMelee();
+      if (!locked && !busy) this.tryMelee();
     }
-    if (this.fireHeld && !locked) this.tryFire();
+    if (this.fireHeld && !locked && !busy) this.tryFire();
     if (this.interactQueued) {
       this.interactQueued = false;
       this.tryInteract();
@@ -911,11 +914,13 @@ export class RaidEngine {
       x /= len;
       z /= len;
     }
-    this.sprinting = this.keys.has('shift') && len > 0.1 && !this.fireHeld && this.meleeT <= 0;
+    const busy = this.kit?.busy ?? false;
+    this.sprinting = this.keys.has('shift') && len > 0.1 && !this.fireHeld && this.meleeT <= 0 && !busy;
     const speed =
       this.spec.speed *
       (this.sprinting ? SPRINT_MULTIPLIER : 1) *
-      (this.burnout ? 0.82 : 1);
+      (this.burnout ? 0.82 : 1) *
+      (this.kit?.moveScale ?? 1);
 
     _fwd.set(Math.sin(this.yaw), 0, Math.cos(this.yaw));
     _right.set(-_fwd.z, 0, _fwd.x);
@@ -950,7 +955,7 @@ export class RaidEngine {
 
     this.player.humanoid.group.position.copy(this.pos);
     this.player.humanoid.group.position.y = this.world.heightAt(this.pos.x, this.pos.z) + (this.kit?.airY ?? 0);
-    this.player.humanoid.group.rotation.y = this.yaw;
+    this.player.humanoid.group.rotation.y = this.yaw + (this.kit?.bodyYaw ?? 0);
     const moving = Math.min(1, len);
     this.anim += dt * (8 + moving * (this.sprinting ? 9 : 6));
     if (this.player.meshSource === 'gltf') {
@@ -1185,6 +1190,14 @@ export class RaidEngine {
       },
       schedule: (delay, fn) => this.scheduler.schedule(this.simTime, delay, fn),
       sound: (id) => this.emitSound(id),
+      turn: (yaw, cut = false) => {
+        this.yaw = yaw;
+        if (cut) this.rig.snap(this.pos, this.yaw, this.pitch);
+      },
+      gainAura: (amount) => {
+        this.aura = Math.min(this.maxAura, this.aura + Math.max(0, amount));
+        if (this.burnout && this.aura >= this.maxAura * BURNOUT_RECOVERY) this.burnout = false;
+      },
     };
   }
 
@@ -1218,6 +1231,8 @@ export class RaidEngine {
       if (!kitOwned && move.id === 'duplicate') this.spawnClones([-1, 1]);
       if (!kitOwned && move.id === 'decoy') this.spawnClones([0]);
       if (!kitOwned && move.id === 'lift') this.liftHosts(2.2);
+      // Generic stand-in for a Ryder without Aaron's kit: one siphon on switch-on.
+      if (!kitOwned && move.id === 'greedSiphon') this.greedSiphon();
       this.particles.emit(this.pos.clone().setY(1.1), this.spec.color, 22, {
         speed: 8,
         size: 0.3,
@@ -1671,12 +1686,14 @@ export class RaidEngine {
 
   private hurtPlayer(amount: number, dir: THREE.Vector3) {
     if (this.iframes > 0 || this.phase === 'dead' || this.kit?.intangible) return;
-    this.hp = Math.max(0, this.hp - amount);
+    // A braced Ryder (mid-spin) shrugs most of the blow off: less damage, no shove.
+    const braced = clamp(this.kit?.braced ?? 0, 0, 1);
+    this.hp = Math.max(0, this.hp - amount * (1 - 0.4 * braced));
     this.iframes = 0.55;
     this.combatT = COMBAT_LINGER;
-    this.rig.addShake(0.4);
-    this.rig.addKick(0.22);
-    this.pos.addScaledVector(dir, 0.35);
+    this.rig.addShake(0.4 * (1 - 0.7 * braced));
+    this.rig.addKick(0.22 * (1 - 0.7 * braced));
+    this.pos.addScaledVector(dir, 0.35 * (1 - braced));
     this.particles.emit(this.pos.clone().setY(1.2), 0xff5570, 14, { speed: 6, size: 0.28, life: 0.4, up: 0.5 });
     if (this.hp <= 0) {
       this.hp = 0;
@@ -1932,7 +1949,7 @@ export class RaidEngine {
   private cameraState(): CameraState {
     if (this.phase === 'dead') return 'EXPLORATION';
     if (this.fireHeld && !this.burnout) return 'AIM';
-    if (this.abilityT > 0 || this.kit?.locked || this.moveT.some((t) => t > 0)) return 'ABILITY';
+    if (this.abilityT > 0 || this.kit?.locked || this.kit?.busy || this.moveT.some((t) => t > 0)) return 'ABILITY';
     if (this.sprinting) return 'SPRINT';
     if (this.combatT > 0) return 'COMBAT';
     for (const host of this.hosts) {

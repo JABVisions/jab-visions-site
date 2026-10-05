@@ -65,6 +65,10 @@ export interface KitContext {
   schedule(delay: number, fn: () => void): void;
   /** Audio hook: ids like `leo.crack.impact`. The engine forwards to whoever is listening. */
   sound(id: string): void;
+  /** Turn the Ryder (and the camera behind her) to face `yaw`; `cut` places the camera there at once. */
+  turn(yaw: number, cut?: boolean): void;
+  /** Give aura back (siphons, greed). Clamped to the maximum. */
+  gainAura(amount: number): void;
 }
 
 /** One step of a melee combo, as the engine executes it. */
@@ -109,6 +113,18 @@ export interface RyderKit {
   readonly glow?: number;
   /** True while enemies cannot touch, block or find the Ryder (phasing, underground). */
   readonly intangible?: boolean;
+  /**
+   * Hands are busy (weapon thrown, mid-spin): no firing, melee or other
+   * powers, but the player keeps walking. The power that is on can still be
+   * switched off.
+   */
+  readonly busy?: boolean;
+  /** Walking speed multiplier this frame (1 = normal). */
+  readonly moveScale?: number;
+  /** Extra yaw on the figure beyond the camera facing (spins). */
+  readonly bodyYaw?: number;
+  /** 0 → 1 resistance to being hurt: damage, shove and camera shake are scaled down. */
+  readonly braced?: number;
   attach(ctx: KitContext): void;
   detach(): void;
   update(frame: KitFrame): void;

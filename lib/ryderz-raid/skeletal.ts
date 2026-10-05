@@ -656,7 +656,11 @@ export type AbilityPose =
   | 'sink'
   | 'grab'
   | 'heave'
-  | 'flip';
+  | 'flip'
+  | 'throw'
+  | 'catch'
+  | 'spin'
+  | 'guard';
 
 export interface PoseOverride {
   kind: AbilityPose;
@@ -679,6 +683,10 @@ export const POSE_ROOT_DROP: Record<AbilityPose, number> = {
   grab: 0.3,
   heave: 0.05,
   flip: 0,
+  throw: 0.1,
+  catch: 0.08,
+  spin: 0.2,
+  guard: 0.22,
 };
 
 export interface SkeletalMotion {
@@ -791,6 +799,18 @@ export function poseSkeleton(skel: ProceduralSkeleton, motion: SkeletalMotion) {
         break;
       case 'flip':
         poseFlip(SCRATCH, pose.t);
+        break;
+      case 'throw':
+        poseThrow(SCRATCH, pose.t);
+        break;
+      case 'catch':
+        poseCatch(SCRATCH, pose.t);
+        break;
+      case 'spin':
+        poseSpin(SCRATCH, pose.t);
+        break;
+      case 'guard':
+        poseGuard(SCRATCH, pose.t);
         break;
     }
     addAngles(A, SCRATCH, w);
@@ -1193,6 +1213,204 @@ function poseFlip(A: Angles, t: number) {
   A.lowerArmR.x -= 0.4 + 0.5 * tuck;
   A.handL.x -= 0.3;
   A.handR.x -= 0.3;
+}
+
+// ---------------------------------------------------------------------------
+// Axe stances (Aaron)
+// ---------------------------------------------------------------------------
+
+/**
+ * Side-arm throw: the axe arm swings out wide and back behind the shoulder as
+ * the torso coils right, then whips forward across the body with a step into
+ * the release; the free arm sights the throw and pulls in.
+ */
+function poseThrow(A: Angles, t: number) {
+  A.upperArmR.z += track(t, [
+    [0, 0],
+    [0.4, -1.45],
+    [0.7, -1.05],
+    [1, -0.3],
+  ]);
+  A.upperArmR.y += track(t, [
+    [0, 0],
+    [0.4, -0.95],
+    [0.6, 1.15],
+    [1, 0.3],
+  ]);
+  A.upperArmR.x += track(t, [
+    [0, 0],
+    [0.4, -0.1],
+    [0.6, -0.45],
+    [1, -0.1],
+  ]);
+  A.lowerArmR.x += track(t, [
+    [0, 0],
+    [0.4, -1.15],
+    [0.6, -0.15],
+    [1, -0.3],
+  ]);
+  A.handR.x += track(t, [
+    [0, 0],
+    [0.4, -0.35],
+    [0.6, 0.2],
+    [1, 0],
+  ]);
+  A.spine.y += track(t, [
+    [0, 0],
+    [0.4, -0.7],
+    [0.65, 0.6],
+    [1, 0.1],
+  ]);
+  A.spine.x += track(t, [
+    [0, 0],
+    [0.4, -0.1],
+    [0.65, 0.3],
+    [1, 0.08],
+  ]);
+  A.hips.y += track(t, [
+    [0, 0],
+    [0.4, -0.3],
+    [0.65, 0.3],
+    [1, 0],
+  ]);
+  A.head.y -= A.spine.y * 0.6;
+  A.upperArmL.x += track(t, [
+    [0, 0],
+    [0.4, -0.95],
+    [0.65, -0.3],
+    [1, 0],
+  ]);
+  A.lowerArmL.x += track(t, [
+    [0, 0],
+    [0.4, -0.2],
+    [0.65, -1.0],
+    [1, -0.3],
+  ]);
+  A.upperLegL.x += track(t, [
+    [0, 0],
+    [0.4, -0.1],
+    [0.65, -0.55],
+    [1, -0.15],
+  ]);
+  A.lowerLegL.x += track(t, [
+    [0, 0],
+    [0.65, 0.55],
+    [1, 0.15],
+  ]);
+  A.upperLegR.x += track(t, [
+    [0, 0],
+    [0.65, 0.4],
+    [1, 0.1],
+  ]);
+  A.footR.x -= track(t, [
+    [0, 0],
+    [0.65, 0.35],
+    [1, 0.1],
+  ]);
+}
+
+/** Receiving the returning axe: arm out to meet it, a braced recoil on impact, then settle. */
+function poseCatch(A: Angles, t: number) {
+  A.upperArmR.x += track(t, [
+    [0, -1.25],
+    [0.3, -1.05],
+    [0.55, -0.75],
+    [1, 0],
+  ]);
+  A.upperArmR.z += track(t, [
+    [0, -0.6],
+    [0.3, -0.45],
+    [1, 0],
+  ]);
+  A.lowerArmR.x += track(t, [
+    [0, -0.1],
+    [0.3, -0.6],
+    [0.55, -0.75],
+    [1, -0.2],
+  ]);
+  A.handR.x += track(t, [
+    [0, -0.4],
+    [0.3, 0],
+    [1, 0],
+  ]);
+  A.spine.x += track(t, [
+    [0, -0.05],
+    [0.3, 0.25],
+    [1, 0],
+  ]);
+  A.spine.y += track(t, [
+    [0, -0.3],
+    [0.35, 0.12],
+    [1, 0],
+  ]);
+  A.head.y -= A.spine.y * 0.5;
+  const brace = track(t, [
+    [0, 0.2],
+    [0.3, 1],
+    [1, 0],
+  ]);
+  A.upperLegL.x -= 0.25 * brace;
+  A.upperLegR.x -= 0.25 * brace;
+  A.lowerLegL.x += 0.45 * brace;
+  A.lowerLegR.x += 0.45 * brace;
+  A.upperArmL.z += 0.5 * brace;
+  A.upperArmL.x += 0.2 * brace;
+  A.lowerArmL.x -= 0.6 * brace;
+}
+
+/**
+ * Greed Swing stance: both hands on the haft, axe thrust straight out ahead at
+ * chest height (the wrist flips it to run along the arm instead of up from the
+ * fist), torso leaning into the spin over a wide, bent-knee base. `t` is how
+ * far the spin has ramped: the lean deepens and the arms lock out.
+ */
+function poseSpin(A: Angles, t: number) {
+  const ramp = smooth(t);
+  A.upperArmR.x -= 1.3 + 0.1 * ramp;
+  A.upperArmR.z -= 0.5;
+  A.lowerArmR.x -= 0.08;
+  A.handR.x += Math.PI;
+  A.handR.z -= 0.15;
+  A.upperArmL.x -= 1.15 + 0.1 * ramp;
+  A.upperArmL.z -= 0.35;
+  A.lowerArmL.x -= 0.45 - 0.2 * ramp;
+  A.spine.x += 0.22 + 0.12 * ramp;
+  A.spine.y -= 0.35;
+  A.hips.x += 0.05;
+  A.head.y += 0.3;
+  A.head.x -= 0.25;
+  A.upperLegL.x -= 0.32;
+  A.upperLegR.x -= 0.32;
+  A.lowerLegL.x += 0.6;
+  A.lowerLegR.x += 0.6;
+  A.upperLegL.z += 0.22;
+  A.upperLegR.z -= 0.22;
+  A.footL.x -= 0.25;
+  A.footR.x -= 0.25;
+}
+
+/** Combat-ready crouch after a Shadow Strike: axe shouldered, free hand up as a guard, weight low. */
+function poseGuard(A: Angles, t: number) {
+  const settle = 1 - 0.25 * smooth(t);
+  A.upperArmR.x += 0.35 * settle;
+  A.upperArmR.z -= 0.25;
+  A.lowerArmR.x -= 0.65;
+  A.handR.x -= 0.2;
+  A.upperArmL.x -= 0.85 * settle;
+  A.upperArmL.z += 0.1;
+  A.lowerArmL.x -= 1.15;
+  A.spine.x += 0.3 * settle;
+  A.spine.y -= 0.2;
+  A.head.x -= 0.32 * settle;
+  A.head.y += 0.15;
+  A.upperLegL.x -= 0.5 * settle;
+  A.upperLegR.x -= 0.4 * settle;
+  A.lowerLegL.x += 0.9 * settle;
+  A.lowerLegR.x += 0.75 * settle;
+  A.upperLegL.z += 0.18;
+  A.upperLegR.z -= 0.18;
+  A.footL.x -= 0.3 * settle;
+  A.footR.x -= 0.25 * settle;
 }
 
 /** Overhead chop: right arm, torso drives it. */

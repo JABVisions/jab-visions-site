@@ -34,18 +34,20 @@ export class TrailRibbon {
   private life: number;
   private width: number;
   private minSpacing: number;
+  private capacity: number;
   intensity = 1;
 
-  constructor(color: THREE.ColorRepresentation, options: { life?: number; width?: number; spacing?: number } = {}) {
+  constructor(color: THREE.ColorRepresentation, options: { life?: number; width?: number; spacing?: number; points?: number } = {}) {
     this.color.set(color);
     this.life = options.life ?? 0.28;
     this.width = options.width ?? 0.22;
     this.minSpacing = options.spacing ?? 0.12;
-    for (let i = 0; i < TRAIL_POINTS; i += 1) {
+    this.capacity = Math.max(2, options.points ?? TRAIL_POINTS);
+    for (let i = 0; i < this.capacity; i += 1) {
       this.points.push(new THREE.Vector3());
       this.ages.push(0);
     }
-    const vertices = (TRAIL_POINTS - 1) * 6;
+    const vertices = (this.capacity - 1) * 6;
     this.positions = new Float32Array(vertices * 3);
     this.colors = new Float32Array(vertices * 3);
     this.geometry = new THREE.BufferGeometry();
@@ -79,7 +81,7 @@ export class TrailRibbon {
       return;
     }
     // Shift down (newest at index 0), dropping the oldest.
-    const n = Math.min(this.count + 1, TRAIL_POINTS);
+    const n = Math.min(this.count + 1, this.capacity);
     for (let i = n - 1; i > 0; i -= 1) {
       this.points[i].copy(this.points[i - 1]);
       this.ages[i] = this.ages[i - 1];
