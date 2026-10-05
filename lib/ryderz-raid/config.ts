@@ -255,7 +255,7 @@ export const RYDERZ: Record<RyderId, RyderSpec> = {
     portrait: '/assets/hadi-taloustan-headshot.jpg',
     icon: '/assets/those-ryderz/icons/aaron.webp',
     // Version query busts browser caches of the earlier (unrigged) exports at this path.
-    glb: '/assets/those-ryderz/models/aaron-addams.glb?v=3',
+    glb: '/assets/those-ryderz/models/aaron-addams.glb?v=4',
     strikes: ['chop', 'slash', 'smash'],
     maxHp: 125,
     speed: 6.9,
