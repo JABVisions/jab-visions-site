@@ -254,8 +254,9 @@ export const RYDERZ: Record<RyderId, RyderSpec> = {
     weapon: 'Black aura axe',
     portrait: '/assets/hadi-taloustan-headshot.jpg',
     icon: '/assets/those-ryderz/icons/aaron.webp',
-    glb: '/assets/those-ryderz/models/aaron-addams.glb?v=2',
-    strikes: ['chop', 'punch', 'chop', 'kick'],
+    // Version query busts browser caches of the earlier (unrigged) exports at this path.
+    glb: '/assets/those-ryderz/models/aaron-addams.glb?v=3',
+    strikes: ['chop', 'slash', 'smash'],
     maxHp: 125,
     speed: 6.9,
     fireRate: 2.2,
@@ -271,28 +272,30 @@ export const RYDERZ: Record<RyderId, RyderSpec> = {
     moves: [
       {
         id: 'cleave',
-        name: 'Axe Cleave',
+        name: 'Boomerang Cleave',
         key: 'Q',
-        description: 'A wide black-aura sweep. Hits everything in front of you.',
-        auraCost: 7,
+        description:
+          'Charge the axe and hurl it. It spins out in a wide loop around the block, launching every host it crosses, and curves back to his hand.',
+        auraCost: 14,
         drain: 0,
       },
       {
         id: 'blink',
-        name: 'Shadow Step',
+        name: 'Shadow Strike',
         key: 'E',
         description:
-          'Teleport toward your aim as long as aura remains. The shadow you leave detonates on arrival.',
-        auraCost: 9,
+          'Dissolve into shadow, reappear behind the nearest host and take its head with one flat cut. With nobody near, a short step through the dark toward your aim.',
+        auraCost: 12,
         drain: 0,
       },
       {
         id: 'greedSiphon',
-        name: 'Greed Vault',
+        name: 'Greed Swing',
         key: 'R',
-        description: 'Rip aura out of nearby hosts. They bleed. You refill.',
-        auraCost: 8,
-        drain: 0,
+        description:
+          'Hold the axe out flat and spin while you steer. The spin builds speed, every host it meets is thrown, each hit feeds aura back. Press again to finish with one last cleave.',
+        auraCost: 0,
+        drain: 9,
       },
     ],
   },

@@ -1,6 +1,7 @@
 import type { RyderId } from '../config';
 import { LeoKit } from './leo';
 import { KevenKit } from './keven';
+import { AaronKit } from './aaron';
 import type { RyderKit } from './kit';
 
 export type { KitContext, KitFrame, KitTarget, MeleeStep, RyderKit } from './kit';
@@ -11,6 +12,7 @@ export type { KitContext, KitFrame, KitTarget, MeleeStep, RyderKit } from './kit
  */
 const KITS: Partial<Record<RyderId, () => RyderKit>> = {
   leo: () => new LeoKit(),
+  aaron: () => new AaronKit(),
   keven: () => new KevenKit(),
 };
 
