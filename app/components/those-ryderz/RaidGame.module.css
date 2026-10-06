@@ -55,8 +55,17 @@
 .topHud {
   top: 0;
   flex-direction: column;
-  gap: 10px;
+  align-items: stretch;
+  gap: 8px;
   padding: 0 0 8px;
+}
+
+.vitalDock {
+  position: absolute;
+  left: 12px;
+  bottom: 78px;
+  z-index: 3;
+  pointer-events: none;
 }
 
 .bottomHud {
@@ -147,6 +156,7 @@
 .chips {
   display: flex;
   flex-wrap: wrap;
+  justify-content: center;
   gap: 8px;
   padding: 0 16px;
 }
@@ -410,7 +420,7 @@
 
 .hint {
   position: absolute;
-  left: 18px;
+  left: 150px;
   bottom: 18px;
   max-width: 360px;
   color: rgba(229, 246, 234, 0.58);
@@ -680,6 +690,21 @@
 .dropIn:focus-visible {
   box-shadow: 0 0 22px rgba(49, 255, 150, 0.32);
   outline: none;
+}
+
+.selectBack {
+  appearance: none;
+  display: inline-block;
+  margin-top: 10px;
+  padding: 6px 10px;
+  border: 1px solid rgba(166, 255, 0, 0.28);
+  border-radius: 999px;
+  background: transparent;
+  color: #9effc4;
+  cursor: pointer;
+  font: 700 0.62rem/1 ui-monospace, monospace;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
 }
 
 .modalCard,
@@ -1028,6 +1053,13 @@
 
   .hint {
     display: none;
+  }
+
+  .vitalDock {
+    left: 8px;
+    bottom: 70px;
+    transform: scale(0.86);
+    transform-origin: left bottom;
   }
 
   .hpStrip .track {

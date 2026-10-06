@@ -1,10 +1,13 @@
 /**
- * Game modes. The engine stores the active mode so round composition, damage
- * rules and spawning can branch on it later; today only PvE has rules.
+ * Session modes. Solo is the existing single-player raid. PvP and Raid share
+ * the same client player model; networking is a later step.
+ *
+ * Older saves stored `pve` — hydrate maps that onto Solo.
  */
 export enum GameMode {
-  PVE = 'pve',
+  SOLO = 'solo',
   PVP = 'pvp',
+  RAID = 'raid',
 }
 
 export interface GameModeSpec {
@@ -18,23 +21,37 @@ export interface GameModeSpec {
 
 export const GAME_MODES: GameModeSpec[] = [
   {
-    id: GameMode.PVE,
-    name: 'PvE · Raid',
-    tagline: 'Hold the block',
-    description:
-      'Waves of mind-controlled hosts pour out of the alleys. Survive the rounds, bank Signal and buy strength at the spire.',
+    id: GameMode.SOLO,
+    name: 'Solo',
+    tagline: 'Single-player experience',
+    description: 'Play the story and open-world combat alone. Choose your Ryder and enter the arena.',
     available: true,
   },
   {
     id: GameMode.PVP,
-    name: 'PvP · Ryder vs Ryder',
-    tagline: 'Coming soon',
+    name: 'PvP',
+    tagline: 'Ryderz fighting each other',
+    description: 'Competitive Ryder-vs-Ryder combat. Other players are opponents, not allies.',
+    available: true,
+  },
+  {
+    id: GameMode.RAID,
+    name: 'Raid',
+    tagline: 'Multiplayer raids with multiple players',
     description:
-      'Ryderz turn on each other. Decks, aura and arenas all carry over; the host mob stays home.',
-    available: false,
+      'Co-op missions with a party of Ryderz. Friendly fire is off. Several parties can share a future raid instance.',
+    available: true,
   },
 ];
 
-export function gameModeSpec(id: GameMode): GameModeSpec {
-  return GAME_MODES.find((mode) => mode.id === id) ?? GAME_MODES[0];
+export function coerceGameMode(value: unknown): GameMode {
+  if (value === 'pve' || value === GameMode.SOLO) return GameMode.SOLO;
+  if (value === GameMode.PVP) return GameMode.PVP;
+  if (value === GameMode.RAID) return GameMode.RAID;
+  return GameMode.SOLO;
+}
+
+export function gameModeSpec(id: GameMode | string): GameModeSpec {
+  const mode = coerceGameMode(id);
+  return GAME_MODES.find((entry) => entry.id === mode) ?? GAME_MODES[0];
 }

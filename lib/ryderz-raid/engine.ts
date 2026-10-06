@@ -230,7 +230,7 @@ export class RaidEngine {
   private spec: RyderSpec = RYDERZ.rubi;
   /** Powers bound to Q / E / R. Defaults to the Ryder's signature moves; the Power Deck can rebind them. */
   private moves: AbilitySpec[] = RYDERZ.rubi.moves;
-  private gameMode: GameMode = GameMode.PVE;
+  private gameMode: GameMode = GameMode.SOLO;
   private switchToken = 0;
   private player: Fighter | null = null;
   private shield: THREE.Mesh | null = null;
@@ -429,7 +429,8 @@ export class RaidEngine {
   }
 
   setGameMode(mode: GameMode) {
-    // Rules do not branch on the mode yet; it is stored so spawning and damage can.
+    // Spawning is unchanged this phase. Damage filtering lives in `canDamage`
+    // so kits can start asking "which player did this?" before networking lands.
     this.gameMode = mode;
   }
 

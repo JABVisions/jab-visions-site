@@ -6,7 +6,7 @@ import type { RyderManager } from '@/lib/ryderz-raid/ryder-manager';
 import { useMenuKeys, wrap } from './useMenuKeys';
 import styles from './PauseMenu.module.css';
 
-/** PvE is live; PvP is registered so the rules can branch on it once Ryder-on-Ryder combat exists. */
+/** Solo is the live campaign. PvP and Raid share the client player model before networking. */
 export default function GameModeSelector({
   manager,
   gameMode,
@@ -37,7 +37,7 @@ export default function GameModeSelector({
       <header className={styles.panelHead}>
         <p className={styles.eyebrow}>Game mode</p>
         <h2>How the block fights</h2>
-        <p>Modes share Ryderz, decks and arenas. Training, Survival and Boss Raid will slot in here later.</p>
+        <p>Solo is the current campaign. PvP and Raid already tag players as opponents or allies.</p>
       </header>
       <div className={`${styles.scroll} ${styles.options}`} role="listbox" aria-label="Game modes">
         {GAME_MODES.map((mode, i) => (

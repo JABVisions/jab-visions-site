@@ -15,20 +15,24 @@ import {
 } from '@/lib/ryderz-raid/config';
 import type { CameraState } from '@/lib/ryderz-raid/camera';
 import type { HudState, RaidEngine } from '@/lib/ryderz-raid/engine';
+import { GameMode } from '@/lib/ryderz-raid/game-mode';
+import { PlayerStore } from '@/lib/ryderz-raid/multiplayer';
 import { RyderManager } from '@/lib/ryderz-raid/ryder-manager';
+import { SaveManager } from '@/lib/ryderz-raid/saves/saveManager';
 import CameraTuningPanel, { loadStoredCameraConfig } from './CameraTuningPanel';
+import CircularPlayerHUD, { type CircularHudApi } from './hud/CircularPlayerHUD';
+import PlayerPartyHUD, { type PartyHudApi } from './hud/PlayerPartyHUD';
 import PauseMenu from './menu/PauseMenu';
 import { NEUTRAL_THEME, RYDER_THEME as AURA } from './menu/theme';
+import RyderzStartScreen from './start/RyderzStartScreen';
 import styles from './RaidGame.module.css';
 
 export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'page' }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const engineRef = useRef<RaidEngine | null>(null);
   const hudRef = useRef<HudState | null>(null);
-  const hpFill = useRef<HTMLDivElement>(null);
-  const auraFill = useRef<HTMLDivElement>(null);
-  const hpLabel = useRef<HTMLSpanElement>(null);
-  const auraLabel = useRef<HTMLSpanElement>(null);
+  const circularHud = useRef<CircularHudApi>(null);
+  const partyHud = useRef<PartyHudApi | null>(null);
   const pointsRef = useRef<HTMLElement>(null);
   const remainingRef = useRef<HTMLElement>(null);
   const roundRef = useRef<HTMLElement>(null);
@@ -39,10 +43,19 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
   // `selected` is the Ryder the raid booted with (it owns the engine's lifetime);
   // the Ryder currently in play lives in the RyderManager and can change mid-raid.
   const [selected, setSelected] = useState<RyderId | null>(null);
+  const [screen, setScreen] = useState<'start' | 'select' | 'game'>('start');
   const manager = useMemo(() => new RyderManager(), []);
+  const playerStore = useMemo(() => new PlayerStore(), []);
+  const saves = useMemo(() => new SaveManager(), []);
   const subscribe = useCallback((listener: () => void) => manager.subscribe(listener), [manager]);
   const getSnapshot = useCallback(() => manager.getState(), [manager]);
   const managerState = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+  const subscribeSaves = useCallback((listener: () => void) => saves.subscribe(listener), [saves]);
+  const getSaves = useCallback(() => saves.getState(), [saves]);
+  const saveState = useSyncExternalStore(subscribeSaves, getSaves, getSaves);
+  const subscribePlayers = useCallback((listener: () => void) => playerStore.subscribe(listener), [playerStore]);
+  const getPlayers = useCallback(() => playerStore.getState(), [playerStore]);
+  const partyState = useSyncExternalStore(subscribePlayers, getPlayers, getPlayers);
   const activeRyder = managerState.activeRyder;
   const [hudMoves, setHudMoves] = useState<HudState['moves']>([]);
   const [round, setRound] = useState(0);
@@ -76,14 +89,15 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
   const syncHud = useCallback((next: HudState) => {
     const prev = hudRef.current;
     hudRef.current = next;
-    if (hpFill.current) hpFill.current.style.width = `${(next.hp / next.maxHp) * 100}%`;
-    if (auraFill.current) auraFill.current.style.width = `${(next.aura / next.maxAura) * 100}%`;
-    if (hpLabel.current) hpLabel.current.textContent = `${Math.ceil(next.hp)} / ${next.maxHp}`;
-    if (auraLabel.current) {
-      auraLabel.current.textContent = next.burnout
-        ? 'BURNOUT · FISTS ONLY'
-        : `${Math.ceil(next.aura)} / ${next.maxAura}`;
-    }
+    circularHud.current?.setVitals(next.hp, next.maxHp, next.aura, next.maxAura, next.burnout);
+    partyHud.current?.setLocalVitals(next.hp, next.maxHp, next.aura, next.maxAura, next.hp > 0);
+    playerStore.syncLocalVitals({
+      health: next.hp,
+      maxHealth: next.maxHp,
+      aura: next.aura,
+      maxAura: next.maxAura,
+      isAlive: next.hp > 0,
+    });
     if (pointsRef.current) pointsRef.current.textContent = String(next.points);
     if (next.beacon && beaconCooldown.current) {
       beaconCooldown.current.textContent = `${Math.ceil(next.beacon.cooldownLeft)}s`;
@@ -138,7 +152,7 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
     if (!prev || Math.abs(prev.intermissionLeft - next.intermissionLeft) > 0.2) {
       setIntermissionLeft(next.intermissionLeft);
     }
-  }, []);
+  }, [playerStore]);
 
   useEffect(() => {
     const mq = window.matchMedia('(pointer: coarse)');
@@ -188,9 +202,41 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
     if (!camPanel) engine.setCameraPreviewState(null);
   }, [camPanel, engineReady]);
 
+  useEffect(() => {
+    playerStore.configure({
+      mode: managerState.gameMode,
+      localRyder: selected ?? managerState.activeRyder,
+      mockParty: managerState.gameMode !== GameMode.SOLO,
+    });
+  }, [managerState.gameMode, playerStore]);
+
+  const enterSelect = useCallback(
+    (mode: GameMode, ryder?: RyderId | null) => {
+      const chosen = ryder ?? manager.getState().activeRyder;
+      manager.setGameMode(mode);
+      playerStore.configure({
+        mode,
+        localRyder: chosen,
+        mockParty: mode !== GameMode.SOLO,
+      });
+      setFocus(Math.max(0, RYDER_ORDER.indexOf(chosen)));
+      setScreen('select');
+      setPhase('select');
+    },
+    [manager, playerStore],
+  );
+
   const pick = (id: RyderId) => {
     manager.setActiveRyder(id);
+    playerStore.setLocalRyder(id);
+    playerStore.configure({
+      mode: manager.getState().gameMode,
+      localRyder: id,
+      mockParty: manager.getState().gameMode !== GameMode.SOLO,
+    });
+    saves.saveGame(manager);
     setSelected(id);
+    setScreen('game');
     setPhase('playing');
     setPaused(false);
   };
@@ -222,7 +268,7 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
     const onKey = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement | null)?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA') return;
-      if (!selected) {
+      if (screen === 'select') {
         if (e.key === 'ArrowRight') {
           e.preventDefault();
           cycleFocus(1);
@@ -236,8 +282,13 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
           e.preventDefault();
           pick(RYDER_ORDER[focus]);
         }
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          setScreen('start');
+        }
         return;
       }
+      if (screen !== 'game') return;
       if (e.code === 'Backquote') {
         e.preventDefault();
         setCamPanel((open) => !open);
@@ -247,19 +298,25 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
     };
     window.addEventListener('keydown', onKey, { capture: true });
     return () => window.removeEventListener('keydown', onKey, { capture: true });
-  }, [selected, focus, cycleFocus]);
+  }, [selected, screen, focus, cycleFocus]);
 
   const changeRyder = () => {
     engineRef.current?.dispose();
     engineRef.current = null;
     setCamPanel(false);
     setSelected(null);
+    setScreen('select');
     setPhase('select');
     setPaused(false);
     setBanner(null);
     setNearShop(false);
     setBeacon(null);
     setRecovering(false);
+  };
+
+  const exitToStart = () => {
+    changeRyder();
+    setScreen('start');
   };
 
   const resume = () => {
@@ -290,7 +347,7 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
   };
 
   const aura = selected ? AURA[activeRyder] : NEUTRAL_THEME;
-  const playing = Boolean(selected);
+  const playing = screen === 'game' && Boolean(selected);
 
   return (
     <div
@@ -308,29 +365,7 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
       {playing && phase !== 'dead' && (
         <div className={styles.overlay} aria-hidden="true">
           <div className={styles.topHud}>
-            <div className={styles.meterStack}>
-              <div className={`${styles.strip} ${styles.hpStrip}`}>
-                <span>
-                  Vital
-                  <em ref={hpLabel}>0 / 0</em>
-                </span>
-                <div className={styles.track}>
-                  <div ref={hpFill} className={`${styles.fill} ${styles.hp}`} />
-                </div>
-              </div>
-              <div className={`${styles.strip} ${styles.auraStrip}`}>
-                <span>
-                  Aura
-                  <em ref={auraLabel}>0 / 0</em>
-                </span>
-                <div className={styles.track}>
-                  <div
-                    ref={auraFill}
-                    className={`${styles.fill} ${styles.aura} ${burnout ? styles.burned : ''}`}
-                  />
-                </div>
-              </div>
-            </div>
+            <PlayerPartyHUD slots={partyState.slots} mode={partyState.mode} apiRef={partyHud} />
             <div className={styles.chips}>
               <div className={styles.chip}>
                 Round <strong ref={roundRef}>0</strong>
@@ -341,6 +376,9 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
               <div className={styles.chip}>
                 Signal pts <strong ref={pointsRef}>0</strong>
               </div>
+              <div className={styles.chip}>
+                Mode <strong>{partyState.mode}</strong>
+              </div>
               <button
                 type="button"
                 className={`${styles.chip} ${styles.chipBtn} ${camPanel ? styles.chipOn : ''}`}
@@ -350,6 +388,10 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
                 Cam <strong>{cameraState}</strong>
               </button>
             </div>
+          </div>
+
+          <div className={styles.vitalDock}>
+            <CircularPlayerHUD ref={circularHud} ryderId={activeRyder} burnout={burnout} />
           </div>
 
           <div className={styles.crosshair} />
@@ -525,7 +567,7 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
           points={points}
           layout={layout}
           onResume={resume}
-          onExit={changeRyder}
+          onExit={exitToStart}
           onOpenCameraTuning={() => setCamPanel(true)}
         />
       )}
@@ -551,17 +593,41 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
         </div>
       )}
 
-      {!playing && (
+      {screen === 'start' && (
+        <RyderzStartScreen
+          slots={saveState.slots}
+          activeSlot={saveState.activeSlot}
+          lastMode={managerState.gameMode}
+          onSelectSlot={(index) => saves.selectSlot(index)}
+          onContinue={() => {
+            if (!saves.loadGame(saveState.activeSlot, manager)) return;
+            const loaded = manager.getState();
+            enterSelect(loaded.gameMode, loaded.activeRyder);
+          }}
+          onNewGame={() => {
+            const empty = saveState.slots.find((slot) => slot.empty);
+            const index = empty?.slotIndex ?? saveState.activeSlot;
+            saves.deleteSave(index);
+            saves.selectSlot(index);
+            manager.resetSession();
+            playerStore.configure({ mode: GameMode.SOLO, localRyder: null, mockParty: false });
+          }}
+          onPickMode={(mode) => enterSelect(mode)}
+        />
+      )}
+
+      {screen === 'select' && (
         <div className={styles.select}>
           <div className={styles.selectInner}>
             <header>
-              <p>Those Ryderz: Raid</p>
-              <h2>The block is overrun. Pick a Ryder.</h2>
+              <p>Those Ryderz: Raid · {partyState.mode.toUpperCase()}</p>
+              <h2>Pick a Ryder.</h2>
               <span>
-                Mind-controlled civilians pour from the alleys. Spend aura on shots and signature
-                powers. When the meter hits empty you burn out — no blades, no blink, just weaker
-                melee until the signal crawls back.
+                Mode is locked in. Choose who drops onto the block. Esc returns to Solo / PvP / Raid.
               </span>
+              <button type="button" className={styles.selectBack} onClick={() => setScreen('start')}>
+                Back to title
+              </button>
             </header>
             <div className={styles.carousel}>
               <button

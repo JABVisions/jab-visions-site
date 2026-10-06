@@ -1,0 +1,200 @@
+.hud {
+  --ryder: #31ff96;
+  position: relative;
+  width: 132px;
+  height: 154px;
+  pointer-events: none;
+  filter: drop-shadow(0 10px 18px rgba(0, 0, 0, 0.45));
+}
+
+.meter {
+  position: absolute;
+  inset: 0 0 auto;
+  width: 132px;
+  height: 132px;
+  transform: rotate(0deg);
+}
+
+.track,
+.arc {
+  fill: none;
+  stroke-linecap: round;
+  stroke-width: 7;
+}
+
+.track {
+  stroke: rgba(255, 255, 255, 0.12);
+}
+
+.arc {
+  stroke-dasharray: 100 100;
+  transition: stroke-dasharray 140ms linear;
+}
+
+.health {
+  stroke: url(#none);
+  stroke: #ff5a73;
+  filter: drop-shadow(0 0 4px rgba(255, 80, 110, 0.7));
+}
+
+.aura {
+  stroke: var(--ryder);
+  filter: drop-shadow(0 0 5px color-mix(in srgb, var(--ryder) 70%, transparent));
+}
+
+.portrait {
+  position: absolute;
+  top: 22px;
+  left: 22px;
+  width: 88px;
+  height: 88px;
+  overflow: hidden;
+  border: 2px solid rgba(255, 255, 255, 0.18);
+  border-radius: 50%;
+  background: rgba(4, 8, 10, 0.85);
+  box-shadow: inset 0 0 0 2px rgba(0, 0, 0, 0.45);
+}
+
+.portrait img {
+  object-fit: cover;
+  object-position: top;
+}
+
+.bolt {
+  position: absolute;
+  top: 18px;
+  left: 18px;
+  width: 96px;
+  height: 96px;
+  border-radius: 50%;
+  pointer-events: none;
+  opacity: 0;
+  box-shadow:
+    0 0 16px color-mix(in srgb, var(--ryder) 55%, transparent),
+    inset 0 0 12px color-mix(in srgb, var(--ryder) 35%, transparent);
+  transition: opacity 220ms ease;
+}
+
+.caption {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  text-align: center;
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.8);
+}
+
+.caption b {
+  display: block;
+  color: #f7fff9;
+  font: 800 0.62rem/1.1 ui-monospace, monospace;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.caption span {
+  color: rgba(229, 246, 234, 0.7);
+  font: 700 0.52rem/1.4 ui-monospace, monospace;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.caption em,
+.caption i {
+  font-style: normal;
+  color: #fff;
+}
+
+.caption i {
+  margin-left: 8px;
+  color: var(--ryder);
+}
+
+.low .portrait {
+  animation: hpPulse 900ms ease-in-out infinite;
+}
+
+.critical .meter {
+  animation: critShake 500ms steps(2, end) infinite;
+}
+
+.critical .health {
+  stroke: #ff2a3a;
+}
+
+.charged .bolt {
+  opacity: 1;
+  animation: chargeFlicker 1.2s ease-in-out infinite;
+}
+
+.charged .aura {
+  stroke-width: 8;
+}
+
+.burned .aura {
+  stroke: #8a9199;
+  filter: none;
+}
+
+.burned .bolt {
+  opacity: 0;
+}
+
+@keyframes hpPulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(255, 50, 70, 0.0);
+  }
+  50% {
+    box-shadow: 0 0 16px 2px rgba(255, 50, 70, 0.55);
+  }
+}
+
+@keyframes critShake {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  40% {
+    transform: translateX(-1px);
+  }
+  70% {
+    transform: translateX(1px);
+  }
+}
+
+@keyframes chargeFlicker {
+  0%,
+  100% {
+    opacity: 0.75;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@media (max-width: 900px) {
+  .hud {
+    width: 108px;
+    height: 128px;
+  }
+
+  .meter {
+    width: 108px;
+    height: 108px;
+  }
+
+  .portrait {
+    top: 18px;
+    left: 18px;
+    width: 72px;
+    height: 72px;
+  }
+
+  .bolt {
+    top: 14px;
+    left: 14px;
+    width: 80px;
+    height: 80px;
+  }
+}

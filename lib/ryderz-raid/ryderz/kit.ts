@@ -43,7 +43,11 @@ export interface KitContext {
   time(): number;
   fighter(): Fighter | null;
   targets(): readonly KitTarget[];
-  /** Hurt a target: damage, hit direction, how it should react. */
+  /**
+   * Hurt a target: damage, hit direction, how it should react.
+   * Kits that can hit other Ryderz should gate this with `canDamage`
+   * (`lib/ryderz-raid/combat`) so Raid allies are not friendly-fired.
+   */
   hurt(target: KitTarget, damage: number, dir: THREE.Vector3, reaction?: HitReaction, strength?: number): void;
   /** Flash a target a colour for `seconds` without hurting it. */
   flash(target: KitTarget, color: number, seconds: number): void;
