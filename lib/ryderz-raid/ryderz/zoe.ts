@@ -44,11 +44,11 @@ const LIFT_BRACED = 0.55;
 // Force Field disc
 const CAST_WIND = 0.16;
 const CAST_HOLD = 0.22;
-const DISC_SPEED = 24;
-const DISC_LIFE = 0.95;
+const DISC_SPEED = 26;
+const DISC_LIFE = 1.05;
 const DISC_HIT = 22;
-const DISC_RADIUS0 = 0.72;
-const DISC_RADIUS1 = 1.45;
+const DISC_RADIUS0 = 0.85;
+const DISC_RADIUS1 = 1.65;
 
 // Heartbreak Blitz
 const BLITZ_LAUNCH = 0.16;
@@ -290,20 +290,24 @@ class PlasmaDiscPool {
       const p = 1 - d.life / d.max;
       d.radius = DISC_RADIUS0 + (DISC_RADIUS1 - DISC_RADIUS0) * p;
       d.pos.addScaledVector(d.vel, dt);
+      if (d.pos.y < 0.9) {
+        d.pos.y = 0.9;
+        if (d.vel.y < 0) d.vel.y = 0;
+      }
       d.mesh.position.copy(d.pos);
       d.mesh.scale.setScalar(d.radius);
       d.mesh.quaternion.setFromUnitVectors(Z_AXIS, _dir.copy(d.vel).normalize());
-      d.face.opacity = 0.18 + 0.16 * (1 - p);
-      d.rim.opacity = 0.4 + 0.35 * (1 - p * 0.6);
+      d.face.opacity = 0.28 + 0.18 * (1 - p);
+      d.rim.opacity = 0.55 + 0.35 * (1 - p * 0.5);
       d.trail.feed(d.pos);
       d.trail.update(dt, env.camera);
 
-      if (d.life <= 0 || d.pos.y < 0.05) {
+      if (d.life <= 0) {
         env.onFizzle(d.pos);
         this.retire(d);
         continue;
       }
-      if (d.pos.y < 2.5 && env.blocked(d.pos.x, d.pos.z, 0.2)) {
+      if (p > 0.06 && d.pos.y < 2.5 && env.blocked(d.pos.x, d.pos.z, 0.25)) {
         env.onFizzle(d.pos);
         this.retire(d);
         continue;
@@ -749,9 +753,22 @@ export class ZoeKit implements RyderKit {
   // Force Field
   // ---------------------------------------------------------------------------
 
+  private aimAlongSight(out: THREE.Vector3) {
+    const ctx = this.ctx!;
+    ctx.lookDir(out);
+    const xz = Math.hypot(out.x, out.z);
+    if (xz < 0.18) {
+      out.set(Math.sin(ctx.yaw()), 0, Math.cos(ctx.yaw()));
+      return out;
+    }
+    // Camera aiming chooses the heading; the disc itself stays a chest-high wave.
+    out.y = 0;
+    return out.normalize();
+  }
+
   private startCast() {
     const ctx = this.ctx!;
-    ctx.lookDir(_dir);
+    this.aimAlongSight(_dir);
     this.seq = { kind: 'cast', phase: 'wind', t: 0, dir: _dir.clone(), fired: false };
     const orbs = this.orbs();
     if (orbs) orbs.castTarget = this.handLocal(_p).clone();
@@ -765,11 +782,10 @@ export class ZoeKit implements RyderKit {
   private fireDisc(seq: Extract<Sequence, { kind: 'cast' }>) {
     const ctx = this.ctx!;
     seq.fired = true;
-    ctx.lookDir(seq.dir);
+    this.aimAlongSight(seq.dir);
     const origin = _p.copy(ctx.pos);
-    origin.y = ctx.heightAt(ctx.pos.x, ctx.pos.z) + 1.2;
-    if (!ctx.power.anchorPosition('handR', _q)) _q.copy(origin);
-    origin.lerp(_q, 0.55);
+    origin.y = ctx.heightAt(ctx.pos.x, ctx.pos.z) + 1.15;
+    origin.addScaledVector(seq.dir, 0.9);
     this.discs.spawn(origin, seq.dir, DISC_HIT);
     ctx.particles.emit(origin, ctx.spec.visual.electricityColor, 12, { speed: 7, size: 0.18, life: 0.28, direction: seq.dir });
     ctx.camera.addKick(0.22);
