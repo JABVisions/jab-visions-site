@@ -1,6 +1,7 @@
 import { RYDERZ, RYDER_ORDER, type RyderId, type RyderSpec } from '../config';
 import { GameMode } from '../game-mode';
 import { aiProfileFor, DEFAULT_AI_PROFILE, type AiProfile } from '../pvp/aiProfile';
+import { combatProfileFor, DEFAULT_COMBAT_PROFILE, type CombatProfile } from '../fighter/profiles';
 
 /**
  * One roster for Solo, PvP, and Raid. Screens map this list; they do not
@@ -38,6 +39,8 @@ export interface RaidCharacter {
   playable: boolean;
   /** How a CPU copy of this character fights. Omitted entries use the default profile. */
   aiProfile: AiProfile;
+  /** Punch, kick, melee, combos, and the power that a chain can unlock. */
+  combatProfile: CombatProfile;
 }
 
 const FUTURE_CHARACTERS: RaidCharacter[] = [
@@ -66,6 +69,7 @@ function stub(id: string, name: string, category: CharacterCategory, solo: boole
     unlocked: false,
     playable: false,
     aiProfile: DEFAULT_AI_PROFILE,
+    combatProfile: DEFAULT_COMBAT_PROFILE,
   };
 }
 
@@ -90,6 +94,7 @@ function fromSpec(spec: RyderSpec): RaidCharacter {
     unlocked: true,
     playable: true,
     aiProfile: aiProfileFor(spec.id),
+    combatProfile: combatProfileFor(spec.id),
   };
 }
 

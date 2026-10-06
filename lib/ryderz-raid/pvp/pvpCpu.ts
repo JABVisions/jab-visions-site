@@ -29,6 +29,12 @@ import { ABILITY_BANDS } from './abilityBands';
 import { aiProfileFor, tuningFor, type AiProfile, type AiTuning, type PvpDifficulty } from './aiProfile';
 import type { PvpDamageKind } from './balance';
 import { choosePvpAction, type AbilityRead, type PvpIntent } from './decide';
+import { bandFit } from './abilityBands';
+import type { CombatRates } from '../fighter/memory';
+import type { PhysicalHit, StrikeKind } from '../fighter/actions';
+import { FighterStriker } from '../fighter/striker';
+import { combatProfileFor, resolvePowerLink } from '../fighter/profiles';
+import { openingPlan } from '../fighter/planner';
 
 export interface DuelBody {
   fighter: Fighter;
@@ -65,7 +71,10 @@ export interface PvpCpuHooks {
   heightAt(x: number, z: number): number;
   resolve(pos: THREE.Vector3): void;
   blocked(x: number, z: number, radius: number): boolean;
-  hurtPlayer(amount: number, dir: THREE.Vector3, kind: PvpDamageKind): void;
+  hurtPlayer(amount: number, dir: THREE.Vector3, kind: PvpDamageKind, physical?: PhysicalHit): void;
+  playerWhiff(): boolean;
+  playerStunned(): boolean;
+  playerMemory(): CombatRates;
   time(): number;
 }
 
@@ -100,6 +109,13 @@ export class PvpCpu {
   private moveOn = [false, false, false];
   private rhythm = [0, 0, 0];
   private meleeCd = 0;
+  private readonly striker = new FighterStriker();
+  private script: StrikeKind[] = [];
+  private pending: StrikeKind | null = null;
+  private chainDelay = 0;
+  private chainLock = 0;
+  private wantCast = false;
+  private strikeQueued = false;
   private decideAt = 0.4;
   private intent: PvpIntent = 'chase';
   private intentSlot: number | null = null;
@@ -141,6 +157,12 @@ export class PvpCpu {
     this.moveOn = [false, false, false];
     this.rhythm = [0, 0, 0];
     this.meleeCd = 0;
+    this.striker.reset();
+    this.striker.setRyder(spec.id);
+    this.script = [];
+    this.pending = null;
+    this.wantCast = false;
+    this.chainLock = 0.35;
     this.decideAt = 0.35 + Math.random() * 0.4;
     this.facing = Math.atan2(this.hooks.playerPos.x - body.pos.x, this.hooks.playerPos.z - body.pos.z);
     this.foe = this.makePlayerBody();
@@ -163,6 +185,8 @@ export class PvpCpu {
 
     this.iframes = Math.max(0, this.iframes - dt);
     this.meleeCd = Math.max(0, this.meleeCd - dt);
+    this.chainDelay = Math.max(0, this.chainDelay - dt);
+    this.chainLock = Math.max(0, this.chainLock - dt);
     for (let i = 0; i < 3; i += 1) {
       this.moveCd[i] = Math.max(0, this.moveCd[i] - dt);
       this.rhythm[i] = Math.max(0, this.rhythm[i] - dt);
@@ -179,6 +203,7 @@ export class PvpCpu {
 
     if (!(this.kit?.locked ?? false) && time >= this.decideAt) this.decide(time);
     if (!(this.kit?.locked ?? false) && !(this.kit?.busy ?? false)) this.act(dt, spec);
+    this.stepStriker(dt);
     const moving = this.intent === 'chase' || this.intent === 'reposition' || this.intent === 'evade' || this.intent === 'retreat';
     this.kit?.update({
       dt,
@@ -219,6 +244,11 @@ export class PvpCpu {
     const foe = this.foe;
     if (!body || !spec || !foe) return;
     const dist = Math.hypot(foe.pos.x - body.pos.x, foe.pos.z - body.pos.z);
+    if (this.striker.busy || this.pending || this.script.length || this.wantCast) {
+      this.decideAt = time + 0.16;
+      if (dist > 2.6) this.intent = 'chase';
+      return;
+    }
     const vel = this.hooks.playerVelocity();
     const awayX = body.pos.x - foe.pos.x;
     const awayZ = body.pos.z - foe.pos.z;
@@ -242,6 +272,11 @@ export class PvpCpu {
         foeRetreating: retreatDot > 1.2,
         foeClosing: retreatDot < -1.2,
         powerHunger: this.abilitiesCast === 0 && time > 1.2 ? 0.35 : 0,
+        foeWhiff: this.hooks.playerWhiff(),
+        foeStun: this.hooks.playerStunned(),
+        powerLink: this.striker.combo.powerReady(time),
+        nextStrike: this.pending,
+        memory: this.hooks.playerMemory(),
         slots,
       },
       this.profile,
@@ -250,6 +285,8 @@ export class PvpCpu {
     this.intent = choice.intent;
     this.intentSlot = choice.slot;
     this.lastAction = choice.intent;
+    this.strikeQueued = false;
+    if (choice.intent === 'dodge') this.iframes = Math.max(this.iframes, 0.12);
     const wait = this.tuning.reactionMin + Math.random() * (this.tuning.reactionMax - this.tuning.reactionMin);
     this.decideAt = time + wait;
     if (choice.intent === 'ability' && choice.slot != null) {
@@ -274,7 +311,7 @@ export class PvpCpu {
     if (this.intent === 'retreat') {
       mx = -mx;
       mz = -mz;
-    } else if (this.intent === 'evade' || this.intent === 'reposition') {
+    } else if (this.intent === 'evade' || this.intent === 'reposition' || this.intent === 'dodge') {
       const side = this.profile.evasiveness > 0.5 ? 1 : -1;
       const strafe = this.intent === 'evade' ? 1 : 0.65;
       mx = (-mz * side) * strafe + mx * (this.intent === 'reposition' ? 0.35 : 0.1);
@@ -289,11 +326,21 @@ export class PvpCpu {
           mz -= dz / dist;
         }
       }
-    } else if (this.intent === 'attack') {
-      if (dist < MELEE_RANGE + foe.radius + 0.3) {
-        this.swing(spec);
-        mx *= 0.15;
-        mz *= 0.15;
+    } else if (
+      this.intent === 'attack' ||
+      this.intent === 'punch' ||
+      this.intent === 'kick' ||
+      this.intent === 'melee' ||
+      this.intent === 'grab'
+    ) {
+      if (!this.strikeQueued && !this.striker.busy) {
+        const kind: StrikeKind = this.intent === 'attack' || this.intent === 'grab' ? 'melee' : this.intent;
+        this.striker.queue(kind === 'melee' && this.intent === 'attack' ? 'punch' : kind);
+        this.strikeQueued = true;
+      }
+      if (dist < 2.5) {
+        mx *= 0.2;
+        mz *= 0.2;
       }
     } else if (this.intent !== 'chase') {
       mx = 0;
@@ -309,6 +356,140 @@ export class PvpCpu {
       this.place(body.pos);
     } else if (dist > 0.2) {
       this.facing = Math.atan2(dx, dz);
+    }
+  }
+
+  private stepStriker(dt: number) {
+    const body = this.body;
+    const foe = this.foe;
+    const spec = this.spec;
+    if (!body || !foe || !spec) return;
+    if (this.pending && this.chainDelay <= 0 && !this.striker.busy) {
+      this.striker.queue(this.pending);
+      this.pending = null;
+    }
+    if (this.wantCast && this.chainDelay <= 0 && !(this.kit?.locked ?? false)) {
+      this.wantCast = false;
+      const slot = this.bestLinkSlot();
+      if (slot != null) this.cast(slot);
+    }
+    const frame = this.striker.tick(dt, {
+      time: this.hooks.time(),
+      stunned: false,
+      locked: this.kit?.locked ?? false,
+      facing: this.facing,
+      x: body.pos.x,
+      z: body.pos.z,
+      meleeDamage: this.burnout ? spec.meleeDamage * 0.45 : spec.meleeDamage,
+      targets: [
+        {
+          ref: foe,
+          x: foe.pos.x,
+          z: foe.pos.z,
+          radius: foe.radius,
+          airborne: foe.airY > 0.25,
+        },
+      ],
+    });
+    if (frame.lunge) {
+      body.pos.x += Math.sin(this.facing) * frame.lunge;
+      body.pos.z += Math.cos(this.facing) * frame.lunge;
+      this.place(body.pos);
+    }
+    if (frame.started) body.swing = true;
+    if (frame.grab) {
+      foe.held = Math.max(foe.held, 0.16);
+      foe.pos.x = body.pos.x + Math.sin(this.facing) * 0.95;
+      foe.pos.z = body.pos.z + Math.cos(this.facing) * 0.95;
+    }
+    if (!frame.hits.length) {
+      if (this.striker.exposed) {
+        this.script = [];
+        this.pending = null;
+      }
+      return;
+    }
+    for (const hit of frame.hits) {
+      _dir.set(foe.pos.x - body.pos.x, 0, foe.pos.z - body.pos.z);
+      if (_dir.lengthSq() < 1e-4) _dir.set(Math.sin(this.facing), 0, Math.cos(this.facing));
+      _dir.normalize();
+      if (hit.kind === 'throw') foe.held = 0;
+      applyReaction(foe, hit.reaction, _dir, hit.strength);
+      this.hooks.hurtPlayer(hit.damage, _dir, 'basic', {
+        reaction: hit.reaction,
+        strength: hit.strength,
+        hitStun: hit.hitStun,
+        knockback: hit.knockback,
+      });
+    }
+    this.onLanded(frame.hits[0].kind);
+  }
+
+  private onLanded(kind: StrikeKind) {
+    const body = this.body;
+    if (!body || !this.spec) return;
+    const selfHp = body.maxHp > 0 ? body.hp / body.maxHp : 1;
+    const foeHp = this.hooks.playerMaxHp() > 0 ? this.hooks.playerHp() / this.hooks.playerMaxHp() : 1;
+    const time = this.hooks.time();
+    if (this.striker.combo.powerReady(time) && this.aura > 8 && Math.random() < 0.42 + this.profile.abilityFrequency * 0.4) {
+      this.script = [];
+      this.pending = null;
+      this.wantCast = true;
+      this.chainDelay = 0.12 + Math.random() * 0.22;
+      return;
+    }
+    if (!this.script.length && this.chainLock <= 0) {
+      const plan = openingPlan(this.profile, selfHp > 0.34 || foeHp < 0.28);
+      if (plan && plan[0] === kind) this.script = plan.slice(1);
+    }
+    if (this.script.length) {
+      this.pending = this.script.shift() ?? null;
+      this.chainDelay = 0.05 + Math.random() * (0.1 + this.tuning.mistake * 0.16);
+      return;
+    }
+    this.chainLock = 0.65 + Math.random() * 0.55;
+  }
+
+  private bestLinkSlot(): number | null {
+    const spec = this.spec;
+    const body = this.body;
+    const foe = this.foe;
+    if (!spec || !body || !foe || this.burnout) return null;
+    const dist = Math.hypot(foe.pos.x - body.pos.x, foe.pos.z - body.pos.z);
+    const signature = combatProfileFor(spec.id).powerLink.abilityId;
+    let best = -1;
+    let score = 0;
+    spec.moves.forEach((move, index) => {
+      const affordable = move.drain > 0 ? this.aura > 2 : this.aura >= move.auraCost;
+      if (!affordable || this.rhythm[index] > 0) return;
+      let value = bandFit(ABILITY_BANDS[move.id], dist);
+      if (move.id === signature) value += 0.65;
+      if (value > score) {
+        score = value;
+        best = index;
+      }
+    });
+    return best < 0 ? null : best;
+  }
+
+  private bloomLink(slot: number) {
+    const spec = this.spec;
+    const foe = this.foe;
+    const body = this.body;
+    if (!spec || !foe || !body) return;
+    if (!this.striker.combo.consumePower(this.hooks.time())) return;
+    const link = resolvePowerLink(spec.id, spec.moves[slot].id);
+    _dir.set(foe.pos.x - body.pos.x, 0, foe.pos.z - body.pos.z);
+    if (_dir.lengthSq() < 1e-4) _dir.set(Math.sin(this.facing), 0, Math.cos(this.facing));
+    _dir.normalize();
+    applyReaction(foe, link.preReaction, _dir, 1);
+    if (link.trap > 0) foe.held = Math.max(foe.held, link.trap);
+    const chip = spec.meleeDamage * 0.28;
+    for (let i = 0; i < link.followUps; i += 1) {
+      const damage = chip * (i === 0 ? 1 : 0.86);
+      this.scheduler.schedule(this.hooks.time(), 0.18 + i * 0.16, () => {
+        this.strikePlayer(damage, 3.4, Math.PI, 'ability', 'stagger', 0.55);
+      });
     }
   }
 
@@ -372,6 +553,7 @@ export class PvpCpu {
       this.moveCd[slot] = 0.2;
       this.kit?.tryAbility(move.id);
       this.noteCast(slot);
+      this.bloomLink(slot);
       return;
     }
     if (this.aura < move.auraCost) return;
@@ -380,7 +562,11 @@ export class PvpCpu {
     const owned = this.kit?.tryAbility(move.id) ?? false;
     this.moveCd[slot] = 0.2;
     this.noteCast(slot);
-    if (!owned) this.aura = Math.min(this.maxAura, this.aura + move.auraCost);
+    if (!owned) {
+      this.aura = Math.min(this.maxAura, this.aura + move.auraCost);
+      return;
+    }
+    this.bloomLink(slot);
   }
 
   private noteCast(slot: number) {

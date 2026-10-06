@@ -20,6 +20,7 @@ import CircularPlayerHUD, { type CircularHudApi } from './hud/CircularPlayerHUD'
 import PlayerPartyHUD, { type PartyHudApi } from './hud/PlayerPartyHUD';
 import PvpVersusHUD from './hud/PvpVersusHUD';
 import LowHealthVignette, { type LowHealthVignetteApi } from './hud/LowHealthVignette';
+import ComboIndicator, { type ComboHudApi } from './hud/ComboIndicator';
 import PauseMenu from './menu/PauseMenu';
 import RaidLobby, { type RaidSeat } from './modes/RaidLobby';
 import PvpFlow, { type PvpLineup } from './modes/PvpFlow';
@@ -35,6 +36,8 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
   const circularHud = useRef<CircularHudApi>(null);
   const foeHud = useRef<CircularHudApi>(null);
   const vignette = useRef<LowHealthVignetteApi>(null);
+  const comboHud = useRef<ComboHudApi>(null);
+  const moveRow = useRef<HTMLDivElement>(null);
   const partyHud = useRef<PartyHudApi | null>(null);
   const pvpRef = useRef<PvpLineup | null>(null);
   const pointsRef = useRef<HTMLElement>(null);
@@ -96,6 +99,8 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
     hudRef.current = next;
     circularHud.current?.setVitals(next.hp, next.maxHp, next.aura, next.maxAura, next.burnout);
     vignette.current?.setHealth(next.hp, next.maxHp);
+    comboHud.current?.setCombo(next.combo);
+    moveRow.current?.setAttribute('data-link', next.combo.power ? 'true' : 'false');
     if (next.opponent) {
       foeHud.current?.setVitals(next.opponent.hp, next.opponent.maxHp, next.opponent.aura, next.opponent.maxAura, next.opponent.aura <= 1);
     }
@@ -357,6 +362,7 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
       {playing && phase !== 'dead' && phase !== 'victory' && (
         <div className={styles.overlay} aria-hidden="true">
           <LowHealthVignette ref={vignette} />
+          <ComboIndicator ref={comboHud} />
           <div className={styles.topHud}>
             {partyState.mode === GameMode.RAID ? (
               <PlayerPartyHUD slots={partyState.slots} mode={partyState.mode} apiRef={partyHud} />
@@ -439,11 +445,11 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
 
           <div className={styles.bottomHud}>
             <p className={styles.hint}>
-              Arrows move · WASD camera · Shift sprint · Mouse aim · Click fire · F / RMB melee · Q E R moves · {INTERACT_LABEL} use · Esc pause
+              Arrows move · WASD camera · Shift sprint · Mouse aim · Click fire · C punch · V kick · F / RMB melee · Z dodge · Q E R powers · {INTERACT_LABEL} use · Esc pause
               {phase === 'intermission' ? ' · Hold the spire to buy strength' : ''}
-              {pvpTwo ? ' · P2 IJKL move · U punch' : ''}
+              {pvpTwo ? ' · P2 IJKL move · U punch · O kick · P melee · N dodge' : ''}
             </p>
-            <div className={styles.moveRow}>
+            <div ref={moveRow} className={styles.moveRow}>
               {hudMoves.map((move, i) => (
                 <div
                   key={`${move.key}-${move.id}`}
@@ -506,8 +512,17 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
               <button type="button" onPointerDown={() => engineRef.current?.setFireHeld(true)} onPointerUp={() => engineRef.current?.setFireHeld(false)}>
                 FIRE
               </button>
+              <button type="button" onClick={() => engineRef.current?.queuePunch()}>
+                PUNCH
+              </button>
+              <button type="button" onClick={() => engineRef.current?.queueKick()}>
+                KICK
+              </button>
               <button type="button" onClick={() => engineRef.current?.queueMelee()}>
-                FIST
+                MELEE
+              </button>
+              <button type="button" onClick={() => engineRef.current?.queueDodge()}>
+                DODGE
               </button>
               <button type="button" onClick={() => engineRef.current?.queueAbility(0)}>
                 Q
