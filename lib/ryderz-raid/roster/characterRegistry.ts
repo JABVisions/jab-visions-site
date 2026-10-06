@@ -1,5 +1,6 @@
 import { RYDERZ, RYDER_ORDER, type RyderId, type RyderSpec } from '../config';
 import { GameMode } from '../game-mode';
+import { aiProfileFor, DEFAULT_AI_PROFILE, type AiProfile } from '../pvp/aiProfile';
 
 /**
  * One roster for Solo, PvP, and Raid. Screens map this list; they do not
@@ -35,6 +36,8 @@ export interface RaidCharacter {
   availableInRaid: boolean;
   unlocked: boolean;
   playable: boolean;
+  /** How a CPU copy of this character fights. Omitted entries use the default profile. */
+  aiProfile: AiProfile;
 }
 
 const FUTURE_CHARACTERS: RaidCharacter[] = [
@@ -62,6 +65,7 @@ function stub(id: string, name: string, category: CharacterCategory, solo: boole
     availableInRaid: true,
     unlocked: false,
     playable: false,
+    aiProfile: DEFAULT_AI_PROFILE,
   };
 }
 
@@ -85,6 +89,7 @@ function fromSpec(spec: RyderSpec): RaidCharacter {
     availableInRaid: true,
     unlocked: true,
     playable: true,
+    aiProfile: aiProfileFor(spec.id),
   };
 }
 

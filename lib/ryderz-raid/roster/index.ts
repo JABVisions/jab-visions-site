@@ -8,3 +8,4 @@ export {
   type RaidCharacter,
   type RosterFilter,
 } from './characterRegistry';
+export { aiProfileFor, DEFAULT_AI_PROFILE, type AiProfile, type PreferredRange } from '../pvp/aiProfile';

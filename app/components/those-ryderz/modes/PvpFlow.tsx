@@ -54,7 +54,7 @@ export default function PvpFlow({
           {step === 'type'
             ? '1 Player picks a Ryder and a CPU opponent. 2 Player puts two local Ryderz in the arena.'
             : type === 'singlePlayer'
-              ? 'Pick Player 1, then the CPU. The CPU closes in and strikes. It does not cast signature powers yet.'
+              ? 'Pick Player 1, then the CPU. The CPU spends that Ryder\u2019s own powers, aura, and cooldowns.'
               : 'Player 1 uses the normal controls. Player 2 moves with I J K L and punches with U.'}
         </span>
       </header>

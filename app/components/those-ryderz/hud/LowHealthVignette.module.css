@@ -1,0 +1,29 @@
+.veil {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: var(--edge, 0);
+  background: radial-gradient(
+    circle at center,
+    transparent 48%,
+    rgba(90, 0, 8, 0.14) 70%,
+    rgba(130, 0, 12, 0.42) 88%,
+    rgba(70, 0, 0, 0.62) 100%
+  );
+  animation: beat var(--beat, 1.6s) ease-in-out infinite;
+}
+
+.veil[data-stage='none'] {
+  animation: none;
+  opacity: 0;
+}
+
+@keyframes beat {
+  0%,
+  100% {
+    opacity: var(--edge, 0);
+  }
+  50% {
+    opacity: calc(var(--edge, 0) * 0.58);
+  }
+}

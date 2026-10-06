@@ -433,6 +433,12 @@ export class RyderPowerVFX {
     this.applyAura();
   }
 
+  /** Drop the meshes. `detach` only hides them. */
+  release(scene: THREE.Scene) {
+    this.detach();
+    scene.remove(this.arcs.mesh, this.ring, this.disc);
+  }
+
   detach() {
     this.fighter = null;
     this.profile = null;

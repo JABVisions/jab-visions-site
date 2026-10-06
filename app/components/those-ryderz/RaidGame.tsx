@@ -19,6 +19,7 @@ import CameraTuningPanel, { loadStoredCameraConfig } from './CameraTuningPanel';
 import CircularPlayerHUD, { type CircularHudApi } from './hud/CircularPlayerHUD';
 import PlayerPartyHUD, { type PartyHudApi } from './hud/PlayerPartyHUD';
 import PvpVersusHUD from './hud/PvpVersusHUD';
+import LowHealthVignette, { type LowHealthVignetteApi } from './hud/LowHealthVignette';
 import PauseMenu from './menu/PauseMenu';
 import RaidLobby, { type RaidSeat } from './modes/RaidLobby';
 import PvpFlow, { type PvpLineup } from './modes/PvpFlow';
@@ -33,6 +34,7 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
   const hudRef = useRef<HudState | null>(null);
   const circularHud = useRef<CircularHudApi>(null);
   const foeHud = useRef<CircularHudApi>(null);
+  const vignette = useRef<LowHealthVignetteApi>(null);
   const partyHud = useRef<PartyHudApi | null>(null);
   const pvpRef = useRef<PvpLineup | null>(null);
   const pointsRef = useRef<HTMLElement>(null);
@@ -93,6 +95,7 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
     const prev = hudRef.current;
     hudRef.current = next;
     circularHud.current?.setVitals(next.hp, next.maxHp, next.aura, next.maxAura, next.burnout);
+    vignette.current?.setHealth(next.hp, next.maxHp);
     if (next.opponent) {
       foeHud.current?.setVitals(next.opponent.hp, next.opponent.maxHp, next.opponent.aura, next.opponent.maxAura, next.opponent.aura <= 1);
     }
@@ -353,6 +356,7 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
 
       {playing && phase !== 'dead' && phase !== 'victory' && (
         <div className={styles.overlay} aria-hidden="true">
+          <LowHealthVignette ref={vignette} />
           <div className={styles.topHud}>
             {partyState.mode === GameMode.RAID ? (
               <PlayerPartyHUD slots={partyState.slots} mode={partyState.mode} apiRef={partyHud} />
