@@ -1,6 +1,5 @@
 'use client';
 
-import Image from 'next/image';
 import { forwardRef, useImperativeHandle, useRef } from 'react';
 import { RYDERZ, type RyderId } from '@/lib/ryderz-raid/config';
 import { RYDER_THEME } from '../menu/theme';
@@ -70,7 +69,7 @@ const CircularPlayerHUD = forwardRef<
         />
       </svg>
       <div className={styles.portrait}>
-        <Image src={spec.icon} alt="" fill unoptimized sizes="88px" />
+        <img src={spec.icon} alt="" />
       </div>
       <div className={styles.bolt} aria-hidden="true" />
       <div className={styles.caption}>

@@ -1,6 +1,5 @@
 'use client';
 
-import Image from 'next/image';
 import { useEffect, useRef, type MutableRefObject } from 'react';
 import { RYDERZ } from '@/lib/ryderz-raid/config';
 import { GameMode } from '@/lib/ryderz-raid/game-mode';
@@ -67,7 +66,7 @@ export default function PlayerPartyHUD({
             title={empty ? `Player ${slot.index + 1}` : player.displayName}
           >
             <div className={styles.portrait}>
-              {ryder ? <Image src={ryder.icon} alt="" fill unoptimized sizes="44px" /> : <span>{slot.index + 1}</span>}
+              {ryder ? <img src={ryder.icon} alt="" /> : <span>{slot.index + 1}</span>}
               <i className={styles.status} />
             </div>
             <div className={styles.meta}>
