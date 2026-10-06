@@ -42,7 +42,7 @@ const STORM_HITS: Array<{ at: number; style: MeleeStyle; mul: number; reaction: 
   { at: 0.06, style: 'slash', mul: 0.72, reaction: 'stagger', strength: 0.8, slash: new THREE.Vector3(1, 0.08, 0.15) },
   { at: 0.24, style: 'chop', mul: 0.78, reaction: 'stagger', strength: 0.95, slash: new THREE.Vector3(0.2, 1, 0.05) },
   { at: 0.42, style: 'slash', mul: 0.84, reaction: 'stagger', strength: 0.9, slash: new THREE.Vector3(-1, 0.25, 0.1) },
-  { at: 0.64, style: 'smash', mul: 1.45, reaction: 'knockback', strength: 1.25, slash: new THREE.Vector3(0.55, 0.85, -0.15) },
+  { at: 0.64, style: 'smash', mul: 1.45, reaction: 'knockback', strength: 1.05, slash: new THREE.Vector3(0.55, 0.85, -0.15) },
 ];
 const STORM_COMBO = 0.88;
 
@@ -59,7 +59,7 @@ const DUP_HITS = 3;
 const DUP_DAMAGE = 0.48;
 const DUP_WAVE_GAP = 0.55;
 const DUP_SPAWN_STAGGER = 0.09;
-const DUP_OPACITY = 0.58;
+const DUP_OPACITY = 0.72;
 
 const TROUBLE_SEEK = 11.5;
 const TROUBLE_LOCK = 0.1;
@@ -126,10 +126,10 @@ function makeEnergyBlade(color: THREE.ColorRepresentation) {
   group.name = 'EnergyBlade';
   const coreMat = energyMat(color, 0);
   const haloMat = energyMat(color, 0);
-  const core = new THREE.Mesh(new THREE.BoxGeometry(0.038, 0.86, 0.055), coreMat);
-  const halo = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.92, 0.12), haloMat);
-  core.position.y = 0.44;
-  halo.position.y = 0.44;
+  const core = new THREE.Mesh(new THREE.BoxGeometry(0.028, 0.78, 0.04), coreMat);
+  const halo = new THREE.Mesh(new THREE.BoxGeometry(0.055, 0.82, 0.07), haloMat);
+  core.position.y = 0.4;
+  halo.position.y = 0.4;
   core.renderOrder = 4;
   halo.renderOrder = 3;
   group.add(halo, core);
@@ -239,7 +239,7 @@ class SpawnFlashPool {
 
   constructor(count = 6) {
     this.group.name = 'RubiSpawnFlashes';
-    const geo = new THREE.CylinderGeometry(0.12, 0.22, 1.7, 10, 1, true);
+    const geo = new THREE.CylinderGeometry(0.05, 0.09, 1.15, 8, 1, true);
     for (let i = 0; i < count; i += 1) {
       const mat = energyMat(CRIMSON, 0);
       const mesh = new THREE.Mesh(geo, mat);
@@ -252,11 +252,11 @@ class SpawnFlashPool {
 
   spawn(pos: THREE.Vector3) {
     const item = this.items.find((i) => i.life <= 0) ?? this.items[0];
-    item.mesh.position.copy(pos).setY(pos.y + 0.9);
+    item.mesh.position.copy(pos).setY(pos.y + 0.85);
     item.mesh.visible = true;
-    item.life = 0.28;
-    item.max = 0.28;
-    item.mesh.scale.set(0.4, 0.3, 0.4);
+    item.life = 0.18;
+    item.max = 0.18;
+    item.mesh.scale.setScalar(0.7);
   }
 
   update(dt: number) {
@@ -268,9 +268,9 @@ class SpawnFlashPool {
         continue;
       }
       const p = 1 - item.life / item.max;
-      const open = p < 0.35 ? p / 0.35 : 1;
-      item.mesh.scale.set(0.5 + open * 0.9, 0.4 + open * 0.8, 0.5 + open * 0.9);
-      item.mat.opacity = (1 - p) * 0.7;
+      const open = p < 0.4 ? p / 0.4 : 1;
+      item.mesh.scale.set(0.7 + open * 0.5, 0.85 + open * 0.25, 0.7 + open * 0.5);
+      item.mat.opacity = (1 - p) * 0.4;
     }
   }
 
@@ -323,7 +323,7 @@ export class RubiKit implements RyderKit {
   private sparkT = 0;
 
   constructor() {
-    this.playerTrail = new TrailRibbon(CRIMSON, { life: 0.22, width: 0.16, spacing: 0.08, points: 14 });
+    this.playerTrail = new TrailRibbon(CRIMSON, { life: 0.18, width: 0.1, spacing: 0.09, points: 12 });
   }
 
   get locked() {
@@ -674,14 +674,14 @@ export class RubiKit implements RyderKit {
     blade.group.visible = true;
     blade.coreMat.opacity = 0.7;
     blade.haloMat.opacity = 0.28;
-    const trail = new TrailRibbon(ctx.spec.visual.electricityColor, { life: 0.2, width: 0.14, spacing: 0.1, points: 12 });
+    const trail = new TrailRibbon(ctx.spec.visual.electricityColor, { life: 0.16, width: 0.09, spacing: 0.1, points: 10 });
     ctx.scene.add(fighter.humanoid.group, trail.mesh);
     fighter.humanoid.group.position.copy(pos);
     fighter.humanoid.group.position.y = ctx.heightAt(pos.x, pos.z);
     fighter.humanoid.group.rotation.y = yaw;
     fighter.humanoid.group.scale.setScalar(0.45);
     setHumanoidOpacity(fighter.humanoid, 0);
-    flashEmissive(fighter.humanoid, ctx.spec.visual.auraColor, 0.55);
+    flashEmissive(fighter.humanoid, ctx.spec.visual.auraColor, 0.22);
     if (delay <= 0) {
       this.flashes.spawn(pos);
       ctx.particles.emit(pos.clone().setY(0.9), ctx.spec.color, 10, { speed: 5, size: 0.2, life: 0.28, up: 1.2 });
@@ -743,8 +743,9 @@ export class RubiKit implements RyderKit {
         style: echo.meleeStarted ? echo.style : undefined,
       });
       echo.meleeStarted = false;
+      echo.fighter.humanoid.group.updateWorldMatrix(true, true);
       bladeTip(echo.fighter, _p);
-      if (echo.state === 'attack' || echo.state === 'chase') echo.trail.feed(_p);
+      if ((echo.state === 'attack' || echo.state === 'chase') && echo.pos.distanceTo(_p) < 2.6) echo.trail.feed(_p);
       echo.trail.update(dt, ctx.cameraObject);
       if (echo.state === 'dissolve' && echo.spawnT > 0.34) {
         this.destroyEcho(echo);
