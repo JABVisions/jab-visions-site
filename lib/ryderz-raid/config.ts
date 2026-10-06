@@ -118,6 +118,37 @@ export const CAR_MODELS: CarModel[] = [
   { url: '/assets/those-ryderz/models/car-hatch.glb', length: 3.9, width: 2.17 },
   { url: '/assets/those-ryderz/models/car-pickup.glb', length: 4.9, width: 2.19 },
 ];
+
+export interface ArenaBuildingModel {
+  url: string;
+  /**
+   * Unscaled size of the export. Width runs along local +X, depth along local +Z
+   * (the street facade, stoop included), and the base sits on y = 0.
+   */
+  width: number;
+  height: number;
+  depth: number;
+}
+
+/**
+ * Textured street buildings that ring the arena. Slots alternate between them.
+ * The Tripo exports are about a metre tall; each slot scales one uniformly so
+ * the facade fills that lot.
+ */
+export const ARENA_BUILDINGS: ArenaBuildingModel[] = [
+  {
+    url: '/assets/those-ryderz/models/arena-storefront.glb',
+    width: 0.6723438501358032,
+    height: 0.9972038269042969,
+    depth: 0.5424783825874329,
+  },
+  {
+    url: '/assets/those-ryderz/models/arena-townhouse.glb',
+    width: 0.5290689468383789,
+    height: 1.0002299547195435,
+    depth: 0.4037730395793915,
+  },
+];
 export const MAX_ALIVE_HOSTS = 26;
 /**
  * Rigged glTF binaries for the host mob. Each spawn picks one at random; when
