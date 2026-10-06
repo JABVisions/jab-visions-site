@@ -1,6 +1,6 @@
 /**
- * Session modes. Solo is the existing single-player raid. PvP and Raid share
- * the same client player model; networking is a later step.
+ * Session modes. Solo, PvP, and Raid are separate flows that share characters,
+ * models, and combat utilities. Networking is a later step.
  *
  * Older saves stored `pve` — hydrate maps that onto Solo.
  */

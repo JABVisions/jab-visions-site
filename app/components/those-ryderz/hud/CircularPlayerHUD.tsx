@@ -16,8 +16,8 @@ function clampPct(value: number, max: number) {
 
 const CircularPlayerHUD = forwardRef<
   CircularHudApi,
-  { ryderId: RyderId; burnout: boolean }
->(function CircularPlayerHUD({ ryderId, burnout }, ref) {
+  { ryderId: RyderId; burnout?: boolean; badge?: string }
+>(function CircularPlayerHUD({ ryderId, burnout, badge }, ref) {
   const spec = RYDERZ[ryderId];
   const theme = RYDER_THEME[ryderId];
   const root = useRef<HTMLDivElement>(null);
@@ -73,6 +73,7 @@ const CircularPlayerHUD = forwardRef<
       </div>
       <div className={styles.bolt} aria-hidden="true" />
       <div className={styles.caption}>
+        {badge ? <small>{badge}</small> : null}
         <b>{spec.name}</b>
         <span>
           HP <em ref={hpLabel}>—</em>

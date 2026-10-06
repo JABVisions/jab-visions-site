@@ -86,6 +86,14 @@
   text-shadow: 0 2px 8px rgba(0, 0, 0, 0.8);
 }
 
+.caption small {
+  display: block;
+  color: var(--ryder);
+  font: 800 0.52rem/1 ui-monospace, monospace;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
 .caption b {
   display: block;
   color: #f7fff9;

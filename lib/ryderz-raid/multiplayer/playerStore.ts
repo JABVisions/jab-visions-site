@@ -5,7 +5,6 @@ import {
   DEFAULT_PARTY_ID,
   LOCAL_PLAYER_ID,
   PARTY_HUD_CAPACITY,
-  PLAYERS_PER_PARTY,
   type PartySlot,
   type RaidInstance,
   type RaidParty,
@@ -13,13 +12,6 @@ import {
 } from './playerTypes';
 
 type Listener = () => void;
-
-const MOCK_ROSTER: Array<{ displayName: string; selectedRyder: RyderId }> = [
-  { displayName: 'P2 Leo', selectedRyder: 'leo' },
-  { displayName: 'P3 Aaron', selectedRyder: 'aaron' },
-  { displayName: 'P4 Zoe', selectedRyder: 'zoe' },
-  { displayName: 'P5 Rubi', selectedRyder: 'rubi' },
-];
 
 function localPlayer(ryder: RyderId | null, mode: GameMode): RaidPlayer {
   const spec = ryder ? RYDERZ[ryder] : null;
@@ -38,28 +30,6 @@ function localPlayer(ryder: RyderId | null, mode: GameMode): RaidPlayer {
     isAlive: true,
     isConnected: true,
     isPlaceholder: false,
-  };
-}
-
-function mockPlayer(index: number, mode: GameMode): RaidPlayer {
-  const mock = MOCK_ROSTER[(index - 1) % MOCK_ROSTER.length];
-  const spec = RYDERZ[mock.selectedRyder];
-  const partyIndex = Math.floor(index / PLAYERS_PER_PARTY);
-  return {
-    id: `player-${index + 1}`,
-    displayName: mock.displayName,
-    playerIndex: index,
-    partyId: partyIndex === 0 ? DEFAULT_PARTY_ID : `party-${String.fromCharCode(97 + partyIndex)}`,
-    selectedRyder: mock.selectedRyder,
-    health: spec.maxHp,
-    maxHealth: spec.maxHp,
-    aura: spec.maxAura,
-    maxAura: spec.maxAura,
-    team: teamForMode(mode, false),
-    isLocal: false,
-    isAlive: true,
-    isConnected: true,
-    isPlaceholder: true,
   };
 }
 
@@ -151,14 +121,38 @@ export class PlayerStore {
     return { id: this.instanceId, mode: this.mode, parties: [...byParty.values()] };
   }
 
-  configure(opts: { mode: GameMode; localRyder: RyderId | null; mockParty?: boolean }) {
+  configure(opts: {
+    mode: GameMode;
+    localRyder: RyderId | null;
+    seats?: Array<{ index: number; displayName: string; ryderId: RyderId | null; isLocal: boolean }>;
+  }) {
     this.mode = opts.mode;
-    const local = localPlayer(opts.localRyder, opts.mode);
-    const extras =
-      opts.mockParty === true
-        ? Array.from({ length: PARTY_HUD_CAPACITY - 1 }, (_, i) => mockPlayer(i + 1, opts.mode))
-        : [];
-    this.players = [local, ...extras];
+    if (opts.seats && opts.seats.length > 0) {
+      this.players = opts.seats.map((seat) => {
+        const spec = seat.ryderId ? RYDERZ[seat.ryderId] : null;
+        return {
+          id: seat.isLocal ? LOCAL_PLAYER_ID : `player-${seat.index + 1}`,
+          displayName: spec?.name ?? seat.displayName,
+          playerIndex: seat.index,
+          partyId: DEFAULT_PARTY_ID,
+          selectedRyder: seat.ryderId,
+          health: spec?.maxHp ?? 100,
+          maxHealth: spec?.maxHp ?? 100,
+          aura: spec?.maxAura ?? 100,
+          maxAura: spec?.maxAura ?? 100,
+          team: teamForMode(opts.mode, seat.isLocal),
+          isLocal: seat.isLocal,
+          isAlive: true,
+          isConnected: true,
+          isPlaceholder: !seat.isLocal,
+        };
+      });
+      const local = this.players.find((player) => player.isLocal);
+      if (local) this.localPlayerId = local.id;
+    } else {
+      this.localPlayerId = LOCAL_PLAYER_ID;
+      this.players = [localPlayer(opts.localRyder, opts.mode)];
+    }
     this.notify();
   }
 

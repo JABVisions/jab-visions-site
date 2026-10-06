@@ -84,7 +84,17 @@ export interface HudState {
   round: number;
   remaining: number;
   points: number;
-  phase: 'playing' | 'intermission' | 'dead';
+  phase: 'playing' | 'intermission' | 'dead' | 'victory';
+  /** Set during a versus match. Null in Solo and Raid. */
+  opponent: {
+    ryderId: RyderId;
+    name: string;
+    hp: number;
+    maxHp: number;
+    aura: number;
+    maxAura: number;
+    cpu: boolean;
+  } | null;
   intermissionLeft: number;
   nearShop: boolean;
   banner: { title: string; sub: string } | null;
@@ -135,6 +145,13 @@ interface Host {
   sink: number;
   /** Colour of the current hit flash; hits reset it to white, kits can tint it. */
   hitColor: number;
+  /** Versus opponent wearing a Ryder model. Not a mind-controlled host. */
+  duelist?: boolean;
+  /** Local player 2, rather than CPU. */
+  controlled?: boolean;
+  ryderId?: RyderId;
+  aura?: number;
+  maxAura?: number;
 }
 
 /** A defeated host still flying from the blow that killed it. */
@@ -231,6 +248,10 @@ export class RaidEngine {
   /** Powers bound to Q / E / R. Defaults to the Ryder's signature moves; the Power Deck can rebind them. */
   private moves: AbilitySpec[] = RYDERZ.rubi.moves;
   private gameMode: GameMode = GameMode.SOLO;
+  private pvpSetup: { opponentId: RyderId; localTwoPlayer: boolean } | null = null;
+  private pvpLocalTwo = false;
+  private p2MeleeQueued = false;
+  private foeHud: HudState['opponent'] = null;
   private switchToken = 0;
   private player: Fighter | null = null;
   private shield: THREE.Mesh | null = null;
@@ -403,7 +424,28 @@ export class RaidEngine {
     this.shield.visible = false;
     this.scene.add(this.shield);
 
-    this.beginRound(1);
+    if (this.gameMode === GameMode.PVP && this.pvpSetup) {
+      this.pvpLocalTwo = this.pvpSetup.localTwoPlayer;
+      await this.spawnDuelist(this.pvpSetup.opponentId, this.pvpSetup.localTwoPlayer);
+      if (this.disposed) return;
+      this.round = 0;
+      this.queue = [];
+      this.phase = 'playing';
+      this.banner = {
+        title: 'VERSUS',
+        sub: this.pvpLocalTwo ? 'P2 · IJKL MOVE · U PUNCH' : 'CPU CLOSES IN',
+      };
+      this.bannerT = 2.6;
+    } else {
+      this.pvpLocalTwo = false;
+      this.beginRound(1);
+    }
+  }
+
+  /** Versus lineup. Cleared by Solo and Raid starts. */
+  setPvpSetup(setup: { opponentId: RyderId; localTwoPlayer: boolean } | null) {
+    this.pvpSetup = setup;
+    if (!setup) this.pvpLocalTwo = false;
   }
 
   setPaused(value: boolean) {
@@ -429,8 +471,7 @@ export class RaidEngine {
   }
 
   setGameMode(mode: GameMode) {
-    // Spawning is unchanged this phase. Damage filtering lives in `canDamage`
-    // so kits can start asking "which player did this?" before networking lands.
+    // Solo and Raid keep the host waves. PvP skips them and spawns one duelist.
     this.gameMode = mode;
   }
 
@@ -649,6 +690,9 @@ export class RaidEngine {
     if (e.key === 'q' || e.key === 'Q' || e.key === '1') this.queuedMoves[0] = true;
     if (e.key === 'e' || e.key === 'E' || e.key === '2') this.queuedMoves[1] = true;
     if (e.key === 'r' || e.key === 'R' || e.key === '3') this.queuedMoves[2] = true;
+    if (this.pvpLocalTwo && (e.key === 'u' || e.key === 'U')) {
+      this.p2MeleeQueued = true;
+    }
     if (e.key === 'f' || e.key === 'F' || e.code === 'Space') {
       this.meleeQueued = true;
     }
@@ -695,7 +739,7 @@ export class RaidEngine {
       this.hitStopT = Math.max(0, this.hitStopT - dt);
       dt *= 0.06;
     }
-    if (!this.paused && this.player && this.phase !== 'dead') this.update(dt, time);
+    if (!this.paused && this.player && this.phase !== 'dead' && this.phase !== 'victory') this.update(dt, time);
     else if (this.player) this.updateCamera(dt);
     this.world.animate(time);
     this.particles.update(dt);
@@ -1489,6 +1533,7 @@ export class RaidEngine {
   }
 
   private updateRound(dt: number) {
+    if (this.gameMode === GameMode.PVP) return;
     if (this.phase === 'intermission') {
       this.intermissionLeft = Math.max(0, this.intermissionLeft - dt);
       if (this.intermissionLeft <= 0) this.beginRound(this.round + 1);
@@ -1576,6 +1621,13 @@ export class RaidEngine {
     }
 
     for (const host of this.hosts) {
+      if (host.duelist && host.controlled) {
+        this.driveLocalOpponent(host, dt, time);
+        continue;
+      }
+      if (host.duelist && host.maxAura) {
+        host.aura = Math.min(host.maxAura, (host.aura ?? host.maxAura) + dt * 4);
+      }
       host.cooldown = Math.max(0, host.cooldown - dt);
       host.hit = Math.max(0, host.hit - dt);
       host.knock.multiplyScalar(Math.max(0, 1 - dt * 6));
@@ -1758,8 +1810,23 @@ export class RaidEngine {
     // Kits may still hold a reference; make sure it reads as dead.
     host.hp = Math.min(host.hp, 0);
     host.held = 0;
-    this.points += host.points;
-    this.aura = Math.min(this.maxAura, this.aura + KILL_AURA_SIPHON + this.upgrades.siphon * 4);
+    if (host.duelist && host.ryderId) {
+      this.foeHud = {
+        ryderId: host.ryderId,
+        name: RYDERZ[host.ryderId].name,
+        hp: 0,
+        maxHp: host.maxHp,
+        aura: host.aura ?? 0,
+        maxAura: host.maxAura ?? 0,
+        cpu: !host.controlled,
+      };
+      this.phase = 'victory';
+      this.banner = { title: 'YOU WIN', sub: 'OPPONENT DOWN' };
+      this.bannerT = 30;
+    } else {
+      this.points += host.points;
+      this.aura = Math.min(this.maxAura, this.aura + KILL_AURA_SIPHON + this.upgrades.siphon * 4);
+    }
     this.burst(host.pos.clone().setY(1), host.kind === 'broadcaster' ? 0xb84dff : 0x7dff9a, host.kind === 'broadcaster' ? 40 : 16);
     this.hosts = this.hosts.filter((h) => h !== host);
     if (flungBy && this.fallen.length < 8) {
@@ -2020,7 +2087,107 @@ export class RaidEngine {
       powerState: this.powerVfx.currentState,
       beacon: this.beacon ? this.beacon.hudState(this.clock.elapsedTime, this.pos) : null,
       recovering: this.recoveryT > 0,
+      opponent: this.publishFoe(),
     });
+  }
+
+  private publishFoe(): HudState['opponent'] {
+    const foe = this.hosts.find((host) => host.duelist && host.ryderId);
+    if (foe?.ryderId) {
+      this.foeHud = {
+        ryderId: foe.ryderId,
+        name: RYDERZ[foe.ryderId].name,
+        hp: foe.hp,
+        maxHp: foe.maxHp,
+        aura: foe.aura ?? foe.maxAura ?? 0,
+        maxAura: foe.maxAura ?? 0,
+        cpu: !foe.controlled,
+      };
+    }
+    return this.gameMode === GameMode.PVP ? this.foeHud : null;
+  }
+
+  private async spawnDuelist(id: RyderId, controlled: boolean) {
+    const spec = RYDERZ[id];
+    if (spec.glb) {
+      await preloadRyderGltf(spec).catch((error) => {
+        console.warn('[raid] failed to load opponent GLB, using block figure', error);
+      });
+    }
+    if (this.disposed) return;
+    const fighter = buildRyder(spec, { clone: true });
+    const pos = new THREE.Vector3(-Math.sign(this.pos.x || 1) * 8, 0, -Math.sign(this.pos.z || 1) * 8);
+    fighter.humanoid.group.position.copy(pos);
+    fighter.humanoid.group.position.y = this.world.heightAt(pos.x, pos.z);
+    fighter.humanoid.group.rotation.y = Math.atan2(this.pos.x - pos.x, this.pos.z - pos.z);
+    this.scene.add(fighter.humanoid.group);
+    this.hosts.push({
+      kind: 'walker',
+      fighter,
+      hp: spec.maxHp,
+      maxHp: spec.maxHp,
+      pos,
+      radius: PLAYER_RADIUS,
+      speed: spec.speed * 0.82,
+      damage: spec.meleeDamage * 0.55,
+      mass: 1,
+      preferredRange: 0,
+      cooldown: 0.6,
+      anim: 0,
+      hit: 0,
+      knock: new THREE.Vector3(),
+      points: 0,
+      summon: 99,
+      stun: 0,
+      swing: false,
+      stagger: 0,
+      airY: 0,
+      airVel: 0,
+      lean: 0,
+      spin: 0,
+      tumble: 0,
+      held: 0,
+      sink: 0,
+      hitColor: 0xffffff,
+      duelist: true,
+      controlled,
+      ryderId: id,
+      aura: spec.maxAura,
+      maxAura: spec.maxAura,
+    });
+  }
+
+  /** Local player 2. I/K move on Z, J/L move on X, U punches. Camera stays on player 1. */
+  private driveLocalOpponent(host: Host, dt: number, time: number) {
+    host.cooldown = Math.max(0, host.cooldown - dt);
+    if (host.maxAura) host.aura = Math.min(host.maxAura, (host.aura ?? 0) + dt * 6);
+    let mx = 0;
+    let mz = 0;
+    if (this.keys.has('j')) mx -= 1;
+    if (this.keys.has('l')) mx += 1;
+    if (this.keys.has('i')) mz -= 1;
+    if (this.keys.has('k')) mz += 1;
+    const moving = Math.hypot(mx, mz);
+    if (moving > 0) {
+      host.pos.x += (mx / moving) * host.speed * dt;
+      host.pos.z += (mz / moving) * host.speed * dt;
+      host.pos.x = clamp(host.pos.x, -BOUNDARY, BOUNDARY);
+      host.pos.z = clamp(host.pos.z, -BOUNDARY, BOUNDARY);
+      resolveCircle(host.pos, host.radius, this.world.obstacles);
+      host.fighter.humanoid.group.rotation.y = Math.atan2(mx, mz);
+    }
+    host.fighter.humanoid.group.position.copy(host.pos);
+    host.fighter.humanoid.group.position.y = this.world.heightAt(host.pos.x, host.pos.z);
+    this.animateHost(host, dt, Math.min(1, moving), time);
+    const dist = Math.hypot(this.pos.x - host.pos.x, this.pos.z - host.pos.z);
+    if (this.p2MeleeQueued && host.cooldown <= 0 && dist < host.radius + PLAYER_RADIUS + 0.7) {
+      host.cooldown = 0.55;
+      host.swing = true;
+      const dx = this.pos.x - host.pos.x;
+      const dz = this.pos.z - host.pos.z;
+      this.hurtPlayer(host.damage, _tmp.set(dx, 0, dz).normalize());
+    }
+    this.p2MeleeQueued = false;
   }
 
   private clearCombat() {
