@@ -3,6 +3,7 @@ import { LeoKit } from './leo';
 import { KevenKit } from './keven';
 import { AaronKit } from './aaron';
 import { ZoeKit } from './zoe';
+import { RubiKit } from './rubi';
 import type { RyderKit } from './kit';
 
 export type { KitContext, KitFrame, KitTarget, MeleeStep, RyderKit } from './kit';
@@ -12,6 +13,7 @@ export type { KitContext, KitFrame, KitTarget, MeleeStep, RyderKit } from './kit
  * handling for her moves and melee; add an entry here when her overhaul lands.
  */
 const KITS: Partial<Record<RyderId, () => RyderKit>> = {
+  rubi: () => new RubiKit(),
   leo: () => new LeoKit(),
   aaron: () => new AaronKit(),
   keven: () => new KevenKit(),

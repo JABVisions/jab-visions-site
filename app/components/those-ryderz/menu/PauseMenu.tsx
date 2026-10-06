@@ -25,7 +25,7 @@ const ROOT_ITEMS: NavItem<RootAction>[] = [
   { id: 'deck', label: 'Power Deck', hint: 'Bind Q · E · R' },
   { id: 'ryder', label: 'Switch Ryder', hint: 'Change who is in play' },
   { id: 'arena', label: 'Arena', hint: 'Where the raid happens', soon: true },
-  { id: 'mode', label: 'Game Mode', hint: 'PvE · PvP' },
+  { id: 'mode', label: 'Game Mode', hint: 'Solo · PvP · Raid' },
   { id: 'settings', label: 'Settings', hint: 'Camera & controls' },
   { id: 'exit', label: 'Exit Raid', hint: 'Drop the signal', danger: true },
 ];

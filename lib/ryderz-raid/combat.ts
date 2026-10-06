@@ -6,8 +6,12 @@ import * as THREE from 'three';
  * impact decals (shock rings, cracked ground) that heavy attacks share.
  *
  * Nothing in here knows about a specific Ryder; kits (see `ryderz/`) compose
- * these into their own moves.
+ * these into their own moves. Multiplayer targeting goes through `canDamage`
+ * so abilities can filter allies vs opponents without each kit hard-coding a mode.
  */
+
+export { canDamage } from './multiplayer/damageRules';
+export { isFriendly } from './multiplayer/teamUtils';
 
 /** The slice of an enemy the hit system needs. The engine's `Host` satisfies it. */
 export interface Targetable {

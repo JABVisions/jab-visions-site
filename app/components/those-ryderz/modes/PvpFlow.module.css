@@ -1,0 +1,155 @@
+.screen {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: grid;
+  align-content: start;
+  gap: 14px;
+  padding: 22px 22px 18px;
+  overflow: auto;
+  background:
+    radial-gradient(circle at 50% 0%, rgba(255, 70, 90, 0.16), transparent 42%),
+    #07080d;
+  pointer-events: auto;
+}
+
+.screen header p {
+  margin: 0;
+  color: #ff8d9a;
+  font: 800 0.68rem/1.3 ui-monospace, monospace;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+.screen header h2 {
+  margin: 6px 0;
+  font-size: clamp(1.6rem, 3vw, 2.4rem);
+}
+
+.screen header span {
+  display: block;
+  max-width: 62ch;
+  color: rgba(255, 236, 238, 0.72);
+}
+
+.types {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  max-width: 980px;
+}
+
+.versus {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+}
+
+.side {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 16px;
+  background: rgba(0, 0, 0, 0.28);
+}
+
+.sideOn {
+  border-color: #ff5c73;
+  box-shadow: 0 0 18px rgba(255, 70, 100, 0.25);
+}
+
+.side button.pick {
+  appearance: none;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  width: 100%;
+  padding: 8px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.pick span {
+  display: grid;
+  gap: 2px;
+}
+
+.pick em {
+  color: rgba(255, 220, 224, 0.55);
+  font: 700 0.62rem/1 ui-monospace, monospace;
+  font-style: normal;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.ready {
+  color: #7dffb2;
+}
+
+.face {
+  width: 54px;
+  height: 54px;
+  overflow: hidden;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.face img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: top;
+}
+
+.vs {
+  align-self: center;
+  color: #ff5c73;
+  font: 800 1.4rem/1 ui-monospace, monospace;
+  letter-spacing: 0.14em;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.actions button,
+.back {
+  appearance: none;
+  padding: 10px 14px;
+  border: 1px solid rgba(255, 92, 115, 0.45);
+  border-radius: 999px;
+  background: rgba(255, 70, 90, 0.12);
+  color: #fff;
+  cursor: pointer;
+  font: 800 0.68rem/1 ui-monospace, monospace;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.actions button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.back {
+  width: fit-content;
+  background: transparent;
+}
+
+@media (max-width: 860px) {
+  .types,
+  .versus {
+    grid-template-columns: 1fr;
+  }
+
+  .vs {
+    text-align: center;
+  }
+}

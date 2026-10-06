@@ -1,12 +1,8 @@
 'use client';
 
-import { ChevronLeft, ChevronRight } from 'lucide-react';
-import Image from 'next/image';
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import {
   INTERACT_LABEL,
-  RYDERZ,
-  RYDER_ORDER,
   UPGRADE_ORDER,
   UPGRADES,
   upgradeCost,
@@ -15,20 +11,32 @@ import {
 } from '@/lib/ryderz-raid/config';
 import type { CameraState } from '@/lib/ryderz-raid/camera';
 import type { HudState, RaidEngine } from '@/lib/ryderz-raid/engine';
+import { GameMode } from '@/lib/ryderz-raid/game-mode';
+import { PlayerStore } from '@/lib/ryderz-raid/multiplayer';
 import { RyderManager } from '@/lib/ryderz-raid/ryder-manager';
+import { SaveManager } from '@/lib/ryderz-raid/saves/saveManager';
 import CameraTuningPanel, { loadStoredCameraConfig } from './CameraTuningPanel';
+import CircularPlayerHUD, { type CircularHudApi } from './hud/CircularPlayerHUD';
+import PlayerPartyHUD, { type PartyHudApi } from './hud/PlayerPartyHUD';
+import PvpVersusHUD from './hud/PvpVersusHUD';
+import LowHealthVignette, { type LowHealthVignetteApi } from './hud/LowHealthVignette';
 import PauseMenu from './menu/PauseMenu';
+import RaidLobby, { type RaidSeat } from './modes/RaidLobby';
+import PvpFlow, { type PvpLineup } from './modes/PvpFlow';
+import SoloCharacterSelect from './modes/SoloCharacterSelect';
 import { NEUTRAL_THEME, RYDER_THEME as AURA } from './menu/theme';
+import RyderzStartScreen from './start/RyderzStartScreen';
 import styles from './RaidGame.module.css';
 
 export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'page' }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const engineRef = useRef<RaidEngine | null>(null);
   const hudRef = useRef<HudState | null>(null);
-  const hpFill = useRef<HTMLDivElement>(null);
-  const auraFill = useRef<HTMLDivElement>(null);
-  const hpLabel = useRef<HTMLSpanElement>(null);
-  const auraLabel = useRef<HTMLSpanElement>(null);
+  const circularHud = useRef<CircularHudApi>(null);
+  const foeHud = useRef<CircularHudApi>(null);
+  const vignette = useRef<LowHealthVignetteApi>(null);
+  const partyHud = useRef<PartyHudApi | null>(null);
+  const pvpRef = useRef<PvpLineup | null>(null);
   const pointsRef = useRef<HTMLElement>(null);
   const remainingRef = useRef<HTMLElement>(null);
   const roundRef = useRef<HTMLElement>(null);
@@ -39,10 +47,22 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
   // `selected` is the Ryder the raid booted with (it owns the engine's lifetime);
   // the Ryder currently in play lives in the RyderManager and can change mid-raid.
   const [selected, setSelected] = useState<RyderId | null>(null);
+  const [screen, setScreen] = useState<'start' | 'solo-select' | 'pvp' | 'raid-lobby' | 'game'>('start');
+  const [pvpOpponent, setPvpOpponent] = useState<RyderId | null>(null);
+  const [pvpLabel, setPvpLabel] = useState('CPU');
+  const [pvpTwo, setPvpTwo] = useState(false);
   const manager = useMemo(() => new RyderManager(), []);
+  const playerStore = useMemo(() => new PlayerStore(), []);
+  const saves = useMemo(() => new SaveManager(), []);
   const subscribe = useCallback((listener: () => void) => manager.subscribe(listener), [manager]);
   const getSnapshot = useCallback(() => manager.getState(), [manager]);
   const managerState = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+  const subscribeSaves = useCallback((listener: () => void) => saves.subscribe(listener), [saves]);
+  const getSaves = useCallback(() => saves.getState(), [saves]);
+  const saveState = useSyncExternalStore(subscribeSaves, getSaves, getSaves);
+  const subscribePlayers = useCallback((listener: () => void) => playerStore.subscribe(listener), [playerStore]);
+  const getPlayers = useCallback(() => playerStore.getState(), [playerStore]);
+  const partyState = useSyncExternalStore(subscribePlayers, getPlayers, getPlayers);
   const activeRyder = managerState.activeRyder;
   const [hudMoves, setHudMoves] = useState<HudState['moves']>([]);
   const [round, setRound] = useState(0);
@@ -67,23 +87,26 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
   });
   const [intermissionLeft, setIntermissionLeft] = useState(0);
   const [coarse, setCoarse] = useState(false);
-  const [focus, setFocus] = useState(0);
   const [camPanel, setCamPanel] = useState(false);
   const [cameraState, setCameraState] = useState<CameraState>('EXPLORATION');
   const [engineReady, setEngineReady] = useState<RaidEngine | null>(null);
-  const cardRefs = useRef<Array<HTMLButtonElement | null>>([]);
 
   const syncHud = useCallback((next: HudState) => {
     const prev = hudRef.current;
     hudRef.current = next;
-    if (hpFill.current) hpFill.current.style.width = `${(next.hp / next.maxHp) * 100}%`;
-    if (auraFill.current) auraFill.current.style.width = `${(next.aura / next.maxAura) * 100}%`;
-    if (hpLabel.current) hpLabel.current.textContent = `${Math.ceil(next.hp)} / ${next.maxHp}`;
-    if (auraLabel.current) {
-      auraLabel.current.textContent = next.burnout
-        ? 'BURNOUT · FISTS ONLY'
-        : `${Math.ceil(next.aura)} / ${next.maxAura}`;
+    circularHud.current?.setVitals(next.hp, next.maxHp, next.aura, next.maxAura, next.burnout);
+    vignette.current?.setHealth(next.hp, next.maxHp);
+    if (next.opponent) {
+      foeHud.current?.setVitals(next.opponent.hp, next.opponent.maxHp, next.opponent.aura, next.opponent.maxAura, next.opponent.aura <= 1);
     }
+    partyHud.current?.setLocalVitals(next.hp, next.maxHp, next.aura, next.maxAura, next.hp > 0);
+    playerStore.syncLocalVitals({
+      health: next.hp,
+      maxHealth: next.maxHp,
+      aura: next.aura,
+      maxAura: next.maxAura,
+      isAlive: next.hp > 0,
+    });
     if (pointsRef.current) pointsRef.current.textContent = String(next.points);
     if (next.beacon && beaconCooldown.current) {
       beaconCooldown.current.textContent = `${Math.ceil(next.beacon.cooldownLeft)}s`;
@@ -138,7 +161,7 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
     if (!prev || Math.abs(prev.intermissionLeft - next.intermissionLeft) > 0.2) {
       setIntermissionLeft(next.intermissionLeft);
     }
-  }, []);
+  }, [playerStore]);
 
   useEffect(() => {
     const mq = window.matchMedia('(pointer: coarse)');
@@ -159,6 +182,11 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
       engine = new RaidEngine(canvas, syncHud);
       engineRef.current = engine;
       manager.attach(engine);
+      engine.setPvpSetup(
+        pvpRef.current
+          ? { opponentId: pvpRef.current.opponent, localTwoPlayer: pvpRef.current.type === 'localTwoPlayer' }
+          : null,
+      );
       const stored = loadStoredCameraConfig();
       if (stored) engine.setCameraConfig(stored);
       setEngineReady(engine);
@@ -188,26 +216,57 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
     if (!camPanel) engine.setCameraPreviewState(null);
   }, [camPanel, engineReady]);
 
-  const pick = (id: RyderId) => {
+  const boot = (id: RyderId) => {
     manager.setActiveRyder(id);
+    saves.saveGame(manager);
     setSelected(id);
+    setScreen('game');
     setPhase('playing');
     setPaused(false);
   };
 
-  const cycleFocus = useCallback((dir: number) => {
-    setFocus((index) => (index + dir + RYDER_ORDER.length) % RYDER_ORDER.length);
-  }, []);
+  const playSolo = (id: RyderId) => {
+    pvpRef.current = null;
+    setPvpOpponent(null);
+    setPvpTwo(false);
+    manager.setGameMode(GameMode.SOLO);
+    playerStore.configure({ mode: GameMode.SOLO, localRyder: id });
+    boot(id);
+  };
 
-  useEffect(() => {
-    cardRefs.current[focus]?.scrollIntoView({
-      behavior: 'smooth',
-      inline: 'center',
-      block: 'nearest',
+  const playPvp = (lineup: PvpLineup) => {
+    pvpRef.current = lineup;
+    setPvpOpponent(lineup.opponent);
+    setPvpLabel(lineup.type === 'localTwoPlayer' ? 'P2' : 'CPU');
+    setPvpTwo(lineup.type === 'localTwoPlayer');
+    manager.setGameMode(GameMode.PVP);
+    playerStore.configure({ mode: GameMode.PVP, localRyder: lineup.player });
+    boot(lineup.player);
+  };
+
+  const playRaid = (seats: RaidSeat[]) => {
+    const host = seats.find((seat) => seat.isLocal) ?? seats[0];
+    const ryder = host?.character?.ryderId;
+    if (!ryder) return;
+    pvpRef.current = null;
+    setPvpOpponent(null);
+    setPvpTwo(false);
+    manager.setGameMode(GameMode.RAID);
+    playerStore.configure({
+      mode: GameMode.RAID,
+      localRyder: ryder,
+      seats: seats.map((seat) => ({
+        index: seat.index,
+        displayName: seat.displayName,
+        ryderId: seat.character?.ryderId ?? null,
+        isLocal: seat.isLocal,
+      })),
     });
-  }, [focus]);
+    boot(ryder);
+  };
 
   useEffect(() => {
+    if (screen !== 'game') return;
     const isScrollKey = (e: KeyboardEvent) =>
       e.code === 'ArrowUp' ||
       e.code === 'ArrowDown' ||
@@ -218,26 +277,9 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
       e.code === 'PageDown' ||
       e.code === 'Home' ||
       e.code === 'End';
-
     const onKey = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement | null)?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA') return;
-      if (!selected) {
-        if (e.key === 'ArrowRight') {
-          e.preventDefault();
-          cycleFocus(1);
-        } else if (e.key === 'ArrowLeft') {
-          e.preventDefault();
-          cycleFocus(-1);
-        } else if (isScrollKey(e)) {
-          e.preventDefault();
-        }
-        if (e.key === 'Enter') {
-          e.preventDefault();
-          pick(RYDER_ORDER[focus]);
-        }
-        return;
-      }
       if (e.code === 'Backquote') {
         e.preventDefault();
         setCamPanel((open) => !open);
@@ -247,19 +289,26 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
     };
     window.addEventListener('keydown', onKey, { capture: true });
     return () => window.removeEventListener('keydown', onKey, { capture: true });
-  }, [selected, focus, cycleFocus]);
+  }, [screen]);
 
   const changeRyder = () => {
     engineRef.current?.dispose();
     engineRef.current = null;
     setCamPanel(false);
     setSelected(null);
+    const mode = manager.getState().gameMode;
+    setScreen(mode === GameMode.PVP ? 'pvp' : mode === GameMode.RAID ? 'raid-lobby' : 'solo-select');
     setPhase('select');
     setPaused(false);
     setBanner(null);
     setNearShop(false);
     setBeacon(null);
     setRecovering(false);
+  };
+
+  const exitToStart = () => {
+    changeRyder();
+    setScreen('start');
   };
 
   const resume = () => {
@@ -290,7 +339,7 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
   };
 
   const aura = selected ? AURA[activeRyder] : NEUTRAL_THEME;
-  const playing = Boolean(selected);
+  const playing = screen === 'game' && Boolean(selected);
 
   return (
     <div
@@ -299,47 +348,35 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
     >
       <canvas
         ref={canvasRef}
-        className={`${styles.canvas} ${!playing || paused || phase === 'dead' ? styles.paused : ''}`}
+        className={`${styles.canvas} ${!playing || paused || phase === 'dead' || phase === 'victory' ? styles.paused : ''}`}
         onClick={() => {
           if (playing && phase === 'playing' && !paused) engineRef.current?.requestPointerLock();
         }}
       />
 
-      {playing && phase !== 'dead' && (
+      {playing && phase !== 'dead' && phase !== 'victory' && (
         <div className={styles.overlay} aria-hidden="true">
+          <LowHealthVignette ref={vignette} />
           <div className={styles.topHud}>
-            <div className={styles.meterStack}>
-              <div className={`${styles.strip} ${styles.hpStrip}`}>
-                <span>
-                  Vital
-                  <em ref={hpLabel}>0 / 0</em>
-                </span>
-                <div className={styles.track}>
-                  <div ref={hpFill} className={`${styles.fill} ${styles.hp}`} />
-                </div>
-              </div>
-              <div className={`${styles.strip} ${styles.auraStrip}`}>
-                <span>
-                  Aura
-                  <em ref={auraLabel}>0 / 0</em>
-                </span>
-                <div className={styles.track}>
-                  <div
-                    ref={auraFill}
-                    className={`${styles.fill} ${styles.aura} ${burnout ? styles.burned : ''}`}
-                  />
-                </div>
-              </div>
-            </div>
+            {partyState.mode === GameMode.RAID ? (
+              <PlayerPartyHUD slots={partyState.slots} mode={partyState.mode} apiRef={partyHud} />
+            ) : null}
             <div className={styles.chips}>
+              {partyState.mode !== GameMode.PVP ? (
+                <>
+                  <div className={styles.chip}>
+                    Round <strong ref={roundRef}>0</strong>
+                  </div>
+                  <div className={styles.chip}>
+                    Hosts <strong ref={remainingRef}>0</strong>
+                  </div>
+                  <div className={styles.chip}>
+                    Signal pts <strong ref={pointsRef}>0</strong>
+                  </div>
+                </>
+              ) : null}
               <div className={styles.chip}>
-                Round <strong ref={roundRef}>0</strong>
-              </div>
-              <div className={styles.chip}>
-                Hosts <strong ref={remainingRef}>0</strong>
-              </div>
-              <div className={styles.chip}>
-                Signal pts <strong ref={pointsRef}>0</strong>
+                Mode <strong>{partyState.mode}</strong>
               </div>
               <button
                 type="button"
@@ -351,6 +388,21 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
               </button>
             </div>
           </div>
+
+          {partyState.mode === GameMode.PVP && pvpOpponent ? (
+            <PvpVersusHUD
+              playerId={activeRyder}
+              opponentId={pvpOpponent}
+              opponentLabel={pvpLabel}
+              playerRef={circularHud}
+              opponentRef={foeHud}
+              burnout={burnout}
+            />
+          ) : (
+            <div className={styles.vitalDock}>
+              <CircularPlayerHUD ref={circularHud} ryderId={activeRyder} burnout={burnout} />
+            </div>
+          )}
 
           <div className={styles.crosshair} />
 
@@ -389,6 +441,7 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
             <p className={styles.hint}>
               Arrows move · WASD camera · Shift sprint · Mouse aim · Click fire · F / RMB melee · Q E R moves · {INTERACT_LABEL} use · Esc pause
               {phase === 'intermission' ? ' · Hold the spire to buy strength' : ''}
+              {pvpTwo ? ' · P2 IJKL move · U punch' : ''}
             </p>
             <div className={styles.moveRow}>
               {hudMoves.map((move, i) => (
@@ -514,7 +567,7 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
         </div>
       )}
 
-      {playing && paused && phase !== 'dead' && !camPanel && (
+      {playing && paused && phase !== 'dead' && phase !== 'victory' && !camPanel && (
         <PauseMenu
           manager={manager}
           engine={engineReady}
@@ -525,7 +578,7 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
           points={points}
           layout={layout}
           onResume={resume}
-          onExit={changeRyder}
+          onExit={exitToStart}
           onOpenCameraTuning={() => setCamPanel(true)}
         />
       )}
@@ -551,99 +604,57 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
         </div>
       )}
 
-      {!playing && (
-        <div className={styles.select}>
-          <div className={styles.selectInner}>
-            <header>
-              <p>Those Ryderz: Raid</p>
-              <h2>The block is overrun. Pick a Ryder.</h2>
-              <span>
-                Mind-controlled civilians pour from the alleys. Spend aura on shots and signature
-                powers. When the meter hits empty you burn out — no blades, no blink, just weaker
-                melee until the signal crawls back.
-              </span>
-            </header>
-            <div className={styles.carousel}>
-              <button
-                type="button"
-                className={styles.carouselNav}
-                onClick={() => cycleFocus(-1)}
-                aria-label="Previous Ryder"
-              >
-                <ChevronLeft size={28} />
+      {playing && phase === 'victory' && (
+        <div className={styles.modal}>
+          <div className={styles.modalCard}>
+            <p>Those Ryderz · PvP</p>
+            <h3>You win</h3>
+            <p>The other Ryder is down. Rematch keeps the same lineup.</p>
+            <div className={styles.actions}>
+              <button type="button" onClick={replay}>
+                Rematch
               </button>
-              <div className={styles.viewport}>
-                <div className={styles.roster}>
-                  {RYDER_ORDER.map((id, index) => {
-                    const ryder = RYDERZ[id];
-                    const colors = AURA[id];
-                    const focused = index === focus;
-                    return (
-                      <button
-                        key={id}
-                        type="button"
-                        ref={(node) => {
-                          cardRefs.current[index] = node;
-                        }}
-                        className={`${styles.card} ${focused ? styles.cardFocused : ''}`}
-                        style={{ ['--aura' as string]: colors.aura, ['--aura-soft' as string]: colors.soft }}
-                        onClick={() => {
-                          if (focused) pick(id);
-                          else setFocus(index);
-                        }}
-                      >
-                        <div className={styles.portrait}>
-                          <Image src={ryder.icon} alt={ryder.name} fill unoptimized sizes="220px" />
-                        </div>
-                        <small>
-                          {ryder.role} · {ryder.title}
-                        </small>
-                        <h3>{ryder.name}</h3>
-                        <ul className={styles.moveList}>
-                          {ryder.moves.map((move) => (
-                            <li key={move.id}>
-                              <strong>{move.key}</strong> {move.name}
-                            </li>
-                          ))}
-                        </ul>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-              <button
-                type="button"
-                className={styles.carouselNav}
-                onClick={() => cycleFocus(1)}
-                aria-label="Next Ryder"
-              >
-                <ChevronRight size={28} />
+              <button type="button" onClick={changeRyder}>
+                Change Ryderz
               </button>
             </div>
-            <div className={styles.dots} role="tablist" aria-label="Ryderz">
-              {RYDER_ORDER.map((id, index) => (
-                <button
-                  key={id}
-                  type="button"
-                  role="tab"
-                  aria-selected={index === focus}
-                  className={`${styles.dot} ${index === focus ? styles.dotActive : ''}`}
-                  style={{ ['--aura' as string]: AURA[id].aura }}
-                  onClick={() => setFocus(index)}
-                  aria-label={RYDERZ[id].name}
-                />
-              ))}
-            </div>
-            <button
-              type="button"
-              className={styles.dropIn}
-              onClick={() => pick(RYDER_ORDER[focus])}
-            >
-              Drop in as {RYDERZ[RYDER_ORDER[focus]].name}
-            </button>
           </div>
         </div>
       )}
+
+      {screen === 'start' && (
+        <RyderzStartScreen
+          slots={saveState.slots}
+          activeSlot={saveState.activeSlot}
+          lastMode={managerState.gameMode}
+          onSelectSlot={(index) => saves.selectSlot(index)}
+          onContinue={() => {
+            if (!saves.loadGame(saveState.activeSlot, manager)) return;
+            const loaded = manager.getState();
+            setScreen(loaded.gameMode === GameMode.PVP ? 'pvp' : loaded.gameMode === GameMode.RAID ? 'raid-lobby' : 'solo-select');
+          }}
+          onNewGame={() => {
+            const empty = saveState.slots.find((slot) => slot.empty);
+            const index = empty?.slotIndex ?? saveState.activeSlot;
+            saves.deleteSave(index);
+            saves.selectSlot(index);
+            manager.resetSession();
+            playerStore.configure({ mode: GameMode.SOLO, localRyder: null });
+          }}
+          onPickMode={(mode) => {
+            manager.setGameMode(mode);
+            setScreen(mode === GameMode.PVP ? 'pvp' : mode === GameMode.RAID ? 'raid-lobby' : 'solo-select');
+          }}
+        />
+      )}
+
+      {screen === 'solo-select' && (
+        <SoloCharacterSelect initialId={activeRyder} onBack={() => setScreen('start')} onPlay={playSolo} />
+      )}
+
+      {screen === 'pvp' && <PvpFlow onBack={() => setScreen('start')} onFight={playPvp} />}
+
+      {screen === 'raid-lobby' && <RaidLobby onBack={() => setScreen('start')} onStart={playRaid} />}
     </div>
   );
 }

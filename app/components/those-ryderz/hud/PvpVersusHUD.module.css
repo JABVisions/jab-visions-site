@@ -1,0 +1,18 @@
+.row {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 72px;
+  z-index: 3;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  pointer-events: none;
+}
+
+.vs {
+  color: #ff8d9a;
+  font: 800 1.1rem/1 ui-monospace, monospace;
+  letter-spacing: 0.18em;
+  text-shadow: 0 0 12px rgba(255, 60, 80, 0.45);
+}

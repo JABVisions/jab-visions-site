@@ -1,7 +1,8 @@
 import { DEFAULT_ARENA, arenaSpec, type ArenaId } from './arenas';
 import { RYDERZ, RYDER_ORDER, type AbilityId, type AbilitySpec, type RyderId } from './config';
 import type { RaidEngine } from './engine';
-import { GameMode, gameModeSpec } from './game-mode';
+import { coerceGameMode, GameMode, gameModeSpec } from './game-mode';
+import type { SaveSnapshot } from './saves/saveManager';
 
 export type InputSlot = 'Q' | 'E' | 'R';
 export const INPUT_SLOTS: InputSlot[] = ['Q', 'E', 'R'];
@@ -46,7 +47,7 @@ export const ABILITIES: Record<AbilityId, AbilitySpec & { owner: RyderId }> = Ob
 const SIGILS: Record<AbilityId, string> = {
   bladeFan: 'BF',
   duplicate: 'DU',
-  envyPulse: 'EP',
+  envyPulse: 'DT',
   shockwave: 'SW',
   overdrive: 'OD',
   prideDash: 'PD',
@@ -74,7 +75,7 @@ function defaultState(): RyderManagerState {
       RyderId,
       AbilityId[]
     >,
-    gameMode: GameMode.PVE,
+    gameMode: GameMode.SOLO,
     arenaId: DEFAULT_ARENA,
   };
 }
@@ -93,7 +94,7 @@ function hydrate(raw: unknown): RyderManagerState {
   if (!raw || typeof raw !== 'object') return state;
   const data = raw as Partial<RyderManagerState>;
   if (isRyderId(data.activeRyder)) state.activeRyder = data.activeRyder;
-  if (data.gameMode && gameModeSpec(data.gameMode).id === data.gameMode) state.gameMode = data.gameMode;
+  if (data.gameMode) state.gameMode = coerceGameMode(data.gameMode);
   if (typeof data.arenaId === 'string' && arenaSpec(data.arenaId)?.available) state.arenaId = data.arenaId;
   for (const id of RYDER_ORDER) {
     const extra = data.unlocked?.[id];
@@ -185,7 +186,7 @@ export class RyderManager {
     return this.state.activeRyder;
   }
 
-  /** Roster gating hook: every Ryder is playable in PvE today. */
+  /** Roster gating hook: every Ryder is playable in Solo today. */
   isRyderAvailable(id: RyderId, mode = this.state.gameMode) {
     return gameModeSpec(mode).available && id in RYDERZ;
   }
@@ -275,6 +276,24 @@ export class RyderManager {
     this.commit({ gameMode: mode });
     this.engine?.setGameMode(mode);
     return true;
+  }
+
+  /** Replace session state from a save slot without tearing down the manager. */
+  applySnapshot(snapshot: SaveSnapshot) {
+    this.state = hydrate(snapshot);
+    this.save();
+    this.listeners.forEach((listener) => listener());
+    this.engine?.setGameMode(this.state.gameMode);
+    if (this.engine && this.engine.getArena().id !== this.state.arenaId) {
+      this.engine.loadArena(this.state.arenaId);
+    }
+  }
+
+  resetSession() {
+    this.state = defaultState();
+    this.save();
+    this.listeners.forEach((listener) => listener());
+    this.engine?.setGameMode(this.state.gameMode);
   }
 
   setArena(id: ArenaId) {
