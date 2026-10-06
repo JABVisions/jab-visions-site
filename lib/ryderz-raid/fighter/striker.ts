@@ -101,6 +101,7 @@ export class FighterStriker {
   private ryderId: RyderId | null = null;
   private grabWindowUntil = 0;
   private didLunge = false;
+  private startedFlag = false;
 
   setRyder(id: RyderId | null) {
     this.ryderId = id;
@@ -115,6 +116,31 @@ export class FighterStriker {
     return this.phase === 'recovery' && !this.connected;
   }
 
+  /** True on the tick an attack begins, so the body can start its swing once. */
+  get justStarted() {
+    return this.startedFlag;
+  }
+
+  /**
+   * 0 at the windup, about 0.5 as the hit lands, 1 as the limb returns.
+   * Null while idle. Callers turn this into the pose clock.
+   */
+  pose(): { style: MeleeStyle; p: number } | null {
+    const action = this.action;
+    if (!action || this.phase === 'idle') return null;
+    const startup = Math.max(action.startup, 0.04);
+    const active = Math.max(action.active, 0.04);
+    const recovery = Math.max(action.recovery, 0.04);
+    let p = 0.45;
+    if (this.phase === 'startup') p = (this.elapsed / startup) * 0.32;
+    else if (this.phase === 'active') p = 0.32 + ((this.elapsed - action.startup) / active) * 0.3;
+    else if (this.phase === 'recovery') {
+      const into = this.elapsed - action.startup - action.active;
+      p = 0.62 + Math.min(1, into / recovery) * 0.38;
+    }
+    return { style: action.style, p: Math.max(0, Math.min(1, p)) };
+  }
+
   queue(kind: StrikeKind) {
     if (this.phase === 'hold') {
       this.throwNext = true;
@@ -127,6 +153,13 @@ export class FighterStriker {
     if (this.kind === 'punch' && (this.phase === 'recovery' || this.phase === 'active')) {
       this.buffer = kind;
     }
+  }
+
+  /** Buffer the next strike of a punch so a jab can become jab-cross or jab-kick. */
+  chainInto(kind: StrikeKind) {
+    if (this.kind !== 'punch' || this.phase === 'idle' || this.phase === 'hold') return false;
+    this.buffer = kind;
+    return true;
   }
 
   interrupt() {
@@ -150,6 +183,7 @@ export class FighterStriker {
 
   tick(dt: number, ctx: StrikerContext): StrikerFrame {
     const frame = empty();
+    this.startedFlag = false;
     this.combo.expire(ctx.time);
     if (ctx.stunned && this.phase !== 'idle' && this.phase !== 'hold') {
       this.interrupt();
@@ -169,6 +203,7 @@ export class FighterStriker {
         this.begin(this.buffer, ctx);
         this.buffer = null;
         frame.started = true;
+        this.startedFlag = true;
         frame.swing = this.action?.style ?? null;
       }
       frame.busy = this.phase !== 'idle';
@@ -201,6 +236,7 @@ export class FighterStriker {
       this.begin(this.buffer, ctx);
       this.buffer = null;
       frame.started = true;
+      this.startedFlag = true;
       frame.swing = this.action?.style ?? null;
     } else if (this.elapsed >= total) {
       this.phase = 'idle';
@@ -294,6 +330,7 @@ export class FighterStriker {
     });
     frame.swing = action.style;
     frame.started = true;
+    this.startedFlag = true;
   }
 }
 

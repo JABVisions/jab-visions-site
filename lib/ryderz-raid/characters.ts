@@ -20,7 +20,6 @@ import { PlasmaOrbits } from './plasma-orbs';
 const BLADE = new THREE.BoxGeometry(0.08, 0.95, 0.08);
 const AXE_HANDLE = new THREE.CylinderGeometry(0.05, 0.06, 1.15, 8);
 const AXE_HEAD = new THREE.BoxGeometry(0.08, 0.38, 0.55);
-const ORB = new THREE.SphereGeometry(0.16, 12, 10);
 const DART_GUN = new THREE.BoxGeometry(0.12, 0.12, 0.42);
 const HALO = new THREE.TorusGeometry(0.55, 0.045, 8, 24);
 const VEIN = new THREE.BoxGeometry(0.18, 0.42, 0.06);
@@ -71,6 +70,8 @@ export interface AnimateExtras {
   pose?: PoseOverride | null;
   /** Strike to play for this `meleeStarted`, instead of cycling the authored list. */
   style?: MeleeStyle;
+  /** Substring of a baked clip name, from a civilian or Ryder animation map. */
+  clipHint?: string;
   camera?: THREE.Camera;
 }
 
@@ -501,6 +502,20 @@ const STRIKE_RELEASE = 0.12;
  * animates, blending from (and back to) the pose it found when it started.
  * The action is stopped once released so the mixer lets go of the bones.
  */
+function clipForStyle(style: MeleeStyle | undefined, count: number) {
+  if (!count) return 0;
+  if (style === 'kick' || style === 'spinKick') return 1 % count;
+  if (style === 'smash' || style === 'slash' || style === 'chop') return Math.min(2, count - 1);
+  if (style === 'blast' || style === 'slap') return Math.min(3, count - 1);
+  return 0;
+}
+
+function strikeForHint(strikes: THREE.AnimationAction[], hint: string | undefined) {
+  if (!hint) return null;
+  const needle = hint.toLowerCase();
+  return strikes.find((action) => action.getClip().name.toLowerCase().includes(needle)) ?? null;
+}
+
 function animateSkeletonWithStrikes(
   rig: GltfRig,
   dt: number,
@@ -509,6 +524,8 @@ function animateSkeletonWithStrikes(
   sprinting: boolean,
   meleeStarted: boolean,
   pose: PoseOverride | null,
+  style?: MeleeStyle,
+  clipHint?: string,
 ) {
   const skeleton = rig.skeleton!;
   const mixer = rig.mixer!;
@@ -522,7 +539,9 @@ function animateSkeletonWithStrikes(
 
   if (meleeStarted) {
     rig.strike?.stop();
-    const strike = rig.strikes[rig.strikeIndex % rig.strikes.length];
+    const hinted = strikeForHint(rig.strikes, clipHint);
+    const index = style ? clipForStyle(style, rig.strikes.length) : rig.strikeIndex % rig.strikes.length;
+    const strike = hinted ?? rig.strikes[index];
     rig.strikeIndex += 1;
     const length = strike.getClip().duration || STRIKE_TIME;
     strike.timeScale = length / STRIKE_TIME;
@@ -567,7 +586,7 @@ export function animateGltfFighter(
   const pose = extras?.pose && extras.pose.weight > 0 ? extras.pose : null;
 
   if (rig.skeleton && rig.mixer && rig.strikes.length) {
-    animateSkeletonWithStrikes(rig, dt, phase, moving, sprinting, meleeStarted, pose);
+    animateSkeletonWithStrikes(rig, dt, phase, moving, sprinting, meleeStarted, pose, extras?.style, extras?.clipHint);
   } else if (rig.mixer) {
     if (meleeStarted && rig.actions.attack) {
       const attack = rig.actions.attack;
@@ -811,13 +830,6 @@ export function buildHost(kind: EnemyKind): Fighter {
       glowMeshes.push(crown);
       weapons.push(crown);
     }
-    if (kind === 'thrower') {
-      const orb = new THREE.Mesh(ORB, glow(0x5dff9a, 1.4));
-      orb.position.set(0, 0.1, 0.05);
-      rig.weaponSocket.add(orb);
-      weapons.push(orb);
-      glowMeshes.push(orb);
-    }
     return { humanoid, weapons, glowMeshes, meshSource: 'gltf', rig };
   }
 
@@ -846,14 +858,6 @@ export function buildHost(kind: EnemyKind): Fighter {
     humanoid.group.add(crown);
     glowMeshes.push(crown);
     weapons.push(crown);
-  }
-
-  if (kind === 'thrower') {
-    const orb = new THREE.Mesh(ORB, glow(0x5dff9a, 1.4));
-    orb.position.set(0, 0.02, 0.08);
-    humanoid.handR.add(orb);
-    weapons.push(orb);
-    glowMeshes.push(orb);
   }
 
   return { humanoid, weapons, glowMeshes, meshSource: 'procedural' };
