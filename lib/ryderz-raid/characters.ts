@@ -95,6 +95,7 @@ interface GltfTemplate {
 const gltfLoader = new GLTFLoader();
 const gltfTemplates = new Map<RyderId, GltfTemplate>();
 const hostTemplates: GltfTemplate[] = [];
+const civilianByUrl = new Map<string, GltfTemplate>();
 
 async function loadGltfTemplate(url: string, label: string, repair?: GlbRepair): Promise<GltfTemplate> {
   const gltf = await gltfLoader.loadAsync(url);
@@ -149,6 +150,26 @@ export async function preloadHostGltf() {
   loaded.forEach((template) => {
     if (template) hostTemplates.push(template);
   });
+}
+
+/** Load civilian bodies named in the registry. Known host files are reused. */
+export async function preloadCivilianModels(urls: Array<string | null | undefined>) {
+  const unique = [...new Set(urls.filter((url): url is string => Boolean(url)))];
+  await Promise.all(
+    unique.map(async (url) => {
+      if (civilianByUrl.has(url)) return;
+      const hostIndex = HOST_MODELS.indexOf(url);
+      if (hostIndex >= 0 && hostTemplates[hostIndex]) {
+        civilianByUrl.set(url, hostTemplates[hostIndex]);
+        return;
+      }
+      try {
+        civilianByUrl.set(url, await loadGltfTemplate(url, `civilian ${url.split('/').pop()}`));
+      } catch (error) {
+        console.warn('[raid] civilian model failed to load', url, error);
+      }
+    }),
+  );
 }
 
 const CLIP_PATTERNS: Record<ClipRole, RegExp> = {
@@ -789,13 +810,14 @@ const HOST_TINT: Record<EnemyKind, number> = {
   broadcaster: 0xd9b3ff,
 };
 
-export function buildHost(kind: EnemyKind): Fighter {
+export function buildHost(kind: EnemyKind, modelPath?: string | null): Fighter {
   const scale = kind === 'broadcaster' ? 2.05 : kind === 'heavy' ? 1.42 : kind === 'sprinter' ? 0.9 : 1;
   const eye =
     kind === 'broadcaster' ? 0xb84dff : kind === 'sprinter' ? 0xb6ff3a : kind === 'heavy' ? 0xff7a1a : 0x5dff9a;
 
-  if (hostTemplates.length) {
-    const template = hostTemplates[Math.floor(Math.random() * hostTemplates.length)];
+  const mapped = modelPath ? civilianByUrl.get(modelPath) : undefined;
+  const template = mapped ?? (hostTemplates.length ? hostTemplates[Math.floor(Math.random() * hostTemplates.length)] : undefined);
+  if (template) {
     const { humanoid, rig } = wrapGltfAsHumanoid(template, 1.9 * scale, { ownMaterials: true });
     humanoid.materials.forEach((material) => {
       const m = material as THREE.MeshStandardMaterial;

@@ -51,6 +51,7 @@ import {
   BOLT_GEOMETRY,
   buildHost,
   buildRyder,
+  preloadCivilianModels,
   preloadHostGltf,
   preloadRyderGltf,
   type Fighter,
@@ -83,7 +84,7 @@ import {
   type StrikerHit,
 } from './fighter';
 import { CIVILIAN_PROFILES, civilianOrder, profileForKind, type CivilianProfileId } from './civilians/profiles';
-import { clipHintFor, definitionForProfile, type CivilianDefinition } from './civilians/registry';
+import { CIVILIAN_REGISTRY, clipHintFor, definitionForProfile, type CivilianDefinition } from './civilians/registry';
 import { ThrowableField, type ThrowBody } from './throwables';
 
 export interface HudState {
@@ -498,6 +499,7 @@ export class RaidEngine {
         : Promise.resolve(),
       preloadHostGltf(),
     ]);
+    await preloadCivilianModels(CIVILIAN_REGISTRY.map((entry) => entry.modelPath));
     if (this.disposed) return;
 
     this.player = buildRyder(this.spec);
@@ -1946,7 +1948,7 @@ export class RaidEngine {
     pos.z += -alley.inward.x * lateral;
     const profileId = profileForKind(kind, Math.random());
     const civilian = definitionForProfile(profileId);
-    const fighter = buildHost(kind);
+    const fighter = buildHost(kind, civilian.modelPath);
     fighter.humanoid.group.position.copy(pos);
     fighter.humanoid.group.position.y = this.world.heightAt(pos.x, pos.z);
     this.scene.add(fighter.humanoid.group);
