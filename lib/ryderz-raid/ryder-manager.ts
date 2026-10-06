@@ -46,7 +46,7 @@ export const ABILITIES: Record<AbilityId, AbilitySpec & { owner: RyderId }> = Ob
 const SIGILS: Record<AbilityId, string> = {
   bladeFan: 'BF',
   duplicate: 'DU',
-  envyPulse: 'EP',
+  envyPulse: 'DT',
   shockwave: 'SW',
   overdrive: 'OD',
   prideDash: 'PD',
