@@ -183,10 +183,9 @@ const NEUTRAL: Partial<Record<BoneKey, NeutralTarget>> = {
     trustRoll: true,
   },
   // Clavicles: square them onto the shoulder line so a raised-arm bind
-  // (Zoe's pointing rest pose) does not leave a collarbone aiming at the
-  // sky while the arm chain tries to hang. This is the bind-pose correction
-  // the skeleton then animates from — rotating the mesh instead would only
-  // look right at idle.
+  // does not leave a collarbone aiming at the sky while the arm chain
+  // tries to hang. Figures that must keep their export arm pose skip
+  // this via `keep` instead — unfolding those joints corkscrews the skin.
   shoulderL: { dir: dir(1, -0.15, 0.05), refs: [SHOULDER_LINE], trustRoll: true },
   shoulderR: { dir: dir(-1, -0.15, 0.05), refs: [SHOULDER_LINE], trustRoll: true },
   // Arm roll comes from a bent elbow (forearms bend forward); a straight arm
@@ -444,12 +443,15 @@ export class ProceduralSkeleton {
   readonly entries: BoneEntry[] = [];
   readonly byKey = new Map<BoneKey, BoneEntry>();
   readonly angles: Record<BoneKey, PoseAngles>;
+  /** Bones left in the export pose. Neutralisation is skipped so a large bind-pose swing cannot corkscrew geodesic weights; animation still layers on top. */
+  private keep: Set<BoneKey>;
 
-  constructor(figure: THREE.Object3D) {
+  constructor(figure: THREE.Object3D, options?: { keep?: BoneKey[] }) {
     this.figure = figure;
     this.angles = Object.fromEntries(
       (Object.keys(BONE_PATTERNS) as BoneKey[]).map((k) => [k, { x: 0, y: 0, z: 0 }]),
     ) as Record<BoneKey, PoseAngles>;
+    this.keep = new Set(options?.keep ?? []);
 
     figure.updateWorldMatrix(true, true);
     const figInverse = new THREE.Matrix4().copy(figure.matrixWorld).invert();
@@ -505,7 +507,7 @@ export class ProceduralSkeleton {
       inherited.multiply(entry.restLocal);
       entry.baseFig.copy(inherited);
 
-      const target = entry.key ? NEUTRAL[entry.key] : undefined;
+      const target = entry.key && !this.keep.has(entry.key) ? NEUTRAL[entry.key] : undefined;
       if (!target) continue;
 
       // Primary: swing the bone axis (or a feature axis) onto its target direction.

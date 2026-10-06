@@ -1,5 +1,5 @@
 import type { GlbRepair } from './mesh-repair';
-import type { MeleeStyle } from './skeletal';
+import type { BoneKey, MeleeStyle } from './skeletal';
 
 export type RyderId = 'rubi' | 'leo' | 'aaron' | 'zoe' | 'keven';
 
@@ -91,6 +91,12 @@ export interface RyderSpec {
   glbRepair?: GlbRepair;
   /** Melee animations cycled per swing when the figure is driven by the procedural skeleton. */
   strikes?: MeleeStyle[];
+  /**
+   * Procedural-skeleton bones left in the GLB's export pose. Use when a
+   * bind-pose correction (hanging a raised arm, unfolding an elbow) would
+   * corkscrew geodesic skinning. Animation still layers on top of the bind.
+   */
+  skelKeep?: BoneKey[];
 }
 
 export const ARENA_HALF = 30;
@@ -314,6 +320,9 @@ export const RYDERZ: Record<RyderId, RyderSpec> = {
     icon: '/assets/those-ryderz/icons/zoe.webp',
     glb: '/assets/those-ryderz/models/zoe-folie.glb?v=2',
     strikes: ['slap', 'kick', 'blast'],
+    // Export bind is a pointing left fist and a hanging right arm. Unfolding
+    // those joints ~114° around a rib-placed elbow corkscrews the gloves.
+    skelKeep: ['shoulderL', 'shoulderR', 'upperArmL', 'upperArmR', 'lowerArmL', 'lowerArmR', 'handL', 'handR'],
     maxHp: 105,
     speed: 7.2,
     fireRate: 3.4,

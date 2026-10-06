@@ -10,6 +10,7 @@ import {
   bakeSkinnedMeshes,
   extractStrikes,
   poseSkeleton,
+  type BoneKey,
   type MeleeStyle,
   type PoseOverride,
 } from './skeletal';
@@ -225,7 +226,7 @@ function measureFigure(figure: THREE.Object3D) {
 function wrapGltfAsHumanoid(
   template: GltfTemplate,
   height = 1.88,
-  options: { ownMaterials?: boolean; strikes?: MeleeStyle[] } = {},
+  options: { ownMaterials?: boolean; strikes?: MeleeStyle[]; keep?: BoneKey[] } = {},
 ): { humanoid: Humanoid; rig: GltfRig } {
   const group = new THREE.Group();
   const figure = template.skinned ? (cloneSkeleton(template.scene) as THREE.Group) : template.scene.clone(true);
@@ -235,7 +236,7 @@ function wrapGltfAsHumanoid(
   const hasLocomotion = (['idle', 'walk', 'run'] as ClipRole[]).some((role) => pickClip(template.clips, role));
   let skeleton: ProceduralSkeleton | null = null;
   if (template.skinned && !hasLocomotion) {
-    const candidate = new ProceduralSkeleton(figure);
+    const candidate = new ProceduralSkeleton(figure, options.keep ? { keep: options.keep } : undefined);
     if (candidate.isUsable) {
       skeleton = candidate;
       skeleton.apply();
@@ -642,6 +643,7 @@ export function buildRyder(spec: RyderSpec, options: { clone?: boolean } = {}): 
     const { humanoid, rig } = wrapGltfAsHumanoid(template, options.clone ? 1.72 : 1.88, {
       strikes: spec.strikes,
       ownMaterials: true,
+      keep: spec.skelKeep,
     });
     const weapons: THREE.Object3D[] = [];
     const glowMeshes: THREE.Mesh[] = [];
