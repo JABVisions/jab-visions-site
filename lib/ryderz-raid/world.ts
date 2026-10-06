@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import { ARENA_HALF, CAR_MODELS } from './config';
+import { ARENA_BUILDINGS, ARENA_HALF, CAR_MODELS } from './config';
 import { addOutline, glow, toon } from './toon';
 
 export type Obstacle =
@@ -28,9 +28,10 @@ export interface World {
  *   - They meet in a circular plaza of radius PLAZA_R around the signal spire.
  *   - Everything else is raised sidewalk (CURB high) up to the building line
  *     at ARENA_HALF, where the perimeter buildings stand.
- *   - The four quadrant blocks are dressed differently: a mid-block building
+ *   - The four quadrant blocks are dressed differently: a mid-block storefront
  *     with an alley (+x,+z), a surface parking lot (-x,-z), a pocket park
  *     (-x,+z) and an open storefront corner (+x,-z).
+ *   - Perimeter lots and the corners use the textured street buildings.
  */
 const BUILDING_DEPTH = 9;
 const AVENUE_HALF = 8;
@@ -178,33 +179,6 @@ function makePlazaTexture() {
       ctx.stroke();
     });
   });
-}
-
-function makeFacadeTexture(seed: number) {
-  const canvas = document.createElement('canvas');
-  canvas.width = 256;
-  canvas.height = 512;
-  const ctx = canvas.getContext('2d');
-  if (!ctx) return null;
-  const palette = ['#2a2136', '#1f2434', '#332430', '#26302b'];
-  ctx.fillStyle = palette[seed % palette.length];
-  ctx.fillRect(0, 0, 256, 512);
-  const next = seededRandom(seed + 1);
-  const cols = 5;
-  const rows = 12;
-  const w = 256 / cols;
-  const h = 512 / rows;
-  for (let r = 0; r < rows; r += 1) {
-    for (let c = 0; c < cols; c += 1) {
-      const lit = next() > 0.62;
-      ctx.fillStyle = lit ? (next() > 0.5 ? '#ffd27a' : '#8ff5c4') : 'rgba(6, 4, 12, 0.9)';
-      ctx.fillRect(c * w + w * 0.22, r * h + h * 0.2, w * 0.56, h * 0.55);
-    }
-  }
-  const tex = new THREE.CanvasTexture(canvas);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  tex.anisotropy = 4;
-  return tex;
 }
 
 // ---------------------------------------------------------------------------
@@ -432,6 +406,32 @@ function makeSky() {
   );
 }
 
+interface SkylineSlot {
+  model: number;
+  x: number;
+  z: number;
+  /** Yaw that aims model +Z (the street facade) inward. */
+  yaw: number;
+  /** Facade width in metres along model local +X. */
+  face: number;
+}
+
+function buildingScale(model: number, face: number) {
+  const spec = ARENA_BUILDINGS[model % ARENA_BUILDINGS.length];
+  const scale = face / Math.max(spec.width, 0.001);
+  return { scale, depth: spec.depth * scale, height: spec.height * scale };
+}
+
+/** Axis-aligned half extents of a uniformly scaled, yawed building. */
+function buildingExtents(model: number, face: number, yaw: number) {
+  const { depth, height } = buildingScale(model, face);
+  const hx = face / 2;
+  const hz = depth / 2;
+  const c = Math.abs(Math.cos(yaw));
+  const s = Math.abs(Math.sin(yaw));
+  return { extX: c * hx + s * hz, extZ: s * hx + c * hz, height };
+}
+
 export function buildWorld(): World {
   const group = new THREE.Group();
   const obstacles: Obstacle[] = [];
@@ -541,19 +541,15 @@ export function buildWorld(): World {
   ].forEach(([x, z]) => stripe(group, x, z, 0.5, 1.1, ironMat, 0.02));
 
   // --- Perimeter buildings & spawn alleys -----------------------------------
-  const facades = [0, 1, 2, 3].map((s) => makeFacadeTexture(s));
-  facades.forEach((t) => t && textures.push(t));
-  const buildingMat = (i: number) => toon(0xffffff, { map: facades[i % facades.length] });
-
-  const addBuilding = (w: number, h: number, d: number, x: number, z: number, facade: number) => {
-    const b = box(w, h, d, buildingMat(facade), x, h / 2, z, 0.1);
-    group.add(b);
-    occluders.push(b);
-    obstacles.push({ kind: 'box', minX: x - w / 2, maxX: x + w / 2, minZ: z - d / 2, maxZ: z + d / 2 });
-    return b;
+  // Textured storefronts and townhouses fill each lot. The facade (model +Z)
+  // points inward; narrow lots take the townhouse so the street wall stays tall.
+  const skyline: SkylineSlot[] = [];
+  let lotPick = 0;
+  const inwardYaw = (axis: 'x' | 'z', sign: 1 | -1) => {
+    if (axis === 'z') return sign === -1 ? 0 : Math.PI;
+    return sign === 1 ? -Math.PI / 2 : Math.PI / 2;
   };
 
-  let facadeIndex = 0;
   SIDES.forEach((side) => {
     const sorted = [...side.gaps].sort((a, b) => a.at - b.at);
     const edges = [-ARENA_HALF, ...sorted.flatMap((g) => [g.at - g.width / 2, g.at + g.width / 2]), ARENA_HALF];
@@ -566,14 +562,20 @@ export function buildWorld(): World {
       const segLength = length / segments;
       for (let s = 0; s < segments; s += 1) {
         const center = start + s * segLength + segLength / 2;
-        const height = 11 + ((facadeIndex * 7) % 13) + (s % 2) * 4;
-        const offset = side.sign * (ARENA_HALF + BUILDING_DEPTH / 2);
-        const w = side.axis === 'z' ? segLength - 0.3 : BUILDING_DEPTH;
-        const d = side.axis === 'z' ? BUILDING_DEPTH : segLength - 0.3;
-        const x = side.axis === 'z' ? center : offset;
-        const z = side.axis === 'z' ? offset : center;
-        addBuilding(w, height, d, x, z, facadeIndex);
-        facadeIndex += 1;
+        const face = segLength - 0.7;
+        if (face < 4 || !ARENA_BUILDINGS.length) continue;
+        const model = face < 8.4 ? 1 % ARENA_BUILDINGS.length : lotPick % ARENA_BUILDINGS.length;
+        lotPick += 1;
+        const yaw = inwardYaw(side.axis, side.sign);
+        const { depth } = buildingScale(model, face);
+        const outward = side.sign * (ARENA_HALF + depth / 2);
+        skyline.push({
+          model,
+          yaw,
+          face,
+          x: side.axis === 'z' ? center : outward,
+          z: side.axis === 'z' ? outward : center,
+        });
       }
     }
 
@@ -599,18 +601,82 @@ export function buildWorld(): World {
     });
   });
 
-  const cornerHeights = [22, 17, 26, 19];
+  // Corners turn to face the plaza, sitting just outside the side lots.
   quadrants.forEach(([sx, sz], i) => {
-    const size = BUILDING_DEPTH;
-    addBuilding(size, cornerHeights[i], size, sx * (ARENA_HALF + size / 2), sz * (ARENA_HALF + size / 2), i + 2);
+    if (!ARENA_BUILDINGS.length) return;
+    const face = 11;
+    const model = i % ARENA_BUILDINGS.length;
+    const yaw = Math.atan2(-sx, -sz);
+    const { extX, extZ } = buildingExtents(model, face, yaw);
+    skyline.push({
+      model,
+      yaw,
+      face,
+      x: sx * (ARENA_HALF + extX),
+      z: sz * (ARENA_HALF + extZ),
+    });
   });
 
-  // --- Quadrant blocks --------------------------------------------------------
-  // (+x,+z): mid-block building with an alley behind it.
-  addBuilding(9, 14, 9, 19.5, 17.5, 1);
-  const awning = box(9.6, 0.18, 1.6, toon(0x6b2a3a), 19.5, 3.2, 12.3, 0.04);
-  group.add(awning);
+  // (+x,+z): mid-block storefront, door toward the cross street.
+  if (ARENA_BUILDINGS.length) {
+    skyline.push({ model: 0, x: 19.5, z: 17.5, yaw: Math.PI, face: 10 });
+  }
 
+  skyline.forEach((slot) => {
+    const { extX, extZ } = buildingExtents(slot.model, slot.face, slot.yaw);
+    obstacles.push({ kind: 'box', minX: slot.x - extX, maxX: slot.x + extX, minZ: slot.z - extZ, maxZ: slot.z + extZ });
+  });
+
+  const mountBuilding = (template: THREE.Object3D, slot: SkylineSlot) => {
+    const { scale } = buildingScale(slot.model, slot.face);
+    const root = new THREE.Group();
+    const scene = template.clone(true);
+    scene.scale.setScalar(scale);
+    root.name = 'arena-building';
+    root.add(scene);
+    root.position.set(slot.x, CURB, slot.z);
+    root.rotation.y = slot.yaw;
+    group.add(root);
+    scene.traverse((o) => {
+      const mesh = o as THREE.Mesh;
+      if (!mesh.isMesh) return;
+      mesh.castShadow = false;
+      const list = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+      list.forEach((m) => {
+        if (m) m.userData.retain = true;
+      });
+      occluders.push(mesh);
+    });
+  };
+
+  const addFallbackBuilding = (slot: SkylineSlot) => {
+    const { extX, extZ, height } = buildingExtents(slot.model, slot.face, slot.yaw);
+    const b = box(extX * 2, height, extZ * 2, toon(0x2a2136), slot.x, CURB + height / 2, slot.z, 0.08);
+    group.add(b);
+    occluders.push(b);
+  };
+
+  if (ARENA_BUILDINGS.length && skyline.length) {
+    const loader = new GLTFLoader();
+    const templates = ARENA_BUILDINGS.map((model) => loader.loadAsync(model.url).catch((error) => {
+      console.warn('[raid] building model failed to load', model.url, error);
+      return null;
+    }));
+    Promise.all(templates).then((loaded) => {
+      if (disposed) return;
+      const any = loaded.findIndex(Boolean);
+      skyline.forEach((slot) => {
+        const template = loaded[slot.model] ?? (any >= 0 ? loaded[any] : null);
+        if (!template) {
+          addFallbackBuilding(slot);
+          return;
+        }
+        mountBuilding(template.scene, slot);
+      });
+    });
+  }
+
+  // --- Quadrant blocks --------------------------------------------------------
   // (-x,-z): surface parking lot on the sidewalk level.
   const lotMat = toon(0xffffff, { map: asphaltTex ? asphaltTex.clone() : null });
   if (lotMat.map) {
