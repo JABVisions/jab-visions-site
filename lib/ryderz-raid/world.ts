@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import { ARENA_BUILDINGS, ARENA_HALF, CAR_MODELS } from './config';
+import { ARENA_BLOCK, ARENA_BUILDINGS, ARENA_HALF, CAR_MODELS } from './config';
 import { addOutline, glow, toon } from './toon';
 
 export type Obstacle =
@@ -30,7 +30,7 @@ export interface World {
  *     at ARENA_HALF, where the perimeter buildings stand.
  *   - The four quadrant blocks are dressed differently: a mid-block storefront
  *     with an alley (+x,+z), a surface parking lot (-x,-z), a pocket park
- *     (-x,+z) and an open storefront corner (+x,-z).
+ *     (-x,+z) and two courtyard blocks on the open corner (+x,-z).
  *   - Perimeter lots and the corners use the textured street buildings.
  */
 const BUILDING_DEPTH = 9;
@@ -729,7 +729,73 @@ export function buildWorld(): World {
     obstacles.push({ kind: 'circle', x, z, r: 0.42 });
   });
 
-  // (+x,-z): open storefront corner — kept clear for combat, framed by planters.
+  // (+x,-z): two courtyard blocks. Entrances face the cross street (+Z).
+  // The gap between them lines up with the north alley so a player can slip
+  // through, and the masses stop shots and bodies.
+  const blockScale = 8.2;
+  const blockSlots = [
+    { x: 14, z: -23.7, yaw: 0 },
+    { x: 24.8, z: -23.7, yaw: 0 },
+  ];
+  const blockW = ARENA_BLOCK.width * blockScale;
+  const blockD = ARENA_BLOCK.depth * blockScale;
+  const blockH = ARENA_BLOCK.height * blockScale;
+  blockSlots.forEach((slot) => {
+    const c = Math.abs(Math.cos(slot.yaw));
+    const s = Math.abs(Math.sin(slot.yaw));
+    const extX = c * (blockW / 2) + s * (blockD / 2);
+    const extZ = s * (blockW / 2) + c * (blockD / 2);
+    obstacles.push({ kind: 'box', minX: slot.x - extX, maxX: slot.x + extX, minZ: slot.z - extZ, maxZ: slot.z + extZ });
+    const cover = new THREE.Mesh(
+      new THREE.BoxGeometry(blockW, blockH, blockD),
+      new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false }),
+    );
+    cover.position.set(slot.x, CURB + blockH / 2, slot.z);
+    cover.rotation.y = slot.yaw;
+    cover.name = 'arena-block-cover';
+    group.add(cover);
+    occluders.push(cover);
+  });
+  {
+    const loader = new GLTFLoader();
+    loader.load(
+      ARENA_BLOCK.url,
+      (gltf) => {
+        if (disposed) return;
+        blockSlots.forEach((slot) => {
+          const root = new THREE.Group();
+          const scene = gltf.scene.clone(true);
+          scene.scale.setScalar(blockScale);
+          root.name = 'arena-block';
+          root.add(scene);
+          root.position.set(slot.x, CURB, slot.z);
+          root.rotation.y = slot.yaw;
+          group.add(root);
+          scene.traverse((obj) => {
+            const mesh = obj as THREE.Mesh;
+            if (!mesh.isMesh) return;
+            mesh.castShadow = false;
+            const list = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+            list.forEach((material) => {
+              if (material) material.userData.retain = true;
+            });
+          });
+        });
+      },
+      undefined,
+      (error) => {
+        console.warn('[raid] courtyard block failed to load', error);
+        if (disposed) return;
+        blockSlots.forEach((slot) => {
+          const fallback = box(blockW, blockH, blockD, toon(0xc8b48a), slot.x, CURB + blockH / 2, slot.z, 0.06);
+          fallback.rotation.y = slot.yaw;
+          group.add(fallback);
+        });
+      },
+    );
+  }
+
+  // (+x,-z) used to stay empty. Planters still frame the street edge.
 
   // --- Signal spire on a raised island ---------------------------------------
   const islandMat = toon(0x4a425c);
@@ -827,7 +893,7 @@ export function buildWorld(): World {
     [13.5, -13.5],
     [-13.5, -13.5],
     [22, -10.2],
-    [27, -22],
+    [27.2, -11.2],
     [13, 26],
     [26.5, 9.8],
   ];

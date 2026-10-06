@@ -135,6 +135,18 @@ export interface ArenaBuildingModel {
  * The Tripo exports are about a metre tall; each slot scales one uniformly so
  * the facade fills that lot.
  */
+/**
+ * Courtyard block dropped into the open northeast sidewalk. The export is about
+ * a metre wide; the arena scales it up. Width is local +X, depth is local +Z
+ * (the entrance facade), and the base sits on y = 0.
+ */
+export const ARENA_BLOCK: ArenaBuildingModel = {
+  url: '/assets/those-ryderz/models/arena-block.glb',
+  width: 1,
+  height: 0.4830169379711151,
+  depth: 0.76153564453125,
+};
+
 export const ARENA_BUILDINGS: ArenaBuildingModel[] = [
   {
     url: '/assets/those-ryderz/models/arena-storefront.glb',
