@@ -144,12 +144,12 @@ export const RYDERZ: Record<RyderId, RyderSpec> = {
     colorHex: '#ff5c66',
     accent: 0xffb3b8,
     visual: { primaryColor: 0xff2e44, auraColor: 0xff3d55, electricityColor: 0xff6a7a, depletedAuraIntensity: 0.18, poweredAuraIntensity: 1.8 },
-    weapon: 'Red light blades',
+    weapon: 'Red energy blade',
     portrait: '/assets/chaeyeon-kim-headshot.jpeg',
     icon: '/assets/those-ryderz/icons/rubi.webp',
     // Version query busts browser caches of the earlier (unrigged) export at this path.
     glb: '/assets/those-ryderz/models/rubi-wong.glb?v=2',
-    strikes: ['slash', 'punch', 'slash', 'kick'],
+    strikes: ['slash', 'chop', 'slash', 'smash'],
     maxHp: 110,
     speed: 7.4,
     fireRate: 4.4,
@@ -165,10 +165,11 @@ export const RYDERZ: Record<RyderId, RyderSpec> = {
     moves: [
       {
         id: 'bladeFan',
-        name: 'Light Blades',
+        name: 'Blade Storm',
         key: 'Q',
-        description: 'Fan red light blades into a cone. Use it as long as aura remains.',
-        auraCost: 8,
+        description:
+          'Close on a host and carve them with a rapid four-hit red-energy sword combo. The last cut knocks them back.',
+        auraCost: 9,
         drain: 0,
       },
       {
@@ -176,16 +177,17 @@ export const RYDERZ: Record<RyderId, RyderSpec> = {
         name: 'Duplication',
         key: 'E',
         description:
-          'Keep two echo-selves fighting beside you. Aura drains while they are out. Press again to drop them.',
+          'Send echo-selves hunting on their own. They sprint, slash, and dissolve; waves keep coming while aura drains. Press again to dismiss them.',
         auraCost: 0,
         drain: 8,
       },
       {
         id: 'envyPulse',
-        name: 'Envy Pulse',
+        name: 'Double Trouble',
         key: 'R',
-        description: 'An empathic burst that wounds nearby hosts and yanks them toward you.',
-        auraCost: 11,
+        description:
+          'A clone appears behind the nearest host as you lunge from the front. Both blades cut at once.',
+        auraCost: 14,
         drain: 0,
       },
     ],
