@@ -217,6 +217,7 @@ export class PvpCpu {
     });
     this.scheduler.update(time);
     this.power?.update(dt, time, this.aura, this.maxAura, !this.burnout, this.hooks.cameraObject);
+    this.separateFromFoe();
 
     const group = body.fighter.humanoid.group;
     group.position.copy(body.pos);
@@ -229,7 +230,10 @@ export class PvpCpu {
     else if (body.hit <= 0) flashEmissive(body.fighter.humanoid, 0x000000, 0);
     body.anim += dt * 6;
     if (body.fighter.meshSource === 'gltf') {
-      animateGltfFighter(body.fighter, dt, body.anim, moving ? 1 : 0, this.intent === 'chase', 0, body.swing);
+      const pose = this.striker.pose();
+      animateGltfFighter(body.fighter, dt, body.anim, moving ? 1 : 0, this.intent === 'chase', pose ? 1 - pose.p : 0, body.swing, {
+        style: pose?.style,
+      });
       body.swing = false;
     } else {
       animateHumanoid(body.fighter.humanoid, body.anim, moving ? 1 : 0, time);
@@ -306,6 +310,10 @@ export class PvpCpu {
     const dx = foe.pos.x - body.pos.x;
     const dz = foe.pos.z - body.pos.z;
     const dist = Math.hypot(dx, dz) || 0.001;
+    if (dist < 2.05 && (this.intent === 'chase' || this.intent === 'reposition') && !this.striker.busy) {
+      this.intent = 'punch';
+      this.strikeQueued = false;
+    }
     let mx = dx / dist;
     let mz = dz / dist;
     if (this.intent === 'retreat') {
@@ -338,9 +346,9 @@ export class PvpCpu {
         this.striker.queue(kind === 'melee' && this.intent === 'attack' ? 'punch' : kind);
         this.strikeQueued = true;
       }
-      if (dist < 2.5) {
-        mx *= 0.2;
-        mz *= 0.2;
+      if (dist < 2.35) {
+        mx = 0;
+        mz = 0;
       }
     } else if (this.intent !== 'chase') {
       mx = 0;
@@ -348,15 +356,36 @@ export class PvpCpu {
     }
 
     const len = Math.hypot(mx, mz);
-    if (len > 0.08 && this.intent !== 'ability') {
+    const striking = this.intent === 'punch' || this.intent === 'kick' || this.intent === 'melee' || this.intent === 'grab' || this.intent === 'attack';
+    if (len > 0.08 && this.intent !== 'ability' && !(striking && dist < 2.35)) {
       const speed = spec.speed * (this.intent === 'chase' ? 0.96 : 0.82) * (this.burnout ? 0.82 : 1);
       body.pos.x += (mx / len) * speed * dt;
       body.pos.z += (mz / len) * speed * dt;
       this.facing = Math.atan2(mx, mz);
-      this.place(body.pos);
     } else if (dist > 0.2) {
       this.facing = Math.atan2(dx, dz);
     }
+    const gap = body.radius + 0.45 + 0.12;
+    if (dist < gap) {
+      body.pos.x = foe.pos.x - (dx / dist) * gap;
+      body.pos.z = foe.pos.z - (dz / dist) * gap;
+    }
+    this.place(body.pos);
+  }
+
+  /** Body contact keeps people apart. A strike is a hitbox, not a shove. */
+  private separateFromFoe() {
+    const body = this.body;
+    const foe = this.foe;
+    if (!body || !foe || (foe.held ?? 0) > 0) return;
+    const dx = body.pos.x - foe.pos.x;
+    const dz = body.pos.z - foe.pos.z;
+    const dist = Math.hypot(dx, dz) || 0.001;
+    const gap = body.radius + PLAYER_RADIUS + 0.16;
+    if (dist >= gap) return;
+    body.pos.x = foe.pos.x + (dx / dist) * gap;
+    body.pos.z = foe.pos.z + (dz / dist) * gap;
+    this.place(body.pos);
   }
 
   private stepStriker(dt: number) {

@@ -51,6 +51,7 @@ import {
   BOLT_GEOMETRY,
   buildHost,
   buildRyder,
+  preloadCivilianModels,
   preloadHostGltf,
   preloadRyderGltf,
   type Fighter,
@@ -72,17 +73,19 @@ import {
   FighterStriker,
   combatProfileFor,
   commandForKey,
-  hostStrikeDamage,
   meleeWantsGrab,
-  nextHostStrike,
   reactionForEffect,
   recipesFor,
   resolvePowerLink,
   risingPadCommands,
   type CombatCommand,
   type PhysicalHit,
+  type StrikeKind,
   type StrikerHit,
 } from './fighter';
+import { CIVILIAN_PROFILES, civilianOrder, profileForKind, type CivilianProfileId } from './civilians/profiles';
+import { CIVILIAN_REGISTRY, clipHintFor, definitionForProfile, type CivilianDefinition } from './civilians/registry';
+import { ThrowableField, type ThrowBody } from './throwables';
 
 export interface HudState {
   hp: number;
@@ -172,6 +175,16 @@ interface Host {
   sink: number;
   /** How far into a punch-kick chain this host is. Resets after a pause. */
   chain: number;
+  /** Physical fighter for civilians. Duelists use PvpCpu instead. */
+  striker?: FighterStriker;
+  profileId?: CivilianProfileId;
+  animMap?: CivilianDefinition['animationMap'];
+  heldItem?: ThrowBody | null;
+  /** Seconds left in a raise-then-throw. 0 means not winding up. */
+  throwWind: number;
+  winding: boolean;
+  /** Next physical strike after this one, for a short jab chain. */
+  follow: StrikeKind | null;
   /** Last shove, kept so props can read it later. */
   lastImpact?: { x: number; z: number; speed: number; kind: string };
   /** Colour of the current hit flash; hits reset it to white, kits can tint it. */
@@ -277,6 +290,15 @@ export class RaidEngine {
   private dodgeQueued = false;
   private queuedMoves = [false, false, false];
   private readonly striker = new FighterStriker();
+  private readonly playerBody = {};
+  private throwables: ThrowableField | null = null;
+  private heldThrow: ThrowBody | null = null;
+  private fireEdge = false;
+  private suppressFire = false;
+  private locomote = 0;
+  private combatDebug = false;
+  private debugGroup: THREE.Group | null = null;
+  private debugMarks: THREE.Mesh[] = [];
   private readonly p2Striker = new FighterStriker();
   private readonly combatMemory = new CombatMemory();
   private hitStun = 0;
@@ -477,6 +499,7 @@ export class RaidEngine {
         : Promise.resolve(),
       preloadHostGltf(),
     ]);
+    await preloadCivilianModels(CIVILIAN_REGISTRY.map((entry) => entry.modelPath));
     if (this.disposed) return;
 
     this.player = buildRyder(this.spec);
@@ -506,13 +529,14 @@ export class RaidEngine {
       this.phase = 'playing';
       this.banner = {
         title: 'VERSUS',
-        sub: this.pvpLocalTwo ? 'P2 · IJKL MOVE · U PUNCH' : 'CPU CLOSES IN',
+        sub: this.pvpLocalTwo ? 'P2 · IJKL MOVE · U PUNCH' : 'CPU STEPS IN AND STRIKES',
       };
       this.bannerT = 2.6;
     } else {
       this.pvpLocalTwo = false;
       this.beginRound(1);
     }
+    this.spawnThrowables();
   }
 
   /** Versus lineup. Cleared by Solo and Raid starts. */
@@ -770,6 +794,11 @@ export class RaidEngine {
       e.preventDefault();
     }
     this.keys.add(e.key.toLowerCase());
+    if (e.code === 'Backquote' && process.env.NODE_ENV !== 'production') {
+      this.combatDebug = !this.combatDebug;
+      this.ensureCombatDebug();
+      if (this.debugGroup) this.debugGroup.visible = this.combatDebug;
+    }
     // Menus own the keyboard while paused; only Escape reaches the raid.
     if (this.paused && e.key !== 'Escape') return;
     const rival = this.pvpLocalTwo ? commandForKey(e.key, e.code, 2) : null;
@@ -852,7 +881,7 @@ export class RaidEngine {
     this.fireCd = Math.max(0, this.fireCd - dt);
     this.meleeCd = Math.max(0, this.meleeCd - dt);
     this.iframes = Math.max(0, this.iframes - dt);
-    if (this.meleeT > 0) this.meleeT = Math.max(0, this.meleeT - dt * 3.4);
+    if (!this.striker.busy && this.meleeT > 0) this.meleeT = Math.max(0, this.meleeT - dt * 3.4);
     for (let i = 0; i < 3; i += 1) {
       this.moveCd[i] = Math.max(0, this.moveCd[i] - dt);
     }
@@ -891,8 +920,21 @@ export class RaidEngine {
       }
     }
     this.pollPad();
+    if (this.fireHeld && !this.fireEdge) {
+      this.fireEdge = true;
+      const near = this.nearestHost(this.pos);
+      const close = near ? Math.hypot(near.pos.x - this.pos.x, near.pos.z - this.pos.z) < 2.75 : false;
+      if (close) {
+        this.punchQueued = true;
+        this.suppressFire = true;
+      }
+    } else if (!this.fireHeld) {
+      this.fireEdge = false;
+      this.suppressFire = false;
+    }
     this.stepPhysical(dt, locked, busy);
-    if (this.fireHeld && !locked && !busy) this.tryFire();
+    this.presentPlayer(dt, time);
+    if (this.fireHeld && !this.suppressFire && !locked && !busy) this.tryFire();
     if (this.interactQueued) {
       this.interactQueued = false;
       this.tryInteract();
@@ -900,6 +942,22 @@ export class RaidEngine {
 
     this.updateClones(dt);
     this.updateHosts(dt, time);
+    if (this.heldThrow && this.throwables) {
+      const socket = this.player?.rig?.weaponSocket;
+      if (socket) this.throwables.grip(this.heldThrow, socket, 0);
+      else {
+        this.throwables.holdPosition(
+          this.heldThrow,
+          this.pos.x + Math.sin(this.yaw) * 0.62,
+          1.15 + this.airY,
+          this.pos.z + Math.cos(this.yaw) * 0.62,
+        );
+      }
+    }
+    this.throwables?.update(dt, this.simTime, (x, z) => this.world.heightAt(x, z), (item, point) => {
+      this.resolveThrowImpact(item, point);
+    });
+    this.updateCombatDebug();
     this.updateFallen(dt);
     this.updateBolts(dt);
     this.updateRound(dt);
@@ -955,7 +1013,10 @@ export class RaidEngine {
   private tryInteract() {
     if (!this.player || this.phase === 'dead' || this.recoveryT > 0 || this.kit?.locked) return;
     const beacon = this.beacon;
-    if (!beacon || !beacon.isPlayerInRange(this.pos)) return;
+    if (!beacon || !beacon.isPlayerInRange(this.pos)) {
+      this.tryPickup();
+      return;
+    }
     const time = this.clock.elapsedTime;
     const chest = this.player.rig?.skeleton?.bone('chest') ?? this.player.humanoid.torso;
     if (!beacon.activate(time, { object: chest, offset: new THREE.Vector3() }, this.spec.visual.auraColor)) return;
@@ -1105,27 +1166,12 @@ export class RaidEngine {
       }
     }
     this.lastPos.copy(this.pos);
+    this.locomote = Math.min(1, len);
 
     this.player.humanoid.group.position.copy(this.pos);
     this.player.humanoid.group.position.y =
       this.world.heightAt(this.pos.x, this.pos.z) + (this.kit?.airY ?? 0) + this.airY - (this.pvpCpu?.playerSink() ?? 0);
     this.player.humanoid.group.rotation.y = this.yaw + (this.kit?.bodyYaw ?? 0);
-    const moving = Math.min(1, len);
-    this.anim += dt * (8 + moving * (this.sprinting ? 9 : 6));
-    if (this.player.meshSource === 'gltf') {
-      animateGltfFighter(this.player, dt, this.anim, moving, this.sprinting, this.meleeT, this.meleeStarted, {
-        pose: this.kit?.pose ?? null,
-        style: this.meleeStarted ? this.strikeOverride ?? undefined : undefined,
-        camera: this.camera,
-      });
-      this.meleeStarted = false;
-      this.strikeOverride = null;
-    } else {
-      animateHumanoid(this.player.humanoid, this.anim, moving, time);
-      if (this.meleeT > 0) poseMelee(this.player.humanoid, 1 - this.meleeT);
-      else poseAim(this.player.humanoid, this.pitch);
-      this.player.orbs?.update(dt, this.camera);
-    }
 
     if (this.shield) {
       this.shield.visible = this.isActive('forcefield') && !this.kitClaimed.has('forcefield');
@@ -1156,6 +1202,37 @@ export class RaidEngine {
         up: 0.8,
       });
     }
+  }
+
+  /** Pose runs after the strike window so the fist and the hit share a frame. */
+  private presentPlayer(dt: number, time: number) {
+    if (!this.player) return;
+    const moving = this.locomote;
+    this.player.humanoid.group.rotation.y = this.yaw + (this.kit?.bodyYaw ?? 0);
+    this.anim += dt * (8 + moving * (this.sprinting ? 9 : 6));
+    if (this.player.meshSource === 'gltf') {
+      animateGltfFighter(this.player, dt, this.anim, moving, this.sprinting, this.meleeT, this.meleeStarted, {
+        pose: this.kit?.pose ?? null,
+        style: this.strikeOverride ?? undefined,
+        camera: this.camera,
+      });
+      this.meleeStarted = false;
+      this.strikeOverride = null;
+    } else {
+      animateHumanoid(this.player.humanoid, this.anim, moving, time);
+      if (this.meleeT > 0) poseMelee(this.player.humanoid, 1 - this.meleeT);
+      else poseAim(this.player.humanoid, this.pitch);
+      this.player.orbs?.update(dt, this.camera);
+    }
+  }
+
+  private faceNearest(range: number) {
+    const near = this.nearestHost(this.pos);
+    if (!near) return;
+    const dx = near.pos.x - this.pos.x;
+    const dz = near.pos.z - this.pos.z;
+    if (dx * dx + dz * dz > range * range) return;
+    this.yaw = Math.atan2(dx, dz);
   }
 
   private tryFire() {
@@ -1262,6 +1339,12 @@ export class RaidEngine {
       }
     }
     const canAct = !locked && !busy && this.hitStun < 0.12 && this.dodgeT <= 0;
+    if ((this.punchQueued || this.kickQueued || this.meleeQueued) && canAct) this.faceNearest(3.4);
+    if (this.heldThrow && (this.punchQueued || this.kickQueued)) {
+      this.releaseHeldThrow();
+      this.punchQueued = false;
+      this.kickQueued = false;
+    }
     if (this.punchQueued) {
       this.punchQueued = false;
       if (canAct || this.striker.busy) this.striker.queue('punch');
@@ -1313,11 +1396,14 @@ export class RaidEngine {
       this.pos.z = clamp(this.pos.z, -BOUNDARY, BOUNDARY);
       resolveCircle(this.pos, PLAYER_RADIUS, this.world.obstacles);
     }
-    if (frame.started && frame.swing) {
-      this.meleeT = 1;
-      this.meleeStarted = true;
-      this.strikeOverride = frame.swing;
-      this.combatT = COMBAT_LINGER;
+    const pose = this.striker.pose();
+    if (pose) {
+      this.meleeT = 1 - pose.p;
+      this.strikeOverride = pose.style;
+      if (frame.started) {
+        this.meleeStarted = true;
+        this.combatT = COMBAT_LINGER;
+      }
     }
     if (frame.grab) {
       const host = frame.grab.ref as Host;
@@ -1860,7 +1946,9 @@ export class RaidEngine {
     const pos = alley.position.clone();
     pos.x += alley.inward.z * lateral;
     pos.z += -alley.inward.x * lateral;
-    const fighter = buildHost(kind);
+    const profileId = profileForKind(kind, Math.random());
+    const civilian = definitionForProfile(profileId);
+    const fighter = buildHost(kind, civilian.modelPath);
     fighter.humanoid.group.position.copy(pos);
     fighter.humanoid.group.position.y = this.world.heightAt(pos.x, pos.z);
     this.scene.add(fighter.humanoid.group);
@@ -1893,7 +1981,20 @@ export class RaidEngine {
       sink: 0,
       chain: 0,
       hitColor: 0xffffff,
+      striker: this.makeCivilianStriker(),
+      profileId: civilian.profile,
+      animMap: civilian.animationMap,
+      heldItem: null,
+      throwWind: 0,
+      winding: false,
+      follow: null,
     });
+  }
+
+  private makeCivilianStriker() {
+    const striker = new FighterStriker();
+    striker.setRyder(null);
+    return striker;
   }
 
   private updateHosts(dt: number, time: number) {
@@ -1988,79 +2089,219 @@ export class RaidEngine {
         continue;
       }
 
-      let tx = this.pos.x;
-      let tz = this.pos.z;
-      if (phased) {
-        tx = 0;
-        tz = 0;
-      }
-      const dx = tx - host.pos.x;
-      const dz = tz - host.pos.z;
-      const dist = Math.hypot(dx, dz) || 0.0001;
-      const dirx = dx / dist;
-      const dirz = dz / dist;
-
-      let want = host.speed;
-      if (host.preferredRange > 0) {
-        if (dist < host.preferredRange - 1.5) want = -host.speed * 0.6;
-        else if (dist < host.preferredRange + 1.2) want = host.speed * 0.15;
-      }
-
-      host.pos.x += dirx * want * dt + host.knock.x * dt;
-      host.pos.z += dirz * want * dt + host.knock.z * dt;
-      host.pos.x = clamp(host.pos.x, -BOUNDARY, BOUNDARY);
-      host.pos.z = clamp(host.pos.z, -BOUNDARY, BOUNDARY);
-      resolveCircle(host.pos, host.radius, this.world.obstacles);
-
-      host.fighter.humanoid.group.position.copy(host.pos);
-      host.fighter.humanoid.group.position.y = this.world.heightAt(host.pos.x, host.pos.z) - host.sink;
-      host.fighter.humanoid.group.rotation.y = Math.atan2(dirx, dirz);
-      this.animateHost(host, dt, Math.min(1, host.speed / 5), time);
-      if (host.hit > 0) flashEmissive(host.fighter.humanoid, host.hitColor, host.hit * 2.4);
-      else flashEmissive(host.fighter.humanoid, 0x000000, 0);
-
-      if (host.kind === 'broadcaster') {
-        host.summon -= dt;
-        if (host.summon <= 0 && this.hosts.length < MAX_ALIVE_HOSTS && this.phase === 'playing') {
-          host.summon = 8;
-          const scale = roundScaling(this.round);
-          this.spawnHost('walker', scale);
-          if (this.hosts.length < MAX_ALIVE_HOSTS) this.spawnHost('sprinter', scale);
-        }
-      }
-
-      if (host.kind === 'thrower' && host.cooldown <= 0 && dist < 16 && dist > 4 && !phased) {
-        host.cooldown = 1.8;
-        _tmp.copy(this.pos).setY(1.2).sub(host.pos.clone().setY(1.2)).normalize();
-        this.spawnBolt(host.pos.clone().setY(1.3), _tmp, host.damage, false, 0x5dff9a, 16);
-      }
-
-      if (!phased && !this.kit?.passthrough && dist < 2.55 && host.cooldown <= 0) {
-        const pick = nextHostStrike({ chain: host.chain, dist, foeStun: this.hitStun, rng: Math.random() });
-        const priced = hostStrikeDamage(host.damage, pick.kind, pick.chain);
-        host.chain = pick.chain >= 3 ? 0 : pick.chain;
-        host.cooldown = priced.recovery;
-        poseMelee(host.fighter.humanoid, 0.6);
-        host.swing = true;
-        if (shielded) {
-          this.particles.emit(this.pos.clone().setY(1.2), 0x66e7ff, 10, { speed: 6, size: 0.22, life: 0.3 });
-          host.knock.set(-dirx * 10, 0, -dirz * 10);
-        } else {
-          this.hurtPlayer(priced.damage, _tmp.set(-dirx, 0, -dirz), undefined, {
-            reaction: pick.kind === 'kick' ? 'knockback' : pick.kind === 'melee' ? 'heavy' : 'stagger',
-            strength: 0.75,
-            hitStun: priced.hitStun,
-            knockback: priced.knockback * 0.45,
-          });
-        }
-      }
+      this.driveCivilian(host, dt, time, phased, shielded);
     }
   }
 
-  /** Block figures swing their limbs; GLB hosts run the skeleton and fire a strike after a hit. */
-  private animateHost(host: Host, dt: number, moving: number, time: number) {
+  /**
+   * Civilians close, stop, then punch, kick, shove, or throw. Walking into
+   * the Ryder does not deal damage.
+   */
+  private driveCivilian(host: Host, dt: number, time: number, phased: boolean, shielded: boolean) {
+    const striker = host.striker ?? this.makeCivilianStriker();
+    host.striker = striker;
+    const profile = CIVILIAN_PROFILES[host.profileId ?? profileForKind(host.kind, 0.2)];
+    if (host.kind === 'broadcaster') {
+      host.summon -= dt;
+      if (host.summon <= 0 && this.hosts.length < MAX_ALIVE_HOSTS && this.phase === 'playing') {
+        host.summon = 8;
+        const scale = roundScaling(this.round);
+        this.spawnHost('walker', scale);
+        if (this.hosts.length < MAX_ALIVE_HOSTS) this.spawnHost('sprinter', scale);
+      }
+    }
+
+    let slot = 0;
+    for (const other of this.hosts) {
+      if (other === host) break;
+      if (!other.duelist && other.hp > 0) slot += 1;
+    }
+    const pdx = this.pos.x - host.pos.x;
+    const pdz = this.pos.z - host.pos.z;
+    const playerDist = Math.hypot(pdx, pdz) || 0.0001;
+    const prop = this.throwables?.nearestFree(host.pos.x, host.pos.z) ?? null;
+    const propDist = prop ? Math.hypot(prop.pos.x - host.pos.x, prop.pos.z - host.pos.z) : null;
+    const order = civilianOrder(profile, {
+      dist: playerDist,
+      hpRatio: host.maxHp > 0 ? host.hp / host.maxHp : 1,
+      holding: Boolean(host.heldItem),
+      throwableDist: propDist,
+      slot,
+      recovering: striker.busy,
+      rng: Math.random(),
+    });
+
+    if (order.state === 'pickup' && prop && !host.heldItem && this.throwables?.pickup(host, prop)) {
+      host.heldItem = prop;
+      host.cooldown = 0.28;
+    }
+    if (order.attack === 'throwObject' && host.heldItem && !phased && playerDist < 12) {
+      if (!host.winding && host.cooldown <= 0) {
+        host.winding = true;
+        host.throwWind = 0.46;
+        host.swing = true;
+      }
+    } else if (!host.heldItem) {
+      host.winding = false;
+      host.throwWind = 0;
+    }
+    if (host.winding && host.heldItem) {
+      host.throwWind = Math.max(0, host.throwWind - dt);
+      if (host.throwWind <= 0) {
+        host.winding = false;
+        const item = host.heldItem;
+        const flight = Math.min(0.65, playerDist / Math.max(6, item.stats.throwForce));
+        const aim = this.pos.clone();
+        aim.x += this.playerVel.x * flight * 0.55;
+        aim.z += this.playerVel.z * flight * 0.55;
+        aim.y = 1.05;
+        const spread = 2.4 + (1 - profile.throwBias) * 3.2;
+        const miss = (Math.random() - 0.5) * spread;
+        this.throwables?.throwAt(item, host.pos.clone().setY(1.35), aim, miss, host, this.simTime);
+        host.heldItem = null;
+        host.cooldown = 0.95 + Math.random() * 0.5;
+        host.swing = true;
+      }
+    } else if (
+      (order.attack === 'punch' || order.attack === 'kick' || order.attack === 'melee') &&
+      !striker.busy &&
+      host.cooldown <= 0 &&
+      !phased &&
+      !host.follow
+    ) {
+      striker.queue(order.attack);
+      host.cooldown = 0.48 + Math.random() * 0.4;
+      if (order.attack === 'punch' && Math.random() < (profile.id === 'brawler' || profile.id === 'aggressive' ? 0.55 : 0.28)) {
+        host.follow = Math.random() < 0.6 ? 'punch' : 'kick';
+      } else if (order.attack === 'kick' && Math.random() < 0.34) {
+        host.follow = 'melee';
+      }
+    }
+    if (host.follow === 'melee' && !phased && !striker.busy && host.cooldown <= 0) {
+      striker.queue('melee');
+      host.follow = null;
+      host.cooldown = 0.4 + Math.random() * 0.2;
+    }
+
+    let gx = this.pos.x;
+    let gz = this.pos.z;
+    if ((order.state === 'search' || order.state === 'pickup') && prop) {
+      gx = prop.pos.x;
+      gz = prop.pos.z;
+    } else if (!phased) {
+      const ang = slot * 1.9;
+      const ring = slot >= 2 ? 1.7 : 0;
+      gx += Math.cos(ang) * ring;
+      gz += Math.sin(ang) * ring;
+    }
+    const gdx = gx - host.pos.x;
+    const gdz = gz - host.pos.z;
+    const goalDist = Math.hypot(gdx, gdz) || 0.0001;
+    let vx = (gdx / goalDist) * order.move;
+    let vz = (gdz / goalDist) * order.move;
+    vx += (-gdz / goalDist) * order.strafe;
+    vz += (gdx / goalDist) * order.strafe;
+    if (striker.busy) {
+      vx *= 0.12;
+      vz *= 0.12;
+    }
+    const speed = host.speed * profile.speed * (order.state === 'flee' ? 1.2 : 1);
+    const mag = Math.hypot(vx, vz);
+    if (mag > 0.05) {
+      host.pos.x += (vx / mag) * speed * dt + host.knock.x * dt;
+      host.pos.z += (vz / mag) * speed * dt + host.knock.z * dt;
+    } else {
+      host.pos.x += host.knock.x * dt;
+      host.pos.z += host.knock.z * dt;
+    }
+    host.pos.x = clamp(host.pos.x, -BOUNDARY, BOUNDARY);
+    host.pos.z = clamp(host.pos.z, -BOUNDARY, BOUNDARY);
+    resolveCircle(host.pos, host.radius, this.world.obstacles);
+    if (!phased && !this.kit?.passthrough) {
+      const sx = host.pos.x - this.pos.x;
+      const sz = host.pos.z - this.pos.z;
+      const sd = Math.hypot(sx, sz) || 0.0001;
+      const min = host.radius + PLAYER_RADIUS + 0.1;
+      if (sd < min) {
+        host.pos.x += (sx / sd) * (min - sd);
+        host.pos.z += (sz / sd) * (min - sd);
+      }
+    }
+
+    const faceX = order.state === 'search' && prop ? prop.pos.x - host.pos.x : this.pos.x - host.pos.x;
+    const faceZ = order.state === 'search' && prop ? prop.pos.z - host.pos.z : this.pos.z - host.pos.z;
+    const facing = Math.atan2(faceX, faceZ);
+    const group = host.fighter.humanoid.group;
+    group.position.copy(host.pos);
+    group.position.y = this.world.heightAt(host.pos.x, host.pos.z) - host.sink;
+    group.rotation.y = facing;
+
+    if (host.heldItem && this.throwables) {
+      const socket = host.fighter.rig?.weaponSocket;
+      const lift = host.winding ? (1 - host.throwWind / 0.46) * 0.42 : 0;
+      if (socket) this.throwables.grip(host.heldItem, socket, lift);
+      else {
+        this.throwables.holdPosition(
+          host.heldItem,
+          host.pos.x + Math.sin(facing) * 0.55,
+          1.15 + lift,
+          host.pos.z + Math.cos(facing) * 0.55,
+        );
+      }
+    }
+
+    const frame = striker.tick(dt, {
+      time: this.simTime,
+      stunned: host.stagger > 0.05 || host.stun > 0,
+      locked: false,
+      facing,
+      x: host.pos.x,
+      z: host.pos.z,
+      meleeDamage: host.damage,
+      targets: phased
+        ? []
+        : [{ ref: this.playerBody, x: this.pos.x, z: this.pos.z, radius: PLAYER_RADIUS, airborne: this.airY > 0.3 }],
+    });
+    if (frame.lunge) {
+      host.pos.x += Math.sin(facing) * frame.lunge * 0.65;
+      host.pos.z += Math.cos(facing) * frame.lunge * 0.65;
+      resolveCircle(host.pos, host.radius, this.world.obstacles);
+      group.position.copy(host.pos);
+    }
+    const pose = striker.pose();
+    if (frame.started) host.swing = true;
+    if (host.follow === 'punch' || host.follow === 'kick') {
+      if (striker.chainInto(host.follow)) host.follow = null;
+    }
+    const moving = Math.min(1, mag);
+    this.animateHost(host, dt, moving, time, pose ? 1 - pose.p : 0, pose?.style, host.winding);
+    if (host.hit > 0) flashEmissive(host.fighter.humanoid, host.hitColor, host.hit * 2.4);
+    else flashEmissive(host.fighter.humanoid, 0x000000, 0);
+
+    if (shielded && frame.hits.length) {
+      this.particles.emit(this.pos.clone().setY(1.2), 0x66e7ff, 10, { speed: 6, size: 0.22, life: 0.3 });
+      host.knock.set(-Math.sin(facing) * 8, 0, -Math.cos(facing) * 8);
+      return;
+    }
+    for (const hit of frame.hits) {
+      if (hit.target.ref !== this.playerBody || this.kit?.passthrough) continue;
+      _tmp.set(Math.sin(facing), 0, Math.cos(facing));
+      this.hurtPlayer(hit.damage, _tmp, undefined, {
+        reaction: hit.reaction,
+        strength: hit.strength,
+        hitStun: hit.hitStun,
+        knockback: hit.knockback * 0.55,
+      });
+    }
+  }
+
+  /** Block figures swing their limbs; GLB hosts run the skeleton through the strike. */
+  private animateHost(host: Host, dt: number, moving: number, time: number, meleeT = 0, style?: MeleeStyle, throwing = false) {
     if (host.fighter.meshSource === 'gltf') {
-      animateGltfFighter(host.fighter, dt, host.anim, moving, host.speed > 5, 0, host.swing);
+      animateGltfFighter(host.fighter, dt, host.anim, moving, host.speed > 5, meleeT, host.swing, {
+        style,
+        clipHint: clipHintFor(host.animMap, style, throwing),
+      });
       host.swing = false;
     } else {
       animateHumanoid(host.fighter.humanoid, host.anim, moving, time);
@@ -2499,6 +2740,9 @@ export class RaidEngine {
       sink: 0,
       chain: 0,
       hitColor: 0xffffff,
+      throwWind: 0,
+      winding: false,
+      follow: null,
       duelist: true,
       controlled,
       ryderId: id,
@@ -2645,6 +2889,126 @@ export class RaidEngine {
     }
   }
 
+  private spawnThrowables() {
+    this.throwables?.dispose();
+    this.heldThrow = null;
+    this.throwables = new ThrowableField(this.scene);
+  }
+
+  private tryPickup() {
+    if (this.heldThrow || !this.throwables) return;
+    const item = this.throwables.nearestFree(this.pos.x, this.pos.z, 1.35);
+    if (!item) return;
+    if (this.throwables.pickup(this.playerBody, item)) this.heldThrow = item;
+  }
+
+  private releaseHeldThrow() {
+    const item = this.heldThrow;
+    if (!item || !this.throwables) return;
+    const aim = this.pos.clone();
+    const near = this.nearestHost(this.pos);
+    if (near) aim.copy(near.pos);
+    else {
+      aim.x += Math.sin(this.yaw) * 6;
+      aim.z += Math.cos(this.yaw) * 6;
+    }
+    aim.y = 1.1;
+    this.throwables.throwAt(item, this.pos.clone().setY(1.2), aim, 0.2, this.playerBody, this.simTime);
+    this.heldThrow = null;
+  }
+
+  private resolveThrowImpact(item: ThrowBody, point: THREE.Vector3) {
+    if (item.dealt) return;
+    if (item.lastThrower === this.playerBody) {
+      const host = this.hosts.find(
+        (candidate) =>
+          !candidate.duelist &&
+          candidate.hp > 0 &&
+          (candidate.pos.x - point.x) ** 2 + (candidate.pos.z - point.z) ** 2 < (candidate.radius + 0.45) ** 2,
+      );
+      if (!host) return;
+      item.dealt = true;
+      _tmp.set(host.pos.x - point.x, 0, host.pos.z - point.z);
+      if (_tmp.lengthSq() < 1e-4) _tmp.set(Math.sin(this.yaw), 0, Math.cos(this.yaw));
+      this.hurtHost(host, item.stats.damage, _tmp.normalize(), 'stagger', 0.65);
+      return;
+    }
+    const dx = this.pos.x - point.x;
+    const dz = this.pos.z - point.z;
+    const inBody = point.y > -0.05 && point.y < 1.85;
+    if (!inBody || dx * dx + dz * dz > 0.8 * 0.8) return;
+    item.dealt = true;
+    _tmp.set(dx, 0, dz);
+    if (_tmp.lengthSq() < 1e-4) _tmp.set(0, 0, 1);
+    this.hurtPlayer(item.stats.damage, _tmp.normalize(), undefined, {
+      reaction: 'stagger',
+      strength: 0.6,
+      hitStun: item.stats.stun,
+      knockback: 3.4,
+    });
+  }
+
+  private ensureCombatDebug() {
+    if (this.debugGroup) return;
+    this.debugGroup = new THREE.Group();
+    const ring = (radius: number, color: number) => {
+      const mesh = new THREE.Mesh(
+        new THREE.RingGeometry(Math.max(0.05, radius - 0.05), radius, 32),
+        new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.5, depthWrite: false, side: THREE.DoubleSide }),
+      );
+      mesh.rotation.x = -Math.PI / 2;
+      mesh.position.y = 0.08;
+      return mesh;
+    };
+    this.debugGroup.add(ring(2.2, 0xffcc66));
+    this.debugGroup.add(ring(2.7, 0xff7744));
+    this.debugGroup.add(ring(1.35, 0x88ffcc));
+    this.debugGroup.visible = false;
+    this.scene.add(this.debugGroup);
+  }
+
+  private markRing(index: number, x: number, z: number, radius: number, color: number) {
+    const group = this.debugGroup;
+    if (!group) return;
+    let mesh = this.debugMarks[index];
+    if (!mesh) {
+      mesh = new THREE.Mesh(
+        new THREE.RingGeometry(0.94, 1, 28),
+        new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.4, depthWrite: false, side: THREE.DoubleSide }),
+      );
+      mesh.rotation.x = -Math.PI / 2;
+      mesh.position.y = 0.1;
+      group.add(mesh);
+      this.debugMarks[index] = mesh;
+    }
+    (mesh.material as THREE.MeshBasicMaterial).color.setHex(color);
+    mesh.visible = true;
+    mesh.position.set(x - this.pos.x, 0.1, z - this.pos.z);
+    mesh.scale.set(radius, radius, 1);
+  }
+
+  private updateCombatDebug() {
+    if (!this.debugGroup) return;
+    this.debugGroup.visible = this.combatDebug;
+    if (!this.combatDebug) return;
+    this.debugGroup.position.set(this.pos.x, 0.02, this.pos.z);
+    let n = 0;
+    for (const host of this.hosts) {
+      if (host.hp <= 0 || host.duelist || !host.profileId) continue;
+      const profile = CIVILIAN_PROFILES[host.profileId];
+      this.markRing(n, host.pos.x, host.pos.z, profile.preferredDistance, 0x66ccff);
+      n += 1;
+      this.markRing(n, host.pos.x, host.pos.z, profile.attackRange, 0xffcc66);
+      n += 1;
+    }
+    for (const item of this.throwables?.items ?? []) {
+      if (item.broken) continue;
+      this.markRing(n, item.pos.x, item.pos.z, item.stats.pickupRadius, 0x88ff88);
+      n += 1;
+    }
+    for (let i = n; i < this.debugMarks.length; i += 1) this.debugMarks[i].visible = false;
+  }
+
   private clearCombat() {
     this.pvpCpu?.dispose();
     this.pvpCpu = null;
@@ -2671,6 +3035,9 @@ export class RaidEngine {
       this.player = null;
     }
     this.powerVfx.detach();
+    this.throwables?.dispose();
+    this.throwables = null;
+    this.heldThrow = null;
     this.recoveryT = 0;
     if (this.shield) {
       this.scene.remove(this.shield);
