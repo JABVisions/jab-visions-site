@@ -331,7 +331,8 @@ export const RYDERZ: Record<RyderId, RyderSpec> = {
         id: 'lift',
         name: 'Levitate',
         key: 'Q',
-        description: 'Hold nearby hosts in the air while aura drains. Press again to drop them.',
+        description:
+          'Rise into a plasma force field and steer it through hosts. Contact burns and shoves them aside while aura drains.',
         auraCost: 0,
         drain: 7,
       },
@@ -340,16 +341,17 @@ export const RYDERZ: Record<RyderId, RyderSpec> = {
         name: 'Force Field',
         key: 'E',
         description:
-          'Keep the blue field up while aura lasts. It blocks hits, burns throws, and shoves hosts off you.',
-        auraCost: 0,
-        drain: 9,
+          'Thrust a concentrated plasma disc along the crosshair. It expands as it flies, damaging and knocking back everything it hits.',
+        auraCost: 11,
+        drain: 0,
       },
       {
         id: 'heartbreak',
-        name: 'Heartbreak',
+        name: 'Heartbreak Blitz',
         key: 'R',
-        description: 'A wide blue detonation. Desire as a weapon.',
-        auraCost: 13,
+        description:
+          'Launch into a force-field sphere, strafe over nearby hosts, and rain plasma bombs before a finishing burst.',
+        auraCost: 16,
         drain: 0,
       },
     ],

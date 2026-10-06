@@ -182,7 +182,13 @@ const NEUTRAL: Partial<Record<BoneKey, NeutralTarget>> = {
     refs: [{ from: 'eyeR', to: 'eyeL', target: LEFT }],
     trustRoll: true,
   },
-  // Clavicles are left as exported: forcing them swings the whole arm chain.
+  // Clavicles: square them onto the shoulder line so a raised-arm bind
+  // (Zoe's pointing rest pose) does not leave a collarbone aiming at the
+  // sky while the arm chain tries to hang. This is the bind-pose correction
+  // the skeleton then animates from — rotating the mesh instead would only
+  // look right at idle.
+  shoulderL: { dir: dir(1, -0.15, 0.05), refs: [SHOULDER_LINE], trustRoll: true },
+  shoulderR: { dir: dir(-1, -0.15, 0.05), refs: [SHOULDER_LINE], trustRoll: true },
   // Arm roll comes from a bent elbow (forearms bend forward); a straight arm
   // keeps its exported roll.
   upperArmL: { dir: dir(0.24, -1, 0.04), refs: [{ from: 'lowerArmL', to: 'handL', target: FORWARD }] },
@@ -666,7 +672,11 @@ export type AbilityPose =
   | 'throw'
   | 'catch'
   | 'spin'
-  | 'guard';
+  | 'guard'
+  | 'hover'
+  | 'cast'
+  | 'flight'
+  | 'land';
 
 export interface PoseOverride {
   kind: AbilityPose;
@@ -693,6 +703,10 @@ export const POSE_ROOT_DROP: Record<AbilityPose, number> = {
   catch: 0.08,
   spin: 0.2,
   guard: 0.22,
+  hover: 0,
+  cast: 0.04,
+  flight: 0,
+  land: 0.22,
 };
 
 export interface SkeletalMotion {
@@ -817,6 +831,18 @@ export function poseSkeleton(skel: ProceduralSkeleton, motion: SkeletalMotion) {
         break;
       case 'guard':
         poseGuard(SCRATCH, pose.t);
+        break;
+      case 'hover':
+        poseHover(SCRATCH, pose.t);
+        break;
+      case 'cast':
+        poseCast(SCRATCH, pose.t);
+        break;
+      case 'flight':
+        poseFlight(SCRATCH, pose.t);
+        break;
+      case 'land':
+        poseLand(SCRATCH, pose.t);
         break;
     }
     addAngles(A, SCRATCH, w);
@@ -1417,6 +1443,93 @@ function poseGuard(A: Angles, t: number) {
   A.upperLegR.z -= 0.18;
   A.footL.x -= 0.3 * settle;
   A.footR.x -= 0.25 * settle;
+}
+
+/** Suspended inside a force-field sphere: knees soft, legs trailing, arms floating ready. */
+function poseHover(A: Angles, t: number) {
+  const wave = Math.sin(t * Math.PI * 2);
+  A.spine.x -= 0.08;
+  A.head.x -= 0.12 + wave * 0.03;
+  A.upperArmL.x -= 0.55;
+  A.upperArmR.x -= 0.45;
+  A.upperArmL.z += 0.32;
+  A.upperArmR.z -= 0.38;
+  A.lowerArmL.x -= 0.55 + wave * 0.08;
+  A.lowerArmR.x -= 0.48 - wave * 0.08;
+  A.handL.x += 0.2;
+  A.handR.x += 0.15;
+  A.upperLegL.x -= 0.35;
+  A.upperLegR.x -= 0.22 + wave * 0.12;
+  A.lowerLegL.x += 0.55;
+  A.lowerLegR.x += 0.7 + wave * 0.1;
+  A.upperLegL.z += 0.12;
+  A.upperLegR.z -= 0.14;
+  A.footL.x += 0.2;
+  A.footR.x += 0.35;
+}
+
+/**
+ * Force-field projection: coil, then both palms thrust toward the aim.
+ * `t` 0 → 0.4 gathers, 0.4 → 1 holds the push.
+ */
+function poseCast(A: Angles, t: number) {
+  const gather = 1 - smooth(Math.min(1, t / 0.4));
+  const push = smooth(Math.min(1, Math.max(0, t - 0.28) / 0.35));
+  A.spine.x += -0.18 * gather + 0.22 * push;
+  A.spine.y -= 0.12 * push;
+  A.head.x -= 0.1 * gather + 0.18 * push;
+  A.upperArmL.x += 0.45 * gather - 1.55 * push;
+  A.upperArmR.x += 0.55 * gather - 1.7 * push;
+  A.upperArmL.z += 0.18 * gather - 0.12 * push;
+  A.upperArmR.z -= 0.22 * gather + 0.08 * push;
+  A.lowerArmL.x -= 1.4 * gather + 0.12 * push;
+  A.lowerArmR.x -= 1.55 * gather + 0.08 * push;
+  A.handL.x += 0.7 * push;
+  A.handR.x += 0.85 * push;
+  A.upperLegL.x -= 0.22 * gather + 0.12 * push;
+  A.upperLegR.x -= 0.18 * gather - 0.18 * push;
+  A.lowerLegL.x += 0.4 * gather;
+  A.lowerLegR.x += 0.28 * gather;
+}
+
+/** Aerial strafing run: chest open to the ground, arms wide, legs streaming back. */
+function poseFlight(A: Angles, t: number) {
+  const shoot = smooth(Math.min(1, t));
+  A.hips.x += 0.18;
+  A.spine.x += 0.42;
+  A.head.x += 0.2;
+  A.upperArmL.x -= 0.35 + 1.1 * shoot;
+  A.upperArmR.x -= 0.25 + 1.25 * shoot;
+  A.upperArmL.z += 0.55 - 0.2 * shoot;
+  A.upperArmR.z -= 0.6 - 0.15 * shoot;
+  A.lowerArmL.x -= 0.35 - 0.2 * shoot;
+  A.lowerArmR.x -= 0.3 - 0.25 * shoot;
+  A.handL.x += 0.45 * shoot;
+  A.handR.x += 0.55 * shoot;
+  A.upperLegL.x += 0.55;
+  A.upperLegR.x += 0.7;
+  A.lowerLegL.x += 0.35;
+  A.lowerLegR.x += 0.55;
+  A.footL.x += 0.4;
+  A.footR.x += 0.5;
+}
+
+/** Controlled landing after an aerial: one knee absorbs, arms open, then rise. */
+function poseLand(A: Angles, t: number) {
+  const d = 1 - smooth(t);
+  A.upperLegL.x -= 0.7 * d;
+  A.upperLegR.x -= 1.15 * d;
+  A.lowerLegL.x += 1.2 * d;
+  A.lowerLegR.x += 1.7 * d;
+  A.footR.x -= 0.35 * d;
+  A.spine.x += 0.45 * d;
+  A.head.x -= 0.35 * d;
+  A.upperArmL.x -= 0.65 * d;
+  A.upperArmR.x -= 0.55 * d;
+  A.upperArmL.z += 0.35 * d;
+  A.upperArmR.z -= 0.3 * d;
+  A.lowerArmL.x -= 0.4 * d;
+  A.lowerArmR.x -= 0.35 * d;
 }
 
 /** Overhead chop: right arm, torso drives it. */

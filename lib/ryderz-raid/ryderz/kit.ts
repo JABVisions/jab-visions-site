@@ -98,6 +98,10 @@ export interface KitFrame {
   speed: number;
   sprinting: boolean;
   moving: boolean;
+  /** Current aura (0 → maxAura). Kits dim their own effects when it is gone. */
+  aura?: number;
+  maxAura?: number;
+  burnout?: boolean;
 }
 
 export interface RyderKit {
@@ -113,6 +117,11 @@ export interface RyderKit {
   readonly glow?: number;
   /** True while enemies cannot touch, block or find the Ryder (phasing, underground). */
   readonly intangible?: boolean;
+  /**
+   * Glide through hosts without becoming unhittable: skips body-blocking and
+   * melee bump, but incoming damage (bolts, etc.) still applies.
+   */
+  readonly passthrough?: boolean;
   /**
    * Hands are busy (weapon thrown, mid-spin): no firing, melee or other
    * powers, but the player keeps walking. The power that is on can still be

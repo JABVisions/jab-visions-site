@@ -14,6 +14,7 @@ import {
   type PoseOverride,
 } from './skeletal';
 import { addOutline, buildHumanoid, glow, toon, type Humanoid } from './toon';
+import { PlasmaOrbits } from './plasma-orbs';
 
 const BLADE = new THREE.BoxGeometry(0.08, 0.95, 0.08);
 const AXE_HANDLE = new THREE.CylinderGeometry(0.05, 0.06, 1.15, 8);
@@ -21,7 +22,6 @@ const AXE_HEAD = new THREE.BoxGeometry(0.08, 0.38, 0.55);
 const ORB = new THREE.SphereGeometry(0.16, 12, 10);
 const DART_GUN = new THREE.BoxGeometry(0.12, 0.12, 0.42);
 const HALO = new THREE.TorusGeometry(0.55, 0.045, 8, 24);
-const GLB_HALO = new THREE.TorusGeometry(0.24, 0.022, 8, 28);
 const VEIN = new THREE.BoxGeometry(0.18, 0.42, 0.06);
 
 const SKINS = [0xf3d2b5, 0xe0b48a, 0xc58c62, 0x8d5524, 0xf6e0c8, 0xb07a52];
@@ -61,6 +61,8 @@ export interface GltfRig {
   weaponSocket: THREE.Object3D;
   /** Same for the free hand; null when the rig has no left hand bone. */
   offhandSocket: THREE.Object3D | null;
+  /** Zoe's three plasma satellites; other Ryderz leave this unset. */
+  orbs?: PlasmaOrbits;
 }
 
 /** Per-frame extras for `animateGltfFighter`: an ability stance and/or a chosen strike. */
@@ -68,6 +70,7 @@ export interface AnimateExtras {
   pose?: PoseOverride | null;
   /** Strike to play for this `meleeStarted`, instead of cycling the authored list. */
   style?: MeleeStyle;
+  camera?: THREE.Camera;
 }
 
 export interface Fighter {
@@ -76,6 +79,8 @@ export interface Fighter {
   glowMeshes: THREE.Mesh[];
   meshSource: 'procedural' | 'gltf';
   rig?: GltfRig;
+  /** Central plasma-orb controller (Zoe). Ticked from `animateGltfFighter`. */
+  orbs?: PlasmaOrbits;
 }
 
 interface GltfTemplate {
@@ -502,14 +507,16 @@ function animateSkeletonWithStrikes(
   moving: number,
   sprinting: boolean,
   meleeStarted: boolean,
+  pose: PoseOverride | null,
 ) {
   const skeleton = rig.skeleton!;
   const mixer = rig.mixer!;
   // The clip supplies the swing, so the procedural chop stays off.
-  poseSkeleton(skeleton, { phase, moving, sprinting, meleeT: 0 });
+  poseSkeleton(skeleton, { phase, moving, sprinting, meleeT: 0, pose });
   const f = rig.figure;
   f.position.copy(rig.basePosition);
-  f.position.y += Math.abs(Math.sin(phase)) * (sprinting ? 0.045 : 0.025) * moving;
+  f.position.y += Math.abs(Math.sin(phase)) * (sprinting ? 0.045 : 0.025) * moving * (pose ? 1 - pose.weight : 1);
+  if (pose) f.position.y -= POSE_ROOT_DROP[pose.kind] * Math.min(1, pose.weight);
   f.rotation.set(0, 0, 0);
 
   if (meleeStarted) {
@@ -559,11 +566,8 @@ export function animateGltfFighter(
   const pose = extras?.pose && extras.pose.weight > 0 ? extras.pose : null;
 
   if (rig.skeleton && rig.mixer && rig.strikes.length) {
-    animateSkeletonWithStrikes(rig, dt, phase, moving, sprinting, meleeStarted);
-    return;
-  }
-
-  if (rig.mixer) {
+    animateSkeletonWithStrikes(rig, dt, phase, moving, sprinting, meleeStarted, pose);
+  } else if (rig.mixer) {
     if (meleeStarted && rig.actions.attack) {
       const attack = rig.actions.attack;
       const clipLen = attack.getClip().duration || 0.6;
@@ -584,11 +588,7 @@ export function animateGltfFighter(
     rig.mixer.update(dt);
     rig.figure.position.copy(rig.basePosition);
     rig.figure.rotation.set(0, 0, 0);
-    return;
-  }
-
-  // --- Procedural skeleton: real strides, arm swing and authored melee styles ---
-  if (rig.skeleton) {
+  } else if (rig.skeleton) {
     if (meleeStarted) {
       if (extras?.style) {
         rig.style = extras.style;
@@ -605,25 +605,33 @@ export function animateGltfFighter(
     if (pose) f.position.y -= POSE_ROOT_DROP[pose.kind] * Math.min(1, pose.weight);
     f.position.z += swing * STRIKE_LUNGE[rig.style];
     f.rotation.set(0, 0, 0);
-    return;
+  } else {
+    // --- Puppet fallback for an unrigged mesh -------------------------------
+    const f = rig.figure;
+    const swing = meleeT > 0 ? Math.sin((1 - meleeT) * Math.PI) : 0;
+    const lean = moving * (sprinting ? 0.2 : 0.11);
+    f.position.copy(rig.basePosition);
+    f.position.y += Math.abs(Math.sin(phase)) * 0.05 * moving;
+    f.position.z += swing * 0.28;
+    f.rotation.x = lean + swing * 0.3;
+    f.rotation.z = Math.sin(phase) * 0.045 * moving - swing * 0.12;
+    f.rotation.y = Math.sin(phase) * 0.07 * moving - swing * 0.55;
+
+    // Raised-fist chop: upright at rest, arcs forward and down through the swing.
+    const socket = rig.weaponSocket;
+    socket.rotation.x = swing * 1.7;
+    socket.rotation.z = -swing * 0.2;
+    socket.position.set(0, -swing * 0.25, swing * 0.35);
   }
 
-  // --- Puppet fallback for an unrigged mesh -------------------------------
-  const f = rig.figure;
-  const swing = meleeT > 0 ? Math.sin((1 - meleeT) * Math.PI) : 0;
-  const lean = moving * (sprinting ? 0.2 : 0.11);
-  f.position.copy(rig.basePosition);
-  f.position.y += Math.abs(Math.sin(phase)) * 0.05 * moving;
-  f.position.z += swing * 0.28;
-  f.rotation.x = lean + swing * 0.3;
-  f.rotation.z = Math.sin(phase) * 0.045 * moving - swing * 0.12;
-  f.rotation.y = Math.sin(phase) * 0.07 * moving - swing * 0.55;
+  const orbs = fighter.orbs ?? rig.orbs;
+  if (orbs) orbs.update(dt, extras?.camera);
+}
 
-  // Raised-fist chop: upright at rest, arcs forward and down through the swing.
-  const socket = rig.weaponSocket;
-  socket.rotation.x = swing * 1.7;
-  socket.rotation.z = -swing * 0.2;
-  socket.position.set(0, -swing * 0.25, swing * 0.35);
+function attachPlasmaOrbs(parent: THREE.Object3D, color: THREE.ColorRepresentation) {
+  const orbs = new PlasmaOrbits(color);
+  parent.add(orbs.group);
+  return orbs;
 }
 
 export function buildRyder(spec: RyderSpec, options: { clone?: boolean } = {}): Fighter {
@@ -663,16 +671,10 @@ export function buildRyder(spec: RyderSpec, options: { clone?: boolean } = {}): 
         glowMeshes.push(...seams);
       }
     } else if (spec.id === 'zoe') {
-      // Orb hovers just off the raised fingertip; halo floats above the head.
-      const orb = new THREE.Mesh(ORB, aura);
-      orb.position.set(0, 0.12, 0.04);
-      rig.weaponSocket.add(orb);
-      const halo = new THREE.Mesh(GLB_HALO, glow(spec.color, options.clone ? 1 : 1.4));
-      halo.rotation.x = Math.PI / 2;
-      halo.position.y = humanoid.height + 0.12;
-      humanoid.group.add(halo);
-      weapons.push(orb, halo);
-      glowMeshes.push(orb, halo);
+      const orbs = attachPlasmaOrbs(humanoid.group, spec.color);
+      glowMeshes.push(...orbs.glowMeshes);
+      rig.orbs = orbs;
+      return { humanoid, weapons, glowMeshes, meshSource: 'gltf' as const, rig, orbs };
     }
     // Keven's dart and Rubi's blade are modelled into their Tripo meshes, so
     // neither gets a socketed weapon.
@@ -732,15 +734,15 @@ export function buildRyder(spec: RyderSpec, options: { clone?: boolean } = {}): 
     weapons.push(axe);
     glowMeshes.push(head);
   } else if (spec.id === 'zoe') {
-    const orb = new THREE.Mesh(ORB, aura);
-    orb.position.set(0, 0.05, 0.1);
-    addWeapon(orb, 'R');
-    const halo = new THREE.Mesh(HALO, aura.clone());
-    halo.rotation.x = Math.PI / 2;
-    halo.position.y = 1.95;
-    humanoid.group.add(halo);
-    weapons.push(halo);
-    glowMeshes.push(halo);
+    const orbs = attachPlasmaOrbs(humanoid.group, spec.color);
+    glowMeshes.push(...orbs.glowMeshes);
+    if (options.clone) {
+      humanoid.materials.forEach((m) => {
+        m.transparent = true;
+        m.opacity = 0.72;
+      });
+    }
+    return { humanoid, weapons, glowMeshes, meshSource: 'procedural', orbs };
   } else {
     const gun = new THREE.Mesh(DART_GUN, aura);
     gun.position.set(0, 0, 0.12);

@@ -96,7 +96,7 @@ export default function RyderShowcase({
         const group = fighter.humanoid.group;
         group.rotation.y = -0.42 + Math.sin(time * 0.45) * 0.14;
         if (fighter.meshSource === 'gltf') {
-          animateGltfFighter(fighter, dt, anim, 0, false, meleeT, meleeStarted);
+          animateGltfFighter(fighter, dt, anim, 0, false, meleeT, meleeStarted, { camera });
         } else {
           animateHumanoid(fighter.humanoid, anim, 0, time);
           if (meleeT > 0) poseMelee(fighter.humanoid, 1 - meleeT);

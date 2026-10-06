@@ -276,6 +276,8 @@ export class RaidEngine {
   /** Per-Ryder combat kit (null for Ryderz still on the generic moves). */
   private kit: RyderKit | null = null;
   private kitContext: KitContext | null = null;
+  /** Ability ids the current kit has claimed via `tryAbility`. */
+  private kitClaimed = new Set<AbilityId>();
   private scheduler = new HitScheduler();
   private rings = new ShockRingPool(10);
   private cracks = new CrackDecalPool(4);
@@ -740,7 +742,16 @@ export class RaidEngine {
     this.scheduler.update(this.simTime);
     if (this.kit) {
       const moving = this.moveAxis.x !== 0 || this.moveAxis.z !== 0 || ['arrowup', 'arrowdown', 'arrowleft', 'arrowright'].some((k) => this.keys.has(k));
-      this.kit.update({ dt, time: this.simTime, speed: this.playerSpeed, sprinting: this.sprinting, moving });
+      this.kit.update({
+        dt,
+        time: this.simTime,
+        speed: this.playerSpeed,
+        sprinting: this.sprinting,
+        moving,
+        aura: this.aura,
+        maxAura: this.maxAura,
+        burnout: this.burnout,
+      });
     }
     this.updatePlayerMove(dt, time);
     const recovering = this.recoveryT > 0;
@@ -882,7 +893,7 @@ export class RaidEngine {
         this.burnout = false;
       }
     }
-    if (this.isActive('lift')) this.liftHosts(0.4);
+    if (this.isActive('lift') && !this.kitClaimed.has('lift')) this.liftHosts(0.4);
   }
 
   private spendAura(amount: number) {
@@ -933,7 +944,7 @@ export class RaidEngine {
 
     // Hosts shoulder the Ryder aside, except while a kit sequence is carrying
     // her through them (dashes decide their own contact).
-    if (!phased && !locked) {
+    if (!phased && !locked && !this.kit?.passthrough) {
       for (const host of this.hosts) {
         const dx = this.pos.x - host.pos.x;
         const dz = this.pos.z - host.pos.z;
@@ -962,6 +973,7 @@ export class RaidEngine {
       animateGltfFighter(this.player, dt, this.anim, moving, this.sprinting, this.meleeT, this.meleeStarted, {
         pose: this.kit?.pose ?? null,
         style: this.meleeStarted ? this.strikeOverride ?? undefined : undefined,
+        camera: this.camera,
       });
       this.meleeStarted = false;
       this.strikeOverride = null;
@@ -969,10 +981,11 @@ export class RaidEngine {
       animateHumanoid(this.player.humanoid, this.anim, moving, time);
       if (this.meleeT > 0) poseMelee(this.player.humanoid, 1 - this.meleeT);
       else poseAim(this.player.humanoid, this.pitch);
+      this.player.orbs?.update(dt, this.camera);
     }
 
     if (this.shield) {
-      this.shield.visible = this.isActive('forcefield');
+      this.shield.visible = this.isActive('forcefield') && !this.kitClaimed.has('forcefield');
       this.shield.position.copy(this.pos).setY(1.1);
       this.shield.rotation.y = time * 1.4;
       const pulse = 1 + Math.sin(time * 8) * 0.04;
@@ -1133,6 +1146,7 @@ export class RaidEngine {
     this.kit.detach();
     this.kit = null;
     this.kitContext = null;
+    this.kitClaimed.clear();
     this.scheduler.clear();
     this.hitStopT = 0;
     if (this.player) {
@@ -1228,17 +1242,20 @@ export class RaidEngine {
       // The toggle stays engine-owned (drain, HUD, switch-off); a kit that
       // claims the power dresses it and plays its effects while it is on.
       const kitOwned = this.kit?.tryAbility(move.id) ?? false;
+      if (kitOwned) this.kitClaimed.add(move.id);
       if (!kitOwned && move.id === 'duplicate') this.spawnClones([-1, 1]);
       if (!kitOwned && move.id === 'decoy') this.spawnClones([0]);
       if (!kitOwned && move.id === 'lift') this.liftHosts(2.2);
       // Generic stand-in for a Ryder without Aaron's kit: one siphon on switch-on.
       if (!kitOwned && move.id === 'greedSiphon') this.greedSiphon();
-      this.particles.emit(this.pos.clone().setY(1.1), this.spec.color, 22, {
-        speed: 8,
-        size: 0.3,
-        life: 0.45,
-        up: 1,
-      });
+      if (!kitOwned) {
+        this.particles.emit(this.pos.clone().setY(1.1), this.spec.color, 22, {
+          speed: 8,
+          size: 0.3,
+          life: 0.45,
+          up: 1,
+        });
+      }
       return;
     }
 
@@ -1249,6 +1266,7 @@ export class RaidEngine {
     const id = move.id;
     // A Ryder kit that owns this power plays it out itself.
     if (this.kit?.tryAbility(id)) {
+      this.kitClaimed.add(id);
       this.abilityT = Math.max(this.abilityT, 0.9);
       return;
     }
@@ -1660,7 +1678,7 @@ export class RaidEngine {
         this.spawnBolt(host.pos.clone().setY(1.3), _tmp, host.damage, false, 0x5dff9a, 16);
       }
 
-      if (!phased && dist < host.radius + PLAYER_RADIUS + 0.55 && host.cooldown <= 0) {
+      if (!phased && !this.kit?.passthrough && dist < host.radius + PLAYER_RADIUS + 0.55 && host.cooldown <= 0) {
         host.cooldown = host.kind === 'heavy' || host.kind === 'broadcaster' ? 1.35 : 0.85;
         poseMelee(host.fighter.humanoid, 0.6);
         host.swing = true;
