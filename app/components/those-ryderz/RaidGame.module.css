@@ -236,6 +236,18 @@
   box-shadow: 0 0 22px color-mix(in srgb, var(--aura, #31ff96) 40%, transparent);
 }
 
+.moveRow[data-link='true'] .ability.ready {
+  animation: linkPulse 0.9s ease-in-out infinite;
+  border-color: #ffd0d6;
+  box-shadow: 0 0 18px color-mix(in srgb, var(--aura, #ff4d6a) 65%, white);
+}
+
+@keyframes linkPulse {
+  50% {
+    transform: translateY(-1px);
+  }
+}
+
 .crosshair {
   position: absolute;
   top: 50%;

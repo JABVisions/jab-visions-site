@@ -67,6 +67,22 @@ import {
 } from './toon';
 import { buildWorld, pointBlocked, resolveCircle, type World } from './world';
 import { calculatePvPDamage, pvpHealth, PvpCpu, type PvpDamageKind } from './pvp';
+import {
+  CombatMemory,
+  FighterStriker,
+  combatProfileFor,
+  commandForKey,
+  hostStrikeDamage,
+  meleeWantsGrab,
+  nextHostStrike,
+  reactionForEffect,
+  recipesFor,
+  resolvePowerLink,
+  risingPadCommands,
+  type CombatCommand,
+  type PhysicalHit,
+  type StrikerHit,
+} from './fighter';
 
 export interface HudState {
   hp: number;
@@ -112,6 +128,16 @@ export interface HudState {
   beacon: BeaconHudState | null;
   /** True for the moment the Beacon is pouring energy back into the Ryder. */
   recovering: boolean;
+  combo: {
+    count: number;
+    label: string;
+    tier: string;
+    color: string;
+    revision: number;
+    power: boolean;
+    powerLabel: string;
+    powerLeft: number;
+  };
 }
 
 interface Host {
@@ -144,6 +170,10 @@ interface Host {
   /** Grab state (see `combat.ts`): seconds held by the Ryder, metres pulled under the floor. */
   held: number;
   sink: number;
+  /** How far into a punch-kick chain this host is. Resets after a pause. */
+  chain: number;
+  /** Last shove, kept so props can read it later. */
+  lastImpact?: { x: number; z: number; speed: number; kind: string };
   /** Colour of the current hit flash; hits reset it to white, kits can tint it. */
   hitColor: number;
   /** Versus opponent wearing a Ryder model. Not a mind-controlled host. */
@@ -242,7 +272,25 @@ export class RaidEngine {
   private lookAcc = { x: 0, y: 0 };
   private fireHeld = false;
   private meleeQueued = false;
+  private punchQueued = false;
+  private kickQueued = false;
+  private dodgeQueued = false;
   private queuedMoves = [false, false, false];
+  private readonly striker = new FighterStriker();
+  private readonly p2Striker = new FighterStriker();
+  private readonly combatMemory = new CombatMemory();
+  private hitStun = 0;
+  private hitKnock = new THREE.Vector3();
+  private airY = 0;
+  private airVel = 0;
+  private takenChain = 0;
+  private takenGap = 0;
+  private dodgeT = 0;
+  private dodgeCd = 0;
+  private dodgeX = 0;
+  private dodgeZ = 1;
+  private retreatNote = 0;
+  private padPrev: boolean[] = [];
   private pointerLocked = false;
 
   private spec: RyderSpec = RYDERZ.rubi;
@@ -252,6 +300,10 @@ export class RaidEngine {
   private pvpSetup: { opponentId: RyderId; localTwoPlayer: boolean } | null = null;
   private pvpLocalTwo = false;
   private p2MeleeQueued = false;
+  private p2PunchQueued = false;
+  private p2KickQueued = false;
+  private p2DodgeQueued = false;
+  private p2DodgeT = 0;
   /** CPU duelist. Null in Solo, Raid, and local 2-player. */
   pvpCpu: PvpCpu | null = null;
   private playerVel = new THREE.Vector3();
@@ -386,6 +438,21 @@ export class RaidEngine {
     this.fireCd = 0;
     this.meleeCd = 0;
     this.meleeT = 0;
+    this.striker.reset();
+    this.striker.setRyder(id);
+    this.p2Striker.reset();
+    this.combatMemory.reset();
+    this.hitStun = 0;
+    this.hitKnock.set(0, 0, 0);
+    this.airY = 0;
+    this.airVel = 0;
+    this.takenChain = 0;
+    this.takenGap = 0;
+    this.dodgeT = 0;
+    this.dodgeCd = 0;
+    this.punchQueued = false;
+    this.kickQueued = false;
+    this.dodgeQueued = false;
     this.moveCd = [0, 0, 0];
     this.moveT = [0, 0, 0];
     this.queuedMoves = [false, false, false];
@@ -584,6 +651,18 @@ export class RaidEngine {
     this.meleeQueued = true;
   }
 
+  queuePunch() {
+    this.punchQueued = true;
+  }
+
+  queueKick() {
+    this.kickQueued = true;
+  }
+
+  queueDodge() {
+    this.dodgeQueued = true;
+  }
+
   queueAbility(slot = 1) {
     const i = Math.max(0, Math.min(2, slot));
     this.queuedMoves[i] = true;
@@ -693,15 +772,9 @@ export class RaidEngine {
     this.keys.add(e.key.toLowerCase());
     // Menus own the keyboard while paused; only Escape reaches the raid.
     if (this.paused && e.key !== 'Escape') return;
-    if (e.key === 'q' || e.key === 'Q' || e.key === '1') this.queuedMoves[0] = true;
-    if (e.key === 'e' || e.key === 'E' || e.key === '2') this.queuedMoves[1] = true;
-    if (e.key === 'r' || e.key === 'R' || e.key === '3') this.queuedMoves[2] = true;
-    if (this.pvpLocalTwo && (e.key === 'u' || e.key === 'U')) {
-      this.p2MeleeQueued = true;
-    }
-    if (e.key === 'f' || e.key === 'F' || e.code === 'Space') {
-      this.meleeQueued = true;
-    }
+    const rival = this.pvpLocalTwo ? commandForKey(e.key, e.code, 2) : null;
+    const command = rival ?? commandForKey(e.key, e.code, 1);
+    if (command) this.queueCommand(command, rival ? 2 : 1);
     if (INTERACT_KEYS.includes(e.key.toLowerCase())) this.interactQueued = true;
     if (e.key === 'Escape') {
       if (this.tuneMode) {
@@ -817,10 +890,8 @@ export class RaidEngine {
         if (!locked && (!busy || this.moveT[i] > 0)) this.tryMove(i);
       }
     }
-    if (this.meleeQueued) {
-      this.meleeQueued = false;
-      if (!locked && !busy) this.tryMelee();
-    }
+    this.pollPad();
+    this.stepPhysical(dt, locked, busy);
     if (this.fireHeld && !locked && !busy) this.tryFire();
     if (this.interactQueued) {
       this.interactQueued = false;
@@ -979,17 +1050,23 @@ export class RaidEngine {
     }
     const busy = this.kit?.busy ?? false;
     this.sprinting = this.keys.has('shift') && len > 0.1 && !this.fireHeld && this.meleeT <= 0 && !busy;
-    const speed =
+    let speed =
       this.spec.speed *
       (this.sprinting ? SPRINT_MULTIPLIER : 1) *
       (this.burnout ? 0.82 : 1) *
       (this.kit?.moveScale ?? 1);
+    if (this.hitStun > 0.05) speed *= 0.22;
 
     _fwd.set(Math.sin(this.yaw), 0, Math.cos(this.yaw));
     _right.set(-_fwd.z, 0, _fwd.x);
     _tmp.copy(_fwd).multiplyScalar(-z).add(_right.multiplyScalar(x));
-    if (_tmp.lengthSq() > 0) _tmp.normalize();
+    if (this.dodgeT > 0) {
+      _tmp.set(this.dodgeX, 0, this.dodgeZ);
+      speed = 15;
+    } else if (_tmp.lengthSq() > 0) _tmp.normalize();
     this.pos.addScaledVector(_tmp, speed * dt);
+    this.hitKnock.multiplyScalar(Math.max(0, 1 - dt * 5));
+    this.pos.addScaledVector(this.hitKnock, dt);
     this.pos.x = clamp(this.pos.x, -BOUNDARY, BOUNDARY);
     this.pos.z = clamp(this.pos.z, -BOUNDARY, BOUNDARY);
     resolveCircle(this.pos, PLAYER_RADIUS, this.world.obstacles);
@@ -1016,11 +1093,22 @@ export class RaidEngine {
     this.playerSpeed = dt > 0 ? Math.hypot(this.pos.x - this.lastPos.x, this.pos.z - this.lastPos.z) / dt : 0;
     if (dt > 0) this.playerVel.set((this.pos.x - this.lastPos.x) / dt, 0, (this.pos.z - this.lastPos.z) / dt);
     else this.playerVel.set(0, 0, 0);
+    const nearest = this.nearestHost(this.pos);
+    if (nearest && this.playerSpeed > 3.2 && this.simTime > this.retreatNote) {
+      const awayX = this.pos.x - nearest.pos.x;
+      const awayZ = this.pos.z - nearest.pos.z;
+      const away = Math.hypot(awayX, awayZ) || 1;
+      const leaving = (this.playerVel.x * awayX + this.playerVel.z * awayZ) / away;
+      if (leaving > 1.4) {
+        this.combatMemory.note('retreat', this.simTime);
+        this.retreatNote = this.simTime + 0.45;
+      }
+    }
     this.lastPos.copy(this.pos);
 
     this.player.humanoid.group.position.copy(this.pos);
     this.player.humanoid.group.position.y =
-      this.world.heightAt(this.pos.x, this.pos.z) + (this.kit?.airY ?? 0) - (this.pvpCpu?.playerSink() ?? 0);
+      this.world.heightAt(this.pos.x, this.pos.z) + (this.kit?.airY ?? 0) + this.airY - (this.pvpCpu?.playerSink() ?? 0);
     this.player.humanoid.group.rotation.y = this.yaw + (this.kit?.bodyYaw ?? 0);
     const moving = Math.min(1, len);
     this.anim += dt * (8 + moving * (this.sprinting ? 9 : 6));
@@ -1102,6 +1190,185 @@ export class RaidEngine {
     });
   }
 
+  private queueCommand(command: CombatCommand, player: 1 | 2) {
+    if (player === 2) {
+      if (command === 'punch') this.p2PunchQueued = true;
+      if (command === 'kick') this.p2KickQueued = true;
+      if (command === 'melee') this.p2MeleeQueued = true;
+      if (command === 'dodge') this.p2DodgeQueued = true;
+      return;
+    }
+    if (command === 'punch') this.punchQueued = true;
+    if (command === 'kick') this.kickQueued = true;
+    if (command === 'melee') this.meleeQueued = true;
+    if (command === 'dodge') this.dodgeQueued = true;
+    if (command === 'ability1') this.queuedMoves[0] = true;
+    if (command === 'ability2') this.queuedMoves[1] = true;
+    if (command === 'ability3') this.queuedMoves[2] = true;
+  }
+
+  private pollPad() {
+    const pads = typeof navigator === 'undefined' ? null : navigator.getGamepads?.();
+    const pad = pads ? Array.from(pads).find((item) => item && item.connected) : null;
+    if (!pad) return;
+    const commands = risingPadCommands(
+      pad.buttons.map((button) => button.pressed),
+      this.padPrev,
+    );
+    for (const command of commands) this.queueCommand(command, 1);
+  }
+
+  private tryDodge() {
+    if (this.dodgeCd > 0 || this.hitStun > 0.18 || (this.kit?.locked ?? false)) return;
+    let x = this.moveAxis.x;
+    let z = this.moveAxis.z;
+    if (this.keys.has('arrowup')) z -= 1;
+    if (this.keys.has('arrowdown')) z += 1;
+    if (this.keys.has('arrowleft')) x -= 1;
+    if (this.keys.has('arrowright')) x += 1;
+    const len = Math.hypot(x, z);
+    const fwdX = Math.sin(this.yaw);
+    const fwdZ = Math.cos(this.yaw);
+    if (len < 0.2) {
+      this.dodgeX = -fwdX;
+      this.dodgeZ = -fwdZ;
+    } else {
+      this.dodgeX = ((-z / len) * fwdX + (x / len) * -fwdZ);
+      this.dodgeZ = ((-z / len) * fwdZ + (x / len) * fwdX);
+      const mag = Math.hypot(this.dodgeX, this.dodgeZ) || 1;
+      this.dodgeX /= mag;
+      this.dodgeZ /= mag;
+    }
+    this.dodgeT = 0.18;
+    this.dodgeCd = 0.88;
+    this.iframes = Math.max(this.iframes, 0.16);
+    this.combatMemory.note('dodge', this.simTime);
+    this.striker.interrupt();
+  }
+
+  /** Punch, kick, grab, and throw. Weapon melee still goes through the Ryder kit. */
+  private stepPhysical(dt: number, locked: boolean, busy: boolean) {
+    this.hitStun = Math.max(0, this.hitStun - dt);
+    this.takenGap += dt;
+    this.dodgeCd = Math.max(0, this.dodgeCd - dt);
+    if (this.dodgeT > 0) this.dodgeT = Math.max(0, this.dodgeT - dt);
+    if (this.airY > 0 || this.airVel > 0) {
+      this.airVel -= 22 * dt;
+      this.airY += this.airVel * dt;
+      if (this.airY <= 0) {
+        this.airY = 0;
+        this.airVel = 0;
+        this.hitStun = Math.max(this.hitStun, 0.18);
+      }
+    }
+    const canAct = !locked && !busy && this.hitStun < 0.12 && this.dodgeT <= 0;
+    if (this.punchQueued) {
+      this.punchQueued = false;
+      if (canAct || this.striker.busy) this.striker.queue('punch');
+      this.combatMemory.note('punch', this.simTime);
+    }
+    if (this.kickQueued) {
+      this.kickQueued = false;
+      if (canAct || this.striker.busy) this.striker.queue('kick');
+      this.combatMemory.note('kick', this.simTime);
+    }
+    if (this.meleeQueued) {
+      this.meleeQueued = false;
+      if (this.striker.busy) this.striker.queue('melee');
+      else if (canAct && this.meleeCd <= 0) {
+        const near = this.nearestHost(this.pos);
+        const dist = near ? Math.hypot(near.pos.x - this.pos.x, near.pos.z - this.pos.z) : 99;
+        const sequence = this.striker.combo.snapshot(this.simTime).sequence;
+        if (near && meleeWantsGrab(sequence, dist, false, recipesFor(this.spec.id))) this.striker.queue('melee');
+        else this.tryMelee();
+        this.combatMemory.note('melee', this.simTime);
+      }
+    }
+    if (this.dodgeQueued) {
+      this.dodgeQueued = false;
+      if (canAct) this.tryDodge();
+    }
+    const frame = this.striker.tick(dt, {
+      time: this.simTime,
+      stunned: this.hitStun > 0.12,
+      locked: locked || busy,
+      facing: this.yaw,
+      x: this.pos.x,
+      z: this.pos.z,
+      meleeDamage: this.meleeDamage(),
+      targets: this.hosts
+        .filter((host) => host.hp > 0)
+        .map((host) => ({
+          ref: host,
+          x: host.pos.x,
+          z: host.pos.z,
+          radius: host.radius,
+          airborne: host.airY > 0.3,
+        })),
+    });
+    if (frame.lunge) {
+      _fwd.set(Math.sin(this.yaw), 0, Math.cos(this.yaw));
+      this.pos.addScaledVector(_fwd, frame.lunge);
+      this.pos.x = clamp(this.pos.x, -BOUNDARY, BOUNDARY);
+      this.pos.z = clamp(this.pos.z, -BOUNDARY, BOUNDARY);
+      resolveCircle(this.pos, PLAYER_RADIUS, this.world.obstacles);
+    }
+    if (frame.started && frame.swing) {
+      this.meleeT = 1;
+      this.meleeStarted = true;
+      this.strikeOverride = frame.swing;
+      this.combatT = COMBAT_LINGER;
+    }
+    if (frame.grab) {
+      const host = frame.grab.ref as Host;
+      if (this.hosts.includes(host)) {
+        host.held = Math.max(host.held, 0.16);
+        host.pos.x = this.pos.x + Math.sin(this.yaw) * 0.95;
+        host.pos.z = this.pos.z + Math.cos(this.yaw) * 0.95;
+      }
+    }
+    for (const hit of frame.hits) this.applyFighterHit(hit);
+  }
+
+  private applyFighterHit(hit: StrikerHit) {
+    const host = hit.target.ref as Host;
+    if (!this.hosts.includes(host) || host.hp <= 0) return;
+    _tmp.set(host.pos.x - this.pos.x, 0, host.pos.z - this.pos.z);
+    if (_tmp.lengthSq() < 1e-4) _tmp.set(Math.sin(this.yaw), 0, Math.cos(this.yaw));
+    _tmp.normalize();
+    host.lastImpact = { x: _tmp.x, z: _tmp.z, speed: hit.knockback, kind: hit.kind };
+    if (hit.kind === 'throw') host.held = 0;
+    this.hurtHost(host, hit.damage, _tmp, hit.reaction, hit.strength);
+    this.combatT = COMBAT_LINGER;
+  }
+
+  private releasePowerLink(abilityId: AbilityId) {
+    if (!this.striker.combo.consumePower(this.simTime)) return;
+    const link = resolvePowerLink(this.spec.id, abilityId);
+    const host = this.nearestHost(this.pos);
+    if (!host) return;
+    const dx = host.pos.x - this.pos.x;
+    const dz = host.pos.z - this.pos.z;
+    if (dx * dx + dz * dz > 6.5 * 6.5) return;
+    _tmp.set(dx, 0, dz);
+    if (_tmp.lengthSq() < 1e-4) _tmp.set(Math.sin(this.yaw), 0, Math.cos(this.yaw));
+    _tmp.normalize();
+    applyReaction(host, link.preReaction, _tmp, 1);
+    if (link.trap > 0) host.held = Math.max(host.held, link.trap);
+    host.lastImpact = { x: _tmp.x, z: _tmp.z, speed: 7, kind: 'ability' };
+    const chip = this.meleeDamage() * 0.28;
+    for (let i = 0; i < link.followUps; i += 1) {
+      this.scheduler.schedule(this.simTime, 0.18 + i * 0.16, () => {
+        if (!this.hosts.includes(host) || host.hp <= 0) return;
+        const ox = host.pos.x - this.pos.x;
+        const oz = host.pos.z - this.pos.z;
+        if (ox * ox + oz * oz > 16) return;
+        this.hurtHost(host, chip * (i === 0 ? 1 : 0.86), _tmp.set(ox, 0, oz).normalize(), 'stagger', 0.55);
+      });
+    }
+    this.rig.addShake(0.16);
+  }
+
   private tryMelee() {
     if (!this.player || this.meleeCd > 0) return;
     const step = this.kit?.melee(this.simTime) ?? null;
@@ -1115,7 +1382,6 @@ export class RaidEngine {
     this.meleeStarted = true;
     this.combatT = COMBAT_LINGER;
     this.rig.addKick(-0.12);
-    const dmg = this.meleeDamage();
     _fwd.set(Math.sin(this.yaw), 0, Math.cos(this.yaw));
     this.particles.emit(this.muzzle(), this.burnout ? 0x8899aa : this.spec.color, 12, {
       speed: 7,
@@ -1124,17 +1390,27 @@ export class RaidEngine {
       direction: _fwd,
       up: 0.2,
     });
-    for (const host of this.hosts) {
+    const struck = this.hosts.filter((host) => {
       const dx = host.pos.x - this.pos.x;
       const dz = host.pos.z - this.pos.z;
       const dist = Math.hypot(dx, dz);
-      if (dist > MELEE_RANGE + host.radius) continue;
+      if (dist > MELEE_RANGE + host.radius) return false;
       const ang = Math.atan2(dx, dz);
       let diff = ang - this.yaw;
       while (diff > Math.PI) diff -= Math.PI * 2;
       while (diff < -Math.PI) diff += Math.PI * 2;
-      if (Math.abs(diff) > MELEE_ARC) continue;
-      this.hurtHost(host, dmg, _fwd);
+      return Math.abs(diff) <= MELEE_ARC;
+    });
+    if (!struck.length) return;
+    const snap = this.striker.combo.land('melee', this.simTime, struck[0]);
+    const shaped = reactionForEffect(snap.effect, 'heavy', 1);
+    const dmg = this.meleeDamage() * snap.scale;
+    for (const host of struck) {
+      _tmp.set(host.pos.x - this.pos.x, 0, host.pos.z - this.pos.z);
+      if (_tmp.lengthSq() < 1e-4) _tmp.copy(_fwd);
+      _tmp.normalize();
+      host.lastImpact = { x: _tmp.x, z: _tmp.z, speed: 5, kind: 'melee' };
+      this.hurtHost(host, dmg, _tmp, shaped.reaction, shaped.strength);
     }
   }
 
@@ -1159,17 +1435,20 @@ export class RaidEngine {
       resolveCircle(this.pos, PLAYER_RADIUS, this.world.obstacles);
       const color = this.burnout ? 0x8899aa : this.spec.visual.electricityColor;
       this.particles.emit(this.muzzle(), color, 10, { speed: 7, size: 0.26, life: 0.26, direction: _fwd, up: 0.2 });
-      const dmg = this.meleeDamage() * step.damageMul;
       const hits = targetsInArc(this.hosts, this.pos, this.yaw, step.range, step.halfArc, [] as Host[]);
       if (!hits.length) {
         this.emitSound(`${step.sound}.whiff`);
         return;
       }
+      const snap = this.striker.combo.land('melee', this.simTime, hits[0]);
+      const shaped = reactionForEffect(snap.effect, step.reaction, step.strength);
+      const dmg = this.meleeDamage() * step.damageMul * snap.scale;
       for (const host of hits) {
         _tmp.set(host.pos.x - this.pos.x, 0, host.pos.z - this.pos.z);
         if (_tmp.lengthSq() < 0.0001) _tmp.copy(_fwd);
         _tmp.normalize();
-        this.hurtHost(host, dmg, _tmp, step.reaction, step.strength);
+        host.lastImpact = { x: _tmp.x, z: _tmp.z, speed: 5, kind: 'melee' };
+        this.hurtHost(host, dmg, _tmp, shaped.reaction, shaped.strength);
         this.particles.emit(host.pos.clone().setY(1.1), 0xffffff, 4, { speed: 3, size: 0.3, life: 0.16 });
       }
       if (step.shake > 0) this.rig.addShake(step.shake);
@@ -1312,6 +1591,8 @@ export class RaidEngine {
           up: 1,
         });
       }
+      this.combatMemory.note('ability', this.simTime);
+      this.releasePowerLink(move.id);
       return;
     }
 
@@ -1325,6 +1606,8 @@ export class RaidEngine {
     if (this.kit?.tryAbility(id)) {
       this.kitClaimed.add(id);
       this.abilityT = Math.max(this.abilityT, 0.9);
+      this.combatMemory.note('ability', this.simTime);
+      this.releasePowerLink(id);
       return;
     }
     this.rig.addKick(0.35);
@@ -1346,6 +1629,8 @@ export class RaidEngine {
       life: 0.4,
       up: 0.8,
     });
+    this.combatMemory.note('ability', this.simTime);
+    this.releasePowerLink(id);
   }
 
   private endMove(slot: number) {
@@ -1606,6 +1891,7 @@ export class RaidEngine {
       tumble: 0,
       held: 0,
       sink: 0,
+      chain: 0,
       hitColor: 0xffffff,
     });
   }
@@ -1749,15 +2035,23 @@ export class RaidEngine {
         this.spawnBolt(host.pos.clone().setY(1.3), _tmp, host.damage, false, 0x5dff9a, 16);
       }
 
-      if (!phased && !this.kit?.passthrough && dist < host.radius + PLAYER_RADIUS + 0.55 && host.cooldown <= 0) {
-        host.cooldown = host.kind === 'heavy' || host.kind === 'broadcaster' ? 1.35 : 0.85;
+      if (!phased && !this.kit?.passthrough && dist < 2.55 && host.cooldown <= 0) {
+        const pick = nextHostStrike({ chain: host.chain, dist, foeStun: this.hitStun, rng: Math.random() });
+        const priced = hostStrikeDamage(host.damage, pick.kind, pick.chain);
+        host.chain = pick.chain >= 3 ? 0 : pick.chain;
+        host.cooldown = priced.recovery;
         poseMelee(host.fighter.humanoid, 0.6);
         host.swing = true;
         if (shielded) {
           this.particles.emit(this.pos.clone().setY(1.2), 0x66e7ff, 10, { speed: 6, size: 0.22, life: 0.3 });
           host.knock.set(-dirx * 10, 0, -dirz * 10);
         } else {
-          this.hurtPlayer(host.damage, _tmp.set(-dirx, 0, -dirz));
+          this.hurtPlayer(priced.damage, _tmp.set(-dirx, 0, -dirz), undefined, {
+            reaction: pick.kind === 'kick' ? 'knockback' : pick.kind === 'melee' ? 'heavy' : 'stagger',
+            strength: 0.75,
+            hitStun: priced.hitStun,
+            knockback: priced.knockback * 0.45,
+          });
         }
       }
     }
@@ -1773,17 +2067,32 @@ export class RaidEngine {
     }
   }
 
-  private hurtPlayer(amount: number, dir: THREE.Vector3, kind?: PvpDamageKind) {
+  private hurtPlayer(amount: number, dir: THREE.Vector3, kind?: PvpDamageKind, physical?: PhysicalHit) {
     if (this.iframes > 0 || this.phase === 'dead' || this.kit?.intangible) return;
     const scaled = kind ? calculatePvPDamage({ baseDamage: amount, kind }) : amount;
     // A braced Ryder (mid-spin) shrugs most of the blow off: less damage, no shove.
     const braced = clamp(this.kit?.braced ?? 0, 0, 1);
     this.hp = Math.max(0, this.hp - scaled * (1 - 0.4 * braced));
-    this.iframes = 0.55;
+    if (physical) {
+      if (this.takenGap > 0.5) this.takenChain = 0;
+      this.takenChain += 1;
+      this.takenGap = 0;
+      let stun = physical.hitStun * (1 - 0.65 * braced);
+      if (this.takenChain >= 4) stun *= 0.5;
+      if (this.takenChain >= 6) stun *= 0.45;
+      this.hitStun = Math.max(this.hitStun, stun);
+      this.iframes = Math.max(this.iframes, this.takenChain >= 4 ? 0.28 : 0.08);
+      this.hitKnock.copy(dir).multiplyScalar(physical.knockback * (1 - braced));
+      if (physical.reaction === 'launch' || physical.reaction === 'slam') this.airVel = Math.max(this.airVel, 6.4);
+      else if (physical.reaction === 'heavy') this.airVel = Math.max(this.airVel, 3.1);
+      this.striker.interrupt();
+    } else {
+      this.iframes = 0.55;
+      this.pos.addScaledVector(dir, 0.35 * (1 - braced));
+    }
     this.combatT = COMBAT_LINGER;
     this.rig.addShake(0.4 * (1 - 0.7 * braced));
     this.rig.addKick(0.22 * (1 - 0.7 * braced));
-    this.pos.addScaledVector(dir, 0.35 * (1 - braced));
     this.particles.emit(this.pos.clone().setY(1.2), 0xff5570, 14, { speed: 6, size: 0.28, life: 0.4, up: 0.5 });
     if (this.hp <= 0) {
       this.hp = 0;
@@ -2111,7 +2420,23 @@ export class RaidEngine {
       beacon: this.beacon ? this.beacon.hudState(this.clock.elapsedTime, this.pos) : null,
       recovering: this.recoveryT > 0,
       opponent: this.publishFoe(),
+      combo: this.comboHud(),
     });
+  }
+
+  private comboHud(): HudState['combo'] {
+    const snap = this.striker.combo.snapshot(this.simTime);
+    const link = combatProfileFor(this.spec.id).powerLink;
+    return {
+      count: snap.count,
+      label: snap.powerReady && snap.count < 2 ? 'POWER LINK' : snap.label,
+      tier: snap.tier,
+      color: this.spec.colorHex,
+      revision: snap.revision,
+      power: snap.powerReady,
+      powerLabel: link.label,
+      powerLeft: snap.powerLeft,
+    };
   }
 
   private publishFoe(): HudState['opponent'] {
@@ -2172,6 +2497,7 @@ export class RaidEngine {
       tumble: 0,
       held: 0,
       sink: 0,
+      chain: 0,
       hitColor: 0xffffff,
       duelist: true,
       controlled,
@@ -2181,6 +2507,7 @@ export class RaidEngine {
     };
     this.hosts.push(host);
     if (!controlled) this.attachCpu(host, spec);
+    else this.p2Striker.setRyder(spec.id);
   }
 
   /** CPU Ryder: same kit as a player, scored decisions, no extra aura. */
@@ -2201,9 +2528,12 @@ export class RaidEngine {
         setPlayerHp: (value) => {
           this.hp = Math.max(0, value);
         },
-        playerAttacking: () => this.meleeT > 0.15 || this.abilityT > 0.12 || this.fireHeld,
+        playerAttacking: () => this.meleeT > 0.15 || this.abilityT > 0.12 || this.fireHeld || this.striker.busy,
         playerVelocity: () => this.playerVel,
         playerIntangible: () => this.isPhased(),
+        playerWhiff: () => this.striker.exposed,
+        playerStunned: () => this.hitStun > 0.08 || this.airY > 0.25,
+        playerMemory: () => this.combatMemory.rates(this.simTime),
         heightAt: (x, z) => this.world.heightAt(x, z),
         resolve: (pos) => {
           pos.x = clamp(pos.x, -BOUNDARY, BOUNDARY);
@@ -2212,7 +2542,7 @@ export class RaidEngine {
         },
         blocked: (x, z, radius) =>
           Math.abs(x) > BOUNDARY || Math.abs(z) > BOUNDARY || pointBlocked(x, z, radius, this.world.obstacles),
-        hurtPlayer: (amount, dir, kind) => this.hurtPlayer(amount, dir, kind),
+        hurtPlayer: (amount, dir, kind, physical) => this.hurtPlayer(amount, dir, kind, physical),
         time: () => this.simTime,
       },
       spec.id,
@@ -2252,15 +2582,67 @@ export class RaidEngine {
     host.fighter.humanoid.group.position.copy(host.pos);
     host.fighter.humanoid.group.position.y = this.world.heightAt(host.pos.x, host.pos.z);
     this.animateHost(host, dt, Math.min(1, moving), time);
-    const dist = Math.hypot(this.pos.x - host.pos.x, this.pos.z - host.pos.z);
-    if (this.p2MeleeQueued && host.cooldown <= 0 && dist < host.radius + PLAYER_RADIUS + 0.7) {
-      host.cooldown = 0.55;
-      host.swing = true;
-      const dx = this.pos.x - host.pos.x;
-      const dz = this.pos.z - host.pos.z;
-      this.hurtPlayer(host.damage, _tmp.set(dx, 0, dz).normalize(), 'basic');
+    if (this.p2DodgeT > 0) this.p2DodgeT = Math.max(0, this.p2DodgeT - dt);
+    if (this.p2PunchQueued) {
+      this.p2PunchQueued = false;
+      this.p2Striker.queue('punch');
     }
-    this.p2MeleeQueued = false;
+    if (this.p2KickQueued) {
+      this.p2KickQueued = false;
+      this.p2Striker.queue('kick');
+    }
+    if (this.p2MeleeQueued) {
+      this.p2MeleeQueued = false;
+      this.p2Striker.queue('melee');
+    }
+    if (this.p2DodgeQueued) {
+      this.p2DodgeQueued = false;
+      this.p2DodgeT = 0.18;
+    }
+    const facing = host.fighter.humanoid.group.rotation.y;
+    const frame = this.p2Striker.tick(dt, {
+      time: this.simTime,
+      stunned: host.stagger > 0.2,
+      locked: false,
+      facing,
+      x: host.pos.x,
+      z: host.pos.z,
+      meleeDamage: host.damage,
+      targets: [
+        {
+          ref: this,
+          x: this.pos.x,
+          z: this.pos.z,
+          radius: PLAYER_RADIUS,
+          airborne: this.airY > 0.25,
+        },
+      ],
+    });
+    if (frame.lunge) {
+      host.pos.x += Math.sin(facing) * frame.lunge;
+      host.pos.z += Math.cos(facing) * frame.lunge;
+    }
+    if (frame.started) host.swing = true;
+    if (frame.grab) {
+      this.hitStun = Math.max(this.hitStun, 0.16);
+      this.pos.x = host.pos.x + Math.sin(facing) * 0.95;
+      this.pos.z = host.pos.z + Math.cos(facing) * 0.95;
+    }
+    for (const hit of frame.hits) {
+      _tmp.set(this.pos.x - host.pos.x, 0, this.pos.z - host.pos.z);
+      if (_tmp.lengthSq() < 1e-4) _tmp.set(Math.sin(facing), 0, Math.cos(facing));
+      _tmp.normalize();
+      this.hurtPlayer(hit.damage, _tmp, 'basic', {
+        reaction: hit.reaction,
+        strength: hit.strength,
+        hitStun: hit.hitStun,
+        knockback: hit.knockback,
+      });
+    }
+    if (this.p2DodgeT > 0 && moving > 0) {
+      host.pos.x += (mx / moving) * host.speed * 0.8 * dt;
+      host.pos.z += (mz / moving) * host.speed * 0.8 * dt;
+    }
   }
 
   private clearCombat() {

@@ -18,6 +18,8 @@ export interface AiProfile {
   abilityFrequency: number;
   /** Finisher and melee-string bias once someone is hurt. */
   comboPreference: number;
+  /** How hard they step in when the other fighter whiffs a heavy attack. */
+  punish: number;
 }
 
 export interface AiTuning {
@@ -36,15 +38,16 @@ export const DEFAULT_AI_PROFILE: AiProfile = {
   preferredRange: 'mid',
   abilityFrequency: 0.55,
   comboPreference: 0.45,
+  punish: 0.45,
 };
 
 /** Personalities for the Ryderz who already have kits. New ids inherit the default. */
 export const RYDER_AI_PROFILES: Record<RyderId, AiProfile> = {
-  keven: { aggression: 0.46, evasiveness: 0.86, preferredRange: 'mid', abilityFrequency: 0.62, comboPreference: 0.34 },
-  leo: { aggression: 0.92, evasiveness: 0.22, preferredRange: 'close', abilityFrequency: 0.7, comboPreference: 0.78 },
-  aaron: { aggression: 0.58, evasiveness: 0.56, preferredRange: 'mid', abilityFrequency: 0.64, comboPreference: 0.5 },
-  zoe: { aggression: 0.4, evasiveness: 0.74, preferredRange: 'long', abilityFrequency: 0.6, comboPreference: 0.32 },
-  rubi: { aggression: 0.86, evasiveness: 0.34, preferredRange: 'close', abilityFrequency: 0.74, comboPreference: 0.9 },
+  keven: { aggression: 0.46, evasiveness: 0.86, preferredRange: 'mid', abilityFrequency: 0.62, comboPreference: 0.48, punish: 0.84 },
+  leo: { aggression: 0.92, evasiveness: 0.22, preferredRange: 'close', abilityFrequency: 0.7, comboPreference: 0.86, punish: 0.4 },
+  aaron: { aggression: 0.58, evasiveness: 0.56, preferredRange: 'mid', abilityFrequency: 0.64, comboPreference: 0.52, punish: 0.82 },
+  zoe: { aggression: 0.4, evasiveness: 0.74, preferredRange: 'long', abilityFrequency: 0.6, comboPreference: 0.36, punish: 0.5 },
+  rubi: { aggression: 0.86, evasiveness: 0.34, preferredRange: 'close', abilityFrequency: 0.74, comboPreference: 0.9, punish: 0.58 },
 };
 
 export function aiProfileFor(id: RyderId | null | undefined): AiProfile {
