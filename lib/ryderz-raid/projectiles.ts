@@ -67,7 +67,7 @@ export class DartPool<T extends DartTarget = DartTarget> {
       fletchB.rotation.y = Math.PI / 2;
       mesh.add(shaft, tip, fletchA, fletchB);
       mesh.visible = false;
-      const trail = new TrailRibbon(this.color, { life: 0.18, width: 0.16, spacing: 0.1 });
+      const trail = new TrailRibbon(this.color, { life: 0.16, width: 0.045, spacing: 0.08 });
       trail.intensity = 0.9;
       this.group.add(mesh, trail.mesh);
       this.darts.push({ active: false, pos: new THREE.Vector3(), vel: new THREE.Vector3(), speed: 30, damage: 0, life: 0, turnRate: 0, target: null, mesh, core, halo, trail });
