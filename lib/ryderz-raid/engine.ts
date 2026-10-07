@@ -2329,6 +2329,7 @@ export class RaidEngine {
     } else {
       animateHumanoid(host.fighter.humanoid, host.anim, moving, time);
     }
+    host.fighter.glitch?.update(time, this.camera);
   }
 
   private hurtPlayer(amount: number, dir: THREE.Vector3, kind?: PvpDamageKind, physical?: PhysicalHit) {
@@ -2466,7 +2467,10 @@ export class RaidEngine {
       group.position.copy(body.pos);
       group.position.y = this.world.heightAt(body.pos.x, body.pos.z) + body.airY;
       group.rotation.x = -body.tumble;
-      setHumanoidOpacity(body.fighter.humanoid, Math.min(1, body.life * 2));
+      const fade = Math.min(1, body.life * 2);
+      setHumanoidOpacity(body.fighter.humanoid, fade);
+      body.fighter.glitch?.setOpacity(fade);
+      body.fighter.glitch?.update(this.simTime, this.camera);
       if (body.life <= 0) {
         this.scene.remove(group);
         disposeObject(group);
