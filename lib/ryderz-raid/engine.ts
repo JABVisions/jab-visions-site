@@ -1260,6 +1260,20 @@ export class RaidEngine {
 
   private tryFire() {
     if (!this.player || this.burnout || this.fireCd > 0) return;
+    // Plasma balls belong to Zoe. Keven looses an arrow. The other Ryderz stay in melee.
+    if (this.spec.id === 'keven') {
+      const volleyCost = this.spec.shotCost;
+      if (this.aura < volleyCost) {
+        this.spendAura(this.aura);
+        return;
+      }
+      if (!this.kit?.rangedShot?.(this.shotDamage())) return;
+      this.fireCd = 1 / this.spec.fireRate;
+      this.spendAura(volleyCost);
+      this.combatT = COMBAT_LINGER;
+      return;
+    }
+    if (this.spec.id !== 'zoe') return;
     const volleyCost = this.spec.shotCost;
     if (this.aura < volleyCost) {
       this.spendAura(this.aura);
@@ -1793,6 +1807,7 @@ export class RaidEngine {
   }
 
   private fireSpread(count: number, spread: number, damageMul: number) {
+    if (this.spec.id !== 'zoe') return;
     this.lookDir(_look);
     _right.set(-Math.cos(this.yaw), 0, Math.sin(this.yaw));
     const origin = this.muzzle();
@@ -1950,7 +1965,7 @@ export class RaidEngine {
         poseAim(clone.fighter.humanoid, 0.1);
       }
       clone.fireCd -= dt;
-      if (clone.fireCd <= 0 && target && !this.burnout) {
+      if (this.spec.id === 'zoe' && clone.fireCd <= 0 && target && !this.burnout) {
         clone.fireCd = 1 / Math.max(2, this.spec.fireRate * 0.75);
         _tmp2.copy(target.pos).setY(1.1).sub(clone.fighter.humanoid.group.position.clone().setY(1.1)).normalize();
         this.spawnBolt(

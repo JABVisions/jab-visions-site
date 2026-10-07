@@ -37,8 +37,10 @@ interface Dart<T extends DartTarget> {
   trail: TrailRibbon;
 }
 
-const CORE = new THREE.CylinderGeometry(0.03, 0.075, 0.62, 6);
-const HALO = new THREE.CylinderGeometry(0.07, 0.12, 0.5, 8);
+/** Arrow along +Y: the pool aims that axis down the flight path. */
+const SHAFT = new THREE.CylinderGeometry(0.012, 0.016, 0.58, 5);
+const TIP = new THREE.ConeGeometry(0.046, 0.2, 6);
+const FLETCH = new THREE.PlaneGeometry(0.1, 0.16);
 const Y_AXIS = new THREE.Vector3(0, 1, 0);
 const _aim = new THREE.Vector3();
 const _dir = new THREE.Vector3();
@@ -52,14 +54,18 @@ export class DartPool<T extends DartTarget = DartTarget> {
     this.group.name = 'Darts';
     this.color.set(color);
     for (let i = 0; i < capacity; i += 1) {
-      const core = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.95, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false });
-      const halo = new THREE.MeshBasicMaterial({ color: this.color, transparent: true, opacity: 0.38, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false });
+      const core = new THREE.MeshBasicMaterial({ color: 0xfff4fb, toneMapped: false });
+      const halo = new THREE.MeshBasicMaterial({ color: this.color, side: THREE.DoubleSide, toneMapped: false });
       const mesh = new THREE.Group();
-      const coreMesh = new THREE.Mesh(CORE, core);
-      const haloMesh = new THREE.Mesh(HALO, halo);
-      coreMesh.renderOrder = 4;
-      haloMesh.renderOrder = 4;
-      mesh.add(coreMesh, haloMesh);
+      const shaft = new THREE.Mesh(SHAFT, core);
+      const tip = new THREE.Mesh(TIP, halo);
+      tip.position.y = 0.38;
+      const fletchA = new THREE.Mesh(FLETCH, halo);
+      const fletchB = new THREE.Mesh(FLETCH, halo);
+      fletchA.position.y = -0.22;
+      fletchB.position.y = -0.22;
+      fletchB.rotation.y = Math.PI / 2;
+      mesh.add(shaft, tip, fletchA, fletchB);
       mesh.visible = false;
       const trail = new TrailRibbon(this.color, { life: 0.18, width: 0.16, spacing: 0.1 });
       trail.intensity = 0.9;
