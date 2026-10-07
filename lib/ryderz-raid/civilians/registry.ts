@@ -20,65 +20,49 @@ export interface CivilianDefinition {
   moveSpeed: number;
 }
 
+const HOST_MALE = '/assets/those-ryderz/models/host-male.glb';
+const LAVENDER = '/assets/those-ryderz/models/civilian-fashion.glb';
+
+function pair(
+  id: string,
+  maleName: string,
+  profile: CivilianProfileId,
+  health: number,
+  moveSpeed: number,
+  maleMap: CivilianDefinition['animationMap'],
+): CivilianDefinition[] {
+  return [
+    {
+      id,
+      name: maleName,
+      modelPath: HOST_MALE,
+      animationMap: maleMap,
+      profile,
+      health,
+      moveSpeed,
+    },
+    {
+      id: `${id}-lavender`,
+      name: 'Lavender',
+      modelPath: LAVENDER,
+      // Rigged at load. No baked clips, so she uses the shared walk and strike poses.
+      animationMap: {},
+      profile,
+      health,
+      moveSpeed,
+    },
+  ];
+}
+
 export const CIVILIAN_REGISTRY: CivilianDefinition[] = [
-  {
-    id: 'street-brawler',
-    name: 'Street brawler',
-    modelPath: '/assets/those-ryderz/models/host-male.glb',
-    animationMap: { punch: 'jab', kick: 'kick', melee: 'tackle', grab: 'grab' },
-    profile: 'brawler',
-    health: 36,
-    moveSpeed: 3.6,
-  },
-  {
-    id: 'street-aggressive',
-    name: 'Aggressor',
-    modelPath: '/assets/those-ryderz/models/host-male.glb',
-    animationMap: { punch: 'jab', kick: 'kick' },
-    profile: 'aggressive',
-    health: 32,
-    moveSpeed: 4.4,
-  },
-  {
-    id: 'street-cautious',
-    name: 'Hesitant',
-    modelPath: '/assets/those-ryderz/models/host-male.glb',
-    animationMap: { punch: 'jab', kick: 'kick' },
-    profile: 'cautious',
-    health: 28,
-    moveSpeed: 3.3,
-  },
-  {
-    id: 'street-thrower',
-    name: 'Thrower',
-    modelPath: '/assets/those-ryderz/models/host-male.glb',
-    animationMap: { punch: 'jab', throw: 'kick' },
-    profile: 'thrower',
-    health: 30,
-    moveSpeed: 3.5,
-  },
-  {
-    id: 'street-coward',
-    name: 'Reluctant',
-    modelPath: '/assets/those-ryderz/models/host-male.glb',
-    animationMap: { punch: 'jab' },
-    profile: 'cowardly',
-    health: 24,
-    moveSpeed: 3.8,
-  },
-  {
-    id: 'street-lavender',
-    name: 'Lavender',
-    modelPath: '/assets/those-ryderz/models/civilian-fashion.glb',
-    // Static Tripo body: no clips. Swings use the shared puppet strike.
-    animationMap: {},
-    profile: 'brawler',
-    health: 34,
-    moveSpeed: 3.7,
-  },
+  ...pair('street-brawler', 'Street brawler', 'brawler', 36, 3.6, { punch: 'jab', kick: 'kick', melee: 'tackle', grab: 'grab' }),
+  ...pair('street-aggressive', 'Aggressor', 'aggressive', 32, 4.4, { punch: 'jab', kick: 'kick' }),
+  ...pair('street-cautious', 'Hesitant', 'cautious', 28, 3.3, { punch: 'jab', kick: 'kick' }),
+  ...pair('street-thrower', 'Thrower', 'thrower', 30, 3.5, { punch: 'jab', throw: 'kick' }),
+  ...pair('street-coward', 'Reluctant', 'cowardly', 24, 3.8, { punch: 'jab' }),
 ];
 
-/** Bodies that share a profile take turns. `rng` is 0–1. */
+/** Each profile has one male and one female body. `rng` 0–1 splits them evenly. */
 export function definitionForProfile(profile: CivilianProfileId, rng = 0): CivilianDefinition {
   const matches = CIVILIAN_REGISTRY.filter((entry) => entry.profile === profile);
   if (!matches.length) return CIVILIAN_REGISTRY[0];
