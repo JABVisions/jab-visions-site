@@ -14,6 +14,7 @@ import {
   type MeleeStyle,
   type PoseOverride,
 } from './skeletal';
+import { HostGlitch } from './host-glitch';
 import { addOutline, buildHumanoid, glow, toon, type Humanoid } from './toon';
 import { PlasmaOrbits } from './plasma-orbs';
 
@@ -22,7 +23,6 @@ const AXE_HANDLE = new THREE.CylinderGeometry(0.05, 0.06, 1.15, 8);
 const AXE_HEAD = new THREE.BoxGeometry(0.08, 0.38, 0.55);
 const DART_GUN = new THREE.BoxGeometry(0.12, 0.12, 0.42);
 const HALO = new THREE.TorusGeometry(0.55, 0.045, 8, 24);
-const VEIN = new THREE.BoxGeometry(0.18, 0.42, 0.06);
 
 const SKINS = [0xf3d2b5, 0xe0b48a, 0xc58c62, 0x8d5524, 0xf6e0c8, 0xb07a52];
 const HAIR = [0x1a1210, 0x3b2416, 0x6b3a1f, 0x111111, 0xc8b48a, 0x4a2030];
@@ -83,6 +83,8 @@ export interface Fighter {
   rig?: GltfRig;
   /** Central plasma-orb controller (Zoe). Ticked from `animateGltfFighter`. */
   orbs?: PlasmaOrbits;
+  /** Green code fragments around a mind-controlled opponent. */
+  glitch?: HostGlitch;
 }
 
 interface GltfTemplate {
@@ -827,29 +829,9 @@ export function buildHost(kind: EnemyKind, modelPath?: string | null): Fighter {
       });
     }
 
-    // Signal vein on the shared host bodies. A finished textured civilian keeps
-    // the jacket art; the slab has no chest bone to sit on.
     const glowMeshes: THREE.Mesh[] = [];
-    const sharedBody = !mapped || HOST_MODELS.includes(modelPath ?? '');
-    if (sharedBody) {
-      const vein = new THREE.Mesh(VEIN, glow(eye, 1.6));
-      const chest = rig.skeleton?.bone('chest');
-      if (chest) {
-        const socket = new THREE.Object3D();
-        socket.scale.setScalar(1 / rig.figure.scale.x);
-        chest.add(socket);
-        rig.skeleton?.alignSocket('chest', socket);
-        vein.position.set(0, 0.07 * scale, 0.15 * scale);
-        vein.scale.setScalar(0.55 * scale);
-        socket.add(vein);
-      } else {
-        vein.position.set(0, 1.25 * scale, 0.15 * scale);
-        vein.scale.setScalar(0.55 * scale);
-        humanoid.group.add(vein);
-      }
-      glowMeshes.push(vein);
-    }
     const weapons: THREE.Object3D[] = [];
+    const glitch = attachHostGlitch(humanoid);
     if (kind === 'broadcaster') {
       const crown = new THREE.Mesh(HALO, glow(0xb84dff, 1.8));
       crown.rotation.x = Math.PI / 2;
@@ -859,7 +841,7 @@ export function buildHost(kind: EnemyKind, modelPath?: string | null): Fighter {
       glowMeshes.push(crown);
       weapons.push(crown);
     }
-    return { humanoid, weapons, glowMeshes, meshSource: 'gltf', rig };
+    return { humanoid, weapons, glowMeshes, meshSource: 'gltf', rig, glitch };
   }
 
   const humanoid = buildHumanoid({
@@ -873,12 +855,9 @@ export function buildHost(kind: EnemyKind, modelPath?: string | null): Fighter {
     outline: kind === 'broadcaster' ? 0.07 : 0.04,
   });
 
-  const vein = new THREE.Mesh(VEIN, glow(eye, 1.6));
-  vein.position.set(0, 0.06, 0.17);
-  humanoid.torso.add(vein);
-
-  const glowMeshes: THREE.Mesh[] = [vein];
+  const glowMeshes: THREE.Mesh[] = [];
   const weapons: THREE.Object3D[] = [];
+  const glitch = attachHostGlitch(humanoid);
 
   if (kind === 'broadcaster') {
     const crown = new THREE.Mesh(HALO, glow(0xb84dff, 1.8));
@@ -889,7 +868,13 @@ export function buildHost(kind: EnemyKind, modelPath?: string | null): Fighter {
     weapons.push(crown);
   }
 
-  return { humanoid, weapons, glowMeshes, meshSource: 'procedural' };
+  return { humanoid, weapons, glowMeshes, meshSource: 'procedural', glitch };
+}
+
+function attachHostGlitch(humanoid: Humanoid) {
+  const glitch = new HostGlitch(humanoid.height);
+  humanoid.group.add(glitch.group);
+  return glitch;
 }
 
 export function setWeaponGlow(fighter: Fighter, on: boolean, color: THREE.ColorRepresentation) {
