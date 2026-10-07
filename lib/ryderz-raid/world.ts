@@ -1064,40 +1064,80 @@ export function steerVelocity(
   if (speed < 1e-5) return { x: 0, z: 0 };
   const nx = vx / speed;
   const nz = vz / speed;
-  const look = Math.max(1.15, radius + 0.7);
-  const skin = Math.max(0.2, radius * 0.9);
-  const free = (dx: number, dz: number, dist: number) => !blocked(x + dx * dist, z + dz * dist, skin);
-  if (free(nx, nz, look) && free(nx, nz, look * 0.45)) return { x: vx, z: vz };
+  const skin = radius + 0.15;
+  const samples = [0.4, 1.05];
+  const clearDir = (dx: number, dz: number) => samples.every((dist) => !blocked(x + dx * dist, z + dz * dist, skin));
+  if (clearDir(nx, nz)) return { x: vx, z: vz };
 
-  const gdx = goalX - x;
-  const gdz = goalZ - z;
-  const glen = Math.hypot(gdx, gdz) || 1;
-  let best = -Infinity;
-  let bestX = 0;
-  let bestZ = 0;
-  let found = false;
-  for (let i = 1; i <= 7; i += 1) {
-    const ang = (i / 7) * (Math.PI * 0.92);
-    for (const sign of [1, -1]) {
-      const c = Math.cos(ang * sign);
-      const s = Math.sin(ang * sign);
+  const opening = (dx: number, dz: number) => {
+    if (!clearDir(dx, dz)) return Infinity;
+    for (let dist = 0.5; dist <= 16; dist += 0.55) {
+      const sx = x + dx * dist;
+      const sz = z + dz * dist;
+      if (blocked(sx, sz, skin)) return Infinity;
+      const fx = goalX - sx;
+      const fz = goalZ - sz;
+      const fl = Math.hypot(fx, fz) || 1;
+      const fxn = fx / fl;
+      const fzn = fz / fl;
+      if (!blocked(sx + fxn * 1.2, sz + fzn * 1.2, skin) && !blocked(sx + fxn * 2.4, sz + fzn * 2.4, skin)) return dist;
+    }
+    return Infinity;
+  };
+
+  const pick = (angles: number[]) => {
+    let best = Infinity;
+    let bestX = 0;
+    let bestZ = 0;
+    let found = false;
+    for (const ang of angles) {
+      const c = Math.cos(ang);
+      const s = Math.sin(ang);
       const dx = nx * c - nz * s;
       const dz = nx * s + nz * c;
-      if (!free(dx, dz, look)) continue;
-      const progress = (gdx * dx + gdz * dz) / glen;
-      const align = nx * dx + nz * dz;
-      const far = free(dx, dz, look * 1.85) ? 0.2 : 0;
-      const score = progress * 0.7 + align * 0.3 + far;
-      if (score > best) {
-        best = score;
-        bestX = dx * speed;
-        bestZ = dz * speed;
+      const cost = opening(dx, dz);
+      if (cost < best) {
+        best = cost;
+        bestX = dx;
+        bestZ = dz;
         found = true;
       }
     }
-  }
-  if (!found) return { x: 0, z: 0 };
-  return { x: bestX, z: bestZ };
+    if (!found) return null;
+    return { x: bestX * speed, z: bestZ * speed };
+  };
+
+  const nearest = (angles: number[]) => {
+    let best = -Infinity;
+    let bestX = 0;
+    let bestZ = 0;
+    let found = false;
+    for (const ang of angles) {
+      const c = Math.cos(ang);
+      const s = Math.sin(ang);
+      const dx = nx * c - nz * s;
+      const dz = nx * s + nz * c;
+      if (!clearDir(dx, dz)) continue;
+      const align = nx * dx + nz * dz;
+      if (align > best) {
+        best = align;
+        bestX = dx;
+        bestZ = dz;
+        found = true;
+      }
+    }
+    if (!found || best < 0.2) return null;
+    return { x: bestX * speed, z: bestZ * speed };
+  };
+
+  // Slide along the blocked side until the line to the goal is open, and keep
+  // that side so the next step does not turn back into the wall or the car.
+  return (
+    pick([Math.PI / 2, -Math.PI / 2]) ??
+    pick([0.6, -0.6, 1, -1, 1.4, -1.4, 2.2, -2.2]) ??
+    nearest([0.35, -0.35, 0.7, -0.7, 1.15, -1.15, Math.PI / 2, -Math.PI / 2]) ??
+    { x: 0, z: 0 }
+  );
 }
 
 export function pointBlocked(x: number, z: number, radius: number, obstacles: Obstacle[]) {
