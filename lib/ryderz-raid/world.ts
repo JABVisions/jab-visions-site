@@ -30,16 +30,18 @@ export interface World {
  *     at ARENA_HALF, where the perimeter buildings stand.
  *   - The four quadrant blocks are dressed differently: a mid-block storefront
  *     with an alley (+x,+z), a surface parking lot (-x,-z), a pocket park
- *     (-x,+z) and two courtyard blocks on the open corner (+x,-z).
+ *     (-x,+z) and an open corner (+x,-z).
  *   - Perimeter lots and the corners use the textured street buildings.
+ *   - One larger courtyard building caps the west end of the north block,
+ *     outside the sidewalk, and the small lots step around it.
  */
-const BUILDING_DEPTH = 9;
 const AVENUE_HALF = 8;
 const STREET_HALF = 7;
 const PLAZA_R = 12;
 const CURB = 0.14;
 const PARKING_LANE = 2.4;
-const GROUND_HALF = ARENA_HALF + BUILDING_DEPTH + 6;
+/** Asphalt pad. Deep enough for the courtyard building past the north wall. */
+const GROUND_HALF = ARENA_HALF + 18;
 const CAR_LENGTH = 4.5;
 
 interface AlleyGap {
@@ -541,8 +543,25 @@ export function buildWorld(): World {
   ].forEach(([x, z]) => stripe(group, x, z, 0.5, 1.1, ironMat, 0.02));
 
   // --- Perimeter buildings & spawn alleys -----------------------------------
-  // Textured storefronts and townhouses fill each lot. The facade (model +Z)
-  // points inward; narrow lots take the townhouse so the street wall stays tall.
+  // One courtyard building fills the west end of the north block (from the
+  // corner to the avenue). It is wider, deeper, and taller than the pair that
+  // stood on the northeast sidewalk. Small lots are not generated there; the
+  // other frontages keep their shops, packed between the roads and alleys.
+  const blockMargin = 0.9;
+  const blockScale = ARENA_HALF - AVENUE_HALF - blockMargin * 2;
+  const blockW = ARENA_BLOCK.width * blockScale;
+  const blockD = ARENA_BLOCK.depth * blockScale;
+  const blockH = ARENA_BLOCK.height * blockScale;
+  const blockSlot = {
+    x: -(ARENA_HALF + AVENUE_HALF) / 2,
+    z: -(ARENA_HALF + blockD / 2),
+    yaw: 0,
+  };
+  const blockSpan = { min: blockSlot.x - blockW / 2, max: blockSlot.x + blockW / 2 };
+
+  // Textured storefronts and townhouses fill each remaining lot. The facade
+  // (model +Z) points inward; narrow lots take the townhouse so the street
+  // wall stays tall.
   const skyline: SkylineSlot[] = [];
   let lotPick = 0;
   const inwardYaw = (axis: 'x' | 'z', sign: 1 | -1) => {
@@ -564,6 +583,15 @@ export function buildWorld(): World {
         const center = start + s * segLength + segLength / 2;
         const face = segLength - 0.7;
         if (face < 4 || !ARENA_BUILDINGS.length) continue;
+        // The courtyard owns the west end of the north block.
+        if (
+          side.axis === 'z' &&
+          side.sign === -1 &&
+          center + segLength / 2 > blockSpan.min - 0.2 &&
+          center - segLength / 2 < blockSpan.max + 0.2
+        ) {
+          continue;
+        }
         const model = face < 8.4 ? 1 % ARENA_BUILDINGS.length : lotPick % ARENA_BUILDINGS.length;
         lotPick += 1;
         const yaw = inwardYaw(side.axis, side.sign);
@@ -729,56 +757,50 @@ export function buildWorld(): World {
     obstacles.push({ kind: 'circle', x, z, r: 0.42 });
   });
 
-  // (+x,-z): two courtyard blocks. Entrances face the cross street (+Z).
-  // The gap between them lines up with the north alley so a player can slip
-  // through, and the masses stop shots and bodies.
-  const blockScale = 8.2;
-  const blockSlots = [
-    { x: 14, z: -23.7, yaw: 0 },
-    { x: 24.8, z: -23.7, yaw: 0 },
-  ];
-  const blockW = ARENA_BLOCK.width * blockScale;
-  const blockD = ARENA_BLOCK.depth * blockScale;
-  const blockH = ARENA_BLOCK.height * blockScale;
-  blockSlots.forEach((slot) => {
-    const c = Math.abs(Math.cos(slot.yaw));
-    const s = Math.abs(Math.sin(slot.yaw));
+  // Courtyard at the west end of the north block. The entrance (local +Z)
+  // faces south into the arena. The mass sits on the building line, so the
+  // sidewalk in front of it stays open.
+  {
+    const c = Math.abs(Math.cos(blockSlot.yaw));
+    const s = Math.abs(Math.sin(blockSlot.yaw));
     const extX = c * (blockW / 2) + s * (blockD / 2);
     const extZ = s * (blockW / 2) + c * (blockD / 2);
-    obstacles.push({ kind: 'box', minX: slot.x - extX, maxX: slot.x + extX, minZ: slot.z - extZ, maxZ: slot.z + extZ });
+    obstacles.push({
+      kind: 'box',
+      minX: blockSlot.x - extX,
+      maxX: blockSlot.x + extX,
+      minZ: blockSlot.z - extZ,
+      maxZ: blockSlot.z + extZ,
+    });
     const cover = new THREE.Mesh(
       new THREE.BoxGeometry(blockW, blockH, blockD),
       new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false }),
     );
-    cover.position.set(slot.x, CURB + blockH / 2, slot.z);
-    cover.rotation.y = slot.yaw;
+    cover.position.set(blockSlot.x, CURB + blockH / 2, blockSlot.z);
+    cover.rotation.y = blockSlot.yaw;
     cover.name = 'arena-block-cover';
     group.add(cover);
     occluders.push(cover);
-  });
-  {
     const loader = new GLTFLoader();
     loader.load(
       ARENA_BLOCK.url,
       (gltf) => {
         if (disposed) return;
-        blockSlots.forEach((slot) => {
-          const root = new THREE.Group();
-          const scene = gltf.scene.clone(true);
-          scene.scale.setScalar(blockScale);
-          root.name = 'arena-block';
-          root.add(scene);
-          root.position.set(slot.x, CURB, slot.z);
-          root.rotation.y = slot.yaw;
-          group.add(root);
-          scene.traverse((obj) => {
-            const mesh = obj as THREE.Mesh;
-            if (!mesh.isMesh) return;
-            mesh.castShadow = false;
-            const list = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-            list.forEach((material) => {
-              if (material) material.userData.retain = true;
-            });
+        const root = new THREE.Group();
+        const scene = gltf.scene.clone(true);
+        scene.scale.setScalar(blockScale);
+        root.name = 'arena-block';
+        root.add(scene);
+        root.position.set(blockSlot.x, CURB, blockSlot.z);
+        root.rotation.y = blockSlot.yaw;
+        group.add(root);
+        scene.traverse((obj) => {
+          const mesh = obj as THREE.Mesh;
+          if (!mesh.isMesh) return;
+          mesh.castShadow = false;
+          const list = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+          list.forEach((material) => {
+            if (material) material.userData.retain = true;
           });
         });
       },
@@ -786,16 +808,14 @@ export function buildWorld(): World {
       (error) => {
         console.warn('[raid] courtyard block failed to load', error);
         if (disposed) return;
-        blockSlots.forEach((slot) => {
-          const fallback = box(blockW, blockH, blockD, toon(0xc8b48a), slot.x, CURB + blockH / 2, slot.z, 0.06);
-          fallback.rotation.y = slot.yaw;
-          group.add(fallback);
-        });
+        const fallback = box(blockW, blockH, blockD, toon(0xc8b48a), blockSlot.x, CURB + blockH / 2, blockSlot.z, 0.06);
+        fallback.rotation.y = blockSlot.yaw;
+        group.add(fallback);
       },
     );
   }
 
-  // (+x,-z) used to stay empty. Planters still frame the street edge.
+  // (+x,-z) stays open. Planters frame that corner.
 
   // --- Signal spire on a raised island ---------------------------------------
   const islandMat = toon(0x4a425c);
@@ -893,7 +913,7 @@ export function buildWorld(): World {
     [13.5, -13.5],
     [-13.5, -13.5],
     [22, -10.2],
-    [27.2, -11.2],
+    [27, -22],
     [13, 26],
     [26.5, 9.8],
   ];
@@ -977,41 +997,107 @@ const closest = new THREE.Vector2();
 
 /** Push a circle (x,z,r) out of every obstacle it overlaps. Mutates `pos`. */
 export function resolveCircle(pos: THREE.Vector3, radius: number, obstacles: Obstacle[]) {
-  for (const o of obstacles) {
-    if (o.kind === 'box') {
-      closest.set(Math.max(o.minX, Math.min(pos.x, o.maxX)), Math.max(o.minZ, Math.min(pos.z, o.maxZ)));
-      let dx = pos.x - closest.x;
-      let dz = pos.z - closest.y;
-      const distSq = dx * dx + dz * dz;
-      if (distSq >= radius * radius) continue;
-      if (distSq < 1e-8) {
-        const left = pos.x - o.minX;
-        const right = o.maxX - pos.x;
-        const near = pos.z - o.minZ;
-        const far = o.maxZ - pos.z;
-        const min = Math.min(left, right, near, far);
-        if (min === left) pos.x = o.minX - radius;
-        else if (min === right) pos.x = o.maxX + radius;
-        else if (min === near) pos.z = o.minZ - radius;
-        else pos.z = o.maxZ + radius;
-        continue;
+  for (let pass = 0; pass < 4; pass += 1) {
+    let moved = false;
+    for (const o of obstacles) {
+      const beforeX = pos.x;
+      const beforeZ = pos.z;
+      separateFromObstacle(pos, radius, o);
+      if (pos.x !== beforeX || pos.z !== beforeZ) moved = true;
+    }
+    if (!moved) break;
+  }
+}
+
+function separateFromObstacle(pos: THREE.Vector3, radius: number, o: Obstacle) {
+  if (o.kind === 'box') {
+    closest.set(Math.max(o.minX, Math.min(pos.x, o.maxX)), Math.max(o.minZ, Math.min(pos.z, o.maxZ)));
+    let dx = pos.x - closest.x;
+    let dz = pos.z - closest.y;
+    const distSq = dx * dx + dz * dz;
+    if (distSq >= radius * radius) return;
+    if (distSq < 1e-8) {
+      const left = pos.x - o.minX;
+      const right = o.maxX - pos.x;
+      const near = pos.z - o.minZ;
+      const far = o.maxZ - pos.z;
+      const min = Math.min(left, right, near, far);
+      if (min === left) pos.x = o.minX - radius;
+      else if (min === right) pos.x = o.maxX + radius;
+      else if (min === near) pos.z = o.minZ - radius;
+      else pos.z = o.maxZ + radius;
+      return;
+    }
+    const dist = Math.sqrt(distSq);
+    dx /= dist;
+    dz /= dist;
+    pos.x = closest.x + dx * radius;
+    pos.z = closest.y + dz * radius;
+    return;
+  }
+  const dx = pos.x - o.x;
+  const dz = pos.z - o.z;
+  const minDist = o.r + radius;
+  const distSq = dx * dx + dz * dz;
+  if (distSq >= minDist * minDist) return;
+  const dist = Math.sqrt(distSq) || 0.0001;
+  pos.x = o.x + (dx / dist) * minDist;
+  pos.z = o.z + (dz / dist) * minDist;
+}
+
+/**
+ * Redirect a desired velocity so the next steps do not run into a wall or car.
+ * Returns a velocity in the same units. A zero result means every nearby
+ * heading is blocked, so the caller should hold instead of grinding.
+ */
+export function steerVelocity(
+  x: number,
+  z: number,
+  vx: number,
+  vz: number,
+  radius: number,
+  blocked: (px: number, pz: number, radius: number) => boolean,
+  goalX = x + vx,
+  goalZ = z + vz,
+) {
+  const speed = Math.hypot(vx, vz);
+  if (speed < 1e-5) return { x: 0, z: 0 };
+  const nx = vx / speed;
+  const nz = vz / speed;
+  const look = Math.max(1.15, radius + 0.7);
+  const skin = Math.max(0.2, radius * 0.9);
+  const free = (dx: number, dz: number, dist: number) => !blocked(x + dx * dist, z + dz * dist, skin);
+  if (free(nx, nz, look) && free(nx, nz, look * 0.45)) return { x: vx, z: vz };
+
+  const gdx = goalX - x;
+  const gdz = goalZ - z;
+  const glen = Math.hypot(gdx, gdz) || 1;
+  let best = -Infinity;
+  let bestX = 0;
+  let bestZ = 0;
+  let found = false;
+  for (let i = 1; i <= 7; i += 1) {
+    const ang = (i / 7) * (Math.PI * 0.92);
+    for (const sign of [1, -1]) {
+      const c = Math.cos(ang * sign);
+      const s = Math.sin(ang * sign);
+      const dx = nx * c - nz * s;
+      const dz = nx * s + nz * c;
+      if (!free(dx, dz, look)) continue;
+      const progress = (gdx * dx + gdz * dz) / glen;
+      const align = nx * dx + nz * dz;
+      const far = free(dx, dz, look * 1.85) ? 0.2 : 0;
+      const score = progress * 0.7 + align * 0.3 + far;
+      if (score > best) {
+        best = score;
+        bestX = dx * speed;
+        bestZ = dz * speed;
+        found = true;
       }
-      const dist = Math.sqrt(distSq);
-      dx /= dist;
-      dz /= dist;
-      pos.x = closest.x + dx * radius;
-      pos.z = closest.y + dz * radius;
-    } else {
-      const dx = pos.x - o.x;
-      const dz = pos.z - o.z;
-      const minDist = o.r + radius;
-      const distSq = dx * dx + dz * dz;
-      if (distSq >= minDist * minDist) continue;
-      const dist = Math.sqrt(distSq) || 0.0001;
-      pos.x = o.x + (dx / dist) * minDist;
-      pos.z = o.z + (dz / dist) * minDist;
     }
   }
+  if (!found) return { x: 0, z: 0 };
+  return { x: bestX, z: bestZ };
 }
 
 export function pointBlocked(x: number, z: number, radius: number, obstacles: Obstacle[]) {

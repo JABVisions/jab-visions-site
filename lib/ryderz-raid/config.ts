@@ -136,9 +136,10 @@ export interface ArenaBuildingModel {
  * the facade fills that lot.
  */
 /**
- * Courtyard block dropped into the open northeast sidewalk. The export is about
- * a metre wide; the arena scales it up. Width is local +X, depth is local +Z
- * (the entrance facade), and the base sits on y = 0.
+ * Courtyard building at the west end of the north block. The export is about
+ * a metre wide; the arena scales it up past the copies that stood on the
+ * sidewalk. Width is local +X, depth is local +Z (the entrance facade), and
+ * the base sits on y = 0.
  */
 export const ARENA_BLOCK: ArenaBuildingModel = {
   url: '/assets/those-ryderz/models/arena-block.glb',

@@ -66,7 +66,7 @@ import {
   poseMelee,
   setHumanoidOpacity,
 } from './toon';
-import { buildWorld, pointBlocked, resolveCircle, type World } from './world';
+import { buildWorld, pointBlocked, resolveCircle, steerVelocity, type World } from './world';
 import { calculatePvPDamage, pvpHealth, PvpCpu, type PvpDamageKind } from './pvp';
 import {
   CombatMemory,
@@ -2018,6 +2018,10 @@ export class RaidEngine {
         b.pos.z += (dz / d) * push * a.mass;
       }
     }
+    for (const host of this.hosts) {
+      if (host.held > 0) continue;
+      resolveCircle(host.pos, host.radius, this.world.obstacles);
+    }
 
     for (const host of this.hosts) {
       if (host.duelist && host.controlled) {
@@ -2091,6 +2095,11 @@ export class RaidEngine {
 
       this.driveCivilian(host, dt, time, phased, shielded);
     }
+  }
+
+  /** Walls, cars, and the map edge. Used so NPCs turn before they grind. */
+  private npcBlocked(x: number, z: number, radius: number) {
+    return Math.abs(x) > BOUNDARY || Math.abs(z) > BOUNDARY || pointBlocked(x, z, radius, this.world.obstacles);
   }
 
   /**
@@ -2207,9 +2216,23 @@ export class RaidEngine {
     }
     const speed = host.speed * profile.speed * (order.state === 'flee' ? 1.2 : 1);
     const mag = Math.hypot(vx, vz);
+    let travelX = 0;
+    let travelZ = 0;
     if (mag > 0.05) {
-      host.pos.x += (vx / mag) * speed * dt + host.knock.x * dt;
-      host.pos.z += (vz / mag) * speed * dt + host.knock.z * dt;
+      const steered = steerVelocity(
+        host.pos.x,
+        host.pos.z,
+        (vx / mag) * speed,
+        (vz / mag) * speed,
+        host.radius,
+        (x, z, radius) => this.npcBlocked(x, z, radius),
+        gx,
+        gz,
+      );
+      travelX = steered.x;
+      travelZ = steered.z;
+      host.pos.x += travelX * dt + host.knock.x * dt;
+      host.pos.z += travelZ * dt + host.knock.z * dt;
     } else {
       host.pos.x += host.knock.x * dt;
       host.pos.z += host.knock.z * dt;
@@ -2273,7 +2296,7 @@ export class RaidEngine {
     if (host.follow === 'punch' || host.follow === 'kick') {
       if (striker.chainInto(host.follow)) host.follow = null;
     }
-    const moving = Math.min(1, mag);
+    const moving = Math.min(1, Math.hypot(travelX, travelZ) / Math.max(0.01, host.speed));
     this.animateHost(host, dt, moving, time, pose ? 1 - pose.p : 0, pose?.style, host.winding);
     if (host.hit > 0) flashEmissive(host.fighter.humanoid, host.hitColor, host.hit * 2.4);
     else flashEmissive(host.fighter.humanoid, 0x000000, 0);
