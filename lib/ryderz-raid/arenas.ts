@@ -7,6 +7,8 @@
  * its single Ryder Beacon stands. The engine reads these when it loads an
  * arena, so there is exactly one Beacon per arena and nothing spawns at random.
  */
+import { HOME_DISTRICT } from './config';
+
 export type ArenaId = string;
 
 export interface ArenaPoint {
@@ -56,11 +58,11 @@ registerArena({
   id: DEFAULT_ARENA,
   name: 'The Block',
   setting: 'Downtown · night',
-  description: 'A ring of towers around a plaza spire. Six alleys feed the hosts in; the crosswalks are kill lanes.',
+  description: 'Four city blocks. Alleys feed the hosts in; the crosswalks are kill lanes.',
   available: true,
-  spawnPoint: { x: 9, z: 11 },
-  // The pocket park on the south-west block: off the kill lanes, visible from the plaza.
-  ryderBeaconPoint: { x: -18.5, z: 18 },
+  spawnPoint: { x: 9 + HOME_DISTRICT, z: 11 + HOME_DISTRICT },
+  // The pocket park on the southwest block: off the kill lanes, visible from that plaza.
+  ryderBeaconPoint: { x: -18.5 + HOME_DISTRICT, z: 18 + HOME_DISTRICT },
   beaconCooldown: DEFAULT_BEACON_COOLDOWN,
 });
 
