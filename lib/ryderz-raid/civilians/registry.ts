@@ -66,10 +66,24 @@ export const CIVILIAN_REGISTRY: CivilianDefinition[] = [
     health: 24,
     moveSpeed: 3.8,
   },
+  {
+    id: 'street-lavender',
+    name: 'Lavender',
+    modelPath: '/assets/those-ryderz/models/civilian-fashion.glb',
+    // Static Tripo body: no clips. Swings use the shared puppet strike.
+    animationMap: {},
+    profile: 'brawler',
+    health: 34,
+    moveSpeed: 3.7,
+  },
 ];
 
-export function definitionForProfile(profile: CivilianProfileId): CivilianDefinition {
-  return CIVILIAN_REGISTRY.find((entry) => entry.profile === profile) ?? CIVILIAN_REGISTRY[0];
+/** Bodies that share a profile take turns. `rng` is 0–1. */
+export function definitionForProfile(profile: CivilianProfileId, rng = 0): CivilianDefinition {
+  const matches = CIVILIAN_REGISTRY.filter((entry) => entry.profile === profile);
+  if (!matches.length) return CIVILIAN_REGISTRY[0];
+  const index = Math.min(matches.length - 1, Math.floor(Math.max(0, rng) * matches.length));
+  return matches[index];
 }
 
 /** Pick a baked clip substring for this swing. Missing names fall back to the style index. */

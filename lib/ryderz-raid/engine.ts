@@ -1947,7 +1947,7 @@ export class RaidEngine {
     pos.x += alley.inward.z * lateral;
     pos.z += -alley.inward.x * lateral;
     const profileId = profileForKind(kind, Math.random());
-    const civilian = definitionForProfile(profileId);
+    const civilian = definitionForProfile(profileId, Math.random());
     const fighter = buildHost(kind, civilian.modelPath);
     fighter.humanoid.group.position.copy(pos);
     fighter.humanoid.group.position.y = this.world.heightAt(pos.x, pos.z);

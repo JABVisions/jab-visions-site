@@ -819,29 +819,36 @@ export function buildHost(kind: EnemyKind, modelPath?: string | null): Fighter {
   const template = mapped ?? (hostTemplates.length ? hostTemplates[Math.floor(Math.random() * hostTemplates.length)] : undefined);
   if (template) {
     const { humanoid, rig } = wrapGltfAsHumanoid(template, 1.9 * scale, { ownMaterials: true });
-    humanoid.materials.forEach((material) => {
-      const m = material as THREE.MeshStandardMaterial;
-      if (m.color) m.color.set(HOST_TINT[kind]);
-    });
-
-    // Signal vein on the chest: ride the chest bone when rigged so it follows the torso.
-    const vein = new THREE.Mesh(VEIN, glow(eye, 1.6));
-    const chest = rig.skeleton?.bone('chest');
-    if (chest) {
-      const socket = new THREE.Object3D();
-      socket.scale.setScalar(1 / rig.figure.scale.x);
-      chest.add(socket);
-      rig.skeleton?.alignSocket('chest', socket);
-      vein.position.set(0, 0.07 * scale, 0.15 * scale);
-      vein.scale.setScalar(0.55 * scale);
-      socket.add(vein);
-    } else {
-      vein.position.set(0, 1.25 * scale, 0.15 * scale);
-      vein.scale.setScalar(0.55 * scale);
-      humanoid.group.add(vein);
+    // Shared host bodies are tinted by kind. A textured civilian keeps the albedo.
+    if (!mapped || HOST_MODELS.includes(modelPath ?? '')) {
+      humanoid.materials.forEach((material) => {
+        const m = material as THREE.MeshStandardMaterial;
+        if (m.color) m.color.set(HOST_TINT[kind]);
+      });
     }
 
-    const glowMeshes: THREE.Mesh[] = [vein];
+    // Signal vein on the shared host bodies. A finished textured civilian keeps
+    // the jacket art; the slab has no chest bone to sit on.
+    const glowMeshes: THREE.Mesh[] = [];
+    const sharedBody = !mapped || HOST_MODELS.includes(modelPath ?? '');
+    if (sharedBody) {
+      const vein = new THREE.Mesh(VEIN, glow(eye, 1.6));
+      const chest = rig.skeleton?.bone('chest');
+      if (chest) {
+        const socket = new THREE.Object3D();
+        socket.scale.setScalar(1 / rig.figure.scale.x);
+        chest.add(socket);
+        rig.skeleton?.alignSocket('chest', socket);
+        vein.position.set(0, 0.07 * scale, 0.15 * scale);
+        vein.scale.setScalar(0.55 * scale);
+        socket.add(vein);
+      } else {
+        vein.position.set(0, 1.25 * scale, 0.15 * scale);
+        vein.scale.setScalar(0.55 * scale);
+        humanoid.group.add(vein);
+      }
+      glowMeshes.push(vein);
+    }
     const weapons: THREE.Object3D[] = [];
     if (kind === 'broadcaster') {
       const crown = new THREE.Mesh(HALO, glow(0xb84dff, 1.8));
