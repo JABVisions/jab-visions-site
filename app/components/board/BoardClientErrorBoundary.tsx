@@ -7,6 +7,8 @@ type Props = {
   fallback?: React.ReactNode;
   name?: string;
   resetLabel?: string;
+  returnLabel?: string;
+  onReturn?: () => void;
   /** Clear a caught error when the wrapped surface remounts onto a new session. */
   resetKey?: string | number;
 };
@@ -44,6 +46,7 @@ export default class BoardClientErrorBoundary extends React.Component<Props, Sta
         onClick={() => this.setState({ error: null })}
         style={{
           marginTop: 12,
+          marginRight: 8,
           borderRadius: 999,
           border: "1px solid rgba(126, 226, 255, 0.45)",
           background: "rgba(126, 226, 255, 0.14)",
@@ -56,11 +59,33 @@ export default class BoardClientErrorBoundary extends React.Component<Props, Sta
         {this.props.resetLabel}
       </button>
     ) : null;
+    const goBack = this.props.returnLabel ? (
+      <button
+        type="button"
+        onClick={() => {
+          this.setState({ error: null });
+          this.props.onReturn?.();
+        }}
+        style={{
+          marginTop: 12,
+          borderRadius: 999,
+          border: "1px solid rgba(255, 255, 255, 0.22)",
+          background: "rgba(255, 255, 255, 0.08)",
+          color: "inherit",
+          fontWeight: 800,
+          padding: "8px 14px",
+          cursor: "pointer",
+        }}
+      >
+        {this.props.returnLabel}
+      </button>
+    ) : null;
     if (this.props.fallback) {
       return (
         <>
           {this.props.fallback}
           {retry}
+          {goBack}
         </>
       );
     }
@@ -79,6 +104,7 @@ export default class BoardClientErrorBoundary extends React.Component<Props, Sta
       >
         This piece of the Board could not be shown. Everything else is still live.
         {retry}
+        {goBack}
       </div>
     );
   }

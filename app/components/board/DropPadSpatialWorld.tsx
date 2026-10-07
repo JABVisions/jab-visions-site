@@ -147,6 +147,10 @@ export default function DropPadSpatialWorld({
   const finishGesture = useCallback(
     (start: Point | null, x: number, y: number, target: EventTarget | null) => {
       if (!start) return;
+      if (typeof document !== "undefined" && document.body.dataset.dropStudioOpen === "1") return;
+      if (target instanceof Element && target.closest("[data-art-surface],[data-art-canvas-stage],.studioStage")) {
+        return;
+      }
       const dx = x - start.x;
       const dy = y - start.y;
       const elapsed = Math.max(1, Date.now() - start.at);

@@ -16,13 +16,19 @@ const DropStudioStageLazy = lazy(() => import("./DropStudioStage"));
 type DropStudioStageProps = ComponentProps<typeof DropStudioStage>;
 
 class DropStudioChunkErrorBoundary extends Component<
-  { children: ReactNode; onReset: () => void },
+  { children: ReactNode; onReset: () => void; onReturn: () => void },
   { error: Error | null }
 > {
   state = { error: null as Error | null };
 
   static getDerivedStateFromError(error: Error) {
     return { error };
+  }
+
+  componentDidCatch(error: Error) {
+    if (process.env.NODE_ENV !== "production") {
+      console.error("[Drop Studio] interrupted", error);
+    }
   }
 
   render() {
@@ -52,28 +58,50 @@ class DropStudioChunkErrorBoundary extends Component<
               textAlign: "center",
             }}
           >
-            <div style={{ fontWeight: 900, marginBottom: 8 }}>Drop Studio couldn&apos;t load</div>
-            <div style={{ fontSize: 13, opacity: 0.72, marginBottom: 14 }}>
-              Try again — no full rebuild needed.
+            <div style={{ fontWeight: 900, marginBottom: 8 }}>
+              Something interrupted Drop Studio.
             </div>
-            <button
-              type="button"
-              onClick={() => {
-                this.setState({ error: null });
-                this.props.onReset();
-              }}
-              style={{
-                borderRadius: 999,
-                border: "1px solid rgba(126, 226, 255, 0.45)",
-                background: "rgba(126, 226, 255, 0.14)",
-                color: "#eef9ff",
-                fontWeight: 800,
-                padding: "9px 16px",
-                cursor: "pointer",
-              }}
-            >
-              Retry Drop Studio
-            </button>
+            <div style={{ fontSize: 13, opacity: 0.72, marginBottom: 14 }}>
+              Your draft has been preserved.
+            </div>
+            <div style={{ display: "flex", gap: 8, justifyContent: "center", flexWrap: "wrap" }}>
+              <button
+                type="button"
+                onClick={() => {
+                  this.setState({ error: null });
+                  this.props.onReset();
+                }}
+                style={{
+                  borderRadius: 999,
+                  border: "1px solid rgba(126, 226, 255, 0.45)",
+                  background: "rgba(126, 226, 255, 0.14)",
+                  color: "#eef9ff",
+                  fontWeight: 800,
+                  padding: "9px 16px",
+                  cursor: "pointer",
+                }}
+              >
+                Resume Editing
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  this.setState({ error: null });
+                  this.props.onReturn();
+                }}
+                style={{
+                  borderRadius: 999,
+                  border: "1px solid rgba(255, 255, 255, 0.22)",
+                  background: "rgba(255, 255, 255, 0.08)",
+                  color: "#eef9ff",
+                  fontWeight: 800,
+                  padding: "9px 16px",
+                  cursor: "pointer",
+                }}
+              >
+                Return to Board
+              </button>
+            </div>
           </div>
         </div>
       );
@@ -139,7 +167,10 @@ export default function LazyDropStudioStage({ open, onClose, ...rest }: DropStud
 
   if (!open && !held) return null;
   return (
-    <DropStudioChunkErrorBoundary onReset={() => setChunkKey((key) => key + 1)}>
+    <DropStudioChunkErrorBoundary
+      onReset={() => setChunkKey((key) => key + 1)}
+      onReturn={onClose}
+    >
       <Suspense fallback={open ? <DropStudioLoading /> : null}>
         <DropStudioStageLazy key={chunkKey} open={open} onClose={onClose} {...rest} />
       </Suspense>

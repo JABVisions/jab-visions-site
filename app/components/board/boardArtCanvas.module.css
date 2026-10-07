@@ -6,6 +6,8 @@
   width: 100%;
   display: flex;
   flex-direction: column;
+  touch-action: none;
+  overscroll-behavior: none;
 }
 
 .mode {
@@ -48,6 +50,8 @@
 
 .stage {
   position: relative;
+  touch-action: none;
+  overscroll-behavior: none;
   aspect-ratio: 4 / 5;
   height: 100%;
   width: auto;
@@ -99,6 +103,35 @@
   height: 100%;
   touch-action: none;
   cursor: crosshair;
+}
+
+.recoveredBar {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 4;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(126, 226, 255, 0.35);
+  background: rgba(9, 13, 19, 0.82);
+  color: #eef9ff;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 6px 10px;
+  pointer-events: auto;
+}
+
+.recoveredDiscard {
+  border: 0;
+  background: transparent;
+  color: rgba(255, 210, 220, 0.9);
+  font: inherit;
+  font-size: 10px;
+  cursor: pointer;
 }
 
 .tools {

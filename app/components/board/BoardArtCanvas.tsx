@@ -15,6 +15,15 @@ import DropChipWorkbench from "./DropChipWorkbench";
 import DropStudioPaletteDeck, { type ObjectTool } from "./DropStudioPaletteDeck";
 import styles from "./boardArtCanvas.module.css";
 import { scaleCanvasToMinLongEdge } from "@/lib/board/imageQuality";
+import {
+  ART_CANVAS_DPR_CAP,
+  ART_UNDO_LIMIT,
+  discardArtDraft,
+  loadArtDraft,
+  persistArtDraftNow,
+  scheduleArtDraftPersist,
+  artDraftObjectUrl,
+} from "@/lib/board/artDraftSession";
 
 function hslToHex(h: number, s: number, l: number) {
   const sN = s / 100;
@@ -58,9 +67,11 @@ export default function BoardArtCanvas({
   const ctxRef = useRef<CanvasRenderingContext2D | null>(null);
   const bgImgRef = useRef<HTMLImageElement>(null);
   const drawingRef = useRef(false);
-  const undoRef = useRef<ImageData[]>([]);
-  const redoRef = useRef<ImageData[]>([]);
+  const undoRef = useRef<HTMLCanvasElement[]>([]);
+  const redoRef = useRef<HTMLCanvasElement[]>([]);
   const dprRef = useRef(1);
+  const recoveredUrlRef = useRef("");
+  const [recovered, setRecovered] = useState(false);
   const lastPtRef = useRef<{ x: number; y: number } | null>(null);
   const wheelRef = useRef<HTMLDivElement | null>(null);
   const wheelDraggingRef = useRef(false);
@@ -106,7 +117,7 @@ export default function BoardArtCanvas({
     if (!canvas) return;
     const rect = canvas.getBoundingClientRect();
     if (rect.width < 1 || rect.height < 1) return;
-    const dpr = Math.min(window.devicePixelRatio || 1, 3);
+    const dpr = Math.min(window.devicePixelRatio || 1, ART_CANVAS_DPR_CAP);
     const nextW = Math.max(1, Math.round(rect.width * dpr));
     const nextH = Math.max(1, Math.round(rect.height * dpr));
     if (canvas.width === nextW && canvas.height === nextH && ctxRef.current) return;
@@ -137,8 +148,7 @@ export default function BoardArtCanvas({
       ctx.drawImage(prev, 0, 0, prev.width, prev.height, 0, 0, nextW, nextH);
       ctx.restore();
     }
-    // Undo/redo snapshots are tied to the old backing-store dimensions, so reset
-    // them on a real resize to avoid putImageData misalignment.
+    // Keep the latest frame; drop pixel-tied undo stacks after a real resize.
     undoRef.current = [];
     redoRef.current = [];
   }
@@ -149,8 +159,86 @@ export default function BoardArtCanvas({
     if (!canvas || typeof ResizeObserver === "undefined") return;
     const ro = new ResizeObserver(() => syncCanvas());
     ro.observe(canvas);
-    return () => ro.disconnect();
+    const blockNav = (event: TouchEvent) => {
+      event.stopPropagation();
+      if (event.cancelable) event.preventDefault();
+    };
+    canvas.addEventListener("touchstart", blockNav, { passive: false });
+    canvas.addEventListener("touchmove", blockNav, { passive: false });
+    return () => {
+      ro.disconnect();
+      canvas.removeEventListener("touchstart", blockNav);
+      canvas.removeEventListener("touchmove", blockNav);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const canvas = canvasRef.current;
+    if (!canvas || initialOverlayUrl) return;
+    void loadArtDraft().then((record) => {
+      if (cancelled || !record?.overlay) return;
+      const url = artDraftObjectUrl(record.overlay);
+      recoveredUrlRef.current = url;
+      const image = new Image();
+      image.onload = () => {
+        if (cancelled) return;
+        syncCanvas();
+        const ctx = ctxRef.current;
+        if (!ctx || !canvasRef.current) return;
+        ctx.save();
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
+        ctx.drawImage(image, 0, 0, canvasRef.current.width, canvasRef.current.height);
+        ctx.restore();
+        if (record.paper) setPaper(true);
+        setRecovered(true);
+      };
+      image.src = url;
+    });
+    return () => {
+      cancelled = true;
+      if (recoveredUrlRef.current) {
+        URL.revokeObjectURL(recoveredUrlRef.current);
+        recoveredUrlRef.current = "";
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialOverlayUrl]);
+
+  useEffect(() => {
+    const persist = () => {
+      const canvas = canvasRef.current;
+      if (canvas) void persistArtDraftNow(canvas, paper);
+    };
+    const onHide = () => {
+      if (document.visibilityState === "hidden") persist();
+    };
+    window.addEventListener("pagehide", persist);
+    window.addEventListener("beforeunload", persist);
+    document.addEventListener("visibilitychange", onHide);
+    return () => {
+      window.removeEventListener("pagehide", persist);
+      window.removeEventListener("beforeunload", persist);
+      document.removeEventListener("visibilitychange", onHide);
+      persist();
+    };
+  }, [paper]);
+
+  useEffect(() => {
+    return () => {
+      undoRef.current.forEach((shot) => {
+        shot.width = 0;
+        shot.height = 0;
+      });
+      redoRef.current.forEach((shot) => {
+        shot.width = 0;
+        shot.height = 0;
+      });
+      undoRef.current = [];
+      redoRef.current = [];
+    };
   }, []);
 
   useEffect(() => {
@@ -188,13 +276,37 @@ export default function BoardArtCanvas({
     return { x: clientX - r.left, y: clientY - r.top };
   }
 
-  function pushUndo() {
+  function snapshotCanvas(source: HTMLCanvasElement) {
+    const snap = document.createElement("canvas");
+    const scale = 0.5;
+    snap.width = Math.max(1, Math.round(source.width * scale));
+    snap.height = Math.max(1, Math.round(source.height * scale));
+    snap.getContext("2d")?.drawImage(source, 0, 0, snap.width, snap.height);
+    return snap;
+  }
+
+  function restoreSnapshot(snap: HTMLCanvasElement) {
     const canvas = canvasRef.current;
     const ctx = ctxRef.current;
     if (!canvas || !ctx) return;
-    undoRef.current.push(ctx.getImageData(0, 0, canvas.width, canvas.height));
-    if (undoRef.current.length > 24) undoRef.current.shift();
-    // A fresh edit invalidates the redo stack.
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(snap, 0, 0, canvas.width, canvas.height);
+    ctx.restore();
+  }
+
+  function pushUndo() {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    undoRef.current.push(snapshotCanvas(canvas));
+    if (undoRef.current.length > ART_UNDO_LIMIT) {
+      const dropped = undoRef.current.shift();
+      if (dropped) {
+        dropped.width = 0;
+        dropped.height = 0;
+      }
+    }
     redoRef.current = [];
   }
 
@@ -308,6 +420,7 @@ export default function BoardArtCanvas({
     const ctx = ctxRef.current;
     if (!ctx) return;
     e.preventDefault();
+    e.stopPropagation();
     e.currentTarget.setPointerCapture(e.pointerId);
     pushUndo();
     drawingRef.current = true;
@@ -347,6 +460,7 @@ export default function BoardArtCanvas({
     const ctx = ctxRef.current;
     if (!ctx) return;
     e.preventDefault();
+    e.stopPropagation();
 
     // Process every coalesced sample for high-fidelity (sensitive) strokes on
     // fast moves, and smooth with quadratic midpoints so lines aren't jagged.
@@ -386,7 +500,8 @@ export default function BoardArtCanvas({
     }
   }
 
-  function onPointerUp() {
+  function onPointerUp(e?: React.PointerEvent<HTMLCanvasElement>) {
+    e?.stopPropagation();
     if (!drawingRef.current) return;
     const ctx = ctxRef.current;
     const last = lastPtRef.current;
@@ -402,6 +517,14 @@ export default function BoardArtCanvas({
       ctx.globalCompositeOperation = "source-over";
       ctx.globalAlpha = 1;
     }
+    const canvas = canvasRef.current;
+    if (canvas) scheduleArtDraftPersist(canvas, paper);
+  }
+
+  function onPointerLeave(e: React.PointerEvent<HTMLCanvasElement>) {
+    e.stopPropagation();
+    if (e.buttons) return;
+    onPointerUp(e);
   }
 
   function clearCanvas() {
@@ -414,23 +537,29 @@ export default function BoardArtCanvas({
 
   function undo() {
     const canvas = canvasRef.current;
-    const ctx = ctxRef.current;
-    if (!canvas || !ctx) return;
+    if (!canvas) return;
     const prev = undoRef.current.pop();
     if (!prev) return;
-    // Stash the current frame so it can be redone.
-    redoRef.current.push(ctx.getImageData(0, 0, canvas.width, canvas.height));
-    ctx.putImageData(prev, 0, 0);
+    redoRef.current.push(snapshotCanvas(canvas));
+    if (redoRef.current.length > ART_UNDO_LIMIT) {
+      const dropped = redoRef.current.shift();
+      if (dropped) {
+        dropped.width = 0;
+        dropped.height = 0;
+      }
+    }
+    restoreSnapshot(prev);
+    scheduleArtDraftPersist(canvas, paper);
   }
 
   function redo() {
     const canvas = canvasRef.current;
-    const ctx = ctxRef.current;
-    if (!canvas || !ctx) return;
+    if (!canvas) return;
     const next = redoRef.current.pop();
     if (!next) return;
-    undoRef.current.push(ctx.getImageData(0, 0, canvas.width, canvas.height));
-    ctx.putImageData(next, 0, 0);
+    undoRef.current.push(snapshotCanvas(canvas));
+    restoreSnapshot(next);
+    scheduleArtDraftPersist(canvas, paper);
   }
 
   function save() {
@@ -513,13 +642,37 @@ export default function BoardArtCanvas({
       ) : null}
       <canvas
         ref={canvasRef}
+        data-art-surface
         className={styles.canvas}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
         onPointerCancel={onPointerUp}
-        onPointerLeave={onPointerUp}
+        onPointerLeave={onPointerLeave}
       />
+      {recovered ? (
+        <div className={styles.recoveredBar} role="status">
+          Recovered Draft
+          <button
+            type="button"
+            className={styles.recoveredDiscard}
+            onClick={() => {
+              void discardArtDraft();
+              setRecovered(false);
+              const canvas = canvasRef.current;
+              const ctx = ctxRef.current;
+              if (canvas && ctx) {
+                ctx.save();
+                ctx.setTransform(1, 0, 0, 1, 0, 0);
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                ctx.restore();
+              }
+            }}
+          >
+            Discard
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 

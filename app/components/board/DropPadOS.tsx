@@ -1,13 +1,14 @@
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import dynamic from "next/dynamic";
 import Image from "next/image";
 import { supabaseBrowser } from "@/lib/supabase/browser";
 import WorkCallsList, { type WorkCallItem } from "@/app/components/board/WorkCallsList";
 import StoreDropTile, { type StoreDrop } from "@/app/components/board/StoreDropTile";
-import DropPadSpatialWorld, {
-  type DropPadSpace,
-  type SpatialLibraryDrop,
+import type {
+  DropPadSpace,
+  SpatialLibraryDrop,
 } from "@/app/components/board/DropPadSpatialWorld";
 import ActivityBadge from "@/app/components/board/activity/ActivityBadge";
 import LazyDropStudioStage from "@/app/components/board/LazyDropStudioStage";
@@ -20,6 +21,11 @@ import type { ResolvedDropbookLink } from "@/lib/board/dropbookLink";
 import { studioLinkEmbedUrl, studioLinkPersistKind } from "@/lib/board/dropbookLink";
 import { toSoundCloudEmbed } from "@/lib/board/soundCloudEmbed";
 import { openProjectDropInfo, openProjectNotebook } from "@/lib/board/projectNotebookBus";
+
+const DropPadSpatialWorld = dynamic(
+  () => import("@/app/components/board/DropPadSpatialWorld"),
+  { ssr: false }
+);
 
 type DropRoute =
   | "board"

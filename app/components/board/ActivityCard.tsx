@@ -1854,11 +1854,12 @@ function ActivityCard({
         <div className={clsx("embed", embed.kind)}>
           {embed.kind === "image" && (
             <div className="mediaFrame imageMediaFrame">
-              <img
+                <img
                 src={playableFeedMediaSrc(embed.url) || undefined}
                 alt={title || "Vision drop"}
                 className="img"
                 loading="lazy"
+                decoding="async"
                 onError={() => setEmbedFailed(true)}
               />
               <DropStudioOverlay customizations={dropCustomizations} />

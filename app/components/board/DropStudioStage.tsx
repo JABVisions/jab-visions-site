@@ -7,6 +7,8 @@
 "use client";
 
 import {
+  lazy,
+  Suspense,
   useCallback,
   useEffect,
   useMemo,
@@ -18,13 +20,13 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import DropStudio from "./DropStudio";
-import BoardArtCanvas from "./BoardArtCanvas";
+const BoardArtCanvas = lazy(() => import("./BoardArtCanvas"));
 import BoardUploadProgressBar from "./BoardUploadProgressBar";
 import { DropChipStage } from "./DropChipWorkbench";
 import chooseStyles from "./dropStudioChoose.module.css";
 import chipStyles from "./dropbookShelfChip.module.css";
 import "./dropStudioStage.css";
-import DescriptStudio from "./DescriptStudio";
+const DescriptStudio = lazy(() => import("./DescriptStudio"));
 import {
   descriptPlainText,
   type DescriptDestination,
@@ -63,7 +65,7 @@ import DropDraftsDrawer from "./DropDraftsDrawer";
 import BoardClientErrorBoundary from "./BoardClientErrorBoundary";
 import VocalVisualizer from "./VocalVisualizer";
 import VoicePresets from "./VoicePresets";
-import VoiceStudioSession from "./VoiceStudioSession";
+const VoiceStudioSession = lazy(() => import("./VoiceStudioSession"));
 import {
   AudioSessionEngine,
   adoptAudioFile,
@@ -138,6 +140,12 @@ import {
 import DropDestinationBadge from "./DropDestinationBadge";
 import type { DropDestination } from "@/lib/board/dropDestination";
 import { dropPublishLabel } from "@/lib/board/dropDestination";
+import {
+  ART_DRAFT_UPDATED_EVENT,
+  hasArtDraft,
+  loadArtDraft,
+  persistArtDraftNow,
+} from "@/lib/board/artDraftSession";
 
 type CaptureMode = "photo" | "video" | "audio" | "art" | "descript";
 type FacingMode = "user" | "environment";
@@ -666,6 +674,14 @@ export default function DropStudioStage({
     liveVoiceHoldHasClips();
 
   const keepMixerMounted = voiceSessionActive || voiceMixerLocked;
+  const [artDraftAlive, setArtDraftAlive] = useState(() => hasArtDraft());
+  useEffect(() => {
+    const sync = () => setArtDraftAlive(hasArtDraft());
+    window.addEventListener(ART_DRAFT_UPDATED_EVENT, sync);
+    void loadArtDraft().then(sync);
+    return () => window.removeEventListener(ART_DRAFT_UPDATED_EVENT, sync);
+  }, []);
+  const keepArtMounted = (open && mode === "art") || artDraftAlive;
 
   const liveUploadProgress = studioVisibleUploadProgress({
     processing: processingVocal,
@@ -691,7 +707,13 @@ export default function DropStudioStage({
     saveNoteTimerRef.current = window.setTimeout(() => setSaveNote(""), 2600);
   }, []);
 
+  const persistArtSurface = useCallback(() => {
+    const canvas = document.querySelector("[data-art-surface]") as HTMLCanvasElement | null;
+    if (canvas) void persistArtDraftNow(canvas);
+  }, []);
+
   const requestCloseStudio = useCallback(() => {
+    persistArtSurface();
     mixAbortRef.current = true;
     persistVoiceProjectRef.current();
     studioCountInTimerRef.current.forEach((id) => window.clearTimeout(id));
@@ -716,7 +738,7 @@ export default function DropStudioStage({
     presetPreviewGenRef.current += 1;
     setPresetPreviewing(false);
     handleClose();
-  }, [handleClose]);
+  }, [handleClose, persistArtSurface]);
 
   useEffect(() => {
     audioSessionRef.current = audioSession;
@@ -1575,9 +1597,15 @@ export default function DropStudioStage({
   useEffect(() => {
     if (!open) {
       persistVoiceProjectRef.current();
+      persistArtSurface();
       document.body.style.overflow = "";
       if (sessionHasClips(audioSessionRef.current) || liveVoiceHoldHasClips()) {
         haltStudioTransport();
+        return;
+      }
+      if (hasArtDraft()) {
+        haltStudioTransport();
+        stopCamera();
         return;
       }
       haltStudioTransport();
@@ -1594,6 +1622,13 @@ export default function DropStudioStage({
     document.body.style.overflow = "hidden";
 
     if (!freshOpen) return;
+
+    if (hasArtDraft()) {
+      setMode("art");
+      setPhase("capture");
+      flashSaveNote("Recovered Draft");
+      return;
+    }
 
     if (sessionHasClips(audioSessionRef.current) || (live && sessionHasClips(live.session))) {
       if (live && !sessionHasClips(audioSessionRef.current)) {
@@ -1685,16 +1720,52 @@ export default function DropStudioStage({
   }, [open, phase, facing, mode, startCamera, stopCamera]);
 
   useEffect(() => {
-    if (!open && !keepMixerMounted) return;
+    if (!open && !keepMixerMounted && !keepArtMounted) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
       e.preventDefault();
       e.stopPropagation();
+      persistArtSurface();
       requestCloseStudio();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [open, keepMixerMounted, requestCloseStudio]);
+  }, [open, keepMixerMounted, keepArtMounted, persistArtSurface, requestCloseStudio]);
+
+  useEffect(() => {
+    if (!open) {
+      delete document.body.dataset.dropStudioOpen;
+      delete document.body.dataset.dropStudioArt;
+      return;
+    }
+    document.body.dataset.dropStudioOpen = "1";
+    if (mode === "art") document.body.dataset.dropStudioArt = "1";
+    else delete document.body.dataset.dropStudioArt;
+    return () => {
+      delete document.body.dataset.dropStudioOpen;
+      delete document.body.dataset.dropStudioArt;
+    };
+  }, [open, mode]);
+
+  useEffect(() => {
+    if (!open || mode !== "art") return;
+    const prior = window.history.state;
+    window.history.pushState(
+      { ...(prior && typeof prior === "object" ? prior : {}), jabArtStudio: true },
+      ""
+    );
+    const onPop = () => {
+      persistArtSurface();
+      window.history.pushState(
+        { ...(window.history.state && typeof window.history.state === "object"
+            ? window.history.state
+            : {}), jabArtStudio: true },
+        ""
+      );
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, [open, mode, persistArtSurface]);
 
   const selectDropbookChip = useCallback(
     (chipId: string) => {
@@ -2732,7 +2803,7 @@ export default function DropStudioStage({
   }
 
   if (typeof document === "undefined") return null;
-  if (!open && !keepMixerMounted) return null;
+  if (!open && !keepMixerMounted && !keepArtMounted) return null;
 
   const isDropbookHomeScreen =
     isDropbookMode &&
@@ -2910,7 +2981,14 @@ export default function DropStudioStage({
       aria-label="Drop Studio"
       onPointerDown={(e) => {
         if (e.target !== e.currentTarget) return;
+        if (mode === "art" || artDraftAlive) {
+          persistArtSurface();
+          return;
+        }
         requestCloseStudio();
+      }}
+      onTouchMove={(e) => {
+        if (mode === "art") e.stopPropagation();
       }}
     >
       <div
@@ -3316,6 +3394,7 @@ export default function DropStudioStage({
                   )}
                 </div>
               ) : mode === "descript" ? (
+                <Suspense fallback={<div className="studioVoiceError">Opening Descript…</div>}>
                 <DescriptStudio
                   key={
                     isDropbookMode
@@ -3353,6 +3432,7 @@ export default function DropStudioStage({
                   }
                   defaultDestination={descriptDestination}
                 />
+                </Suspense>
               ) : voiceStudioOpen && mode === "audio" && audioSession ? (
                 <div className="capEdit">
                   <div className="capEditScroll">
@@ -3366,6 +3446,7 @@ export default function DropStudioStage({
                         </div>
                       }
                     >
+                    <Suspense fallback={<div className="studioVoiceError">Opening Voice Studio…</div>}>
                     <VoiceStudioSession
                       session={audioSession}
                       autoSaveLabel={
@@ -3602,6 +3683,7 @@ export default function DropStudioStage({
                         });
                       }}
                     />
+                    </Suspense>
                     </BoardClientErrorBoundary>
                   </div>
                   <div className="editActions">
@@ -3680,10 +3762,27 @@ export default function DropStudioStage({
               ) : phase === "capture" ? (
                 <div className="capMonitorHost">
                   {mode === "art" ? (
+                    <BoardClientErrorBoundary
+                      name="drop-studio-art"
+                      resetLabel="Resume Editing"
+                      returnLabel="Return to Board"
+                      onReturn={() => {
+                        persistArtSurface();
+                        requestCloseStudio();
+                      }}
+                      fallback={
+                        <div className="studioVoiceError">
+                          Something interrupted Drop Studio. Your draft has been preserved.
+                        </div>
+                      }
+                    >
+                    <Suspense fallback={<div className="studioVoiceError">Opening Art…</div>}>
                     <BoardArtCanvas
                       operatingTable
                       onSave={(f) => commitBlob(f, "image", "capture")}
                     />
+                    </Suspense>
+                    </BoardClientErrorBoundary>
                   ) : (
                     <DropChipStage
                       mediaFrame={captureMediaFrame}
@@ -3852,6 +3951,21 @@ export default function DropStudioStage({
                     </>
                   ) : drawOpen && mode === "art" ? (
                     <div className="capMonitorHost">
+                      <BoardClientErrorBoundary
+                        name="drop-studio-art-draw"
+                        resetLabel="Resume Editing"
+                        returnLabel="Return to Board"
+                        onReturn={() => {
+                          persistArtSurface();
+                          requestCloseStudio();
+                        }}
+                        fallback={
+                          <div className="studioVoiceError">
+                            Something interrupted Drop Studio. Your draft has been preserved.
+                          </div>
+                        }
+                      >
+                      <Suspense fallback={<div className="studioVoiceError">Opening Art…</div>}>
                       <BoardArtCanvas
                         operatingTable
                         backgroundImageUrl={
@@ -3892,6 +4006,8 @@ export default function DropStudioStage({
                           setDrawOpen(false);
                         }}
                       />
+                      </Suspense>
+                      </BoardClientErrorBoundary>
                     </div>
                   ) : (
                     <div className="capStudioHost">
