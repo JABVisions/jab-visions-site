@@ -50,10 +50,10 @@ const RaidRadar = forwardRef<RadarApi>(function RaidRadar(_, ref) {
     draw(frame) {
       const canvas = canvasRef.current;
       if (!canvas) return;
-      const css = canvas.clientWidth || 132;
+      const css = Math.max(canvas.clientWidth, canvas.clientHeight) || 132;
       const dpr = Math.min(2, window.devicePixelRatio || 1);
       const size = Math.round(css * dpr);
-      if (canvas.width !== size) {
+      if (canvas.width !== size || canvas.height !== size) {
         canvas.width = size;
         canvas.height = size;
       }
