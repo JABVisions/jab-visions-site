@@ -162,6 +162,18 @@ export const ARENA_BUILDINGS: ArenaBuildingModel[] = [
     depth: 0.4037730395793915,
   },
 ];
+
+/**
+ * Street tree used wherever the arena used a green sphere for vegetation.
+ * The Tripo export is about a metre tall and its base sits on y = 0.
+ * `height` is the world height in metres at placement scale 1.
+ */
+export const ARENA_TREE = {
+  url: '/assets/those-ryderz/models/arena-tree.glb',
+  sourceHeight: 0.992584228515625,
+  height: 5.2,
+};
+
 export const MAX_ALIVE_HOSTS = 26;
 /**
  * Rigged glTF binaries for the host mob. Each spawn picks one at random; when

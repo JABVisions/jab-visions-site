@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import { ARENA_BLOCK, ARENA_BUILDINGS, ARENA_HALF, CAR_MODELS } from './config';
+import { ARENA_BLOCK, ARENA_BUILDINGS, ARENA_HALF, ARENA_TREE, CAR_MODELS } from './config';
 import { addOutline, glow, toon } from './toon';
 
 export type Obstacle =
@@ -262,6 +262,7 @@ function quadrantSlab(sx: 1 | -1, sz: 1 | -1, materials: THREE.Material[]) {
   return mesh;
 }
 
+/** Procedural stand-in used until the street-tree model loads. */
 function treeAt(parent: THREE.Object3D, x: number, z: number, y: number, scale = 1) {
   const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.16 * scale, 0.22 * scale, 3.2 * scale, 8), toon(0x3a2a22));
   trunk.position.set(x, y + 1.6 * scale, z);
@@ -273,7 +274,23 @@ function treeAt(parent: THREE.Object3D, x: number, z: number, y: number, scale =
   canopy2.position.set(x + 0.7 * scale, y + 5.1 * scale, z - 0.4 * scale);
   addOutline(canopy2, 0.05);
   parent.add(trunk, canopy, canopy2);
-  return trunk;
+  return [trunk, canopy, canopy2];
+}
+
+interface TreeSpot {
+  x: number;
+  z: number;
+  y: number;
+  /** Multiplier on ARENA_TREE.height. */
+  scale: number;
+  yaw: number;
+  standIn: THREE.Object3D[];
+}
+
+function treeYaw(x: number, z: number) {
+  const turn = Math.sin(x * 12.9898 + z * 78.233) * 43758.5453;
+  const frac = turn - Math.floor(turn);
+  return frac * Math.PI * 2;
 }
 
 // ---------------------------------------------------------------------------
@@ -735,6 +752,11 @@ export function buildWorld(): World {
     obstacles.push({ kind: 'circle', x: -11.4, z, r: 0.2 });
   });
 
+  const treeSpots: TreeSpot[] = [];
+  const queueTree = (x: number, z: number, y: number, scale: number, standIn: THREE.Object3D[]) => {
+    treeSpots.push({ x, z, y, scale, yaw: treeYaw(x, z), standIn });
+  };
+
   // (-x,+z): pocket park.
   const grass = new THREE.Mesh(new THREE.PlaneGeometry(12.5, 13), toon(0x2f5a3a));
   grass.rotation.x = -Math.PI / 2;
@@ -753,8 +775,8 @@ export function buildWorld(): World {
     [-22, 13, 0.9],
     [-19.5, 24.5, 0.75],
   ].forEach(([x, z, s]) => {
-    treeAt(group, x, z, CURB, s);
-    obstacles.push({ kind: 'circle', x, z, r: 0.42 });
+    queueTree(x, z, CURB, s, treeAt(group, x, z, CURB, s));
+    obstacles.push({ kind: 'circle', x, z, r: 0.55 });
   });
 
   // Courtyard at the west end of the north block. The entrance (local +Z)
@@ -926,7 +948,45 @@ export function buildWorld(): World {
     group.add(base, bush);
     occluders.push(base);
     obstacles.push({ kind: 'box', minX: x - 0.9, maxX: x + 0.9, minZ: z - 0.9, maxZ: z + 0.9 });
+    queueTree(x, z, y + 0.8, 0.7, [bush]);
   });
+
+  // Swap the green sphere stand-ins for the street tree once it loads.
+  {
+    const loader = new GLTFLoader();
+    loader.load(
+      ARENA_TREE.url,
+      (gltf) => {
+        if (disposed) return;
+        const fit = ARENA_TREE.height / ARENA_TREE.sourceHeight;
+        treeSpots.forEach((spot) => {
+          const scene = gltf.scene.clone(true);
+          scene.scale.setScalar(fit * spot.scale);
+          const root = new THREE.Group();
+          root.name = 'arena-tree';
+          root.add(scene);
+          root.position.set(spot.x, spot.y, spot.z);
+          root.rotation.y = spot.yaw;
+          group.add(root);
+          spot.standIn.forEach((obj) => group.remove(obj));
+          scene.traverse((obj) => {
+            const mesh = obj as THREE.Mesh;
+            if (!mesh.isMesh) return;
+            mesh.castShadow = false;
+            mesh.receiveShadow = false;
+            const list = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+            list.forEach((material) => {
+              if (material) material.userData.retain = true;
+            });
+          });
+        });
+      },
+      undefined,
+      (error) => {
+        console.warn('[raid] tree model failed to load', error);
+      },
+    );
+  }
 
   // --- Street lights: cobra-head poles on the curb line, arms over the road ---
   const lampMat = toon(0x22202c);
