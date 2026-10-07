@@ -1,0 +1,23 @@
+.radar {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 5;
+  width: 132px;
+  height: 132px;
+  pointer-events: none;
+  filter: drop-shadow(0 0 10px rgba(57, 255, 106, 0.28));
+}
+
+.canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+@media (max-width: 720px) {
+  .radar {
+    width: 96px;
+    height: 96px;
+  }
+}

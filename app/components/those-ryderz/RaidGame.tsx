@@ -21,6 +21,7 @@ import PlayerPartyHUD, { type PartyHudApi } from './hud/PlayerPartyHUD';
 import PvpVersusHUD from './hud/PvpVersusHUD';
 import LowHealthVignette, { type LowHealthVignetteApi } from './hud/LowHealthVignette';
 import ComboIndicator, { type ComboHudApi } from './hud/ComboIndicator';
+import RaidRadar, { type RadarApi } from './hud/RaidRadar';
 import PauseMenu from './menu/PauseMenu';
 import RaidLobby, { type RaidSeat } from './modes/RaidLobby';
 import PvpFlow, { type PvpLineup } from './modes/PvpFlow';
@@ -37,6 +38,7 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
   const foeHud = useRef<CircularHudApi>(null);
   const vignette = useRef<LowHealthVignetteApi>(null);
   const comboHud = useRef<ComboHudApi>(null);
+  const radarHud = useRef<RadarApi>(null);
   const moveRow = useRef<HTMLDivElement>(null);
   const partyHud = useRef<PartyHudApi | null>(null);
   const pvpRef = useRef<PvpLineup | null>(null);
@@ -100,6 +102,7 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
     circularHud.current?.setVitals(next.hp, next.maxHp, next.aura, next.maxAura, next.burnout);
     vignette.current?.setHealth(next.hp, next.maxHp);
     comboHud.current?.setCombo(next.combo);
+    radarHud.current?.draw(next.radar);
     moveRow.current?.setAttribute('data-link', next.combo.power ? 'true' : 'false');
     if (next.opponent) {
       foeHud.current?.setVitals(next.opponent.hp, next.opponent.maxHp, next.opponent.aura, next.opponent.maxAura, next.opponent.aura <= 1);
@@ -379,6 +382,7 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
         <div className={styles.overlay} aria-hidden="true">
           <LowHealthVignette ref={vignette} />
           <ComboIndicator ref={comboHud} />
+          <RaidRadar ref={radarHud} />
           <div className={styles.topHud}>
             {partyState.mode === GameMode.RAID ? (
               <PlayerPartyHUD slots={partyState.slots} mode={partyState.mode} apiRef={partyHud} />

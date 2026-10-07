@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import { ARENA_BLOCK, ARENA_BUILDINGS, ARENA_HALF, ARENA_TREE, CAR_MODELS } from './config';
+import { ARENA_BLOCK, ARENA_BUILDINGS, ARENA_HALF, ARENA_TREE, CAR_MODELS, DISTRICT_SPAN } from './config';
 import { addOutline, glow, toon } from './toon';
 
 export type Obstacle =
@@ -33,6 +33,7 @@ export interface World {
  *   - Perimeter lots and the corners use the textured street buildings.
  *   - One larger courtyard building caps the west end of the north block,
  *     outside the sidewalk, and the small lots step around it.
+ *   - That whole block is tiled 2×2. Centres sit at (±GROUND_HALF, ±GROUND_HALF).
  */
 const AVENUE_HALF = 8;
 const STREET_HALF = 7;
@@ -40,7 +41,22 @@ const PLAZA_R = 12;
 const CURB = 0.14;
 const PARKING_LANE = 2.4;
 /** Asphalt pad. Deep enough for the courtyard building past the north wall. */
-const GROUND_HALF = ARENA_HALF + 18;
+const GROUND_HALF = DISTRICT_SPAN / 2;
+
+/** World position of the city block that contains (x, z), and the local offset inside it. */
+export function districtLocal(x: number, z: number) {
+  const ox = (x < 0 ? -1 : 1) * GROUND_HALF;
+  const oz = (z < 0 ? -1 : 1) * GROUND_HALF;
+  return { x: x - ox, z: z - oz, ox, oz };
+}
+
+/** True when (x, z) is near the hub island of whichever block it sits in. */
+export function nearDistrictHub(x: number, z: number, radius: number) {
+  const hub = districtLocal(x, z);
+  const dx = x - hub.ox;
+  const dz = z - hub.oz;
+  return dx * dx + dz * dz < radius * radius;
+}
 const CAR_LENGTH = 4.5;
 
 interface AlleyGap {
@@ -272,6 +288,9 @@ function treeAt(parent: THREE.Object3D, x: number, z: number, y: number, scale =
   const canopy2 = new THREE.Mesh(new THREE.IcosahedronGeometry(1.3 * scale, 1), toon(0x37904f));
   canopy2.position.set(x + 0.7 * scale, y + 5.1 * scale, z - 0.4 * scale);
   addOutline(canopy2, 0.05);
+  trunk.userData.treeStandIn = true;
+  canopy.userData.treeStandIn = true;
+  canopy2.userData.treeStandIn = true;
   parent.add(trunk, canopy, canopy2);
   return [trunk, canopy, canopy2];
 }
@@ -459,10 +478,11 @@ export function buildWorld(): World {
   const textures: THREE.Texture[] = [];
   let disposed = false;
 
-  group.add(makeSky());
+  const sky = makeSky();
   const moon = new THREE.Mesh(new THREE.SphereGeometry(14, 24, 16), glow(0x9dffc9, 0.9));
   moon.position.set(-90, 95, -150);
-  group.add(moon);
+  const districts: THREE.Group[] = [];
+  const districtParents = () => (districts.length ? districts : [group]);
 
   // --- Ground: asphalt everywhere, sidewalk slabs on top ---------------------
   const asphaltTex = makeAsphaltTexture();
@@ -636,6 +656,7 @@ export function buildWorld(): World {
           : new THREE.Vector3(side.sign * ARENA_HALF, nodeY, g.at);
       const node = new THREE.Mesh(new THREE.IcosahedronGeometry(0.55, 0), glow(0x6dff9e, 1.6));
       node.position.copy(nodePos);
+      node.userData.alleyNode = true;
       group.add(node);
       alleyNodes.push(node);
       const arch = new THREE.Mesh(new THREE.TorusGeometry(g.width > 6 ? 4.2 : 2.7, 0.14, 8, 36), glow(0x36c56e, 1.1));
@@ -671,7 +692,7 @@ export function buildWorld(): World {
     obstacles.push({ kind: 'box', minX: slot.x - extX, maxX: slot.x + extX, minZ: slot.z - extZ, maxZ: slot.z + extZ });
   });
 
-  const mountBuilding = (template: THREE.Object3D, slot: SkylineSlot) => {
+  const mountBuilding = (template: THREE.Object3D, slot: SkylineSlot, parent: THREE.Object3D) => {
     const { scale } = buildingScale(slot.model, slot.face);
     const root = new THREE.Group();
     const scene = template.clone(true);
@@ -680,7 +701,7 @@ export function buildWorld(): World {
     root.add(scene);
     root.position.set(slot.x, CURB, slot.z);
     root.rotation.y = slot.yaw;
-    group.add(root);
+    parent.add(root);
     scene.traverse((o) => {
       const mesh = o as THREE.Mesh;
       if (!mesh.isMesh) return;
@@ -693,10 +714,10 @@ export function buildWorld(): World {
     });
   };
 
-  const addFallbackBuilding = (slot: SkylineSlot) => {
+  const addFallbackBuilding = (slot: SkylineSlot, parent: THREE.Object3D) => {
     const { extX, extZ, height } = buildingExtents(slot.model, slot.face, slot.yaw);
     const b = box(extX * 2, height, extZ * 2, toon(0x2a2136), slot.x, CURB + height / 2, slot.z, 0.08);
-    group.add(b);
+    parent.add(b);
     occluders.push(b);
   };
 
@@ -709,13 +730,15 @@ export function buildWorld(): World {
     Promise.all(templates).then((loaded) => {
       if (disposed) return;
       const any = loaded.findIndex(Boolean);
-      skyline.forEach((slot) => {
-        const template = loaded[slot.model] ?? (any >= 0 ? loaded[any] : null);
-        if (!template) {
-          addFallbackBuilding(slot);
-          return;
-        }
-        mountBuilding(template.scene, slot);
+      districtParents().forEach((parent) => {
+        skyline.forEach((slot) => {
+          const template = loaded[slot.model] ?? (any >= 0 ? loaded[any] : null);
+          if (!template) {
+            addFallbackBuilding(slot, parent);
+            return;
+          }
+          mountBuilding(template.scene, slot, parent);
+        });
       });
     });
   }
@@ -807,21 +830,23 @@ export function buildWorld(): World {
       ARENA_BLOCK.url,
       (gltf) => {
         if (disposed) return;
-        const root = new THREE.Group();
-        const scene = gltf.scene.clone(true);
-        scene.scale.setScalar(blockScale);
-        root.name = 'arena-block';
-        root.add(scene);
-        root.position.set(blockSlot.x, CURB, blockSlot.z);
-        root.rotation.y = blockSlot.yaw;
-        group.add(root);
-        scene.traverse((obj) => {
-          const mesh = obj as THREE.Mesh;
-          if (!mesh.isMesh) return;
-          mesh.castShadow = false;
-          const list = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-          list.forEach((material) => {
-            if (material) material.userData.retain = true;
+        districtParents().forEach((parent) => {
+          const root = new THREE.Group();
+          const scene = gltf.scene.clone(true);
+          scene.scale.setScalar(blockScale);
+          root.name = 'arena-block';
+          root.add(scene);
+          root.position.set(blockSlot.x, CURB, blockSlot.z);
+          root.rotation.y = blockSlot.yaw;
+          parent.add(root);
+          scene.traverse((obj) => {
+            const mesh = obj as THREE.Mesh;
+            if (!mesh.isMesh) return;
+            mesh.castShadow = false;
+            const list = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+            list.forEach((material) => {
+              if (material) material.userData.retain = true;
+            });
           });
         });
       },
@@ -829,9 +854,11 @@ export function buildWorld(): World {
       (error) => {
         console.warn('[raid] courtyard block failed to load', error);
         if (disposed) return;
-        const fallback = box(blockW, blockH, blockD, toon(0xc8b48a), blockSlot.x, CURB + blockH / 2, blockSlot.z, 0.06);
-        fallback.rotation.y = blockSlot.yaw;
-        group.add(fallback);
+        districtParents().forEach((parent) => {
+          const fallback = box(blockW, blockH, blockD, toon(0xc8b48a), blockSlot.x, CURB + blockH / 2, blockSlot.z, 0.06);
+          fallback.rotation.y = blockSlot.yaw;
+          parent.add(fallback);
+        });
       },
     );
   }
@@ -870,15 +897,14 @@ export function buildWorld(): World {
     { x: -16.75, z: -21.6, rot: parkedAlongAvenue, color: 0x3c6b9c, model: 0 },
   ];
 
-  const carRoots: THREE.Group[] = [];
   slots.forEach((slot) => {
     const root = new THREE.Group();
+    root.name = 'parked-car';
     root.position.set(slot.x, groundHeight(slot.x, slot.z), slot.z);
     root.rotation.y = slot.rot;
     const { car, solids } = buildToonCar(slot.color);
     root.add(car);
     group.add(root);
-    carRoots.push(root);
     occluders.push(...solids);
     const { length, width } = carFootprint(slot);
     const halfL = length / 2 + 0.05;
@@ -900,20 +926,23 @@ export function buildWorld(): World {
     }));
     Promise.all(templates).then((loaded) => {
       if (disposed) return;
-      carRoots.forEach((root, i) => {
-        const wanted = slots[i].model % CAR_MODELS.length;
-        const index = loaded[wanted] ? wanted : loaded.findIndex(Boolean);
-        const template = loaded[index];
-        if (!template) return;
-        const { wrapper, meshes } = normaliseCarModel(template.scene.clone(true), CAR_MODELS[index].length);
-        const old = root.children[0];
-        root.remove(old);
-        old.traverse((o) => {
-          const idx = occluders.indexOf(o);
-          if (idx >= 0) occluders.splice(idx, 1);
+      districtParents().forEach((parent) => {
+        const roots = parent.children.filter((child) => child.name === 'parked-car');
+        roots.forEach((root, i) => {
+          const wanted = slots[i].model % CAR_MODELS.length;
+          const index = loaded[wanted] ? wanted : loaded.findIndex(Boolean);
+          const template = loaded[index];
+          if (!template) return;
+          const { wrapper, meshes } = normaliseCarModel(template.scene.clone(true), CAR_MODELS[index].length);
+          const old = root.children[0];
+          root.remove(old);
+          old.traverse((o) => {
+            const idx = occluders.indexOf(o);
+            if (idx >= 0) occluders.splice(idx, 1);
+          });
+          root.add(wrapper);
+          occluders.push(...meshes);
         });
-        root.add(wrapper);
-        occluders.push(...meshes);
       });
     });
   }
@@ -934,6 +963,7 @@ export function buildWorld(): World {
     const base = box(1.8, 0.8, 1.8, toon(0x4b4360), x, y + 0.4, z, 0.05);
     const bush = new THREE.Mesh(new THREE.SphereGeometry(0.85, 12, 10), toon(0x2f8a4f));
     bush.position.set(x, y + 1.2, z);
+    bush.userData.treeStandIn = true;
     addOutline(bush, 0.05);
     group.add(base, bush);
     occluders.push(base);
@@ -958,26 +988,29 @@ export function buildWorld(): World {
       (gltf) => {
         if (disposed) return;
         const fit = ARENA_TREE.height / ARENA_TREE.sourceHeight;
-        treeSpots.forEach((spot) => {
-          const scene = gltf.scene.clone(true);
-          scene.scale.setScalar(fit * spot.scale);
-          const root = new THREE.Group();
-          root.name = 'arena-tree';
-          root.add(scene);
-          root.position.set(spot.x, spot.y, spot.z);
-          root.rotation.y = spot.yaw;
-          group.add(root);
-          spot.standIn.forEach((obj) => group.remove(obj));
-          scene.traverse((obj) => {
-            const mesh = obj as THREE.Mesh;
-            if (!mesh.isMesh) return;
-            mesh.castShadow = false;
-            mesh.receiveShadow = false;
-            const list = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-            list.forEach((material) => {
-              if (material) material.userData.retain = true;
+        districtParents().forEach((parent) => {
+          treeSpots.forEach((spot) => {
+            const scene = gltf.scene.clone(true);
+            scene.scale.setScalar(fit * spot.scale);
+            const root = new THREE.Group();
+            root.name = 'arena-tree';
+            root.add(scene);
+            root.position.set(spot.x, spot.y, spot.z);
+            root.rotation.y = spot.yaw;
+            parent.add(root);
+            scene.traverse((obj) => {
+              const mesh = obj as THREE.Mesh;
+              if (!mesh.isMesh) return;
+              mesh.castShadow = false;
+              mesh.receiveShadow = false;
+              const list = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+              list.forEach((material) => {
+                if (material) material.userData.retain = true;
+              });
             });
           });
+          const standIns = parent.children.filter((obj) => obj.userData.treeStandIn);
+          standIns.forEach((obj) => parent.remove(obj));
         });
       },
       undefined,
@@ -1032,6 +1065,59 @@ export function buildWorld(): World {
     obstacles.push({ kind: 'circle', x: lamp.x, z: lamp.z, r: 0.25 });
   });
 
+  // Four copies of this block. The southwest one keeps the original drop-in.
+  occluders.forEach((obj) => {
+    obj.userData.raidOccluder = true;
+  });
+  const localObstacles = obstacles.slice();
+  const localAlleys = alleys.slice();
+  const origins: [number, number][] = [
+    [-GROUND_HALF, -GROUND_HALF],
+    [GROUND_HALF, -GROUND_HALF],
+    [-GROUND_HALF, GROUND_HALF],
+    [GROUND_HALF, GROUND_HALF],
+  ];
+  const city = new THREE.Group();
+  city.name = 'city';
+  city.add(sky, moon);
+  group.name = 'district';
+  origins.forEach(([ox, oz], index) => {
+    const tile = index === 0 ? group : group.clone(true);
+    tile.name = 'district';
+    tile.position.set(ox, 0, oz);
+    city.add(tile);
+    districts.push(tile);
+    localObstacles.forEach((obstacle) => {
+      if (obstacle.kind === 'circle') {
+        obstacles.push({ kind: 'circle', x: obstacle.x + ox, z: obstacle.z + oz, r: obstacle.r });
+        return;
+      }
+      obstacles.push({
+        kind: 'box',
+        minX: obstacle.minX + ox,
+        maxX: obstacle.maxX + ox,
+        minZ: obstacle.minZ + oz,
+        maxZ: obstacle.maxZ + oz,
+      });
+    });
+    localAlleys.forEach((alley) => {
+      alleys.push({
+        position: alley.position.clone().set(alley.position.x + ox, alley.position.y, alley.position.z + oz),
+        inward: alley.inward.clone(),
+      });
+    });
+  });
+  obstacles.splice(0, localObstacles.length);
+  alleys.splice(0, localAlleys.length);
+  occluders.length = 0;
+  alleyNodes.length = 0;
+  districts.forEach((tile) => {
+    tile.traverse((obj) => {
+      if (obj.userData.raidOccluder) occluders.push(obj);
+      if (obj.userData.alleyNode) alleyNodes.push(obj as THREE.Mesh);
+    });
+  });
+
   const animate = (time: number) => {
     alleyNodes.forEach((n, i) => {
       n.rotation.y = time * 1.2 + i;
@@ -1045,7 +1131,19 @@ export function buildWorld(): World {
     textures.forEach((t) => t.dispose());
   };
 
-  return { group, obstacles, occluders, alleys, alleyNodes, heightAt: groundHeight, animate, dispose };
+  return {
+    group: city,
+    obstacles,
+    occluders,
+    alleys,
+    alleyNodes,
+    heightAt: (x, z) => {
+      const local = districtLocal(x, z);
+      return groundHeight(local.x, local.z);
+    },
+    animate,
+    dispose,
+  };
 }
 
 const closest = new THREE.Vector2();

@@ -2,7 +2,9 @@ import * as THREE from 'three';
 import {
   BOUNDARY,
   BURNOUT_RECOVERY,
+  DISTRICT_SPAN,
   ENEMIES,
+  HOME_DISTRICT,
   INTERACT_KEYS,
   INTERMISSION,
   KILL_AURA_SIPHON,
@@ -66,7 +68,7 @@ import {
   poseMelee,
   setHumanoidOpacity,
 } from './toon';
-import { buildWorld, pointBlocked, resolveCircle, steerVelocity, type World } from './world';
+import { buildWorld, nearDistrictHub, pointBlocked, resolveCircle, steerVelocity, type World } from './world';
 import { calculatePvPDamage, pvpHealth, PvpCpu, type PvpDamageKind } from './pvp';
 import {
   CombatMemory,
@@ -140,6 +142,13 @@ export interface HudState {
     power: boolean;
     powerLabel: string;
     powerLeft: number;
+  };
+  /** Player and living hostiles, in world metres, for the corner map. */
+  radar: {
+    x: number;
+    z: number;
+    yaw: number;
+    enemies: { x: number; z: number }[];
   };
 }
 
@@ -335,7 +344,7 @@ export class RaidEngine {
   private switchToken = 0;
   private player: Fighter | null = null;
   private shield: THREE.Mesh | null = null;
-  private pos = new THREE.Vector3(9, 0, 11);
+  private pos = new THREE.Vector3(9 + HOME_DISTRICT, 0, 11 + HOME_DISTRICT);
   private yaw = Math.PI * 0.2;
   private pitch = 0.12;
   private combatT = 0;
@@ -410,9 +419,9 @@ export class RaidEngine {
     this.renderer.setClearColor(0x0a0614, 1);
 
     this.scene = new THREE.Scene();
-    this.scene.fog = new THREE.FogExp2(0x1a0c22, 0.011);
+    this.scene.fog = new THREE.FogExp2(0x1a0c22, 0.007);
 
-    this.camera = new THREE.PerspectiveCamera(58, 1, 0.08, 280);
+    this.camera = new THREE.PerspectiveCamera(58, 1, 0.08, 480);
     this.scene.add(new THREE.HemisphereLight(0xffd4b8, 0x1a1430, 1.35));
     const sun = new THREE.DirectionalLight(0xffe6c8, 1.55);
     sun.position.set(-18, 42, 12);
@@ -1947,9 +1956,24 @@ export class RaidEngine {
     }
   }
 
+  /** Prefer alleys in the block the Ryder is standing in, so a wave still arrives on a four-block map. */
+  private spawnAlley() {
+    const alleys = this.world.alleys;
+    const reach = DISTRICT_SPAN * 0.65;
+    if (Math.random() < 0.65) {
+      const here = alleys.filter((alley) => {
+        const dx = alley.position.x - this.pos.x;
+        const dz = alley.position.z - this.pos.z;
+        return dx * dx + dz * dz < reach * reach;
+      });
+      if (here.length) return here[Math.floor(Math.random() * here.length)];
+    }
+    return alleys[Math.floor(Math.random() * alleys.length)];
+  }
+
   private spawnHost(kind: EnemyKind, scale: ReturnType<typeof roundScaling>) {
     const spec = ENEMIES[kind];
-    const alley = this.world.alleys[Math.floor(Math.random() * this.world.alleys.length)];
+    const alley = this.spawnAlley();
     const lateral = (Math.random() - 0.5) * 2.4;
     const pos = alley.position.clone();
     pos.x += alley.inward.z * lateral;
@@ -2684,7 +2708,7 @@ export class RaidEngine {
       points: this.points,
       phase: this.phase,
       intermissionLeft: this.intermissionLeft,
-      nearShop: this.phase === 'intermission' && this.pos.length() < 6.2,
+      nearShop: this.phase === 'intermission' && nearDistrictHub(this.pos.x, this.pos.z, 6.2),
       banner: this.banner,
       upgrades: { ...this.upgrades },
       pointerLocked: this.pointerLocked,
@@ -2698,6 +2722,12 @@ export class RaidEngine {
       recovering: this.recoveryT > 0,
       opponent: this.publishFoe(),
       combo: this.comboHud(),
+      radar: {
+        x: this.pos.x,
+        z: this.pos.z,
+        yaw: this.yaw,
+        enemies: this.hosts.filter((host) => host.hp > 0).map((host) => ({ x: host.pos.x, z: host.pos.z })),
+      },
     });
   }
 

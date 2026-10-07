@@ -100,6 +100,12 @@ export interface RyderSpec {
 }
 
 export const ARENA_HALF = 30;
+/** Asphalt past the building line. Matches the ground pad in the city block. */
+export const GROUND_MARGIN = 18;
+/** Edge-to-edge width of one city block. The live map tiles four of these. */
+export const DISTRICT_SPAN = (ARENA_HALF + GROUND_MARGIN) * 2;
+/** Centre of the southwest block, which keeps the original drop-in. */
+export const HOME_DISTRICT = -DISTRICT_SPAN / 2;
 export interface CarModel {
   url: string;
   /** Length in metres; the model is rescaled to this. */
@@ -187,7 +193,8 @@ export const MELEE_RANGE = 2.55;
 export const MELEE_ARC = 0.9;
 export const INTERMISSION = 18;
 export const PLAYER_RADIUS = 0.45;
-export const BOUNDARY = ARENA_HALF + 3.2;
+/** Playable limit of the 2×2 city. The ground runs to ±DISTRICT_SPAN. */
+export const BOUNDARY = DISTRICT_SPAN - 2;
 
 export const RYDERZ: Record<RyderId, RyderSpec> = {
   rubi: {
