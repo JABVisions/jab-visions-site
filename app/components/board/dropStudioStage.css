@@ -6,6 +6,8 @@
   z-index: 100050;
   display: grid;
   place-items: center;
+  touch-action: none;
+  overscroll-behavior: none;
   /* Respect notches and the home-indicator / browser chrome so the sheet
      (and its top bar + bottom "Use" button) stay fully on-screen. */
   padding: max(10px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right))
@@ -28,6 +30,8 @@
   padding: 8px 12px 4px;
 }
 .studioSheet {
+  touch-action: pan-y;
+  overscroll-behavior: contain;
   width: min(560px, calc(100vw - 20px));
   /* Size against the dynamic viewport minus the safe-area padding the
      stage already applies, so the sheet never extends under the dock,
@@ -55,6 +59,9 @@
 
 /* Vision/Video editing needs room for the 4:5 monitor and its Palette side by
    side. Other Drop Studio modes keep the original compact sheet width. */
+.studioSheet:has([data-art-surface]) {
+  touch-action: none;
+}
 .studioSheet:has(.capStudioHost) {
   width: min(
     920px,

@@ -1,14 +1,19 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import { Orbit, Radio } from "lucide-react";
 import StoreDropMarketplace from "@/app/components/board/StoreDropMarketplace";
-import DropPadOS from "@/app/components/board/DropPadOS.v3";
 import type { DropPadApp } from "@/app/components/board/DropPadOS";
 import { EVT_UPDATED, readBrain } from "@/lib/board/bucketBrain";
 import { persistWave } from "@/lib/board/persistWave";
 import { supabaseBrowser } from "@/lib/supabase/browser";
+
+const DropPadOS = dynamic(() => import("@/app/components/board/DropPadOS.v3"), {
+  ssr: false,
+  loading: () => <div aria-hidden className="min-h-[320px]" />,
+});
 
 const PROFILE_STORAGE_KEY = "jab_board_profile_v2";
 const OPTIONS_STORAGE_KEY = "board.options.v1";

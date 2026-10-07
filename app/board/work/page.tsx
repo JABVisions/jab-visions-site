@@ -1,21 +1,22 @@
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
+import dynamic from "next/dynamic";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import WorkDesk from "@/app/components/board/WorkDesk";
 import ProjectCenter from "@/app/components/board/ProjectCenter";
 import QuickActionsRemote, { type DropPadApp } from "@/app/components/board/QuickActionsRemote";
-
-// ✅ swap DropPadOS -> DropPadOS.v3 (your patch file)
-import DropPadOS from "@/app/components/board/DropPadOS.v3";
-
 import { supabaseBrowser } from "@/lib/supabase/browser";
 import { rememberBoardUploadSession } from "@/lib/board/boardUploadSession";
-
 import { POWER_EVENT, readPower, togglePower, setPower } from "@/lib/board/powerBus";
 import { DROP_PAD_APP_EVENT, readDropPadApp, setDropPadApp } from "@/lib/board/dropPadNavBus";
 import { openProjectNotebook } from "@/lib/board/projectNotebookBus";
+
+const DropPadOS = dynamic(() => import("@/app/components/board/DropPadOS.v3"), {
+  ssr: false,
+  loading: () => <div aria-hidden className="h-full min-h-[320px]" />,
+});
 
 export default function WorkPage() {
   // ✅ single supabase client instance for the page lifetime

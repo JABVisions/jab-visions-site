@@ -27,7 +27,6 @@ export default function DropStudioLauncher({
 
   return (
     <LazyDropStudioStage
-      key={open ? `${destination.type}-${initialMode}` : "closed"}
       open={open}
       initialFile={null}
       initialMode={initialMode}
