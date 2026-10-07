@@ -81,6 +81,9 @@ assert(combatProfileFor(null).melee.label === 'Melee', 'unknown fighters inherit
 assert(commandForKey('c', 'KeyC', 1) === 'punch', 'C punches');
 assert(commandForKey('v', 'KeyV', 1) === 'kick', 'V kicks');
 assert(commandForKey('f', 'KeyF', 1) === 'melee', 'F stays melee');
+assert(commandForKey(' ', 'Space', 1) === 'jump', 'Space jumps');
+assert(commandForKey('m', 'KeyM', 2) === 'jump', 'player 2 jumps with M');
+assert(commandForKey('m', 'KeyM', 1) === null, 'M does not jump for player 1');
 assert(commandForKey('q', 'KeyQ', 1) === 'ability1', 'Q stays the first power');
 assert(commandForKey('u', 'KeyU', 2) === 'punch', 'player 2 punches with U');
 assert(commandForKey('u', 'KeyU', 1) === null, 'U does not punch for player 1');

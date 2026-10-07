@@ -41,7 +41,7 @@ import {
 } from './combat';
 import { AfterimagePool } from './speed-vfx';
 import { createRyderKit, type KitContext, type MeleeStep, type RyderKit } from './ryderz';
-import type { MeleeStyle } from './skeletal';
+import type { MeleeStyle, PoseOverride } from './skeletal';
 import {
   ThirdPersonCamera,
   type CameraConfig,
@@ -246,6 +246,8 @@ const _ray = new THREE.Raycaster();
 const _aimRay = new THREE.Ray();
 
 const SPRINT_MULTIPLIER = 1.28;
+/** Short hop. v² / (2g) with g = 22 lands near 1.15 m. */
+const JUMP_SPEED = 7.1;
 const KEY_YAW_RATE = 2.4; // rad/s while holding A/D
 const KEY_PITCH_RATE = 1.3; // rad/s while holding W/S
 const COMBAT_LINGER = 2.6;
@@ -297,6 +299,8 @@ export class RaidEngine {
   private punchQueued = false;
   private kickQueued = false;
   private dodgeQueued = false;
+  private jumpQueued = false;
+  private jumping = false;
   private queuedMoves = [false, false, false];
   private readonly striker = new FighterStriker();
   private readonly playerBody = {};
@@ -334,6 +338,8 @@ export class RaidEngine {
   private p2PunchQueued = false;
   private p2KickQueued = false;
   private p2DodgeQueued = false;
+  private p2JumpQueued = false;
+  private p2Jumping = false;
   private p2DodgeT = 0;
   /** CPU duelist. Null in Solo, Raid, and local 2-player. */
   pvpCpu: PvpCpu | null = null;
@@ -484,6 +490,10 @@ export class RaidEngine {
     this.punchQueued = false;
     this.kickQueued = false;
     this.dodgeQueued = false;
+    this.jumpQueued = false;
+    this.jumping = false;
+    this.p2JumpQueued = false;
+    this.p2Jumping = false;
     this.moveCd = [0, 0, 0];
     this.moveT = [0, 0, 0];
     this.queuedMoves = [false, false, false];
@@ -694,6 +704,10 @@ export class RaidEngine {
 
   queueDodge() {
     this.dodgeQueued = true;
+  }
+
+  queueJump() {
+    this.jumpQueued = true;
   }
 
   queueAbility(slot = 1) {
@@ -1221,7 +1235,7 @@ export class RaidEngine {
     this.anim += dt * (8 + moving * (this.sprinting ? 9 : 6));
     if (this.player.meshSource === 'gltf') {
       animateGltfFighter(this.player, dt, this.anim, moving, this.sprinting, this.meleeT, this.meleeStarted, {
-        pose: this.kit?.pose ?? null,
+        pose: this.kit?.pose ?? this.jumpPose(),
         style: this.strikeOverride ?? undefined,
         camera: this.camera,
       });
@@ -1282,12 +1296,14 @@ export class RaidEngine {
       if (command === 'kick') this.p2KickQueued = true;
       if (command === 'melee') this.p2MeleeQueued = true;
       if (command === 'dodge') this.p2DodgeQueued = true;
+      if (command === 'jump') this.p2JumpQueued = true;
       return;
     }
     if (command === 'punch') this.punchQueued = true;
     if (command === 'kick') this.kickQueued = true;
     if (command === 'melee') this.meleeQueued = true;
     if (command === 'dodge') this.dodgeQueued = true;
+    if (command === 'jump') this.jumpQueued = true;
     if (command === 'ability1') this.queuedMoves[0] = true;
     if (command === 'ability2') this.queuedMoves[1] = true;
     if (command === 'ability3') this.queuedMoves[2] = true;
@@ -1332,19 +1348,46 @@ export class RaidEngine {
     this.striker.interrupt();
   }
 
+  /** Grounded hop. A kit that has locked the body, a dodge, or a hard stun holds it. */
+  private tryJump() {
+    if (this.jumping || this.airY > 0.04 || this.airVel > 0.2) return;
+    if (this.hitStun > 0.12 || this.dodgeT > 0 || (this.kit?.locked ?? false)) return;
+    if (this.pvpCpu?.grabsPlayer()) return;
+    this.airVel = JUMP_SPEED;
+    this.airY = 0.02;
+    this.jumping = true;
+    this.emitSound('move.jump.swing');
+  }
+
+  /** Launch while rising, tuck while falling. Kits that already own a pose win. */
+  private jumpPose(airY = this.airY, airVel = this.airVel, active = this.jumping): PoseOverride | null {
+    if (!active) return null;
+    if (airVel > 0) return { kind: 'launch', t: Math.min(1, airY / 1.1), weight: 0.85 };
+    return { kind: 'land', t: 0.4, weight: 0.85 };
+  }
+
   /** Punch, kick, grab, and throw. Weapon melee still goes through the Ryder kit. */
   private stepPhysical(dt: number, locked: boolean, busy: boolean) {
     this.hitStun = Math.max(0, this.hitStun - dt);
     this.takenGap += dt;
     this.dodgeCd = Math.max(0, this.dodgeCd - dt);
     if (this.dodgeT > 0) this.dodgeT = Math.max(0, this.dodgeT - dt);
+    if (this.jumpQueued) {
+      this.jumpQueued = false;
+      if (!locked) this.tryJump();
+    }
     if (this.airY > 0 || this.airVel > 0) {
       this.airVel -= 22 * dt;
       this.airY += this.airVel * dt;
       if (this.airY <= 0) {
         this.airY = 0;
         this.airVel = 0;
-        this.hitStun = Math.max(this.hitStun, 0.18);
+        if (this.jumping) this.jumping = false;
+        else this.hitStun = Math.max(this.hitStun, 0.18);
+      }
+      if (this.player) {
+        this.player.humanoid.group.position.y =
+          this.world.heightAt(this.pos.x, this.pos.z) + (this.kit?.airY ?? 0) + this.airY - (this.pvpCpu?.playerSink() ?? 0);
       }
     }
     const canAct = !locked && !busy && this.hitStun < 0.12 && this.dodgeT <= 0;
@@ -2352,11 +2395,21 @@ export class RaidEngine {
   }
 
   /** Block figures swing their limbs; GLB hosts run the skeleton through the strike. */
-  private animateHost(host: Host, dt: number, moving: number, time: number, meleeT = 0, style?: MeleeStyle, throwing = false) {
+  private animateHost(
+    host: Host,
+    dt: number,
+    moving: number,
+    time: number,
+    meleeT = 0,
+    style?: MeleeStyle,
+    throwing = false,
+    pose: PoseOverride | null = null,
+  ) {
     if (host.fighter.meshSource === 'gltf') {
       animateGltfFighter(host.fighter, dt, host.anim, moving, host.speed > 5, meleeT, host.swing, {
         style,
         clipHint: clipHintFor(host.animMap, style, throwing),
+        pose,
       });
       host.swing = false;
     } else {
@@ -2381,8 +2434,13 @@ export class RaidEngine {
       this.hitStun = Math.max(this.hitStun, stun);
       this.iframes = Math.max(this.iframes, this.takenChain >= 4 ? 0.28 : 0.08);
       this.hitKnock.copy(dir).multiplyScalar(physical.knockback * (1 - braced));
-      if (physical.reaction === 'launch' || physical.reaction === 'slam') this.airVel = Math.max(this.airVel, 6.4);
-      else if (physical.reaction === 'heavy') this.airVel = Math.max(this.airVel, 3.1);
+      if (physical.reaction === 'launch' || physical.reaction === 'slam') {
+        this.airVel = Math.max(this.airVel, 6.4);
+        this.jumping = false;
+      } else if (physical.reaction === 'heavy') {
+        this.airVel = Math.max(this.airVel, 3.1);
+        this.jumping = false;
+      }
       this.striker.interrupt();
     } else {
       this.iframes = 0.55;
@@ -2681,7 +2739,7 @@ export class RaidEngine {
     // Ride part of a kit's airtime so a flip or leap stays in frame; descents
     // (phasing underground) leave the pivot on the ground.
     this.cameraPivot.copy(this.pos);
-    this.cameraPivot.y += Math.max(0, this.kit?.airY ?? 0) * 0.6;
+    this.cameraPivot.y += Math.max(0, this.kit?.airY ?? 0) * 0.6 + this.airY * 0.45;
     this.rig.update(dt, this.cameraPivot, this.yaw, this.pitch, this.cameraState());
   }
 
@@ -2842,7 +2900,7 @@ export class RaidEngine {
         playerVelocity: () => this.playerVel,
         playerIntangible: () => this.isPhased(),
         playerWhiff: () => this.striker.exposed,
-        playerStunned: () => this.hitStun > 0.08 || this.airY > 0.25,
+        playerStunned: () => this.hitStun > 0.08 || (this.airY > 0.25 && !this.jumping),
         playerMemory: () => this.combatMemory.rates(this.simTime),
         heightAt: (x, z) => this.world.heightAt(x, z),
         resolve: (pos) => {
@@ -2890,9 +2948,10 @@ export class RaidEngine {
       resolveCircle(host.pos, host.radius, this.world.obstacles);
       host.fighter.humanoid.group.rotation.y = Math.atan2(mx, mz);
     }
+    this.stepLocalOpponentAir(host, dt);
     host.fighter.humanoid.group.position.copy(host.pos);
-    host.fighter.humanoid.group.position.y = this.world.heightAt(host.pos.x, host.pos.z);
-    this.animateHost(host, dt, Math.min(1, moving), time);
+    host.fighter.humanoid.group.position.y = this.world.heightAt(host.pos.x, host.pos.z) + host.airY;
+    this.animateHost(host, dt, Math.min(1, moving), time, 0, undefined, false, this.jumpPose(host.airY, host.airVel, this.p2Jumping));
     if (this.p2DodgeT > 0) this.p2DodgeT = Math.max(0, this.p2DodgeT - dt);
     if (this.p2PunchQueued) {
       this.p2PunchQueued = false;
@@ -2954,6 +3013,35 @@ export class RaidEngine {
     if (this.p2DodgeT > 0 && moving > 0) {
       host.pos.x += (mx / moving) * host.speed * 0.8 * dt;
       host.pos.z += (mz / moving) * host.speed * 0.8 * dt;
+    }
+  }
+
+  /**
+   * Controlled duelists skip stepReaction, so their hop (and any launch that
+   * already wrote air velocity) is integrated here. A voluntary landing does
+   * not add stagger; a knockback landing still does.
+   */
+  private stepLocalOpponentAir(host: Host, dt: number) {
+    host.stagger = Math.max(0, host.stagger - dt);
+    host.lean = Math.max(0, host.lean - dt * 2.2);
+    if (host.stagger > 0.2) this.p2Jumping = false;
+    if (this.p2JumpQueued) {
+      this.p2JumpQueued = false;
+      if (host.airY <= 0.04 && host.airVel <= 0 && host.stagger < 0.2) {
+        host.airVel = JUMP_SPEED;
+        host.airY = 0.02;
+        this.p2Jumping = true;
+      }
+    }
+    if (host.airY > 0 || host.airVel > 0) {
+      host.airVel -= 22 * dt;
+      host.airY += host.airVel * dt;
+      if (host.airY <= 0) {
+        host.airY = 0;
+        host.airVel = 0;
+        if (this.p2Jumping) this.p2Jumping = false;
+        else host.stagger = Math.max(host.stagger, 0.35);
+      }
     }
   }
 
