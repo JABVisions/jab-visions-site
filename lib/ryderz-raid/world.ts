@@ -12,7 +12,6 @@ export interface World {
   obstacles: Obstacle[];
   occluders: THREE.Object3D[];
   alleys: { position: THREE.Vector3; inward: THREE.Vector3 }[];
-  spireRing: THREE.Mesh;
   alleyNodes: THREE.Mesh[];
   /** Walkable surface height at a point (roads are 0, sidewalks sit on a curb). */
   heightAt: (x: number, z: number) => number;
@@ -25,7 +24,7 @@ export interface World {
  *
  *   - A north–south avenue, |x| < AVENUE_HALF, runs the full length of the block.
  *   - An east–west cross street, |z| < STREET_HALF.
- *   - They meet in a circular plaza of radius PLAZA_R around the signal spire.
+ *   - They meet in a circular plaza of radius PLAZA_R.
  *   - Everything else is raised sidewalk (CURB high) up to the building line
  *     at ARENA_HALF, where the perimeter buildings stand.
  *   - The four quadrant blocks are dressed differently: a mid-block storefront
@@ -839,7 +838,7 @@ export function buildWorld(): World {
 
   // (+x,-z) stays open. Planters frame that corner.
 
-  // --- Signal spire on a raised island ---------------------------------------
+  // --- Low island where the avenue and cross street meet ---------------------
   const islandMat = toon(0x4a425c);
   const step = new THREE.Mesh(new THREE.CylinderGeometry(3.9, 4.1, 0.18, 32), toon(0x5a526c));
   step.position.y = 0.09;
@@ -847,17 +846,8 @@ export function buildWorld(): World {
   const island = new THREE.Mesh(new THREE.CylinderGeometry(3.2, 3.3, 0.36, 32), islandMat);
   island.position.y = 0.36;
   addOutline(island, 0.05);
-  const spireBase = new THREE.Mesh(new THREE.CylinderGeometry(2.4, 2.7, 1.1, 24), toon(0x3a3350));
-  spireBase.position.y = 0.54 + 0.55;
-  addOutline(spireBase, 0.07);
-  const spire = box(1.1, 8.5, 1.1, toon(0x1d1828), 0, 1.64 + 4.25, 0, 0.07);
-  const spireRing = new THREE.Mesh(new THREE.TorusGeometry(1.4, 0.12, 8, 32), glow(0x6dff9e, 1.8));
-  spireRing.position.y = 9.7;
-  spireRing.rotation.x = Math.PI / 2;
-  const spireTip = new THREE.Mesh(new THREE.OctahedronGeometry(0.6, 0), glow(0x9dffc9, 2.4));
-  spireTip.position.y = 11.1;
-  group.add(step, island, spireBase, spire, spireRing, spireTip);
-  occluders.push(step, island, spireBase, spire);
+  group.add(step, island);
+  occluders.push(step, island);
   obstacles.push({ kind: 'circle', x: 0, z: 0, r: 3.5 });
 
   // --- Cars -------------------------------------------------------------------
@@ -1043,10 +1033,6 @@ export function buildWorld(): World {
   });
 
   const animate = (time: number) => {
-    const pulse = 1 + Math.sin(time * 3) * 0.12;
-    spireRing.scale.setScalar(pulse);
-    spireRing.rotation.z = time * 0.6;
-    spireTip.rotation.y = time * 1.4;
     alleyNodes.forEach((n, i) => {
       n.rotation.y = time * 1.2 + i;
       n.rotation.x = time * 0.7;
@@ -1059,7 +1045,7 @@ export function buildWorld(): World {
     textures.forEach((t) => t.dispose());
   };
 
-  return { group, obstacles, occluders, alleys, spireRing, alleyNodes, heightAt: groundHeight, animate, dispose };
+  return { group, obstacles, occluders, alleys, alleyNodes, heightAt: groundHeight, animate, dispose };
 }
 
 const closest = new THREE.Vector2();
