@@ -948,6 +948,15 @@ export function buildWorld(): World {
     group.add(base, bush);
     occluders.push(base);
     obstacles.push({ kind: 'box', minX: x - 0.9, maxX: x + 0.9, minZ: z - 0.9, maxZ: z + 0.9 });
+    const planted = treeSpots.find((spot) => Math.hypot(spot.x - x, spot.z - z) < 1.2);
+    if (planted) {
+      group.remove(bush);
+      planted.y = y + 0.8;
+      planted.standIn.forEach((obj) => {
+        obj.position.y += 0.8;
+      });
+      return;
+    }
     queueTree(x, z, y + 0.8, 0.7, [bush]);
   });
 
