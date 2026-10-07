@@ -14,6 +14,7 @@ import {
   type MeleeStyle,
   type PoseOverride,
 } from './skeletal';
+import { rigFashionBody } from './civilians/fashion-rig';
 import { HostGlitch } from './host-glitch';
 import { addOutline, buildHumanoid, glow, toon, type Humanoid } from './toon';
 import { PlasmaOrbits } from './plasma-orbs';
@@ -114,6 +115,9 @@ async function loadGltfTemplate(url: string, label: string, repair?: GlbRepair):
     if (Array.isArray(mesh.material)) mesh.material.forEach(mark);
     else if (mesh.material) mark(mesh.material);
   });
+  if (!skinned && url.includes('civilian-fashion.glb')) {
+    skinned = rigFashionBody(gltf.scene);
+  }
   if (skinned) {
     // A rig whose weights do not match its geometry would tear apart when
     // posed; freeze it in its export pose and animate it as a puppet instead.

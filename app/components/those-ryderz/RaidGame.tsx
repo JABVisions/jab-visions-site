@@ -180,11 +180,24 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
     if (!selected || !canvasRef.current) return;
     let engine: RaidEngine | null = null;
     let cancelled = false;
+    let audio: { play(id: string): void; resume(): Promise<void>; startCity(): void; dispose(): void } | null = null;
     const canvas = canvasRef.current;
+    const unlockAudio = () => {
+      void audio?.resume();
+    };
+    window.addEventListener('pointerdown', unlockAudio);
+    window.addEventListener('keydown', unlockAudio);
     (async () => {
-      const { RaidEngine } = await import('@/lib/ryderz-raid/engine');
+      const [{ RaidEngine }, { createRaidAudio }] = await Promise.all([
+        import('@/lib/ryderz-raid/engine'),
+        import('@/lib/ryderz-raid/raid-audio'),
+      ]);
       if (cancelled || !canvas) return;
       engine = new RaidEngine(canvas, syncHud);
+      audio = createRaidAudio();
+      engine.setSoundHook((id) => audio?.play(id));
+      audio.startCity();
+      void audio.resume();
       engineRef.current = engine;
       manager.attach(engine);
       engine.setPvpSetup(
@@ -206,6 +219,9 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
     return () => {
       cancelled = true;
       window.removeEventListener('resize', onResize);
+      window.removeEventListener('pointerdown', unlockAudio);
+      window.removeEventListener('keydown', unlockAudio);
+      audio?.dispose();
       if (engine) manager.detach(engine);
       engine?.dispose();
       engineRef.current = null;

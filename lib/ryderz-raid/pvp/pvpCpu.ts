@@ -77,6 +77,7 @@ export interface PvpCpuHooks {
   playerStunned(): boolean;
   playerMemory(): CombatRates;
   time(): number;
+  sound(id: string): void;
 }
 
 interface PlayerBody extends ReactiveBody, KitTarget {
@@ -437,11 +438,19 @@ export class PvpCpu {
       body.pos.z += Math.cos(this.facing) * frame.lunge;
       this.place(body.pos);
     }
-    if (frame.started) body.swing = true;
+    if (frame.started) {
+      body.swing = true;
+      const kick = frame.swing === 'kick' || frame.swing === 'spinKick';
+      this.hooks.sound(kick ? 'fight.kick.swing' : 'fight.punch.swing');
+    }
     if (frame.grab) {
       foe.held = Math.max(foe.held, 0.16);
       foe.pos.x = body.pos.x + Math.sin(this.facing) * 0.95;
       foe.pos.z = body.pos.z + Math.cos(this.facing) * 0.95;
+    }
+    if (frame.hits.length) {
+      const kick = frame.hits.some((hit) => hit.kind === 'kick');
+      this.hooks.sound(kick ? 'fight.kick.impact' : 'fight.punch.impact');
     }
     if (!frame.hits.length) {
       if (this.striker.exposed) {
@@ -731,7 +740,7 @@ export class PvpCpu {
         if (cpu.body) cpu.body.swing = true;
       },
       schedule: (delay: number, fn: () => void) => cpu.scheduler.schedule(hooks.time(), delay, fn),
-      sound: () => undefined,
+      sound: (id: string) => this.hooks.sound(id),
       turn: (yaw: number) => {
         cpu.facing = yaw;
       },

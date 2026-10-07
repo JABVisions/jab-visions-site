@@ -1414,6 +1414,7 @@ export class RaidEngine {
       }
     }
     for (const hit of frame.hits) this.applyFighterHit(hit);
+    this.cueStrike(frame);
   }
 
   private applyFighterHit(hit: StrikerHit) {
@@ -1550,6 +1551,13 @@ export class RaidEngine {
 
   private emitSound(id: string) {
     this.onSound?.(id);
+  }
+
+  /** Swing on the windup, impact when a fist or foot connects. */
+  private cueStrike(frame: { started: boolean; swing: string | null; hits: Array<{ kind: string }> }) {
+    const kick = frame.swing === 'kick' || frame.swing === 'spinKick' || frame.hits.some((hit) => hit.kind === 'kick');
+    if (frame.started) this.emitSound(kick ? 'fight.kick.swing' : 'fight.punch.swing');
+    if (frame.hits.length) this.emitSound(kick ? 'fight.kick.impact' : 'fight.punch.impact');
   }
 
   private bindKit() {
@@ -2301,6 +2309,7 @@ export class RaidEngine {
     if (host.hit > 0) flashEmissive(host.fighter.humanoid, host.hitColor, host.hit * 2.4);
     else flashEmissive(host.fighter.humanoid, 0x000000, 0);
 
+    this.cueStrike(frame);
     if (shielded && frame.hits.length) {
       this.particles.emit(this.pos.clone().setY(1.2), 0x66e7ff, 10, { speed: 6, size: 0.22, life: 0.3 });
       host.knock.set(-Math.sin(facing) * 8, 0, -Math.cos(facing) * 8);
@@ -2815,6 +2824,7 @@ export class RaidEngine {
           Math.abs(x) > BOUNDARY || Math.abs(z) > BOUNDARY || pointBlocked(x, z, radius, this.world.obstacles),
         hurtPlayer: (amount, dir, kind, physical) => this.hurtPlayer(amount, dir, kind, physical),
         time: () => this.simTime,
+        sound: (id) => this.emitSound(id),
       },
       spec.id,
     );
@@ -2899,6 +2909,7 @@ export class RaidEngine {
       this.pos.x = host.pos.x + Math.sin(facing) * 0.95;
       this.pos.z = host.pos.z + Math.cos(facing) * 0.95;
     }
+    this.cueStrike(frame);
     for (const hit of frame.hits) {
       _tmp.set(this.pos.x - host.pos.x, 0, this.pos.z - host.pos.z);
       if (_tmp.lengthSq() < 1e-4) _tmp.set(Math.sin(facing), 0, Math.cos(facing));
