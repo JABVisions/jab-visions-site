@@ -35,6 +35,7 @@ import type { PhysicalHit, StrikeKind } from '../fighter/actions';
 import { FighterStriker } from '../fighter/striker';
 import { combatProfileFor, resolvePowerLink } from '../fighter/profiles';
 import { openingPlan } from '../fighter/planner';
+import { steerVelocity } from '../world';
 
 export interface DuelBody {
   fighter: Fighter;
@@ -359,9 +360,20 @@ export class PvpCpu {
     const striking = this.intent === 'punch' || this.intent === 'kick' || this.intent === 'melee' || this.intent === 'grab' || this.intent === 'attack';
     if (len > 0.08 && this.intent !== 'ability' && !(striking && dist < 2.35)) {
       const speed = spec.speed * (this.intent === 'chase' ? 0.96 : 0.82) * (this.burnout ? 0.82 : 1);
-      body.pos.x += (mx / len) * speed * dt;
-      body.pos.z += (mz / len) * speed * dt;
-      this.facing = Math.atan2(mx, mz);
+      const steered = steerVelocity(
+        body.pos.x,
+        body.pos.z,
+        (mx / len) * speed,
+        (mz / len) * speed,
+        body.radius,
+        (x, z, radius) => this.hooks.blocked(x, z, radius),
+        foe.pos.x,
+        foe.pos.z,
+      );
+      body.pos.x += steered.x * dt;
+      body.pos.z += steered.z * dt;
+      const travel = Math.hypot(steered.x, steered.z);
+      this.facing = travel > 0.2 ? Math.atan2(steered.x, steered.z) : Math.atan2(mx, mz);
     } else if (dist > 0.2) {
       this.facing = Math.atan2(dx, dz);
     }
