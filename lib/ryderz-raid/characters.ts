@@ -819,10 +819,13 @@ export function buildHost(kind: EnemyKind, modelPath?: string | null): Fighter {
   const template = mapped ?? (hostTemplates.length ? hostTemplates[Math.floor(Math.random() * hostTemplates.length)] : undefined);
   if (template) {
     const { humanoid, rig } = wrapGltfAsHumanoid(template, 1.9 * scale, { ownMaterials: true });
-    humanoid.materials.forEach((material) => {
-      const m = material as THREE.MeshStandardMaterial;
-      if (m.color) m.color.set(HOST_TINT[kind]);
-    });
+    // Shared host bodies are tinted by kind. A textured civilian keeps the albedo.
+    if (!mapped || HOST_MODELS.includes(modelPath ?? '')) {
+      humanoid.materials.forEach((material) => {
+        const m = material as THREE.MeshStandardMaterial;
+        if (m.color) m.color.set(HOST_TINT[kind]);
+      });
+    }
 
     // Signal vein on the chest: ride the chest bone when rigged so it follows the torso.
     const vein = new THREE.Mesh(VEIN, glow(eye, 1.6));
