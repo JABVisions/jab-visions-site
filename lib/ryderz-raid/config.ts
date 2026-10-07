@@ -440,7 +440,7 @@ export const RYDERZ: Record<RyderId, RyderSpec> = {
     colorHex: '#ff68d7',
     accent: 0xffc2ee,
     visual: { primaryColor: 0xff3fcf, auraColor: 0xff4ad2, electricityColor: 0xff8ae6, depletedAuraIntensity: 0.18, poweredAuraIntensity: 1.8 },
-    weapon: 'Pink energy darts',
+    weapon: 'Pink arrows',
     portrait: '/assets/john_andy_headshot.jpg',
     icon: '/assets/those-ryderz/icons/keven.webp',
     glb: '/assets/those-ryderz/models/keven-hart.glb?v=3',

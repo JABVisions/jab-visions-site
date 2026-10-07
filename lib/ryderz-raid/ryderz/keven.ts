@@ -37,7 +37,8 @@ const GRAB_ENEMY_SINK = 1.05;
 const GRAB_FAIL_WAIT = 0.35;
 
 // Phantom Phase
-const PHASE_OPACITY = 0.42;
+const PHASE_OPACITY = 0.14;
+const THROW_TIME = 0.42;
 const PHASE_HIT = 9;
 const PHASE_HIT_COOLDOWN = 0.75;
 const PHASE_REACH = 0.2;
@@ -79,6 +80,9 @@ export class KevenKit implements RyderKit {
   private phaseHits = new HitSet<KitTarget>();
   private phaseSparkT = 0;
   private phaseHumT = 0;
+  private throwT = 0;
+  private throwReleased = false;
+  private throwDamage = 0;
   private streak: TrailRibbon;
   private darts: DartPool<KitTarget>;
   private pinkSoft: number;
@@ -113,8 +117,8 @@ export class KevenKit implements RyderKit {
   get glow() {
     const seq = this.seq;
     if (seq?.kind === 'storm') return seq.phase === 'flip' ? 0.16 : 0.08;
-    const ghost = Math.min(0.55, (1 - this.bodyOpacity) * 1.1);
-    return this.phasing ? Math.max(ghost, 0.4) : ghost;
+    if (this.phasing) return 0.1;
+    return Math.min(0.55, (1 - this.bodyOpacity) * 1.1);
   }
 
   attach(ctx: KitContext) {
@@ -128,6 +132,8 @@ export class KevenKit implements RyderKit {
     if (fighter) ctx.afterimages.bind(fighter, aura);
     this.bodyOpacity = 1;
     this.phasing = false;
+    this.throwT = 0;
+    this.throwReleased = false;
   }
 
   detach() {
@@ -150,6 +156,8 @@ export class KevenKit implements RyderKit {
     this.bodyOpacity = 1;
     this.phasing = false;
     this.phaseHits.clear();
+    this.throwT = 0;
+    this.throwReleased = false;
     this.streak.clear();
     this.streak.intensity = 0;
     this.darts.clear();
@@ -162,6 +170,16 @@ export class KevenKit implements RyderKit {
   // ---------------------------------------------------------------------------
   // Abilities
   // ---------------------------------------------------------------------------
+
+  /** Click at range: wind up and loose one arrow. Storm darts stay on R. */
+  rangedShot(damage: number) {
+    if (!this.ctx || this.seq || this.throwT > 0.05) return false;
+    this.throwT = THROW_TIME;
+    this.throwReleased = false;
+    this.throwDamage = damage;
+    this.poseState = { kind: 'throw', t: 0, weight: 1 };
+    return true;
+  }
 
   tryAbility(id: AbilityId) {
     if (!this.ctx) return false;
@@ -603,6 +621,31 @@ export class KevenKit implements RyderKit {
     }
   }
 
+  /** One arrow from the throwing hand, toward the nearest host or the crosshair. */
+  private releaseArrow() {
+    const ctx = this.ctx;
+    if (!ctx) return;
+    const near = targetsInRadius(ctx.targets(), ctx.pos, 28, _hits).filter((t) => t.hp > 0);
+    const target = sortByDistance(near, ctx.pos)[0] ?? null;
+    if (!ctx.power.anchorPosition('handR', _p)) _p.copy(ctx.pos).setY(ctx.heightAt(ctx.pos.x, ctx.pos.z) + 1.25);
+    if (target) _dir.copy(target.pos).setY(1.15).sub(_p);
+    else ctx.lookDir(_dir);
+    if (_dir.lengthSq() < 1e-4) {
+      const yaw = ctx.yaw();
+      _dir.set(Math.sin(yaw), 0.05, Math.cos(yaw));
+    }
+    _dir.normalize();
+    this.darts.spawn(_p, _dir, {
+      speed: 34,
+      damage: this.throwDamage,
+      target,
+      turnRate: target ? 2.2 : 0,
+      life: 1.5,
+    });
+    ctx.particles.emit(_p, ctx.spec.visual.auraColor, 3, { speed: 1.4, size: 0.1, life: 0.16 });
+    ctx.sound('keven.storm.dart');
+  }
+
   private fireDart(seq: Extract<Sequence, { kind: 'storm' }>) {
     const ctx = this.ctx!;
     const aura = ctx.spec.visual.auraColor;
@@ -637,6 +680,16 @@ export class KevenKit implements RyderKit {
     if (this.seq) {
       if (this.seq.kind === 'grab') this.updateGrab(this.seq, dt);
       else this.updateStorm(this.seq, dt);
+    } else if (this.throwT > 0) {
+      this.throwT = Math.max(0, this.throwT - dt);
+      const t = 1 - this.throwT / THROW_TIME;
+      this.poseState = { kind: 'throw', t, weight: t < 0.9 ? 1 : (1 - t) / 0.1 };
+      this.air = 0;
+      if (!this.throwReleased && t >= 0.55) {
+        this.throwReleased = true;
+        this.releaseArrow();
+      }
+      if (this.throwT <= 0) this.poseState = null;
     } else {
       this.poseState = null;
       this.air = 0;

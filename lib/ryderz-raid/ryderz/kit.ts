@@ -148,6 +148,11 @@ export interface RyderKit {
    */
   tryAbility(id: AbilityId): boolean;
   endAbility?(id: AbilityId): void;
+  /**
+   * Basic ranged attack. Zoe does not implement this and keeps the plasma
+   * volley. Keven throws an arrow. Return false to spend nothing.
+   */
+  rangedShot?(damage: number): boolean;
   /** Next melee step, or null to use the engine's default swing. */
   melee(time: number): MeleeStep | null;
   /** Cut any running sequence (death, Ryder switch, Beacon recovery). */
