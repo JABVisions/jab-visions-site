@@ -3,12 +3,14 @@
 import { useRef, type PointerEvent } from "react";
 import {
   DROP_STUDIO_V5_ASPECTS,
+  V5_SPEEDS,
   clipPlayableMs,
   sessionDurationMs,
   type DropStudioV5ArtAction,
   type DropStudioV5Aspect,
   type DropStudioV5Session,
 } from "@/lib/board/dropStudioV5";
+import { V5_GRADE_PRESETS, V5_MOTIONS, type DropStudioV5Motion } from "@/lib/board/dropStudioV5Grade";
 import styles from "./DropStudioV5Timeline.module.css";
 
 const LANE_LABEL_WIDTH = 54;
@@ -40,6 +42,15 @@ export default function DropStudioV5Timeline({
   onCropFill,
   onCropInset,
   onArtAction,
+  onSpeed,
+  onDuplicate,
+  onFade,
+  onPreset,
+  onClearGrade,
+  onAddEffect,
+  onVolume,
+  onRecordVoice,
+  voiceState,
 }: {
   session: DropStudioV5Session;
   selectedClipId: string | null;
@@ -61,9 +72,20 @@ export default function DropStudioV5Timeline({
   onCropFill: () => void;
   onCropInset: () => void;
   onArtAction?: (action: DropStudioV5ArtAction) => void;
+  onSpeed?: (speed: number) => void;
+  onDuplicate?: () => void;
+  onFade?: (fadeInMs: number, fadeOutMs: number) => void;
+  onPreset?: (name: string, intensity: number) => void;
+  onClearGrade?: () => void;
+  onAddEffect?: (motion: DropStudioV5Motion) => void;
+  onVolume?: (volume: number) => void;
+  onRecordVoice?: () => void;
+  voiceState?: "idle" | "recording" | "denied";
 }) {
   const videoInputRef = useRef<HTMLInputElement | null>(null);
+  const presetRef = useRef("cinematic");
   const audioInputRef = useRef<HTMLInputElement | null>(null);
+  const selectedClip = session.tracks.flatMap((track) => track.clips).find((clip) => clip.id === selectedClipId);
   const selectedArt = session.tracks
     .find((track) => track.kind === "art")
     ?.clips.find((clip) => clip.id === selectedClipId);
@@ -107,6 +129,9 @@ export default function DropStudioV5Timeline({
           <button type="button" onClick={onDelete} disabled={!selectedClipId}>
             Delete
           </button>
+          <button type="button" onClick={onDuplicate} disabled={!selectedClipId || !onDuplicate}>
+            Duplicate
+          </button>
           <button type="button" onClick={() => videoInputRef.current?.click()}>
             Import clip
           </button>
@@ -137,6 +162,109 @@ export default function DropStudioV5Timeline({
           />
         </div>
       </div>
+
+      {onSpeed ? (
+        <div className={styles.cropRow} aria-label="Speed">
+          <span className={styles.groupLabel}>Speed</span>
+          {V5_SPEEDS.map((speed) => (
+            <button key={speed} type="button" onClick={() => onSpeed(speed)} disabled={!selectedClipId}>
+              {speed}x
+            </button>
+          ))}
+        </div>
+      ) : null}
+
+      {onPreset ? (
+        <div className={styles.cropRow} aria-label="Grade">
+          <span className={styles.groupLabel}>Grade</span>
+          {V5_GRADE_PRESETS.map((preset) => (
+            <button
+              key={preset}
+              type="button"
+              onClick={() => {
+                presetRef.current = preset;
+                onPreset(preset, 1);
+              }}
+              disabled={!selectedClipId}
+            >
+              {preset}
+            </button>
+          ))}
+          <button type="button" onClick={onClearGrade} disabled={!selectedClipId}>
+            Clear
+          </button>
+          <label className={styles.sliderLabel}>
+            Intensity
+            <input
+              type="range"
+              min={15}
+              max={100}
+              defaultValue={100}
+              aria-label="Grade intensity"
+              disabled={!selectedClipId}
+              onChange={(event) => onPreset(presetRef.current, Number(event.target.value) / 100)}
+            />
+          </label>
+        </div>
+      ) : null}
+
+      {onAddEffect ? (
+        <div className={styles.cropRow} aria-label="Effects">
+          <span className={styles.groupLabel}>Effect</span>
+          {V5_MOTIONS.map((motion) => (
+            <button key={motion} type="button" onClick={() => onAddEffect(motion)}>
+              {motion}
+            </button>
+          ))}
+        </div>
+      ) : null}
+
+      {onFade ? (
+        <div className={styles.cropRow} aria-label="Audio">
+          <span className={styles.groupLabel}>Audio</span>
+          <button type="button" onClick={onRecordVoice} disabled={!onRecordVoice}>
+            {voiceState === "recording" ? "Stop voice" : voiceState === "denied" ? "Mic blocked" : "Record voice"}
+          </button>
+          <label className={styles.sliderLabel}>
+            Volume
+            <input
+              type="range"
+              min={0}
+              max={100}
+              defaultValue={100}
+              aria-label="Clip volume"
+              disabled={!selectedClipId}
+              onChange={(event) => onVolume?.(Number(event.target.value) / 100)}
+            />
+          </label>
+          <label className={styles.sliderLabel}>
+            Fade in
+            <input
+              type="range"
+              min={0}
+              max={2000}
+              step={50}
+              defaultValue={0}
+              aria-label="Fade in"
+              disabled={!selectedClipId}
+              onChange={(event) => onFade(Number(event.target.value), selectedClip?.fadeOutMs ?? 0)}
+            />
+          </label>
+          <label className={styles.sliderLabel}>
+            Fade out
+            <input
+              type="range"
+              min={0}
+              max={2000}
+              step={50}
+              defaultValue={0}
+              aria-label="Fade out"
+              disabled={!selectedClipId}
+              onChange={(event) => onFade(selectedClip?.fadeInMs ?? 0, Number(event.target.value))}
+            />
+          </label>
+        </div>
+      ) : null}
 
       <div className={styles.aspects} aria-label="Aspect ratios">
         <span className={styles.groupLabel}>Aspect</span>

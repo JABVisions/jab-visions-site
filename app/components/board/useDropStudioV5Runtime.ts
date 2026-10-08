@@ -2,8 +2,15 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  addEffectClip,
   artClipsAtTime,
   bindArtOverlay,
+  duplicateClip,
+  effectsAtTime,
+  fadeGainAt,
+  setClipFade,
+  setClipGrade,
+  setClipSpeed,
   type DropStudioV5ArtAction,
   clipEndMs,
   createDropStudioV5History,
@@ -49,6 +56,7 @@ import {
   saveDropStudioV5Media,
 } from "@/lib/board/dropStudioV5Media";
 import { fetchDropStudioV5Cloud, queueDropStudioV5CloudSync } from "@/lib/board/dropStudioV5Cloud";
+import { gradeToFilter, presetGrade, type DropStudioV5Grade, type DropStudioV5Motion } from "@/lib/board/dropStudioV5Grade";
 
 function persistArtOverlay(draftId: string, mediaKey: string, dataUrl: string) {
   void fetch(dataUrl)
@@ -106,6 +114,8 @@ export function useDropStudioV5Runtime({
   const [editingArtId, setEditingArtId] = useState<string | null>(null);
   const [artRestoreNonce, setArtRestoreNonce] = useState(0);
   const [clearArtToken, setClearArtToken] = useState(0);
+  const [voiceState, setVoiceState] = useState<"idle" | "recording" | "denied">("idle");
+  const recorderRef = useRef<MediaRecorder | null>(null);
   const objectUrlsRef = useRef<string[]>([]);
   const persistTimerRef = useRef<number | null>(null);
   const seededUrlRef = useRef("");
@@ -291,7 +301,8 @@ export function useDropStudioV5Runtime({
     const clip = preview?.clip;
     if (!clip) return;
     const handoff = handoffPlayheadMs(clip, currentTimeSeconds * 1000);
-    const next = handoff ?? clip.offsetMs + Math.max(0, currentTimeSeconds * 1000 - clip.trimInMs);
+    const speed = clip.speed && clip.speed > 0 ? clip.speed : 1;
+    const next = handoff ?? clip.offsetMs + Math.max(0, currentTimeSeconds * 1000 - clip.trimInMs) / speed;
     setSession((current) => {
       if (Math.abs(current.playheadMs - next) < 80) return current;
       return setPlayhead(current, next);
@@ -400,6 +411,70 @@ export function useDropStudioV5Runtime({
     [applyArtEdit]
   );
 
+  const selectedClip = () =>
+    sessionRef.current.tracks.flatMap((track) => track.clips).find((clip) => clip.id === selectedClipId) ??
+    null;
+
+  const editSelected = useCallback(
+    (next: (current: DropStudioV5Session, clipId: string) => DropStudioV5Session) => {
+      const clip = selectedClip();
+      if (!clip) return;
+      applyArtEdit(next(sessionRef.current, clip.id));
+    },
+    [applyArtEdit, selectedClipId]
+  );
+
+  const recordVoice = useCallback(async () => {
+    if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) return "unavailable" as const;
+    const existing = recorderRef.current;
+    if (existing && existing.state === "recording") {
+      existing.stop();
+      return "stopped" as const;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream);
+      const chunks: Blob[] = [];
+      const offset = sessionRef.current.playheadMs;
+      recorder.ondataavailable = (event) => {
+        if (event.data.size) chunks.push(event.data);
+      };
+      recorder.onstop = () => {
+        stream.getTracks().forEach((track) => track.stop());
+        recorderRef.current = null;
+        setVoiceState("idle");
+        const blob = new Blob(chunks, { type: recorder.mimeType || "audio/webm" });
+        if (!blob.size) return;
+        const file = new File([blob], `voiceover-${Date.now()}.webm`, { type: blob.type || "audio/webm" });
+        void importAudio(file).then(() => {
+          const audio = sessionRef.current.tracks.find((track) => track.kind === "audio");
+          const clip = audio?.clips[audio.clips.length - 1];
+          if (!clip) return;
+          applyArtEdit({
+            ...sessionRef.current,
+            tracks: sessionRef.current.tracks.map((track) =>
+              track.kind === "audio"
+                ? {
+                    ...track,
+                    clips: track.clips.map((item) =>
+                      item.id === clip.id ? { ...item, offsetMs: offset, name: item.name || "Voiceover" } : item
+                    ),
+                  }
+                : track
+            ),
+          });
+        });
+      };
+      recorderRef.current = recorder;
+      setVoiceState("recording");
+      recorder.start();
+      return "recording" as const;
+    } catch {
+      setVoiceState("denied");
+      return "denied" as const;
+    }
+  }, [applyArtEdit, importAudio]);
+
   const artFrames = artClipsAtTime(session, session.playheadMs)
     .map((clip) => ({
       id: clip.id,
@@ -440,7 +515,15 @@ export function useDropStudioV5Runtime({
     previewClipPath,
     audioPreviewUrl: audioPreview ? mediaBag[audioPreview.clip.mediaKey]?.url : undefined,
     audioPreviewTimeSeconds: audioPreview ? audioPreview.mediaTimeMs / 1000 : 0,
-    audioVolume: audioPreview ? audioPreview.clip.volume : 1,
+    audioVolume: audioPreview ? fadeGainAt(audioPreview.clip, session.playheadMs) : 1,
+    previewSpeed: preview ? (preview.clip.speed && preview.clip.speed > 0 ? preview.clip.speed : 1) : 1,
+    audioSpeed: audioPreview ? (audioPreview.clip.speed && audioPreview.clip.speed > 0 ? audioPreview.clip.speed : 1) : 1,
+    gradeFilter: gradeToFilter(preview?.clip.grade),
+    vignette: preview?.clip.grade?.vignette ?? 0,
+    activeMotions: effectsAtTime(session, session.playheadMs)
+      .map((clip) => clip.mediaKey.slice(3))
+      .filter(Boolean),
+    voiceState,
     mediaBag,
     scrubbing,
     aspect: session.aspect,
@@ -457,6 +540,28 @@ export function useDropStudioV5Runtime({
     clearArtToken,
     selectClip,
     artAction,
+    setSpeed: (speed: number) => editSelected((current, clipId) => setClipSpeed(current, clipId, speed)),
+    duplicateSelected: () => editSelected((current, clipId) => duplicateClip(current, clipId)),
+    setFade: (fadeInMs: number, fadeOutMs: number) =>
+      editSelected((current, clipId) => setClipFade(current, clipId, fadeInMs, fadeOutMs)),
+    setGrade: (grade: DropStudioV5Grade | null) =>
+      editSelected((current, clipId) => setClipGrade(current, clipId, grade)),
+    applyPreset: (name: string, intensity: number) =>
+      editSelected((current, clipId) => setClipGrade(current, clipId, presetGrade(name, intensity) ?? null)),
+    addEffect: (motion: DropStudioV5Motion) =>
+      applyArtEdit(addEffectClip(sessionRef.current, motion, sessionRef.current.playheadMs, 2000)),
+    setVolume: (volume: number) => {
+      const clip = selectedClip();
+      if (!clip) return;
+      applyArtEdit({
+        ...sessionRef.current,
+        tracks: sessionRef.current.tracks.map((track) => ({
+          ...track,
+          clips: track.clips.map((item) => (item.id === clip.id ? { ...item, volume } : item)),
+        })),
+      });
+    },
+    recordVoice,
     importVideo,
     importAudio,
     applyDuration,

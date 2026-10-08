@@ -2,6 +2,8 @@ import {
   DROP_STUDIO_V5_ASPECTS,
   clipEndMs,
   clipPlayableMs,
+  clipSpeed,
+  effectMotion,
   resolveTrimOutMs,
   type DropStudioV5Aspect,
   type DropStudioV5Clip,
@@ -9,6 +11,7 @@ import {
   type DropStudioV5MediaBag,
   type DropStudioV5Session,
 } from "@/lib/board/dropStudioV5";
+import { gradeActive, gradeToFilter, joinFilters, motionAt, type DropStudioV5Grade, type DropStudioV5Motion } from "@/lib/board/dropStudioV5Grade";
 
 export type DropStudioV5ExportClip = {
   mediaKey: string;
@@ -20,6 +23,16 @@ export type DropStudioV5ExportClip = {
   filter?: string | null;
   volume: number;
   muted: boolean;
+  speed: number;
+  fadeInMs: number;
+  fadeOutMs: number;
+  grade?: DropStudioV5Grade;
+};
+
+export type DropStudioV5ExportEffect = {
+  motion: DropStudioV5Motion;
+  offsetMs: number;
+  endMs: number;
 };
 
 export type DropStudioV5ExportArt = {
@@ -37,6 +50,7 @@ export type DropStudioV5ExportPlan = {
   video: DropStudioV5ExportClip[];
   audio: DropStudioV5ExportClip[];
   art: DropStudioV5ExportArt[];
+  effects: DropStudioV5ExportEffect[];
 };
 
 const FILTERS: Record<string, string> = {
@@ -77,6 +91,10 @@ function toExportClip(clip: DropStudioV5Clip, muted: boolean): DropStudioV5Expor
     filter: clip.filter,
     volume: clip.volume,
     muted: Boolean(muted || clip.muted),
+    speed: clipSpeed(clip),
+    fadeInMs: Math.max(0, clip.fadeInMs ?? 0),
+    fadeOutMs: Math.max(0, clip.fadeOutMs ?? 0),
+    ...(clip.grade ? { grade: clip.grade } : {}),
   };
 }
 
@@ -101,23 +119,34 @@ export function buildExportPlan(session: DropStudioV5Session): DropStudioV5Expor
           endMs: clipEndMs(clip),
           ...(clip.placement ? { placement: clip.placement } : {}),
         }));
+  const effects: DropStudioV5ExportEffect[] = (
+    session.tracks.find((track) => track.kind === "effect")?.clips ?? []
+  )
+    .filter((clip) => !clip.hidden && effectMotion(clip) && clipEndMs(clip) - clip.offsetMs >= 80)
+    .map((clip) => ({
+      motion: effectMotion(clip) as DropStudioV5Motion,
+      offsetMs: clip.offsetMs,
+      endMs: clipEndMs(clip),
+    }));
   const durationMs = Math.max(
     video.reduce((end, clip) => Math.max(end, clip.offsetMs + clip.playableMs), 0),
     audio.reduce((end, clip) => Math.max(end, clip.offsetMs + clip.playableMs), 0),
-    art.reduce((end, clip) => Math.max(end, clip.endMs), 0)
+    art.reduce((end, clip) => Math.max(end, clip.endMs), 0),
+    effects.reduce((end, clip) => Math.max(end, clip.endMs), 0)
   );
-  return { aspect: session.aspect, ...size, durationMs, video, audio, art };
+  return { aspect: session.aspect, ...size, durationMs, video, audio, art, effects };
 }
 
 /** True when Done must render a new file. An untouched primary tape stays on the V4 path. */
 export function exportNeedsFlatten(session: DropStudioV5Session): boolean {
   const plan = buildExportPlan(session);
   if (!plan.video.length) return false;
-  if (plan.video.length > 1 || plan.audio.length > 0 || plan.art.length > 0) return true;
+  if (plan.video.length > 1 || plan.audio.length > 0 || plan.art.length > 0 || plan.effects.length > 0) return true;
   if (session.aspect === "square" || session.aspect === "story") return true;
   const clip = plan.video[0];
   if (clip.trimInMs > 0) return true;
   if (clip.crop && (clip.crop.x || clip.crop.y || clip.crop.w < 1 || clip.crop.h < 1)) return true;
+  if (clip.speed !== 1 || clip.fadeInMs > 0 || clip.fadeOutMs > 0 || gradeActive(clip.grade)) return true;
   return false;
 }
 
@@ -211,6 +240,7 @@ export async function exportDropStudioV5(
     source.buffer = decoded;
     const gain = audioCtx.createGain();
     gain.gain.value = clip.volume;
+    source.playbackRate.value = clip.speed;
     source.connect(gain);
     gain.connect(mixDest);
     audioSources.push(source);
@@ -277,12 +307,27 @@ export async function exportDropStudioV5(
       video.currentTime = clip.trimInMs / 1000;
       await waitFor(video, "seeked");
       video.volume = clip.muted ? 0 : clip.volume;
+      video.playbackRate = clip.speed;
       if (!audioArmed) {
         audioArmed = true;
         const startedAt = audioCtx.currentTime;
         audioSources.forEach((source, index) => {
           const bed = audioStarts[index];
-          source.start(startedAt + bed.offsetMs / 1000, bed.trimInMs / 1000, bed.playableMs / 1000);
+          const startAt = startedAt + bed.offsetMs / 1000;
+          const duration = bed.playableMs / 1000;
+          const gain = source.context.createGain();
+          source.disconnect();
+          source.connect(gain);
+          gain.connect(mixDest);
+          const fadeIn = Math.min(bed.fadeInMs / 1000, duration / 2);
+          const fadeOut = Math.min(bed.fadeOutMs / 1000, duration / 2);
+          gain.gain.setValueAtTime(fadeIn > 0 ? 0 : bed.volume, startAt);
+          if (fadeIn > 0) gain.gain.linearRampToValueAtTime(bed.volume, startAt + fadeIn);
+          if (fadeOut > 0) {
+            gain.gain.setValueAtTime(bed.volume, startAt + Math.max(fadeIn, duration - fadeOut));
+            gain.gain.linearRampToValueAtTime(0, startAt + duration);
+          }
+          source.start(startAt, bed.trimInMs / 1000, duration);
         });
       }
       await video.play();
@@ -293,10 +338,35 @@ export async function exportDropStudioV5(
             resolve();
             return;
           }
-          ctx.filter = canvasFilterFor(clip.filter);
+          const timelineMs = clip.offsetMs + Math.max(0, (video.currentTime * 1000 - clip.trimInMs) / clip.speed);
+          const look = plan.effects.find((effect) => timelineMs >= effect.offsetMs && timelineMs < effect.endMs);
+          const motion = look
+            ? motionAt(look.motion, timelineMs - look.offsetMs, look.endMs - look.offsetMs)
+            : motionAt(null, 0, 0);
+          ctx.save();
+          if (motion.shake) ctx.translate(motion.shake, motion.shake * 0.4);
+          ctx.filter = joinFilters(canvasFilterFor(clip.filter), gradeToFilter(clip.grade), motion.filter);
           drawCoverCrop(ctx, video, video.videoWidth || plan.width, video.videoHeight || plan.height, clip.crop, plan.width, plan.height);
           ctx.filter = "none";
-          const timelineMs = clip.offsetMs + Math.max(0, video.currentTime * 1000 - clip.trimInMs);
+          if (motion.vhs) {
+            ctx.fillStyle = "rgba(0, 0, 0, 0.18)";
+            for (let line = 0; line < plan.height; line += 4) ctx.fillRect(0, line, plan.width, 1);
+          }
+          if ((clip.grade?.vignette ?? 0) > 0) {
+            const vignette = ctx.createRadialGradient(
+              plan.width / 2,
+              plan.height / 2,
+              plan.width * 0.2,
+              plan.width / 2,
+              plan.height / 2,
+              plan.width * 0.72
+            );
+            vignette.addColorStop(0, "rgba(0,0,0,0)");
+            vignette.addColorStop(1, `rgba(0,0,0,${Math.min(0.72, clip.grade?.vignette ?? 0)})`);
+            ctx.fillStyle = vignette;
+            ctx.fillRect(0, 0, plan.width, plan.height);
+          }
+          ctx.restore();
           for (const art of plan.art) {
             if (timelineMs < art.offsetMs || timelineMs >= art.endMs) continue;
             const image = artImages.get(art.mediaKey);
@@ -311,6 +381,10 @@ export async function exportDropStudioV5(
             );
           }
           if (overlay) ctx.drawImage(overlay, 0, 0, plan.width, plan.height);
+          if (motion.flash > 0) {
+            ctx.fillStyle = `rgba(255,255,255,${motion.flash})`;
+            ctx.fillRect(0, 0, plan.width, plan.height);
+          }
           requestAnimationFrame(draw);
         };
         draw();

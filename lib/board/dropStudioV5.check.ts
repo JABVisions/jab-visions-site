@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { presetGrade } from "./dropStudioV5Grade";
 import { buildExportPlan, canvasFilterFor, exportNeedsFlatten, exportPixelSize } from "./dropStudioV5Export";
 import {
   canPersistDropStudioV5Media,
@@ -35,6 +36,14 @@ import {
   setClipCrop,
   setClipDuration,
   setClipFilter,
+  addEffectClip,
+  clipSpeed,
+  duplicateClip,
+  effectsAtTime,
+  fadeGainAt,
+  setClipFade,
+  setClipGrade,
+  setClipSpeed,
   setClipHidden,
   setPlayhead,
   setSessionAspect,
@@ -54,10 +63,11 @@ assert.equal(mediaKeyFromFile(file), "tape.mp4:12:99");
 
 let session = createDropStudioV5Session("sess-1");
 assert.equal(session.version, 5);
-assert.equal(session.tracks.length, 3);
+assert.equal(session.tracks.length, 4);
 assert.equal(session.tracks[0].kind, "video");
 assert.equal(session.tracks[1].kind, "audio");
 assert.equal(session.tracks[2].kind, "art");
+assert.equal(session.tracks[3].kind, "effect");
 
 session = importVideoClip(session, {
   mediaKey: "primary",
@@ -289,5 +299,23 @@ assert.equal(artPlan.art[0].endMs, 3000);
 assert.equal(artPlan.art[0].placement?.w, 0.5);
 const removedArt = deleteClip(placed, placedClip?.id || "");
 assert.equal(removedArt.tracks.find((track) => track.kind === "art")?.clips[0].offsetMs, 2000);
+
+const sped = setClipSpeed(plain, plain.tracks[0].clips[0].id, 2);
+assert.equal(clipSpeed(sped.tracks[0].clips[0]), 2);
+assert.equal(clipPlayableMs(sped.tracks[0].clips[0]), 1000);
+assert.equal(exportNeedsFlatten(sped), true);
+const copied = duplicateClip(plain, plain.tracks[0].clips[0].id);
+assert.equal(copied.tracks[0].clips.length, 2);
+assert.equal(copied.tracks[0].clips[1].mediaKey, "primary");
+const faded = setClipFade(withAudio, withAudio.tracks[1].clips[0].id, 400, 200);
+assert.equal(fadeGainAt(faded.tracks[1].clips[0], faded.tracks[1].clips[0].offsetMs), 0);
+assert.equal(fadeGainAt(faded.tracks[1].clips[0], faded.tracks[1].clips[0].offsetMs + 400) > 0.9, true);
+const graded = setClipGrade(plain, plain.tracks[0].clips[0].id, presetGrade("cool", 1));
+assert.equal(exportNeedsFlatten(graded), true);
+const withLook = addEffectClip(plain, "glow", 100, 800);
+assert.equal(effectsAtTime(withLook, 200).length, 1);
+assert.equal(effectsAtTime(withLook, 2000).length, 0);
+assert.equal(buildExportPlan(withLook).effects[0]?.motion, "glow");
+assert.equal(exportNeedsFlatten(withLook), true);
 
 console.log("drop studio v5 checks passed");

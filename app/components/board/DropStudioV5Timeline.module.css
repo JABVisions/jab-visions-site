@@ -78,6 +78,20 @@
   align-items: center;
 }
 
+.sliderLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.58rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.sliderLabel input {
+  width: 88px;
+}
+
 .groupLabel {
   font-size: 0.52rem;
   font-weight: 950;

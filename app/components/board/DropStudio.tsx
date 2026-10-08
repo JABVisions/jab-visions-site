@@ -20,6 +20,7 @@ import DropStudioPaletteDeck, { type ObjectTool } from "./DropStudioPaletteDeck"
 import DropStudioV5Timeline from "./DropStudioV5Timeline";
 import BoardPlayableVideo from "./BoardPlayableVideo";
 import { useDropStudioV5Runtime } from "./useDropStudioV5Runtime";
+import { chooseDropStudioV5Layout, type DropStudioV5Layout } from "@/lib/board/dropStudioV5Layout";
 import {
   aspectToMediaFrame,
   DROP_STUDIO_V5_ASPECTS,
@@ -108,6 +109,7 @@ function StudioPreviewVideo({
   onTimeUpdate,
   onClipBoundary,
   onPlayingChange,
+  playbackRate = 1,
 }: {
   src: string;
   contentType?: string;
@@ -120,6 +122,7 @@ function StudioPreviewVideo({
   onTimeUpdate?: (seconds: number) => void;
   onClipBoundary?: () => boolean;
   onPlayingChange?: (playing: boolean) => void;
+  playbackRate?: number;
 }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const [playing, setPlaying] = useState(false);
@@ -130,6 +133,12 @@ function StudioPreviewVideo({
     setPlaying(false);
     shownFrameRef.current = false;
   }, [src, contentType]);
+
+  useEffect(() => {
+    const el = videoRef.current;
+    if (!el) return;
+    el.playbackRate = playbackRate > 0 ? playbackRate : 1;
+  }, [playbackRate, src]);
 
   useEffect(() => {
     const el = videoRef.current;
@@ -286,6 +295,8 @@ function DropStudio({
 }) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const previewRef = useRef<HTMLDivElement | null>(null);
+  const [studioLayout, setStudioLayout] = useState<DropStudioV5Layout>("phone");
+  const [timelineOpen, setTimelineOpen] = useState(false);
   const [tool, setTool] = useState<Tool>("text");
   const [text, setText] = useState("");
   const [dragging, setDragging] = useState<{
@@ -306,6 +317,47 @@ function DropStudio({
 
   useEffect(() => {
     if (!timelineOn) return;
+    const measure = () => {
+      const fine = window.matchMedia("(pointer: fine)").matches;
+      setStudioLayout(
+        chooseDropStudioV5Layout({
+          width: window.innerWidth,
+          height: window.innerHeight,
+          finePointer: fine,
+        })
+      );
+    };
+    measure();
+    window.addEventListener("resize", measure);
+    const pointer = window.matchMedia("(pointer: fine)");
+    pointer.addEventListener?.("change", measure);
+    return () => {
+      window.removeEventListener("resize", measure);
+      pointer.removeEventListener?.("change", measure);
+    };
+  }, [timelineOn]);
+
+  useEffect(() => {
+    if (!timelineOn || studioLayout === "phone") return;
+    const onKey = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) return;
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "z") {
+        event.preventDefault();
+        if (event.shiftKey) v5.redo();
+        else v5.undo();
+      } else if (event.key.toLowerCase() === "s" && !event.metaKey && !event.ctrlKey) {
+        v5.split();
+      } else if (event.key === "Delete" || event.key === "Backspace") {
+        v5.remove();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [studioLayout, timelineOn, v5]);
+
+  useEffect(() => {
+    if (!timelineOn) return;
     onV5Change?.({ session: v5.session, mediaBag: v5.mediaBag });
   }, [timelineOn, onV5Change, v5.session, v5.mediaBag]);
 
@@ -317,6 +369,7 @@ function DropStudio({
       return;
     }
     el.volume = Math.max(0, Math.min(1, v5.audioVolume));
+    el.playbackRate = v5.audioSpeed > 0 ? v5.audioSpeed : 1;
     if (v5.scrubbing) {
       try {
         el.currentTime = v5.audioPreviewTimeSeconds;
@@ -324,7 +377,7 @@ function DropStudio({
         // Metadata may not be ready on a freshly imported take.
       }
     }
-  }, [timelineOn, v5.audioPreviewTimeSeconds, v5.audioPreviewUrl, v5.audioVolume, v5.scrubbing]);
+  }, [timelineOn, v5.audioPreviewTimeSeconds, v5.audioPreviewUrl, v5.audioSpeed, v5.audioVolume, v5.scrubbing]);
 
   function update(next: DropCustomization) {
     onChange(compactDropCustomizations(next) ?? {});
@@ -452,6 +505,7 @@ function DropStudio({
   const previewMediaStyle = {
     ...mediaRotationStyle,
     ...(timelineOn && v5.previewClipPath ? { clipPath: v5.previewClipPath } : null),
+    ...(timelineOn && v5.gradeFilter !== "none" ? { filter: v5.gradeFilter } : null),
   };
 
   const previewEl = (
@@ -483,6 +537,7 @@ function DropStudio({
               onClipBoundary={timelineOn ? v5.crossClipBoundary : undefined}
               onDuration={timelineOn ? v5.applyDuration : undefined}
               onTimeUpdate={timelineOn ? v5.syncPlayheadFromVideo : undefined}
+              playbackRate={timelineOn ? v5.previewSpeed : 1}
               onPlayingChange={
                 timelineOn
                   ? (playing) => {
@@ -530,6 +585,14 @@ function DropStudio({
                 }
               />
             ))
+        : null}
+      {timelineOn && v5.vignette > 0 ? (
+        <div className={styles.vignette} style={{ opacity: Math.min(1, v5.vignette) }} aria-hidden />
+      ) : null}
+      {timelineOn
+        ? v5.activeMotions.map((motion) => (
+            <div key={motion} className={styles[`motion_${motion}`] ?? styles.motion_glow} aria-hidden />
+          ))
         : null}
       <DropStudioOverlay
         customizations={
@@ -827,8 +890,14 @@ function DropStudio({
     );
     if (!timelineOn) return workbench;
     return (
-      <div className={styles.v5Workbench} data-studio-v5="1">
+      <div className={styles.v5Workbench} data-layout={studioLayout} data-studio-v5="1">
         <div className={styles.v5MonitorSlot}>{workbench}</div>
+        {studioLayout === "phone" ? (
+          <button type="button" className={styles.timelineToggle} onClick={() => setTimelineOpen((open) => !open)}>
+            {timelineOpen ? "Hide timeline" : "Timeline"}
+          </button>
+        ) : null}
+        <div className={styles.timelineShell} data-open={studioLayout === "phone" && !timelineOpen ? "0" : "1"}>
         <DropStudioV5Timeline
           session={v5.session}
           selectedClipId={v5.selectedClipId}
@@ -836,7 +905,6 @@ function DropStudio({
           canRedo={v5.canRedo}
           extraClipCount={v5.extraClipCount}
           onSelectClip={v5.selectClip}
-          onArtAction={v5.artAction}
           onScrub={v5.scrub}
           onImportVideo={(file) => void v5.importVideo(file)}
           onImportAudio={(file) => void v5.importAudio(file)}
@@ -853,7 +921,18 @@ function DropStudio({
           onCropFit={v5.cropFit}
           onCropFill={v5.cropFill}
           onCropInset={v5.cropInset}
+          onArtAction={v5.artAction}
+          onSpeed={v5.setSpeed}
+          onDuplicate={v5.duplicateSelected}
+          onFade={v5.setFade}
+          onPreset={v5.applyPreset}
+          onClearGrade={() => v5.setGrade(null)}
+          onAddEffect={v5.addEffect}
+          onVolume={v5.setVolume}
+          onRecordVoice={() => void v5.recordVoice()}
+          voiceState={v5.voiceState}
         />
+        </div>
         <audio
           ref={audioRef}
           hidden

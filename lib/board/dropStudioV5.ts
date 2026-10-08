@@ -5,6 +5,13 @@
  * Publish still uses the V4 single-file path until a real flatten/export ships.
  */
 
+import {
+  normalizeGrade,
+  V5_MOTIONS,
+  type DropStudioV5Grade,
+  type DropStudioV5Motion,
+} from "@/lib/board/dropStudioV5Grade";
+
 export const DROP_STUDIO_V5_FLAG_KEY = "jab_drop_studio_v5";
 export const DROP_STUDIO_V5_PROJECTS_KEY = "jab_drop_studio_v5_projects";
 export const DROP_STUDIO_V5_UPDATED_EVENT = "board:drop-studio-v5:updated";
@@ -12,11 +19,13 @@ export const DROP_STUDIO_V5_UPDATED_EVENT = "board:drop-studio-v5:updated";
 export const MAX_V5_VIDEO_CLIPS = 8;
 export const MAX_V5_AUDIO_CLIPS = 8;
 export const MAX_V5_ART_CLIPS = 8;
+export const MAX_V5_EFFECT_CLIPS = 8;
+export const V5_SPEEDS = [0.25, 0.5, 1, 1.5, 2, 3] as const;
 export const MAX_V5_TRACKS = 4;
 export const MAX_V5_HISTORY = 24;
 
 export type DropStudioV5Aspect = "portrait" | "landscape" | "square" | "story";
-export type DropStudioV5TrackKind = "video" | "audio" | "art";
+export type DropStudioV5TrackKind = "video" | "audio" | "art" | "effect";
 export type DropStudioV5ArtAction =
   | "new"
   | "duplicate"
@@ -73,6 +82,11 @@ export type DropStudioV5Clip = {
   hidden?: boolean;
   /** Art overlays only. Destination box in the frame. Missing means full frame. */
   placement?: DropStudioV5Crop;
+  /** Playback rate. Timeline length is the source range divided by this. */
+  speed?: number;
+  fadeInMs?: number;
+  fadeOutMs?: number;
+  grade?: DropStudioV5Grade;
 };
 
 export type DropStudioV5Track = {
@@ -186,6 +200,7 @@ export function createDropStudioV5Session(id?: string): DropStudioV5Session {
       { id: "video-a", kind: "video", label: "Video", clips: [], volume: 1 },
       { id: "audio-a", kind: "audio", label: "Audio", clips: [], volume: 1 },
       { id: "art-a", kind: "art", label: "Art", clips: [], volume: 1 },
+      { id: "fx-a", kind: "effect", label: "Effect", clips: [], volume: 1 },
     ],
   };
 }
@@ -210,6 +225,20 @@ function emptyArtTrack(): DropStudioV5Track {
   return { id: "art-a", kind: "art", label: "Art", clips: [], volume: 1 };
 }
 
+function emptyEffectTrack(): DropStudioV5Track {
+  return { id: "fx-a", kind: "effect", label: "Effect", clips: [], volume: 1 };
+}
+
+function effectTrack(session: DropStudioV5Session) {
+  return session.tracks.find((track) => track.kind === "effect");
+}
+
+export function ensureEffectTrack(session: DropStudioV5Session): DropStudioV5Session {
+  if (session.tracks.some((track) => track.kind === "effect")) return session;
+  if (session.tracks.length >= MAX_V5_TRACKS) return session;
+  return { ...session, tracks: [...session.tracks, emptyEffectTrack()] };
+}
+
 export function ensureArtTrack(session: DropStudioV5Session): DropStudioV5Session {
   if (session.tracks.some((track) => track.kind === "art")) return session;
   if (session.tracks.length >= MAX_V5_TRACKS) return session;
@@ -228,8 +257,28 @@ export function resolveTrimOutMs(clip: DropStudioV5Clip): number {
   return duration;
 }
 
+export function clipSpeed(clip: DropStudioV5Clip): number {
+  const speed = clip.speed ?? 1;
+  return (V5_SPEEDS as readonly number[]).includes(speed) ? speed : 1;
+}
+
 export function clipPlayableMs(clip: DropStudioV5Clip): number {
-  return Math.max(0, resolveTrimOutMs(clip) - Math.max(0, clip.trimInMs));
+  const source = Math.max(0, resolveTrimOutMs(clip) - Math.max(0, clip.trimInMs));
+  const speed = clipSpeed(clip);
+  return speed === 1 ? source : source / speed;
+}
+
+export function fadeGainAt(clip: DropStudioV5Clip, timelineMs: number): number {
+  const start = clip.offsetMs;
+  const end = clipEndMs(clip);
+  const duration = Math.max(1, end - start);
+  const local = timelineMs - start;
+  let gain = Math.min(1, Math.max(0, clip.volume ?? 1));
+  const fadeIn = Math.max(0, clip.fadeInMs ?? 0);
+  const fadeOut = Math.max(0, clip.fadeOutMs ?? 0);
+  if (fadeIn > 0 && local < fadeIn) gain *= Math.max(0, local) / fadeIn;
+  if (fadeOut > 0 && duration - local < fadeOut) gain *= Math.max(0, duration - local) / fadeOut;
+  return Math.min(1, Math.max(0, gain));
 }
 
 export function clipEndMs(clip: DropStudioV5Clip): number {
@@ -419,8 +468,8 @@ export function reorderClip(
   const clips = [...found.track.clips];
   const [moved] = clips.splice(found.index, 1);
   clips.splice(nextIndex, 0, moved);
-  const nextTrack =
-    found.track.kind === "art" ? { ...found.track, clips } : packTrackClips({ ...found.track, clips });
+  const keepTime = found.track.kind === "art" || found.track.kind === "effect";
+  const nextTrack = keepTime ? { ...found.track, clips } : packTrackClips({ ...found.track, clips });
   return replaceTrack(session, nextTrack);
 }
 
@@ -428,8 +477,8 @@ export function deleteClip(session: DropStudioV5Session, clipId: string): DropSt
   const found = findClip(session, clipId);
   if (!found) return session;
   const clips = found.track.clips.filter((clip) => clip.id !== clipId);
-  const nextTrack =
-    found.track.kind === "art" ? { ...found.track, clips } : packTrackClips({ ...found.track, clips });
+  const keepTime = found.track.kind === "art" || found.track.kind === "effect";
+  const nextTrack = keepTime ? { ...found.track, clips } : packTrackClips({ ...found.track, clips });
   return replaceTrack(session, nextTrack);
 }
 
@@ -572,6 +621,112 @@ export function duplicateArtClip(session: DropStudioV5Session, clipId: string): 
   const clips = [...found.track.clips];
   clips.splice(found.index + 1, 0, copy);
   return replaceTrack(session, { ...found.track, clips });
+}
+
+export function duplicateClip(session: DropStudioV5Session, clipId: string): DropStudioV5Session {
+  const found = findClip(session, clipId);
+  if (!found) return session;
+  if (found.track.kind === "art") return duplicateArtClip(session, clipId);
+  const cap = found.track.kind === "audio" ? MAX_V5_AUDIO_CLIPS : MAX_V5_VIDEO_CLIPS;
+  if (found.track.kind === "effect" || found.track.clips.length >= cap) return session;
+  const copy: DropStudioV5Clip = {
+    ...found.clip,
+    id: makeId("clip"),
+    name: found.clip.name ? `${found.clip.name} copy` : "Copy",
+    offsetMs: clipEndMs(found.clip),
+  };
+  const clips = [...found.track.clips];
+  clips.splice(found.index + 1, 0, copy);
+  if (found.track.kind === "video") return replaceTrack(session, packTrackClips({ ...found.track, clips }));
+  return replaceTrack(session, { ...found.track, clips });
+}
+
+export function setClipSpeed(
+  session: DropStudioV5Session,
+  clipId: string,
+  speed: number
+): DropStudioV5Session {
+  if (!(V5_SPEEDS as readonly number[]).includes(speed)) return session;
+  const found = findClip(session, clipId);
+  if (!found || found.track.kind === "art" || found.track.kind === "effect") return session;
+  const clips = found.track.clips.map((clip) => (clip.id === clipId ? { ...clip, speed } : clip));
+  const nextTrack =
+    found.track.kind === "video"
+      ? packTrackClips({ ...found.track, clips })
+      : { ...found.track, clips };
+  return replaceTrack(session, nextTrack);
+}
+
+export function setClipFade(
+  session: DropStudioV5Session,
+  clipId: string,
+  fadeInMs: number,
+  fadeOutMs: number
+): DropStudioV5Session {
+  const found = findClip(session, clipId);
+  if (!found || (found.track.kind !== "audio" && found.track.kind !== "video")) return session;
+  const clips = found.track.clips.map((clip) =>
+    clip.id === clipId
+      ? {
+          ...clip,
+          fadeInMs: clamp(fadeInMs, 0, 4000),
+          fadeOutMs: clamp(fadeOutMs, 0, 4000),
+        }
+      : clip
+  );
+  return replaceTrack(session, { ...found.track, clips });
+}
+
+export function setClipGrade(
+  session: DropStudioV5Session,
+  clipId: string,
+  grade?: DropStudioV5Grade | null
+): DropStudioV5Session {
+  const found = findClip(session, clipId);
+  if (!found || found.track.kind === "art" || found.track.kind === "effect") return session;
+  const next = normalizeGrade(grade);
+  const clips = found.track.clips.map((clip) =>
+    clip.id === clipId ? { ...clip, grade: next } : clip
+  );
+  return replaceTrack(session, { ...found.track, clips });
+}
+
+export function addEffectClip(
+  session: DropStudioV5Session,
+  motion: DropStudioV5Motion,
+  offsetMs: number,
+  durationMs = 2000
+): DropStudioV5Session {
+  if (!V5_MOTIONS.includes(motion)) return session;
+  const next = ensureEffectTrack(session);
+  const track = effectTrack(next);
+  if (!track || track.clips.length >= MAX_V5_EFFECT_CLIPS) return next;
+  const clip: DropStudioV5Clip = {
+    id: makeId("fx"),
+    name: motion,
+    mediaKey: `fx:${motion}`,
+    kind: "image",
+    offsetMs: Math.max(0, offsetMs),
+    trimInMs: 0,
+    trimOutMs: 0,
+    sourceDurationMs: Math.max(240, durationMs),
+    volume: 1,
+  };
+  return replaceTrack(next, { ...track, clips: [...track.clips, clip] });
+}
+
+export function effectMotion(clip: DropStudioV5Clip): DropStudioV5Motion | null {
+  if (!clip.mediaKey.startsWith("fx:")) return null;
+  const name = clip.mediaKey.slice(3);
+  return V5_MOTIONS.includes(name as DropStudioV5Motion) ? (name as DropStudioV5Motion) : null;
+}
+
+export function effectsAtTime(session: DropStudioV5Session, timeMs: number): DropStudioV5Clip[] {
+  const track = effectTrack(session);
+  if (!track) return [];
+  return track.clips.filter(
+    (clip) => !clip.hidden && effectMotion(clip) && timeMs >= clip.offsetMs && timeMs < clipEndMs(clip)
+  );
 }
 
 export function setClipHidden(
@@ -761,9 +916,21 @@ export function parseDropStudioV5Snapshot(raw: unknown): DropStudioV5Session | n
           if (!entry || typeof entry !== "object") return null;
           const track = entry as Record<string, unknown>;
           const kind: DropStudioV5TrackKind =
-            track.kind === "audio" ? "audio" : track.kind === "art" ? "art" : "video";
+            track.kind === "audio"
+              ? "audio"
+              : track.kind === "art"
+                ? "art"
+                : track.kind === "effect"
+                  ? "effect"
+                  : "video";
           const clipCap =
-            kind === "audio" ? MAX_V5_AUDIO_CLIPS : kind === "art" ? MAX_V5_ART_CLIPS : MAX_V5_VIDEO_CLIPS;
+            kind === "audio"
+              ? MAX_V5_AUDIO_CLIPS
+              : kind === "art"
+                ? MAX_V5_ART_CLIPS
+                : kind === "effect"
+                  ? MAX_V5_EFFECT_CLIPS
+                  : MAX_V5_VIDEO_CLIPS;
           const clips: DropStudioV5Clip[] = [];
           if (Array.isArray(track.clips)) {
             for (const [clipIndex, clipEntry] of track.clips.slice(0, clipCap).entries()) {
@@ -806,6 +973,15 @@ export function parseDropStudioV5Snapshot(raw: unknown): DropStudioV5Session | n
               if (clip.hidden) parsedClip.hidden = true;
               const placement = normalizeV5Crop(clip.placement);
               if (placement) parsedClip.placement = placement;
+              if ((V5_SPEEDS as readonly number[]).includes(Number(clip.speed))) {
+                parsedClip.speed = Number(clip.speed);
+              }
+              const fadeIn = Math.max(0, Number(clip.fadeInMs) || 0);
+              const fadeOut = Math.max(0, Number(clip.fadeOutMs) || 0);
+              if (fadeIn > 0) parsedClip.fadeInMs = Math.min(4000, fadeIn);
+              if (fadeOut > 0) parsedClip.fadeOutMs = Math.min(4000, fadeOut);
+              const grade = normalizeGrade(clip.grade);
+              if (grade) parsedClip.grade = grade;
               clips.push(parsedClip);
             }
           }
@@ -822,7 +998,9 @@ export function parseDropStudioV5Snapshot(raw: unknown): DropStudioV5Session | n
                   ? "Audio"
                   : kind === "art"
                     ? "Art"
-                    : "Video",
+                    : kind === "effect"
+                      ? "Effect"
+                      : "Video",
             clips,
             muted: Boolean(track.muted),
             volume: clamp(Number(track.volume ?? 1), 0, 1),
@@ -834,6 +1012,9 @@ export function parseDropStudioV5Snapshot(raw: unknown): DropStudioV5Session | n
   if (!tracks.length) return null;
   if (!tracks.some((track) => track.kind === "art") && tracks.length < MAX_V5_TRACKS) {
     tracks.push(emptyArtTrack());
+  }
+  if (!tracks.some((track) => track.kind === "effect") && tracks.length < MAX_V5_TRACKS) {
+    tracks.push(emptyEffectTrack());
   }
   return {
     id: source.id,
