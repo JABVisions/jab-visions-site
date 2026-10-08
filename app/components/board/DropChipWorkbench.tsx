@@ -178,7 +178,7 @@ export default function DropChipWorkbench({
             <DropChipMonitor
               overlay={
                 showDock ? (
-                  <div className={styles.chipDock}>
+                  <div className={styles.chipDock} data-chip-dock>
                     {onToggleFrame ? (
                       <button
                         type="button"

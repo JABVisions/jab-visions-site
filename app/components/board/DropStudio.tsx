@@ -110,6 +110,7 @@ function StudioPreviewVideo({
   onClipBoundary,
   onPlayingChange,
   playbackRate = 1,
+  controls = true,
 }: {
   src: string;
   contentType?: string;
@@ -123,6 +124,7 @@ function StudioPreviewVideo({
   onClipBoundary?: () => boolean;
   onPlayingChange?: (playing: boolean) => void;
   playbackRate?: number;
+  controls?: boolean;
 }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const [playing, setPlaying] = useState(false);
@@ -225,6 +227,7 @@ function StudioPreviewVideo({
         videoRef={videoRef}
         src={src}
         style={style}
+        controls={controls}
         preload="auto"
         onPlay={() => markPlaying(true)}
         onPause={() => markPlaying(false)}
@@ -538,6 +541,7 @@ function DropStudio({
               onDuration={timelineOn ? v5.applyDuration : undefined}
               onTimeUpdate={timelineOn ? v5.syncPlayheadFromVideo : undefined}
               playbackRate={timelineOn ? v5.previewSpeed : 1}
+              controls={!timelineOn}
               onPlayingChange={
                 timelineOn
                   ? (playing) => {
