@@ -61,6 +61,7 @@ import type { BoardUploadProgress, BoardUploadProgressHandler } from "@/lib/boar
 import { preparingUploadProgress, studioVisibleUploadProgress } from "@/lib/board/uploadProgress";
 import { guessUploadBytes, isBoardStorageLimitMessage } from "@/lib/board/boardMediaUpload";
 import { saveDropDraft, draftToFile, ensureVoiceStudioDraftCard, type DropDraft } from "@/lib/board/dropDrafts";
+import { readDropStudioV5Flag } from "@/lib/board/dropStudioV5";
 import DropDraftsDrawer from "./DropDraftsDrawer";
 import BoardClientErrorBoundary from "./BoardClientErrorBoundary";
 import VocalVisualizer from "./VocalVisualizer";
@@ -562,6 +563,8 @@ export default function DropStudioStage({
   const [saveNote, setSaveNote] = useState("");
   const saveNoteTimerRef = useRef<number | null>(null);
   const [draftsOpen, setDraftsOpen] = useState(false);
+  const [studioV5, setStudioV5] = useState(true);
+  const [studioDraftId, setStudioDraftId] = useState("");
   const [isDropbookMode, setIsDropbookMode] = useState(false);
   const [dropbookCreating, setDropbookCreating] = useState(false);
   const [dropbookIntroPhase, setDropbookIntroPhase] = useState<"splash" | "workspace" | null>(
@@ -1746,6 +1749,18 @@ export default function DropStudioStage({
       delete document.body.dataset.dropStudioArt;
     };
   }, [open, mode]);
+
+  useEffect(() => {
+    setStudioV5(readDropStudioV5Flag(window.location.search));
+  }, []);
+
+  useEffect(() => {
+    if (!open || phase !== "edit") return;
+    if (!draftIdRef.current) {
+      draftIdRef.current = `draft_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
+    }
+    setStudioDraftId(draftIdRef.current);
+  }, [open, phase, mediaUrl]);
 
   useEffect(() => {
     if (!open || mode !== "art") return;
@@ -4026,7 +4041,12 @@ export default function DropStudioStage({
                         onChange={handleStudioChange}
                         hideHeader
                         operatingTable
-                        enableArtTools={mode === "art"}
+                        enableArtTools={
+                          mode === "art" ||
+                          (studioV5 && (mode === "photo" || mode === "video"))
+                        }
+                        studioV5={studioV5}
+                        studioDraftId={studioDraftId}
                         onMediaError={handleMediaPreviewError}
                       />
                       {liveUploadProgress && mediaKind === "video" ? (

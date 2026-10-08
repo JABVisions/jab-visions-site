@@ -41,6 +41,7 @@ export default function DropStudioArtPalette({
   const [wheelHue, setWheelHue] = useState(318);
   const [wheelSat, setWheelSat] = useState(100);
   const [brushMode, setBrushMode] = useState<ArtBrushMode>("paint");
+  const [drawArmed, setDrawArmed] = useState(false);
 
   useEffect(() => setPortalReady(true), []);
 
@@ -122,6 +123,7 @@ export default function DropStudioArtPalette({
   }
 
   function startDrawing(event: React.PointerEvent<HTMLCanvasElement>) {
+    if (!drawArmed) return;
     const context = contextRef.current;
     if (!context) return;
     event.preventDefault();
@@ -203,8 +205,9 @@ export default function DropStudioArtPalette({
   const canvas = (
     <canvas
       ref={canvasRef}
-      className={styles.artCanvasLayer}
+      className={`${styles.artCanvasLayer} ${drawArmed ? styles.artCanvasLayerArmed : ""}`}
       aria-label="Draw on this Drop"
+      aria-hidden={!drawArmed}
       onPointerDown={startDrawing}
       onPointerMove={moveDrawing}
       onPointerUp={stopDrawing}
@@ -217,7 +220,17 @@ export default function DropStudioArtPalette({
     <>
       {portalReady && hostRef.current ? createPortal(canvas, hostRef.current) : null}
       <div className={styles.inlineArtPalette}>
-        <div className={styles.inlineArtHeading}>Art Palette</div>
+        <div className={styles.inlineArtHeadingRow}>
+          <div className={styles.inlineArtHeading}>Art Palette</div>
+          <button
+            type="button"
+            className={styles.artDrawArm}
+            aria-pressed={drawArmed}
+            onClick={() => setDrawArmed((armed) => !armed)}
+          >
+            {drawArmed ? "Drawing on" : "Draw"}
+          </button>
+        </div>
         <ArtPaletteTools
           wheelRef={wheelRef}
           color={color}
@@ -233,10 +246,13 @@ export default function DropStudioArtPalette({
           onWheelPointerMove={(x, y) => wheelDraggingRef.current && pickFromWheel(x, y)}
           onWheelDragStart={() => { wheelDraggingRef.current = true; }}
           onWheelDragEnd={() => { wheelDraggingRef.current = false; }}
-          onColorPick={(next) => { setBrushMode("paint"); setColor(next); }}
+          onColorPick={(next) => { setBrushMode("paint"); setColor(next); setDrawArmed(true); }}
           onLightChange={(next) => { setLight(next); setColor(hslToHex(wheelHue, wheelSat, next)); }}
           onSizeChange={setSize}
-          onBrushModeChange={setBrushMode}
+          onBrushModeChange={(next) => {
+            setBrushMode(next);
+            setDrawArmed(true);
+          }}
           onPaperToggle={() => {}}
           onUndo={() => restore(undoRef.current, redoRef.current)}
           onRedo={() => restore(redoRef.current, undoRef.current)}

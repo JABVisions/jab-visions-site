@@ -17,7 +17,10 @@ import DropChipWorkbench from "./DropChipWorkbench";
 import DropStudioArtPalette from "./DropStudioArtPalette";
 import DropStudioOverlay from "./DropStudioOverlay";
 import DropStudioPaletteDeck, { type ObjectTool } from "./DropStudioPaletteDeck";
+import DropStudioV5Timeline from "./DropStudioV5Timeline";
 import BoardPlayableVideo from "./BoardPlayableVideo";
+import { useDropStudioV5Runtime } from "./useDropStudioV5Runtime";
+import { aspectToMediaFrame } from "@/lib/board/dropStudioV5";
 import {
   STICKER_PACKS,
   stickerTypeForPack,
@@ -92,11 +95,21 @@ function StudioPreviewVideo({
   contentType,
   style,
   onError,
+  mediaTimeSeconds,
+  scrubbing = false,
+  onDuration,
+  onTimeUpdate,
+  onPlayingChange,
 }: {
   src: string;
   contentType?: string;
   style?: React.CSSProperties;
   onError?: () => void;
+  mediaTimeSeconds?: number;
+  scrubbing?: boolean;
+  onDuration?: (seconds: number) => void;
+  onTimeUpdate?: (seconds: number) => void;
+  onPlayingChange?: (playing: boolean) => void;
 }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const [playing, setPlaying] = useState(false);
@@ -107,15 +120,44 @@ function StudioPreviewVideo({
     shownFrameRef.current = false;
   }, [src, contentType]);
 
+  useEffect(() => {
+    const el = videoRef.current;
+    if (!el || mediaTimeSeconds == null) return;
+    if (!scrubbing && shownFrameRef.current) return;
+    try {
+      if (Math.abs(el.currentTime - mediaTimeSeconds) > 0.12) {
+        el.currentTime = mediaTimeSeconds;
+      }
+    } catch {
+      // Some blobs reject a seek until more data arrives.
+    }
+  }, [src, mediaTimeSeconds, scrubbing]);
+
+  useEffect(() => {
+    const el = videoRef.current;
+    if (!el) return;
+    const onMeta = () => {
+      if (Number.isFinite(el.duration) && el.duration > 0) onDuration?.(el.duration);
+    };
+    const onTick = () => onTimeUpdate?.(el.currentTime);
+    el.addEventListener("loadedmetadata", onMeta);
+    el.addEventListener("timeupdate", onTick);
+    return () => {
+      el.removeEventListener("loadedmetadata", onMeta);
+      el.removeEventListener("timeupdate", onTick);
+    };
+  }, [src, onDuration, onTimeUpdate]);
+
   function showFirstFrame() {
     const el = videoRef.current;
     if (!el || shownFrameRef.current || !el.paused || el.currentTime > 0) return;
     shownFrameRef.current = true;
     try {
-      el.currentTime = 0.001;
+      el.currentTime = mediaTimeSeconds && mediaTimeSeconds > 0 ? mediaTimeSeconds : 0.001;
     } catch {
       // Some blobs reject a seek until more data arrives.
     }
+    if (Number.isFinite(el.duration) && el.duration > 0) onDuration?.(el.duration);
   }
 
   async function togglePlay(event: React.MouseEvent) {
@@ -136,6 +178,11 @@ function StudioPreviewVideo({
     }
   }
 
+  function markPlaying(next: boolean) {
+    setPlaying(next);
+    onPlayingChange?.(next);
+  }
+
   return (
     <>
       <BoardPlayableVideo
@@ -143,9 +190,9 @@ function StudioPreviewVideo({
         src={src}
         style={style}
         preload="auto"
-        onPlay={() => setPlaying(true)}
-        onPause={() => setPlaying(false)}
-        onEnded={() => setPlaying(false)}
+        onPlay={() => markPlaying(true)}
+        onPause={() => markPlaying(false)}
+        onEnded={() => markPlaying(false)}
         onLoadedData={showFirstFrame}
         onPointerDown={(event) => event.stopPropagation()}
         onError={onError}
@@ -186,6 +233,8 @@ function DropStudio({
   enableArtTools = false,
   artTools,
   onMediaError,
+  studioV5 = false,
+  studioDraftId,
 }: {
   mediaUrl: string;
   mediaKind: "image" | "video";
@@ -196,13 +245,17 @@ function DropStudio({
   hideHeader?: boolean;
   /** Uniform 4:5 monitor + Palette overlay (Drop Studio stage). */
   operatingTable?: boolean;
-  /** Brush / Art Palette overlays — only when the Art mode button is on. */
+  /** Brush / Art Palette overlays — Vision, Video, and Art when V5 is on. */
   enableArtTools?: boolean;
   /** Art brush tools — rendered below object tool panels in the Palette drawer. */
   artTools?: React.ReactNode;
   /** Rebuild preview URL if a blob fails to paint (e.g. revoked object URL). */
   onMediaError?: () => void;
+  /** Incremental V5 timeline. Off restores V4 layout and behavior. */
+  studioV5?: boolean;
+  studioDraftId?: string;
 }) {
+  const audioRef = useRef<HTMLAudioElement | null>(null);
   const previewRef = useRef<HTMLDivElement | null>(null);
   const [tool, setTool] = useState<Tool>("text");
   const [text, setText] = useState("");
@@ -212,6 +265,32 @@ function DropStudio({
   } | null>(null);
 
   const normalized = compactDropCustomizations(value) ?? {};
+  const timelineOn = Boolean(studioV5 && mediaKind === "video");
+  const v5 = useDropStudioV5Runtime({
+    enabled: timelineOn,
+    mediaUrl,
+    mediaKind,
+    draftId: studioDraftId,
+    filter: normalized.effects?.filter,
+    overlay: normalized.effects?.overlay,
+  });
+
+  useEffect(() => {
+    if (!timelineOn) return;
+    const el = audioRef.current;
+    if (!el || !v5.audioPreviewUrl) {
+      el?.pause();
+      return;
+    }
+    el.volume = Math.max(0, Math.min(1, v5.audioVolume));
+    if (v5.scrubbing) {
+      try {
+        el.currentTime = v5.audioPreviewTimeSeconds;
+      } catch {
+        // Metadata may not be ready on a freshly imported take.
+      }
+    }
+  }, [timelineOn, v5.audioPreviewTimeSeconds, v5.audioPreviewUrl, v5.audioVolume, v5.scrubbing]);
 
   function update(next: DropCustomization) {
     onChange(compactDropCustomizations(next) ?? {});
@@ -258,6 +337,12 @@ function DropStudio({
       ...normalized,
       effects: hasStudioEffects(nextEffects) ? nextEffects : undefined,
     });
+    if (timelineOn) {
+      v5.applyFilterToClip(
+        kind === "filter" ? selected : v5.activeFilter,
+        kind === "overlay" ? selected : v5.activeOverlay
+      );
+    }
   }
 
   function setMediaFrame(frame: DropMediaFrame) {
@@ -327,17 +412,25 @@ function DropStudio({
         <div className={styles.eyebrow}>Drop Studio</div>
         <div className={styles.title}>Customize this media drop.</div>
       </div>
-      <span className={styles.version}>Vision Tools</span>
+      <span className={styles.version}>{studioV5 ? "Studio V5" : "Vision Tools"}</span>
     </div>
   );
+
+  const previewFilter = timelineOn ? v5.activeFilter : normalized.effects?.filter;
+  const previewOverlay = timelineOn ? v5.activeOverlay : normalized.effects?.overlay;
+  const previewSrc = timelineOn ? v5.previewUrl || mediaUrl : mediaUrl;
+  const previewMediaStyle = {
+    ...mediaRotationStyle,
+    ...(timelineOn && v5.previewClipPath ? { clipPath: v5.previewClipPath } : null),
+  };
 
   const previewEl = (
     <div
       ref={previewRef}
       className={`${styles.preview} ${operatingTable ? styles.previewInFrame : ""} ${
-        normalized.effects?.filter ? styles[`filter_${normalized.effects.filter}`] ?? "" : ""
+        previewFilter ? styles[`filter_${previewFilter}`] ?? "" : ""
       } ${
-        normalized.effects?.overlay ? styles[`overlay_${normalized.effects.overlay}`] ?? "" : ""
+        previewOverlay ? styles[`overlay_${previewOverlay}`] ?? "" : ""
       }`}
       onPointerMove={moveItem}
       onPointerUp={() => setDragging(null)}
@@ -348,10 +441,26 @@ function DropStudio({
         <div className={styles.mediaLayer}>
           {mediaKind === "video" ? (
             <StudioPreviewVideo
-              src={mediaUrl}
+              src={previewSrc}
               contentType={mediaContentType}
-              style={mediaRotationStyle}
-              onError={() => onMediaError?.()}
+              style={previewMediaStyle}
+              onError={() => {
+                if (!timelineOn || previewSrc === mediaUrl) onMediaError?.();
+              }}
+              mediaTimeSeconds={timelineOn ? v5.previewMediaTimeSeconds : undefined}
+              scrubbing={timelineOn ? v5.scrubbing : false}
+              onDuration={timelineOn ? v5.applyDuration : undefined}
+              onTimeUpdate={timelineOn ? v5.syncPlayheadFromVideo : undefined}
+              onPlayingChange={
+                timelineOn
+                  ? (playing) => {
+                      const el = audioRef.current;
+                      if (!el || !v5.audioPreviewUrl) return;
+                      if (playing) void el.play().catch(() => {});
+                      else el.pause();
+                    }
+                  : undefined
+              }
             />
           ) : (
             <img
@@ -638,13 +747,49 @@ function DropStudio({
   );
 
   if (operatingTable) {
-    return (
+    const workbench = (
       <DropChipWorkbench
         chip={previewEl}
         deck={deckPanelEl}
         mediaFrame={mediaFrame}
         onToggleFrame={toggleMediaFrame}
       />
+    );
+    if (!timelineOn) return workbench;
+    return (
+      <div className={styles.v5Workbench} data-studio-v5="1">
+        <div className={styles.v5MonitorSlot}>{workbench}</div>
+        <DropStudioV5Timeline
+          session={v5.session}
+          selectedClipId={v5.selectedClipId}
+          canUndo={v5.canUndo}
+          canRedo={v5.canRedo}
+          extraClipCount={v5.extraClipCount}
+          onSelectClip={v5.setSelectedClipId}
+          onScrub={v5.scrub}
+          onImportVideo={(file) => void v5.importVideo(file)}
+          onImportAudio={(file) => void v5.importAudio(file)}
+          onSplit={v5.split}
+          onReorder={v5.reorder}
+          onDelete={v5.remove}
+          onTrim={v5.trim}
+          onUndo={v5.undo}
+          onRedo={v5.redo}
+          onAspect={(aspect) => {
+            v5.setAspect(aspect);
+            setMediaFrame(aspectToMediaFrame(aspect));
+          }}
+          onCropFit={v5.cropFit}
+          onCropFill={v5.cropFill}
+          onCropInset={v5.cropInset}
+        />
+        <audio
+          ref={audioRef}
+          hidden
+          preload="metadata"
+          src={v5.audioPreviewUrl}
+        />
+      </div>
     );
   }
 
