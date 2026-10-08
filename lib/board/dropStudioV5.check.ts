@@ -1,0 +1,321 @@
+import assert from "node:assert/strict";
+import { presetGrade } from "./dropStudioV5Grade";
+import { buildExportPlan, canvasFilterFor, exportNeedsFlatten, exportPixelSize } from "./dropStudioV5Export";
+import {
+  canPersistDropStudioV5Media,
+  dropStudioV5MediaId,
+  DROP_STUDIO_V5_MEDIA_MAX_BYTES,
+} from "./dropStudioV5Media";
+import {
+  aspectToMediaFrame,
+  clipEndMs,
+  clipPlayableMs,
+  createDropStudioV5History,
+  createDropStudioV5Session,
+  cropToClipPath,
+  deleteClip,
+  handoffPlayheadMs,
+  importAudioClip,
+  importVideoClip,
+  insetV5Crop,
+  MAX_V5_VIDEO_CLIPS,
+  mediaKeyFromFile,
+  monitorAspectRatio,
+  parseDropStudioV5Snapshot,
+  previewAudioAtPlayhead,
+  previewVideoAtPlayhead,
+  pushV5History,
+  readDropStudioV5Flag,
+  reorderClip,
+  sessionDurationMs,
+  artClipsAtTime,
+  bindArtOverlay,
+  duplicateArtClip,
+  scaleArtPlacement,
+  setArtClipBounds,
+  setClipCrop,
+  setClipDuration,
+  setClipFilter,
+  addEffectClip,
+  clipSpeed,
+  duplicateClip,
+  effectsAtTime,
+  fadeGainAt,
+  setClipFade,
+  setClipGrade,
+  setClipSpeed,
+  setClipHidden,
+  setPlayhead,
+  setSessionAspect,
+  snapshotDropStudioV5,
+  splitClipAtPlayhead,
+  trimClip,
+  undoV5,
+} from "./dropStudioV5";
+
+assert.equal(readDropStudioV5Flag("studio=v4"), false, "query v4 disables the flag");
+assert.equal(readDropStudioV5Flag("?studio=v5"), true, "query v5 enables the flag");
+assert.equal(readDropStudioV5Flag(""), true, "V5 is on by default");
+assert.equal(readDropStudioV5Flag("foo=1"), true, "unrelated query keeps the default");
+
+const file = { name: "tape.mp4", size: 12, lastModified: 99 };
+assert.equal(mediaKeyFromFile(file), "tape.mp4:12:99");
+
+let session = createDropStudioV5Session("sess-1");
+assert.equal(session.version, 5);
+assert.equal(session.tracks.length, 4);
+assert.equal(session.tracks[0].kind, "video");
+assert.equal(session.tracks[1].kind, "audio");
+assert.equal(session.tracks[2].kind, "art");
+assert.equal(session.tracks[3].kind, "effect");
+
+session = importVideoClip(session, {
+  mediaKey: "primary",
+  name: "Clip 1",
+  kind: "video",
+  sourceDurationMs: 4000,
+});
+session = setClipDuration(session, session.tracks[0].clips[0].id, 4000);
+assert.equal(clipPlayableMs(session.tracks[0].clips[0]), 4000);
+assert.equal(sessionDurationMs(session), 4000);
+
+session = importVideoClip(session, {
+  mediaKey: "b-roll",
+  name: "Clip 2",
+  kind: "video",
+  sourceDurationMs: 2000,
+});
+assert.equal(session.tracks[0].clips.length, 2);
+assert.equal(session.tracks[0].clips[1].offsetMs, 4000);
+assert.equal(sessionDurationMs(session), 6000);
+
+const firstId = session.tracks[0].clips[0].id;
+session = trimClip(session, firstId, 500, 3000);
+assert.equal(clipPlayableMs(session.tracks[0].clips[0]), 2500);
+
+session = setPlayhead(session, 1200);
+session = splitClipAtPlayhead(session, firstId);
+assert.equal(session.tracks[0].clips.length, 3, "split adds a right-hand clip");
+assert.equal(session.tracks[0].clips[0].trimInMs, 500);
+assert.ok(session.tracks[0].clips[1].trimInMs > 500, "right clip starts after the split");
+
+const beforeReorder = session.tracks[0].clips.map((clip) => clip.id);
+session = reorderClip(session, session.tracks[0].clips[0].id, 1);
+const afterReorder = session.tracks[0].clips.map((clip) => clip.id);
+assert.notDeepEqual(beforeReorder, afterReorder, "reorder swaps packed order");
+assert.equal(session.tracks[0].clips[0].id, beforeReorder[1], "clip moves right by one slot");
+assert.equal(session.tracks[0].clips[0].offsetMs, 0, "packed clips start at 0");
+
+session = setSessionAspect(session, "story");
+assert.equal(session.aspect, "story");
+assert.equal(aspectToMediaFrame("story"), "portrait");
+assert.equal(aspectToMediaFrame("landscape"), "landscape");
+
+const clipId = session.tracks[0].clips[0].id;
+session = setClipCrop(session, clipId, insetV5Crop(0.1));
+assert.equal(session.tracks[0].clips[0].crop?.w, 0.8);
+assert.equal(cropToClipPath(session.tracks[0].clips[0].crop), "inset(10% 10% 10% 10%)");
+assert.equal(cropToClipPath(undefined), undefined);
+
+session = setClipFilter(session, clipId, "night-glass", "film-grain");
+assert.equal(session.tracks[0].clips[0].filter, "night-glass");
+assert.equal(session.tracks[0].clips[0].overlay, "film-grain");
+
+session = importAudioClip(session, {
+  mediaKey: "voice",
+  name: "VO",
+  kind: "audio",
+  sourceDurationMs: 1500,
+});
+assert.equal(session.tracks[1].clips.length, 1);
+
+session = setPlayhead(session, 200);
+const videoPreview = previewVideoAtPlayhead(session);
+assert.ok(videoPreview, "playhead should resolve one video clip");
+assert.equal(
+  session.tracks[0].clips.filter((clip) => clip.mediaKey === videoPreview?.clip.mediaKey).length >= 1,
+  true
+);
+const audioPreview = previewAudioAtPlayhead(session);
+assert.ok(audioPreview, "audio clip at 200ms should be active");
+assert.equal(audioPreview?.clip.mediaKey, "voice");
+
+const snapshot = snapshotDropStudioV5(session);
+assert.equal(JSON.stringify(snapshot).includes("[object File]"), false);
+assert.equal("file" in snapshot.tracks[0].clips[0], false);
+const parsed = parseDropStudioV5Snapshot(snapshot);
+assert.ok(parsed);
+assert.equal(parsed?.id, "sess-1");
+assert.equal(parsed?.tracks[0].clips.length, session.tracks[0].clips.length);
+
+let history = createDropStudioV5History();
+history = pushV5History(history, session);
+const deleted = deleteClip(session, session.tracks[1].clips[0].id);
+assert.equal(deleted.tracks[1].clips.length, 0);
+const undone = undoV5(history, deleted);
+assert.equal(undone.session.tracks[1].clips.length, 1, "undo restores the audio clip");
+
+const atStart = splitClipAtPlayhead(setPlayhead(session, 0), session.tracks[0].clips[0].id);
+assert.equal(
+  atStart.tracks[0].clips.length,
+  session.tracks[0].clips.length,
+  "split at the clip edge is a no-op"
+);
+
+let capped = createDropStudioV5Session("cap");
+for (let i = 0; i < MAX_V5_VIDEO_CLIPS + 3; i += 1) {
+  capped = importVideoClip(capped, {
+    mediaKey: `clip-${i}`,
+    kind: "video",
+    sourceDurationMs: 1000,
+  });
+}
+assert.equal(capped.tracks[0].clips.length, MAX_V5_VIDEO_CLIPS, "import respects the clip cap");
+
+assert.equal(parseDropStudioV5Snapshot({ version: 4, id: "nope" }), null);
+assert.equal(parseDropStudioV5Snapshot(null), null);
+
+const endedSession = setPlayhead(capped, sessionDurationMs(capped));
+const endedPreview = previewVideoAtPlayhead(endedSession);
+assert.equal(endedPreview?.ended, true, "the end of the timeline stays on the last clip");
+assert.equal(endedPreview?.clip.mediaKey, `clip-${MAX_V5_VIDEO_CLIPS - 1}`);
+
+const handoffClip = capped.tracks[0].clips[0];
+assert.equal(handoffPlayheadMs(handoffClip, 200), null, "mid-clip playback does not hand off");
+assert.equal(
+  handoffPlayheadMs({ ...handoffClip, sourceDurationMs: 1000, trimInMs: 0, trimOutMs: 0, offsetMs: 0 }, 980),
+  1000
+);
+
+assert.equal(monitorAspectRatio("story"), 9 / 16);
+assert.equal(monitorAspectRatio("square"), 1);
+assert.equal(monitorAspectRatio("landscape"), 16 / 9);
+
+assert.equal(canPersistDropStudioV5Media(1024), true);
+assert.equal(canPersistDropStudioV5Media(DROP_STUDIO_V5_MEDIA_MAX_BYTES + 1), false);
+assert.equal(dropStudioV5MediaId("draft", "tape.mp4:1:2"), "draft::tape.mp4:1:2");
+
+const plain = importVideoClip(createDropStudioV5Session("plain"), {
+  mediaKey: "primary",
+  kind: "video",
+  sourceDurationMs: 2000,
+});
+assert.equal(exportNeedsFlatten(plain), false, "an untouched tape stays on the V4 publish path");
+const trimmedExport = trimClip(plain, plain.tracks[0].clips[0].id, 200, 1500);
+assert.equal(exportNeedsFlatten(trimmedExport), true);
+const story = setSessionAspect(plain, "story");
+assert.equal(exportNeedsFlatten(story), true);
+const withAudio = importAudioClip(plain, {
+  mediaKey: "bed",
+  kind: "audio",
+  sourceDurationMs: 2000,
+});
+assert.equal(exportNeedsFlatten(withAudio), true);
+const plan = buildExportPlan(trimmedExport);
+assert.equal(plan.video.length, 1);
+assert.equal(plan.video[0].trimInMs, 200);
+assert.equal(plan.video[0].playableMs, 1300);
+assert.equal(exportPixelSize("story").width, 540);
+assert.equal(exportPixelSize("story").height, 960);
+assert.equal(canvasFilterFor("clean-enhance").includes("contrast"), true);
+assert.equal(canvasFilterFor(null), "none");
+assert.equal(plan.art.length, 0);
+
+const legacy = parseDropStudioV5Snapshot({
+  version: 5,
+  id: "old",
+  aspect: "portrait",
+  playheadMs: 0,
+  tracks: [
+    {
+      id: "video-a",
+      kind: "video",
+      label: "Video",
+      volume: 1,
+      clips: [
+        {
+          id: "c1",
+          mediaKey: "primary",
+          kind: "video",
+          offsetMs: 0,
+          trimInMs: 0,
+          trimOutMs: 0,
+          sourceDurationMs: 1000,
+          volume: 1,
+        },
+      ],
+    },
+    { id: "audio-a", kind: "audio", label: "Audio", clips: [], volume: 1 },
+  ],
+});
+assert.equal(legacy?.tracks.some((track) => track.kind === "art"), true);
+assert.equal(legacy?.tracks[0].clips[0].mediaKey, "primary");
+
+let artSession = importVideoClip(createDropStudioV5Session("art"), {
+  mediaKey: "primary",
+  kind: "video",
+  sourceDurationMs: 8000,
+});
+artSession = setPlayhead(artSession, 2000);
+const firstArt = bindArtOverlay(artSession, "art-1", null);
+assert.equal(firstArt.created, true);
+assert.equal(firstArt.clipId.length > 0, true);
+const artClip = firstArt.session.tracks.find((track) => track.kind === "art")?.clips[0];
+assert.equal(artClip?.offsetMs, 2000);
+assert.equal(artClip ? clipEndMs(artClip) : 0, 8000);
+assert.equal(artClipsAtTime(firstArt.session, 1000).length, 0);
+assert.equal(artClipsAtTime(firstArt.session, 2000).length, 1);
+
+const secondArt = bindArtOverlay(setPlayhead(firstArt.session, 2500), "art-2", firstArt.clipId);
+assert.equal(secondArt.created, false);
+assert.equal(secondArt.mediaKey, "art-1");
+assert.equal(secondArt.session.tracks.find((track) => track.kind === "art")?.clips.length, 1);
+
+const hiddenArt = setClipHidden(secondArt.session, secondArt.clipId, true);
+assert.equal(artClipsAtTime(hiddenArt, 2500).length, 0);
+const shownArt = setClipHidden(hiddenArt, secondArt.clipId, false);
+const duplicated = duplicateArtClip(shownArt, secondArt.clipId);
+const artClips = duplicated.tracks.find((track) => track.kind === "art")?.clips ?? [];
+assert.equal(artClips.length, 2);
+assert.equal(artClips[1].mediaKey, artClips[0].mediaKey);
+assert.equal(artClips[1].offsetMs, artClips[0].offsetMs);
+const raised = reorderClip(duplicated, artClips[0].id, 1);
+const raisedClips = raised.tracks.find((track) => track.kind === "art")?.clips ?? [];
+assert.equal(raisedClips[1].id, artClips[0].id);
+assert.equal(raisedClips[0].offsetMs, 2000, "art reorder keeps timeline positions");
+const bounded = setArtClipBounds(raised, raisedClips[0].id, 1000, 3000);
+const boundedClip = bounded.tracks.find((track) => track.kind === "art")?.clips[0];
+assert.equal(boundedClip?.offsetMs, 1000);
+assert.equal(boundedClip ? clipEndMs(boundedClip) : 0, 3000);
+const placed = scaleArtPlacement(bounded, boundedClip?.id || "", 0.5);
+const placedClip = placed.tracks.find((track) => track.kind === "art")?.clips[0];
+assert.equal(placedClip?.placement?.w, 0.5);
+assert.equal(placedClip?.placement?.x, 0.25);
+assert.equal(exportNeedsFlatten(placed), true);
+const artPlan = buildExportPlan(placed);
+assert.equal(artPlan.art.length, 2);
+assert.equal(artPlan.art[0].offsetMs, 1000);
+assert.equal(artPlan.art[0].endMs, 3000);
+assert.equal(artPlan.art[0].placement?.w, 0.5);
+const removedArt = deleteClip(placed, placedClip?.id || "");
+assert.equal(removedArt.tracks.find((track) => track.kind === "art")?.clips[0].offsetMs, 2000);
+
+const sped = setClipSpeed(plain, plain.tracks[0].clips[0].id, 2);
+assert.equal(clipSpeed(sped.tracks[0].clips[0]), 2);
+assert.equal(clipPlayableMs(sped.tracks[0].clips[0]), 1000);
+assert.equal(exportNeedsFlatten(sped), true);
+const copied = duplicateClip(plain, plain.tracks[0].clips[0].id);
+assert.equal(copied.tracks[0].clips.length, 2);
+assert.equal(copied.tracks[0].clips[1].mediaKey, "primary");
+const faded = setClipFade(withAudio, withAudio.tracks[1].clips[0].id, 400, 200);
+assert.equal(fadeGainAt(faded.tracks[1].clips[0], faded.tracks[1].clips[0].offsetMs), 0);
+assert.equal(fadeGainAt(faded.tracks[1].clips[0], faded.tracks[1].clips[0].offsetMs + 400) > 0.9, true);
+const graded = setClipGrade(plain, plain.tracks[0].clips[0].id, presetGrade("cool", 1));
+assert.equal(exportNeedsFlatten(graded), true);
+const withLook = addEffectClip(plain, "glow", 100, 800);
+assert.equal(effectsAtTime(withLook, 200).length, 1);
+assert.equal(effectsAtTime(withLook, 2000).length, 0);
+assert.equal(buildExportPlan(withLook).effects[0]?.motion, "glow");
+assert.equal(exportNeedsFlatten(withLook), true);
+
+console.log("drop studio v5 checks passed");

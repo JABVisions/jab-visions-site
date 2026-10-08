@@ -9,6 +9,7 @@ type ArtPaletteToolsProps = {
   wheelRef: RefObject<HTMLDivElement | null>;
   color: string;
   size: number;
+  opacity: number;
   light: number;
   wheelHue: number;
   wheelSat: number;
@@ -23,6 +24,7 @@ type ArtPaletteToolsProps = {
   onColorPick: (color: string) => void;
   onLightChange: (light: number, color: string) => void;
   onSizeChange: (size: number) => void;
+  onOpacityChange: (opacity: number) => void;
   onBrushModeChange: (mode: ArtBrushMode) => void;
   onPaperToggle: () => void;
   onUndo: () => void;
@@ -47,6 +49,7 @@ export default function ArtPaletteTools({
   wheelRef,
   color,
   size,
+  opacity,
   light,
   wheelHue,
   wheelSat,
@@ -61,6 +64,7 @@ export default function ArtPaletteTools({
   onColorPick,
   onLightChange,
   onSizeChange,
+  onOpacityChange,
   onBrushModeChange,
   onPaperToggle,
   onUndo,
@@ -160,6 +164,14 @@ export default function ArtPaletteTools({
                 value={size}
                 onChange={(e) => onSizeChange(Number(e.target.value))}
                 aria-label="Brush size"
+              />
+              <input
+                type="range"
+                min={15}
+                max={100}
+                value={Math.round(opacity * 100)}
+                onChange={(e) => onOpacityChange(Number(e.target.value) / 100)}
+                aria-label="Brush opacity"
               />
             </div>
             <button

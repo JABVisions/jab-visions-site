@@ -61,6 +61,8 @@ import type { BoardUploadProgress, BoardUploadProgressHandler } from "@/lib/boar
 import { preparingUploadProgress, studioVisibleUploadProgress } from "@/lib/board/uploadProgress";
 import { guessUploadBytes, isBoardStorageLimitMessage } from "@/lib/board/boardMediaUpload";
 import { saveDropDraft, draftToFile, ensureVoiceStudioDraftCard, type DropDraft } from "@/lib/board/dropDrafts";
+import { readDropStudioV5Flag, type DropStudioV5MediaBag, type DropStudioV5Session } from "@/lib/board/dropStudioV5";
+import { exportDropStudioV5, exportNeedsFlatten } from "@/lib/board/dropStudioV5Export";
 import DropDraftsDrawer from "./DropDraftsDrawer";
 import BoardClientErrorBoundary from "./BoardClientErrorBoundary";
 import VocalVisualizer from "./VocalVisualizer";
@@ -562,6 +564,17 @@ export default function DropStudioStage({
   const [saveNote, setSaveNote] = useState("");
   const saveNoteTimerRef = useRef<number | null>(null);
   const [draftsOpen, setDraftsOpen] = useState(false);
+  const [studioV5, setStudioV5] = useState(true);
+  const [studioDraftId, setStudioDraftId] = useState("");
+  const v5HandleRef = useRef<{ session: DropStudioV5Session; mediaBag: DropStudioV5MediaBag } | null>(
+    null
+  );
+  const rememberV5 = useCallback(
+    (next: { session: DropStudioV5Session; mediaBag: DropStudioV5MediaBag }) => {
+      v5HandleRef.current = next;
+    },
+    []
+  );
   const [isDropbookMode, setIsDropbookMode] = useState(false);
   const [dropbookCreating, setDropbookCreating] = useState(false);
   const [dropbookIntroPhase, setDropbookIntroPhase] = useState<"splash" | "workspace" | null>(
@@ -1360,6 +1373,7 @@ export default function DropStudioStage({
       if (!draftIdRef.current) {
         draftIdRef.current = `draft_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
       }
+      setStudioDraftId(draftIdRef.current);
       if (!quiet) setVoiceAutoSaving(true);
       else if (auto) setVoiceAutoSaving(true);
       let saved = false;
@@ -1746,6 +1760,18 @@ export default function DropStudioStage({
       delete document.body.dataset.dropStudioArt;
     };
   }, [open, mode]);
+
+  useEffect(() => {
+    setStudioV5(readDropStudioV5Flag(window.location.search));
+  }, []);
+
+  useEffect(() => {
+    if (!open || phase !== "edit") return;
+    if (!draftIdRef.current) {
+      draftIdRef.current = `draft_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
+    }
+    setStudioDraftId(draftIdRef.current);
+  }, [open, phase, mediaUrl]);
 
   useEffect(() => {
     if (!open || mode !== "art") return;
@@ -2623,6 +2649,32 @@ export default function DropStudioStage({
       } catch (error) {
         console.error("[DropStudioStage] Art Palette rendering failed", error);
         flashSaveNote("Couldn't render this drawing. Try Apply Art again.");
+        return;
+      }
+    }
+
+    const timeline = v5HandleRef.current;
+    if (
+      studioV5 &&
+      file.type.startsWith("video/") &&
+      timeline &&
+      exportNeedsFlatten(timeline.session)
+    ) {
+      flashSaveNote("Rendering timeline…");
+      try {
+        file = await exportDropStudioV5(timeline.session, timeline.mediaBag, {
+          artOverlayUrl: completionValue.artOverlayUrl,
+        });
+        fileRef.current = file;
+        if (completionValue.artOverlayUrl) {
+          completionValue = { ...completionValue, artOverlayUrl: undefined };
+          setStudioValue(completionValue);
+        }
+        setMediaKind("video");
+        setMediaContentType(file.type);
+      } catch (error) {
+        console.error("[DropStudioStage] timeline render failed", error);
+        flashSaveNote("Couldn't render this timeline. Your draft is still here.");
         return;
       }
     }
@@ -4026,7 +4078,13 @@ export default function DropStudioStage({
                         onChange={handleStudioChange}
                         hideHeader
                         operatingTable
-                        enableArtTools={mode === "art"}
+                        enableArtTools={
+                          mode === "art" ||
+                          (studioV5 && (mode === "photo" || mode === "video"))
+                        }
+                        studioV5={studioV5}
+                        studioDraftId={studioDraftId}
+                        onV5Change={rememberV5}
                         onMediaError={handleMediaPreviewError}
                       />
                       {liveUploadProgress && mediaKind === "video" ? (

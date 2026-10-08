@@ -5,6 +5,7 @@ import {
   useEffect,
   useRef,
   useState,
+  type CSSProperties,
   type PointerEvent,
   type ReactNode,
 } from "react";
@@ -62,6 +63,8 @@ export default function DropChipWorkbench({
   deck,
   mediaFrame = "portrait",
   onToggleFrame,
+  monitorAspect,
+  monitorRatio,
 }: {
   chip: ReactNode;
   deck: ReactNode;
@@ -69,6 +72,9 @@ export default function DropChipWorkbench({
   mediaFrame?: DropMediaFrame;
   /** Portrait ↔ landscape — shown as the rotate dock button above Palette. */
   onToggleFrame?: () => void;
+  /** V5 monitor shape. Omitted on the V4 workbench so the chip still fills the host. */
+  monitorAspect?: string;
+  monitorRatio?: number;
 }) {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [paletteFull, setPaletteFull] = useState(false);
@@ -156,7 +162,19 @@ export default function DropChipWorkbench({
     >
       <div className={styles.chipSlot}>
         <div ref={assemblyRef} className={styles.chipAssembly}>
-          <div className={styles.chipFrame} data-frame={mediaFrame}>
+          <div
+            className={styles.chipFrame}
+            data-frame={mediaFrame}
+            data-monitor-aspect={monitorAspect ? "1" : undefined}
+            style={
+              monitorAspect
+                ? ({
+                    "--monitor-aspect": monitorAspect,
+                    "--monitor-ratio": String(monitorRatio ?? 0.8),
+                  } as CSSProperties)
+                : undefined
+            }
+          >
             <DropChipMonitor
               overlay={
                 showDock ? (

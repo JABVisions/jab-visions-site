@@ -11,6 +11,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import ArtPaletteTools, { type ArtBrushMode } from "./ArtPaletteTools";
+import ArtLayerStrip from "./ArtLayerStrip";
+import { useArtLayerCanvases } from "./useArtLayerCanvases";
 import DropChipWorkbench from "./DropChipWorkbench";
 import DropStudioPaletteDeck, { type ObjectTool } from "./DropStudioPaletteDeck";
 import styles from "./boardArtCanvas.module.css";
@@ -24,6 +26,7 @@ import {
   scheduleArtDraftPersist,
   artDraftObjectUrl,
 } from "@/lib/board/artDraftSession";
+import { ART_BLEND_STRENGTH, grabArtSmudge, stampArtSmudge } from "@/lib/board/artSmudge";
 
 function hslToHex(h: number, s: number, l: number) {
   const sN = s / 100;
@@ -64,6 +67,8 @@ export default function BoardArtCanvas({
   layout?: "side" | "stack";
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const underRef = useRef<HTMLCanvasElement>(null);
+  const overRef = useRef<HTMLCanvasElement>(null);
   const ctxRef = useRef<CanvasRenderingContext2D | null>(null);
   const bgImgRef = useRef<HTMLImageElement>(null);
   const drawingRef = useRef(false);
@@ -84,12 +89,44 @@ export default function BoardArtCanvas({
   const [objectTool, setObjectTool] = useState<ObjectTool>("text");
   const [color, setColor] = useState("#FF4FD8");
   const [size, setSize] = useState(8);
+  const [opacity, setOpacity] = useState(1);
   const [paper, setPaper] = useState(false); // dark by default
   const [brushMode, setBrushMode] = useState<ArtBrushMode>("paint");
   const [light, setLight] = useState(65);
   const [wheelHue, setWheelHue] = useState(318);
   const [wheelSat, setWheelSat] = useState(100);
+  const layers = useArtLayerCanvases(canvasRef, ctxRef);
   const onPhoto = !!backgroundImageUrl || !!backgroundVideoUrl;
+
+  function refreshArtChrome() {
+    const draw = canvasRef.current;
+    const under = underRef.current;
+    const over = overRef.current;
+    if (!draw || !under || !over || draw.width < 1) return;
+    if (under.width !== draw.width || under.height !== draw.height) {
+      under.width = draw.width;
+      under.height = draw.height;
+    }
+    if (over.width !== draw.width || over.height !== draw.height) {
+      over.width = draw.width;
+      over.height = draw.height;
+    }
+    const underCtx = under.getContext("2d");
+    const overCtx = over.getContext("2d");
+    if (underCtx && overCtx) layers.paintLayerChrome(underCtx, overCtx);
+  }
+
+  function persistLayers(nextPaper = paper) {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const out = document.createElement("canvas");
+    out.width = canvas.width;
+    out.height = canvas.height;
+    const ctx = out.getContext("2d");
+    if (!ctx) return;
+    layers.compositeOnto(ctx, out.width, out.height);
+    scheduleArtDraftPersist(out, nextPaper);
+  }
 
   function pickFromWheel(clientX: number, clientY: number, nextLight = light) {
     const el = wheelRef.current;
@@ -151,6 +188,7 @@ export default function BoardArtCanvas({
     // Keep the latest frame; drop pixel-tied undo stacks after a real resize.
     undoRef.current = [];
     redoRef.current = [];
+    refreshArtChrome();
   }
 
   useEffect(() => {
@@ -210,7 +248,14 @@ export default function BoardArtCanvas({
   useEffect(() => {
     const persist = () => {
       const canvas = canvasRef.current;
-      if (canvas) void persistArtDraftNow(canvas, paper);
+      if (!canvas) return;
+      const out = document.createElement("canvas");
+      out.width = canvas.width;
+      out.height = canvas.height;
+      const ctx = out.getContext("2d");
+      if (!ctx) return;
+      layers.compositeOnto(ctx, out.width, out.height);
+      void persistArtDraftNow(out, paper);
     };
     const onHide = () => {
       if (document.visibilityState === "hidden") persist();
@@ -225,6 +270,27 @@ export default function BoardArtCanvas({
       persist();
     };
   }, [paper]);
+
+  useEffect(() => {
+    refreshArtChrome();
+    // Chrome follows the stack. The painter reads refs, so the layer identity is the dependency.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [layers.layers, layers.activeLayerId]);
+
+  useEffect(() => {
+    return () => {
+      undoRef.current.forEach((shot) => {
+        shot.width = 0;
+        shot.height = 0;
+      });
+      redoRef.current.forEach((shot) => {
+        shot.width = 0;
+        shot.height = 0;
+      });
+      undoRef.current = [];
+      redoRef.current = [];
+    };
+  }, [layers.activeLayerId]);
 
   useEffect(() => {
     return () => {
@@ -316,8 +382,6 @@ export default function BoardArtCanvas({
   // (like Procreate). It deposits NO new color and only ever reads/writes the
   // transparent strokes canvas — the photo/paper background sits underneath,
   // untouched (picture/video > brush strokes > blend strokes).
-  const BLEND_STRENGTH = 0.94;
-
   function ensureSmudgeBuffer(diameter: number) {
     let buf = smudgeBufRef.current;
     if (!buf) {
@@ -337,83 +401,36 @@ export default function BoardArtCanvas({
     const bctx = smudgeCtxRef.current;
     const canvas = canvasRef.current;
     if (!bctx || !canvas) return;
-    const sx = cxDev - D / 2;
-    const sy = cyDev - D / 2;
-    bctx.globalCompositeOperation = "source-over";
-    bctx.globalAlpha = 1;
-    bctx.clearRect(0, 0, D, D);
-
-    // Draw-on-photo: the photo is the bottom layer (a separate <img>), so the
-    // smudge samples the VISIBLE composite — photo first, strokes on top — and
-    // then lays that smear onto the strokes layer. This is why blending drags
-    // the actual image, not just painted strokes. The photo itself stays put.
     const img = bgImgRef.current;
-    if (onPhoto && img && img.naturalWidth > 0 && img.naturalHeight > 0) {
-      const W = canvas.width;
-      const H = canvas.height;
-      const iw0 = img.naturalWidth;
-      const ih0 = img.naturalHeight;
-      // Mirror the on-screen object-fit:cover mapping so the sampled region lines
-      // up exactly with what's displayed (studio monitor is cover-filled).
-      const scale = Math.max(W / iw0, H / ih0);
-      const ox = (W - iw0 * scale) / 2;
-      const oy = (H - ih0 * scale) / 2;
-      const srcX = (sx - ox) / scale;
-      const srcY = (sy - oy) / scale;
-      const srcSize = D / scale;
-      try {
-        bctx.drawImage(img, srcX, srcY, srcSize, srcSize, 0, 0, D, D);
-      } catch {}
-    }
-
-    // Strokes on top (clamp the source rect so edge smudges don't throw).
-    const ix = Math.max(0, sx);
-    const iy = Math.max(0, sy);
-    const iw = Math.min(canvas.width, sx + D) - ix;
-    const ih = Math.min(canvas.height, sy + D) - iy;
-    if (iw > 0 && ih > 0) {
-      bctx.drawImage(canvas, ix, iy, iw, ih, ix - sx, iy - sy, iw, ih);
-    }
-    bctx.globalCompositeOperation = "destination-in";
-    const g = bctx.createRadialGradient(D / 2, D / 2, 0, D / 2, D / 2, D / 2);
-    g.addColorStop(0, "rgba(0,0,0,1)");
-    g.addColorStop(0.55, "rgba(0,0,0,0.95)");
-    g.addColorStop(1, "rgba(0,0,0,0)");
-    bctx.fillStyle = g;
-    bctx.fillRect(0, 0, D, D);
-    bctx.globalCompositeOperation = "source-over";
+    grabArtSmudge({
+      buffer: bctx,
+      strokes: canvas,
+      background: img,
+      backgroundWidth: img?.naturalWidth ?? 0,
+      backgroundHeight: img?.naturalHeight ?? 0,
+      sampleBackground: onPhoto,
+      cxDev,
+      cyDev,
+      diameter: D,
+    });
   }
 
-  // Drag the carried paint from (x0,y0) to (x1,y1): stamp it down at each step,
-  // then re-grab the (now blended) result so the color travels and merges.
   function blendSegment(x0: number, y0: number, x1: number, y1: number, strength: number) {
     const ctx = ctxRef.current;
     const buf = smudgeBufRef.current;
     if (!ctx || !buf) return;
-    const dpr = dprRef.current;
-    const D = blendDiamRef.current;
-    if (D <= 0) return;
-    const r = D / 2;
-    // Finer step spacing → more samples per move → a more sensitive, responsive
-    // smear that reacts to small movements.
-    const stepCss = Math.max(1, (D * 0.1) / dpr);
-    const dist = Math.hypot(x1 - x0, y1 - y0);
-    const steps = Math.max(1, Math.round(dist / stepCss));
-    for (let i = 1; i <= steps; i++) {
-      const t = i / steps;
-      const cxDev = (x0 + (x1 - x0) * t) * dpr;
-      const cyDev = (y0 + (y1 - y0) * t) * dpr;
-      // Lay carried paint at the new point (work in raw device pixels).
-      ctx.save();
-      ctx.setTransform(1, 0, 0, 1, 0, 0);
-      ctx.globalCompositeOperation = "source-over";
-      ctx.globalAlpha = strength;
-      ctx.drawImage(buf, cxDev - r, cyDev - r);
-      ctx.restore();
-      // Re-pick the blended result to carry forward (decays + merges colors).
-      grabSmudge(cxDev, cyDev, D);
-    }
-    ctx.globalAlpha = 1;
+    stampArtSmudge({
+      ctx,
+      buffer: buf,
+      x0,
+      y0,
+      x1,
+      y1,
+      strength,
+      dpr: dprRef.current,
+      diameter: blendDiamRef.current,
+      grab: (cxDev, cyDev) => grabSmudge(cxDev, cyDev, blendDiamRef.current),
+    });
   }
 
   function onPointerDown(e: React.PointerEvent<HTMLCanvasElement>) {
@@ -442,7 +459,7 @@ export default function BoardArtCanvas({
       ctx.globalAlpha = 1;
     } else {
       ctx.globalCompositeOperation = "source-over";
-      ctx.globalAlpha = 1;
+      ctx.globalAlpha = opacity;
     }
     ctx.strokeStyle = color;
     ctx.fillStyle = color;
@@ -480,7 +497,7 @@ export default function BoardArtCanvas({
         // touch is gentler. Mice/trackpads report 0 → treat as a medium press.
         const rawPressure = (sample as PointerEvent).pressure;
         const pressure = rawPressure && rawPressure > 0 ? rawPressure : 0.5;
-        const strength = Math.max(0.55, Math.min(0.99, BLEND_STRENGTH + (pressure - 0.5) * 0.5));
+        const strength = Math.max(0.55, Math.min(0.99, ART_BLEND_STRENGTH + (pressure - 0.5) * 0.5));
         blendSegment(last.x, last.y, x, y, strength);
         lastPtRef.current = { x, y };
       }
@@ -518,7 +535,7 @@ export default function BoardArtCanvas({
       ctx.globalAlpha = 1;
     }
     const canvas = canvasRef.current;
-    if (canvas) scheduleArtDraftPersist(canvas, paper);
+    persistLayers();
   }
 
   function onPointerLeave(e: React.PointerEvent<HTMLCanvasElement>) {
@@ -549,7 +566,7 @@ export default function BoardArtCanvas({
       }
     }
     restoreSnapshot(prev);
-    scheduleArtDraftPersist(canvas, paper);
+    persistLayers();
   }
 
   function redo() {
@@ -559,7 +576,7 @@ export default function BoardArtCanvas({
     if (!next) return;
     undoRef.current.push(snapshotCanvas(canvas));
     restoreSnapshot(next);
-    scheduleArtDraftPersist(canvas, paper);
+    persistLayers();
   }
 
   function save() {
@@ -586,8 +603,7 @@ export default function BoardArtCanvas({
       ctx.fillStyle = paper ? PAPER_BG : DARK_BG;
       ctx.fillRect(0, 0, out.width, out.height);
     }
-    // …then the strokes on top.
-    ctx.drawImage(canvas, 0, 0);
+    layers.compositeOnto(ctx, out.width, out.height);
 
     const exportCanvas = scaleCanvasToMinLongEdge(out);
     exportCanvas.toBlob((blob) => {
@@ -640,16 +656,23 @@ export default function BoardArtCanvas({
           crossOrigin="anonymous"
         />
       ) : null}
+      <canvas ref={underRef} className={styles.canvasUnder} aria-hidden />
       <canvas
         ref={canvasRef}
         data-art-surface
         className={styles.canvas}
+        style={
+          layers.layers.some((layer) => layer.id === layers.activeLayerId && layer.hidden)
+            ? { visibility: "hidden" }
+            : undefined
+        }
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
         onPointerCancel={onPointerUp}
         onPointerLeave={onPointerLeave}
       />
+      <canvas ref={overRef} className={styles.canvasOver} aria-hidden />
       {recovered ? (
         <div className={styles.recoveredBar} role="status">
           Recovered Draft
@@ -676,11 +699,29 @@ export default function BoardArtCanvas({
     </div>
   );
 
+  const layerStrip = (
+    <ArtLayerStrip
+      layers={layers.layers}
+      activeId={layers.activeLayerId}
+      onSelect={layers.selectLayer}
+      onAdd={layers.addLayer}
+      onDelete={layers.removeLayer}
+      onHide={layers.hideLayer}
+      onDrop={(action) => {
+        if (action.type === "merge") layers.mergeLayers(action.draggedId, action.targetId);
+        else layers.reorderLayer(action.draggedId, action.index);
+      }}
+    />
+  );
+
   const artToolsEl = (
+    <>
+    {layerStrip}
     <ArtPaletteTools
       wheelRef={wheelRef}
       color={color}
       size={size}
+      opacity={opacity}
       light={light}
       wheelHue={wheelHue}
       wheelSat={wheelSat}
@@ -708,6 +749,7 @@ export default function BoardArtCanvas({
         setColor(hslToHex(wheelHue, wheelSat, l));
       }}
       onSizeChange={setSize}
+      onOpacityChange={setOpacity}
       onBrushModeChange={setBrushMode}
       onPaperToggle={() => setPaper((p) => !p)}
       onUndo={undo}
@@ -715,6 +757,7 @@ export default function BoardArtCanvas({
       onClear={clearCanvas}
       onSave={save}
     />
+    </>
   );
 
   const toolsEl = (
