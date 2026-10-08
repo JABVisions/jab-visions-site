@@ -29,7 +29,6 @@ export default function DropStudioV5Timeline({
   extraClipCount,
   onSelectClip,
   onScrub,
-  onImportVideo,
   onImportAudio,
   onSplit,
   onReorder,
@@ -59,7 +58,6 @@ export default function DropStudioV5Timeline({
   extraClipCount: number;
   onSelectClip: (clipId: string) => void;
   onScrub: (ms: number) => void;
-  onImportVideo: (file: File) => void;
   onImportAudio: (file: File) => void;
   onSplit: () => void;
   onReorder: (direction: -1 | 1) => void;
@@ -82,7 +80,6 @@ export default function DropStudioV5Timeline({
   onRecordVoice?: () => void;
   voiceState?: "idle" | "recording" | "denied";
 }) {
-  const videoInputRef = useRef<HTMLInputElement | null>(null);
   const presetRef = useRef("cinematic");
   const audioInputRef = useRef<HTMLInputElement | null>(null);
   const selectedClip = session.tracks.flatMap((track) => track.clips).find((clip) => clip.id === selectedClipId);
@@ -132,23 +129,9 @@ export default function DropStudioV5Timeline({
           <button type="button" onClick={onDuplicate} disabled={!selectedClipId || !onDuplicate}>
             Duplicate
           </button>
-          <button type="button" onClick={() => videoInputRef.current?.click()}>
-            Import clip
-          </button>
           <button type="button" onClick={() => audioInputRef.current?.click()}>
             Audio track
           </button>
-          <input
-            ref={videoInputRef}
-            className={styles.hiddenInput}
-            type="file"
-            accept="video/*"
-            onChange={(event) => {
-              const file = event.currentTarget.files?.[0];
-              event.currentTarget.value = "";
-              if (file) onImportVideo(file);
-            }}
-          />
           <input
             ref={audioInputRef}
             className={styles.hiddenInput}
