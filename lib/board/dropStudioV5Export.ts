@@ -1,5 +1,6 @@
 import {
   DROP_STUDIO_V5_ASPECTS,
+  clipEndMs,
   clipPlayableMs,
   resolveTrimOutMs,
   type DropStudioV5Aspect,
@@ -21,6 +22,13 @@ export type DropStudioV5ExportClip = {
   muted: boolean;
 };
 
+export type DropStudioV5ExportArt = {
+  mediaKey: string;
+  offsetMs: number;
+  endMs: number;
+  placement?: DropStudioV5Crop;
+};
+
 export type DropStudioV5ExportPlan = {
   aspect: DropStudioV5Aspect;
   width: number;
@@ -28,6 +36,7 @@ export type DropStudioV5ExportPlan = {
   durationMs: number;
   video: DropStudioV5ExportClip[];
   audio: DropStudioV5ExportClip[];
+  art: DropStudioV5ExportArt[];
 };
 
 const FILTERS: Record<string, string> = {
@@ -81,18 +90,30 @@ export function buildExportPlan(session: DropStudioV5Session): DropStudioV5Expor
   const audio = (audioTrack?.clips ?? [])
     .map((clip) => toExportClip(clip, Boolean(audioTrack?.muted)))
     .filter((clip): clip is DropStudioV5ExportClip => Boolean(clip));
+  const artTrack = session.tracks.find((track) => track.kind === "art");
+  const art: DropStudioV5ExportArt[] = artTrack?.muted
+    ? []
+    : (artTrack?.clips ?? [])
+        .filter((clip) => !clip.hidden && clip.mediaKey && clipEndMs(clip) - clip.offsetMs >= 80)
+        .map((clip) => ({
+          mediaKey: clip.mediaKey,
+          offsetMs: clip.offsetMs,
+          endMs: clipEndMs(clip),
+          ...(clip.placement ? { placement: clip.placement } : {}),
+        }));
   const durationMs = Math.max(
     video.reduce((end, clip) => Math.max(end, clip.offsetMs + clip.playableMs), 0),
-    audio.reduce((end, clip) => Math.max(end, clip.offsetMs + clip.playableMs), 0)
+    audio.reduce((end, clip) => Math.max(end, clip.offsetMs + clip.playableMs), 0),
+    art.reduce((end, clip) => Math.max(end, clip.endMs), 0)
   );
-  return { aspect: session.aspect, ...size, durationMs, video, audio };
+  return { aspect: session.aspect, ...size, durationMs, video, audio, art };
 }
 
 /** True when Done must render a new file. An untouched primary tape stays on the V4 path. */
 export function exportNeedsFlatten(session: DropStudioV5Session): boolean {
   const plan = buildExportPlan(session);
   if (!plan.video.length) return false;
-  if (plan.video.length > 1 || plan.audio.length > 0) return true;
+  if (plan.video.length > 1 || plan.audio.length > 0 || plan.art.length > 0) return true;
   if (session.aspect === "square" || session.aspect === "story") return true;
   const clip = plan.video[0];
   if (clip.trimInMs > 0) return true;
@@ -158,7 +179,7 @@ export async function exportDropStudioV5(
 ): Promise<File> {
   const plan = buildExportPlan(session);
   if (!plan.video.length) throw new Error("Timeline has no video clips");
-  for (const clip of [...plan.video, ...plan.audio]) {
+  for (const clip of [...plan.video, ...plan.audio, ...plan.art]) {
     if (!mediaBag[clip.mediaKey]?.url) throw new Error("A timeline clip is missing its media");
   }
   const mime = recorderMime();
@@ -196,14 +217,27 @@ export async function exportDropStudioV5(
     audioStarts.push(clip);
   }
 
+  const artImages = new Map<string, HTMLImageElement>();
   let overlay: HTMLImageElement | null = null;
-  if (options?.artOverlayUrl) {
+  if (!plan.art.length && options?.artOverlayUrl) {
     overlay = await new Promise((resolve) => {
       const image = new Image();
       image.onload = () => resolve(image);
       image.onerror = () => resolve(null);
       image.src = options.artOverlayUrl || "";
     });
+  }
+  for (const clip of plan.art) {
+    const url = mediaBag[clip.mediaKey]?.url;
+    if (!url || artImages.has(clip.mediaKey)) continue;
+    const image = await new Promise<HTMLImageElement | null>((resolve) => {
+      const node = new Image();
+      node.onload = () => resolve(node);
+      node.onerror = () => resolve(null);
+      node.src = url;
+    });
+    if (!image) throw new Error("An art overlay could not be read");
+    artImages.set(clip.mediaKey, image);
   }
 
   const canvasStream = canvas.captureStream(30);
@@ -262,6 +296,20 @@ export async function exportDropStudioV5(
           ctx.filter = canvasFilterFor(clip.filter);
           drawCoverCrop(ctx, video, video.videoWidth || plan.width, video.videoHeight || plan.height, clip.crop, plan.width, plan.height);
           ctx.filter = "none";
+          const timelineMs = clip.offsetMs + Math.max(0, video.currentTime * 1000 - clip.trimInMs);
+          for (const art of plan.art) {
+            if (timelineMs < art.offsetMs || timelineMs >= art.endMs) continue;
+            const image = artImages.get(art.mediaKey);
+            if (!image) continue;
+            const place = art.placement ?? { x: 0, y: 0, w: 1, h: 1 };
+            ctx.drawImage(
+              image,
+              place.x * plan.width,
+              place.y * plan.height,
+              Math.max(1, place.w * plan.width),
+              Math.max(1, place.h * plan.height)
+            );
+          }
           if (overlay) ctx.drawImage(overlay, 0, 0, plan.width, plan.height);
           requestAnimationFrame(draw);
         };

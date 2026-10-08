@@ -505,6 +505,32 @@ function DropStudio({
           )}
         </div>
       ) : null}
+      {timelineOn
+        ? v5.artFrames
+            .filter((frame) => !(v5.editingArtLive && frame.id === v5.editingArtId))
+            .map((frame) => (
+              <img
+                key={frame.id}
+                className={styles.artTrackFrame}
+                src={frame.url}
+                alt=""
+                aria-hidden
+                draggable={false}
+                style={
+                  frame.placement
+                    ? {
+                        top: `${frame.placement.y * 100}%`,
+                        left: `${frame.placement.x * 100}%`,
+                        width: `${frame.placement.w * 100}%`,
+                        height: `${frame.placement.h * 100}%`,
+                        right: "auto",
+                        bottom: "auto",
+                      }
+                    : undefined
+                }
+              />
+            ))
+        : null}
       <DropStudioOverlay
         customizations={
           operatingTable && normalized.artOverlayUrl
@@ -758,10 +784,16 @@ function DropStudio({
       <>
         <DropStudioArtPalette
           hostRef={previewRef}
-          initialOverlayUrl={normalized.artOverlayUrl}
-          onOverlayChange={(artOverlayUrl) =>
-            update({ ...normalized, artOverlayUrl })
-          }
+          initialOverlayUrl={timelineOn ? undefined : normalized.artOverlayUrl}
+          restoreKey={timelineOn && v5.artRestoreNonce ? String(v5.artRestoreNonce) : ""}
+          restoreUrl={timelineOn ? v5.editingArtUrl : undefined}
+          clearToken={timelineOn ? v5.clearArtToken : 0}
+          live={!timelineOn || v5.editingArtLive}
+          placement={timelineOn && v5.editingArtLive ? v5.editingArtPlacement : undefined}
+          onOverlayChange={(artOverlayUrl) => {
+            if (timelineOn && artOverlayUrl) v5.rememberArt(artOverlayUrl);
+            update({ ...normalized, artOverlayUrl });
+          }}
         />
         {artTools}
       </>
@@ -803,7 +835,8 @@ function DropStudio({
           canUndo={v5.canUndo}
           canRedo={v5.canRedo}
           extraClipCount={v5.extraClipCount}
-          onSelectClip={v5.setSelectedClipId}
+          onSelectClip={v5.selectClip}
+          onArtAction={v5.artAction}
           onScrub={v5.scrub}
           onImportVideo={(file) => void v5.importVideo(file)}
           onImportAudio={(file) => void v5.importAudio(file)}

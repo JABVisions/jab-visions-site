@@ -160,6 +160,20 @@ export function useArtLayerCanvases(
     paint(over, activeIndex + 1, list.length);
   }
 
+  function clearAll() {
+    const canvas = canvasRef.current;
+    const ctx = ctxRef.current;
+    if (canvas && ctx) {
+      ctx.save();
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.restore();
+    }
+    storesRef.current.forEach((stored) => {
+      stored.getContext("2d")?.clearRect(0, 0, stored.width, stored.height);
+    });
+  }
+
   function compositeOnto(target: CanvasRenderingContext2D, width: number, height: number) {
     stashActiveLayer();
     target.clearRect(0, 0, width, height);
@@ -184,5 +198,6 @@ export function useArtLayerCanvases(
     stashActiveLayer,
     compositeOnto,
     paintLayerChrome,
+    clearAll,
   };
 }

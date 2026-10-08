@@ -11,11 +11,28 @@ export const DROP_STUDIO_V5_UPDATED_EVENT = "board:drop-studio-v5:updated";
 
 export const MAX_V5_VIDEO_CLIPS = 8;
 export const MAX_V5_AUDIO_CLIPS = 8;
+export const MAX_V5_ART_CLIPS = 8;
 export const MAX_V5_TRACKS = 4;
 export const MAX_V5_HISTORY = 24;
 
 export type DropStudioV5Aspect = "portrait" | "landscape" | "square" | "story";
-export type DropStudioV5TrackKind = "video" | "audio";
+export type DropStudioV5TrackKind = "video" | "audio" | "art";
+export type DropStudioV5ArtAction =
+  | "new"
+  | "duplicate"
+  | "hide"
+  | "start-earlier"
+  | "start-later"
+  | "end-earlier"
+  | "end-later"
+  | "earlier"
+  | "later"
+  | "smaller"
+  | "larger"
+  | "nudge-left"
+  | "nudge-right"
+  | "nudge-up"
+  | "nudge-down";
 export type DropStudioV5MediaKind = "video" | "audio" | "image";
 
 export const DROP_STUDIO_V5_ASPECTS: Record<
@@ -52,6 +69,10 @@ export type DropStudioV5Clip = {
   filter?: string | null;
   overlay?: string | null;
   rotation?: 0 | 90 | 180 | 270;
+  /** Art overlays only. Hidden clips stay on the timeline and out of the preview. */
+  hidden?: boolean;
+  /** Art overlays only. Destination box in the frame. Missing means full frame. */
+  placement?: DropStudioV5Crop;
 };
 
 export type DropStudioV5Track = {
@@ -164,6 +185,7 @@ export function createDropStudioV5Session(id?: string): DropStudioV5Session {
     tracks: [
       { id: "video-a", kind: "video", label: "Video", clips: [], volume: 1 },
       { id: "audio-a", kind: "audio", label: "Audio", clips: [], volume: 1 },
+      { id: "art-a", kind: "art", label: "Art", clips: [], volume: 1 },
     ],
   };
 }
@@ -182,6 +204,20 @@ function videoTrack(session: DropStudioV5Session) {
 
 function audioTrack(session: DropStudioV5Session) {
   return session.tracks.find((track) => track.kind === "audio");
+}
+
+function emptyArtTrack(): DropStudioV5Track {
+  return { id: "art-a", kind: "art", label: "Art", clips: [], volume: 1 };
+}
+
+export function ensureArtTrack(session: DropStudioV5Session): DropStudioV5Session {
+  if (session.tracks.some((track) => track.kind === "art")) return session;
+  if (session.tracks.length >= MAX_V5_TRACKS) return session;
+  return { ...session, tracks: [...session.tracks, emptyArtTrack()] };
+}
+
+function artTrack(session: DropStudioV5Session) {
+  return session.tracks.find((track) => track.kind === "art");
 }
 
 export function resolveTrimOutMs(clip: DropStudioV5Clip): number {
@@ -383,14 +419,18 @@ export function reorderClip(
   const clips = [...found.track.clips];
   const [moved] = clips.splice(found.index, 1);
   clips.splice(nextIndex, 0, moved);
-  return replaceTrack(session, packTrackClips({ ...found.track, clips }));
+  const nextTrack =
+    found.track.kind === "art" ? { ...found.track, clips } : packTrackClips({ ...found.track, clips });
+  return replaceTrack(session, nextTrack);
 }
 
 export function deleteClip(session: DropStudioV5Session, clipId: string): DropStudioV5Session {
   const found = findClip(session, clipId);
   if (!found) return session;
   const clips = found.track.clips.filter((clip) => clip.id !== clipId);
-  return replaceTrack(session, packTrackClips({ ...found.track, clips }));
+  const nextTrack =
+    found.track.kind === "art" ? { ...found.track, clips } : packTrackClips({ ...found.track, clips });
+  return replaceTrack(session, nextTrack);
 }
 
 export function setSessionAspect(
@@ -438,6 +478,157 @@ export function setClipFilter(
       ),
     })),
   };
+}
+
+export function artClipsAtTime(session: DropStudioV5Session, timeMs: number): DropStudioV5Clip[] {
+  const track = artTrack(session);
+  if (!track || track.muted) return [];
+  return track.clips.filter(
+    (clip) => !clip.hidden && timeMs >= clip.offsetMs && timeMs < clipEndMs(clip)
+  );
+}
+
+/**
+ * Attach a drawing to the art track. A stroke inside an existing overlay updates
+ * that clip's image key. A stroke in empty time creates a clip from the playhead
+ * through the end of the video. The source video file is not modified.
+ */
+export function bindArtOverlay(
+  session: DropStudioV5Session,
+  mediaKey: string,
+  preferredClipId?: string | null,
+  forceNew = false
+): { session: DropStudioV5Session; clipId: string; mediaKey: string; created: boolean } {
+  const next = ensureArtTrack(session);
+  const track = artTrack(next);
+  if (!track || !mediaKey) {
+    return { session: next, clipId: "", mediaKey, created: false };
+  }
+  const playhead = Math.max(0, next.playheadMs);
+  const covers = (clip: DropStudioV5Clip) => playhead >= clip.offsetMs && playhead < clipEndMs(clip);
+  const preferred = preferredClipId
+    ? track.clips.find((clip) => clip.id === preferredClipId)
+    : undefined;
+  const target = forceNew
+    ? undefined
+    : preferred && covers(preferred)
+      ? preferred
+      : [...track.clips].reverse().find((clip) => covers(clip));
+  if (target) {
+    return { session: next, clipId: target.id, mediaKey: target.mediaKey, created: false };
+  }
+  if (track.clips.length >= MAX_V5_ART_CLIPS) {
+    const last = track.clips[track.clips.length - 1];
+    return { session: next, clipId: last?.id || "", mediaKey: last?.mediaKey || mediaKey, created: false };
+  }
+  const videoEnd = trackEndMs(videoTrack(next) ?? { id: "video", kind: "video", label: "Video", clips: [], volume: 1 });
+  const duration = videoEnd > playhead + 200 ? videoEnd - playhead : 60_000;
+  const clip: DropStudioV5Clip = {
+    id: makeId("art"),
+    name: `Art ${track.clips.length + 1}`,
+    mediaKey,
+    kind: "image",
+    offsetMs: playhead,
+    trimInMs: 0,
+    trimOutMs: 0,
+    sourceDurationMs: duration,
+    volume: 1,
+  };
+  return {
+    session: replaceTrack(next, { ...track, clips: [...track.clips, clip] }),
+    clipId: clip.id,
+    mediaKey,
+    created: true,
+  };
+}
+
+export function setArtClipBounds(
+  session: DropStudioV5Session,
+  clipId: string,
+  offsetMs: number,
+  endMs: number
+): DropStudioV5Session {
+  const found = findClip(session, clipId);
+  if (!found || found.track.kind !== "art") return session;
+  const start = Math.max(0, offsetMs);
+  const end = Math.max(start + 200, endMs);
+  const clips = found.track.clips.map((clip) =>
+    clip.id === clipId
+      ? { ...clip, offsetMs: start, trimInMs: 0, trimOutMs: 0, sourceDurationMs: end - start }
+      : clip
+  );
+  return replaceTrack(session, { ...found.track, clips });
+}
+
+export function duplicateArtClip(session: DropStudioV5Session, clipId: string): DropStudioV5Session {
+  const found = findClip(session, clipId);
+  if (!found || found.track.kind !== "art") return session;
+  if (found.track.clips.length >= MAX_V5_ART_CLIPS) return session;
+  const copy: DropStudioV5Clip = {
+    ...found.clip,
+    id: makeId("art"),
+    name: found.clip.name ? `${found.clip.name} copy` : "Art copy",
+  };
+  const clips = [...found.track.clips];
+  clips.splice(found.index + 1, 0, copy);
+  return replaceTrack(session, { ...found.track, clips });
+}
+
+export function setClipHidden(
+  session: DropStudioV5Session,
+  clipId: string,
+  hidden: boolean
+): DropStudioV5Session {
+  return {
+    ...session,
+    tracks: session.tracks.map((track) => ({
+      ...track,
+      clips: track.clips.map((clip) => (clip.id === clipId ? { ...clip, hidden } : clip)),
+    })),
+  };
+}
+
+export function setArtPlacement(
+  session: DropStudioV5Session,
+  clipId: string,
+  placement?: DropStudioV5Crop | null
+): DropStudioV5Session {
+  const found = findClip(session, clipId);
+  if (!found || found.track.kind !== "art") return session;
+  const nextPlacement = normalizeV5Crop(placement);
+  const clips = found.track.clips.map((clip) =>
+    clip.id === clipId ? { ...clip, placement: nextPlacement } : clip
+  );
+  return replaceTrack(session, { ...found.track, clips });
+}
+
+export function scaleArtPlacement(
+  session: DropStudioV5Session,
+  clipId: string,
+  factor: number
+): DropStudioV5Session {
+  const found = findClip(session, clipId);
+  if (!found || found.track.kind !== "art") return session;
+  const current = found.clip.placement ?? { x: 0, y: 0, w: 1, h: 1 };
+  const w = clamp(current.w * factor, 0.2, 1);
+  const h = clamp(current.h * factor, 0.2, 1);
+  const x = clamp(current.x + (current.w - w) / 2, 0, 1 - w);
+  const y = clamp(current.y + (current.h - h) / 2, 0, 1 - h);
+  return setArtPlacement(session, clipId, { x, y, w, h });
+}
+
+export function nudgeArtPlacement(
+  session: DropStudioV5Session,
+  clipId: string,
+  dx: number,
+  dy: number
+): DropStudioV5Session {
+  const found = findClip(session, clipId);
+  if (!found || found.track.kind !== "art") return session;
+  const current = found.clip.placement ?? { x: 0, y: 0, w: 1, h: 1 };
+  const x = clamp(current.x + dx, 0, 1 - current.w);
+  const y = clamp(current.y + dy, 0, 1 - current.h);
+  return setArtPlacement(session, clipId, { x, y, w: current.w, h: current.h });
 }
 
 export function setTrackMute(
@@ -569,12 +760,13 @@ export function parseDropStudioV5Snapshot(raw: unknown): DropStudioV5Session | n
         .map((entry, index) => {
           if (!entry || typeof entry !== "object") return null;
           const track = entry as Record<string, unknown>;
-          const kind: DropStudioV5TrackKind = track.kind === "audio" ? "audio" : "video";
+          const kind: DropStudioV5TrackKind =
+            track.kind === "audio" ? "audio" : track.kind === "art" ? "art" : "video";
+          const clipCap =
+            kind === "audio" ? MAX_V5_AUDIO_CLIPS : kind === "art" ? MAX_V5_ART_CLIPS : MAX_V5_VIDEO_CLIPS;
           const clips: DropStudioV5Clip[] = [];
           if (Array.isArray(track.clips)) {
-            for (const [clipIndex, clipEntry] of track.clips
-              .slice(0, kind === "audio" ? MAX_V5_AUDIO_CLIPS : MAX_V5_VIDEO_CLIPS)
-              .entries()) {
+            for (const [clipIndex, clipEntry] of track.clips.slice(0, clipCap).entries()) {
               if (!clipEntry || typeof clipEntry !== "object") continue;
               const clip = clipEntry as Record<string, unknown>;
               const mediaKey =
@@ -611,6 +803,9 @@ export function parseDropStudioV5Snapshot(raw: unknown): DropStudioV5Session | n
               if (clip.rotation === 90 || clip.rotation === 180 || clip.rotation === 270) {
                 parsedClip.rotation = clip.rotation;
               }
+              if (clip.hidden) parsedClip.hidden = true;
+              const placement = normalizeV5Crop(clip.placement);
+              if (placement) parsedClip.placement = placement;
               clips.push(parsedClip);
             }
           }
@@ -625,7 +820,9 @@ export function parseDropStudioV5Snapshot(raw: unknown): DropStudioV5Session | n
                 ? track.label.trim().slice(0, 24)
                 : kind === "audio"
                   ? "Audio"
-                  : "Video",
+                  : kind === "art"
+                    ? "Art"
+                    : "Video",
             clips,
             muted: Boolean(track.muted),
             volume: clamp(Number(track.volume ?? 1), 0, 1),
@@ -635,6 +832,9 @@ export function parseDropStudioV5Snapshot(raw: unknown): DropStudioV5Session | n
         .filter((track): track is DropStudioV5Track => Boolean(track))
     : [];
   if (!tracks.length) return null;
+  if (!tracks.some((track) => track.kind === "art") && tracks.length < MAX_V5_TRACKS) {
+    tracks.push(emptyArtTrack());
+  }
   return {
     id: source.id,
     version: 5,

@@ -2,17 +2,22 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  artClipsAtTime,
+  bindArtOverlay,
+  type DropStudioV5ArtAction,
   clipEndMs,
   createDropStudioV5History,
   createDropStudioV5Session,
   cropToClipPath,
   deleteClip,
+  duplicateArtClip,
   handoffPlayheadMs,
   importAudioClip,
   importVideoClip,
   insetV5Crop,
   loadDropStudioV5Project,
   mediaKeyFromFile,
+  nudgeArtPlacement,
   previewAudioAtPlayhead,
   previewVideoAtPlayhead,
   pushV5History,
@@ -20,9 +25,12 @@ import {
   reorderClip,
   resolveTrimOutMs,
   saveDropStudioV5Project,
+  scaleArtPlacement,
   sessionDurationMs,
+  setArtClipBounds,
   setClipCrop,
   setClipFilter,
+  setClipHidden,
   setMediaDuration,
   setPlayhead,
   setSessionAspect,
@@ -30,6 +38,7 @@ import {
   trimClip,
   undoV5,
   type DropStudioV5Aspect,
+  type DropStudioV5Crop,
   type DropStudioV5History,
   type DropStudioV5MediaBag,
   type DropStudioV5Session,
@@ -40,6 +49,18 @@ import {
   saveDropStudioV5Media,
 } from "@/lib/board/dropStudioV5Media";
 import { fetchDropStudioV5Cloud, queueDropStudioV5CloudSync } from "@/lib/board/dropStudioV5Cloud";
+
+function persistArtOverlay(draftId: string, mediaKey: string, dataUrl: string) {
+  void fetch(dataUrl)
+    .then((response) => response.blob())
+    .then((blob) => {
+      if (!canPersistDropStudioV5Media(blob.size)) return;
+      return saveDropStudioV5Media(draftId, mediaKey, blob);
+    })
+    .catch(() => {
+      // The in-memory overlay still previews. Reload needs the IndexedDB copy.
+    });
+}
 
 function readDuration(file: File): Promise<number> {
   return new Promise((resolve) => {
@@ -82,9 +103,18 @@ export function useDropStudioV5Runtime({
   const [mediaBag, setMediaBag] = useState<DropStudioV5MediaBag>({});
   const [selectedClipId, setSelectedClipId] = useState<string | null>(null);
   const [scrubbing, setScrubbing] = useState(false);
+  const [editingArtId, setEditingArtId] = useState<string | null>(null);
+  const [artRestoreNonce, setArtRestoreNonce] = useState(0);
+  const [clearArtToken, setClearArtToken] = useState(0);
   const objectUrlsRef = useRef<string[]>([]);
   const persistTimerRef = useRef<number | null>(null);
   const seededUrlRef = useRef("");
+  const sessionRef = useRef(session);
+  const artTargetRef = useRef<string | null>(null);
+  const forceNewArtRef = useRef(false);
+  useEffect(() => {
+    sessionRef.current = session;
+  }, [session]);
 
   const commit = useCallback((next: DropStudioV5Session, recordHistory = true) => {
     if (recordHistory) {
@@ -268,6 +298,124 @@ export function useDropStudioV5Runtime({
     });
   }, [preview?.clip, scrubbing]);
 
+  const rememberArt = useCallback(
+    (dataUrl: string) => {
+      if (!dataUrl) return;
+      const freshKey = `art-${Date.now().toString(36)}-${Math.random().toString(16).slice(2, 6)}`;
+      const current = sessionRef.current;
+      const bound = bindArtOverlay(
+        current,
+        freshKey,
+        artTargetRef.current,
+        forceNewArtRef.current
+      );
+      forceNewArtRef.current = false;
+      if (!bound.clipId) return;
+      artTargetRef.current = bound.clipId;
+      sessionRef.current = bound.session;
+      if (bound.created) setHistory((prev) => pushV5History(prev, current));
+      setSession(bound.session);
+      setEditingArtId(bound.clipId);
+      setSelectedClipId(bound.clipId);
+      setMediaBag((bag) => ({
+        ...bag,
+        [bound.mediaKey]: { url: dataUrl, kind: "image" },
+      }));
+      if (draftId) persistArtOverlay(draftId, bound.mediaKey, dataUrl);
+    },
+    [draftId]
+  );
+
+  const selectClip = useCallback((clipId: string) => {
+    setSelectedClipId(clipId);
+    const clip = sessionRef.current.tracks
+      .find((track) => track.kind === "art")
+      ?.clips.find((item) => item.id === clipId);
+    if (!clip) return;
+    artTargetRef.current = clipId;
+    forceNewArtRef.current = false;
+    setEditingArtId(clipId);
+    setArtRestoreNonce((nonce) => nonce + 1);
+  }, []);
+
+  const applyArtEdit = useCallback((next: DropStudioV5Session) => {
+    const previous = sessionRef.current;
+    if (next === previous) return;
+    sessionRef.current = next;
+    setHistory((prev) => pushV5History(prev, previous));
+    setSession(next);
+  }, []);
+
+  const artAction = useCallback(
+    (action: DropStudioV5ArtAction) => {
+      if (action === "new") {
+        forceNewArtRef.current = true;
+        artTargetRef.current = null;
+        setEditingArtId(null);
+        setSelectedClipId(null);
+        setClearArtToken((token) => token + 1);
+        return;
+      }
+      const clipId = artTargetRef.current;
+      const current = sessionRef.current;
+      const clip = clipId
+        ? current.tracks.find((track) => track.kind === "art")?.clips.find((item) => item.id === clipId)
+        : undefined;
+      if (!clip) return;
+      const end = clipEndMs(clip);
+      if (action === "hide") {
+        applyArtEdit(setClipHidden(current, clip.id, !clip.hidden));
+        return;
+      }
+      if (action === "duplicate") {
+        const next = duplicateArtClip(current, clip.id);
+        const previousIds = new Set(
+          current.tracks.find((track) => track.kind === "art")?.clips.map((item) => item.id)
+        );
+        const created = next.tracks
+          .find((track) => track.kind === "art")
+          ?.clips.find((item) => !previousIds.has(item.id));
+        applyArtEdit(next);
+        if (created) {
+          artTargetRef.current = created.id;
+          setEditingArtId(created.id);
+          setSelectedClipId(created.id);
+          setArtRestoreNonce((nonce) => nonce + 1);
+        }
+        return;
+      }
+      if (action === "start-earlier") applyArtEdit(setArtClipBounds(current, clip.id, clip.offsetMs - 200, end));
+      else if (action === "start-later") applyArtEdit(setArtClipBounds(current, clip.id, clip.offsetMs + 200, end));
+      else if (action === "end-earlier") applyArtEdit(setArtClipBounds(current, clip.id, clip.offsetMs, end - 200));
+      else if (action === "end-later") applyArtEdit(setArtClipBounds(current, clip.id, clip.offsetMs, end + 200));
+      else if (action === "earlier") applyArtEdit(setArtClipBounds(current, clip.id, clip.offsetMs - 200, end - 200));
+      else if (action === "later") applyArtEdit(setArtClipBounds(current, clip.id, clip.offsetMs + 200, end + 200));
+      else if (action === "smaller") applyArtEdit(scaleArtPlacement(current, clip.id, 0.85));
+      else if (action === "larger") applyArtEdit(scaleArtPlacement(current, clip.id, 1 / 0.85));
+      else if (action === "nudge-left") applyArtEdit(nudgeArtPlacement(current, clip.id, -0.04, 0));
+      else if (action === "nudge-right") applyArtEdit(nudgeArtPlacement(current, clip.id, 0.04, 0));
+      else if (action === "nudge-up") applyArtEdit(nudgeArtPlacement(current, clip.id, 0, -0.04));
+      else if (action === "nudge-down") applyArtEdit(nudgeArtPlacement(current, clip.id, 0, 0.04));
+    },
+    [applyArtEdit]
+  );
+
+  const artFrames = artClipsAtTime(session, session.playheadMs)
+    .map((clip) => ({
+      id: clip.id,
+      url: mediaBag[clip.mediaKey]?.url || "",
+      placement: clip.placement,
+    }))
+    .filter((frame) => frame.url);
+  const editingClip = editingArtId
+    ? session.tracks.find((track) => track.kind === "art")?.clips.find((clip) => clip.id === editingArtId)
+    : undefined;
+  const editingArtLive =
+    !editingClip ||
+    (session.playheadMs >= editingClip.offsetMs && session.playheadMs < clipEndMs(editingClip));
+  const editingArtUrl = editingClip ? mediaBag[editingClip.mediaKey]?.url : undefined;
+  const editingArtPlacement: DropStudioV5Crop | undefined = editingClip?.placement;
+
   const selected = selectedClipId
     ? session.tracks.flatMap((track) => track.clips).find((clip) => clip.id === selectedClipId)
     : preview?.clip;
@@ -299,6 +447,16 @@ export function useDropStudioV5Runtime({
     activeFilter: preview?.clip.filter ?? filter ?? null,
     activeOverlay: preview?.clip.overlay ?? overlay ?? null,
     setSelectedClipId,
+    rememberArt,
+    artFrames,
+    editingArtId,
+    editingArtUrl,
+    editingArtPlacement,
+    editingArtLive,
+    artRestoreNonce,
+    clearArtToken,
+    selectClip,
+    artAction,
     importVideo,
     importAudio,
     applyDuration,

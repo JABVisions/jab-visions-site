@@ -105,7 +105,7 @@
 
 .ruler {
   position: relative;
-  min-height: 118px;
+  min-height: 156px;
 }
 
 .ticks {
@@ -170,6 +170,15 @@
 .clipAudio {
   background: linear-gradient(90deg, rgba(183, 255, 45, 0.18), rgba(126, 226, 255, 0.12));
   border-color: rgba(183, 255, 45, 0.32);
+}
+
+.clipArt {
+  background: linear-gradient(90deg, rgba(255, 209, 45, 0.28), rgba(255, 79, 216, 0.16));
+  border-color: rgba(255, 209, 45, 0.72);
+}
+
+.clipHidden {
+  opacity: 0.4;
 }
 
 .clipSelected {

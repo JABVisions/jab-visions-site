@@ -23,10 +23,22 @@ export default function DropStudioArtPalette({
   hostRef,
   initialOverlayUrl,
   onOverlayChange,
+  restoreKey = "",
+  restoreUrl,
+  clearToken = 0,
+  live = true,
+  placement,
 }: {
   hostRef: RefObject<HTMLDivElement | null>;
   initialOverlayUrl?: string;
   onOverlayChange: (url?: string) => void;
+  /** Changes when the user selects a different art clip to keep editing. */
+  restoreKey?: string;
+  restoreUrl?: string;
+  clearToken?: number;
+  /** False while the playhead is outside the overlay being edited. */
+  live?: boolean;
+  placement?: { x: number; y: number; w: number; h: number };
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const underRef = useRef<HTMLCanvasElement>(null);
@@ -53,6 +65,8 @@ export default function DropStudioArtPalette({
   const [opacity, setOpacity] = useState(1);
   const artLayers = useArtLayerCanvases(canvasRef, contextRef);
   const [drawArmed, setDrawArmed] = useState(false);
+  const restoreUrlRef = useRef(restoreUrl);
+  restoreUrlRef.current = restoreUrl;
 
   function refreshArtChrome() {
     const draw = canvasRef.current;
@@ -127,6 +141,35 @@ export default function DropStudioArtPalette({
     undoRef.current = [];
     redoRef.current = [];
   }, [artLayers.activeLayerId]);
+
+  useEffect(() => {
+    if (!clearToken) return;
+    artLayers.clearAll();
+    refreshArtChrome();
+    // New art starts from an empty transparent layer.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clearToken]);
+
+  useEffect(() => {
+    if (!restoreKey) return;
+    const url = restoreUrlRef.current;
+    const canvas = canvasRef.current;
+    const context = contextRef.current;
+    if (!url || !canvas || !context) return;
+    const image = new Image();
+    image.onload = () => {
+      artLayers.clearAll();
+      context.save();
+      context.setTransform(1, 0, 0, 1, 0, 0);
+      context.clearRect(0, 0, canvas.width, canvas.height);
+      context.drawImage(image, 0, 0, canvas.width, canvas.height);
+      context.restore();
+      refreshArtChrome();
+    };
+    image.src = url;
+    // Selecting another overlay reloads that PNG. Stroke updates must not.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [restoreKey, portalReady]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -332,7 +375,22 @@ export default function DropStudioArtPalette({
   }
 
   const canvas = (
-    <div className={`${styles.artCanvasStack} ${drawArmed ? styles.artCanvasStackArmed : ""}`}>
+    <div
+      className={`${styles.artCanvasStack} ${drawArmed && live ? styles.artCanvasStackArmed : ""}`}
+      style={
+        placement
+          ? {
+              top: `${placement.y * 100}%`,
+              left: `${placement.x * 100}%`,
+              width: `${placement.w * 100}%`,
+              height: `${placement.h * 100}%`,
+              right: "auto",
+              bottom: "auto",
+            }
+          : undefined
+      }
+      hidden={!live}
+    >
       <canvas ref={underRef} className={styles.artCanvasChrome} aria-hidden />
       <canvas
         ref={canvasRef}

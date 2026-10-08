@@ -5,6 +5,7 @@ import {
   DROP_STUDIO_V5_ASPECTS,
   clipPlayableMs,
   sessionDurationMs,
+  type DropStudioV5ArtAction,
   type DropStudioV5Aspect,
   type DropStudioV5Session,
 } from "@/lib/board/dropStudioV5";
@@ -38,6 +39,7 @@ export default function DropStudioV5Timeline({
   onCropFit,
   onCropFill,
   onCropInset,
+  onArtAction,
 }: {
   session: DropStudioV5Session;
   selectedClipId: string | null;
@@ -58,9 +60,13 @@ export default function DropStudioV5Timeline({
   onCropFit: () => void;
   onCropFill: () => void;
   onCropInset: () => void;
+  onArtAction?: (action: DropStudioV5ArtAction) => void;
 }) {
   const videoInputRef = useRef<HTMLInputElement | null>(null);
   const audioInputRef = useRef<HTMLInputElement | null>(null);
+  const selectedArt = session.tracks
+    .find((track) => track.kind === "art")
+    ?.clips.find((clip) => clip.id === selectedClipId);
   const duration = Math.max(sessionDurationMs(session), 4_000);
   const pxPerMs = 0.042;
   const width = Math.max(280, LANE_LABEL_WIDTH + duration * pxPerMs);
@@ -87,10 +93,10 @@ export default function DropStudioV5Timeline({
             Split
           </button>
           <button type="button" onClick={() => onReorder(-1)} disabled={!selectedClipId}>
-            Left
+            {selectedArt ? "Lower" : "Left"}
           </button>
           <button type="button" onClick={() => onReorder(1)} disabled={!selectedClipId}>
-            Right
+            {selectedArt ? "Raise" : "Right"}
           </button>
           <button type="button" onClick={() => onTrim("in", 120)} disabled={!selectedClipId}>
             Trim In
@@ -146,6 +152,57 @@ export default function DropStudioV5Timeline({
         ))}
       </div>
 
+      {onArtAction ? (
+        <div className={styles.cropRow} aria-label="Art overlay">
+          <span className={styles.groupLabel}>Art</span>
+          <button type="button" onClick={() => onArtAction("new")}>
+            New
+          </button>
+          <button type="button" onClick={() => onArtAction("duplicate")} disabled={!selectedArt}>
+            Duplicate
+          </button>
+          <button type="button" onClick={() => onArtAction("hide")} disabled={!selectedArt}>
+            {selectedArt?.hidden ? "Show" : "Hide"}
+          </button>
+          <button type="button" onClick={() => onArtAction("start-earlier")} disabled={!selectedArt}>
+            Start−
+          </button>
+          <button type="button" onClick={() => onArtAction("start-later")} disabled={!selectedArt}>
+            Start+
+          </button>
+          <button type="button" onClick={() => onArtAction("end-earlier")} disabled={!selectedArt}>
+            End−
+          </button>
+          <button type="button" onClick={() => onArtAction("end-later")} disabled={!selectedArt}>
+            End+
+          </button>
+          <button type="button" onClick={() => onArtAction("earlier")} disabled={!selectedArt}>
+            Earlier
+          </button>
+          <button type="button" onClick={() => onArtAction("later")} disabled={!selectedArt}>
+            Later
+          </button>
+          <button type="button" onClick={() => onArtAction("smaller")} disabled={!selectedArt}>
+            Smaller
+          </button>
+          <button type="button" onClick={() => onArtAction("larger")} disabled={!selectedArt}>
+            Larger
+          </button>
+          <button type="button" onClick={() => onArtAction("nudge-left")} disabled={!selectedArt}>
+            Nudge left
+          </button>
+          <button type="button" onClick={() => onArtAction("nudge-right")} disabled={!selectedArt}>
+            Nudge right
+          </button>
+          <button type="button" onClick={() => onArtAction("nudge-up")} disabled={!selectedArt}>
+            Nudge up
+          </button>
+          <button type="button" onClick={() => onArtAction("nudge-down")} disabled={!selectedArt}>
+            Nudge down
+          </button>
+        </div>
+      ) : null}
+
       <div className={styles.cropRow} aria-label="Crop">
         <span className={styles.groupLabel}>Crop</span>
         <button type="button" onClick={onCropFill}>
@@ -185,6 +242,8 @@ export default function DropStudioV5Timeline({
                     key={clip.id}
                     type="button"
                     className={`${styles.clip} ${track.kind === "audio" ? styles.clipAudio : ""} ${
+                      track.kind === "art" ? styles.clipArt : ""
+                    } ${clip.hidden ? styles.clipHidden : ""} ${
                       selectedClipId === clip.id ? styles.clipSelected : ""
                     }`}
                     style={{

@@ -7,6 +7,7 @@ import {
 } from "./dropStudioV5Media";
 import {
   aspectToMediaFrame,
+  clipEndMs,
   clipPlayableMs,
   createDropStudioV5History,
   createDropStudioV5Session,
@@ -26,9 +27,15 @@ import {
   readDropStudioV5Flag,
   reorderClip,
   sessionDurationMs,
+  artClipsAtTime,
+  bindArtOverlay,
+  duplicateArtClip,
+  scaleArtPlacement,
+  setArtClipBounds,
   setClipCrop,
   setClipDuration,
   setClipFilter,
+  setClipHidden,
   setPlayhead,
   setSessionAspect,
   snapshotDropStudioV5,
@@ -47,9 +54,10 @@ assert.equal(mediaKeyFromFile(file), "tape.mp4:12:99");
 
 let session = createDropStudioV5Session("sess-1");
 assert.equal(session.version, 5);
-assert.equal(session.tracks.length, 2);
+assert.equal(session.tracks.length, 3);
 assert.equal(session.tracks[0].kind, "video");
 assert.equal(session.tracks[1].kind, "audio");
+assert.equal(session.tracks[2].kind, "art");
 
 session = importVideoClip(session, {
   mediaKey: "primary",
@@ -201,5 +209,85 @@ assert.equal(exportPixelSize("story").width, 540);
 assert.equal(exportPixelSize("story").height, 960);
 assert.equal(canvasFilterFor("clean-enhance").includes("contrast"), true);
 assert.equal(canvasFilterFor(null), "none");
+assert.equal(plan.art.length, 0);
+
+const legacy = parseDropStudioV5Snapshot({
+  version: 5,
+  id: "old",
+  aspect: "portrait",
+  playheadMs: 0,
+  tracks: [
+    {
+      id: "video-a",
+      kind: "video",
+      label: "Video",
+      volume: 1,
+      clips: [
+        {
+          id: "c1",
+          mediaKey: "primary",
+          kind: "video",
+          offsetMs: 0,
+          trimInMs: 0,
+          trimOutMs: 0,
+          sourceDurationMs: 1000,
+          volume: 1,
+        },
+      ],
+    },
+    { id: "audio-a", kind: "audio", label: "Audio", clips: [], volume: 1 },
+  ],
+});
+assert.equal(legacy?.tracks.some((track) => track.kind === "art"), true);
+assert.equal(legacy?.tracks[0].clips[0].mediaKey, "primary");
+
+let artSession = importVideoClip(createDropStudioV5Session("art"), {
+  mediaKey: "primary",
+  kind: "video",
+  sourceDurationMs: 8000,
+});
+artSession = setPlayhead(artSession, 2000);
+const firstArt = bindArtOverlay(artSession, "art-1", null);
+assert.equal(firstArt.created, true);
+assert.equal(firstArt.clipId.length > 0, true);
+const artClip = firstArt.session.tracks.find((track) => track.kind === "art")?.clips[0];
+assert.equal(artClip?.offsetMs, 2000);
+assert.equal(artClip ? clipEndMs(artClip) : 0, 8000);
+assert.equal(artClipsAtTime(firstArt.session, 1000).length, 0);
+assert.equal(artClipsAtTime(firstArt.session, 2000).length, 1);
+
+const secondArt = bindArtOverlay(setPlayhead(firstArt.session, 2500), "art-2", firstArt.clipId);
+assert.equal(secondArt.created, false);
+assert.equal(secondArt.mediaKey, "art-1");
+assert.equal(secondArt.session.tracks.find((track) => track.kind === "art")?.clips.length, 1);
+
+const hiddenArt = setClipHidden(secondArt.session, secondArt.clipId, true);
+assert.equal(artClipsAtTime(hiddenArt, 2500).length, 0);
+const shownArt = setClipHidden(hiddenArt, secondArt.clipId, false);
+const duplicated = duplicateArtClip(shownArt, secondArt.clipId);
+const artClips = duplicated.tracks.find((track) => track.kind === "art")?.clips ?? [];
+assert.equal(artClips.length, 2);
+assert.equal(artClips[1].mediaKey, artClips[0].mediaKey);
+assert.equal(artClips[1].offsetMs, artClips[0].offsetMs);
+const raised = reorderClip(duplicated, artClips[0].id, 1);
+const raisedClips = raised.tracks.find((track) => track.kind === "art")?.clips ?? [];
+assert.equal(raisedClips[1].id, artClips[0].id);
+assert.equal(raisedClips[0].offsetMs, 2000, "art reorder keeps timeline positions");
+const bounded = setArtClipBounds(raised, raisedClips[0].id, 1000, 3000);
+const boundedClip = bounded.tracks.find((track) => track.kind === "art")?.clips[0];
+assert.equal(boundedClip?.offsetMs, 1000);
+assert.equal(boundedClip ? clipEndMs(boundedClip) : 0, 3000);
+const placed = scaleArtPlacement(bounded, boundedClip?.id || "", 0.5);
+const placedClip = placed.tracks.find((track) => track.kind === "art")?.clips[0];
+assert.equal(placedClip?.placement?.w, 0.5);
+assert.equal(placedClip?.placement?.x, 0.25);
+assert.equal(exportNeedsFlatten(placed), true);
+const artPlan = buildExportPlan(placed);
+assert.equal(artPlan.art.length, 2);
+assert.equal(artPlan.art[0].offsetMs, 1000);
+assert.equal(artPlan.art[0].endMs, 3000);
+assert.equal(artPlan.art[0].placement?.w, 0.5);
+const removedArt = deleteClip(placed, placedClip?.id || "");
+assert.equal(removedArt.tracks.find((track) => track.kind === "art")?.clips[0].offsetMs, 2000);
 
 console.log("drop studio v5 checks passed");
