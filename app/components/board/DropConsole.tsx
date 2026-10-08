@@ -51,6 +51,7 @@ import {
 import { forumPickerRooms, resolveRoomId } from "@/lib/board/rooms/catalog";
 import { upsertConversation } from "@/lib/board/rooms/storage";
 import LazyDropStudioStage from "./LazyDropStudioStage";
+import BoardFeedVideo from "./BoardFeedVideo";
 import BoardClientErrorBoundary from "./BoardClientErrorBoundary";
 import { DropPrivacyButton } from "./DropPrivacyButton";
 
@@ -1473,7 +1474,7 @@ export default function DropConsole({
                 <div className="consoleMediaPreview">
                   {inferMediaType(announceMediaUrl) === "video" ||
                   /\.(mp4|webm|mov|m4v)$/i.test(announceMediaName) ? (
-                    <video src={announceMediaUrl} controls playsInline />
+                    <BoardFeedVideo src={announceMediaUrl} />
                   ) : inferMediaType(announceMediaUrl) === "audio" ||
                     /\.(mp3|wav|m4a|aac|ogg|flac)$/i.test(announceMediaName) ? (
                     <audio src={announceMediaUrl} controls preload="metadata" />
@@ -2261,7 +2262,7 @@ function BoardDropConsoleFields({
       {dropFlavor === "pay" && (mediaPreviewUrl || attachUrl) ? (
         <div className="consoleMediaPreview">
           {inferMediaType(attachUrl || mediaPreviewUrl, uploadedFileName) === "video" || /\.(mp4|webm|mov|m4v)$/i.test(uploadedFileName) ? (
-            <video src={mediaPreviewUrl || attachUrl} controls playsInline />
+            <BoardFeedVideo src={mediaPreviewUrl || attachUrl} />
           ) : (
             <img src={mediaPreviewUrl || attachUrl} alt="Pay Drop request context" />
           )}

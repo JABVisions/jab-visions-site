@@ -1,6 +1,7 @@
 "use client";
 
 import styles from "./workBoardPreview.module.css";
+import BoardFeedVideo from "@/app/components/board/BoardFeedVideo";
 import VoiceDropSoundboard from "@/app/components/board/VoiceDropSoundboard";
 import type { WorkBoardLibraryDrop } from "@/lib/board/brain/workBoardPreview";
 import { kindLabel } from "@/lib/board/utils";
@@ -60,7 +61,7 @@ export function WorkBoardDropBody({
   if (drop.mediaUrl && drop.mediaType === "video") {
     return (
       <div className={styles.media}>
-        <video src={drop.mediaUrl} controls playsInline />
+        <BoardFeedVideo src={drop.mediaUrl} />
       </div>
     );
   }

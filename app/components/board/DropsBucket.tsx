@@ -8,6 +8,7 @@ import { mergeActivityWithFeed } from "@/lib/board/feedActivity";
 import { EVENTS, readFeed } from "@/lib/boardStore";
 import { supabaseBrowser } from "@/lib/supabase/browser";
 import VoiceDropSoundboard from "./VoiceDropSoundboard";
+import BoardFeedVideo from "./BoardFeedVideo";
 import {
   buildDropDownloadFilename,
   classifyDropDownload,
@@ -1858,11 +1859,9 @@ function BucketDropCard({
 
           {embed.kind === "video" && (
             <div className="mediaFrame">
-              <video
+              <BoardFeedVideo
                 className="vid"
                 src={embed.url}
-                controls
-                playsInline
                 onError={() => setEmbedFailed(true)}
               />
             </div>

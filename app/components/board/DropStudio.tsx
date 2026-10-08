@@ -17,6 +17,7 @@ import DropChipWorkbench from "./DropChipWorkbench";
 import DropStudioArtPalette from "./DropStudioArtPalette";
 import DropStudioOverlay from "./DropStudioOverlay";
 import DropStudioPaletteDeck, { type ObjectTool } from "./DropStudioPaletteDeck";
+import BoardPlayableVideo from "./BoardPlayableVideo";
 import {
   STICKER_PACKS,
   stickerTypeForPack,
@@ -99,24 +100,21 @@ function StudioPreviewVideo({
 }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const [playing, setPlaying] = useState(false);
+  const shownFrameRef = useRef(false);
 
   useEffect(() => {
     setPlaying(false);
-    const el = videoRef.current;
-    if (!el) return;
-    el.pause();
-    el.load();
+    shownFrameRef.current = false;
   }, [src, contentType]);
 
   function showFirstFrame() {
     const el = videoRef.current;
-    if (!el) return;
-    if (el.currentTime === 0) {
-      try {
-        el.currentTime = 0.05;
-      } catch {
-        // Some blobs reject a seek until more data arrives.
-      }
+    if (!el || shownFrameRef.current || !el.paused || el.currentTime > 0) return;
+    shownFrameRef.current = true;
+    try {
+      el.currentTime = 0.001;
+    } catch {
+      // Some blobs reject a seek until more data arrives.
     }
   }
 
@@ -140,21 +138,17 @@ function StudioPreviewVideo({
 
   return (
     <>
-      <video
-        ref={videoRef}
-        key={src}
+      <BoardPlayableVideo
+        videoRef={videoRef}
         src={src}
-        controls
-        playsInline
-        preload="auto"
         style={style}
+        preload="auto"
         onPlay={() => setPlaying(true)}
         onPause={() => setPlaying(false)}
         onEnded={() => setPlaying(false)}
-        onLoadedMetadata={showFirstFrame}
         onLoadedData={showFirstFrame}
         onPointerDown={(event) => event.stopPropagation()}
-        onError={() => onError?.()}
+        onError={onError}
       />
       <button
         type="button"

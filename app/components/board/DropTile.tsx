@@ -2257,7 +2257,7 @@ export default function DropTile() {
                   {file && isAudioFile(file) ? (
                     <audio src={selectedMediaPreview} controls preload="metadata" />
                   ) : file?.type.startsWith("video/") ? (
-                    <video src={selectedMediaPreview} controls playsInline />
+                    <BoardFeedVideo src={selectedMediaPreview} />
                   ) : (
                     <img src={selectedMediaPreview} alt="Pay Drop context preview" />
                   )}
@@ -2343,7 +2343,7 @@ export default function DropTile() {
             {selectedMediaPreview ? (
               <div className="selected-media-preview drop-studio-media-frame">
                 {file?.type.startsWith("video/") ? (
-                  <video src={selectedMediaPreview} controls playsInline />
+                  <BoardFeedVideo src={selectedMediaPreview} />
                 ) : (
                   <img src={selectedMediaPreview} alt="Vision Drop preview" />
                 )}
@@ -2558,7 +2558,7 @@ export default function DropTile() {
                   />
                 ) : viewerDrop.mediaKind === "video" ? (
                   <div className="viewer-studio-frame">
-                    <video src={viewerSignedUrl} controls autoPlay playsInline />
+                    <BoardFeedVideo src={viewerSignedUrl} autoPlay />
                     <DropStudioOverlay customizations={viewerDrop.customizations} />
                   </div>
                 ) : (
