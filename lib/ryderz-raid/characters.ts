@@ -18,6 +18,7 @@ import { rigFashionBody } from './civilians/fashion-rig';
 import { HostGlitch } from './host-glitch';
 import { addOutline, buildHumanoid, glow, toon, type Humanoid } from './toon';
 import { PlasmaOrbits } from './plasma-orbs';
+import { reskinRigidSkeleton } from './rigid-skin';
 
 const BLADE = new THREE.BoxGeometry(0.08, 0.95, 0.08);
 const AXE_HANDLE = new THREE.CylinderGeometry(0.05, 0.06, 1.15, 8);
@@ -121,8 +122,12 @@ async function loadGltfTemplate(url: string, label: string, repair?: GlbRepair):
   if (skinned) {
     // A rig whose weights do not match its geometry would tear apart when
     // posed; freeze it in its export pose and animate it as a puppet instead.
+    // A mesh welded entirely to one bone is the other failure: the skeleton is
+    // real, but nothing outside that bone can move it. Paint a skin first.
+    const reskinned = reskinRigidSkeleton(gltf.scene);
+    if (reskinned) console.info('[raid] %s: painted a skin onto a rigid rig', label);
     const broken = assessSkinning(gltf.scene);
-    if (broken.length) {
+    if (broken.length && !reskinned) {
       bakeSkinnedMeshes(gltf.scene);
       skinned = false;
       console.info('[raid] %s: untrusted rig (%s), using static mesh', label, broken.join(', '));
