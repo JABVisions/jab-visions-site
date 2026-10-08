@@ -317,5 +317,9 @@ assert.equal(effectsAtTime(withLook, 200).length, 1);
 assert.equal(effectsAtTime(withLook, 2000).length, 0);
 assert.equal(buildExportPlan(withLook).effects[0]?.motion, "glow");
 assert.equal(exportNeedsFlatten(withLook), true);
+const glow = withLook.tracks.find((track) => track.kind === "effect")?.clips[0];
+const withoutGlow = deleteClip(withLook, glow?.id || "");
+assert.equal(withoutGlow.tracks.find((track) => track.kind === "effect")?.clips.length, 0);
+assert.equal(effectsAtTime(withoutGlow, 200).length, 0);
 
 console.log("drop studio v5 checks passed");

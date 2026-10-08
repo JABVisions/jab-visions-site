@@ -47,6 +47,7 @@ export default function DropStudioV5Timeline({
   onPreset,
   onClearGrade,
   onAddEffect,
+  onDeleteClip,
   onVolume,
   onRecordVoice,
   voiceState,
@@ -76,6 +77,7 @@ export default function DropStudioV5Timeline({
   onPreset?: (name: string, intensity: number) => void;
   onClearGrade?: () => void;
   onAddEffect?: (motion: DropStudioV5Motion) => void;
+  onDeleteClip?: (clipId: string) => void;
   onVolume?: (volume: number) => void;
   onRecordVoice?: () => void;
   voiceState?: "idle" | "recording" | "denied";
@@ -86,6 +88,8 @@ export default function DropStudioV5Timeline({
   const selectedArt = session.tracks
     .find((track) => track.kind === "art")
     ?.clips.find((clip) => clip.id === selectedClipId);
+  const effectClips = session.tracks.find((track) => track.kind === "effect")?.clips ?? [];
+  const selectedEffect = effectClips.find((clip) => clip.id === selectedClipId);
   const duration = Math.max(sessionDurationMs(session), 4_000);
   const pxPerMs = 0.042;
   const width = Math.max(280, LANE_LABEL_WIDTH + duration * pxPerMs);
@@ -191,6 +195,90 @@ export default function DropStudioV5Timeline({
         </div>
       ) : null}
 
+      <div className={styles.rulerWrap}>
+        <div
+          className={styles.ruler}
+          style={{ width }}
+          onPointerDown={scrubFromEvent}
+        >
+          <div className={styles.ticks}>
+            {ticks.map((tick) => (
+              <span
+                key={tick}
+                className={styles.tick}
+                style={{ left: LANE_LABEL_WIDTH + tick * pxPerMs }}
+              >
+                {clock(tick)}
+              </span>
+            ))}
+          </div>
+          {session.tracks.map((track) => (
+            <div className={styles.lane} key={track.id}>
+              <div className={styles.laneLabel}>{track.label}</div>
+              <div className={styles.laneClips}>
+                {track.clips.map((clip) => {
+                  const clipClass = `${styles.clip} ${track.kind === "audio" ? styles.clipAudio : ""} ${
+                    track.kind === "art" ? styles.clipArt : ""
+                  } ${track.kind === "effect" ? styles.clipEffect : ""} ${clip.hidden ? styles.clipHidden : ""} ${
+                    selectedClipId === clip.id ? styles.clipSelected : ""
+                  }`;
+                  const clipStyle = {
+                    left: clip.offsetMs * pxPerMs,
+                    width: Math.max(track.kind === "effect" ? 72 : 28, clipPlayableMs(clip) * pxPerMs),
+                  };
+                  if (track.kind === "effect") {
+                    return (
+                      <div key={clip.id} className={clipClass} style={clipStyle}>
+                        <button
+                          type="button"
+                          className={styles.clipLabel}
+                          onPointerDown={(event) => event.stopPropagation()}
+                          onClick={() => onSelectClip(clip.id)}
+                        >
+                          {clip.name || track.label}
+                        </button>
+                        <button
+                          type="button"
+                          className={styles.clipRemove}
+                          aria-label={`Delete ${clip.name || "effect"} effect`}
+                          onPointerDown={(event) => event.stopPropagation()}
+                          onClick={() => onDeleteClip?.(clip.id)}
+                        >
+                          ×
+                        </button>
+                      </div>
+                    );
+                  }
+                  return (
+                    <button
+                      key={clip.id}
+                      type="button"
+                      className={clipClass}
+                      style={clipStyle}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onSelectClip(clip.id);
+                      }}
+                    >
+                      {clip.name || track.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+          <div
+            className={styles.playhead}
+            style={{ left: LANE_LABEL_WIDTH + session.playheadMs * pxPerMs }}
+          />
+        </div>
+      </div>
+      <p className={styles.note}>
+        {extraClipCount > 0
+          ? "Done renders this timeline with one decoder. The draft stays if that render fails."
+          : "One decoder preview. Trim, crop, and extra audio render on Done."}
+      </p>
+
       {onAddEffect ? (
         <div className={styles.cropRow} aria-label="Effects">
           <span className={styles.groupLabel}>Effect</span>
@@ -199,6 +287,9 @@ export default function DropStudioV5Timeline({
               {motion}
             </button>
           ))}
+          <button type="button" onClick={() => selectedEffect && onDeleteClip?.(selectedEffect.id)} disabled={!selectedEffect}>
+            Delete effect
+          </button>
         </div>
       ) : null}
 
@@ -220,6 +311,12 @@ export default function DropStudioV5Timeline({
               onChange={(event) => onVolume?.(Number(event.target.value) / 100)}
             />
           </label>
+        </div>
+      ) : null}
+
+      {onFade ? (
+        <div className={styles.cropRow} aria-label="Fade">
+          <span className={styles.groupLabel}>Fade</span>
           <label className={styles.sliderLabel}>
             Fade in
             <input
@@ -327,62 +424,6 @@ export default function DropStudioV5Timeline({
         </button>
       </div>
 
-      <div className={styles.rulerWrap}>
-        <div
-          className={styles.ruler}
-          style={{ width }}
-          onPointerDown={scrubFromEvent}
-        >
-          <div className={styles.ticks}>
-            {ticks.map((tick) => (
-              <span
-                key={tick}
-                className={styles.tick}
-                style={{ left: LANE_LABEL_WIDTH + tick * pxPerMs }}
-              >
-                {clock(tick)}
-              </span>
-            ))}
-          </div>
-          {session.tracks.map((track) => (
-            <div className={styles.lane} key={track.id}>
-              <div className={styles.laneLabel}>{track.label}</div>
-              <div className={styles.laneClips}>
-                {track.clips.map((clip) => (
-                  <button
-                    key={clip.id}
-                    type="button"
-                    className={`${styles.clip} ${track.kind === "audio" ? styles.clipAudio : ""} ${
-                      track.kind === "art" ? styles.clipArt : ""
-                    } ${clip.hidden ? styles.clipHidden : ""} ${
-                      selectedClipId === clip.id ? styles.clipSelected : ""
-                    }`}
-                    style={{
-                      left: clip.offsetMs * pxPerMs,
-                      width: Math.max(28, clipPlayableMs(clip) * pxPerMs),
-                    }}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      onSelectClip(clip.id);
-                    }}
-                  >
-                    {clip.name || track.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-          ))}
-          <div
-            className={styles.playhead}
-            style={{ left: LANE_LABEL_WIDTH + session.playheadMs * pxPerMs }}
-          />
-        </div>
-      </div>
-      <p className={styles.note}>
-        {extraClipCount > 0
-          ? "Done renders this timeline with one decoder. The draft stays if that render fails."
-          : "One decoder preview. Trim, crop, and extra audio render on Done."}
-      </p>
     </section>
   );
 }

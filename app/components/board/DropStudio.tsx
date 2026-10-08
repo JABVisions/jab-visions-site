@@ -950,6 +950,7 @@ function DropStudio({
           onPreset={v5.applyPreset}
           onClearGrade={() => v5.setGrade(null)}
           onAddEffect={v5.addEffect}
+          onDeleteClip={v5.removeClip}
           onVolume={v5.setVolume}
           onRecordVoice={() => void v5.recordVoice()}
           voiceState={v5.voiceState}

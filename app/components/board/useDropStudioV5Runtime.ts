@@ -548,8 +548,19 @@ export function useDropStudioV5Runtime({
       editSelected((current, clipId) => setClipGrade(current, clipId, grade)),
     applyPreset: (name: string, intensity: number) =>
       editSelected((current, clipId) => setClipGrade(current, clipId, presetGrade(name, intensity) ?? null)),
-    addEffect: (motion: DropStudioV5Motion) =>
-      applyArtEdit(addEffectClip(sessionRef.current, motion, sessionRef.current.playheadMs, 2000)),
+    addEffect: (motion: DropStudioV5Motion) => {
+      const next = addEffectClip(sessionRef.current, motion, sessionRef.current.playheadMs, 2000);
+      if (next === sessionRef.current) return;
+      applyArtEdit(next);
+      const created = next.tracks.find((track) => track.kind === "effect")?.clips.at(-1);
+      if (created) setSelectedClipId(created.id);
+    },
+    removeClip: (clipId: string) => {
+      const current = sessionRef.current;
+      const clip = current.tracks.flatMap((track) => track.clips).find((item) => item.id === clipId);
+      if (!clip || clip.mediaKey === "primary") return;
+      applyArtEdit(deleteClip(current, clipId));
+    },
     setVolume: (volume: number) => {
       const clip = selectedClip();
       if (!clip) return;
@@ -574,7 +585,7 @@ export function useDropStudioV5Runtime({
     },
     remove: () => {
       if (!selected || selected.mediaKey === "primary") return;
-      commit(deleteClip(session, selected.id));
+      applyArtEdit(deleteClip(sessionRef.current, selected.id));
     },
     trim: (edge: "in" | "out", deltaMs: number) => {
       if (!selected) return;
