@@ -2,10 +2,12 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  clipEndMs,
   createDropStudioV5History,
   createDropStudioV5Session,
   cropToClipPath,
   deleteClip,
+  handoffPlayheadMs,
   importAudioClip,
   importVideoClip,
   insetV5Crop,
@@ -16,7 +18,9 @@ import {
   pushV5History,
   redoV5,
   reorderClip,
+  resolveTrimOutMs,
   saveDropStudioV5Project,
+  sessionDurationMs,
   setClipCrop,
   setClipFilter,
   setMediaDuration,
@@ -30,6 +34,11 @@ import {
   type DropStudioV5MediaBag,
   type DropStudioV5Session,
 } from "@/lib/board/dropStudioV5";
+import {
+  canPersistDropStudioV5Media,
+  loadDropStudioV5Media,
+  saveDropStudioV5Media,
+} from "@/lib/board/dropStudioV5Media";
 
 function readDuration(file: File): Promise<number> {
   return new Promise((resolve) => {
@@ -107,6 +116,32 @@ export function useDropStudioV5Runtime({
       primary: { url: mediaUrl, kind: "video" },
     }));
     setSelectedClipId(next.tracks[0]?.clips[0]?.id ?? null);
+    if (!draftId) return;
+    let cancelled = false;
+    void loadDropStudioV5Media(draftId).then((rows) => {
+      if (cancelled || !rows.length) return;
+      const urls: DropStudioV5MediaBag = {};
+      for (const row of rows) {
+        if (row.mediaKey === "primary") continue;
+        const url = URL.createObjectURL(row.blob);
+        objectUrlsRef.current.push(url);
+        urls[row.mediaKey] = {
+          url,
+          kind: row.mimeType.startsWith("audio/")
+            ? "audio"
+            : row.mimeType.startsWith("image/")
+              ? "image"
+              : "video",
+          objectUrl: true,
+        };
+      }
+      if (Object.keys(urls).length) {
+        setMediaBag((bag) => ({ ...bag, ...urls }));
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [draftId, enabled, mediaKind, mediaUrl]);
 
   useEffect(() => {
@@ -155,6 +190,9 @@ export function useDropStudioV5Runtime({
       objectUrlsRef.current.push(url);
       const duration = await readDuration(file);
       setMediaBag((bag) => ({ ...bag, [key]: { url, kind: "video", objectUrl: true } }));
+      if (draftId && canPersistDropStudioV5Media(file.size)) {
+        void saveDropStudioV5Media(draftId, key, file);
+      }
       commit(
         importVideoClip(session, {
           mediaKey: key,
@@ -164,7 +202,7 @@ export function useDropStudioV5Runtime({
         })
       );
     },
-    [commit, session]
+    [commit, draftId, session]
   );
 
   const importAudio = useCallback(
@@ -175,6 +213,9 @@ export function useDropStudioV5Runtime({
       objectUrlsRef.current.push(url);
       const duration = await readDuration(file);
       setMediaBag((bag) => ({ ...bag, [key]: { url, kind: "audio", objectUrl: true } }));
+      if (draftId && canPersistDropStudioV5Media(file.size)) {
+        void saveDropStudioV5Media(draftId, key, file);
+      }
       commit(
         importAudioClip(session, {
           mediaKey: key,
@@ -184,7 +225,7 @@ export function useDropStudioV5Runtime({
         })
       );
     },
-    [commit, session]
+    [commit, draftId, session]
   );
 
   const applyDuration = useCallback((seconds: number) => {
@@ -205,7 +246,8 @@ export function useDropStudioV5Runtime({
     if (scrubbing) return;
     const clip = preview?.clip;
     if (!clip) return;
-    const next = clip.offsetMs + Math.max(0, currentTimeSeconds * 1000 - clip.trimInMs);
+    const handoff = handoffPlayheadMs(clip, currentTimeSeconds * 1000);
+    const next = handoff ?? clip.offsetMs + Math.max(0, currentTimeSeconds * 1000 - clip.trimInMs);
     setSession((current) => {
       if (Math.abs(current.playheadMs - next) < 80) return current;
       return setPlayhead(current, next);
@@ -224,6 +266,15 @@ export function useDropStudioV5Runtime({
     extraClipCount,
     previewUrl,
     previewMediaTimeSeconds: preview ? preview.mediaTimeMs / 1000 : 0,
+    previewTrimOutSeconds: preview ? resolveTrimOutMs(preview.clip) / 1000 : 0,
+    crossClipBoundary: () => {
+      const clip = preview?.clip;
+      if (!clip) return false;
+      const nextMs = clipEndMs(clip);
+      const duration = sessionDurationMs(session);
+      setSession((current) => setPlayhead(current, nextMs));
+      return nextMs < duration - 1;
+    },
     previewClipPath,
     audioPreviewUrl: audioPreview ? mediaBag[audioPreview.clip.mediaKey]?.url : undefined,
     audioPreviewTimeSeconds: audioPreview ? audioPreview.mediaTimeMs / 1000 : 0,

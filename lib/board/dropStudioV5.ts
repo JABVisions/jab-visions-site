@@ -489,15 +489,40 @@ export function clipAtTime(
 export function previewVideoAtPlayhead(session: DropStudioV5Session): {
   clip: DropStudioV5Clip;
   mediaTimeMs: number;
+  ended: boolean;
 } | null {
   const track = videoTrack(session);
   if (!track || track.clips.length === 0) return null;
-  const clip = clipAtTime(track, session.playheadMs) ?? track.clips[0];
-  const mediaTimeMs = Math.max(
-    clip.trimInMs,
-    session.playheadMs - clip.offsetMs + clip.trimInMs
-  );
-  return { clip, mediaTimeMs };
+  const active = clipAtTime(track, session.playheadMs);
+  if (active) {
+    const mediaTimeMs = Math.max(
+      active.trimInMs,
+      session.playheadMs - active.offsetMs + active.trimInMs
+    );
+    return { clip: active, mediaTimeMs, ended: false };
+  }
+  const ordered = [...track.clips].sort((a, b) => a.offsetMs - b.offsetMs);
+  const last = ordered[ordered.length - 1];
+  if (session.playheadMs >= clipEndMs(last) - 1) {
+    return { clip: last, mediaTimeMs: resolveTrimOutMs(last), ended: true };
+  }
+  const upcoming = ordered.find((clip) => clip.offsetMs >= session.playheadMs);
+  if (upcoming) {
+    return { clip: upcoming, mediaTimeMs: upcoming.trimInMs, ended: false };
+  }
+  return { clip: ordered[0], mediaTimeMs: ordered[0].trimInMs, ended: false };
+}
+
+/** Timeline position where the single decoder should load the next clip. */
+export function handoffPlayheadMs(clip: DropStudioV5Clip, mediaMs: number): number | null {
+  const trimOut = resolveTrimOutMs(clip);
+  if (trimOut <= 0 || mediaMs < trimOut - 40) return null;
+  return clipEndMs(clip);
+}
+
+export function monitorAspectRatio(aspect: DropStudioV5Aspect): number {
+  const spec = DROP_STUDIO_V5_ASPECTS[aspect] ?? DROP_STUDIO_V5_ASPECTS.portrait;
+  return spec.w / spec.h;
 }
 
 export function previewAudioAtPlayhead(session: DropStudioV5Session): {

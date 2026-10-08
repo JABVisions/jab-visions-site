@@ -20,7 +20,11 @@ import DropStudioPaletteDeck, { type ObjectTool } from "./DropStudioPaletteDeck"
 import DropStudioV5Timeline from "./DropStudioV5Timeline";
 import BoardPlayableVideo from "./BoardPlayableVideo";
 import { useDropStudioV5Runtime } from "./useDropStudioV5Runtime";
-import { aspectToMediaFrame } from "@/lib/board/dropStudioV5";
+import {
+  aspectToMediaFrame,
+  DROP_STUDIO_V5_ASPECTS,
+  monitorAspectRatio,
+} from "@/lib/board/dropStudioV5";
 import {
   STICKER_PACKS,
   stickerTypeForPack,
@@ -96,9 +100,11 @@ function StudioPreviewVideo({
   style,
   onError,
   mediaTimeSeconds,
+  trimOutSeconds,
   scrubbing = false,
   onDuration,
   onTimeUpdate,
+  onClipBoundary,
   onPlayingChange,
 }: {
   src: string;
@@ -106,14 +112,17 @@ function StudioPreviewVideo({
   style?: React.CSSProperties;
   onError?: () => void;
   mediaTimeSeconds?: number;
+  trimOutSeconds?: number;
   scrubbing?: boolean;
   onDuration?: (seconds: number) => void;
   onTimeUpdate?: (seconds: number) => void;
+  onClipBoundary?: () => boolean;
   onPlayingChange?: (playing: boolean) => void;
 }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const [playing, setPlaying] = useState(false);
   const shownFrameRef = useRef(false);
+  const resumeRef = useRef(false);
 
   useEffect(() => {
     setPlaying(false);
@@ -139,14 +148,26 @@ function StudioPreviewVideo({
     const onMeta = () => {
       if (Number.isFinite(el.duration) && el.duration > 0) onDuration?.(el.duration);
     };
-    const onTick = () => onTimeUpdate?.(el.currentTime);
+    const onTick = () => {
+      if (
+        trimOutSeconds &&
+        trimOutSeconds > 0 &&
+        el.currentTime >= trimOutSeconds - 0.04 &&
+        !el.paused
+      ) {
+        el.pause();
+        resumeRef.current = onClipBoundary?.() ?? false;
+        return;
+      }
+      onTimeUpdate?.(el.currentTime);
+    };
     el.addEventListener("loadedmetadata", onMeta);
     el.addEventListener("timeupdate", onTick);
     return () => {
       el.removeEventListener("loadedmetadata", onMeta);
       el.removeEventListener("timeupdate", onTick);
     };
-  }, [src, onDuration, onTimeUpdate]);
+  }, [src, onDuration, onTimeUpdate, onClipBoundary, trimOutSeconds]);
 
   function showFirstFrame() {
     const el = videoRef.current;
@@ -158,6 +179,10 @@ function StudioPreviewVideo({
       // Some blobs reject a seek until more data arrives.
     }
     if (Number.isFinite(el.duration) && el.duration > 0) onDuration?.(el.duration);
+    if (resumeRef.current) {
+      resumeRef.current = false;
+      void el.play().catch(() => {});
+    }
   }
 
   async function togglePlay(event: React.MouseEvent) {
@@ -372,10 +397,6 @@ function DropStudio({
   const mediaFrame = resolveDropMediaFrame(normalized);
   const mediaRotationStyle = dropMediaRotationStyle(normalized.effects?.rotation ?? 0);
 
-  function toggleMediaFrame() {
-    setMediaFrame(mediaFrame === "landscape" ? "portrait" : "landscape");
-  }
-
   function removeItem(kind: "text" | "sticker", id: string) {
     update({
       ...normalized,
@@ -448,7 +469,9 @@ function DropStudio({
                 if (!timelineOn || previewSrc === mediaUrl) onMediaError?.();
               }}
               mediaTimeSeconds={timelineOn ? v5.previewMediaTimeSeconds : undefined}
+              trimOutSeconds={timelineOn ? v5.previewTrimOutSeconds : undefined}
               scrubbing={timelineOn ? v5.scrubbing : false}
+              onClipBoundary={timelineOn ? v5.crossClipBoundary : undefined}
               onDuration={timelineOn ? v5.applyDuration : undefined}
               onTimeUpdate={timelineOn ? v5.syncPlayheadFromVideo : undefined}
               onPlayingChange={
@@ -752,7 +775,13 @@ function DropStudio({
         chip={previewEl}
         deck={deckPanelEl}
         mediaFrame={mediaFrame}
-        onToggleFrame={toggleMediaFrame}
+        onToggleFrame={() => {
+          const next = mediaFrame === "landscape" ? "portrait" : "landscape";
+          if (timelineOn) v5.setAspect(next);
+          setMediaFrame(next);
+        }}
+        monitorAspect={timelineOn ? DROP_STUDIO_V5_ASPECTS[v5.session.aspect].css : undefined}
+        monitorRatio={timelineOn ? monitorAspectRatio(v5.session.aspect) : undefined}
       />
     );
     if (!timelineOn) return workbench;

@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import ArtPaletteTools, { type ArtBrushMode } from "./ArtPaletteTools";
+import { ART_BLEND_STRENGTH, grabArtSmudge, stampArtSmudge } from "@/lib/board/artSmudge";
 import styles from "./DropStudio.module.css";
 
 function hslToHex(h: number, s: number, l: number) {
@@ -33,6 +34,10 @@ export default function DropStudioArtPalette({
   const wheelDraggingRef = useRef(false);
   const undoRef = useRef<ImageData[]>([]);
   const redoRef = useRef<ImageData[]>([]);
+  const smudgeBufRef = useRef<HTMLCanvasElement | null>(null);
+  const smudgeCtxRef = useRef<CanvasRenderingContext2D | null>(null);
+  const blendDiamRef = useRef(0);
+  const dprRef = useRef(1);
   const initialPaintedRef = useRef(false);
   const [portalReady, setPortalReady] = useState(false);
   const [color, setColor] = useState("#FF4FD8");
@@ -53,7 +58,8 @@ export default function DropStudioArtPalette({
     function syncCanvas() {
       const rect = target.getBoundingClientRect();
       if (rect.width < 1 || rect.height < 1) return;
-      const dpr = Math.min(window.devicePixelRatio || 1, 3);
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      dprRef.current = dpr;
       const width = Math.max(1, Math.round(rect.width * dpr));
       const height = Math.max(1, Math.round(rect.height * dpr));
       if (target.width === width && target.height === height && contextRef.current) return;
@@ -116,10 +122,61 @@ export default function DropStudioArtPalette({
 
   function configureBrush(context: CanvasRenderingContext2D) {
     context.globalCompositeOperation = brushMode === "erase" ? "destination-out" : "source-over";
-    context.globalAlpha = brushMode === "blend" ? 0.22 : 1;
+    context.globalAlpha = 1;
     context.strokeStyle = color;
     context.fillStyle = color;
     context.lineWidth = size;
+  }
+
+  function ensureSmudgeBuffer(diameter: number) {
+    let buf = smudgeBufRef.current;
+    if (!buf) {
+      buf = document.createElement("canvas");
+      smudgeBufRef.current = buf;
+    }
+    if (buf.width !== diameter || buf.height !== diameter) {
+      buf.width = diameter;
+      buf.height = diameter;
+    }
+    smudgeCtxRef.current = buf.getContext("2d");
+  }
+
+  function backgroundMedia() {
+    const host = hostRef.current;
+    const media = host?.querySelector("video, img");
+    if (media instanceof HTMLVideoElement) {
+      return {
+        source: media,
+        width: media.videoWidth,
+        height: media.videoHeight,
+      };
+    }
+    if (media instanceof HTMLImageElement) {
+      return {
+        source: media,
+        width: media.naturalWidth,
+        height: media.naturalHeight,
+      };
+    }
+    return null;
+  }
+
+  function grabSmudge(cxDev: number, cyDev: number, diameter: number) {
+    const buffer = smudgeCtxRef.current;
+    const canvas = canvasRef.current;
+    if (!buffer || !canvas) return;
+    const background = backgroundMedia();
+    grabArtSmudge({
+      buffer,
+      strokes: canvas,
+      background: background?.source,
+      backgroundWidth: background?.width,
+      backgroundHeight: background?.height,
+      sampleBackground: true,
+      cxDev,
+      cyDev,
+      diameter,
+    });
   }
 
   function startDrawing(event: React.PointerEvent<HTMLCanvasElement>) {
@@ -132,6 +189,13 @@ export default function DropStudioArtPalette({
     drawingRef.current = true;
     const next = point(event);
     lastPointRef.current = next;
+    if (brushMode === "blend") {
+      const diameter = Math.max(2, Math.round(size * dprRef.current));
+      blendDiamRef.current = diameter;
+      ensureSmudgeBuffer(diameter);
+      grabSmudge(next.x * dprRef.current, next.y * dprRef.current, diameter);
+      return;
+    }
     configureBrush(context);
     context.beginPath();
     context.arc(next.x, next.y, size / 2, 0, Math.PI * 2);
@@ -146,6 +210,27 @@ export default function DropStudioArtPalette({
     event.preventDefault();
     const next = point(event);
     const previous = lastPointRef.current ?? next;
+    if (brushMode === "blend") {
+      const buffer = smudgeBufRef.current;
+      if (!buffer) return;
+      const rawPressure = event.pressure;
+      const pressure = rawPressure > 0 ? rawPressure : 0.5;
+      const strength = Math.max(0.55, Math.min(0.99, ART_BLEND_STRENGTH + (pressure - 0.5) * 0.5));
+      stampArtSmudge({
+        ctx: context,
+        buffer,
+        x0: previous.x,
+        y0: previous.y,
+        x1: next.x,
+        y1: next.y,
+        strength,
+        dpr: dprRef.current,
+        diameter: blendDiamRef.current,
+        grab: (cxDev, cyDev) => grabSmudge(cxDev, cyDev, blendDiamRef.current),
+      });
+      lastPointRef.current = next;
+      return;
+    }
     context.quadraticCurveTo(previous.x, previous.y, (previous.x + next.x) / 2, (previous.y + next.y) / 2);
     context.stroke();
     lastPointRef.current = next;

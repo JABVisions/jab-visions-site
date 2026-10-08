@@ -1,16 +1,23 @@
 import assert from "node:assert/strict";
 import {
+  canPersistDropStudioV5Media,
+  dropStudioV5MediaId,
+  DROP_STUDIO_V5_MEDIA_MAX_BYTES,
+} from "./dropStudioV5Media";
+import {
   aspectToMediaFrame,
   clipPlayableMs,
   createDropStudioV5History,
   createDropStudioV5Session,
   cropToClipPath,
   deleteClip,
+  handoffPlayheadMs,
   importAudioClip,
   importVideoClip,
   insetV5Crop,
   MAX_V5_VIDEO_CLIPS,
   mediaKeyFromFile,
+  monitorAspectRatio,
   parseDropStudioV5Snapshot,
   previewAudioAtPlayhead,
   previewVideoAtPlayhead,
@@ -148,5 +155,25 @@ assert.equal(capped.tracks[0].clips.length, MAX_V5_VIDEO_CLIPS, "import respects
 
 assert.equal(parseDropStudioV5Snapshot({ version: 4, id: "nope" }), null);
 assert.equal(parseDropStudioV5Snapshot(null), null);
+
+const endedSession = setPlayhead(capped, sessionDurationMs(capped));
+const endedPreview = previewVideoAtPlayhead(endedSession);
+assert.equal(endedPreview?.ended, true, "the end of the timeline stays on the last clip");
+assert.equal(endedPreview?.clip.mediaKey, `clip-${MAX_V5_VIDEO_CLIPS - 1}`);
+
+const handoffClip = capped.tracks[0].clips[0];
+assert.equal(handoffPlayheadMs(handoffClip, 200), null, "mid-clip playback does not hand off");
+assert.equal(
+  handoffPlayheadMs({ ...handoffClip, sourceDurationMs: 1000, trimInMs: 0, trimOutMs: 0, offsetMs: 0 }, 980),
+  1000
+);
+
+assert.equal(monitorAspectRatio("story"), 9 / 16);
+assert.equal(monitorAspectRatio("square"), 1);
+assert.equal(monitorAspectRatio("landscape"), 16 / 9);
+
+assert.equal(canPersistDropStudioV5Media(1024), true);
+assert.equal(canPersistDropStudioV5Media(DROP_STUDIO_V5_MEDIA_MAX_BYTES + 1), false);
+assert.equal(dropStudioV5MediaId("draft", "tape.mp4:1:2"), "draft::tape.mp4:1:2");
 
 console.log("drop studio v5 checks passed");
