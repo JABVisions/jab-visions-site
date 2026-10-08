@@ -39,6 +39,7 @@ import {
   loadDropStudioV5Media,
   saveDropStudioV5Media,
 } from "@/lib/board/dropStudioV5Media";
+import { fetchDropStudioV5Cloud, queueDropStudioV5CloudSync } from "@/lib/board/dropStudioV5Cloud";
 
 function readDuration(file: File): Promise<number> {
   return new Promise((resolve) => {
@@ -98,6 +99,7 @@ export function useDropStudioV5Runtime({
     if (seededUrlRef.current === seedKey) return;
     seededUrlRef.current = seedKey;
     const restored = draftId ? loadDropStudioV5Project(draftId) : null;
+    const localHit = Boolean(restored);
     const base = restored ?? createDropStudioV5Session(draftId);
     const hasPrimary = base.tracks.some((track) =>
       track.clips.some((clip) => clip.mediaKey === "primary")
@@ -118,6 +120,14 @@ export function useDropStudioV5Runtime({
     setSelectedClipId(next.tracks[0]?.clips[0]?.id ?? null);
     if (!draftId) return;
     let cancelled = false;
+    if (!localHit) {
+      void fetchDropStudioV5Cloud(draftId).then((cloud) => {
+        if (cancelled || !cloud) return;
+        setSession((current) =>
+          (current.tracks[0]?.clips.length ?? 0) > 1 ? current : cloud
+        );
+      });
+    }
     void loadDropStudioV5Media(draftId).then((rows) => {
       if (cancelled || !rows.length) return;
       const urls: DropStudioV5MediaBag = {};
@@ -156,6 +166,7 @@ export function useDropStudioV5Runtime({
     if (persistTimerRef.current) window.clearTimeout(persistTimerRef.current);
     persistTimerRef.current = window.setTimeout(() => {
       saveDropStudioV5Project(draftId, session);
+      queueDropStudioV5CloudSync(draftId, session);
     }, 700);
     return () => {
       if (persistTimerRef.current) window.clearTimeout(persistTimerRef.current);
@@ -164,7 +175,10 @@ export function useDropStudioV5Runtime({
 
   useEffect(() => {
     if (!enabled || !draftId) return;
-    const persist = () => saveDropStudioV5Project(draftId, session);
+    const persist = () => {
+      saveDropStudioV5Project(draftId, session);
+      queueDropStudioV5CloudSync(draftId, session);
+    };
     const onHide = () => {
       if (document.visibilityState === "hidden") persist();
     };
@@ -279,6 +293,7 @@ export function useDropStudioV5Runtime({
     audioPreviewUrl: audioPreview ? mediaBag[audioPreview.clip.mediaKey]?.url : undefined,
     audioPreviewTimeSeconds: audioPreview ? audioPreview.mediaTimeMs / 1000 : 0,
     audioVolume: audioPreview ? audioPreview.clip.volume : 1,
+    mediaBag,
     scrubbing,
     aspect: session.aspect,
     activeFilter: preview?.clip.filter ?? filter ?? null,

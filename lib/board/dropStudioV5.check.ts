@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { buildExportPlan, canvasFilterFor, exportNeedsFlatten, exportPixelSize } from "./dropStudioV5Export";
 import {
   canPersistDropStudioV5Media,
   dropStudioV5MediaId,
@@ -175,5 +176,30 @@ assert.equal(monitorAspectRatio("landscape"), 16 / 9);
 assert.equal(canPersistDropStudioV5Media(1024), true);
 assert.equal(canPersistDropStudioV5Media(DROP_STUDIO_V5_MEDIA_MAX_BYTES + 1), false);
 assert.equal(dropStudioV5MediaId("draft", "tape.mp4:1:2"), "draft::tape.mp4:1:2");
+
+const plain = importVideoClip(createDropStudioV5Session("plain"), {
+  mediaKey: "primary",
+  kind: "video",
+  sourceDurationMs: 2000,
+});
+assert.equal(exportNeedsFlatten(plain), false, "an untouched tape stays on the V4 publish path");
+const trimmedExport = trimClip(plain, plain.tracks[0].clips[0].id, 200, 1500);
+assert.equal(exportNeedsFlatten(trimmedExport), true);
+const story = setSessionAspect(plain, "story");
+assert.equal(exportNeedsFlatten(story), true);
+const withAudio = importAudioClip(plain, {
+  mediaKey: "bed",
+  kind: "audio",
+  sourceDurationMs: 2000,
+});
+assert.equal(exportNeedsFlatten(withAudio), true);
+const plan = buildExportPlan(trimmedExport);
+assert.equal(plan.video.length, 1);
+assert.equal(plan.video[0].trimInMs, 200);
+assert.equal(plan.video[0].playableMs, 1300);
+assert.equal(exportPixelSize("story").width, 540);
+assert.equal(exportPixelSize("story").height, 960);
+assert.equal(canvasFilterFor("clean-enhance").includes("contrast"), true);
+assert.equal(canvasFilterFor(null), "none");
 
 console.log("drop studio v5 checks passed");

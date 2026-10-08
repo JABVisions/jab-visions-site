@@ -208,16 +208,11 @@ export default function DropStudioV5Timeline({
           />
         </div>
       </div>
-      {extraClipCount > 0 ? (
-        <p className={styles.note}>
-          Extra clips stay on this timeline. Publishing still uses the original tape until V5 export
-          ships.
-        </p>
-      ) : (
-        <p className={styles.note}>
-          One decoder preview. Trim, split, and crop are non-destructive.
-        </p>
-      )}
+      <p className={styles.note}>
+        {extraClipCount > 0
+          ? "Done renders this timeline with one decoder. The draft stays if that render fails."
+          : "One decoder preview. Trim, crop, and extra audio render on Done."}
+      </p>
     </section>
   );
 }

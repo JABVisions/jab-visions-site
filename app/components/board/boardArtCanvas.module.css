@@ -707,3 +707,69 @@
     height: 76px;
   }
 }
+
+.layerStrip {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.layerStripScroll {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+
+.layerTile {
+  flex: 0 0 auto;
+  display: grid;
+  gap: 4px;
+  min-width: 92px;
+  padding: 6px;
+  border-radius: 12px;
+  border: 1px solid rgba(167, 244, 232, 0.16);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.layerTileActive {
+  border-color: rgba(255, 209, 45, 0.7);
+  box-shadow: 0 0 0 1px rgba(255, 209, 45, 0.35);
+}
+
+.layerTile > button:first-child {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #e8fff8;
+  font: inherit;
+  font-size: 0.68rem;
+  font-weight: 800;
+  text-align: left;
+  cursor: pointer;
+}
+
+.layerTileActions {
+  display: flex;
+  gap: 4px;
+}
+
+.layerTileActions button,
+.addLayer {
+  margin: 0;
+  padding: 0.2rem 0.4rem;
+  border-radius: 999px;
+  border: 1px solid rgba(167, 244, 232, 0.22);
+  background: rgba(255, 255, 255, 0.06);
+  color: #e8fff8;
+  font: inherit;
+  font-size: 0.58rem;
+  cursor: pointer;
+}
+
+.layerTileActions button:disabled,
+.addLayer:disabled {
+  opacity: 0.35;
+  cursor: default;
+}

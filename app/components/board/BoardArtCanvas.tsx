@@ -11,6 +11,15 @@
 
 import { useEffect, useRef, useState } from "react";
 import ArtPaletteTools, { type ArtBrushMode } from "./ArtPaletteTools";
+import ArtLayerStrip from "./ArtLayerStrip";
+import {
+  addArtLayer,
+  deleteArtLayer,
+  initialArtLayers,
+  mergeArtLayerIds,
+  moveArtLayer,
+  nextActiveArtLayer,
+} from "@/lib/board/artLayers";
 import DropChipWorkbench from "./DropChipWorkbench";
 import DropStudioPaletteDeck, { type ObjectTool } from "./DropStudioPaletteDeck";
 import styles from "./boardArtCanvas.module.css";
@@ -90,7 +99,109 @@ export default function BoardArtCanvas({
   const [light, setLight] = useState(65);
   const [wheelHue, setWheelHue] = useState(318);
   const [wheelSat, setWheelSat] = useState(100);
+  const [layers, setLayers] = useState(() => initialArtLayers());
+  const [activeLayerId, setActiveLayerId] = useState("layer-1");
+  const layersRef = useRef(layers);
+  const activeLayerRef = useRef(activeLayerId);
+  const layerStoresRef = useRef<Map<string, HTMLCanvasElement>>(new Map());
+  layersRef.current = layers;
+  activeLayerRef.current = activeLayerId;
   const onPhoto = !!backgroundImageUrl || !!backgroundVideoUrl;
+
+  function storeFor(id: string, width: number, height: number) {
+    let stored = layerStoresRef.current.get(id);
+    if (!stored) {
+      stored = document.createElement("canvas");
+      stored.width = width;
+      stored.height = height;
+      layerStoresRef.current.set(id, stored);
+    }
+    return stored;
+  }
+
+  function stashActiveLayer() {
+    const canvas = canvasRef.current;
+    if (!canvas || canvas.width < 1) return;
+    const stored = storeFor(activeLayerRef.current, canvas.width, canvas.height);
+    if (stored.width !== canvas.width || stored.height !== canvas.height) {
+      const previous = document.createElement("canvas");
+      previous.width = stored.width;
+      previous.height = stored.height;
+      previous.getContext("2d")?.drawImage(stored, 0, 0);
+      stored.width = canvas.width;
+      stored.height = canvas.height;
+      stored.getContext("2d")?.drawImage(previous, 0, 0, stored.width, stored.height);
+    }
+    const storedCtx = stored.getContext("2d");
+    storedCtx?.clearRect(0, 0, stored.width, stored.height);
+    storedCtx?.drawImage(canvas, 0, 0);
+  }
+
+  function showLayer(id: string) {
+    const canvas = canvasRef.current;
+    const ctx = ctxRef.current;
+    if (!canvas || !ctx) return;
+    const stored = layerStoresRef.current.get(id);
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    if (stored) ctx.drawImage(stored, 0, 0, canvas.width, canvas.height);
+    ctx.restore();
+  }
+
+  function selectLayer(id: string) {
+    if (id === activeLayerRef.current) return;
+    stashActiveLayer();
+    setActiveLayerId(id);
+    showLayer(id);
+  }
+
+  function addLayer() {
+    const next = addArtLayer(layersRef.current);
+    if (next.length === layersRef.current.length) return;
+    stashActiveLayer();
+    const created = next[next.length - 1];
+    const canvas = canvasRef.current;
+    if (canvas) {
+      const blank = storeFor(created.id, canvas.width, canvas.height);
+      blank.getContext("2d")?.clearRect(0, 0, blank.width, blank.height);
+    }
+    setLayers(next);
+    setActiveLayerId(created.id);
+    showLayer(created.id);
+  }
+
+  function removeLayer(id: string) {
+    const current = layersRef.current;
+    const next = deleteArtLayer(current, id);
+    if (next.length === current.length) return;
+    stashActiveLayer();
+    layerStoresRef.current.delete(id);
+    const active = nextActiveArtLayer(current, id, activeLayerRef.current);
+    setLayers(next);
+    setActiveLayerId(active);
+    showLayer(active);
+  }
+
+  function moveLayer(id: string, direction: -1 | 1) {
+    setLayers((current) => moveArtLayer(current, id, direction));
+  }
+
+  function mergeLayerDown(id: string) {
+    const current = layersRef.current;
+    const index = current.findIndex((layer) => layer.id === id);
+    if (index <= 0) return;
+    const targetId = current[index - 1].id;
+    if (!mergeArtLayerIds(current, id, targetId)) return;
+    stashActiveLayer();
+    const target = layerStoresRef.current.get(targetId);
+    const dragged = layerStoresRef.current.get(id);
+    if (target && dragged) target.getContext("2d")?.drawImage(dragged, 0, 0);
+    layerStoresRef.current.delete(id);
+    setLayers(deleteArtLayer(current, id));
+    setActiveLayerId(targetId);
+    showLayer(targetId);
+  }
 
   function pickFromWheel(clientX: number, clientY: number, nextLight = light) {
     const el = wheelRef.current;
@@ -538,8 +649,11 @@ export default function BoardArtCanvas({
       ctx.fillStyle = paper ? PAPER_BG : DARK_BG;
       ctx.fillRect(0, 0, out.width, out.height);
     }
-    // …then the strokes on top.
-    ctx.drawImage(canvas, 0, 0);
+    stashActiveLayer();
+    for (const layer of layersRef.current) {
+      const stored = layerStoresRef.current.get(layer.id);
+      if (stored) ctx.drawImage(stored, 0, 0, out.width, out.height);
+    }
 
     const exportCanvas = scaleCanvasToMinLongEdge(out);
     exportCanvas.toBlob((blob) => {
@@ -628,7 +742,21 @@ export default function BoardArtCanvas({
     </div>
   );
 
+  const layerStrip = (
+    <ArtLayerStrip
+      layers={layers}
+      activeId={activeLayerId}
+      onSelect={selectLayer}
+      onAdd={addLayer}
+      onDelete={removeLayer}
+      onMove={moveLayer}
+      onMerge={mergeLayerDown}
+    />
+  );
+
   const artToolsEl = (
+    <>
+    {layerStrip}
     <ArtPaletteTools
       wheelRef={wheelRef}
       color={color}
@@ -667,6 +795,7 @@ export default function BoardArtCanvas({
       onClear={clearCanvas}
       onSave={save}
     />
+    </>
   );
 
   const toolsEl = (

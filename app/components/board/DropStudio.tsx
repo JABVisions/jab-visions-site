@@ -24,6 +24,8 @@ import {
   aspectToMediaFrame,
   DROP_STUDIO_V5_ASPECTS,
   monitorAspectRatio,
+  type DropStudioV5MediaBag,
+  type DropStudioV5Session,
 } from "@/lib/board/dropStudioV5";
 import {
   STICKER_PACKS,
@@ -260,6 +262,7 @@ function DropStudio({
   onMediaError,
   studioV5 = false,
   studioDraftId,
+  onV5Change,
 }: {
   mediaUrl: string;
   mediaKind: "image" | "video";
@@ -279,6 +282,7 @@ function DropStudio({
   /** Incremental V5 timeline. Off restores V4 layout and behavior. */
   studioV5?: boolean;
   studioDraftId?: string;
+  onV5Change?: (next: { session: DropStudioV5Session; mediaBag: DropStudioV5MediaBag }) => void;
 }) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const previewRef = useRef<HTMLDivElement | null>(null);
@@ -299,6 +303,11 @@ function DropStudio({
     filter: normalized.effects?.filter,
     overlay: normalized.effects?.overlay,
   });
+
+  useEffect(() => {
+    if (!timelineOn) return;
+    onV5Change?.({ session: v5.session, mediaBag: v5.mediaBag });
+  }, [timelineOn, onV5Change, v5.session, v5.mediaBag]);
 
   useEffect(() => {
     if (!timelineOn) return;
