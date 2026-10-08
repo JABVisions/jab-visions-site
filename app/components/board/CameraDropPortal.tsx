@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import BoardPlayableVideo from "./BoardPlayableVideo";
 import styles from "./CameraDropPortal.module.css";
 
 type CaptureMode = "photo" | "video";
@@ -215,12 +216,19 @@ export default function CameraDropPortal({
       setCaptured(new Blob(chunksRef.current, { type }));
       setRecording(false);
     };
-    recorder.start();
+    recorder.start(250);
     setRecording(true);
   }
 
   function stopRecording() {
-    if (recorderRef.current?.state === "recording") recorderRef.current.stop();
+    const rec = recorderRef.current;
+    if (!rec || rec.state !== "recording") return;
+    try {
+      rec.requestData();
+    } catch {
+      // Safari may not implement requestData.
+    }
+    rec.stop();
   }
 
   async function useCapture() {
@@ -282,7 +290,7 @@ export default function CameraDropPortal({
                 // eslint-disable-next-line @next/next/no-img-element
                 <img className={styles.preview} src={capturedUrl} alt="Captured media preview" />
               ) : (
-                <video className={styles.preview} src={capturedUrl} controls playsInline />
+                <BoardPlayableVideo className={styles.preview} src={capturedUrl} />
               )
             ) : (
               <video

@@ -2483,7 +2483,7 @@ export default function DropStudioStage({
     recorderRef.current = rec;
     rec.ondataavailable = (e) => e.data.size > 0 && chunksRef.current.push(e.data);
     rec.onstop = () => commitBlob(new Blob(chunksRef.current, { type: rec.mimeType || mt || "video/webm" }), "video", "capture");
-    rec.start();
+    rec.start(250);
     setRecording(true);
   }
 
@@ -2510,7 +2510,14 @@ export default function DropStudioStage({
     }
   }
   function stopRecording() {
-    if (recorderRef.current?.state === "recording") recorderRef.current.stop();
+    const rec = recorderRef.current;
+    if (!rec || rec.state !== "recording") return;
+    try {
+      rec.requestData();
+    } catch {
+      // Safari may not implement requestData.
+    }
+    rec.stop();
   }
 
   async function onUpload(f: File | undefined) {

@@ -34,6 +34,13 @@ export async function captureVideoPosterFile(src: string): Promise<File | null> 
   if (!playable) return null;
   if (typeof document === "undefined") return null;
 
+  const playingSameTape = Array.from(document.querySelectorAll("video")).some((el) => {
+    if (el.paused || el.ended) return false;
+    const current = el.currentSrc || el.src || "";
+    return posterCacheKey(current) === posterCacheKey(playable);
+  });
+  if (playingSameTape) return null;
+
   const key = posterCacheKey(playable);
   const existing = posterCaptureInflight.get(key);
   if (existing) return existing;
@@ -62,8 +69,8 @@ export async function captureVideoPosterFile(src: string): Promise<File | null> 
       if (settled) return;
       settled = true;
       window.clearTimeout(timeoutId);
+      video.pause();
       video.removeAttribute("src");
-      video.load();
       video.remove();
       resolve(file);
     }

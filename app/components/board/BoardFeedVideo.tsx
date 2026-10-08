@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import BoardPlayableVideo from "./BoardPlayableVideo";
 
 /**
  * Feed/profile video that does not keep a decoder hot offscreen.
@@ -10,45 +10,22 @@ export default function BoardFeedVideo({
   src,
   poster,
   className,
+  autoPlay,
   onError,
 }: {
   src: string;
   poster?: string;
   className?: string;
+  autoPlay?: boolean;
   onError?: () => void;
 }) {
-  const ref = useRef<HTMLVideoElement>(null);
-
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-
-    const io = new IntersectionObserver(
-      ([entry]) => {
-        if (!entry) return;
-        if (entry.isIntersecting) {
-          if (el.preload !== "metadata") el.preload = "metadata";
-          return;
-        }
-        if (!el.paused) el.pause();
-        el.preload = "none";
-      },
-      { rootMargin: "160px 0px", threshold: 0.01 }
-    );
-    io.observe(el);
-    return () => io.disconnect();
-  }, [src]);
-
-  if (!src) return null;
-
   return (
-    <video
-      ref={ref}
-      className={className}
+    <BoardPlayableVideo
       src={src}
-      poster={poster || undefined}
-      controls
-      playsInline
+      poster={poster}
+      className={className}
+      autoPlay={autoPlay}
+      offscreenPause={!autoPlay}
       preload={poster ? "none" : "metadata"}
       onError={onError}
     />

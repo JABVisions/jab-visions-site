@@ -1,6 +1,7 @@
 "use client";
 
 import React from "react";
+import BoardFeedVideo from "@/app/components/board/BoardFeedVideo";
 import type { ProjectDrop } from "./ProjectDropMenu";
 
 function clsx(...parts: Array<string | false | null | undefined>) {
@@ -56,12 +57,9 @@ export default function ProjectDropCard({
               className="w-full max-h-[min(90vh,56rem)] object-contain bg-black/40"
             />
           ) : (
-            <video
+            <BoardFeedVideo
               src={drop.media.src}
               className="w-full max-h-72 object-contain bg-black"
-              muted
-              playsInline
-              controls
             />
           )
         ) : (
