@@ -695,20 +695,39 @@
   text-shadow: 0 0 12px rgba(255, 79, 216, 0.3);
 }
 
-.artCanvasLayer {
+.artCanvasStack {
   position: absolute;
   inset: 0;
   z-index: 3;
-  width: 100%;
-  height: 100%;
   touch-action: none;
-  cursor: crosshair;
   pointer-events: none;
 }
 
-.artCanvasLayerArmed {
+.artCanvasStackArmed {
   z-index: 7;
+}
+
+.artCanvasDraw,
+.artCanvasChrome {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+  pointer-events: none;
+}
+
+.artCanvasDraw {
+  z-index: 1;
+  cursor: crosshair;
+}
+
+.artCanvasStackArmed .artCanvasDraw {
   pointer-events: auto;
+}
+
+.artCanvasChromeOver {
+  z-index: 2;
 }
 
 .inlineArtHeadingRow {

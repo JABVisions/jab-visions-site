@@ -12,14 +12,7 @@
 import { useEffect, useRef, useState } from "react";
 import ArtPaletteTools, { type ArtBrushMode } from "./ArtPaletteTools";
 import ArtLayerStrip from "./ArtLayerStrip";
-import {
-  addArtLayer,
-  deleteArtLayer,
-  initialArtLayers,
-  mergeArtLayerIds,
-  moveArtLayer,
-  nextActiveArtLayer,
-} from "@/lib/board/artLayers";
+import { useArtLayerCanvases } from "./useArtLayerCanvases";
 import DropChipWorkbench from "./DropChipWorkbench";
 import DropStudioPaletteDeck, { type ObjectTool } from "./DropStudioPaletteDeck";
 import styles from "./boardArtCanvas.module.css";
@@ -74,6 +67,8 @@ export default function BoardArtCanvas({
   layout?: "side" | "stack";
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const underRef = useRef<HTMLCanvasElement>(null);
+  const overRef = useRef<HTMLCanvasElement>(null);
   const ctxRef = useRef<CanvasRenderingContext2D | null>(null);
   const bgImgRef = useRef<HTMLImageElement>(null);
   const drawingRef = useRef(false);
@@ -94,113 +89,43 @@ export default function BoardArtCanvas({
   const [objectTool, setObjectTool] = useState<ObjectTool>("text");
   const [color, setColor] = useState("#FF4FD8");
   const [size, setSize] = useState(8);
+  const [opacity, setOpacity] = useState(1);
   const [paper, setPaper] = useState(false); // dark by default
   const [brushMode, setBrushMode] = useState<ArtBrushMode>("paint");
   const [light, setLight] = useState(65);
   const [wheelHue, setWheelHue] = useState(318);
   const [wheelSat, setWheelSat] = useState(100);
-  const [layers, setLayers] = useState(() => initialArtLayers());
-  const [activeLayerId, setActiveLayerId] = useState("layer-1");
-  const layersRef = useRef(layers);
-  const activeLayerRef = useRef(activeLayerId);
-  const layerStoresRef = useRef<Map<string, HTMLCanvasElement>>(new Map());
-  layersRef.current = layers;
-  activeLayerRef.current = activeLayerId;
+  const layers = useArtLayerCanvases(canvasRef, ctxRef);
   const onPhoto = !!backgroundImageUrl || !!backgroundVideoUrl;
 
-  function storeFor(id: string, width: number, height: number) {
-    let stored = layerStoresRef.current.get(id);
-    if (!stored) {
-      stored = document.createElement("canvas");
-      stored.width = width;
-      stored.height = height;
-      layerStoresRef.current.set(id, stored);
+  function refreshArtChrome() {
+    const draw = canvasRef.current;
+    const under = underRef.current;
+    const over = overRef.current;
+    if (!draw || !under || !over || draw.width < 1) return;
+    if (under.width !== draw.width || under.height !== draw.height) {
+      under.width = draw.width;
+      under.height = draw.height;
     }
-    return stored;
-  }
-
-  function stashActiveLayer() {
-    const canvas = canvasRef.current;
-    if (!canvas || canvas.width < 1) return;
-    const stored = storeFor(activeLayerRef.current, canvas.width, canvas.height);
-    if (stored.width !== canvas.width || stored.height !== canvas.height) {
-      const previous = document.createElement("canvas");
-      previous.width = stored.width;
-      previous.height = stored.height;
-      previous.getContext("2d")?.drawImage(stored, 0, 0);
-      stored.width = canvas.width;
-      stored.height = canvas.height;
-      stored.getContext("2d")?.drawImage(previous, 0, 0, stored.width, stored.height);
+    if (over.width !== draw.width || over.height !== draw.height) {
+      over.width = draw.width;
+      over.height = draw.height;
     }
-    const storedCtx = stored.getContext("2d");
-    storedCtx?.clearRect(0, 0, stored.width, stored.height);
-    storedCtx?.drawImage(canvas, 0, 0);
+    const underCtx = under.getContext("2d");
+    const overCtx = over.getContext("2d");
+    if (underCtx && overCtx) layers.paintLayerChrome(underCtx, overCtx);
   }
 
-  function showLayer(id: string) {
+  function persistLayers(nextPaper = paper) {
     const canvas = canvasRef.current;
-    const ctx = ctxRef.current;
-    if (!canvas || !ctx) return;
-    const stored = layerStoresRef.current.get(id);
-    ctx.save();
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    if (stored) ctx.drawImage(stored, 0, 0, canvas.width, canvas.height);
-    ctx.restore();
-  }
-
-  function selectLayer(id: string) {
-    if (id === activeLayerRef.current) return;
-    stashActiveLayer();
-    setActiveLayerId(id);
-    showLayer(id);
-  }
-
-  function addLayer() {
-    const next = addArtLayer(layersRef.current);
-    if (next.length === layersRef.current.length) return;
-    stashActiveLayer();
-    const created = next[next.length - 1];
-    const canvas = canvasRef.current;
-    if (canvas) {
-      const blank = storeFor(created.id, canvas.width, canvas.height);
-      blank.getContext("2d")?.clearRect(0, 0, blank.width, blank.height);
-    }
-    setLayers(next);
-    setActiveLayerId(created.id);
-    showLayer(created.id);
-  }
-
-  function removeLayer(id: string) {
-    const current = layersRef.current;
-    const next = deleteArtLayer(current, id);
-    if (next.length === current.length) return;
-    stashActiveLayer();
-    layerStoresRef.current.delete(id);
-    const active = nextActiveArtLayer(current, id, activeLayerRef.current);
-    setLayers(next);
-    setActiveLayerId(active);
-    showLayer(active);
-  }
-
-  function moveLayer(id: string, direction: -1 | 1) {
-    setLayers((current) => moveArtLayer(current, id, direction));
-  }
-
-  function mergeLayerDown(id: string) {
-    const current = layersRef.current;
-    const index = current.findIndex((layer) => layer.id === id);
-    if (index <= 0) return;
-    const targetId = current[index - 1].id;
-    if (!mergeArtLayerIds(current, id, targetId)) return;
-    stashActiveLayer();
-    const target = layerStoresRef.current.get(targetId);
-    const dragged = layerStoresRef.current.get(id);
-    if (target && dragged) target.getContext("2d")?.drawImage(dragged, 0, 0);
-    layerStoresRef.current.delete(id);
-    setLayers(deleteArtLayer(current, id));
-    setActiveLayerId(targetId);
-    showLayer(targetId);
+    if (!canvas) return;
+    const out = document.createElement("canvas");
+    out.width = canvas.width;
+    out.height = canvas.height;
+    const ctx = out.getContext("2d");
+    if (!ctx) return;
+    layers.compositeOnto(ctx, out.width, out.height);
+    scheduleArtDraftPersist(out, nextPaper);
   }
 
   function pickFromWheel(clientX: number, clientY: number, nextLight = light) {
@@ -263,6 +188,7 @@ export default function BoardArtCanvas({
     // Keep the latest frame; drop pixel-tied undo stacks after a real resize.
     undoRef.current = [];
     redoRef.current = [];
+    refreshArtChrome();
   }
 
   useEffect(() => {
@@ -322,7 +248,14 @@ export default function BoardArtCanvas({
   useEffect(() => {
     const persist = () => {
       const canvas = canvasRef.current;
-      if (canvas) void persistArtDraftNow(canvas, paper);
+      if (!canvas) return;
+      const out = document.createElement("canvas");
+      out.width = canvas.width;
+      out.height = canvas.height;
+      const ctx = out.getContext("2d");
+      if (!ctx) return;
+      layers.compositeOnto(ctx, out.width, out.height);
+      void persistArtDraftNow(out, paper);
     };
     const onHide = () => {
       if (document.visibilityState === "hidden") persist();
@@ -337,6 +270,27 @@ export default function BoardArtCanvas({
       persist();
     };
   }, [paper]);
+
+  useEffect(() => {
+    refreshArtChrome();
+    // Chrome follows the stack. The painter reads refs, so the layer identity is the dependency.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [layers.layers, layers.activeLayerId]);
+
+  useEffect(() => {
+    return () => {
+      undoRef.current.forEach((shot) => {
+        shot.width = 0;
+        shot.height = 0;
+      });
+      redoRef.current.forEach((shot) => {
+        shot.width = 0;
+        shot.height = 0;
+      });
+      undoRef.current = [];
+      redoRef.current = [];
+    };
+  }, [layers.activeLayerId]);
 
   useEffect(() => {
     return () => {
@@ -505,7 +459,7 @@ export default function BoardArtCanvas({
       ctx.globalAlpha = 1;
     } else {
       ctx.globalCompositeOperation = "source-over";
-      ctx.globalAlpha = 1;
+      ctx.globalAlpha = opacity;
     }
     ctx.strokeStyle = color;
     ctx.fillStyle = color;
@@ -581,7 +535,7 @@ export default function BoardArtCanvas({
       ctx.globalAlpha = 1;
     }
     const canvas = canvasRef.current;
-    if (canvas) scheduleArtDraftPersist(canvas, paper);
+    persistLayers();
   }
 
   function onPointerLeave(e: React.PointerEvent<HTMLCanvasElement>) {
@@ -612,7 +566,7 @@ export default function BoardArtCanvas({
       }
     }
     restoreSnapshot(prev);
-    scheduleArtDraftPersist(canvas, paper);
+    persistLayers();
   }
 
   function redo() {
@@ -622,7 +576,7 @@ export default function BoardArtCanvas({
     if (!next) return;
     undoRef.current.push(snapshotCanvas(canvas));
     restoreSnapshot(next);
-    scheduleArtDraftPersist(canvas, paper);
+    persistLayers();
   }
 
   function save() {
@@ -649,11 +603,7 @@ export default function BoardArtCanvas({
       ctx.fillStyle = paper ? PAPER_BG : DARK_BG;
       ctx.fillRect(0, 0, out.width, out.height);
     }
-    stashActiveLayer();
-    for (const layer of layersRef.current) {
-      const stored = layerStoresRef.current.get(layer.id);
-      if (stored) ctx.drawImage(stored, 0, 0, out.width, out.height);
-    }
+    layers.compositeOnto(ctx, out.width, out.height);
 
     const exportCanvas = scaleCanvasToMinLongEdge(out);
     exportCanvas.toBlob((blob) => {
@@ -706,16 +656,23 @@ export default function BoardArtCanvas({
           crossOrigin="anonymous"
         />
       ) : null}
+      <canvas ref={underRef} className={styles.canvasUnder} aria-hidden />
       <canvas
         ref={canvasRef}
         data-art-surface
         className={styles.canvas}
+        style={
+          layers.layers.some((layer) => layer.id === layers.activeLayerId && layer.hidden)
+            ? { visibility: "hidden" }
+            : undefined
+        }
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
         onPointerCancel={onPointerUp}
         onPointerLeave={onPointerLeave}
       />
+      <canvas ref={overRef} className={styles.canvasOver} aria-hidden />
       {recovered ? (
         <div className={styles.recoveredBar} role="status">
           Recovered Draft
@@ -744,13 +701,16 @@ export default function BoardArtCanvas({
 
   const layerStrip = (
     <ArtLayerStrip
-      layers={layers}
-      activeId={activeLayerId}
-      onSelect={selectLayer}
-      onAdd={addLayer}
-      onDelete={removeLayer}
-      onMove={moveLayer}
-      onMerge={mergeLayerDown}
+      layers={layers.layers}
+      activeId={layers.activeLayerId}
+      onSelect={layers.selectLayer}
+      onAdd={layers.addLayer}
+      onDelete={layers.removeLayer}
+      onHide={layers.hideLayer}
+      onDrop={(action) => {
+        if (action.type === "merge") layers.mergeLayers(action.draggedId, action.targetId);
+        else layers.reorderLayer(action.draggedId, action.index);
+      }}
     />
   );
 
@@ -761,6 +721,7 @@ export default function BoardArtCanvas({
       wheelRef={wheelRef}
       color={color}
       size={size}
+      opacity={opacity}
       light={light}
       wheelHue={wheelHue}
       wheelSat={wheelSat}
@@ -788,6 +749,7 @@ export default function BoardArtCanvas({
         setColor(hslToHex(wheelHue, wheelSat, l));
       }}
       onSizeChange={setSize}
+      onOpacityChange={setOpacity}
       onBrushModeChange={setBrushMode}
       onPaperToggle={() => setPaper((p) => !p)}
       onUndo={undo}
