@@ -110,6 +110,7 @@ function StudioPreviewVideo({
   onClipBoundary,
   onPlayingChange,
   playbackRate = 1,
+  controls = true,
 }: {
   src: string;
   contentType?: string;
@@ -123,6 +124,7 @@ function StudioPreviewVideo({
   onClipBoundary?: () => boolean;
   onPlayingChange?: (playing: boolean) => void;
   playbackRate?: number;
+  controls?: boolean;
 }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const [playing, setPlaying] = useState(false);
@@ -225,6 +227,7 @@ function StudioPreviewVideo({
         videoRef={videoRef}
         src={src}
         style={style}
+        controls={controls}
         preload="auto"
         onPlay={() => markPlaying(true)}
         onPause={() => markPlaying(false)}
@@ -538,6 +541,7 @@ function DropStudio({
               onDuration={timelineOn ? v5.applyDuration : undefined}
               onTimeUpdate={timelineOn ? v5.syncPlayheadFromVideo : undefined}
               playbackRate={timelineOn ? v5.previewSpeed : 1}
+              controls={!timelineOn}
               onPlayingChange={
                 timelineOn
                   ? (playing) => {
@@ -892,12 +896,31 @@ function DropStudio({
     return (
       <div className={styles.v5Workbench} data-layout={studioLayout} data-studio-v5="1">
         <div className={styles.v5MonitorSlot}>{workbench}</div>
-        {studioLayout === "phone" ? (
-          <button type="button" className={styles.timelineToggle} onClick={() => setTimelineOpen((open) => !open)}>
-            {timelineOpen ? "Hide timeline" : "Timeline"}
+        {studioLayout === "phone" && !timelineOpen ? (
+          <button
+            type="button"
+            className={styles.timelineToggle}
+            data-placed="rest"
+            onClick={() => setTimelineOpen(true)}
+          >
+            Timeline
           </button>
         ) : null}
-        <div className={styles.timelineShell} data-open={studioLayout === "phone" && !timelineOpen ? "0" : "1"}>
+        <div
+          className={styles.timelineShell}
+          data-open={studioLayout === "phone" && !timelineOpen ? "0" : "1"}
+          aria-hidden={studioLayout === "phone" && !timelineOpen ? true : undefined}
+        >
+        {studioLayout === "phone" && timelineOpen ? (
+          <button
+            type="button"
+            className={styles.timelineToggle}
+            data-placed="sheet"
+            onClick={() => setTimelineOpen(false)}
+          >
+            Hide timeline
+          </button>
+        ) : null}
         <DropStudioV5Timeline
           session={v5.session}
           selectedClipId={v5.selectedClipId}
@@ -906,7 +929,6 @@ function DropStudio({
           extraClipCount={v5.extraClipCount}
           onSelectClip={v5.selectClip}
           onScrub={v5.scrub}
-          onImportVideo={(file) => void v5.importVideo(file)}
           onImportAudio={(file) => void v5.importAudio(file)}
           onSplit={v5.split}
           onReorder={v5.reorder}

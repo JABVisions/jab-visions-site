@@ -768,42 +768,74 @@
 }
 
 .v5Workbench {
-  display: flex;
-  flex-direction: column;
+  position: relative;
+  z-index: 1;
+  display: block;
   width: 100%;
   height: 100%;
   min-height: 0;
   min-width: 0;
-  padding-bottom: 84px;
   box-sizing: border-box;
 }
 
+.timelineShell {
+  position: absolute;
+  z-index: 12;
+  left: 0;
+  right: 0;
+  bottom: max(84px, calc(18px + env(safe-area-inset-bottom) + 64px));
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  max-height: min(52%, 440px);
+  overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  transform: translateY(0);
+  transition: transform 280ms ease, visibility 0s linear 0s;
+  pointer-events: auto;
+}
+
 .timelineShell[data-open="0"] {
-  display: none;
+  transform: translateY(calc(100% + 96px));
+  pointer-events: none;
+  visibility: hidden;
+  transition: transform 280ms ease, visibility 0s linear 280ms;
 }
 
 .timelineToggle {
-  align-self: center;
-  margin: 0 0 6px;
+  margin: 0;
   padding: 0.4rem 0.8rem;
   border-radius: 999px;
   border: 1px solid rgba(127, 245, 231, 0.35);
-  background: rgba(8, 18, 22, 0.72);
+  background: rgba(8, 18, 22, 0.88);
   color: #e8fff8;
   font: inherit;
   font-size: 0.68rem;
   font-weight: 850;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.35);
 }
 
-.v5Workbench[data-layout="tablet"] .timelineShell,
-.v5Workbench[data-layout="desktop"] .timelineShell {
-  flex: 0 0 32%;
-  min-height: 180px;
-  max-height: 36%;
+.timelineToggle[data-placed="rest"] {
+  position: absolute;
+  z-index: 13;
+  left: 50%;
+  bottom: calc(max(84px, calc(18px + env(safe-area-inset-bottom) + 64px)) + 10px);
+  transform: translateX(-50%);
 }
 
-.v5Workbench[data-layout="desktop"] .timelineShell {
-  flex-basis: 34%;
+.timelineToggle[data-placed="sheet"] {
+  align-self: center;
+  position: sticky;
+  top: 6px;
+  z-index: 2;
+  margin-bottom: 6px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .timelineShell {
+    transition: none;
+  }
 }
 
 .vignette,
@@ -862,7 +894,9 @@
 }
 
 .v5MonitorSlot {
-  flex: 1 1 auto;
+  position: absolute;
+  inset: 0;
+  z-index: 1;
   min-height: 0;
   min-width: 0;
 }
@@ -907,6 +941,16 @@
   line-height: 1;
   box-shadow: 0 0 22px rgba(72, 238, 211, 0.22);
   pointer-events: none;
+}
+
+.v5Workbench:has(.timelineShell[data-open="1"]) .videoPlayHitPlaying {
+  top: 12px;
+  right: 12px;
+  bottom: auto;
+}
+
+.v5Workbench:has(.timelineShell[data-open="1"]) [data-chip-dock] {
+  top: 22%;
 }
 
 .videoPlayHitPlaying .videoPlayGlyph {
