@@ -125,7 +125,7 @@ async function loadGltfTemplate(url: string, label: string, repair?: GlbRepair):
     // A mesh welded entirely to one bone is the other failure: the skeleton is
     // real, but nothing outside that bone can move it. Paint a skin first.
     const reskinned = reskinRigidSkeleton(gltf.scene);
-    if (reskinned) console.info('[raid] %s: painted a skin onto a rigid rig', label);
+    if (reskinned) console.info('[raid] %s: rebuilt skin weights', label);
     const broken = assessSkinning(gltf.scene);
     if (broken.length && !reskinned) {
       bakeSkinnedMeshes(gltf.scene);
