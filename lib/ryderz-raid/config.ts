@@ -209,7 +209,7 @@ export const RYDERZ: Record<RyderId, RyderSpec> = {
     visual: { primaryColor: 0xff2e44, auraColor: 0xff3d55, electricityColor: 0xff6a7a, depletedAuraIntensity: 0.18, poweredAuraIntensity: 1.8 },
     weapon: 'Red energy blade',
     portrait: '/assets/chaeyeon-kim-headshot.jpeg',
-    icon: '/assets/those-ryderz/icons/rubi.webp?v=2',
+    icon: '/assets/those-ryderz/icons/rubi.webp?v=3',
     // Version query busts browser caches of the earlier (unrigged) export at this path.
     glb: '/assets/those-ryderz/models/rubi-wong.glb?v=3',
     strikes: ['slash', 'chop', 'slash', 'smash'],
