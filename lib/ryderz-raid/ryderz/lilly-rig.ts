@@ -86,8 +86,9 @@ function uncrossLegs(packed: Float32Array) {
     if (y > maxY) maxY = y;
   }
   const height = Math.max(0.001, maxY - minY);
-  const hip = minY + height * 0.42;
-  const handFloor = minY + height * 0.34;
+  // Start under the shorts. Pulling the hem itself splits that fringe into spikes.
+  const hip = minY + height * 0.44;
+  const handFloor = minY + height * 0.36;
   const centers = [
     { x: 0.055, z: 0, y: hip },
     { x: -0.055, z: 0, y: hip },
@@ -101,7 +102,7 @@ function uncrossLegs(packed: Float32Array) {
       if (py >= y + height * 0.012 || py < y - height * 0.02) continue;
       const px = packed[i * 3];
       const pz = packed[i * 3 + 2];
-      // The left hand hangs beside the hip. It is not a thigh.
+      // The hands hang beside the hips. They are not thighs.
       if (Math.abs(px) > 0.11 && py > handFloor) continue;
       const d0 = (px - centers[0].x) ** 2 + (pz - centers[0].z) ** 2;
       const d1 = (px - centers[1].x) ** 2 + (pz - centers[1].z) ** 2;
@@ -141,7 +142,8 @@ function uncrossLegs(packed: Float32Array) {
   const target = (side: number, y: number) => {
     const sign = side === 0 ? 1 : -1;
     const t = Math.min(1, Math.max(0, (hip - y) / (hip - minY)));
-    return { x: sign * (0.058 + 0.012 * t), z: 0.02 * t };
+    // Both legs share one depth. A leftover z split is the crossed stance.
+    return { x: sign * (0.058 + 0.012 * t), z: 0 };
   };
 
   if (!samples[0].length || !samples[1].length) return;
@@ -158,12 +160,12 @@ function uncrossLegs(packed: Float32Array) {
     const dRight = (px - right.x) ** 2 + (pz - right.z) ** 2;
     const side = dLeft <= dRight ? 0 : 1;
     const along = Math.sqrt(side === 0 ? dLeft : dRight);
-    // Shorts and the gap between the thighs stay put. Only the leg column slides.
     if (along > 0.055) continue;
     const actual = side === 0 ? left : right;
     const want = target(side, py);
-    const knee = hip - height * 0.16;
-    const blend = py >= hip ? 0 : py <= knee ? 1 : (hip - py) / (hip - knee);
+    // Full correction by the knee. The shorts hem above `hip` is left alone.
+    const knee = hip - height * 0.12;
+    const blend = py >= hip ? 0 : py <= knee ? 1 : (hip - py) / Math.max(0.001, hip - knee);
     packed[i * 3] += (want.x - actual.x) * blend;
     packed[i * 3 + 2] += (want.z - actual.z) * blend;
   }
@@ -330,10 +332,15 @@ export function rigLillyBody(root: THREE.Object3D) {
     const knee = leg(yAt(0.2), yAt(0.32));
     const ankle = leg(yAt(0.05), yAt(0.12));
     const foot = leg(minY, yAt(0.06));
-    const hipSocket = point(thigh, centerX + sign * 0.06, yAt(0.46), hipsP.z);
-    const kneeP = point(knee, centerX + sign * 0.06, yAt(0.26));
-    const ankleP = point(ankle, centerX + sign * 0.06, yAt(0.08));
-    const toeP = point(foot, ankleP.x, yAt(0.02), ankleP.z + 0.045);
+    const hipSocket = point(thigh, centerX + sign * 0.058, yAt(0.46), hipsP.z);
+    const kneeP = point(knee, centerX + sign * 0.064, yAt(0.27));
+    const ankleP = point(ankle, centerX + sign * 0.07, yAt(0.08));
+    const toeP = point(foot, ankleP.x, yAt(0.02), ankleP.z + 0.04);
+    // Keep the shin on the same depth as the hip so the knee does not bow forward.
+    kneeP.z = hipsP.z;
+    ankleP.z = hipsP.z;
+    toeP.z = hipsP.z + 0.04;
+    toeP.x = ankleP.x;
     return { shoulderP, elbowP, wristP, handP, hipSocket, kneeP, ankleP, toeP };
   };
   const left = limb(1);
@@ -433,11 +440,6 @@ export function rigLillyBody(root: THREE.Object3D) {
     const side = x >= centerX ? 'L' : 'R';
     const hand = side === 'L' ? left.handP : right.handP;
     const handD = (x - hand.x) ** 2 + (y - hand.y) ** 2 + (z - hand.z) ** 2;
-    if (handD < handReach && Math.abs(x - centerX) > 0.08) {
-      indices[base] = side === 'L' ? 12 : 13;
-      weights[base] = 1;
-      continue;
-    }
     let body = 0;
     let bodyD = Infinity;
     let arm = -1;
@@ -464,7 +466,16 @@ export function rigLillyBody(root: THREE.Object3D) {
         body = segment.index;
       }
     }
-    const useArm = arm >= 0 && armD < armReach && armD + 0.0008 < Math.min(bodyD, legD);
+    // The forearms hang across the hips, so distance-to-arm paints the
+    // shorts onto the fist. Under the hip joint, the body width is the leg.
+    const legColumn = y < hipsP.y || (y < hipsP.y + height * 0.045 && Math.abs(x - centerX) < 0.155);
+    const onHand = !legColumn && handD < handReach && Math.abs(x - centerX) > 0.15 && handD + 0.0006 < Math.min(bodyD, legD);
+    if (onHand) {
+      indices[base] = side === 'L' ? 12 : 13;
+      weights[base] = 1;
+      continue;
+    }
+    const useArm = !legColumn && arm >= 0 && y >= hipsP.y && armD < armReach && armD + 0.0008 < Math.min(bodyD, legD);
     if (useArm) {
       indices[base] = arm;
       weights[base] = 1;

@@ -569,7 +569,7 @@ export const RYDERZ: Record<RyderId, RyderSpec> = {
         name: 'Soul Drain',
         key: 'Q',
         description:
-          'Raise both hands and boil an emerald puddle around you. Hosts inside take damage over time, and a share of that damage returns as health. Press again to close it.',
+          'Raise both hands and spin an emerald vortex around you. Hosts inside take damage over time, and a share of that damage returns as health. Press again to close it.',
         auraCost: 0,
         drain: 8,
       },

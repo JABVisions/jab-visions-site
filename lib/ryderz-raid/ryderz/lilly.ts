@@ -65,8 +65,9 @@ export class LillyKit implements RyderKit {
   private comboIndex = 0;
   private comboExpires = 0;
   private scale = 1;
-  private puddle: THREE.Mesh | null = null;
-  private puddleMat: THREE.ShaderMaterial | null = null;
+  private vortex: THREE.Group | null = null;
+  private vortexMats: THREE.ShaderMaterial[] = [];
+  private vortexField: THREE.Mesh | null = null;
   private tendrils: THREE.LineSegments | null = null;
   private tendrilPos: Float32Array | null = null;
   private circle: THREE.Group | null = null;
@@ -125,7 +126,7 @@ export class LillyKit implements RyderKit {
   attach(ctx: KitContext) {
     this.ctx = ctx;
     this.scale = 1;
-    this.buildPuddle(ctx);
+    this.buildVortex(ctx);
     this.buildCircle(ctx);
     this.buildTendrils(ctx);
   }
@@ -134,19 +135,25 @@ export class LillyKit implements RyderKit {
     this.interrupt();
     const ctx = this.ctx;
     if (ctx) {
-      if (this.puddle) ctx.scene.remove(this.puddle);
+      if (this.vortex) ctx.scene.remove(this.vortex);
       if (this.tendrils) ctx.scene.remove(this.tendrils);
       if (this.circle) ctx.scene.remove(this.circle);
       for (const floater of this.floaters) ctx.scene.remove(floater.sprite);
       for (const animal of this.animals) animal.dispose(ctx.scene);
     }
-    this.puddle?.geometry.dispose();
-    this.puddleMat?.dispose();
+    this.vortex?.traverse((object) => {
+      const mesh = object as THREE.Mesh;
+      if (!mesh.isMesh) return;
+      mesh.geometry.dispose();
+    });
+    for (const material of this.vortexMats) material.dispose();
+    this.vortexMats = [];
     this.tendrils?.geometry.dispose();
     (this.tendrils?.material as THREE.Material | undefined)?.dispose();
     this.floaters = [];
     this.animals = [];
-    this.puddle = null;
+    this.vortex = null;
+    this.vortexField = null;
     this.circle = null;
     this.tendrils = null;
     this.ctx = null;
@@ -160,7 +167,7 @@ export class LillyKit implements RyderKit {
     this.poseState = null;
     this.scale = 1;
     this.applyScale(1);
-    if (this.puddle) this.puddle.visible = false;
+    if (this.vortex) this.vortex.visible = false;
     if (this.circle) this.circle.visible = false;
     if (this.tendrils) this.tendrils.visible = false;
     const ctx = this.ctx;
@@ -337,28 +344,36 @@ export class LillyKit implements RyderKit {
 
   private stepDrain(frame: KitFrame) {
     const ctx = this.ctx;
-    if (!ctx || !this.puddle || !this.puddleMat) return;
+    if (!ctx || !this.vortex) return;
     if (!this.drainOn) this.drainFade = Math.max(0, this.drainFade - frame.dt * 1.4);
     else this.drainFade = Math.min(1, this.drainFade + frame.dt * 1.8);
     const shown = this.drainFade > 0.02;
-    this.puddle.visible = shown;
+    this.vortex.visible = shown;
     if (this.tendrils) this.tendrils.visible = shown && this.drainOn;
     if (!shown) return;
     const radius = SOUL_RADIUS * this.drainFade;
-    const y = ctx.heightAt(ctx.pos.x, ctx.pos.z) + 0.045;
-    this.puddle.position.set(ctx.pos.x, y, ctx.pos.z);
-    this.puddle.scale.setScalar(radius);
-    this.puddleMat.uniforms.uTime.value = frame.time;
-    this.puddleMat.uniforms.uStrength.value = this.drainFade;
-    if (this.drainOn && frame.dt > 0 && Math.random() < 0.85) {
-      const a = Math.random() * Math.PI * 2;
-      const r = Math.sqrt(Math.random()) * radius * 0.92;
-      ctx.particles.emit(new THREE.Vector3(ctx.pos.x + Math.cos(a) * r, y + 0.05, ctx.pos.z + Math.sin(a) * r), GREEN, 1, {
-        speed: 0.8,
-        size: 0.16 + Math.random() * 0.14,
-        life: 0.45,
-        up: 1.6,
-        gravity: -0.4,
+    const y = ctx.heightAt(ctx.pos.x, ctx.pos.z);
+    this.vortex.position.set(ctx.pos.x, y, ctx.pos.z);
+    if (this.vortexField) {
+      const span = radius / SOUL_RADIUS;
+      this.vortexField.scale.set(span, 1, span);
+    }
+    for (const material of this.vortexMats) {
+      material.uniforms.uTime.value = frame.time;
+      material.uniforms.uStrength.value = this.drainFade;
+    }
+    if (this.drainOn && frame.dt > 0 && Math.random() < 0.9) {
+      const a = frame.time * 2.6 + Math.random() * 0.5;
+      const r = 0.4 + Math.random() * 0.85;
+      const h = 0.25 + Math.random() * 1.7;
+      _dir.set(-Math.sin(a), 0.85, Math.cos(a));
+      ctx.particles.emit(new THREE.Vector3(ctx.pos.x + Math.cos(a) * r, y + h, ctx.pos.z + Math.sin(a) * r), GREEN, 1, {
+        speed: 1.6,
+        direction: _dir,
+        spread: 0.2,
+        size: 0.14 + Math.random() * 0.1,
+        life: 0.5,
+        gravity: -0.8,
       });
     }
     if (!this.drainOn) {
@@ -484,45 +499,64 @@ export class LillyKit implements RyderKit {
     });
   }
 
-  private buildPuddle(ctx: KitContext) {
-    const geometry = new THREE.CircleGeometry(1, 40);
-    const material = new THREE.ShaderMaterial({
-      transparent: true,
-      depthWrite: false,
-      blending: THREE.AdditiveBlending,
-      uniforms: { uTime: { value: 0 }, uStrength: { value: 1 } },
-      vertexShader: `
-        varying vec2 vUv;
-        void main() {
-          vUv = uv;
-          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-        }
-      `,
-      fragmentShader: `
-        varying vec2 vUv;
-        uniform float uTime;
-        uniform float uStrength;
-        void main() {
-          vec2 p = vUv * 2.0 - 1.0;
-          float r = length(p);
-          if (r > 1.0) discard;
-          float edge = smoothstep(1.0, 0.78, r);
-          float boil = sin(p.x * 18.0 + uTime * 3.2) * sin(p.y * 16.0 - uTime * 2.6);
-          float bubble = smoothstep(0.55, 0.95, boil);
-          vec3 col = mix(vec3(0.02, 0.22, 0.08), vec3(0.45, 1.0, 0.55), 0.35 + bubble * 0.65);
-          float alpha = edge * (0.28 + bubble * 0.38) * uStrength;
-          gl_FragColor = vec4(col, alpha);
-        }
-      `,
-    });
-    const mesh = new THREE.Mesh(geometry, material);
-    mesh.rotation.x = -Math.PI / 2;
-    mesh.visible = false;
-    mesh.renderOrder = 2;
-    mesh.frustumCulled = false;
-    ctx.scene.add(mesh);
-    this.puddle = mesh;
-    this.puddleMat = material;
+  private buildVortex(ctx: KitContext) {
+    const group = new THREE.Group();
+    const swirl = (spin: number, bands: number, alpha: number) =>
+      new THREE.ShaderMaterial({
+        transparent: true,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+        blending: THREE.AdditiveBlending,
+        uniforms: {
+          uTime: { value: 0 },
+          uStrength: { value: 1 },
+          uSpin: { value: spin },
+          uBands: { value: bands },
+          uAlpha: { value: alpha },
+        },
+        vertexShader: `
+          varying vec2 vUv;
+          void main() {
+            vUv = uv;
+            gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+          }
+        `,
+        fragmentShader: `
+          varying vec2 vUv;
+          uniform float uTime;
+          uniform float uStrength;
+          uniform float uSpin;
+          uniform float uBands;
+          uniform float uAlpha;
+          void main() {
+            float stripe = abs(fract(vUv.x * 3.0 + vUv.y * uBands - uTime * uSpin) - 0.5);
+            float streak = smoothstep(0.46, 0.04, stripe);
+            float lift = smoothstep(0.0, 0.16, vUv.y) * smoothstep(1.0, 0.58, vUv.y);
+            vec3 col = mix(vec3(0.04, 0.42, 0.16), vec3(0.72, 1.0, 0.78), streak);
+            float alpha = (0.04 + streak * 0.7) * lift * uStrength * uAlpha;
+            if (alpha < 0.02) discard;
+            gl_FragColor = vec4(col, alpha);
+          }
+        `,
+      });
+
+    const add = (top: number, bottom: number, height: number, spin: number, bands: number, alpha: number) => {
+      const material = swirl(spin, bands, alpha);
+      const mesh = new THREE.Mesh(new THREE.CylinderGeometry(top, bottom, height, 48, 1, true), material);
+      mesh.position.y = height * 0.5;
+      mesh.frustumCulled = false;
+      mesh.renderOrder = 3;
+      this.vortexMats.push(material);
+      group.add(mesh);
+      return mesh;
+    };
+
+    // A column around her body, and a wider spiral out to the drain's edge.
+    add(0.42, 1.05, 2.6, 1.8, 2.4, 0.85);
+    this.vortexField = add(SOUL_RADIUS * 0.42, SOUL_RADIUS * 0.9, 2.8, -0.9, 3.4, 0.28);
+    group.visible = false;
+    ctx.scene.add(group);
+    this.vortex = group;
   }
 
   private buildTendrils(ctx: KitContext) {
