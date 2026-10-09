@@ -78,6 +78,7 @@ export interface PvpCpuHooks {
   playerMemory(): CombatRates;
   time(): number;
   sound(id: string): void;
+  playerHazards?(): Array<{ x: number; z: number; radius: number; kind: 'drain' | 'stomp' }>;
 }
 
 interface PlayerBody extends ReactiveBody, KitTarget {
@@ -222,6 +223,9 @@ export class PvpCpu {
     this.separateFromFoe();
 
     const group = body.fighter.humanoid.group;
+    const bodyScale = this.kit?.bodyScale ?? 1;
+    body.radius = PLAYER_RADIUS * (this.kit?.radiusScale ?? 1);
+    group.scale.setScalar(bodyScale);
     group.position.copy(body.pos);
     group.position.y = this.hooks.heightAt(body.pos.x, body.pos.z) + (this.kit?.airY ?? 0) - body.sink;
     group.rotation.y = this.facing + (this.kit?.bodyYaw ?? 0);
@@ -235,6 +239,7 @@ export class PvpCpu {
       const pose = this.striker.pose();
       animateGltfFighter(body.fighter, dt, body.anim, moving ? 1 : 0, this.intent === 'chase', pose ? 1 - pose.p : 0, body.swing, {
         style: pose?.style,
+        pose: this.kit?.pose ?? null,
       });
       body.swing = false;
     } else {
@@ -316,12 +321,18 @@ export class PvpCpu {
       this.intent = 'punch';
       this.strikeQueued = false;
     }
+    const hazard = this.playerHazard(body.pos.x, body.pos.z);
     let mx = dx / dist;
     let mz = dz / dist;
+    if (hazard) {
+      mx = hazard.x;
+      mz = hazard.z;
+      this.intent = 'evade';
+    }
     if (this.intent === 'retreat') {
       mx = -mx;
       mz = -mz;
-    } else if (this.intent === 'evade' || this.intent === 'reposition' || this.intent === 'dodge') {
+    } else if (!hazard && (this.intent === 'evade' || this.intent === 'reposition' || this.intent === 'dodge')) {
       const side = this.profile.evasiveness > 0.5 ? 1 : -1;
       const strafe = this.intent === 'evade' ? 1 : 0.65;
       mx = (-mz * side) * strafe + mx * (this.intent === 'reposition' ? 0.35 : 0.1);
@@ -709,10 +720,12 @@ export class PvpCpu {
       fighter: () => cpu.body?.fighter ?? null,
       targets: () => (cpu.foe ? [cpu.foe] : []),
       hurt: (target: KitTarget, damage: number, dir: THREE.Vector3, reaction?: HitReaction, strength = 1) => {
-        if (target !== cpu.foe || cpu.hooks.playerIntangible()) return;
+        if (target !== cpu.foe || cpu.hooks.playerIntangible()) return 0;
         const kind: PvpDamageKind = cpu.intentSlot === 2 ? 'ultimate' : 'ability';
         if (reaction) applyReaction(cpu.foe, reaction, dir, strength ?? 1);
+        const before = hooks.playerHp();
         hooks.hurtPlayer(damage, dir, kind);
+        return Math.max(0, before - hooks.playerHp());
       },
       flash: (target: KitTarget, color: number, seconds: number) => {
         if (target === cpu.foe) {
@@ -748,7 +761,33 @@ export class PvpCpu {
         cpu.aura = Math.min(cpu.maxAura, cpu.aura + Math.max(0, amount));
         if (cpu.burnout && cpu.aura >= cpu.maxAura * BURNOUT_RECOVERY) cpu.burnout = false;
       },
+      heal: (amount: number) => {
+        const body = cpu.body;
+        if (!body) return 0;
+        const before = body.hp;
+        body.hp = Math.min(body.maxHp, body.hp + Math.max(0, amount));
+        return body.hp - before;
+      },
+      cooldown: (id: AbilitySpec['id'], seconds: number) => {
+        const slot = cpu.spec?.moves.findIndex((move) => move.id === id) ?? -1;
+        if (slot >= 0) cpu.moveCd[slot] = Math.max(cpu.moveCd[slot], seconds);
+      },
     };
+  }
+
+  private playerHazard(x: number, z: number) {
+    const zones = this.hooks.playerHazards?.() ?? [];
+    let best: { x: number; z: number; push: number } | null = null;
+    for (const zone of zones) {
+      const dx = x - zone.x;
+      const dz = z - zone.z;
+      const dist = Math.hypot(dx, dz) || 0.001;
+      const reach = zone.radius + (zone.kind === 'stomp' ? 1.35 : 0.4);
+      if (dist > reach) continue;
+      const push = (reach - dist) / reach;
+      if (!best || push > best.push) best = { x: dx / dist, z: dz / dist, push };
+    }
+    return best;
   }
 
   private disposeKit() {

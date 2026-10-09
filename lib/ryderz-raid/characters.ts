@@ -15,6 +15,7 @@ import {
   type PoseOverride,
 } from './skeletal';
 import { rigFashionBody } from './civilians/fashion-rig';
+import { rigLillyBody } from './ryderz/lilly-rig';
 import { rigRubiBody } from './ryderz/rubi-rig';
 import { HostGlitch } from './host-glitch';
 import { addOutline, buildHumanoid, glow, toon, type Humanoid } from './toon';
@@ -123,6 +124,10 @@ async function loadGltfTemplate(url: string, label: string, repair?: GlbRepair):
   if (!skinned && url.includes('rubi-wong.glb')) {
     skinned = rigRubiBody(gltf.scene);
     if (skinned) console.info('[raid] %s: fitted a skeleton and seated the sword', label);
+  }
+  if (!skinned && url.includes('lilly-james.glb')) {
+    skinned = rigLillyBody(gltf.scene);
+    if (skinned) console.info('[raid] %s: fitted a skeleton and uncrossed her legs', label);
   }
   if (skinned) {
     // A rig whose weights do not match its geometry would tear apart when

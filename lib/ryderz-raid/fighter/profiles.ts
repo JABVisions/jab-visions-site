@@ -88,6 +88,13 @@ const RYDER_COMBAT: Record<RyderId, CombatProfile> = {
     combos: SHARED_COMBOS,
     powerLink: { id: 'storm-chain', abilityId: 'bladeFan', label: 'Storm Chain', preReaction: 'stagger', followUps: 2, trap: 0 },
   },
+  lilly: {
+    punch: { damageMul: 0.42, recovery: 0.22 },
+    kick: { damageMul: 0.8, knockback: 6.6 },
+    melee: { label: 'Famine strike', damageMul: 1.02, reaction: 'knockback', range: 2.3, recovery: 0.46, style: 'smash' },
+    combos: SHARED_COMBOS,
+    powerLink: { id: 'drain-link', abilityId: 'soulDrain', label: 'Soul Link', preReaction: 'stagger', followUps: 1, trap: 0.2 },
+  },
 };
 
 export function combatProfileFor(id: RyderId | null | undefined): CombatProfile {

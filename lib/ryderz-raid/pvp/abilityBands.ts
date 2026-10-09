@@ -19,6 +19,9 @@ export const ABILITY_BANDS: Record<AbilityId, AbilityBand> = {
   decoy: 'movement',
   phase: 'defensive',
   dartStorm: 'mid',
+  soulDrain: 'close',
+  giantStep: 'close',
+  animalAllegiance: 'mid',
 };
 
 /** 0–1. A close cutter scores almost nothing from across the block. */

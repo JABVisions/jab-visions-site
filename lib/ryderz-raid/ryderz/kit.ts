@@ -48,7 +48,8 @@ export interface KitContext {
    * Kits that can hit other Ryderz should gate this with `canDamage`
    * (`lib/ryderz-raid/combat`) so Raid allies are not friendly-fired.
    */
-  hurt(target: KitTarget, damage: number, dir: THREE.Vector3, reaction?: HitReaction, strength?: number): void;
+  /** Returns the health actually removed. */
+  hurt(target: KitTarget, damage: number, dir: THREE.Vector3, reaction?: HitReaction, strength?: number): number;
   /** Flash a target a colour for `seconds` without hurting it. */
   flash(target: KitTarget, color: number, seconds: number): void;
   /** Base melee damage after upgrades / burnout. */
@@ -73,6 +74,27 @@ export interface KitContext {
   turn(yaw: number, cut?: boolean): void;
   /** Give aura back (siphons, greed). Clamped to the maximum. */
   gainAura(amount: number): void;
+  /**
+   * Restore health. Returns the amount actually gained, which is 0 once the
+   * Ryder is already at maximum.
+   */
+  heal(amount: number): number;
+  /** Hold an ability off the input for `seconds`. */
+  cooldown(id: AbilityId, seconds: number): void;
+}
+
+/** A ground area enemies should leave. `drain` is a standing puddle; `stomp` is an incoming foot. */
+export interface HazardZone {
+  x: number;
+  z: number;
+  radius: number;
+  kind: 'drain' | 'stomp';
+}
+
+export interface CameraExtra {
+  distance: number;
+  height: number;
+  targetHeight: number;
 }
 
 /** One step of a melee combo, as the engine executes it. */
@@ -138,6 +160,14 @@ export interface RyderKit {
   readonly bodyYaw?: number;
   /** 0 → 1 resistance to being hurt: damage, shove and camera shake are scaled down. */
   readonly braced?: number;
+  /** Uniform scale of the figure. 1 is the authored size. The engine restores 1 when the kit is gone. */
+  readonly bodyScale?: number;
+  /** Multiplier on the Ryder's collision radius. */
+  readonly radiusScale?: number;
+  /** Extra third-person distance while the figure is enlarged. */
+  readonly cameraExtra?: CameraExtra | null;
+  /** Areas the enemy AI should step out of. */
+  hazards?(): HazardZone[];
   attach(ctx: KitContext): void;
   detach(): void;
   update(frame: KitFrame): void;
