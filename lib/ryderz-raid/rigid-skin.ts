@@ -28,10 +28,11 @@ interface Segment {
   bz: number;
 }
 
-function isRigidWeld(mesh: THREE.SkinnedMesh) {
+/** Index of the bone that owns the mesh, when almost every weight sits on it. */
+function weldedBone(mesh: THREE.SkinnedMesh) {
   const index = mesh.geometry.getAttribute('skinIndex');
   const weight = mesh.geometry.getAttribute('skinWeight');
-  if (!index || !weight || mesh.skeleton.bones.length < 12) return false;
+  if (!index || !weight || mesh.skeleton.bones.length < 12) return -1;
   const totals = new Float64Array(mesh.skeleton.bones.length);
   const step = Math.max(1, Math.floor(index.count / 4000));
   let samples = 0;
@@ -44,10 +45,34 @@ function isRigidWeld(mesh: THREE.SkinnedMesh) {
       if (bone >= 0 && bone < totals.length) totals[bone] += w;
     }
   }
-  if (!samples) return false;
+  if (!samples) return -1;
   let max = 0;
-  for (let i = 0; i < totals.length; i += 1) max = Math.max(max, totals[i]);
-  return max / samples > 0.9;
+  let bone = -1;
+  for (let i = 0; i < totals.length; i += 1) {
+    if (totals[i] > max) {
+      max = totals[i];
+      bone = i;
+    }
+  }
+  return max / samples > 0.9 ? bone : -1;
+}
+
+/**
+ * A body welded to the pelvis needs a new skin. A sword welded to the hand
+ * does not: it already follows that bone, and reseating the skeleton from
+ * the blade moves the bones the rest of a multi-part body is using.
+ */
+function isBodyWeld(mesh: THREE.SkinnedMesh, meshes: THREE.SkinnedMesh[]) {
+  const bone = weldedBone(mesh);
+  if (bone < 0) return false;
+  const name = mesh.skeleton.bones[bone]?.name ?? '';
+  if (!/(^|_)hips$/i.test(name)) return false;
+  const count = mesh.geometry.getAttribute('position')?.count ?? 0;
+  let biggest = 0;
+  meshes.forEach((other) => {
+    biggest = Math.max(biggest, other.geometry.getAttribute('position')?.count ?? 0);
+  });
+  return count >= biggest * 0.5;
 }
 
 /** Put each bone on the joint encoded by its inverse bind, parents first. */
@@ -337,19 +362,26 @@ function seatFloatingLimbs(mesh: THREE.SkinnedMesh, bindWorld: THREE.Matrix4[]) 
 
     if (leg.length >= 40) {
       const ys = leg.map((id) => at(id, 1)).sort((a, b) => a - b);
-      const hipCut = ys[Math.floor(ys.length * 0.86)];
       const ankleCut = ys[Math.floor(ys.length * 0.14)];
-      const hip = centroidOf(cloud, leg.filter((id) => at(id, 1) >= hipCut));
       const ankle = centroidOf(cloud, leg.filter((id) => at(id, 1) <= ankleCut));
+      const hipsIndex = bones.findIndex((bone) => /(^|_)hips$/i.test(bone.name));
+      // The hip pivot belongs in the pelvis, not halfway down the thigh. A pivot
+      // in the thigh makes a kick tear out of the leg instead of swinging from the socket.
+      let hip: THREE.Vector3 | null = null;
+      if (hipsIndex >= 0) {
+        hip = new THREE.Vector3().setFromMatrixPosition(bindWorld[hipsIndex]);
+        hip.setComponent(lat, hip.getComponent(lat) + sign * height * 0.055);
+        hip.y -= height * 0.02;
+      }
       if (hip && ankle) {
-        const span = hip.distanceTo(ankle) || 1;
-        const knee = centroidOf(
-          cloud,
-          leg.filter((id) => {
-            const d = Math.hypot(at(id, 0) - hip.x, at(id, 1) - hip.y, at(id, 2) - hip.z);
-            return d > span * 0.38 && d < span * 0.62;
-          }),
-        );
+        const knee =
+          centroidOf(
+            cloud,
+            leg.filter((id) => {
+              const up = (at(id, 1) - cloud.minY) / height;
+              return up > 0.2 && up < 0.34;
+            }),
+          ) ?? hip.clone().lerp(ankle, 0.52);
         const upper = find(/upperleg|thigh/i);
         const lower = find(/lowerleg|calf/i);
         const foot = find(/foot/i);
@@ -631,6 +663,37 @@ function paintWeights(mesh: THREE.SkinnedMesh, bindWorld: THREE.Matrix4[]) {
     owner.set(next);
   }
 
+  // Thigh vertices sit close to the pelvis, so a distance bind leaves them on
+  // the hips. A kick then hinges in the middle of the thigh. Anything below
+  // the crotch belongs to that side's leg.
+  const hipsBone = bones.findIndex((bone) => /(^|_)hips$/i.test(bone.name));
+  if (hipsBone >= 0) {
+    const xWide = cloud.maxX - cloud.minX >= cloud.maxZ - cloud.minZ;
+    const latAxis = xWide ? 0 : 2;
+    const mid = ((xWide ? cloud.minX : cloud.minZ) + (xWide ? cloud.maxX : cloud.maxZ)) / 2;
+    const crotch = joints[hipsBone].y - height * 0.035;
+    const legSegs = segments.filter(
+      (segment) => /upperleg|lowerleg|thigh|calf|foot|toe/i.test(bones[segment.bone].name) && !/end/i.test(bones[segment.bone].name),
+    );
+    for (let v = 0; v < count; v += 1) {
+      const o = v * 3;
+      if (xyz[o + 1] >= crotch || !legSegs.length) continue;
+      const side = Math.sign(xyz[o + latAxis] - mid);
+      let best = owner[v];
+      let bestD = Infinity;
+      legSegs.forEach((segment) => {
+        const boneSide = Math.sign(joints[segment.bone].getComponent(latAxis) - mid);
+        if (side !== 0 && boneSide !== 0 && boneSide !== side) return;
+        const d = segmentDistance(xyz[o], xyz[o + 1], xyz[o + 2], segment);
+        if (d < bestD) {
+          bestD = d;
+          best = segment.bone;
+        }
+      });
+      if (bestD < height * 0.22) owner[v] = best;
+    }
+  }
+
   const index = new Uint16Array(count * 4);
   const weight = new Float32Array(count * 4);
   for (let v = 0; v < count; v += 1) {
@@ -663,21 +726,145 @@ function paintWeights(mesh: THREE.SkinnedMesh, bindWorld: THREE.Matrix4[]) {
 }
 
 /**
+ * The export stands in a split. Swing each leg in from the hip until the feet
+ * sit about a shoulder-width apart, without rebaking the bind. Walk and kicks
+ * then start from that stance instead of from the split.
+ */
+function closeStance(mesh: THREE.SkinnedMesh) {
+  const bones = mesh.skeleton.bones;
+  const hips = bones.find((bone) => /(^|_)hips$/i.test(bone.name));
+  if (!hips) return;
+  let top: THREE.Object3D = mesh;
+  while (top.parent) top = top.parent;
+  top.updateMatrixWorld(true);
+  const cloud = meshCloud(mesh);
+  const height = Math.max(1e-3, cloud.maxY - cloud.minY);
+  const pelvis = new THREE.Vector3().setFromMatrixPosition(hips.matrixWorld);
+  let axis: 'x' | 'z' = 'x';
+  let widest = 0;
+  ([-1, 1] as const).forEach((sign) => {
+    const side = sign < 0 ? 'left' : 'right';
+    const foot = bones.find((bone) => new RegExp(`${side}_?foot`, 'i').test(bone.name));
+    if (!foot) return;
+    const from = new THREE.Vector3().setFromMatrixPosition(foot.matrixWorld).sub(pelvis);
+    (['x', 'z'] as const).forEach((candidate) => {
+      if (Math.abs(from[candidate]) > widest) {
+        widest = Math.abs(from[candidate]);
+        axis = candidate;
+      }
+    });
+  });
+  const secondary: 'x' | 'z' = axis === 'x' ? 'z' : 'x';
+  ([-1, 1] as const).forEach((sign) => {
+    const side = sign < 0 ? 'left' : 'right';
+    const upper = bones.find((bone) => new RegExp(`${side}_?(upperleg|thigh)`, 'i').test(bone.name));
+    const foot = bones.find((bone) => new RegExp(`${side}_?foot`, 'i').test(bone.name));
+    const parent = upper?.parent;
+    if (!upper || !foot || !parent) return;
+    const ankle = new THREE.Vector3().setFromMatrixPosition(foot.matrixWorld);
+    const from = ankle.clone().sub(pelvis);
+    const socket = Math.abs(new THREE.Vector3().setFromMatrixPosition(upper.matrixWorld)[axis] - pelvis[axis]);
+    // Feet belong under the hip sockets. A shoulder measurement stays wide
+    // when the arms themselves are held out, and the stance never closes.
+    const target = Math.sign(from[axis] || sign) * Math.min(Math.abs(from[axis]), Math.max(socket, height * 0.04));
+    const along = Math.max(-height * 0.02, Math.min(height * 0.02, from[secondary]));
+    if (Math.abs(from[axis]) - Math.abs(target) < height * 0.015 && Math.abs(from[secondary] - along) < height * 0.015) return;
+    const desired = from.clone();
+    desired[axis] = target;
+    desired[secondary] = along;
+    if (from.lengthSq() < 1e-8 || desired.lengthSq() < 1e-8) return;
+    const swing = new THREE.Quaternion().setFromUnitVectors(from.normalize(), desired.normalize());
+    const parentQ = new THREE.Quaternion();
+    parent.updateWorldMatrix(true, false);
+    parent.matrixWorld.decompose(new THREE.Vector3(), parentQ, new THREE.Vector3());
+    const worldQ = new THREE.Quaternion();
+    upper.matrixWorld.decompose(new THREE.Vector3(), worldQ, new THREE.Vector3());
+    worldQ.premultiply(swing);
+    upper.quaternion.copy(parentQ.invert()).multiply(worldQ);
+    upper.updateMatrixWorld(true);
+  });
+}
+
+/** Vertices far from the pelvis that are still weighted to it will stretch into spikes when a limb moves. */
+function anchoredToHips(mesh: THREE.SkinnedMesh) {
+  const bones = mesh.skeleton.bones;
+  const hips = bones.findIndex((bone) => /(^|_)hips$/i.test(bone.name));
+  const index = mesh.geometry.getAttribute('skinIndex');
+  const weight = mesh.geometry.getAttribute('skinWeight');
+  if (hips < 0 || !index || !weight) return false;
+  mesh.skeleton.update();
+  const hip = new THREE.Vector3().setFromMatrixPosition(bones[hips].matrixWorld);
+  const sample = new THREE.Vector3();
+  let far = 0;
+  let anchored = 0;
+  const step = Math.max(1, Math.floor(index.count / 1500));
+  let minY = Infinity;
+  let maxY = -Infinity;
+  for (let i = 0; i < index.count; i += step) {
+    mesh.getVertexPosition(i, sample);
+    minY = Math.min(minY, sample.y);
+    maxY = Math.max(maxY, sample.y);
+  }
+  const height = Math.max(1e-3, maxY - minY);
+  for (let i = 0; i < index.count; i += step) {
+    mesh.getVertexPosition(i, sample);
+    if (sample.distanceTo(hip) < height * 0.22) continue;
+    far += 1;
+    let hipsWeight = 0;
+    for (let k = 0; k < 4; k += 1) {
+      if (index.getComponent(i, k) === hips) hipsWeight += weight.getComponent(i, k);
+    }
+    if (hipsWeight > 0.35) anchored += 1;
+  }
+  return far > 24 && anchored / far > 0.2;
+}
+
+function bakeRestPose(mesh: THREE.SkinnedMesh) {
+  mesh.skeleton.update();
+  const position = mesh.geometry.getAttribute('position');
+  const baked = new Float32Array(position.count * 3);
+  const point = new THREE.Vector3();
+  for (let i = 0; i < position.count; i += 1) {
+    mesh.getVertexPosition(i, point);
+    baked[i * 3] = point.x;
+    baked[i * 3 + 1] = point.y;
+    baked[i * 3 + 2] = point.z;
+  }
+  mesh.geometry.setAttribute('position', new THREE.BufferAttribute(baked, 3));
+  mesh.geometry.computeVertexNormals();
+  mesh.geometry.computeBoundingBox();
+  mesh.geometry.computeBoundingSphere();
+}
+
+/**
  * Returns true when a rigid weld was rebuilt into a poseable skin.
  * The bind pose is unchanged; only later bone motion deforms the mesh.
  */
 export function reskinRigidSkeleton(root: THREE.Object3D) {
   let changed = false;
+  root.updateMatrixWorld(true);
   const meshes: THREE.SkinnedMesh[] = [];
   root.traverse((object) => {
     const mesh = object as THREE.SkinnedMesh;
     if (mesh.isSkinnedMesh) meshes.push(mesh);
   });
   meshes.forEach((mesh) => {
-    if (!isRigidWeld(mesh)) return;
+    if (!isBodyWeld(mesh, meshes)) return;
     const bindWorld = placeBonesOnBind(mesh);
     if (!bindWorld) return;
     if (seatFloatingLimbs(mesh, bindWorld)) console.info('[raid] seated a floating rig onto the body');
+    paintWeights(mesh, bindWorld);
+    let top: THREE.Object3D = mesh;
+    while (top.parent) top = top.parent;
+    top.updateMatrixWorld(true);
+    mesh.skeleton.calculateInverses();
+    closeStance(mesh);
+    changed = true;
+  });
+  meshes.forEach((mesh) => {
+    if (weldedBone(mesh) >= 0 || !anchoredToHips(mesh)) return;
+    bakeRestPose(mesh);
+    const bindWorld = mesh.skeleton.bones.map((bone) => bone.matrixWorld.clone());
     paintWeights(mesh, bindWorld);
     let top: THREE.Object3D = mesh;
     while (top.parent) top = top.parent;
