@@ -211,7 +211,7 @@ export const RYDERZ: Record<RyderId, RyderSpec> = {
     portrait: '/assets/chaeyeon-kim-headshot.jpeg',
     icon: '/assets/those-ryderz/icons/rubi.webp',
     // Version query busts browser caches of the earlier (unrigged) export at this path.
-    glb: '/assets/those-ryderz/models/rubi-wong.glb?v=2',
+    glb: '/assets/those-ryderz/models/rubi-wong.glb?v=3',
     strikes: ['slash', 'chop', 'slash', 'smash'],
     maxHp: 110,
     speed: 7.4,

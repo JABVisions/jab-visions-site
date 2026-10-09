@@ -15,6 +15,7 @@ import {
   type PoseOverride,
 } from './skeletal';
 import { rigFashionBody } from './civilians/fashion-rig';
+import { rigRubiBody } from './ryderz/rubi-rig';
 import { HostGlitch } from './host-glitch';
 import { addOutline, buildHumanoid, glow, toon, type Humanoid } from './toon';
 import { PlasmaOrbits } from './plasma-orbs';
@@ -118,6 +119,10 @@ async function loadGltfTemplate(url: string, label: string, repair?: GlbRepair):
   });
   if (!skinned && url.includes('civilian-fashion.glb')) {
     skinned = rigFashionBody(gltf.scene);
+  }
+  if (!skinned && url.includes('rubi-wong.glb')) {
+    skinned = rigRubiBody(gltf.scene);
+    if (skinned) console.info('[raid] %s: fitted a skeleton and seated the sword', label);
   }
   if (skinned) {
     // A rig whose weights do not match its geometry would tear apart when
@@ -729,8 +734,8 @@ export function buildRyder(spec: RyderSpec, options: { clone?: boolean } = {}): 
       rig.orbs = orbs;
       return { humanoid, weapons, glowMeshes, meshSource: 'gltf' as const, rig, orbs };
     }
-    // Keven's dart and Rubi's blade are modelled into their Tripo meshes, so
-    // neither gets a socketed weapon.
+    // Keven's dart is modelled into his mesh. Rubi's sword is parented to her
+    // right hand by the rig, and the energy blade still mounts on the socket.
     return { humanoid, weapons, glowMeshes, meshSource: 'gltf', rig };
   }
 
