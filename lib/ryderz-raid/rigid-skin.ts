@@ -227,6 +227,42 @@ function centroidOf(cloud: Cloud, ids: number[]) {
   return point.multiplyScalar(1 / ids.length);
 }
 
+function vertexNeighbors(mesh: THREE.SkinnedMesh, count: number) {
+  const neighbors: number[][] = Array.from({ length: count }, () => []);
+  const geoIndex = mesh.geometry.getIndex();
+  const triCount = geoIndex ? geoIndex.count / 3 : count / 3;
+  const corner = (tri: number, slot: number) => (geoIndex ? geoIndex.getX(tri * 3 + slot) : tri * 3 + slot);
+  for (let tri = 0; tri < triCount; tri += 1) {
+    const a = corner(tri, 0);
+    const b = corner(tri, 1);
+    const c = corner(tri, 2);
+    neighbors[a].push(b, c);
+    neighbors[b].push(a, c);
+    neighbors[c].push(a, b);
+  }
+  // Tripo splits one surface into vertices that share a point but not an index,
+  // so a walk along the index stops at the elbow and never reaches the hand.
+  const position = mesh.geometry.getAttribute('position');
+  if (position) {
+    const buckets = new Map<string, number[]>();
+    for (let i = 0; i < count; i += 1) {
+      const key = `${Math.round(position.getX(i) * 10000)},${Math.round(position.getY(i) * 10000)},${Math.round(position.getZ(i) * 10000)}`;
+      const group = buckets.get(key);
+      if (group) group.push(i);
+      else buckets.set(key, [i]);
+    }
+    buckets.forEach((group) => {
+      if (group.length < 2) return;
+      const head = group[0];
+      for (let i = 1; i < group.length; i += 1) {
+        neighbors[head].push(group[i]);
+        neighbors[group[i]].push(head);
+      }
+    });
+  }
+  return neighbors;
+}
+
 function alignBoneY(from: THREE.Vector3, to: THREE.Vector3) {
   const y = new THREE.Vector3().subVectors(to, from);
   if (y.lengthSq() < 1e-8) return new THREE.Quaternion();
@@ -262,6 +298,7 @@ function seatFloatingLimbs(mesh: THREE.SkinnedMesh, bindWorld: THREE.Matrix4[]) 
   const armCut = half * 0.38;
   const { children, parent, order } = boneGraph(bones);
   const { xyz } = cloud;
+  const neighbors = vertexNeighbors(mesh, cloud.count);
 
   const at = (id: number, axis: number) => xyz[id * 3 + axis];
   const targets = new Map<number, THREE.Vector3>();
@@ -269,14 +306,55 @@ function seatFloatingLimbs(mesh: THREE.SkinnedMesh, bindWorld: THREE.Matrix4[]) 
   const placeSide = (sign: number) => {
     const arm: number[] = [];
     const leg: number[] = [];
+    const lateralOf = (id: number) => at(id, lat) - center;
     for (let i = 0; i < cloud.count; i += 1) {
-      const y = at(i, 1);
-      const lateral = at(i, lat) - center;
+      const lateral = lateralOf(i);
       if (Math.sign(lateral) !== sign && lateral !== 0) continue;
       const out = Math.abs(lateral);
-      const up = (y - cloud.minY) / height;
-      if (up > 0.37 && up < 0.8 && out > armCut) arm.push(i);
-      else if (up < 0.5 && out > armCut * 0.45) leg.push(i);
+      const up = (at(i, 1) - cloud.minY) / height;
+      if (up < 0.5 && out > armCut * 0.45) leg.push(i);
+    }
+    // The forearm hangs beside the ribs, below the old chest-height cut, so a
+    // band that only kept the upper arm parked the elbow on the shoulder and
+    // left the forearm glued to the spine. Walk out from the shoulder along
+    // the surface and stop at the torso, which is how the hand is reached
+    // without also swallowing the leg.
+    const seen = new Uint8Array(cloud.count);
+    const queue: number[] = [];
+    for (let i = 0; i < cloud.count; i += 1) {
+      const lateral = lateralOf(i);
+      if (Math.sign(lateral) !== sign && lateral !== 0) continue;
+      const up = (at(i, 1) - cloud.minY) / height;
+      if (up > 0.58 && up < 0.8 && Math.abs(lateral) > armCut) {
+        seen[i] = 1;
+        queue.push(i);
+      }
+    }
+    let cursor = 0;
+    while (cursor < queue.length) {
+      const v = queue[cursor];
+      cursor += 1;
+      arm.push(v);
+      neighbors[v].forEach((next) => {
+        if (seen[next]) return;
+        const lateral = lateralOf(next);
+        if (Math.sign(lateral) !== sign && lateral !== 0) return;
+        const up = (at(next, 1) - cloud.minY) / height;
+        // Stay outside the torso. A looser cut walks off the wrist, across the
+        // hip, and seats the elbow in the thigh.
+        if (up < 0.16 || Math.abs(lateral) < armCut) return;
+        seen[next] = 1;
+        queue.push(next);
+      });
+    }
+    if (arm.length < 40) {
+      arm.length = 0;
+      for (let i = 0; i < cloud.count; i += 1) {
+        const lateral = lateralOf(i);
+        if (Math.sign(lateral) !== sign && lateral !== 0) continue;
+        const up = (at(i, 1) - cloud.minY) / height;
+        if (up > 0.37 && up < 0.8 && Math.abs(lateral) > armCut) arm.push(i);
+      }
     }
     const find = (pattern: RegExp) =>
       bones.findIndex((bone) => {
@@ -516,18 +594,7 @@ function paintWeights(mesh: THREE.SkinnedMesh, bindWorld: THREE.Matrix4[]) {
     if (cursor >= 0) regionChildren[cursor].push(index);
   });
 
-  const adj: number[][] = Array.from({ length: count }, () => []);
-  const geoIndex = mesh.geometry.getIndex();
-  const triCount = geoIndex ? geoIndex.count / 3 : count / 3;
-  const corner = (tri: number, slot: number) => (geoIndex ? geoIndex.getX(tri * 3 + slot) : tri * 3 + slot);
-  for (let tri = 0; tri < triCount; tri += 1) {
-    const a = corner(tri, 0);
-    const b = corner(tri, 1);
-    const c = corner(tri, 2);
-    adj[a].push(b, c);
-    adj[b].push(a, c);
-    adj[c].push(a, b);
-  }
+  const adj = vertexNeighbors(mesh, count);
 
   const dist = new Float32Array(count).fill(Infinity);
   const owner = new Int32Array(count).fill(-1);
@@ -694,6 +761,39 @@ function paintWeights(mesh: THREE.SkinnedMesh, bindWorld: THREE.Matrix4[]) {
     }
   }
 
+  // A forearm that rests against the ribs is nearer the spine than a bone
+  // that only roughly follows the arm. The sleeve then stays behind when the
+  // arm lifts, and the forearm tears off at the elbow. Keep a vertex on the
+  // arm when the arm is clearly the closer bone.
+  const armSegs = segments.filter(
+    (segment) =>
+      /shoulder|upperarm|lowerarm|forearm|hand/i.test(bones[segment.bone].name) &&
+      !/twist|end|thumb|index|middle|ring|pinky/i.test(bones[segment.bone].name),
+  );
+  if (armSegs.length) {
+    for (let v = 0; v < count; v += 1) {
+      const o = v * 3;
+      let armD = Infinity;
+      let armBone = owner[v];
+      armSegs.forEach((segment) => {
+        const d = segmentDistance(xyz[o], xyz[o + 1], xyz[o + 2], segment);
+        if (d < armD) {
+          armD = d;
+          armBone = segment.bone;
+        }
+      });
+      let currentD = Infinity;
+      segments.forEach((segment) => {
+        if (segment.bone !== owner[v]) return;
+        currentD = Math.min(currentD, segmentDistance(xyz[o], xyz[o + 1], xyz[o + 2], segment));
+      });
+      // The hanging forearm is a split surface, so the torso flood reaches it
+      // first. Hand it back when the arm bone actually runs through it, and
+      // leave the thigh alone when the leg is closer.
+      if (armD + height * 0.008 < currentD && armD < height * 0.14) owner[v] = armBone;
+    }
+  }
+
   const index = new Uint16Array(count * 4);
   const weight = new Float32Array(count * 4);
   for (let v = 0; v < count; v += 1) {
@@ -837,6 +937,67 @@ function bakeRestPose(mesh: THREE.SkinnedMesh) {
 }
 
 /**
+ * A face whose jaw is weighted to the neck slides off the skull when the head
+ * turns. A mesh that lives on the skull is baked in its rest pose and bound
+ * entirely to the head, so the features stay one piece.
+ */
+function sealHeadMeshes(meshes: THREE.SkinnedMesh[]) {
+  let changed = false;
+  meshes.forEach((mesh) => {
+    const bones = mesh.skeleton.bones;
+    const head = bones.findIndex((bone) => /(^|_)head$/i.test(bone.name));
+    const anchor = bones.findIndex((bone) => /(^|_)(upperchest|chest|neck)$/i.test(bone.name) && !/twist/i.test(bone.name));
+    const position = mesh.geometry.getAttribute('position');
+    if (head < 0 || !position) return;
+    mesh.updateWorldMatrix(true, false);
+    const into = (bone: THREE.Object3D) => {
+      const point = new THREE.Vector3();
+      bone.getWorldPosition(point);
+      mesh.worldToLocal(point);
+      return point;
+    };
+    const headP = into(bones[head]);
+    const belowP = anchor >= 0 ? into(bones[anchor]) : headP.clone().setY(headP.y - 0.12);
+    const sample = new THREE.Vector3();
+    const step = Math.max(1, Math.floor(position.count / 700));
+    let samples = 0;
+    let onHead = 0;
+    let minY = Infinity;
+    let maxY = -Infinity;
+    for (let i = 0; i < position.count; i += step) {
+      mesh.getVertexPosition(i, sample);
+      samples += 1;
+      minY = Math.min(minY, sample.y);
+      maxY = Math.max(maxY, sample.y);
+      if (sample.distanceTo(headP) + 1e-4 < sample.distanceTo(belowP)) onHead += 1;
+    }
+    const span = maxY - minY;
+    if (samples < 12 || onHead / samples < 0.4 || span < 1e-4) return;
+    // The head joint of a full body sits near the top of the mesh. A head
+    // part has that joint down inside it, and it does not reach the waist.
+    if (headP.y - minY > span * 0.82) return;
+    if (headP.y - minY > 0.28) return;
+    bakeRestPose(mesh);
+    const count = mesh.geometry.getAttribute('position').count;
+    const index = new Uint16Array(count * 4);
+    const weight = new Float32Array(count * 4);
+    for (let v = 0; v < count; v += 1) {
+      index[v * 4] = head;
+      weight[v * 4] = 1;
+    }
+    mesh.geometry.setAttribute('skinIndex', new THREE.Uint16BufferAttribute(index, 4));
+    mesh.geometry.setAttribute('skinWeight', new THREE.Float32BufferAttribute(weight, 4));
+    mesh.normalizeSkinWeights();
+    let top: THREE.Object3D = mesh;
+    while (top.parent) top = top.parent;
+    top.updateMatrixWorld(true);
+    mesh.skeleton.calculateInverses();
+    changed = true;
+  });
+  return changed;
+}
+
+/**
  * Returns true when a rigid weld was rebuilt into a poseable skin.
  * The bind pose is unchanged; only later bone motion deforms the mesh.
  */
@@ -872,5 +1033,6 @@ export function reskinRigidSkeleton(root: THREE.Object3D) {
     mesh.skeleton.calculateInverses();
     changed = true;
   });
+  if (sealHeadMeshes(meshes)) changed = true;
   return changed;
 }
