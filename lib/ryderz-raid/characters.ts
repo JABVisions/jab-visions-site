@@ -124,6 +124,10 @@ async function loadGltfTemplate(url: string, label: string, repair?: GlbRepair):
     skinned = rigRubiBody(gltf.scene);
     if (skinned) console.info('[raid] %s: fitted a skeleton and seated the sword', label);
   }
+  if (!skinned && url.includes('lilly-james.glb')) {
+    skinned = rigRubiBody(gltf.scene);
+    if (skinned) console.info('[raid] %s: fitted a skeleton', label);
+  }
   if (skinned) {
     // A rig whose weights do not match its geometry would tear apart when
     // posed; freeze it in its export pose and animate it as a puppet instead.

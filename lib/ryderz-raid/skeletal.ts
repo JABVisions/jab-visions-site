@@ -678,7 +678,11 @@ export type AbilityPose =
   | 'hover'
   | 'cast'
   | 'flight'
-  | 'land';
+  | 'land'
+  | 'channel'
+  | 'summon'
+  | 'grow'
+  | 'stomp';
 
 export interface PoseOverride {
   kind: AbilityPose;
@@ -709,6 +713,10 @@ export const POSE_ROOT_DROP: Record<AbilityPose, number> = {
   cast: 0.04,
   flight: 0,
   land: 0.22,
+  channel: 0.06,
+  summon: 0.02,
+  grow: 0.12,
+  stomp: 0.16,
 };
 
 export interface SkeletalMotion {
@@ -845,6 +853,18 @@ export function poseSkeleton(skel: ProceduralSkeleton, motion: SkeletalMotion) {
         break;
       case 'land':
         poseLand(SCRATCH, pose.t);
+        break;
+      case 'channel':
+        poseChannel(SCRATCH, pose.t);
+        break;
+      case 'summon':
+        poseSummon(SCRATCH, pose.t);
+        break;
+      case 'grow':
+        poseGrow(SCRATCH, pose.t);
+        break;
+      case 'stomp':
+        poseStomp(SCRATCH, pose.t);
         break;
     }
     addAngles(A, SCRATCH, w);
@@ -1492,6 +1512,83 @@ function poseCast(A: Angles, t: number) {
   A.upperLegR.x -= 0.18 * gather - 0.18 * push;
   A.lowerLegL.x += 0.4 * gather;
   A.lowerLegR.x += 0.28 * gather;
+}
+
+/** Both palms turned down over a pool: elbows high, wrists dropped, weight in the hips. */
+function poseChannel(A: Angles, t: number) {
+  const d = 0.55 + 0.45 * smooth(t);
+  A.spine.x += 0.28 * d;
+  A.head.x += 0.22 * d;
+  A.upperArmL.x -= 0.35 * d;
+  A.upperArmR.x -= 0.35 * d;
+  A.upperArmL.z += 0.55 * d;
+  A.upperArmR.z -= 0.55 * d;
+  A.lowerArmL.x -= 1.35 * d;
+  A.lowerArmR.x -= 1.35 * d;
+  A.handL.x += 0.6 * d;
+  A.handR.x += 0.6 * d;
+  A.upperLegL.x -= 0.18 * d;
+  A.upperLegR.x -= 0.18 * d;
+  A.lowerLegL.x += 0.28 * d;
+  A.lowerLegR.x += 0.28 * d;
+}
+
+/** Arms spread to open a circle, then lowered as the pulse fires. */
+function poseSummon(A: Angles, t: number) {
+  const open = track(t, [
+    [0, 0],
+    [0.45, 1],
+    [0.75, 1],
+    [1, 0.15],
+  ]);
+  A.spine.x -= 0.08 * open;
+  A.head.x -= 0.06 * open;
+  A.upperArmL.z += 1.35 * open;
+  A.upperArmR.z -= 1.35 * open;
+  A.upperArmL.x -= 0.15 * open;
+  A.upperArmR.x -= 0.15 * open;
+  A.lowerArmL.x -= 0.25 * open;
+  A.lowerArmR.x -= 0.25 * open;
+  A.upperLegL.x -= 0.12;
+  A.upperLegR.x -= 0.12;
+}
+
+/** Feet planted, chest lifted, arms tucked as the body swells. */
+function poseGrow(A: Angles, t: number) {
+  const d = 0.4 + 0.6 * smooth(t);
+  A.upperLegL.x -= 0.35 * d;
+  A.upperLegR.x -= 0.35 * d;
+  A.lowerLegL.x += 0.55 * d;
+  A.lowerLegR.x += 0.55 * d;
+  A.upperLegL.z += 0.18 * d;
+  A.upperLegR.z -= 0.18 * d;
+  A.spine.x -= 0.16 * d;
+  A.head.x -= 0.08 * d;
+  A.upperArmL.x += 0.35 * d;
+  A.upperArmR.x += 0.35 * d;
+  A.upperArmL.z += 0.28 * d;
+  A.upperArmR.z -= 0.28 * d;
+  A.lowerArmL.x -= 1.1 * d;
+  A.lowerArmR.x -= 1.1 * d;
+}
+
+/** One foot driven into the ground. `t` near 0 is the left foot, near 1 the right. */
+function poseStomp(A: Angles, t: number) {
+  if (t >= 0.5) {
+    A.upperLegR.x += 0.95;
+    A.lowerLegR.x += 0.12;
+    A.upperLegL.x -= 0.5;
+    A.lowerLegL.x += 0.75;
+  } else {
+    A.upperLegL.x += 0.95;
+    A.lowerLegL.x += 0.12;
+    A.upperLegR.x -= 0.5;
+    A.lowerLegR.x += 0.75;
+  }
+  A.spine.x += 0.22;
+  A.head.x += 0.08;
+  A.upperArmL.x += 0.4;
+  A.upperArmR.x += 0.4;
 }
 
 /** Aerial strafing run: chest open to the ground, arms wide, legs streaming back. */

@@ -60,6 +60,9 @@ const SIGILS: Record<AbilityId, string> = {
   decoy: 'DC',
   phase: 'PH',
   dartStorm: 'DS',
+  soulDrain: 'SD',
+  giantStep: 'GT',
+  animalAllegiance: 'AA',
 };
 
 export function defaultLoadout(id: RyderId): PowerLoadout {

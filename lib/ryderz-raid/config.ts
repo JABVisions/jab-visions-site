@@ -1,7 +1,7 @@
 import type { GlbRepair } from './mesh-repair';
 import type { BoneKey, MeleeStyle } from './skeletal';
 
-export type RyderId = 'rubi' | 'leo' | 'aaron' | 'zoe' | 'keven';
+export type RyderId = 'rubi' | 'leo' | 'aaron' | 'zoe' | 'keven' | 'lilly';
 
 export type AbilityId =
   | 'bladeFan'
@@ -18,7 +18,10 @@ export type AbilityId =
   | 'heartbreak'
   | 'decoy'
   | 'phase'
-  | 'dartStorm';
+  | 'dartStorm'
+  | 'soulDrain'
+  | 'giantStep'
+  | 'animalAllegiance';
 
 export type MoveKey = 'Q' | 'E' | 'R';
 
@@ -510,9 +513,66 @@ export const RYDERZ: Record<RyderId, RyderSpec> = {
       },
     ],
   },
+  lilly: {
+    id: 'lilly',
+    name: 'Lilly James',
+    title: 'Famine',
+    flaw: 'Famine',
+    role: 'Controller',
+    color: 0x1fbf5a,
+    colorHex: '#3dff7a',
+    accent: 0xb8ffc8,
+    visual: { primaryColor: 0x1fbf5a, auraColor: 0x39f07a, electricityColor: 0x9dffc0, depletedAuraIntensity: 0.16, poweredAuraIntensity: 1.7 },
+    weapon: 'Emerald plasma',
+    portrait: '/assets/those-ryderz/icons/lilly.webp',
+    icon: '/assets/those-ryderz/icons/lilly.webp',
+    glb: '/assets/those-ryderz/models/lilly-james.glb?v=1',
+    strikes: ['slap', 'kick', 'smash'],
+    maxHp: 115,
+    speed: 6.8,
+    fireRate: 3.6,
+    damage: 12,
+    projectileSpeed: 28,
+    projectileCount: 1,
+    spread: 0.04,
+    shotCost: 2.4,
+    maxAura: 110,
+    auraRegen: 5.5,
+    meleeDamage: 22,
+    meleeRate: 2,
+    moves: [
+      {
+        id: 'soulDrain',
+        name: 'Soul Drain',
+        key: 'Q',
+        description:
+          'Raise both hands and boil an emerald puddle around you. Hosts inside take damage over time, and a share of that damage returns as health. Press again to close it.',
+        auraCost: 0,
+        drain: 8,
+      },
+      {
+        id: 'giantStep',
+        name: 'Giant Step',
+        key: 'E',
+        description:
+          'Grow to four times your height. Heavy footsteps crush hosts under the foot and shock the ground around each stomp, then you shrink back.',
+        auraCost: 22,
+        drain: 0,
+      },
+      {
+        id: 'animalAllegiance',
+        name: 'Animal Allegiance',
+        key: 'R',
+        description:
+          'Open a summoning circle. A registered animal answers and hunts your enemies. With none registered, the rite still completes.',
+        auraCost: 16,
+        drain: 0,
+      },
+    ],
+  },
 };
 
-export const RYDER_ORDER: RyderId[] = ['rubi', 'leo', 'aaron', 'zoe', 'keven'];
+export const RYDER_ORDER: RyderId[] = ['rubi', 'leo', 'aaron', 'zoe', 'keven', 'lilly'];
 
 export type EnemyKind = 'walker' | 'sprinter' | 'heavy' | 'thrower' | 'broadcaster';
 

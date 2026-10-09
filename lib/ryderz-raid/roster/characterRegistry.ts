@@ -46,7 +46,6 @@ export interface RaidCharacter {
 const FUTURE_CHARACTERS: RaidCharacter[] = [
   stub('baxter', 'Baxter', 'ryder', true),
   stub('tj', 'TJ', 'villain', false),
-  stub('lilly', 'Lilly', 'ryder', true),
   stub('ester', 'Ester', 'support', false),
 ];
 

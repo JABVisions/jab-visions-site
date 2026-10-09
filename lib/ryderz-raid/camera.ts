@@ -145,6 +145,8 @@ export class ThirdPersonCamera {
   private initialized = false;
   private lastVerticalFov = -1;
   private lastAspect = -1;
+  private extra = { distance: 0, height: 0, targetHeight: 0 };
+  private extraTarget = { distance: 0, height: 0, targetHeight: 0 };
 
   constructor(camera: THREE.PerspectiveCamera, occluders: THREE.Object3D[]) {
     this.camera = camera;
@@ -202,6 +204,13 @@ export class ThirdPersonCamera {
     this.fovPunch = Math.min(16, Math.max(this.fovPunch, degrees));
   }
 
+  /** Additive framing that eases in and out. Used when a Ryder grows. */
+  setFramingExtra(extra: { distance?: number; height?: number; targetHeight?: number } | null) {
+    this.extraTarget.distance = extra?.distance ?? 0;
+    this.extraTarget.height = extra?.height ?? 0;
+    this.extraTarget.targetHeight = extra?.targetHeight ?? 0;
+  }
+
   /** Place the camera immediately (no smoothing). Use on spawn / respawn. */
   snap(playerPos: THREE.Vector3, yaw: number, pitch: number) {
     this.smoothYaw = yaw;
@@ -249,13 +258,16 @@ export class ThirdPersonCamera {
     }
 
     // --- Blend framing towards the active state preset ----------------------
+    (['distance', 'height', 'targetHeight'] as const).forEach((key) => {
+      this.extra[key] = damp(this.extra[key], this.extraTarget[key], instant ? 0 : 0.28, dt);
+    });
     const offsets = CAMERA_STATE_OFFSETS[state];
     const target: CameraFraming = {
       fov: cfg.fov + (offsets.fov ?? 0),
       distance:
-        cfg.distance + (offsets.distance ?? 0) + (state === 'SPRINT' ? cfg.sprintPullback : 0),
-      height: cfg.height + (offsets.height ?? 0),
-      targetHeight: cfg.targetHeight + (offsets.targetHeight ?? 0),
+        cfg.distance + (offsets.distance ?? 0) + (state === 'SPRINT' ? cfg.sprintPullback : 0) + this.extra.distance,
+      height: cfg.height + (offsets.height ?? 0) + this.extra.height,
+      targetHeight: cfg.targetHeight + (offsets.targetHeight ?? 0) + this.extra.targetHeight,
       shoulderX: cfg.shoulderX + (offsets.shoulderX ?? 0),
       shoulderY: cfg.shoulderY + (offsets.shoulderY ?? 0),
     };

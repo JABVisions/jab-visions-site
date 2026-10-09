@@ -1153,7 +1153,7 @@ export class RaidEngine {
     this.pos.addScaledVector(this.hitKnock, dt);
     this.pos.x = clamp(this.pos.x, -BOUNDARY, BOUNDARY);
     this.pos.z = clamp(this.pos.z, -BOUNDARY, BOUNDARY);
-    resolveCircle(this.pos, PLAYER_RADIUS, this.world.obstacles);
+    resolveCircle(this.pos, this.playerRadius(), this.world.obstacles);
 
     // Hosts shoulder the Ryder aside, except while a kit sequence is carrying
     // her through them (dashes decide their own contact).
@@ -1161,7 +1161,7 @@ export class RaidEngine {
       for (const host of this.hosts) {
         const dx = this.pos.x - host.pos.x;
         const dz = this.pos.z - host.pos.z;
-        const min = PLAYER_RADIUS + host.radius;
+        const min = this.playerRadius() + host.radius;
         const d2 = dx * dx + dz * dz;
         if (d2 >= min * min || d2 < 1e-8) continue;
         const d = Math.sqrt(d2);
@@ -1169,7 +1169,7 @@ export class RaidEngine {
         this.pos.x += (dx / d) * push * 0.35;
         this.pos.z += (dz / d) * push * 0.35;
       }
-      resolveCircle(this.pos, PLAYER_RADIUS, this.world.obstacles);
+      resolveCircle(this.pos, this.playerRadius(), this.world.obstacles);
     }
 
     // Horizontal speed for the kit's speed effects (measured, not commanded,
@@ -1195,6 +1195,10 @@ export class RaidEngine {
     this.player.humanoid.group.position.y =
       this.world.heightAt(this.pos.x, this.pos.z) + (this.kit?.airY ?? 0) + this.airY - (this.pvpCpu?.playerSink() ?? 0);
     this.player.humanoid.group.rotation.y = this.yaw + (this.kit?.bodyYaw ?? 0);
+    const bodyScale = this.kit?.bodyScale ?? 1;
+    if (Math.abs(this.player.humanoid.group.scale.x - bodyScale) > 0.0001) {
+      this.player.humanoid.group.scale.setScalar(bodyScale);
+    }
 
     if (this.shield) {
       this.shield.visible = this.isActive('forcefield') && !this.kitClaimed.has('forcefield');
@@ -1644,9 +1648,11 @@ export class RaidEngine {
     this.scheduler.clear();
     this.hitStopT = 0;
     if (this.player) {
+      this.player.humanoid.group.scale.setScalar(1);
       setHumanoidOpacity(this.player.humanoid, 1);
       if (this.playerGlow > 0) flashEmissive(this.player.humanoid, 0x000000, 0);
     }
+    this.rig.setFramingExtra(null);
     this.playerGlow = 0;
   }
 
@@ -1666,12 +1672,19 @@ export class RaidEngine {
       cracks: this.cracks,
       afterimages: this.afterimages,
       scene: this.scene,
-      radius: PLAYER_RADIUS,
+      get radius() {
+        return engine.playerRadius();
+      },
       yaw: () => this.yaw,
       time: () => this.simTime,
       fighter: () => this.player,
       targets: () => this.hosts,
-      hurt: (target, damage, dir, reaction, strength) => this.hurtHost(target as Host, damage, dir, reaction, strength),
+      hurt: (target, damage, dir, reaction, strength) => {
+        const host = target as Host;
+        const before = host.hp;
+        this.hurtHost(host, damage, dir, reaction, strength);
+        return Math.max(0, before - Math.max(0, host.hp));
+      },
       flash: (target, color, seconds) => {
         const host = target as Host;
         host.hit = Math.max(host.hit, seconds);
@@ -1682,7 +1695,7 @@ export class RaidEngine {
       resolve: (pos) => {
         pos.x = clamp(pos.x, -BOUNDARY, BOUNDARY);
         pos.z = clamp(pos.z, -BOUNDARY, BOUNDARY);
-        resolveCircle(pos, PLAYER_RADIUS, this.world.obstacles);
+        resolveCircle(pos, engine.playerRadius(), this.world.obstacles);
       },
       blocked: (x, z, radius) => Math.abs(x) > BOUNDARY || Math.abs(z) > BOUNDARY || pointBlocked(x, z, radius, this.world.obstacles),
       lookDir: (out) => this.lookDir(out),
@@ -1706,7 +1719,20 @@ export class RaidEngine {
         this.aura = Math.min(this.maxAura, this.aura + Math.max(0, amount));
         if (this.burnout && this.aura >= this.maxAura * BURNOUT_RECOVERY) this.burnout = false;
       },
+      heal: (amount) => {
+        const before = this.hp;
+        this.hp = Math.min(this.maxHp, this.hp + Math.max(0, amount));
+        return this.hp - before;
+      },
+      cooldown: (id, seconds) => {
+        const slot = this.moves.findIndex((move) => move.id === id);
+        if (slot >= 0) this.moveCd[slot] = Math.max(this.moveCd[slot], seconds);
+      },
     };
+  }
+
+  private playerRadius() {
+    return PLAYER_RADIUS * (this.kit?.radiusScale ?? 1);
   }
 
   private isActive(id: AbilityId) {
@@ -2187,6 +2213,22 @@ export class RaidEngine {
     }
   }
 
+  /** Outward unit vector when a host is standing in one of the player's danger zones. */
+  private hazardPush(x: number, z: number) {
+    const zones = this.kit?.hazards?.() ?? [];
+    let best: { x: number; z: number; push: number } | null = null;
+    for (const zone of zones) {
+      const dx = x - zone.x;
+      const dz = z - zone.z;
+      const dist = Math.hypot(dx, dz) || 0.001;
+      const reach = zone.radius + (zone.kind === 'stomp' ? 1.35 : 0.4);
+      if (dist > reach) continue;
+      const push = (reach - dist) / reach;
+      if (!best || push > best.push) best = { x: dx / dist, z: dz / dist, push };
+    }
+    return best;
+  }
+
   /** Walls, cars, and the map edge. Used so NPCs turn before they grind. */
   private npcBlocked(x: number, z: number, radius: number) {
     return Math.abs(x) > BOUNDARY || Math.abs(z) > BOUNDARY || pointBlocked(x, z, radius, this.world.obstacles);
@@ -2266,7 +2308,8 @@ export class RaidEngine {
       !striker.busy &&
       host.cooldown <= 0 &&
       !phased &&
-      !host.follow
+      !host.follow &&
+      !this.hazardPush(host.pos.x, host.pos.z)
     ) {
       striker.queue(order.attack);
       host.cooldown = 0.48 + Math.random() * 0.4;
@@ -2304,7 +2347,12 @@ export class RaidEngine {
       vx *= 0.12;
       vz *= 0.12;
     }
-    const speed = host.speed * profile.speed * (order.state === 'flee' ? 1.2 : 1);
+    const hazard = this.hazardPush(host.pos.x, host.pos.z);
+    if (hazard) {
+      vx = hazard.x;
+      vz = hazard.z;
+    }
+    const speed = host.speed * profile.speed * (order.state === 'flee' || hazard ? 1.35 : 1);
     const mag = Math.hypot(vx, vz);
     let travelX = 0;
     let travelZ = 0;
@@ -2334,7 +2382,7 @@ export class RaidEngine {
       const sx = host.pos.x - this.pos.x;
       const sz = host.pos.z - this.pos.z;
       const sd = Math.hypot(sx, sz) || 0.0001;
-      const min = host.radius + PLAYER_RADIUS + 0.1;
+      const min = host.radius + this.playerRadius() + 0.1;
       if (sd < min) {
         host.pos.x += (sx / sd) * (min - sd);
         host.pos.z += (sz / sd) * (min - sd);
@@ -2755,6 +2803,7 @@ export class RaidEngine {
     // (phasing underground) leave the pivot on the ground.
     this.cameraPivot.copy(this.pos);
     this.cameraPivot.y += Math.max(0, this.kit?.airY ?? 0) * 0.6 + this.airY * 0.45;
+    this.rig.setFramingExtra(this.kit?.cameraExtra ?? null);
     this.rig.update(dt, this.cameraPivot, this.yaw, this.pitch, this.cameraState());
   }
 
@@ -2928,6 +2977,7 @@ export class RaidEngine {
         hurtPlayer: (amount, dir, kind, physical) => this.hurtPlayer(amount, dir, kind, physical),
         time: () => this.simTime,
         sound: (id) => this.emitSound(id),
+        playerHazards: () => this.kit?.hazards?.() ?? [],
       },
       spec.id,
     );

@@ -4,9 +4,10 @@ import { KevenKit } from './keven';
 import { AaronKit } from './aaron';
 import { ZoeKit } from './zoe';
 import { RubiKit } from './rubi';
+import { LillyKit } from './lilly';
 import type { RyderKit } from './kit';
 
-export type { KitContext, KitFrame, KitTarget, MeleeStep, RyderKit } from './kit';
+export type { CameraExtra, HazardZone, KitContext, KitFrame, KitTarget, MeleeStep, RyderKit } from './kit';
 
 /**
  * Per-Ryder combat kits. A Ryder without a kit keeps the engine's generic
@@ -14,6 +15,7 @@ export type { KitContext, KitFrame, KitTarget, MeleeStep, RyderKit } from './kit
  */
 const KITS: Partial<Record<RyderId, () => RyderKit>> = {
   rubi: () => new RubiKit(),
+  lilly: () => new LillyKit(),
   leo: () => new LeoKit(),
   aaron: () => new AaronKit(),
   keven: () => new KevenKit(),
