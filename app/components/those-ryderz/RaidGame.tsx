@@ -9,6 +9,7 @@ import {
   type RyderId,
   type UpgradeId,
 } from '@/lib/ryderz-raid/config';
+import { arenaSpec } from '@/lib/ryderz-raid/arenas';
 import type { CameraState } from '@/lib/ryderz-raid/camera';
 import type { HudState, RaidEngine } from '@/lib/ryderz-raid/engine';
 import { GameMode } from '@/lib/ryderz-raid/game-mode';
@@ -99,7 +100,7 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
   const syncHud = useCallback((next: HudState) => {
     const prev = hudRef.current;
     hudRef.current = next;
-    circularHud.current?.setVitals(next.hp, next.maxHp, next.aura, next.maxAura, next.burnout);
+    circularHud.current?.setVitals(next.hp, next.maxHp, next.aura, next.maxAura, next.burnout, next.resonance);
     vignette.current?.setHealth(next.hp, next.maxHp);
     comboHud.current?.setCombo(next.combo);
     radarHud.current?.draw(next.radar);
@@ -403,6 +404,9 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
               ) : null}
               <div className={styles.chip}>
                 Mode <strong>{partyState.mode}</strong>
+              </div>
+              <div className={styles.chip}>
+                Arena <strong>{arenaSpec(managerState.arenaId)?.name ?? 'The Block'}</strong>
               </div>
               <button
                 type="button"

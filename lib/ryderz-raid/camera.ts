@@ -153,6 +153,10 @@ export class ThirdPersonCamera {
     this.occluders = occluders;
   }
 
+  setOccluders(occluders: THREE.Object3D[]) {
+    this.occluders = occluders;
+  }
+
   setConfig(patch: Partial<CameraConfig>) {
     Object.assign(this.config, patch);
   }

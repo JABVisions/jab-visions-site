@@ -1,7 +1,8 @@
 import type { GlbRepair } from './mesh-repair';
 import type { BoneKey, MeleeStyle } from './skeletal';
+import { PAD_CHARACTER_GLB } from './dlc/pad';
 
-export type RyderId = 'rubi' | 'leo' | 'aaron' | 'zoe' | 'keven' | 'lilly';
+export type RyderId = 'rubi' | 'leo' | 'aaron' | 'zoe' | 'keven' | 'lilly' | 'kid-paranormal' | 'agent-nyx';
 
 export type AbilityId =
   | 'bladeFan'
@@ -21,7 +22,13 @@ export type AbilityId =
   | 'dartStorm'
   | 'soulDrain'
   | 'giantStep'
-  | 'animalAllegiance';
+  | 'animalAllegiance'
+  | 'phantomGrasp'
+  | 'paranormalProjection'
+  | 'dimensionalCollapse'
+  | 'nyxSlotQ'
+  | 'nyxSlotE'
+  | 'nyxSlotR';
 
 export type MoveKey = 'Q' | 'E' | 'R';
 
@@ -594,9 +601,119 @@ export const RYDERZ: Record<RyderId, RyderSpec> = {
       },
     ],
   },
+  'kid-paranormal': {
+    id: 'kid-paranormal',
+    name: 'Kid Paranormal',
+    title: 'P.A.D.',
+    flaw: 'Unassigned',
+    role: 'Operative',
+    color: 0xb388ff,
+    colorHex: '#b388ff',
+    accent: 0x3de7ff,
+    visual: { primaryColor: 0xb388ff, auraColor: 0xb388ff, electricityColor: 0x3de7ff, depletedAuraIntensity: 0.16, poweredAuraIntensity: 1.75 },
+    weapon: 'Unipolar constructs',
+    portrait: '/assets/those-ryderz/icons/kid-paranormal.webp?v=1',
+    icon: '/assets/those-ryderz/icons/kid-paranormal.webp?v=1',
+    glb: PAD_CHARACTER_GLB['kid-paranormal'] ?? undefined,
+    strikes: ['punch', 'spinKick', 'slash'],
+    maxHp: 110,
+    speed: 7,
+    fireRate: 4,
+    damage: 11,
+    projectileSpeed: 32,
+    projectileCount: 1,
+    spread: 0.05,
+    shotCost: 2,
+    maxAura: 100,
+    auraRegen: 5.5,
+    meleeDamage: 20,
+    meleeRate: 2.2,
+    moves: [
+      {
+        id: 'phantomGrasp',
+        name: 'Phantom Grasp',
+        key: 'Q',
+        description:
+          'Raise both arms. Dimensional cracks open and two spectral hands seize the nearest opponent, lift them, and slam them into a radial shockwave.',
+        auraCost: 16,
+        drain: 0,
+      },
+      {
+        id: 'paranormalProjection',
+        name: 'Paranormal Projection',
+        key: 'E',
+        description:
+          'Send two attacking illusion copies and one decoy. Press again to swap places with the nearest copy. The swap stops at a wall.',
+        auraCost: 14,
+        drain: 0,
+      },
+      {
+        id: 'dimensionalCollapse',
+        name: 'Fourth-Dimensional Collapse',
+        key: 'R',
+        description:
+          'Levitate and fold a geometric construct around nearby opponents. They hang inside it until it bursts.',
+        auraCost: 22,
+        drain: 0,
+      },
+    ],
+  },
+  'agent-nyx': {
+    id: 'agent-nyx',
+    name: 'Agent Yesterday-Nyx',
+    title: 'P.A.D. Agent',
+    flaw: 'Unassigned',
+    role: 'Agent',
+    color: 0x7f93a8,
+    colorHex: '#9eb4c8',
+    accent: 0x3de7ff,
+    visual: { primaryColor: 0x7f93a8, auraColor: 0x8ec8d8, electricityColor: 0x3de7ff, depletedAuraIntensity: 0.14, poweredAuraIntensity: 1.4 },
+    weapon: 'Unassigned',
+    portrait: '/assets/those-ryderz/icons/agent-nyx.webp?v=1',
+    icon: '/assets/those-ryderz/icons/agent-nyx.webp?v=1',
+    strikes: ['punch', 'kick', 'slash'],
+    maxHp: 100,
+    speed: 6.6,
+    fireRate: 3.4,
+    damage: 10,
+    projectileSpeed: 28,
+    projectileCount: 1,
+    spread: 0.06,
+    shotCost: 2.2,
+    maxAura: 90,
+    auraRegen: 5,
+    meleeDamage: 16,
+    meleeRate: 2,
+    moves: [
+      {
+        id: 'nyxSlotQ',
+        name: 'Unassigned',
+        key: 'Q',
+        description: 'P.A.D. moveset has not been supplied. This slot is ready for a future power.',
+        auraCost: 8,
+        drain: 0,
+      },
+      {
+        id: 'nyxSlotE',
+        name: 'Unassigned',
+        key: 'E',
+        description: 'P.A.D. moveset has not been supplied. This slot is ready for a future power.',
+        auraCost: 8,
+        drain: 0,
+      },
+      {
+        id: 'nyxSlotR',
+        name: 'Unassigned',
+        key: 'R',
+        description: 'P.A.D. moveset has not been supplied. This slot is ready for a future power.',
+        auraCost: 8,
+        drain: 0,
+      },
+    ],
+  },
 };
 
-export const RYDER_ORDER: RyderId[] = ['rubi', 'leo', 'aaron', 'zoe', 'keven', 'lilly'];
+export const RYDER_ORDER: RyderId[] = ['rubi', 'leo', 'aaron', 'zoe', 'keven', 'lilly', 'kid-paranormal', 'agent-nyx'];
 
 export type EnemyKind = 'walker' | 'sprinter' | 'heavy' | 'thrower' | 'broadcaster';
 

@@ -120,6 +120,14 @@
   color: var(--ryder);
 }
 
+.resonance {
+  display: block;
+  margin-top: 2px;
+  color: #d7f7ff;
+  font: 800 0.48rem/1.2 ui-monospace, monospace;
+  letter-spacing: 0.12em;
+}
+
 .low .portrait {
   animation: hpPulse 900ms ease-in-out infinite;
 }

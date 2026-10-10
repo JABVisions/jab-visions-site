@@ -4,6 +4,7 @@ import { ChevronLeft, ChevronRight } from 'lucide-react';
 import Image from 'next/image';
 import { useEffect, useState } from 'react';
 import { RYDERZ, type RyderId } from '@/lib/ryderz-raid/config';
+import { isPadRyder } from '@/lib/ryderz-raid/dlc/pad';
 import { GameMode } from '@/lib/ryderz-raid/game-mode';
 import { playableCharacters } from '@/lib/ryderz-raid/roster';
 import styles from '../RaidGame.module.css';
@@ -85,7 +86,7 @@ export default function SoloCharacterSelect({
                     <small>
                       {ryder.role} · {ryder.title}
                     </small>
-                    <h3>{ryder.name}</h3>
+                    <h3>{isPadRyder(id) ? `P.A.D. DLC · ${ryder.name}` : ryder.name}</h3>
                     <ul className={styles.moveList}>
                       {ryder.moves.map((move) => (
                         <li key={move.id}>

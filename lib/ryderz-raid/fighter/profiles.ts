@@ -95,6 +95,20 @@ const RYDER_COMBAT: Record<RyderId, CombatProfile> = {
     combos: [...SHARED_COMBOS, { id: 'lilly-crowd', sequence: ['kick', 'kick', 'punch'], effect: 'heavyKnockback' }],
     powerLink: { id: 'drain-link', abilityId: 'soulDrain', label: 'Soul Link', preReaction: 'stagger', followUps: 1, trap: 0.2 },
   },
+  'kid-paranormal': {
+    punch: { damageMul: 0.46, recovery: 0.22 },
+    kick: { damageMul: 0.82, knockback: 6.8 },
+    melee: { label: 'Dimensional baton', damageMul: 1.02, reaction: 'knockback', range: 2.2, recovery: 0.44, style: 'slash' },
+    combos: SHARED_COMBOS,
+    powerLink: { id: 'grasp-link', abilityId: 'phantomGrasp', label: 'Grasp Link', preReaction: 'stagger', followUps: 1, trap: 0.2 },
+  },
+  'agent-nyx': {
+    punch: { damageMul: 0.42, recovery: 0.22 },
+    kick: { damageMul: 0.7, knockback: 5.4 },
+    melee: { label: 'Melee', damageMul: 1, reaction: 'knockback', range: 2.1, recovery: 0.48, style: 'slash' },
+    combos: SHARED_COMBOS,
+    powerLink: { id: 'nyx-link', abilityId: 'nyxSlotQ', label: 'Unassigned', preReaction: 'stagger', followUps: 0, trap: 0 },
+  },
 };
 
 export function combatProfileFor(id: RyderId | null | undefined): CombatProfile {

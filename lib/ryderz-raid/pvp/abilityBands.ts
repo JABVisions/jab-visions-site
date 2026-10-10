@@ -22,6 +22,12 @@ export const ABILITY_BANDS: Record<AbilityId, AbilityBand> = {
   soulDrain: 'close',
   giantStep: 'close',
   animalAllegiance: 'mid',
+  phantomGrasp: 'mid',
+  paranormalProjection: 'mid',
+  dimensionalCollapse: 'mid',
+  nyxSlotQ: 'mid',
+  nyxSlotE: 'mid',
+  nyxSlotR: 'mid',
 };
 
 /** 0–1. A close cutter scores almost nothing from across the block. */

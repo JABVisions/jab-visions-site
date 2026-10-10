@@ -8,8 +8,8 @@ import { RYDER_THEME } from './theme';
 import { useMenuKeys, wrap } from './useMenuKeys';
 import styles from './PauseMenu.module.css';
 
-/** Roster slots shown; the gap after the real Ryderz reads as room to grow. */
-const ROSTER_SLOTS = 6;
+/** Roster slots shown; one locked card stays after the playable roster. */
+const ROSTER_SLOTS = 9;
 const COLUMNS = 3;
 
 /**

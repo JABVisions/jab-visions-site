@@ -6,7 +6,7 @@ import { RYDER_THEME } from '../menu/theme';
 import styles from './CircularPlayerHUD.module.css';
 
 export type CircularHudApi = {
-  setVitals: (hp: number, maxHp: number, aura: number, maxAura: number, burnout: boolean) => void;
+  setVitals: (hp: number, maxHp: number, aura: number, maxAura: number, burnout: boolean, resonance?: number) => void;
 };
 
 function clampPct(value: number, max: number) {
@@ -25,9 +25,10 @@ const CircularPlayerHUD = forwardRef<
   const auraArc = useRef<SVGPathElement>(null);
   const hpLabel = useRef<HTMLElement>(null);
   const auraLabel = useRef<HTMLElement>(null);
+  const resLabel = useRef<HTMLElement>(null);
 
   useImperativeHandle(ref, () => ({
-    setVitals(hp, maxHp, aura, maxAura, isBurnout) {
+    setVitals(hp, maxHp, aura, maxAura, isBurnout, resonance = 0) {
       const healthPct = clampPct(hp, maxHp);
       const auraPct = clampPct(aura, maxAura);
       if (hpArc.current) hpArc.current.style.strokeDasharray = `${healthPct} 100`;
@@ -35,6 +36,10 @@ const CircularPlayerHUD = forwardRef<
       if (hpLabel.current) hpLabel.current.textContent = `${Math.ceil(hp)}`;
       if (auraLabel.current) {
         auraLabel.current.textContent = isBurnout ? 'OUT' : `${Math.ceil(aura)}`;
+      }
+      if (resLabel.current) {
+        resLabel.current.hidden = resonance <= 0;
+        resLabel.current.textContent = resonance >= 100 ? 'RES READY' : `RES ${Math.floor(resonance)}`;
       }
       const node = root.current;
       if (!node) return;
@@ -78,6 +83,9 @@ const CircularPlayerHUD = forwardRef<
         <span>
           HP <em ref={hpLabel}>—</em>
           <i>Aura</i> <em ref={auraLabel}>—</em>
+          <b ref={resLabel} className={styles.resonance} hidden>
+            RES 0
+          </b>
         </span>
       </div>
     </div>

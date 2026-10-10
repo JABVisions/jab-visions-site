@@ -1,4 +1,5 @@
 import { RYDERZ, RYDER_ORDER, type RyderId, type RyderSpec } from '../config';
+import { padCharacterMeta } from '../dlc/pad';
 import { GameMode } from '../game-mode';
 import { aiProfileFor, DEFAULT_AI_PROFILE, type AiProfile } from '../pvp/aiProfile';
 import { combatProfileFor, DEFAULT_COMBAT_PROFILE, type CombatProfile } from '../fighter/profiles';
@@ -78,8 +79,8 @@ function fromSpec(spec: RyderSpec): RaidCharacter {
     id: spec.id,
     ryderId: spec.id,
     name: spec.name,
-    universe: 'Those Ryderz',
-    category: 'ryder',
+    universe: padCharacterMeta(spec.id)?.universe ?? 'Those Ryderz',
+    category: padCharacterMeta(spec.id)?.category ?? 'ryder',
     portrait: spec.icon || spec.portrait,
     modelPath: spec.glb ?? '',
     primaryColor: spec.colorHex,

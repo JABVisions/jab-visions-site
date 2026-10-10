@@ -378,17 +378,23 @@ function wrapGltfAsHumanoid(
       strikes.push(action);
     });
   } else if (template.skinned && template.clips.length) {
-    mixer = new THREE.AnimationMixer(figure);
-    (['idle', 'walk', 'run', 'attack'] as ClipRole[]).forEach((role) => {
-      const clip = pickClip(template.clips, role);
-      if (clip) actions[role] = mixer!.clipAction(clip);
-    });
-    if (!actions.idle) actions.idle = mixer.clipAction(template.clips[0]);
-    if (!actions.run) actions.run = actions.walk;
-    if (!actions.walk) actions.walk = actions.run;
-    if (actions.attack) {
-      actions.attack.setLoop(THREE.LoopOnce, 1);
-      actions.attack.clampWhenFinished = true;
+    const picked = (['idle', 'walk', 'run', 'attack'] as ClipRole[])
+      .map((role) => [role, pickClip(template.clips, role)] as const)
+      .filter((entry): entry is readonly [ClipRole, THREE.AnimationClip] => Boolean(entry[1]));
+    // A spell or other unmatched clip stays in the file. It is not an idle,
+    // so the procedural skeleton keeps walking and striking.
+    if (picked.length) {
+      mixer = new THREE.AnimationMixer(figure);
+      picked.forEach(([role, clip]) => {
+        actions[role] = mixer!.clipAction(clip);
+      });
+      if (!actions.idle) actions.idle = actions.walk ?? actions.run;
+      if (!actions.run) actions.run = actions.walk;
+      if (!actions.walk) actions.walk = actions.run;
+      if (actions.attack) {
+        actions.attack.setLoop(THREE.LoopOnce, 1);
+        actions.attack.clampWhenFinished = true;
+      }
     }
   }
 
