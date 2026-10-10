@@ -15,6 +15,7 @@ import {
   type PoseOverride,
 } from './skeletal';
 import { rigFashionBody } from './civilians/fashion-rig';
+import { rigKevenBody } from './ryderz/keven-rig';
 import { rigLillyBody } from './ryderz/lilly-rig';
 import { createLillyFork, preloadLillyFork } from './ryderz/lilly-fork';
 import { rigRubiBody } from './ryderz/rubi-rig';
@@ -125,6 +126,10 @@ async function loadGltfTemplate(url: string, label: string, repair?: GlbRepair):
   if (!skinned && url.includes('rubi-wong.glb')) {
     skinned = rigRubiBody(gltf.scene);
     if (skinned) console.info('[raid] %s: fitted a skeleton and seated the sword', label);
+  }
+  if (!skinned && url.includes('keven-hart.glb')) {
+    skinned = rigKevenBody(gltf.scene);
+    if (skinned) console.info('[raid] %s: fitted a skeleton through the stride', label);
   }
   if (!skinned && url.includes('lilly-james.glb')) {
     skinned = rigLillyBody(gltf.scene);

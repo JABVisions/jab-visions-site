@@ -79,6 +79,9 @@ export default function RyderShowcase({
     let meleeT = 0;
     let meleeStarted = false;
     let consumed = pendingPose.current;
+    // The rig turns Keven's chest to raid-forward (+Z). This camera sits on
+    // +Z, so that leaves the menu looking at his back. Spin him toward the lens.
+    const menuYaw = ryderId === 'keven' ? Math.PI : 0;
 
     const loop = () => {
       if (disposed) return;
@@ -94,7 +97,7 @@ export default function RyderShowcase({
         if (meleeT > 0) meleeT = Math.max(0, meleeT - dt * 2.6);
         anim += dt * 6;
         const group = fighter.humanoid.group;
-        group.rotation.y = -0.42 + Math.sin(time * 0.45) * 0.14;
+        group.rotation.y = menuYaw - 0.42 + Math.sin(time * 0.45) * 0.14;
         if (fighter.meshSource === 'gltf') {
           animateGltfFighter(fighter, dt, anim, 0, false, meleeT, meleeStarted, { camera });
         } else {
