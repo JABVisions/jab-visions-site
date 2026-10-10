@@ -53,8 +53,8 @@ export default function SoloCharacterSelect({
       <div className={styles.selectInner}>
         <header>
           <p>Those Ryderz: Raid · Solo</p>
-          <h2>Pick a Ryder.</h2>
-          <span>Single-player. One Ryder drops into the block you already know.</span>
+          <h2>Pick a fighter.</h2>
+          <span>Ryderz and Those Boomers. One fighter drops into the block you already know.</span>
           <button type="button" className={styles.selectBack} onClick={onBack}>
             Back to title
           </button>
