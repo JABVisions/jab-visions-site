@@ -2,12 +2,13 @@ import * as THREE from 'three';
 import type { AbilityId } from '../config';
 import type { MeleeStyle, PoseOverride } from '../skeletal';
 import type { HitReaction } from '../combat';
+import { AirJumpFx, chestPoint, leapAhead } from './air-jump';
 import type { KitContext, KitFrame, KitTarget, MeleeStep, RyderKit } from './kit';
 
 /**
  * Kid Paranormal. The Mixamo GLB supplies the body and the blanket cape.
  * This kit plays Unipolar Energy on top of the shared punch, kick, and melee
- * pipeline: spectral hands, illusion copies, a folding construct, and a short hover.
+ * pipeline: spectral hands, illusion copies, a folding construct, and a goo teleport.
  */
 
 const VIOLET = 0xb388ff;
@@ -18,8 +19,6 @@ const SHOCK_RANGE = 4.6;
 const COLLAPSE_RANGE = 7;
 const COLLAPSE_RANGE_CHARGED = 9.4;
 const PROJECTION_LIFE = 8;
-const HOVER_TIME = 2.35;
-const HOVER_DRAIN = 7;
 const RESONANCE_MAX = 100;
 const RESONANCE_GAIN = 22;
 
@@ -76,8 +75,10 @@ export class KidParanormalKit implements RyderKit {
   private fist: THREE.Mesh | null = null;
   private batonT = 0;
   private fistT = 0;
-  private hoverT = 0;
   private meter = 0;
+  private fx: AirJumpFx | null = null;
+  private veil = 0;
+  private readonly chest = new THREE.Vector3();
   private poseState: PoseOverride | null = null;
   private lift = 0;
 
@@ -86,7 +87,11 @@ export class KidParanormalKit implements RyderKit {
   }
 
   get flying() {
-    return this.hoverT > 0 || this.collapse !== null;
+    return this.collapse !== null;
+  }
+
+  get opacity() {
+    return this.veil > 0 ? 0.12 : 1;
   }
 
   get airY() {
@@ -100,7 +105,7 @@ export class KidParanormalKit implements RyderKit {
   get glow() {
     if (this.collapse) return 0.9;
     if (this.grasp) return 0.55;
-    if (this.hoverT > 0) return 0.28;
+    if (this.veil > 0) return 0.35;
     return 0;
   }
 
@@ -109,7 +114,7 @@ export class KidParanormalKit implements RyderKit {
   }
 
   get moveScale() {
-    return this.hoverT > 0 ? 0.94 : 1;
+    return 1;
   }
 
   attach(ctx: KitContext) {
@@ -158,6 +163,8 @@ export class KidParanormalKit implements RyderKit {
       this.fist.visible = false;
       parent.add(this.fist);
     }
+    this.fx = new AirJumpFx(ctx.scene);
+    this.veil = 0;
   }
 
   detach() {
@@ -179,6 +186,9 @@ export class KidParanormalKit implements RyderKit {
     this.fragments = [];
     this.baton = null;
     this.fist = null;
+    this.fx?.clear();
+    this.fx = null;
+    this.veil = 0;
     this.ctx = null;
   }
 
@@ -204,13 +214,24 @@ export class KidParanormalKit implements RyderKit {
     return false;
   }
 
-  tryAirJump(sinceJump: number) {
-    if (!this.ctx || this.locked || this.hoverT > 0 || sinceJump > 0.85) return false;
-    this.hoverT = HOVER_TIME;
-    this.lift = 1.45;
-    this.ctx.sound('kid.float.start');
-    this.ctx.afterimages.spawn(0.35, 0.4);
-    this.ctx.spendAura(4);
+  tryAirJump(sinceJump: number, _height = 0) {
+    const ctx = this.ctx;
+    if (!ctx || this.locked || sinceJump > 0.9) return false;
+    const jitter = (Math.random() - 0.5) * 0.7;
+    const from = leapAhead(ctx, 6.5, jitter);
+    if (!from) return false;
+    const depart = chestPoint(ctx, from.x, from.z, this.chest).clone();
+    depart.y = ctx.heightAt(from.x, from.z);
+    const arrive = chestPoint(ctx, ctx.pos.x, ctx.pos.z, this.chest).clone();
+    arrive.y = ctx.heightAt(ctx.pos.x, ctx.pos.z);
+    this.fx?.goo(depart);
+    this.fx?.goo(arrive);
+    ctx.particles.emit(depart.clone().setY(depart.y + 0.8), VIOLET, 12, { speed: 4, size: 0.32, life: 0.4, spread: 0.8, up: 1.2, gravity: 8 });
+    ctx.particles.emit(arrive.clone().setY(arrive.y + 0.6), CYAN, 10, { speed: 3.5, size: 0.28, life: 0.36, spread: 0.7, up: 0.8, gravity: 8 });
+    this.veil = 0.18;
+    ctx.iframes(0.16);
+    ctx.sound('kid.goo.impact');
+    ctx.camera.addShake(0.12);
     return true;
   }
 
@@ -282,16 +303,9 @@ export class KidParanormalKit implements RyderKit {
     this.stepGrasp(frame.dt);
     this.stepCollapse(frame.dt);
     this.stepProjections(frame.dt);
-    if (this.hoverT > 0) {
-      if (frame.stunned || (frame.aura ?? 0) <= 1 || this.collapse) this.hoverT = 0;
-      else {
-        this.hoverT = Math.max(0, this.hoverT - frame.dt);
-        ctx.spendAura(HOVER_DRAIN * frame.dt);
-        this.lift = 1.45;
-        this.poseState = this.grasp || this.collapse ? this.poseState : { kind: 'hover', t: 1 - this.hoverT / HOVER_TIME, weight: 0.8 };
-      }
-    }
-    if (this.hoverT <= 0 && !this.collapse) this.lift = this.grasp ? 0 : 0;
+    if (this.veil > 0) this.veil = Math.max(0, this.veil - frame.dt);
+    this.fx?.step(frame.dt);
+    if (!this.collapse) this.lift = this.grasp ? 0 : 0;
     this.batonT = Math.max(0, this.batonT - frame.dt);
     this.fistT = Math.max(0, this.fistT - frame.dt);
     if (this.baton) this.baton.visible = this.batonT > 0;
@@ -304,7 +318,8 @@ export class KidParanormalKit implements RyderKit {
     this.releaseGrasp();
     this.releaseCollapse();
     this.clearProjections();
-    this.hoverT = 0;
+    this.veil = 0;
+    this.fx?.clear();
     this.lift = 0;
     this.poseState = null;
     this.batonT = 0;
@@ -627,7 +642,6 @@ export class KidParanormalKit implements RyderKit {
   private startCollapse() {
     const ctx = this.ctx;
     if (!ctx) return;
-    this.hoverT = 0;
     const charged = this.takeCharge();
     const radius = charged ? COLLAPSE_RANGE_CHARGED : COLLAPSE_RANGE;
     const mesh = new THREE.Group();
@@ -728,15 +742,15 @@ export class KidParanormalKit implements RyderKit {
     }
     this.collapse = null;
     if (!this.grasp) this.poseState = null;
-    if (this.hoverT <= 0) this.lift = 0;
+    this.lift = 0;
   }
 
   private waveCape(time: number) {
     const group = this.ctx?.fighter()?.humanoid.group;
     const cape = group?.getObjectByName('PadCape');
     if (!cape) return;
-    const flap = this.hoverT > 0 || this.collapse ? 0.45 : 0.18;
-    cape.rotation.x = -0.15 + Math.sin(time * (this.hoverT > 0 ? 7 : 2.4)) * flap;
+    const flap = this.collapse ? 0.45 : 0.18;
+    cape.rotation.x = -0.15 + Math.sin(time * (this.collapse ? 7 : 2.4)) * flap;
   }
 
   private orbitFragments(frame: KitFrame) {

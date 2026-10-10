@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import type { AbilityId } from '../config';
 import type { PoseOverride } from '../skeletal';
+import { AirJumpFx, chestPoint, transferAhead } from './air-jump';
 import type { KitContext, KitFrame, KitTarget, MeleeStep, RyderKit } from './kit';
 
 /**
@@ -333,6 +334,9 @@ export class NyxKit implements RyderKit {
   private throwN = 0;
   private poseState: PoseOverride | null = null;
   private immune = new WeakMap<KitTarget, number>();
+  private fx: AirJumpFx | null = null;
+  private veil = 0;
+  private readonly chest = new THREE.Vector3();
 
   get locked() {
     return this.rewind !== null || this.zap?.phase === 'charge';
@@ -362,6 +366,10 @@ export class NyxKit implements RyderKit {
     return this.overdriveT > 0 ? 1.14 : 1;
   }
 
+  get opacity() {
+    return this.veil > 0 ? 0.04 : 1;
+  }
+
   get haste() {
     return this.overdriveT > 0 ? 1.12 : 1;
   }
@@ -370,6 +378,8 @@ export class NyxKit implements RyderKit {
     this.ctx = ctx;
     this.buildGuard();
     this.mountGuard();
+    this.fx = new AirJumpFx(ctx.scene);
+    this.veil = 0;
   }
 
   detach() {
@@ -377,11 +387,16 @@ export class NyxKit implements RyderKit {
     this.guard.removeFromParent();
     this.disposeLoose();
     this.mats.forEach((mat) => mat.dispose());
+    this.fx?.clear();
+    this.fx = null;
+    this.veil = 0;
     this.ctx = null;
   }
 
   interrupt() {
     this.releaseAll();
+    this.veil = 0;
+    this.fx?.clear();
   }
 
   onRound() {
@@ -516,6 +531,22 @@ export class NyxKit implements RyderKit {
     return false;
   }
 
+  tryAirJump(sinceJump: number, _height = 0) {
+    const ctx = this.ctx;
+    if (!ctx || this.locked || sinceJump > 0.9) return false;
+    const from = transferAhead(ctx, 11, 18);
+    if (!from) return false;
+    this.fx?.vortex(chestPoint(ctx, from.x, from.z, this.chest).clone());
+    this.fx?.vortex(chestPoint(ctx, ctx.pos.x, ctx.pos.z, this.chest).clone());
+    ctx.particles.emit(chestPoint(ctx, from.x, from.z, this.chest), 0x3de7ff, 14, { speed: 3, size: 0.12, life: 0.4, spread: 0.6, up: 1.8 });
+    ctx.particles.emit(chestPoint(ctx, ctx.pos.x, ctx.pos.z, this.chest), 0xb388ff, 14, { speed: 3, size: 0.12, life: 0.4, spread: 0.6, up: 1.8 });
+    this.veil = 0.2;
+    ctx.iframes(0.22);
+    ctx.sound('nyx.vortex.swing');
+    ctx.camera.addShake(0.1);
+    return true;
+  }
+
   update(frame: KitFrame) {
     const ctx = this.ctx;
     if (!ctx) return;
@@ -529,6 +560,8 @@ export class NyxKit implements RyderKit {
     this.stepFragments(frame.dt);
     this.pressButtons();
     this.poseState = this.poseFor();
+    if (this.veil > 0) this.veil = Math.max(0, this.veil - frame.dt);
+    this.fx?.step(frame.dt);
   }
 
   private poseFor(): PoseOverride | null {

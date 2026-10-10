@@ -146,6 +146,30 @@ function findBody(root: THREE.Object3D): THREE.Mesh | null {
   return body;
 }
 
+/**
+ * How far from each end the mesh stays narrow, as a fraction of the profile.
+ * A handle is a neck. A tip flares into the blade within the first bands.
+ */
+export function gripNecks(radii: number[]): { low: number; high: number } {
+  const peak = radii.reduce((max, radius) => Math.max(max, radius), 1e-4);
+  const limit = peak * 0.38;
+  const run = (seq: number[]) => {
+    let n = 0;
+    for (const radius of seq) {
+      if (radius > limit) break;
+      n += 1;
+    }
+    return n / Math.max(1, seq.length);
+  };
+  return { low: run(radii), high: run([...radii].reverse()) };
+}
+
+/** The longer narrow neck is the grip. Equal necks fall back to whichever end is nearer the hand. */
+export function pickGripEnd(lowNeck: number, highNeck: number, lowNearHand: boolean): 'low' | 'high' {
+  if (Math.abs(lowNeck - highNeck) >= 0.04) return lowNeck > highNeck ? 'low' : 'high';
+  return lowNearHand ? 'low' : 'high';
+}
+
 /** Move the loose sword so its grip sits in the right fist and the blade runs out through the fingers. */
 function seatSword(hand: THREE.Bone, sword: THREE.Mesh) {
   sword.updateWorldMatrix(true, false);
@@ -203,12 +227,31 @@ function seatSword(hand: THREE.Bone, sword: THREE.Mesh) {
   hand.getWorldPosition(handPoint);
   const low = endAt(minT);
   const high = endAt(maxT);
-  const handleT = low.distanceToSquared(handPoint) < high.distanceToSquared(handPoint) ? minT : maxT;
-  const tipT = handleT === minT ? maxT : minT;
-  if (tipT < handleT) axis.negate();
-  const span = Math.abs(tipT - handleT);
-  const grip = endAt(handleT).addScaledVector(axis.clone().normalize(), span * 0.12);
-  const bladeDir = endAt(tipT).sub(grip).normalize();
+  const span0 = Math.max(1e-4, maxT - minT);
+  const bands = 12;
+  const bandSum = new Array<number>(bands).fill(0);
+  const bandCount = new Array<number>(bands).fill(0);
+  for (let i = 0; i < count; i += 1) {
+    const px = src[i * 3] - mean.x;
+    const py = src[i * 3 + 1] - mean.y;
+    const pz = src[i * 3 + 2] - mean.z;
+    const t = px * axis.x + py * axis.y + pz * axis.z;
+    const band = Math.min(bands - 1, Math.max(0, Math.floor(((t - minT) / span0) * bands)));
+    const radius = Math.hypot(px - axis.x * t, py - axis.y * t, pz - axis.z * t);
+    bandSum[band] += radius;
+    bandCount[band] += 1;
+  }
+  const bandRadii = bandSum.map((sum, index) => (bandCount[index] ? sum / bandCount[index] : 0));
+  const necks = gripNecks(bandRadii);
+  const lowNearHand = low.distanceToSquared(handPoint) < high.distanceToSquared(handPoint);
+  const handleIsLow = pickGripEnd(necks.low, necks.high, lowNearHand) === 'low';
+  const gripEnd = (handleIsLow ? low : high).clone();
+  const tipEnd = (handleIsLow ? high : low).clone();
+  const bladeDir = tipEnd.sub(gripEnd);
+  const span = bladeDir.length();
+  if (span < 1e-4) return;
+  bladeDir.multiplyScalar(1 / span);
+  const grip = gripEnd.addScaledVector(bladeDir, span * 0.12);
 
   // A second axis in the blade's wide direction, so the flat faces sideways.
   const wide = new THREE.Vector3(1, 0, 0);

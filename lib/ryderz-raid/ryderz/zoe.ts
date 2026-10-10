@@ -41,6 +41,12 @@ const LIFT_HIT = 14;
 const LIFT_REHIT = 0.42;
 const LIFT_BRACED = 0.55;
 
+// Double-jump levitation. Same shell as Levitate, no contact damage, and it lands on its own.
+const HOP_RISE = 0.32;
+const HOP_HOLD = 1.05;
+const HOP_DROP = 0.34;
+const HOP_HEIGHT = 2.2;
+
 // Force Field disc
 const CAST_WIND = 0.16;
 const CAST_HOLD = 0.22;
@@ -69,6 +75,7 @@ const BLITZ_DASH = 7.5;
 
 type Sequence =
   | { kind: 'lift'; phase: 'rise' | 'hover' | 'drop'; t: number }
+  | { kind: 'float'; phase: 'rise' | 'hover' | 'drop'; t: number; from: number }
   | { kind: 'cast'; phase: 'wind' | 'hold'; t: number; dir: THREE.Vector3; fired: boolean }
   | {
       kind: 'blitz';
@@ -499,6 +506,7 @@ export class ZoeKit implements RyderKit {
     const seq = this.seq;
     if (!seq) return false;
     if (seq.kind === 'lift') return seq.phase !== 'hover';
+    if (seq.kind === 'float') return false;
     return true;
   }
 
@@ -583,6 +591,20 @@ export class ZoeKit implements RyderKit {
     }
   }
 
+  tryAirJump(sinceJump: number, height: number) {
+    if (!this.ctx || this.seq || this.lifting || sinceJump > 0.9) return false;
+    const from = Math.max(0.3, height);
+    this.seq = { kind: 'float', phase: 'rise', t: 0, from };
+    this.air = from;
+    this.shell.want = 1;
+    this.ctx.sound('zoe.lift.start');
+    this.ctx.camera.addKick(-0.1);
+    _p.copy(this.ctx.pos).setY(this.ctx.heightAt(this.ctx.pos.x, this.ctx.pos.z) + 0.05);
+    this.ctx.rings.spawn(_p, this.ctx.spec.visual.auraColor, { radius: 1.7, duration: 0.4 });
+    this.ctx.particles.emit(_p.clone().setY(_p.y + 1), this.ctx.spec.visual.electricityColor, 16, { speed: 4, size: 0.2, life: 0.4, up: 2.4 });
+    return true;
+  }
+
   melee(time: number): MeleeStep | null {
     if (time > this.comboExpires) this.comboIndex = 0;
     const step = COMBO[this.comboIndex % COMBO.length];
@@ -628,7 +650,7 @@ export class ZoeKit implements RyderKit {
     const fighting = this.seq !== null || this.lifting;
     orbs.drive = (frame.sprinting ? 1.55 : 1) * (1 + (fighting ? 0.35 : 0) + (frame.moving ? 0.15 : 0));
     if (this.seq?.kind === 'blitz') orbs.mode = 'blitz';
-    else if (this.lifting || this.seq?.kind === 'lift') orbs.mode = 'levitate';
+    else if (this.lifting || this.seq?.kind === 'lift' || this.seq?.kind === 'float') orbs.mode = 'levitate';
     else if (this.seq?.kind === 'cast') orbs.mode = 'cast';
     else {
       orbs.mode = 'idle';
@@ -678,6 +700,45 @@ export class ZoeKit implements RyderKit {
     ctx.sound('zoe.lift.end');
     _p.copy(ctx.pos).setY(ctx.heightAt(ctx.pos.x, ctx.pos.z) + 1);
     ctx.particles.emit(_p, ctx.spec.visual.electricityColor, 14, { speed: 4, size: 0.18, life: 0.32, up: 0.6 });
+  }
+
+  private updateFloat(seq: Extract<Sequence, { kind: 'float' }>, dt: number, frame: KitFrame) {
+    seq.t += dt;
+    this.shell.want = seq.phase === 'drop' ? 0 : 1;
+    if (seq.phase === 'rise') {
+      const p = Math.min(1, seq.t / HOP_RISE);
+      const eased = 1 - (1 - p) * (1 - p);
+      this.air = seq.from + (HOP_HEIGHT - seq.from) * eased;
+      this.poseState = { kind: 'hover', t: p, weight: Math.min(1, p * 1.5) };
+      this.bodyGlow = 0.22 * p;
+      if (seq.t >= HOP_RISE) {
+        seq.phase = 'hover';
+        seq.t = 0;
+      }
+      return;
+    }
+    if (seq.phase === 'hover') {
+      this.air = HOP_HEIGHT + Math.sin(frame.time * 2.6) * 0.07;
+      this.poseState = { kind: 'hover', t: (frame.time * 0.4) % 1, weight: 1 };
+      this.bodyGlow = 0.2;
+      if (seq.t >= HOP_HOLD) {
+        seq.phase = 'drop';
+        seq.t = 0;
+        this.shell.want = 0;
+      }
+      return;
+    }
+    const p = Math.min(1, seq.t / HOP_DROP);
+    this.air = HOP_HEIGHT * (1 - p) * (1 - p);
+    this.poseState = { kind: 'land', t: p, weight: 0.75 };
+    this.bodyGlow = Math.max(0, 0.2 - p * 0.35);
+    if (seq.t >= HOP_DROP) {
+      this.seq = null;
+      this.poseState = null;
+      this.air = 0;
+      this.bodyGlow = 0;
+      this.shell.want = 0;
+    }
   }
 
   private updateLift(seq: Extract<Sequence, { kind: 'lift' }>, dt: number, frame: KitFrame) {
@@ -1056,6 +1117,9 @@ export class ZoeKit implements RyderKit {
       switch (this.seq.kind) {
         case 'lift':
           this.updateLift(this.seq, dt, frame);
+          break;
+        case 'float':
+          this.updateFloat(this.seq, dt, frame);
           break;
         case 'cast':
           this.updateCast(this.seq, dt);
