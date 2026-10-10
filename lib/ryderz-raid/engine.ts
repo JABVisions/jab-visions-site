@@ -44,6 +44,7 @@ import { createRyderKit, type KitContext, type MeleeStep, type RyderKit } from '
 import type { MeleeStyle, PoseOverride } from './skeletal';
 import {
   ThirdPersonCamera,
+  cameraRelativeVelocity,
   type CameraConfig,
   type CameraSnapshot,
   type CameraState,
@@ -253,8 +254,9 @@ const _aimRay = new THREE.Ray();
 const SPRINT_MULTIPLIER = 1.28;
 /** Short hop. v² / (2g) with g = 22 lands near 1.15 m. */
 const JUMP_SPEED = 7.1;
-const KEY_YAW_RATE = 2.4; // rad/s while holding A/D
-const KEY_PITCH_RATE = 1.3; // rad/s while holding W/S
+const STICK_YAW_RATE = 2.35;
+const STICK_PITCH_RATE = 1.55;
+const LOOK_IDLE_RECENTER = 2.4;
 const COMBAT_LINGER = 2.6;
 const COMBAT_PROXIMITY = 9;
 const ABILITY_LINGER = 0.45;
@@ -300,6 +302,13 @@ export class RaidEngine {
   private keys = new Set<string>();
   private moveAxis = { x: 0, z: 0 };
   private lookAcc = { x: 0, y: 0 };
+  private padMove = false;
+  private recenter = false;
+  private lookIdle = 0;
+  private lastCam = new THREE.Vector3();
+  private camReady = false;
+  private facilityAgents: { x: number; z: number }[] = [];
+  private labFog = new THREE.Color();
   private fireHeld = false;
   private meleeQueued = false;
   private punchQueued = false;
@@ -524,6 +533,7 @@ export class RaidEngine {
     this.paused = false;
     this.phase = 'playing';
     this.rig.snap(this.pos, this.yaw, this.pitch);
+    this.camReady = false;
 
     await Promise.all([
       this.spec.glb
@@ -839,6 +849,9 @@ export class RaidEngine {
     }
     // Menus own the keyboard while paused; only Escape reaches the raid.
     if (this.paused && e.key !== 'Escape') return;
+    const lower = e.key.toLowerCase();
+    if (lower === 'x') this.recenter = true;
+    if (lower === 'b') this.swapShoulder();
     const rival = this.pvpLocalTwo ? commandForKey(e.key, e.code, 2) : null;
     const command = rival ?? commandForKey(e.key, e.code, 1);
     if (command) this.queueCommand(command, rival ? 2 : 1);
@@ -896,22 +909,27 @@ export class RaidEngine {
   private update(dt: number, time: number) {
     const cam = this.rig.config;
     const sens = cam.lookSensitivity;
-    // Keyboard camera: A/D orbit, W/S tilt. Mouse look still applies on top.
-    let keyYaw = 0;
-    let keyPitch = 0;
-    if (this.keys.has('a')) keyYaw += 1;
-    if (this.keys.has('d')) keyYaw -= 1;
-    if (this.keys.has('w')) keyPitch -= 1;
-    if (this.keys.has('s')) keyPitch += 1;
-    this.yaw += keyYaw * KEY_YAW_RATE * sens * dt;
-    this.yaw -= this.lookAcc.x * 0.0024 * sens;
+    const stick = this.readLookStick();
+    const manualLook = Math.abs(this.lookAcc.x) + Math.abs(this.lookAcc.y) + Math.abs(stick.x) + Math.abs(stick.y) > 0.001;
+    if (manualLook) {
+      this.recenter = false;
+      this.lookIdle = 0;
+    } else this.lookIdle += dt;
+    this.yaw -= (this.lookAcc.x * 0.0024 + stick.x * STICK_YAW_RATE * dt) * sens;
     this.pitch = clamp(
-      this.pitch + keyPitch * KEY_PITCH_RATE * sens * dt - this.lookAcc.y * 0.0018 * sens,
+      this.pitch - (this.lookAcc.y * 0.0018 + stick.y * STICK_PITCH_RATE * dt) * sens,
       cam.pitchMin,
       cam.pitchMax,
     );
     this.lookAcc.x = 0;
     this.lookAcc.y = 0;
+    const traveling = this.readMoveAxes().len > 0.15;
+    if (this.recenter || (this.lookIdle > LOOK_IDLE_RECENTER && traveling)) {
+      const home = 0.26;
+      const tc = this.recenter ? 0.16 : 1.05;
+      this.pitch += (home - this.pitch) * (1 - Math.exp(-dt / tc));
+      if (this.recenter && Math.abs(this.pitch - home) < 0.012) this.recenter = false;
+    }
     this.combatT = Math.max(0, this.combatT - dt);
     this.abilityT = Math.max(0, this.abilityT - dt);
     this.pvpHitKindT = Math.max(0, this.pvpHitKindT - dt);
@@ -933,7 +951,8 @@ export class RaidEngine {
     this.simTime += dt;
     this.scheduler.update(this.simTime);
     if (this.kit) {
-      const moving = this.moveAxis.x !== 0 || this.moveAxis.z !== 0 || ['arrowup', 'arrowdown', 'arrowleft', 'arrowright'].some((k) => this.keys.has(k));
+      const wish = this.readMoveAxes();
+      const moving = wish.len > 0.05;
       this.kit.update({
         dt,
         time: this.simTime,
@@ -1198,22 +1217,15 @@ export class RaidEngine {
     const phased = this.isPhased();
     const locked = this.kit?.locked ?? false;
 
-    let x = this.moveAxis.x;
-    let z = this.moveAxis.z;
-    if (this.keys.has('arrowup')) z -= 1;
-    if (this.keys.has('arrowdown')) z += 1;
-    if (this.keys.has('arrowleft')) x -= 1;
-    if (this.keys.has('arrowright')) x += 1;
+    const wish = this.readMoveAxes();
+    let x = wish.x;
+    let z = wish.z;
     if (this.simTime > this.suppressUntil) this.suppress = 1;
     if (this.recoveryT > 0 || locked || this.pvpCpu?.grabsPlayer() || this.stasis > 0) {
       x = 0;
       z = 0;
     }
     const len = Math.hypot(x, z);
-    if (len > 1) {
-      x /= len;
-      z /= len;
-    }
     const busy = this.kit?.busy ?? false;
     this.sprinting = this.keys.has('shift') && len > 0.1 && !this.fireHeld && this.meleeT <= 0 && !busy;
     let speed =
@@ -1224,9 +1236,8 @@ export class RaidEngine {
       this.suppress;
     if (this.hitStun > 0.05) speed *= 0.22;
 
-    _fwd.set(Math.sin(this.yaw), 0, Math.cos(this.yaw));
-    _right.set(-_fwd.z, 0, _fwd.x);
-    _tmp.copy(_fwd).multiplyScalar(-z).add(_right.multiplyScalar(x));
+    const move = cameraRelativeVelocity(this.yaw, x, -z);
+    _tmp.set(move.x, 0, move.z);
     if (this.dodgeT > 0) {
       _tmp.set(this.dodgeX, 0, this.dodgeZ);
       speed = 15;
@@ -1410,26 +1421,70 @@ export class RaidEngine {
     if (command === 'ability3') this.queuedMoves[2] = true;
   }
 
-  private pollPad() {
+  private connectedPad() {
     const pads = typeof navigator === 'undefined' ? null : navigator.getGamepads?.();
-    const pad = pads ? Array.from(pads).find((item) => item && item.connected) : null;
+    return pads ? Array.from(pads).find((item) => item && item.connected) ?? null : null;
+  }
+
+  private readLookStick() {
+    const pad = this.connectedPad();
+    if (!pad) return { x: 0, y: 0 };
+    if (pad.buttons[11]?.pressed) this.recenter = true;
+    const x = pad.axes[2] ?? 0;
+    const y = pad.axes[3] ?? 0;
+    if (Math.hypot(x, y) < 0.18) return { x: 0, y: 0 };
+    return { x, y };
+  }
+
+  /** Strafe on x, forward/back on z. Positive z is backward, matching the touch stick. */
+  private readMoveAxes() {
+    let x = this.moveAxis.x;
+    let z = this.moveAxis.z;
+    if (this.keys.has('arrowup') || this.keys.has('w')) z -= 1;
+    if (this.keys.has('arrowdown') || this.keys.has('s')) z += 1;
+    if (this.keys.has('arrowleft') || this.keys.has('a')) x -= 1;
+    if (this.keys.has('arrowright') || this.keys.has('d')) x += 1;
+    const len = Math.hypot(x, z);
+    if (len > 1) {
+      x /= len;
+      z /= len;
+    }
+    return { x, z, len: Math.min(1, len) };
+  }
+
+  private swapShoulder() {
+    const cfg = this.rig.config;
+    const magnitude = Math.abs(cfg.shoulderX) > 0.05 ? Math.abs(cfg.shoulderX) : 0.42;
+    cfg.shoulderX = cfg.shoulderX >= 0 ? -magnitude : magnitude;
+  }
+
+  private pollPad() {
+    const pad = this.connectedPad();
     if (!pad) return;
     const commands = risingPadCommands(
       pad.buttons.map((button) => button.pressed),
       this.padPrev,
     );
     for (const command of commands) this.queueCommand(command, 1);
+    const lx = pad.axes[0] ?? 0;
+    const ly = pad.axes[1] ?? 0;
+    const mag = Math.hypot(lx, ly);
+    if (mag > 0.2) {
+      this.padMove = true;
+      const scale = Math.min(1, (mag - 0.2) / 0.75);
+      this.setMoveAxis((lx / mag) * scale, (ly / mag) * scale);
+    } else if (this.padMove) {
+      this.padMove = false;
+      this.setMoveAxis(0, 0);
+    }
   }
 
   private tryDodge() {
     if (this.dodgeCd > 0 || this.hitStun > 0.18 || this.stasis > 0 || (this.kit?.locked ?? false)) return;
-    let x = this.moveAxis.x;
-    let z = this.moveAxis.z;
-    if (this.keys.has('arrowup')) z -= 1;
-    if (this.keys.has('arrowdown')) z += 1;
-    if (this.keys.has('arrowleft')) x -= 1;
-    if (this.keys.has('arrowright')) x += 1;
-    const len = Math.hypot(x, z);
+    const wish = this.readMoveAxes();
+    const x = wish.x;
+    const z = wish.z;
+    const len = wish.len;
     const fwdX = Math.sin(this.yaw);
     const fwdZ = Math.cos(this.yaw);
     if (len < 0.2) {
@@ -2588,6 +2643,11 @@ export class RaidEngine {
       gx += Math.cos(ang) * ring;
       gz += Math.sin(ang) * ring;
     }
+    const hop = this.world.routeTo?.(host.pos.x, host.pos.z, gx, gz);
+    if (hop && Math.hypot(hop.x - host.pos.x, hop.z - host.pos.z) > 1.15) {
+      gx = hop.x;
+      gz = hop.z;
+    }
     const gdx = gx - host.pos.x;
     const gdz = gz - host.pos.z;
     const goalDist = Math.hypot(gdx, gdz) || 0.0001;
@@ -3055,12 +3115,47 @@ export class RaidEngine {
   }
 
   private updateCamera(dt: number) {
-    // Ride part of a kit's airtime so a flip or leap stays in frame; descents
-    // (phasing underground) leave the pivot on the ground.
-    this.cameraPivot.copy(this.pos);
-    this.cameraPivot.y += Math.max(0, this.kit?.airY ?? 0) * 0.6 + this.airY * 0.45;
+    // Feet in the world, including stairs, jumps, levitation, and descents.
+    const feet =
+      this.world.heightAt(this.pos.x, this.pos.z) +
+      (this.kit?.airY ?? 0) +
+      this.airY -
+      (this.pvpCpu?.playerSink() ?? 0);
+    this.cameraPivot.set(this.pos.x, feet, this.pos.z);
+    if (this.camReady) {
+      const hop = Math.hypot(this.cameraPivot.x - this.lastCam.x, this.cameraPivot.z - this.lastCam.z);
+      const rise = Math.abs(this.cameraPivot.y - this.lastCam.y);
+      if (hop > 5 || rise > 2.5) this.rig.relocate(this.cameraPivot);
+    }
+    this.lastCam.copy(this.cameraPivot);
+    this.camReady = true;
     this.rig.setFramingExtra(this.kit?.cameraExtra ?? null);
     this.rig.update(dt, this.cameraPivot, this.yaw, this.pitch, this.cameraState());
+    this.stepFacility(dt);
+    this.tintPadFog(dt);
+  }
+
+  private stepFacility(dt: number) {
+    if (!this.world.stepFacility) return;
+    this.facilityAgents.length = 0;
+    this.facilityAgents.push({ x: this.pos.x, z: this.pos.z });
+    for (const host of this.hosts) {
+      if (host.hp <= 0) continue;
+      this.facilityAgents.push({ x: host.pos.x, z: host.pos.z });
+    }
+    this.world.stepFacility(this.facilityAgents, dt);
+  }
+
+  /** The lab hall eases the cyan facility fog toward a bright clinical white. */
+  private tintPadFog(dt: number) {
+    const fog = this.scene.fog as THREE.FogExp2 | null;
+    if (!fog || this.arena.id !== 'training-pad') return;
+    const inLab = this.pos.x < -41 && this.world.heightAt(this.pos.x, this.pos.z) > 3;
+    this.labFog.setHex(inLab ? 0xe7eef2 : 0x07141c);
+    const density = inLab ? 0.0045 : 0.011;
+    const blend = 1 - Math.exp(-dt * 2.4);
+    fog.color.lerp(this.labFog, blend);
+    fog.density += (density - fog.density) * blend;
   }
 
   private emitHud() {

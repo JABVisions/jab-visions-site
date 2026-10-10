@@ -106,6 +106,26 @@ const _origin = new THREE.Vector3();
 const _look = new THREE.Vector3();
 const _ray = new THREE.Raycaster();
 
+/**
+ * Camera-relative stick on the horizontal plane. `strafe` +1 is right, `forward` +1
+ * is the way the camera faces. Pitch is ignored so looking up never lifts the run.
+ * The result is clamped to length 1 so diagonals are not faster.
+ */
+export function cameraRelativeVelocity(yaw: number, strafe: number, forward: number) {
+  const fwdX = Math.sin(yaw);
+  const fwdZ = Math.cos(yaw);
+  const rightX = -fwdZ;
+  const rightZ = fwdX;
+  let x = rightX * strafe + fwdX * forward;
+  let z = rightZ * strafe + fwdZ * forward;
+  const len = Math.hypot(x, z);
+  if (len > 1) {
+    x /= len;
+    z /= len;
+  }
+  return { x, z };
+}
+
 function damp(current: number, target: number, timeConstant: number, dt: number) {
   if (timeConstant <= 0) return target;
   return THREE.MathUtils.lerp(current, target, 1 - Math.exp(-dt / timeConstant));
@@ -215,6 +235,15 @@ export class ThirdPersonCamera {
     this.extraTarget.targetHeight = extra?.targetHeight ?? 0;
   }
 
+  /**
+   * A teleport, rewind, or other discontinuity. The rig jumps to the new feet
+   * instead of dragging across the arena. Yaw and pitch stay where the player left them.
+   */
+  relocate(playerPos: THREE.Vector3) {
+    this.smoothPivot.copy(playerPos);
+    this.initialized = true;
+  }
+
   /** Place the camera immediately (no smoothing). Use on spawn / respawn. */
   snap(playerPos: THREE.Vector3, yaw: number, pitch: number) {
     this.smoothYaw = yaw;
@@ -285,7 +314,9 @@ export class ThirdPersonCamera {
     const posTc = instant ? 0 : cfg.positionSmoothing;
     const rotTc = instant ? 0 : cfg.rotationSmoothing;
     this.smoothPivot.x = damp(this.smoothPivot.x, playerPos.x, posTc, dt);
-    this.smoothPivot.y = damp(this.smoothPivot.y, playerPos.y, posTc * 0.6, dt);
+    // Vertical follow is a little quicker than horizontal so stairs and jumps
+    // stay framed, without a separate ground-floor anchor.
+    this.smoothPivot.y = damp(this.smoothPivot.y, playerPos.y, posTc * 0.72, dt);
     this.smoothPivot.z = damp(this.smoothPivot.z, playerPos.z, posTc, dt);
     this.smoothYaw += damp(0, wrapAngle(yaw - this.smoothYaw), rotTc, dt);
     this.smoothPitch = damp(this.smoothPitch, pitch, rotTc, dt);
@@ -341,13 +372,14 @@ export class ThirdPersonCamera {
       const hits = _ray.intersectObjects(this.occluders, false);
       if (hits.length) allowed = Math.min(allowed, Math.max(0, hits[0].distance - pad));
     }
-    // Keep the camera off the floor.
-    const floorY = 0.45;
+    // Keep the camera off whatever floor the character is standing on.
+    const floorY = playerPos.y + 0.32;
     if (_desired.y < floorY && _dir.y < -1e-4) {
       allowed = Math.min(allowed, (floorY - _origin.y) / _dir.y);
     }
-    const minAllowed = Math.min(fullLen, cfg.minDistance);
-    allowed = Math.max(minAllowed, allowed);
+    // A wall closer than the comfort distance wins. Clamping back out to
+    // minDistance pushes the lens through thin rails and corridor walls.
+    allowed = Math.max(0.12, Math.min(fullLen, allowed));
 
     // Snap in fast when blocked, ease back out when clear.
     const tc = instant ? 0 : allowed < this.collisionDist ? 0.02 : 0.28;
