@@ -2365,7 +2365,7 @@ export class RaidEngine {
 
   private updateRaid(dt: number) {
     if (this.phase !== 'playing') return;
-    const cap = 4;
+    const cap = 5;
     this.spawnTimer -= dt;
     while (this.spawnTimer <= 0 && this.queue.length && this.livingEnemies() < cap) {
       const kind = this.queue.shift();
@@ -2414,9 +2414,10 @@ export class RaidEngine {
     if (this.disposed) return;
     const fighter = buildRyder(spec, { clone: true });
     const offsets = [
-      { x: 2.4, z: -1.8 },
-      { x: -2.4, z: -1.8 },
-      { x: 0, z: -3.4 },
+      { x: 2.4, z: -1.6 },
+      { x: -2.4, z: -1.6 },
+      { x: 1.35, z: -3.6 },
+      { x: -1.35, z: -3.6 },
     ];
     const offset = offsets[index] ?? { x: 1.6 * (index + 1), z: -2 };
     const pos = new THREE.Vector3(this.pos.x + offset.x, 0, this.pos.z + offset.z);

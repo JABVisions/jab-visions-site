@@ -153,8 +153,12 @@ function restoreComputer(room: RaidRoom, index: number) {
     };
     return;
   }
-  const taken = new Set(room.squad.slots.map((slot) => slot.ryderId));
-  const pick = defaultAllyIds(null).find((id) => !taken.has(id)) ?? defaultAllyIds(null)[0];
+  const taken = new Set(room.squad.slots.filter((slot) => slot.index !== index).map((slot) => slot.ryderId));
+  const hostId = room.squad.slots[0]?.ryderId ?? null;
+  const pick =
+    defaultAllyIds(null).find((id) => !taken.has(id)) ??
+    defaultAllyIds(hostId).find((id) => !taken.has(id));
+  if (!pick) return;
   room.squad.slots[index] = computerSlot(index, pick);
 }
 

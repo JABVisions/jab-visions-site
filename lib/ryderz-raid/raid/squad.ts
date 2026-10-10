@@ -1,7 +1,7 @@
 import { RYDERZ, RYDER_ORDER, type EnemyKind, type RyderId } from '../config';
 
 /** Cooperative raid is allies versus civilians. It is not PvP. */
-export const SQUAD_SIZE = 4;
+export const SQUAD_SIZE = 5;
 export const RAID_WAVES = 3;
 
 export type SlotControl = 'human' | 'computer' | 'open' | 'disconnected' | 'reconnecting';
@@ -140,8 +140,8 @@ export function squadReady(squad: RaidSquad): boolean {
 }
 
 /**
- * Civilian counts grow with the squad and the wave, and stay capped so four
- * allies plus a wave do not all appear on the same frame.
+ * Civilian counts grow with the squad and the wave, and stay capped so five
+ * fighters plus a wave do not all appear on the same frame.
  */
 export function waveKinds(wave: number, squadSize: number): EnemyKind[] {
   const count = Math.min(8, 3 + wave + Math.max(0, squadSize - 2));

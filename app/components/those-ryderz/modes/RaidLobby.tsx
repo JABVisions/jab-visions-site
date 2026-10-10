@@ -192,7 +192,7 @@ export default function RaidLobby({
         <p>Those Ryderz · Cooperative raid</p>
         <h2>One squad. Civilians are the enemy.</h2>
         <span>
-          Slot 1 is you. The other three start as computer teammates using their own powers. Friends who join replace a computer slot. Friendly fire stays off.
+          Slot 1 is you. The other four start as computer teammates using their own powers. Friends who join replace a computer slot, up to five fighters. Friendly fire stays off.
         </span>
       </header>
       <div className={styles.seats}>
