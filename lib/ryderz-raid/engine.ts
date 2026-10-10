@@ -45,6 +45,7 @@ import type { MeleeStyle, PoseOverride } from './skeletal';
 import {
   ThirdPersonCamera,
   cameraRelativeVelocity,
+  stepYaw,
   type CameraConfig,
   type CameraSnapshot,
   type CameraState,
@@ -267,13 +268,13 @@ const _tmp2 = new THREE.Vector3();
 const _aimPoint = new THREE.Vector3();
 const _ray = new THREE.Raycaster();
 const _aimRay = new THREE.Ray();
+const _camLead = new THREE.Vector3();
 
 const SPRINT_MULTIPLIER = 1.28;
 /** Short hop. v² / (2g) with g = 22 lands near 1.15 m. */
 const JUMP_SPEED = 7.1;
-const STICK_YAW_RATE = 2.35;
-const STICK_PITCH_RATE = 1.55;
-const LOOK_IDLE_RECENTER = 2.4;
+const STICK_YAW_RATE = 2.6;
+const STICK_PITCH_RATE = 1.85;
 const COMBAT_LINGER = 2.6;
 const COMBAT_PROXIMITY = 9;
 const ABILITY_LINGER = 0.45;
@@ -321,7 +322,6 @@ export class RaidEngine {
   private lookAcc = { x: 0, y: 0 };
   private padMove = false;
   private recenter = false;
-  private lookIdle = 0;
   private lastCam = new THREE.Vector3();
   private camReady = false;
   private facilityAgents: { x: number; z: number }[] = [];
@@ -400,6 +400,8 @@ export class RaidEngine {
   private shield: THREE.Mesh | null = null;
   private pos = new THREE.Vector3(9 + HOME_DISTRICT, 0, 11 + HOME_DISTRICT);
   private yaw = Math.PI * 0.2;
+  /** Body heading. Movement turns this; the mouse turns `yaw` and the camera follows. */
+  private facing = Math.PI * 0.2;
   private pitch = 0.12;
   private combatT = 0;
   private abilityT = 0;
@@ -556,7 +558,8 @@ export class RaidEngine {
     this.raidDown = false;
     this.pos.set(this.arena.spawnPoint.x, 0, this.arena.spawnPoint.z);
     this.yaw = Math.PI * 0.85;
-    this.pitch = 0.12;
+    this.facing = this.yaw;
+    this.pitch = 0.2;
     this.combatT = 0;
     this.abilityT = 0;
     this.sprinting = false;
@@ -748,7 +751,8 @@ export class RaidEngine {
     this.player = buildRyder(spec);
     this.player.humanoid.group.position.copy(this.pos);
     this.player.humanoid.group.position.y = this.world.heightAt(this.pos.x, this.pos.z);
-    this.player.humanoid.group.rotation.y = this.yaw;
+    this.facing = this.yaw;
+    this.player.humanoid.group.rotation.y = this.facing;
     this.scene.add(this.player.humanoid.group);
     this.powerVfx.attach(this.player, spec.visual);
     this.bindKit();
@@ -967,6 +971,10 @@ export class RaidEngine {
 
   private onMouseDown = (e: MouseEvent) => {
     if (this.paused) return;
+    if (this.phase === 'playing' && document.pointerLockElement !== this.canvas) {
+      const lock = this.canvas.requestPointerLock();
+      if (lock && typeof (lock as Promise<void>).catch === 'function') void (lock as Promise<void>).catch(() => {});
+    }
     if (e.button === 0) this.fireHeld = true;
     if (e.button === 2) {
       e.preventDefault();
@@ -1001,24 +1009,19 @@ export class RaidEngine {
     const sens = cam.lookSensitivity;
     const stick = this.readLookStick();
     const manualLook = Math.abs(this.lookAcc.x) + Math.abs(this.lookAcc.y) + Math.abs(stick.x) + Math.abs(stick.y) > 0.001;
-    if (manualLook) {
-      this.recenter = false;
-      this.lookIdle = 0;
-    } else this.lookIdle += dt;
-    this.yaw -= (this.lookAcc.x * 0.0024 + stick.x * STICK_YAW_RATE * dt) * sens;
+    if (manualLook) this.recenter = false;
+    this.yaw -= (this.lookAcc.x * 0.0031 + stick.x * STICK_YAW_RATE * dt) * sens;
     this.pitch = clamp(
-      this.pitch - (this.lookAcc.y * 0.0018 + stick.y * STICK_PITCH_RATE * dt) * sens,
+      this.pitch - (this.lookAcc.y * 0.0024 + stick.y * STICK_PITCH_RATE * dt) * sens,
       cam.pitchMin,
       cam.pitchMax,
     );
     this.lookAcc.x = 0;
     this.lookAcc.y = 0;
-    const traveling = this.readMoveAxes().len > 0.15;
-    if (this.recenter || (this.lookIdle > LOOK_IDLE_RECENTER && traveling)) {
-      const home = 0.26;
-      const tc = this.recenter ? 0.16 : 1.05;
-      this.pitch += (home - this.pitch) * (1 - Math.exp(-dt / tc));
-      if (this.recenter && Math.abs(this.pitch - home) < 0.012) this.recenter = false;
+    if (this.recenter) {
+      const home = 0.2;
+      this.pitch += (home - this.pitch) * (1 - Math.exp(-dt / 0.16));
+      if (Math.abs(this.pitch - home) < 0.012) this.recenter = false;
     }
     this.combatT = Math.max(0, this.combatT - dt);
     this.abilityT = Math.max(0, this.abilityT - dt);
@@ -1167,6 +1170,7 @@ export class RaidEngine {
       this.pos.set(def.spawnPoint.x, 0, def.spawnPoint.z);
       this.player.humanoid.group.position.copy(this.pos);
       this.player.humanoid.group.position.y = this.world.heightAt(this.pos.x, this.pos.z) + (this.kit?.airY ?? 0);
+      this.facing = this.yaw;
       this.rig.snap(this.pos, this.yaw, this.pitch);
       for (const host of this.hosts) {
         if (host.hp <= 0) continue;
@@ -1379,7 +1383,7 @@ export class RaidEngine {
     this.player.humanoid.group.position.copy(this.pos);
     this.player.humanoid.group.position.y =
       this.world.heightAt(this.pos.x, this.pos.z) + (this.kit?.airY ?? 0) + this.airY - (this.pvpCpu?.playerSink() ?? 0);
-    this.player.humanoid.group.rotation.y = this.yaw + (this.kit?.bodyYaw ?? 0);
+    this.player.humanoid.group.rotation.y = this.facing + (this.kit?.bodyYaw ?? 0);
     const bodyScale = this.kit?.bodyScale ?? 1;
     if (Math.abs(this.player.humanoid.group.scale.x - bodyScale) > 0.0001) {
       this.player.humanoid.group.scale.setScalar(bodyScale);
@@ -1416,11 +1420,34 @@ export class RaidEngine {
     }
   }
 
+  /**
+   * Run direction turns the body. Aiming, striking, and abilities square up to the
+   * camera so attacks still go where the crosshair is. WASD never orbits the camera.
+   */
+  private stepFacing(dt: number) {
+    const committed =
+      this.fireHeld ||
+      this.meleeT > 0 ||
+      this.dodgeT > 0 ||
+      (this.kit?.busy ?? false) ||
+      (this.kit?.locked ?? false);
+    let target = this.facing;
+    if (this.dodgeT > 0) target = Math.atan2(this.dodgeX, this.dodgeZ);
+    else if (committed) target = this.yaw;
+    else if (this.locomote > 0.12) {
+      const vx = this.playerVel.x;
+      const vz = this.playerVel.z;
+      if (vx * vx + vz * vz > 0.35) target = Math.atan2(vx, vz);
+    }
+    return stepYaw(this.facing, target, committed ? 16 : 11, dt);
+  }
+
   /** Pose runs after the strike window so the fist and the hit share a frame. */
   private presentPlayer(dt: number, time: number) {
     if (!this.player) return;
     const moving = this.locomote;
-    this.player.humanoid.group.rotation.y = this.yaw + (this.kit?.bodyYaw ?? 0);
+    this.facing = this.stepFacing(dt);
+    this.player.humanoid.group.rotation.y = this.facing + (this.kit?.bodyYaw ?? 0);
     this.anim += dt * (8 + moving * (this.sprinting ? 9 : 6));
     if (this.player.meshSource === 'gltf') {
       animateGltfFighter(this.player, dt, this.anim, moving, this.sprinting, this.meleeT, this.meleeStarted, {
@@ -1445,6 +1472,7 @@ export class RaidEngine {
     const dz = near.pos.z - this.pos.z;
     if (dx * dx + dz * dz > range * range) return;
     this.yaw = Math.atan2(dx, dz);
+    this.facing = this.yaw;
   }
 
   private tryFire() {
@@ -2031,7 +2059,10 @@ export class RaidEngine {
       sound: (id) => this.emitSound(id),
       turn: (yaw, cut = false) => {
         this.yaw = yaw;
-        if (cut) this.rig.snap(this.pos, this.yaw, this.pitch);
+        if (cut) {
+          this.facing = yaw;
+          this.rig.snap(this.pos, this.yaw, this.pitch);
+        }
       },
       gainAura: (amount) => {
         this.aura = Math.min(this.maxAura, this.aura + Math.max(0, amount));
@@ -3536,7 +3567,10 @@ export class RaidEngine {
     this.lastCam.copy(this.cameraPivot);
     this.camReady = true;
     this.rig.setFramingExtra(this.kit?.cameraExtra ?? null);
-    this.rig.update(dt, this.cameraPivot, this.yaw, this.pitch, this.cameraState());
+    const planar = Math.hypot(this.playerVel.x, this.playerVel.z);
+    const lead = planar > 0.4 ? Math.min(0.85, planar * 0.07) / planar : 0;
+    _camLead.set(this.playerVel.x * lead, 0, this.playerVel.z * lead);
+    this.rig.update(dt, this.cameraPivot, this.yaw, this.pitch, this.cameraState(), false, _camLead);
     this.stepFacility(dt);
     this.tintPadFog(dt);
   }

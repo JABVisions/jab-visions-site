@@ -509,7 +509,7 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
 
           <div className={styles.bottomHud}>
             <p className={styles.hint}>
-              WASD or arrows move with the camera · Mouse aims · Shift sprint · Space jump · X recenters · B swaps shoulder · Click punches up close · Zoe blasts at range · Keven throws darts · C punch · V kick · F / RMB melee, F again throws · Z dodge · Q E R powers · {INTERACT_LABEL} pickup or beacon · Esc pause
+              WASD or arrows move the character · Mouse orbits the camera, which follows · Shift sprint · Space jump · X recenters pitch · B swaps shoulder · Click punches up close · Zoe blasts at range · Keven throws darts · C punch · V kick · F / RMB melee, F again throws · Z dodge · Q E R powers · {INTERACT_LABEL} pickup or beacon · Esc pause
               {phase === 'intermission' ? ' · Hold the spire to buy strength' : ''}
               {pvpTwo ? ' · P2 IJKL move · U punch · O kick · P melee · N dodge · M jump' : ''}
             </p>
@@ -643,9 +643,9 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
       {playing && phase === 'playing' && !paused && !locked && !coarse && !camPanel && (
         <div className={styles.lock}>
           <button type="button" onClick={() => engineRef.current?.requestPointerLock()}>
-            Click to capture aim
+            Click to look
           </button>
-          <p>WASD moves with the camera. Mouse aims. Click to fire. Esc pauses.</p>
+          <p>WASD moves the character. The camera follows. Mouse orbits. Esc pauses.</p>
         </div>
       )}
 

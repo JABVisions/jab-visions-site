@@ -60,15 +60,15 @@ export const CAMERA_DEFAULTS: CameraConfig = {
   targetHeight: 1.3,
   shoulderX: 0.42,
   shoulderY: 0,
-  positionSmoothing: 0.085,
-  rotationSmoothing: 0.03,
-  stateBlend: 0.22,
-  sprintPullback: 0.7,
+  positionSmoothing: 0.05,
+  rotationSmoothing: 0,
+  stateBlend: 0.18,
+  sprintPullback: 0.35,
   lookSensitivity: 1,
   collisionRadius: 0.32,
   minDistance: 0.85,
-  pitchMin: -0.42,
-  pitchMax: 0.78,
+  pitchMin: -1.05,
+  pitchMax: 1.15,
 };
 
 /** Values the state presets are allowed to nudge. Offsets are additive on top of the base config. */
@@ -79,7 +79,7 @@ export type CameraFraming = Pick<
 
 export const CAMERA_STATE_OFFSETS: Record<CameraState, Partial<CameraFraming>> = {
   EXPLORATION: {},
-  COMBAT: { distance: -0.35, shoulderX: 0.18, fov: -2 },
+  COMBAT: { distance: -0.12, shoulderX: 0.06, fov: -1 },
   AIM: { distance: -1.35, shoulderX: 0.42, shoulderY: 0.08, height: -0.12, fov: -10 },
   // SPRINT distance is driven by config.sprintPullback (tunable from the panel).
   SPRINT: { fov: 6, shoulderX: -0.12, height: 0.08 },
@@ -111,6 +111,16 @@ const _ray = new THREE.Raycaster();
  * is the way the camera faces. Pitch is ignored so looking up never lifts the run.
  * The result is clamped to length 1 so diagonals are not faster.
  */
+/** Shortest-step a facing angle toward `target`. Movement keys never call this. */
+export function stepYaw(current: number, target: number, radiansPerSecond: number, dt: number) {
+  let delta = target - current;
+  while (delta > Math.PI) delta -= Math.PI * 2;
+  while (delta < -Math.PI) delta += Math.PI * 2;
+  const max = Math.max(0, radiansPerSecond) * Math.max(0, dt);
+  if (Math.abs(delta) <= max) return current + delta;
+  return current + Math.sign(delta) * max;
+}
+
 export function cameraRelativeVelocity(yaw: number, strafe: number, forward: number) {
   const fwdX = Math.sin(yaw);
   const fwdZ = Math.cos(yaw);
@@ -276,6 +286,7 @@ export class ThirdPersonCamera {
     pitch: number,
     requestedState: CameraState,
     instant = false,
+    lead: THREE.Vector3 | null = null,
   ) {
     const cfg = this.config;
     this.time += dt;
@@ -313,11 +324,12 @@ export class ThirdPersonCamera {
     // --- Smooth follow + look -----------------------------------------------
     const posTc = instant ? 0 : cfg.positionSmoothing;
     const rotTc = instant ? 0 : cfg.rotationSmoothing;
-    this.smoothPivot.x = damp(this.smoothPivot.x, playerPos.x, posTc, dt);
-    // Vertical follow is a little quicker than horizontal so stairs and jumps
-    // stay framed, without a separate ground-floor anchor.
-    this.smoothPivot.y = damp(this.smoothPivot.y, playerPos.y, posTc * 0.72, dt);
-    this.smoothPivot.z = damp(this.smoothPivot.z, playerPos.z, posTc, dt);
+    const leadX = lead?.x ?? 0;
+    const leadZ = lead?.z ?? 0;
+    this.smoothPivot.x = damp(this.smoothPivot.x, playerPos.x + leadX, posTc, dt);
+    // Vertical follow is quicker than horizontal so stairs and jumps stay framed.
+    this.smoothPivot.y = damp(this.smoothPivot.y, playerPos.y, posTc * 0.55, dt);
+    this.smoothPivot.z = damp(this.smoothPivot.z, playerPos.z + leadZ, posTc, dt);
     this.smoothYaw += damp(0, wrapAngle(yaw - this.smoothYaw), rotTc, dt);
     this.smoothPitch = damp(this.smoothPitch, pitch, rotTc, dt);
 

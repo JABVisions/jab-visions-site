@@ -209,8 +209,8 @@ export default function CameraTuningPanel({
         </button>
       </div>
       <p className={styles.camHint}>
-        ` toggles this panel · Esc releases the mouse without pausing · WASD moves with the camera · Mouse aims
-        the camera · Shift sprints · hold LMB for AIM
+        ` toggles this panel · Esc releases the mouse without pausing · WASD moves the character · Mouse orbits
+        the camera, which follows · Shift sprints · hold LMB for AIM
       </p>
     </aside>
   );
