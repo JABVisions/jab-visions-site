@@ -446,8 +446,9 @@ export const RYDERZ: Record<RyderId, RyderSpec> = {
     weapon: 'Pink arrows',
     portrait: '/assets/john_andy_headshot.jpg',
     icon: '/assets/those-ryderz/icons/keven.webp?v=5',
-    glb: '/assets/those-ryderz/models/keven-hart.glb?v=3',
-    // The bind pose is already a stance. Leave it; the painted skin matches these joints.
+    glb: '/assets/those-ryderz/models/keven-hart.glb?v=4',
+    // The export is a stride with the dart in hand. The rig skins that pose.
+    // Unfolding it corkscrews the limbs, so the bind is left as the stance.
     skelKeep: [
       'hips',
       'spine',
