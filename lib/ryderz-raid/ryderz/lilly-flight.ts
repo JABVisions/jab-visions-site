@@ -24,10 +24,15 @@ export function shouldStartFlight(input: {
   return input.sinceJump >= 0 && input.sinceJump <= FLIGHT_WINDOW;
 }
 
-/** Aura turns the pitchfork into a weapon. Flight and an empty aura put it away. */
+/** Aura turns the pitchfork into a weapon. Flight and an empty aura put the swings away. */
 export function forkArmed(input: { aura: number; burnout: boolean; phase: FlightPhase }): boolean {
   if (input.burnout || input.aura <= 0) return false;
   return input.phase === 'ground';
+}
+
+/** The mesh is only there while she still has aura. Burnout puts it away until the aura returns. */
+export function forkVisible(input: { aura: number; burnout: boolean }): boolean {
+  return !input.burnout && input.aura > 0;
 }
 
 export function stepAltitude(

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { FLIGHT_CEILING, FLIGHT_WINDOW, forkArmed, inArc, shouldStartFlight, stepAltitude } from './lilly-flight';
+import { FLIGHT_CEILING, FLIGHT_WINDOW, forkArmed, forkVisible, inArc, shouldStartFlight, stepAltitude } from './lilly-flight';
 
 assert.equal(
   shouldStartFlight({ airborne: true, sinceJump: 0.2, giant: false, phase: 'ground' }),
@@ -31,6 +31,9 @@ assert.equal(forkArmed({ aura: 40, burnout: false, phase: 'ground' }), true);
 assert.equal(forkArmed({ aura: 0, burnout: false, phase: 'ground' }), false, 'no aura, no weapon');
 assert.equal(forkArmed({ aura: 40, burnout: true, phase: 'ground' }), false);
 assert.equal(forkArmed({ aura: 40, burnout: false, phase: 'flying' }), false, 'the fork is a mount in the air');
+assert.equal(forkVisible({ aura: 40, burnout: false }), true);
+assert.equal(forkVisible({ aura: 0, burnout: false }), false, 'an empty aura puts the pitchfork away');
+assert.equal(forkVisible({ aura: 12, burnout: true }), false, 'burnout keeps the pitchfork away while aura trickles back');
 
 assert.equal(stepAltitude(2, 0.5, 0), 2, 'releasing climb holds altitude');
 assert.equal(stepAltitude(13.5, 0.2, 1), FLIGHT_CEILING, 'she cannot climb past the ceiling');

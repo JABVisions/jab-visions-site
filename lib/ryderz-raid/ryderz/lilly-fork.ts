@@ -89,6 +89,10 @@ export class LillyFork {
     this.root.position.set(0, 0, 0);
   }
 
+  setShown(on: boolean) {
+    this.root.visible = on;
+  }
+
   setGlow(on: boolean) {
     for (const material of this.materials) {
       material.emissive.setHex(on ? GREEN : 0x000000);

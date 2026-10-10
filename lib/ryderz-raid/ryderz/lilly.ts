@@ -11,6 +11,7 @@ import {
   FLY_SPEED,
   MOUNT_TIME,
   forkArmed,
+  forkVisible,
   inArc,
   shouldStartFlight,
   stepAltitude,
@@ -595,9 +596,11 @@ export class LillyKit implements RyderKit {
   private syncFork() {
     const fork = this.ensureFork();
     if (!fork) return;
-    if (this.flight === 'ground') fork.hold();
-    else fork.ride();
-    fork.setGlow(this.forkArmed || this.flight !== 'ground');
+    const shown = forkVisible({ aura: this.auraNow, burnout: this.auraBurnout });
+    if (shown && this.flight !== 'ground') fork.ride();
+    else fork.hold();
+    fork.setShown(shown);
+    fork.setGlow(shown);
   }
 
   /** Snap puts her on the ground at once. Otherwise she descends and then lands. */
