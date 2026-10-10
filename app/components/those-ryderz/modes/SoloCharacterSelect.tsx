@@ -2,7 +2,7 @@
 
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import Image from 'next/image';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { RYDERZ, type RyderId } from '@/lib/ryderz-raid/config';
 import { isPadRyder } from '@/lib/ryderz-raid/dlc/pad';
 import { GameMode } from '@/lib/ryderz-raid/game-mode';
@@ -22,6 +22,11 @@ export default function SoloCharacterSelect({
 }) {
   const roster = playableCharacters(GameMode.SOLO);
   const [focus, setFocus] = useState(Math.max(0, roster.findIndex((character) => character.ryderId === initialId)));
+  const cards = useRef<(HTMLButtonElement | null)[]>([]);
+
+  useEffect(() => {
+    cards.current[focus]?.scrollIntoView({ inline: 'center', block: 'nearest', behavior: 'smooth' });
+  }, [focus]);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -73,6 +78,9 @@ export default function SoloCharacterSelect({
                   <button
                     key={character.id}
                     type="button"
+                    ref={(node) => {
+                      cards.current[index] = node;
+                    }}
                     className={`${styles.card} ${index === focus ? styles.cardFocused : ''}`}
                     style={{ ['--aura' as string]: colors.aura, ['--aura-soft' as string]: colors.soft }}
                     onClick={() => {
