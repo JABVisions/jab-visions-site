@@ -24,7 +24,9 @@ import LowHealthVignette, { type LowHealthVignetteApi } from './hud/LowHealthVig
 import ComboIndicator, { type ComboHudApi } from './hud/ComboIndicator';
 import RaidRadar, { type RadarApi } from './hud/RaidRadar';
 import PauseMenu from './menu/PauseMenu';
-import RaidLobby, { type RaidSeat } from './modes/RaidLobby';
+import RaidLobby from './modes/RaidLobby';
+import RaidWatch from './modes/RaidWatch';
+import { launchFromSquad, type RaidSquad } from '@/lib/ryderz-raid/raid/squad';
 import PvpFlow, { type PvpLineup } from './modes/PvpFlow';
 import SoloCharacterSelect from './modes/SoloCharacterSelect';
 import { NEUTRAL_THEME, RYDER_THEME as AURA } from './menu/theme';
@@ -53,7 +55,11 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
   // `selected` is the Ryder the raid booted with (it owns the engine's lifetime);
   // the Ryder currently in play lives in the RyderManager and can change mid-raid.
   const [selected, setSelected] = useState<RyderId | null>(null);
-  const [screen, setScreen] = useState<'start' | 'solo-select' | 'pvp' | 'raid-lobby' | 'game'>('start');
+  const [screen, setScreen] = useState<'start' | 'solo-select' | 'pvp' | 'raid-lobby' | 'raid-watch' | 'game'>('start');
+  const raidPlanRef = useRef<ReturnType<typeof launchFromSquad> | null>(null);
+  const netRef = useRef<{ code: string; guestId: string; authority: boolean } | null>(null);
+  const netAt = useRef(0);
+  const [watchNet, setWatchNet] = useState<{ code: string; guestId: string } | null>(null);
   const [pvpOpponent, setPvpOpponent] = useState<RyderId | null>(null);
   const [pvpLabel, setPvpLabel] = useState('CPU');
   const [pvpTwo, setPvpTwo] = useState(false);
@@ -116,6 +122,26 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
       maxAura: next.maxAura,
       isAlive: next.hp > 0,
     });
+    const net = netRef.current;
+    if (net?.authority && engineRef.current && Date.now() - netAt.current > 350) {
+      netAt.current = Date.now();
+      const snapshot = engineRef.current.raidReport();
+      void fetch('/api/raid/room', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ action: 'snapshot', code: net.code, guestId: net.guestId, snapshot }),
+      });
+      void fetch(`/api/raid/room?code=${net.code}&guest=${net.guestId}`)
+        .then((response) => response.json())
+        .then((room) => {
+          const inputs = room.inputs ?? {};
+          for (const playerId of Object.keys(inputs)) {
+            const input = inputs[playerId];
+            if (playerId !== net.guestId) engineRef.current?.setAllyInput(playerId, input.x, input.z);
+          }
+        })
+        .catch(() => {});
+    }
     if (pointsRef.current) pointsRef.current.textContent = String(next.points);
     if (next.beacon && beaconCooldown.current) {
       beaconCooldown.current.textContent = `${Math.ceil(next.beacon.cooldownLeft)}s`;
@@ -204,6 +230,7 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
       void audio.resume();
       engineRef.current = engine;
       manager.attach(engine);
+      engine.setRaidPlan(raidPlanRef.current);
       engine.setPvpSetup(
         pvpRef.current
           ? { opponentId: pvpRef.current.opponent, localTwoPlayer: pvpRef.current.type === 'localTwoPlayer' }
@@ -252,6 +279,8 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
 
   const playSolo = (id: RyderId) => {
     pvpRef.current = null;
+    raidPlanRef.current = null;
+    netRef.current = null;
     setPvpOpponent(null);
     setPvpTwo(false);
     manager.setGameMode(GameMode.SOLO);
@@ -261,6 +290,8 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
 
   const playPvp = (lineup: PvpLineup) => {
     pvpRef.current = lineup;
+    raidPlanRef.current = null;
+    netRef.current = null;
     setPvpOpponent(lineup.opponent);
     setPvpLabel(lineup.type === 'localTwoPlayer' ? 'P2' : 'CPU');
     setPvpTwo(lineup.type === 'localTwoPlayer');
@@ -269,25 +300,34 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
     boot(lineup.player);
   };
 
-  const playRaid = (seats: RaidSeat[]) => {
-    const host = seats.find((seat) => seat.isLocal) ?? seats[0];
-    const ryder = host?.character?.ryderId;
+  const playRaid = (squad: RaidSquad, net: { code: string; guestId: string; authority: boolean } | null) => {
+    const ryder = squad.slots[0]?.ryderId;
     if (!ryder) return;
     pvpRef.current = null;
+    raidPlanRef.current = launchFromSquad(squad, ryder);
+    netRef.current = net;
     setPvpOpponent(null);
     setPvpTwo(false);
+    manager.setArena(squad.arenaId);
     manager.setGameMode(GameMode.RAID);
     playerStore.configure({
       mode: GameMode.RAID,
       localRyder: ryder,
-      seats: seats.map((seat) => ({
-        index: seat.index,
-        displayName: seat.displayName,
-        ryderId: seat.character?.ryderId ?? null,
-        isLocal: seat.isLocal,
-      })),
+      seats: squad.slots
+        .filter((slot) => slot.ryderId)
+        .map((slot) => ({
+          index: slot.index,
+          displayName: slot.displayName,
+          ryderId: slot.ryderId,
+          isLocal: slot.index === 0,
+        })),
     });
     boot(ryder);
+  };
+
+  const spectateRaid = (net: { code: string; guestId: string }) => {
+    setWatchNet(net);
+    setScreen('raid-watch');
   };
 
   useEffect(() => {
@@ -629,10 +669,11 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
         <div className={styles.modal}>
           <div className={styles.modalCard}>
             <p>Those Ryderz: Raid</p>
-            <h3>Signal lost</h3>
+            <h3>{partyState.mode === GameMode.RAID ? 'Raid defeat' : 'Signal lost'}</h3>
             <p>
-              The mind-controlled block overran you. Come back with more aura discipline — powers
-              drain, and fists are all that is left when the signal runs dry.
+              {partyState.mode === GameMode.RAID
+                ? `The squad is down. Enemies defeated ${hudRef.current?.raid?.defeated ?? 0}. Damage dealt ${hudRef.current?.raid?.dealt ?? 0}. Damage taken ${hudRef.current?.raid?.taken ?? 0}.`
+                : 'The mind-controlled block overran you. Come back with more aura discipline — powers drain, and fists are all that is left when the signal runs dry.'}
             </p>
             <div className={styles.actions}>
               <button type="button" onClick={replay}>
@@ -649,9 +690,22 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
       {playing && phase === 'victory' && (
         <div className={styles.modal}>
           <div className={styles.modalCard}>
-            <p>Those Ryderz · PvP</p>
-            <h3>You win</h3>
-            <p>The other Ryder is down. Rematch keeps the same lineup.</p>
+            <p>{partyState.mode === GameMode.RAID ? 'Those Ryderz · Raid' : 'Those Ryderz · PvP'}</p>
+            <h3>{partyState.mode === GameMode.RAID ? 'Raid victory' : 'You win'}</h3>
+            <p>
+              {partyState.mode === GameMode.RAID
+                ? `All waves are down. Enemies defeated ${hudRef.current?.raid?.defeated ?? 0}. Damage dealt ${hudRef.current?.raid?.dealt ?? 0}. Damage taken ${hudRef.current?.raid?.taken ?? 0}.`
+                : 'The other Ryder is down. Rematch keeps the same lineup.'}
+            </p>
+            {partyState.mode === GameMode.RAID ? (
+              <ul>
+                {(hudRef.current?.raid?.contributions ?? []).map((row) => (
+                  <li key={row.name}>
+                    {row.name}: {row.dealt}
+                  </li>
+                ))}
+              </ul>
+            ) : null}
             <div className={styles.actions}>
               <button type="button" onClick={replay}>
                 Rematch
@@ -696,7 +750,19 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
 
       {screen === 'pvp' && <PvpFlow onBack={() => setScreen('start')} onFight={playPvp} />}
 
-      {screen === 'raid-lobby' && <RaidLobby onBack={() => setScreen('start')} onStart={playRaid} />}
+      {screen === 'raid-lobby' && (
+        <RaidLobby onBack={() => setScreen('start')} onStart={playRaid} onSpectate={spectateRaid} />
+      )}
+      {screen === 'raid-watch' && watchNet && (
+        <RaidWatch
+          code={watchNet.code}
+          guestId={watchNet.guestId}
+          onLeave={() => {
+            setWatchNet(null);
+            setScreen('raid-lobby');
+          }}
+        />
+      )}
     </div>
   );
 }
