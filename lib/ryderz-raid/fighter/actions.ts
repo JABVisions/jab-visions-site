@@ -63,6 +63,57 @@ export const KICK: CombatAction = {
   style: 'kick',
 };
 
+/** Pitchfork reach. Damage multipliers stay on the Ryder profile; this only changes the swing. */
+export function forkStrike(action: CombatAction, kind: StrikeKind): CombatAction {
+  if (kind === 'punch') {
+    return {
+      ...action,
+      id: 'fork-thrust',
+      range: 2.6,
+      halfArc: 0.35,
+      style: 'forkThrust',
+      reaction: 'stagger',
+      knockback: 3.4,
+      lunge: 0.36,
+      startup: 0.1,
+      active: 0.08,
+      hitStun: 0.22,
+    };
+  }
+  if (kind === 'kick') {
+    return {
+      ...action,
+      id: 'fork-sweep',
+      range: 3.1,
+      halfArc: 1.35,
+      style: 'forkSweep',
+      reaction: 'knockback',
+      knockback: 8,
+      lunge: 0.24,
+      startup: 0.12,
+      active: 0.1,
+      hitStun: 0.32,
+    };
+  }
+  if (kind === 'melee') {
+    return {
+      ...action,
+      id: 'fork-slam',
+      range: 2.55,
+      halfArc: 0.55,
+      style: 'forkSlam',
+      reaction: 'heavy',
+      knockback: 6.5,
+      lunge: 0.16,
+      damageMul: action.damageMul * 1.3,
+      startup: 0.16,
+      active: 0.1,
+      strength: 1.15,
+    };
+  }
+  return action;
+}
+
 export const MELEE: CombatAction = {
   id: 'melee',
   type: 'melee',

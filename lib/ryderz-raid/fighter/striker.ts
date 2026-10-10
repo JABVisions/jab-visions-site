@@ -1,7 +1,7 @@
 import type { RyderId } from '../config';
 import type { HitReaction } from '../combat';
 import type { MeleeStyle } from '../skeletal';
-import type { CombatAction, StrikeKind } from './actions';
+import { forkStrike, type CombatAction, type StrikeKind } from './actions';
 import { ComboManager, meleeWantsGrab, reactionForEffect, type ComboSnapshot } from './combo';
 import { actionFor, recipesFor } from './profiles';
 
@@ -22,6 +22,8 @@ export interface StrikerHit {
   knockback: number;
   kind: StrikeKind;
   combo: ComboSnapshot;
+  /** Shock radius around a connected pitchfork slam. Set on the first hit only. */
+  shockRange?: number;
 }
 
 export interface StrikerFrame {
@@ -99,6 +101,7 @@ export class FighterStriker {
   private holdTarget: StrikeTarget | null = null;
   private throwNext = false;
   private ryderId: RyderId | null = null;
+  private fork = false;
   private grabWindowUntil = 0;
   private didLunge = false;
   private startedFlag = false;
@@ -106,6 +109,11 @@ export class FighterStriker {
   setRyder(id: RyderId | null) {
     this.ryderId = id;
     this.combo.setRecipes(recipesFor(id));
+  }
+
+  /** Aura pitchfork. Other Ryderz leave this off, so their punch chains stay as they are. */
+  setFork(on: boolean) {
+    this.fork = on;
   }
 
   get busy() {
@@ -150,7 +158,7 @@ export class FighterStriker {
       this.buffer = kind;
       return;
     }
-    if (this.kind === 'punch' && (this.phase === 'recovery' || this.phase === 'active')) {
+    if ((this.kind === 'punch' || this.fork) && (this.phase === 'recovery' || this.phase === 'active')) {
       this.buffer = kind;
     }
   }
@@ -232,8 +240,11 @@ export class FighterStriker {
     const activeEnd = action.startup + action.active;
     const total = activeEnd + action.recovery;
     if (this.phase === 'active' && this.elapsed >= activeEnd) this.phase = 'recovery';
-    if (this.phase === 'recovery' && this.kind === 'punch' && this.buffer && this.elapsed >= activeEnd) {
-      this.begin(this.buffer, ctx);
+    const next = this.buffer;
+    const chain =
+      next !== null && this.elapsed >= activeEnd && (this.kind === 'punch' || (this.fork && this.kind !== 'grab' && this.kind !== 'throw'));
+    if (this.phase === 'recovery' && chain && next) {
+      this.begin(next, ctx);
       this.buffer = null;
       frame.started = true;
       this.startedFlag = true;
@@ -262,6 +273,7 @@ export class FighterStriker {
     this.inputKind = kind;
     this.kind = use;
     this.action = actionFor(use, this.ryderId);
+    if (this.fork && (use === 'punch' || use === 'kick' || use === 'melee')) this.action = forkStrike(this.action, use);
     this.phase = 'startup';
     this.elapsed = 0;
     this.connected = false;
@@ -302,6 +314,7 @@ export class FighterStriker {
         knockback: action.knockback,
         kind: this.kind,
         combo: snap,
+        shockRange: action.style === 'forkSlam' && target === primary ? 4.4 : undefined,
       });
     }
   }

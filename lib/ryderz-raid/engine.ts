@@ -300,6 +300,8 @@ export class RaidEngine {
   private kickQueued = false;
   private dodgeQueued = false;
   private jumpQueued = false;
+  /** Sim time of the last grounded hop, so a second press can mount. */
+  private jumpAt = -10;
   private jumping = false;
   private queuedMoves = [false, false, false];
   private readonly striker = new FighterStriker();
@@ -928,8 +930,13 @@ export class RaidEngine {
         aura: this.aura,
         maxAura: this.maxAura,
         burnout: this.burnout,
+        ascend: this.keys.has(' '),
+        descend: this.keys.has('control'),
+        boost: this.keys.has('shift'),
+        stunned: this.hitStun > 0.12,
       });
-    }
+      this.striker.setFork(this.kit.forkArmed ?? false);
+    } else this.striker.setFork(false);
     this.updatePlayerMove(dt, time);
     const recovering = this.recoveryT > 0;
     const locked = recovering || (this.kit?.locked ?? false);
@@ -1088,7 +1095,7 @@ export class RaidEngine {
     if (drain > 0) {
       this.spendAura(drain * dt);
       if (this.burnout || this.aura <= 0) this.endAllMoves();
-    } else {
+    } else if (!this.kit?.flying) {
       const regen =
         this.spec.auraRegen +
         this.upgrades.capacity * 1.2 +
@@ -1366,14 +1373,24 @@ export class RaidEngine {
     this.striker.interrupt();
   }
 
-  /** Grounded hop. A kit that has locked the body, a dodge, or a hard stun holds it. */
+  /** Grounded hop. A second press while that hop is still up can mount, for a kit that flies. */
   private tryJump() {
-    if (this.jumping || this.airY > 0.04 || this.airVel > 0.2) return;
+    const airborne = this.jumping || this.airY > 0.04 || this.airVel > 0.2 || (this.kit?.flying ?? false);
+    if (airborne) {
+      const since = this.simTime - this.jumpAt;
+      if (this.kit?.tryAirJump?.(since, this.airY)) {
+        this.airY = 0;
+        this.airVel = 0;
+        this.jumping = false;
+      }
+      return;
+    }
     if (this.hitStun > 0.12 || this.dodgeT > 0 || (this.kit?.locked ?? false)) return;
     if (this.pvpCpu?.grabsPlayer()) return;
     this.airVel = JUMP_SPEED;
     this.airY = 0.02;
     this.jumping = true;
+    this.jumpAt = this.simTime;
     this.emitSound('move.jump.swing');
   }
 
@@ -1394,7 +1411,11 @@ export class RaidEngine {
       this.jumpQueued = false;
       if (!locked) this.tryJump();
     }
-    if (this.airY > 0 || this.airVel > 0) {
+    if (this.kit?.flying) {
+      this.airY = 0;
+      this.airVel = 0;
+      this.jumping = false;
+    } else if (this.airY > 0 || this.airVel > 0) {
       this.airVel -= 22 * dt;
       this.airY += this.airVel * dt;
       if (this.airY <= 0) {
@@ -1414,6 +1435,20 @@ export class RaidEngine {
       this.releaseHeldThrow();
       this.punchQueued = false;
       this.kickQueued = false;
+    }
+    if (this.kit?.flying) {
+      if (this.punchQueued) {
+        this.punchQueued = false;
+        this.kit.airStrike?.('punch');
+      }
+      if (this.kickQueued) {
+        this.kickQueued = false;
+        this.kit.airStrike?.('kick');
+      }
+      if (this.meleeQueued) {
+        this.meleeQueued = false;
+        this.kit.airStrike?.('melee');
+      }
     }
     if (this.punchQueued) {
       this.punchQueued = false;
@@ -1484,6 +1519,8 @@ export class RaidEngine {
       }
     }
     for (const hit of frame.hits) this.applyFighterHit(hit);
+    const shock = frame.hits.find((hit) => hit.shockRange);
+    if (shock?.shockRange) this.forkShock(shock.shockRange, frame.hits.map((hit) => hit.target.ref));
     this.cueStrike(frame);
   }
 
@@ -1595,6 +1632,7 @@ export class RaidEngine {
       const hits = targetsInArc(this.hosts, this.pos, this.yaw, step.range, step.halfArc, [] as Host[]);
       if (!hits.length) {
         this.emitSound(`${step.sound}.whiff`);
+        if (step.shockRange && step.shockRange > 0) this.forkShock(step.shockRange, hits, step.shockMul ?? 0.4);
         return;
       }
       const snap = this.striker.combo.land('melee', this.simTime, hits[0]);
@@ -1608,11 +1646,40 @@ export class RaidEngine {
         this.hurtHost(host, dmg, _tmp, shaped.reaction, shaped.strength);
         this.particles.emit(host.pos.clone().setY(1.1), 0xffffff, 4, { speed: 3, size: 0.3, life: 0.16 });
       }
+      if (step.shockRange && step.shockRange > 0) {
+        this.forkShock(
+          step.shockRange,
+          hits,
+          step.shockMul ?? 0.4,
+        );
+      }
       if (step.shake > 0) this.rig.addShake(step.shake);
       if (step.hitStop > 0) this.hitStop(step.hitStop);
       this.powerVfx.boost(0.9 + step.damageMul * 0.6);
       this.emitSound(step.sound);
     });
+  }
+
+  /** Lighter hit on everyone near a pitchfork slam who was not already in the blade arc. */
+  private forkShock(range: number, already: readonly object[], mul = 0.42) {
+    const hits = targetsInArc(this.hosts, this.pos, this.yaw, range, Math.PI, [] as Host[]);
+    let any = false;
+    for (const host of hits) {
+      if (already.includes(host) || host.hp <= 0) continue;
+      any = true;
+      _tmp.set(host.pos.x - this.pos.x, 0, host.pos.z - this.pos.z);
+      if (_tmp.lengthSq() < 1e-4) _tmp.set(Math.sin(this.yaw), 0, Math.cos(this.yaw));
+      _tmp.normalize();
+      host.lastImpact = { x: _tmp.x, z: _tmp.z, speed: 3.5, kind: 'melee' };
+      this.hurtHost(host, this.meleeDamage() * mul, _tmp, 'knockback', 0.65);
+    }
+    if (any || already.length) {
+      const y = this.world.heightAt(this.pos.x, this.pos.z);
+      this.rings.spawn(new THREE.Vector3(this.pos.x, y + 0.05, this.pos.z), this.spec.visual.auraColor, {
+        radius: range,
+        duration: 0.35,
+      });
+    }
   }
 
   private hitStop(seconds: number) {
@@ -1718,6 +1785,10 @@ export class RaidEngine {
       gainAura: (amount) => {
         this.aura = Math.min(this.maxAura, this.aura + Math.max(0, amount));
         if (this.burnout && this.aura >= this.maxAura * BURNOUT_RECOVERY) this.burnout = false;
+      },
+      spendAura: (amount) => {
+        this.spendAura(amount);
+        return this.aura;
       },
       heal: (amount) => {
         const before = this.hp;

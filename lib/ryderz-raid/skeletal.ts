@@ -653,7 +653,19 @@ function track(p: number, keys: Array<[number, number]>) {
 }
 
 /** Authored melee animations the procedural skeleton can perform. */
-export type MeleeStyle = 'chop' | 'slash' | 'punch' | 'punchR' | 'kick' | 'spinKick' | 'slap' | 'blast' | 'smash';
+export type MeleeStyle =
+  | 'chop'
+  | 'slash'
+  | 'punch'
+  | 'punchR'
+  | 'kick'
+  | 'spinKick'
+  | 'slap'
+  | 'blast'
+  | 'smash'
+  | 'forkThrust'
+  | 'forkSweep'
+  | 'forkSlam';
 
 /**
  * Full-body stances abilities hold the figure in (not timed like a melee
@@ -682,7 +694,8 @@ export type AbilityPose =
   | 'channel'
   | 'summon'
   | 'grow'
-  | 'stomp';
+  | 'stomp'
+  | 'ride';
 
 export interface PoseOverride {
   kind: AbilityPose;
@@ -690,6 +703,10 @@ export interface PoseOverride {
   t: number;
   /** Blend weight against locomotion, 0 → 1. */
   weight: number;
+  /** Extra chest yaw, radians. Positive turns toward the character's left. */
+  lean?: number;
+  /** Extra roll, radians. */
+  bank?: number;
 }
 
 /** How far each stance drops the root toward the ground, in figure metres. */
@@ -717,6 +734,7 @@ export const POSE_ROOT_DROP: Record<AbilityPose, number> = {
   summon: 0.02,
   grow: 0.12,
   stomp: 0.16,
+  ride: 0,
 };
 
 export interface SkeletalMotion {
@@ -866,6 +884,17 @@ export function poseSkeleton(skel: ProceduralSkeleton, motion: SkeletalMotion) {
       case 'stomp':
         poseStomp(SCRATCH, pose.t);
         break;
+      case 'ride':
+        poseRide(SCRATCH, pose.t);
+        break;
+    }
+    if (pose.lean) {
+      SCRATCH.spine.y += pose.lean;
+      SCRATCH.chest.y += pose.lean * 0.35;
+    }
+    if (pose.bank) {
+      SCRATCH.spine.z += pose.bank;
+      SCRATCH.hips.z += pose.bank * 0.6;
     }
     addAngles(A, SCRATCH, w);
   }
@@ -899,6 +928,15 @@ export function poseSkeleton(skel: ProceduralSkeleton, motion: SkeletalMotion) {
         break;
       case 'smash':
         poseSmash(A, p);
+        break;
+      case 'forkThrust':
+        poseForkThrust(A, p);
+        break;
+      case 'forkSweep':
+        poseForkSweep(A, p);
+        break;
+      case 'forkSlam':
+        poseForkSlam(A, p);
         break;
       default:
         poseChop(A, p);
@@ -2211,4 +2249,113 @@ function poseSmash(A: Angles, p: number) {
   A.lowerLegR.x += 0.95 * drop;
   A.footL.x -= 0.25 * drop;
   A.footR.x -= 0.25 * drop;
+}
+
+/**
+ * Seated on the pitchfork. Thighs forward, knees bent, both arms on the shaft.
+ * Arm bends stay moderate: Lilly's export corkscrews if the elbows wind too far.
+ */
+function poseRide(A: Angles, t: number) {
+  const d = 0.92 + Math.sin(t * Math.PI * 2) * 0.08;
+  A.spine.x += 0.32 * d;
+  A.chest.x += 0.12 * d;
+  A.head.x -= 0.14 * d;
+  A.upperArmL.x -= 1.05 * d;
+  A.upperArmR.x -= 1.15 * d;
+  A.upperArmL.z += 0.28 * d;
+  A.upperArmR.z -= 0.08 * d;
+  A.lowerArmL.x -= 0.7 * d;
+  A.lowerArmR.x -= 0.75 * d;
+  A.upperLegL.x -= 1.15 * d;
+  A.upperLegR.x -= 1.15 * d;
+  A.upperLegL.z += 0.42 * d;
+  A.upperLegR.z -= 0.42 * d;
+  A.lowerLegL.x += 1.25 * d;
+  A.lowerLegR.x += 1.25 * d;
+  A.footL.x -= 0.35 * d;
+  A.footR.x -= 0.35 * d;
+}
+
+/** Both hands drive the pitchfork straight out. */
+function poseForkThrust(A: Angles, p: number) {
+  const reach = track(p, [
+    [0, 0],
+    [0.28, 0.35],
+    [0.5, -1.25],
+    [0.68, -1.15],
+    [1, 0],
+  ]);
+  const elbow = track(p, [
+    [0, 0],
+    [0.28, -0.9],
+    [0.5, -0.15],
+    [1, 0],
+  ]);
+  A.upperArmL.x += reach;
+  A.upperArmR.x += reach - 0.08;
+  A.upperArmL.z += 0.22;
+  A.upperArmR.z -= 0.06;
+  A.lowerArmL.x += elbow;
+  A.lowerArmR.x += elbow;
+  A.spine.x += track(p, [
+    [0, 0],
+    [0.28, -0.16],
+    [0.5, 0.22],
+    [1, 0],
+  ]);
+  A.upperLegL.x -= 0.2;
+  A.upperLegR.x -= 0.45 * Math.max(0, -reach);
+  A.head.x -= A.spine.x * 0.5;
+}
+
+/** A wide horizontal cut. The chest turns; the arms stay in a reachable bend. */
+function poseForkSweep(A: Angles, p: number) {
+  const sweep = track(p, [
+    [0, 0],
+    [0.3, -1],
+    [0.55, 1],
+    [0.75, 0.7],
+    [1, 0],
+  ]);
+  A.spine.y += sweep * 0.7;
+  A.chest.y += sweep * 0.35;
+  A.head.y -= sweep * 0.25;
+  A.upperArmL.x -= 0.7;
+  A.upperArmR.x -= 0.85;
+  A.upperArmL.z += 0.55 + sweep * 0.25;
+  A.upperArmR.z -= 0.35 - sweep * 0.2;
+  A.lowerArmL.x -= 0.55;
+  A.lowerArmR.x -= 0.6;
+  A.upperLegL.x -= 0.25;
+  A.upperLegR.x -= 0.15;
+  A.hips.y += sweep * 0.2;
+}
+
+/** Overhead harvest brought down in front. */
+function poseForkSlam(A: Angles, p: number) {
+  const lift = track(p, [
+    [0, 0],
+    [0.32, 1],
+    [0.58, 0],
+    [1, 0],
+  ]);
+  const drop = track(p, [
+    [0, 0],
+    [0.32, 0],
+    [0.58, 1],
+    [0.75, 0.85],
+    [1, 0],
+  ]);
+  A.upperArmL.x += -0.9 * lift - 0.55 * drop;
+  A.upperArmR.x += -1.05 * lift - 0.7 * drop;
+  A.upperArmL.z += 0.4 * lift;
+  A.upperArmR.z -= 0.15 * lift;
+  A.lowerArmL.x -= 0.85 * lift + 0.2 * drop;
+  A.lowerArmR.x -= 0.95 * lift + 0.15 * drop;
+  A.spine.x += -0.2 * lift + 0.35 * drop;
+  A.upperLegL.x -= 0.4 * drop;
+  A.upperLegR.x -= 0.4 * drop;
+  A.lowerLegL.x += 0.55 * drop;
+  A.lowerLegR.x += 0.55 * drop;
+  A.head.x += 0.15 * drop;
 }

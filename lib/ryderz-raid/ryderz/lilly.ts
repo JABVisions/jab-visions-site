@@ -3,6 +3,19 @@ import type { AbilityId } from '../config';
 import { targetsInRadius } from '../combat';
 import type { PoseOverride } from '../skeletal';
 import { animalSummonRegistry, type AnimalDef } from './animal-registry';
+import { forkOn, type LillyFork } from './lilly-fork';
+import {
+  BOOST_DRAIN,
+  BOOST_SPEED,
+  FLY_DRAIN,
+  FLY_SPEED,
+  MOUNT_TIME,
+  forkArmed,
+  inArc,
+  shouldStartFlight,
+  stepAltitude,
+  type FlightPhase,
+} from './lilly-flight';
 import type { HazardZone, KitContext, KitFrame, KitTarget, MeleeStep, RyderKit } from './kit';
 import {
   GIANT_COOLDOWN,
@@ -73,13 +86,36 @@ export class LillyKit implements RyderKit {
   private circle: THREE.Group | null = null;
   private floaters: Floater[] = [];
   private animals: SummonedAnimal[] = [];
+  private flight: FlightPhase = 'ground';
+  private altitude = 0;
+  private mountT = 0;
+  private mountFrom = 0;
+  private auraNow = 0;
+  private auraBurnout = false;
+  private fork: LillyFork | null = null;
+  private bank = 0;
+  private lastYaw = 0;
+  private airKind: 'punch' | 'kick' | 'melee' | null = null;
+  private airT = 0;
+  private airLock = 0;
+  private airHit = false;
+  private pendingAir: 'punch' | 'kick' | 'melee' | null = null;
+  private boosting = false;
 
   get locked() {
     return this.summonT >= 0 || (this.grow !== null && this.grow.phase !== 'giant');
   }
 
   get airY() {
-    return 0;
+    return this.altitude;
+  }
+
+  get flying() {
+    return this.flight !== 'ground';
+  }
+
+  get forkArmed() {
+    return forkArmed({ aura: this.auraNow, burnout: this.auraBurnout, phase: this.flight });
   }
 
   get pose() {
@@ -87,6 +123,8 @@ export class LillyKit implements RyderKit {
   }
 
   get moveScale() {
+    if (this.flight === 'flying' || this.flight === 'attacking') return this.boosting ? BOOST_SPEED : FLY_SPEED;
+    if (this.flight === 'mounting') return 1.2;
     return this.grow?.phase === 'giant' ? GIANT_MOVE : 1;
   }
 
@@ -99,6 +137,7 @@ export class LillyKit implements RyderKit {
   }
 
   get cameraExtra() {
+    if (this.flight !== 'ground') return { distance: 3.4, height: 1.8, targetHeight: 1.15 };
     const extra = this.scale - 1;
     if (extra < 0.02) return null;
     return { distance: extra * 2.55, height: extra * 1.15, targetHeight: extra * 0.9 };
@@ -166,6 +205,7 @@ export class LillyKit implements RyderKit {
     this.summonT = -1;
     this.poseState = null;
     this.scale = 1;
+    this.endFlight(true);
     this.applyScale(1);
     if (this.vortex) this.vortex.visible = false;
     if (this.circle) this.circle.visible = false;
@@ -178,13 +218,38 @@ export class LillyKit implements RyderKit {
   }
 
   melee(time: number): MeleeStep | null {
-    if (this.locked) return null;
+    if (this.locked || this.flying) return null;
+    if (this.forkArmed) return this.harvestSlam();
     if (time > this.comboExpires) this.comboIndex = 0;
     const step = COMBO[this.comboIndex % COMBO.length];
     this.comboIndex += 1;
     this.comboExpires = time + step.recovery + 0.9;
     const mul = this.grow?.phase === 'giant' ? 1.8 : 1;
     return { ...step, damageMul: step.damageMul * mul, range: step.range * (this.grow?.phase === 'giant' ? 1.8 : 1) };
+  }
+
+  tryAirJump(sinceJump: number, height: number) {
+    if (!shouldStartFlight({ airborne: true, sinceJump, giant: this.grow !== null, phase: this.flight })) return false;
+    this.flight = 'mounting';
+    this.mountT = 0;
+    this.mountFrom = Math.max(0.35, height);
+    this.altitude = this.mountFrom;
+    this.pendingAir = null;
+    this.airLock = 0;
+    this.fork?.ride();
+    this.ctx?.sound('lilly.fork.mount');
+    this.ctx?.camera.addShake(0.08);
+    return true;
+  }
+
+  airStrike(kind: 'punch' | 'kick' | 'melee') {
+    if (this.flight === 'mounting' || this.flight === 'dismounting') {
+      this.pendingAir = kind;
+      return;
+    }
+    if (this.flight !== 'flying' && this.flight !== 'attacking') return;
+    if (this.airLock > 0) return;
+    this.beginAir(kind);
   }
 
   tryAbility(id: AbilityId) {
@@ -205,11 +270,15 @@ export class LillyKit implements RyderKit {
   update(frame: KitFrame) {
     const ctx = this.ctx;
     if (!ctx) return;
+    this.auraNow = frame.aura ?? 0;
+    this.auraBurnout = frame.burnout ?? false;
     this.stepGrow(frame);
+    this.stepFlight(frame);
     this.stepSummon(frame);
     this.stepDrain(frame);
     this.stepAnimals(frame.dt);
     this.stepFloaters(frame.dt);
+    this.syncFork();
     this.poseState = this.pickPose(frame);
     this.applyScale(this.scale);
   }
@@ -226,6 +295,7 @@ export class LillyKit implements RyderKit {
 
   private startGiant() {
     if (this.grow) return true;
+    if (this.flight !== 'ground') this.endFlight(true);
     this.grow = { phase: 'plant', t: 0, held: 0, stride: 0, foot: 0, telegraph: null };
     this.ctx?.sound('lilly.giant.start');
     this.ctx?.camera.addShake(0.2);
@@ -353,7 +423,7 @@ export class LillyKit implements RyderKit {
     if (!shown) return;
     const radius = SOUL_RADIUS * this.drainFade;
     const y = ctx.heightAt(ctx.pos.x, ctx.pos.z);
-    this.vortex.position.set(ctx.pos.x, y, ctx.pos.z);
+    this.vortex.position.set(ctx.pos.x, y + this.altitude, ctx.pos.z);
     if (this.vortexField) {
       const span = radius / SOUL_RADIUS;
       this.vortexField.scale.set(span, 1, span);
@@ -479,8 +549,223 @@ export class LillyKit implements RyderKit {
       if (this.grow.telegraph) return { kind: 'stomp', t: this.grow.foot, weight: 0.85 };
       return { kind: 'grow', t: 0.35 + (frame.moving ? 0.2 : 0), weight: 0.28 };
     }
+    if (this.flight !== 'ground') {
+      const mounting = this.flight === 'mounting' ? Math.min(1, this.mountT) : 1;
+      const leaving = this.flight === 'dismounting' ? Math.min(1, this.altitude / 1.6) : 1;
+      const attacking = this.flight === 'attacking' ? 0.4 : 1;
+      return {
+        kind: 'ride',
+        t: 0.5 + Math.sin(frame.time * 2.2) * 0.5,
+        weight: mounting * leaving * (this.flight === 'attacking' ? attacking : 0.96),
+        lean: this.bank * 0.35,
+        bank: this.bank,
+      };
+    }
     if (this.drainOn) return { kind: 'channel', t: this.drainFade, weight: frame.moving ? 0.45 : 0.82 };
     return null;
+  }
+
+  private harvestSlam(): MeleeStep {
+    const giant = this.grow?.phase === 'giant';
+    const mul = giant ? 1.8 : 1;
+    return {
+      style: 'forkSlam',
+      damageMul: 1.45 * mul,
+      hitDelay: 0.2,
+      range: 2.55 * mul,
+      halfArc: 0.5,
+      reaction: 'heavy',
+      strength: 1.15,
+      recovery: 0.52,
+      shake: 0.22,
+      hitStop: 0.05,
+      lunge: 0.18,
+      sound: 'lilly.fork.slam',
+      shockRange: 4.4 * (giant ? 1.6 : 1),
+      shockMul: 0.42,
+    };
+  }
+
+  private ensureFork() {
+    if (this.fork) return this.fork;
+    this.fork = forkOn(this.ctx?.fighter()?.humanoid.group ?? null);
+    return this.fork;
+  }
+
+  private syncFork() {
+    const fork = this.ensureFork();
+    if (!fork) return;
+    if (this.flight === 'ground') fork.hold();
+    else fork.ride();
+    fork.setGlow(this.forkArmed || this.flight !== 'ground');
+  }
+
+  /** Snap puts her on the ground at once. Otherwise she descends and then lands. */
+  private endFlight(snap: boolean) {
+    this.pendingAir = null;
+    this.airKind = null;
+    this.airLock = 0;
+    this.airHit = false;
+    this.boosting = false;
+    if (snap || this.altitude <= 0.08) {
+      this.flight = 'ground';
+      this.altitude = 0;
+      this.mountT = 0;
+      this.fork?.hold();
+      return;
+    }
+    this.flight = 'dismounting';
+  }
+
+  private beginAir(kind: 'punch' | 'kick' | 'melee') {
+    const ctx = this.ctx;
+    if (!ctx) return;
+    this.flight = 'attacking';
+    this.airKind = kind;
+    this.airT = 0;
+    this.airHit = false;
+    this.airLock = kind === 'melee' ? 0.7 : 0.42;
+    const style = kind === 'punch' ? 'forkThrust' : kind === 'kick' ? 'forkSweep' : 'forkSlam';
+    ctx.strike(style);
+    ctx.sound(kind === 'melee' ? 'lilly.fork.dive' : 'lilly.fork.swing');
+  }
+
+  private stepFlight(frame: KitFrame) {
+    const ctx = this.ctx;
+    if (!ctx) return;
+    this.airLock = Math.max(0, this.airLock - frame.dt);
+    if (frame.stunned && this.flight !== 'ground' && this.flight !== 'dismounting') this.endFlight(false);
+    if (this.flight === 'ground') return;
+
+    const yaw = ctx.yaw();
+    let dy = yaw - this.lastYaw;
+    while (dy > Math.PI) dy -= Math.PI * 2;
+    while (dy < -Math.PI) dy += Math.PI * 2;
+    this.lastYaw = yaw;
+    const targetBank = Math.max(-0.45, Math.min(0.45, -dy * 2.4));
+    this.bank += (targetBank - this.bank) * Math.min(1, frame.dt * 8);
+
+    if (this.flight === 'mounting') {
+      this.mountT += frame.dt / MOUNT_TIME;
+      const rise = Math.max(this.mountFrom, 1.75);
+      const u = Math.min(1, this.mountT);
+      const s = u * u * (3 - 2 * u);
+      this.altitude = this.mountFrom + (rise - this.mountFrom) * s;
+      if (this.mountT >= 1) {
+        this.flight = 'flying';
+        this.altitude = rise;
+        if (this.pendingAir) {
+          const next = this.pendingAir;
+          this.pendingAir = null;
+          this.beginAir(next);
+        }
+      }
+    } else if (this.flight === 'dismounting') {
+      this.altitude = Math.max(0, this.altitude - 9 * frame.dt);
+      if (this.altitude <= 0.04) this.endFlight(true);
+    } else {
+      this.boosting = (frame.boost ?? false) && this.flight === 'flying';
+      const climb: -1 | 0 | 1 = frame.ascend ? 1 : frame.descend ? -1 : 0;
+      if (this.flight === 'attacking' && this.airKind === 'melee') {
+        this.altitude = Math.max(0, this.altitude - 22 * frame.dt);
+      } else if (this.flight === 'attacking') {
+        this.altitude = stepAltitude(this.altitude, frame.dt, frame.descend ? -1 : 0);
+      } else {
+        this.altitude = stepAltitude(this.altitude, frame.dt, climb);
+      }
+      this.stepAirAttack(frame);
+      const phase = this.flight as FlightPhase;
+      const rate = this.boosting ? BOOST_DRAIN : FLY_DRAIN;
+      const left = ctx.spendAura(rate * frame.dt);
+      if ((left <= 0 || frame.burnout) && phase !== 'ground') this.endFlight(false);
+      if (this.altitude <= 0.04 && phase === 'flying') this.endFlight(true);
+      if (phase !== 'ground' && Math.random() < frame.dt * 16) {
+        ctx.particles.emit(
+          new THREE.Vector3(ctx.pos.x - Math.sin(yaw) * 0.85, this.altitude + 0.7, ctx.pos.z - Math.cos(yaw) * 0.85),
+          GREEN,
+          1,
+          { speed: 1.2, size: 0.18, life: 0.45, up: 0.3, gravity: 1.5 },
+        );
+      }
+    }
+  }
+
+  /** The swing is already playing. Damage lands once, inside the active window. */
+  private stepAirAttack(frame: KitFrame) {
+    const ctx = this.ctx;
+    if (!ctx || this.flight !== 'attacking' || !this.airKind) return;
+    this.airT += frame.dt;
+    const yaw = ctx.yaw();
+    if (this.airKind === 'punch' && this.airT < 0.18) {
+      ctx.pos.x += Math.sin(yaw) * 8 * frame.dt;
+      ctx.pos.z += Math.cos(yaw) * 8 * frame.dt;
+      ctx.resolve(ctx.pos);
+    }
+    if (this.airKind === 'kick' && this.airT < 0.16) {
+      ctx.pos.x += Math.sin(yaw) * 3 * frame.dt;
+      ctx.pos.z += Math.cos(yaw) * 3 * frame.dt;
+      ctx.resolve(ctx.pos);
+    }
+    const window =
+      this.airKind === 'punch' ? this.airT >= 0.1
+      : this.airKind === 'kick' ? this.airT >= 0.12
+      : this.altitude <= 0.35;
+    if (window && !this.airHit) {
+      this.airHit = true;
+      this.connectAir(yaw);
+    }
+    const done = this.airKind === 'melee' ? this.airHit && this.airT > 0.15 : this.airT >= this.airLock;
+    if (!done) return;
+    this.airKind = null;
+    this.airT = 0;
+    if (this.auraNow <= 0 || this.auraBurnout) {
+      this.endFlight(this.altitude <= 0.2);
+      return;
+    }
+    if (this.altitude < 1.2) this.altitude = Math.min(1.6, this.altitude + 1.2);
+    this.flight = 'flying';
+  }
+
+  private connectAir(yaw: number) {
+    const ctx = this.ctx;
+    if (!ctx || !this.airKind) return;
+    const kind = this.airKind;
+    if (kind === 'melee') {
+      const y = ctx.heightAt(ctx.pos.x, ctx.pos.z);
+      ctx.rings.spawn(new THREE.Vector3(ctx.pos.x, y + 0.05, ctx.pos.z), GREEN, { radius: 3.4, duration: 0.4 });
+      ctx.cracks.spawn(new THREE.Vector3(ctx.pos.x, y, ctx.pos.z), 2.4, 2.2);
+      ctx.particles.emit(new THREE.Vector3(ctx.pos.x, y + 0.2, ctx.pos.z), GREEN, 14, { speed: 6, size: 0.28, life: 0.4, up: 1.6 });
+      ctx.camera.addShake(0.24);
+      ctx.sound('lilly.fork.slam');
+      for (const target of ctx.targets()) {
+        if (target.hp <= 0) continue;
+        const dist = Math.hypot(target.pos.x - ctx.pos.x, target.pos.z - ctx.pos.z);
+        if (dist > 3.4 + target.radius) continue;
+        _dir.set(target.pos.x - ctx.pos.x, 0, target.pos.z - ctx.pos.z);
+        if (_dir.lengthSq() < 1e-6) _dir.set(Math.sin(yaw), 0, Math.cos(yaw));
+        _dir.normalize();
+        ctx.hurt(target, ctx.meleeDamage() * 1.35, _dir, 'slam', 1.1);
+      }
+      return;
+    }
+    const range = kind === 'punch' ? 2.8 : 3.2;
+    const halfArc = kind === 'punch' ? 0.4 : 1.35;
+    const mul = kind === 'punch' ? 0.7 : 1.05;
+    let connected = false;
+    for (const target of ctx.targets()) {
+      if (target.hp <= 0) continue;
+      if (!inArc(target.pos.x - ctx.pos.x, target.pos.z - ctx.pos.z, yaw, range, halfArc, target.radius)) continue;
+      connected = true;
+      _dir.set(target.pos.x - ctx.pos.x, 0, target.pos.z - ctx.pos.z);
+      if (_dir.lengthSq() < 1e-6) _dir.set(Math.sin(yaw), 0, Math.cos(yaw));
+      _dir.normalize();
+      ctx.hurt(target, ctx.meleeDamage() * mul, _dir, kind === 'punch' ? 'stagger' : 'knockback', kind === 'punch' ? 0.75 : 1);
+      ctx.particles.emit(target.pos.clone().setY(1.2), GREEN, 4, { speed: 3, size: 0.22, life: 0.2 });
+    }
+    ctx.sound(connected ? 'lilly.fork.hit' : 'lilly.fork.whiff');
+    if (kind === 'kick') {
+      ctx.particles.emit(ctx.pos.clone().setY(this.altitude + 1), GREEN, 8, { speed: 5, size: 0.2, life: 0.25, up: 0.2 });
+    }
   }
 
   private applyScale(scale: number) {

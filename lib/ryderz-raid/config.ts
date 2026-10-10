@@ -523,7 +523,7 @@ export const RYDERZ: Record<RyderId, RyderSpec> = {
     colorHex: '#3dff7a',
     accent: 0xb8ffc8,
     visual: { primaryColor: 0x1fbf5a, auraColor: 0x39f07a, electricityColor: 0x9dffc0, depletedAuraIntensity: 0.16, poweredAuraIntensity: 1.7 },
-    weapon: 'Emerald plasma',
+    weapon: 'Emerald pitchfork',
     portrait: '/assets/those-ryderz/icons/lilly.webp',
     icon: '/assets/those-ryderz/icons/lilly.webp',
     glb: '/assets/those-ryderz/models/lilly-james.glb?v=1',
