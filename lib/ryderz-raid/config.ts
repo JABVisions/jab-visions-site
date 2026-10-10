@@ -445,7 +445,7 @@ export const RYDERZ: Record<RyderId, RyderSpec> = {
     visual: { primaryColor: 0xff3fcf, auraColor: 0xff4ad2, electricityColor: 0xff8ae6, depletedAuraIntensity: 0.18, poweredAuraIntensity: 1.8 },
     weapon: 'Pink arrows',
     portrait: '/assets/john_andy_headshot.jpg',
-    icon: '/assets/those-ryderz/icons/keven.webp?v=5',
+    icon: '/assets/those-ryderz/icons/keven.webp?v=6',
     glb: '/assets/those-ryderz/models/keven-hart.glb?v=4',
     // The export is a stride with the dart in hand. The rig skins that pose.
     // Unfolding it corkscrews the limbs, so the bind is left as the stance.
