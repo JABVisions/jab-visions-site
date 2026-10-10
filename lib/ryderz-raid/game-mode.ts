@@ -37,9 +37,9 @@ export const GAME_MODES: GameModeSpec[] = [
   {
     id: GameMode.RAID,
     name: 'Raid',
-    tagline: 'Multiplayer raids with multiple players',
+    tagline: 'Cooperative squad versus civilians',
     description:
-      'Co-op missions with a party of Ryderz. Friendly fire is off. Several parties can share a future raid instance.',
+      'Four allied Ryderz, you plus computer teammates, against civilian waves. Friends can replace a computer slot. Friendly fire is off.',
     available: true,
   },
 ];

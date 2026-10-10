@@ -72,6 +72,8 @@ import {
 import { buildWorld, nearDistrictHub, pointBlocked, resolveCircle, steerVelocity, type World } from './world';
 import { buildPadWorld } from './world-pad';
 import { calculatePvPDamage, pvpHealth, PvpCpu, type PvpDamageKind } from './pvp';
+import type { PvpDifficulty } from './pvp/aiProfile';
+import { RAID_WAVES, waveKinds, type RaidLaunch } from './raid/squad';
 import {
   CombatMemory,
   FighterStriker,
@@ -154,6 +156,15 @@ export interface HudState {
     yaw: number;
     enemies: { x: number; z: number }[];
   };
+  raid: {
+    wave: number;
+    waves: number;
+    defeated: number;
+    dealt: number;
+    taken: number;
+    allies: number;
+    contributions: { name: string; dealt: number }[];
+  } | null;
 }
 
 interface Host {
@@ -206,6 +217,12 @@ interface Host {
   hitColor: number;
   /** Versus opponent wearing a Ryder model. Not a mind-controlled host. */
   duelist?: boolean;
+  /** Squad teammate. Friendly fire from the player does not land. */
+  ally?: boolean;
+  cpu?: PvpCpu;
+  dealt?: number;
+  playerId?: string | null;
+  remoteHuman?: boolean;
   /** Local player 2, rather than CPU. */
   controlled?: boolean;
   ryderId?: RyderId;
@@ -366,6 +383,14 @@ export class RaidEngine {
   private p2DodgeT = 0;
   /** CPU duelist. Null in Solo, Raid, and local 2-player. */
   pvpCpu: PvpCpu | null = null;
+  private raidPlan: RaidLaunch | null = null;
+  private raidWave = 0;
+  private raidEnemiesDown = 0;
+  private raidDealt = 0;
+  private raidTaken = 0;
+  private raidDown = false;
+  private allowAllyDamage = false;
+  private allyInputs = new Map<string, { x: number; z: number; at: number }>();
   private playerVel = new THREE.Vector3();
   private pvpHitKind: PvpDamageKind = 'basic';
   private pvpHitKindT = 0;
@@ -524,6 +549,11 @@ export class RaidEngine {
     this.iframes = 0;
     this.recoveryT = 0;
     this.interactQueued = false;
+    this.raidWave = 0;
+    this.raidEnemiesDown = 0;
+    this.raidDealt = 0;
+    this.raidTaken = 0;
+    this.raidDown = false;
     this.pos.set(this.arena.spawnPoint.x, 0, this.arena.spawnPoint.z);
     this.yaw = Math.PI * 0.85;
     this.pitch = 0.12;
@@ -576,11 +606,71 @@ export class RaidEngine {
         sub: this.pvpLocalTwo ? 'P2 · IJKL MOVE · U PUNCH' : 'CPU STEPS IN AND STRIKES',
       };
       this.bannerT = 2.6;
+    } else if (this.gameMode === GameMode.RAID && this.raidPlan) {
+      this.pvpLocalTwo = false;
+      await this.spawnRaidAllies();
+      if (this.disposed) return;
+      this.beginRaid();
     } else {
       this.pvpLocalTwo = false;
+      this.raidPlan = null;
       this.beginRound(1);
     }
     this.spawnThrowables();
+  }
+
+  /** Cooperative squad. Cleared by Solo and PvP starts. */
+  setRaidPlan(plan: RaidLaunch | null) {
+    this.raidPlan = plan;
+  }
+
+  /** Movement from a remote human who owns an ally slot. */
+  setAllyInput(playerId: string, x: number, z: number) {
+    this.allyInputs.set(playerId, { x, z, at: Date.now() });
+  }
+
+  /** Authoritative raid picture for the room server. Clients do not invent this. */
+  raidReport() {
+    const contributions = [{ name: this.spec?.name ?? 'You', dealt: Math.round(this.raidDealt) }];
+    for (const host of this.hosts) {
+      if (!host.ally || !host.ryderId) continue;
+      contributions.push({ name: RYDERZ[host.ryderId].name, dealt: Math.round(host.dealt ?? 0) });
+    }
+    return {
+      phase: this.phase === 'victory' ? 'victory' : this.phase === 'dead' ? 'dead' : 'playing',
+      wave: this.raidWave,
+      waves: RAID_WAVES,
+      enemiesLeft: this.livingEnemies() + this.queue.length,
+      defeated: this.raidEnemiesDown,
+      dealt: Math.round(this.raidDealt + this.hosts.reduce((sum, host) => sum + (host.ally ? host.dealt ?? 0 : 0), 0)),
+      taken: Math.round(this.raidTaken),
+      at: Date.now(),
+      contributions,
+      fighters: [
+        {
+          id: 'local',
+          ryderId: this.spec?.id ?? null,
+          name: this.spec?.name ?? 'You',
+          hp: this.hp,
+          maxHp: this.maxHp,
+          x: this.pos.x,
+          z: this.pos.z,
+          ally: true,
+          human: true,
+        },
+        ...this.hosts.map((host, index) => ({
+          id: host.ally ? `ally-${host.ryderId ?? index}` : `enemy-${index}`,
+          ryderId: host.ryderId ?? null,
+          name: host.ryderId ? RYDERZ[host.ryderId].name : host.kind,
+          hp: Math.max(0, host.hp),
+          maxHp: host.maxHp,
+          x: host.pos.x,
+          z: host.pos.z,
+          ally: Boolean(host.ally),
+          human: false,
+        })),
+      ],
+    } as const;
   }
 
   /** Versus lineup. Cleared by Solo and Raid starts. */
@@ -1214,6 +1304,7 @@ export class RaidEngine {
 
   private updatePlayerMove(dt: number, time: number) {
     if (!this.player) return;
+    if (this.raidDown) return;
     const phased = this.isPhased();
     const locked = this.kit?.locked ?? false;
 
@@ -1619,7 +1710,7 @@ export class RaidEngine {
       z: this.pos.z,
       meleeDamage: this.meleeDamage(),
       targets: this.hosts
-        .filter((host) => host.hp > 0)
+        .filter((host) => host.hp > 0 && !host.ally)
         .map((host) => ({
           ref: host,
           x: host.pos.x,
@@ -2255,6 +2346,235 @@ export class RaidEngine {
     }
   }
 
+  private livingEnemies() {
+    return this.hosts.filter((host) => !host.ally && host.hp > 0).length;
+  }
+
+  private livingAllies() {
+    return this.hosts.filter((host) => host.ally && host.hp > 0).length;
+  }
+
+  private beginRaid() {
+    this.raidWave = 1;
+    this.phase = 'playing';
+    this.queue = waveKinds(1, 1 + (this.raidPlan?.allies.length ?? 0));
+    this.spawnTimer = 0.6;
+    this.banner = { title: 'RAID', sub: 'WAVE 1 · CIVILIANS INCOMING' };
+    this.bannerT = 2.4;
+  }
+
+  private updateRaid(dt: number) {
+    if (this.phase !== 'playing') return;
+    const cap = 4;
+    this.spawnTimer -= dt;
+    while (this.spawnTimer <= 0 && this.queue.length && this.livingEnemies() < cap) {
+      const kind = this.queue.shift();
+      if (kind) this.spawnHost(kind, roundScaling(this.raidWave));
+      this.spawnTimer += 0.85;
+    }
+    if (this.queue.length === 0 && this.livingEnemies() === 0 && this.raidWave > 0) {
+      if (this.raidWave < RAID_WAVES) {
+        this.raidWave += 1;
+        this.queue = waveKinds(this.raidWave, 1 + (this.raidPlan?.allies.length ?? 0));
+        this.spawnTimer = 1.2;
+        this.banner = { title: `WAVE ${this.raidWave}`, sub: 'THE NEXT GROUP IS MOVING IN' };
+        this.bannerT = 2.2;
+      } else {
+        this.phase = 'victory';
+        this.banner = { title: 'RAID VICTORY', sub: 'EVERY WAVE IS DOWN' };
+        this.bannerT = 30;
+      }
+    }
+  }
+
+  private failRaid() {
+    this.phase = 'dead';
+    this.banner = { title: 'RAID DEFEAT', sub: 'THE SQUAD IS DOWN' };
+    this.bannerT = 30;
+    if (document.pointerLockElement === this.canvas) document.exitPointerLock();
+  }
+
+  private async spawnRaidAllies() {
+    const allies = this.raidPlan?.allies ?? [];
+    let index = 0;
+    for (const ally of allies) {
+      if (this.disposed) return;
+      await this.spawnAlly(ally.ryderId, index, ally.playerId, ally.human);
+      index += 1;
+    }
+  }
+
+  private async spawnAlly(id: RyderId, index: number, playerId: string | null = null, remoteHuman = false) {
+    const spec = RYDERZ[id];
+    if (spec.glb) {
+      await preloadRyderGltf(spec).catch((error) => {
+        console.warn('[raid] failed to load ally GLB, using block figure', error);
+      });
+    }
+    if (this.disposed) return;
+    const fighter = buildRyder(spec, { clone: true });
+    const offsets = [
+      { x: 2.4, z: -1.8 },
+      { x: -2.4, z: -1.8 },
+      { x: 0, z: -3.4 },
+    ];
+    const offset = offsets[index] ?? { x: 1.6 * (index + 1), z: -2 };
+    const pos = new THREE.Vector3(this.pos.x + offset.x, 0, this.pos.z + offset.z);
+    fighter.humanoid.group.position.copy(pos);
+    fighter.humanoid.group.position.y = this.world.heightAt(pos.x, pos.z);
+    this.scene.add(fighter.humanoid.group);
+    const focus = new THREE.Vector3(pos.x, 0, pos.z + 4);
+    const vel = new THREE.Vector3();
+    const host: Host = {
+      kind: 'walker',
+      fighter,
+      hp: spec.maxHp,
+      maxHp: spec.maxHp,
+      pos,
+      radius: PLAYER_RADIUS,
+      speed: spec.speed * 0.92,
+      damage: spec.meleeDamage,
+      mass: 1,
+      preferredRange: 0,
+      cooldown: 0.4,
+      anim: 0,
+      hit: 0,
+      knock: new THREE.Vector3(),
+      points: 0,
+      summon: 99,
+      stun: 0,
+      swing: false,
+      stagger: 0,
+      airY: 0,
+      airVel: 0,
+      lean: 0,
+      spin: 0,
+      tumble: 0,
+      held: 0,
+      sink: 0,
+      chain: 0,
+      hitColor: 0xffffff,
+      throwWind: 0,
+      winding: false,
+      follow: null,
+      duelist: true,
+      ally: true,
+      playerId,
+      remoteHuman,
+      ryderId: id,
+      aura: spec.maxAura,
+      maxAura: spec.maxAura,
+      dealt: 0,
+    };
+    let foe: Host | null = null;
+    const cpu = new PvpCpu(
+      {
+        scene: this.scene,
+        particles: this.particles,
+        rings: this.rings,
+        cracks: this.cracks,
+        afterimages: this.afterimages,
+        camera: this.rig,
+        cameraObject: this.camera,
+        playerPos: focus,
+        playerHp: () => foe?.hp ?? 0,
+        playerMaxHp: () => foe?.maxHp ?? 1,
+        setPlayerHp: (value) => {
+          if (foe && foe.hp > 0) foe.hp = Math.max(0, value);
+        },
+        playerAttacking: () => Boolean(foe?.swing),
+        playerVelocity: () => vel,
+        playerIntangible: () => false,
+        playerWhiff: () => false,
+        playerStunned: () => (foe?.stagger ?? 0) > 0.08 || (foe?.stun ?? 0) > 0,
+        playerMemory: () => ({ punch: 0, kick: 0, melee: 0, ability: 0, dodge: 0, retreat: 0 }),
+        heightAt: (x, z) => this.world.heightAt(x, z),
+        resolve: (body) => {
+          body.x = clamp(body.x, -BOUNDARY, BOUNDARY);
+          body.z = clamp(body.z, -BOUNDARY, BOUNDARY);
+          resolveCircle(body, PLAYER_RADIUS, this.world.obstacles);
+        },
+        blocked: (x, z, radius) => this.npcBlocked(x, z, radius),
+        hurtPlayer: (amount, dir, _kind, physical) => {
+          if (!foe || foe.hp <= 0 || foe.ally) return;
+          host.dealt = (host.dealt ?? 0) + amount;
+          this.allowAllyDamage = true;
+          this.hurtHost(foe, amount, dir, physical?.reaction, physical?.strength ?? 1);
+          this.allowAllyDamage = false;
+        },
+        stunPlayer: (seconds) => {
+          if (foe) foe.stun = Math.max(foe.stun, seconds);
+        },
+        suppressPlayer: () => {},
+        time: () => this.simTime,
+        sound: (soundId) => this.emitSound(soundId),
+        playerHazards: () => this.kit?.hazards?.() ?? [],
+      },
+      id,
+      (this.raidPlan?.difficulty ?? 'normal') as PvpDifficulty,
+    );
+    cpu.attach(host, spec);
+    host.cpu = cpu;
+    const aim = () => {
+      foe = this.allyTarget(host);
+      if (foe) {
+        focus.copy(foe.pos);
+        vel.copy(foe.knock);
+      }
+    };
+    (host as Host & { aim?: () => void }).aim = aim;
+    this.hosts.push(host);
+  }
+
+  private allyTarget(self: Host): Host | null {
+    const foes = this.hosts.filter((host) => !host.ally && !host.duelist && host.hp > 0);
+    let best: Host | null = null;
+    let bestScore = Infinity;
+    for (const foe of foes) {
+      const crowd = this.hosts.filter(
+        (ally) => ally.ally && ally !== self && ally.hp > 0 && Math.hypot(ally.pos.x - foe.pos.x, ally.pos.z - foe.pos.z) < 5,
+      ).length;
+      const dist = Math.hypot(self.pos.x - foe.pos.x, self.pos.z - foe.pos.z);
+      const score = crowd * 8 + dist;
+      if (score < bestScore) {
+        best = foe;
+        bestScore = score;
+      }
+    }
+    return best;
+  }
+
+  private driveAlly(host: Host, dt: number) {
+    const remote = host.playerId ? this.allyInputs.get(host.playerId) : null;
+    if (host.remoteHuman && remote && Date.now() - remote.at < 700) {
+      const mag = Math.hypot(remote.x, remote.z);
+      if (mag > 0.08) {
+        host.pos.x += (remote.x / mag) * host.speed * dt;
+        host.pos.z += (remote.z / mag) * host.speed * dt;
+        host.pos.x = clamp(host.pos.x, -BOUNDARY, BOUNDARY);
+        host.pos.z = clamp(host.pos.z, -BOUNDARY, BOUNDARY);
+        resolveCircle(host.pos, host.radius, this.world.obstacles);
+        host.fighter.humanoid.group.rotation.y = Math.atan2(remote.x, remote.z);
+      }
+      host.fighter.humanoid.group.position.copy(host.pos);
+      host.fighter.humanoid.group.position.y = this.world.heightAt(host.pos.x, host.pos.z);
+      this.animateHost(host, dt, Math.min(1, mag), this.simTime);
+      return;
+    }
+    const aim = (host as Host & { aim?: () => void }).aim;
+    aim?.();
+    if (host.held > 0) {
+      stepReaction(host, dt);
+      host.cpu?.stun();
+      return;
+    }
+    host.cpu?.update(dt, this.simTime);
+    if (host.cpu) {
+      host.aura = host.cpu.aura;
+      host.maxAura = host.cpu.maxAura;
+    }
+  }
+
   private beginRound(n: number) {
     this.round = n;
     this.phase = 'playing';
@@ -2269,6 +2589,10 @@ export class RaidEngine {
 
   private updateRound(dt: number) {
     if (this.gameMode === GameMode.PVP) return;
+    if (this.gameMode === GameMode.RAID && this.raidPlan) {
+      this.updateRaid(dt);
+      return;
+    }
     if (this.phase === 'intermission') {
       this.intermissionLeft = Math.max(0, this.intermissionLeft - dt);
       if (this.intermissionLeft <= 0) this.beginRound(this.round + 1);
@@ -2429,6 +2753,10 @@ export class RaidEngine {
     }
 
     for (const host of this.hosts) {
+      if (host.ally && host.cpu) {
+        this.driveAlly(host, dt);
+        continue;
+      }
       if (host.duelist && host.controlled) {
         this.driveLocalOpponent(host, dt, time);
         continue;
@@ -2564,8 +2892,9 @@ export class RaidEngine {
       if (other === host) break;
       if (!other.duelist && other.hp > 0) slot += 1;
     }
-    const pdx = this.pos.x - host.pos.x;
-    const pdz = this.pos.z - host.pos.z;
+    const aim = this.squadAim(host);
+    const pdx = aim.x - host.pos.x;
+    const pdz = aim.z - host.pos.z;
     const playerDist = Math.hypot(pdx, pdz) || 0.0001;
     const prop = this.throwables?.nearestFree(host.pos.x, host.pos.z) ?? null;
     const propDist = prop ? Math.hypot(prop.pos.x - host.pos.x, prop.pos.z - host.pos.z) : null;
@@ -2599,10 +2928,10 @@ export class RaidEngine {
         host.winding = false;
         const item = host.heldItem;
         const flight = Math.min(0.65, playerDist / Math.max(6, item.stats.throwForce));
-        const aim = this.pos.clone();
-        aim.x += this.playerVel.x * flight * 0.55;
-        aim.z += this.playerVel.z * flight * 0.55;
-        aim.y = 1.05;
+        const aim = new THREE.Vector3(this.squadAim(host).x, 1.05, this.squadAim(host).z);
+        const lead = this.squadAim(host);
+        aim.x += lead.vx * flight * 0.55;
+        aim.z += lead.vz * flight * 0.55;
         const spread = 2.4 + (1 - profile.throwBias) * 3.2;
         const miss = (Math.random() - 0.5) * spread;
         this.throwables?.throwAt(item, host.pos.clone().setY(1.35), aim, miss, host, this.simTime);
@@ -2632,8 +2961,9 @@ export class RaidEngine {
       host.cooldown = 0.4 + Math.random() * 0.2;
     }
 
-    let gx = this.pos.x;
-    let gz = this.pos.z;
+    const chase = this.squadAim(host);
+    let gx = chase.x;
+    let gz = chase.z;
     if ((order.state === 'search' || order.state === 'pickup') && prop) {
       gx = prop.pos.x;
       gz = prop.pos.z;
@@ -2701,8 +3031,9 @@ export class RaidEngine {
       }
     }
 
-    const faceX = order.state === 'search' && prop ? prop.pos.x - host.pos.x : this.pos.x - host.pos.x;
-    const faceZ = order.state === 'search' && prop ? prop.pos.z - host.pos.z : this.pos.z - host.pos.z;
+    const faceAt = this.squadAim(host);
+    const faceX = order.state === 'search' && prop ? prop.pos.x - host.pos.x : faceAt.x - host.pos.x;
+    const faceZ = order.state === 'search' && prop ? prop.pos.z - host.pos.z : faceAt.z - host.pos.z;
     const facing = Math.atan2(faceX, faceZ);
     const group = host.fighter.humanoid.group;
     group.position.copy(host.pos);
@@ -2732,9 +3063,7 @@ export class RaidEngine {
       x: host.pos.x,
       z: host.pos.z,
       meleeDamage: host.damage,
-      targets: phased
-        ? []
-        : [{ ref: this.playerBody, x: this.pos.x, z: this.pos.z, radius: PLAYER_RADIUS, airborne: this.airY > 0.3 }],
+      targets: phased ? [] : this.civilianTargets(),
     });
     if (frame.lunge) {
       host.pos.x += Math.sin(facing) * frame.lunge * 0.65;
@@ -2759,8 +3088,18 @@ export class RaidEngine {
       return;
     }
     for (const hit of frame.hits) {
-      if (hit.target.ref !== this.playerBody || this.kit?.passthrough) continue;
       _tmp.set(Math.sin(facing), 0, Math.cos(facing));
+      if (hit.target.ref !== this.playerBody) {
+        const ally = hit.target.ref as Host;
+        if (ally.ally && ally.hp > 0) {
+          this.allowAllyDamage = true;
+          this.hurtHost(ally, hit.damage, _tmp, hit.reaction, hit.strength);
+          this.allowAllyDamage = false;
+        }
+        continue;
+      }
+      if (this.kit?.passthrough || this.hp <= 0) continue;
+      this.raidTaken += hit.damage;
       this.hurtPlayer(hit.damage, _tmp, undefined, {
         reaction: hit.reaction,
         strength: hit.strength,
@@ -2768,6 +3107,46 @@ export class RaidEngine {
         knockback: hit.knockback * 0.55,
       });
     }
+  }
+
+  private squadAim(from: Host) {
+    let x = this.pos.x;
+    let z = this.pos.z;
+    let best = this.hp > 0 ? Math.hypot(this.pos.x - from.pos.x, this.pos.z - from.pos.z) : Infinity;
+    let vx = this.playerVel.x;
+    let vz = this.playerVel.z;
+    if (this.hp <= 0) {
+      vx = 0;
+      vz = 0;
+    }
+    if (this.gameMode === GameMode.RAID) {
+      for (const ally of this.hosts) {
+        if (!ally.ally || ally.hp <= 0) continue;
+        const dist = Math.hypot(ally.pos.x - from.pos.x, ally.pos.z - from.pos.z);
+        if (dist < best) {
+          best = dist;
+          x = ally.pos.x;
+          z = ally.pos.z;
+          vx = 0;
+          vz = 0;
+        }
+      }
+    }
+    return { x, z, vx, vz };
+  }
+
+  private civilianTargets() {
+    const targets: { ref: object; x: number; z: number; radius: number; airborne: boolean }[] = [];
+    if (this.hp > 0) {
+      targets.push({ ref: this.playerBody, x: this.pos.x, z: this.pos.z, radius: PLAYER_RADIUS, airborne: this.airY > 0.3 });
+    }
+    if (this.gameMode === GameMode.RAID) {
+      for (const ally of this.hosts) {
+        if (!ally.ally || ally.hp <= 0) continue;
+        targets.push({ ref: ally, x: ally.pos.x, z: ally.pos.z, radius: ally.radius, airborne: ally.airY > 0.3 });
+      }
+    }
+    return targets;
   }
 
   /** Block figures swing their limbs; GLB hosts run the skeleton through the strike. */
@@ -2828,6 +3207,18 @@ export class RaidEngine {
     this.particles.emit(this.pos.clone().setY(1.2), 0xff5570, 14, { speed: 6, size: 0.28, life: 0.4, up: 0.5 });
     if (this.hp <= 0) {
       this.hp = 0;
+      if (this.gameMode === GameMode.RAID && this.raidPlan && this.livingAllies() > 0) {
+        if (!this.raidDown) {
+          this.raidDown = true;
+          this.banner = { title: 'YOU ARE DOWN', sub: 'THE SQUAD IS STILL FIGHTING' };
+          this.bannerT = 3;
+        }
+        return;
+      }
+      if (this.gameMode === GameMode.RAID && this.raidPlan) {
+        this.failRaid();
+        return;
+      }
       this.phase = 'dead';
       this.kit?.interrupt();
       this.scheduler.clear();
@@ -2847,10 +3238,15 @@ export class RaidEngine {
    */
   private hurtHost(host: Host, amount: number, dir: THREE.Vector3, reaction?: HitReaction, strength = 1) {
     if (host.hp <= 0) return;
-    if (host.duelist && !host.controlled && this.pvpCpu && (this.pvpCpu.iframes > 0 || this.pvpCpu.intangible)) return;
+    if (host.ally && !this.allowAllyDamage) return;
+    if (host.ally && host.cpu && (host.cpu.iframes > 0 || host.cpu.intangible)) return;
+    if (host.duelist && !host.ally && !host.controlled && this.pvpCpu && (this.pvpCpu.iframes > 0 || this.pvpCpu.intangible)) return;
     if (this.gameMode === GameMode.PVP && host.duelist) {
       amount = calculatePvPDamage({ baseDamage: amount, kind: this.outgoingPvpKind() });
     }
+    if (!host.ally) {
+      if (!this.allowAllyDamage) this.raidDealt += amount;
+    } else this.raidTaken += amount;
     host.hp -= amount;
     host.hit = 0.18;
     host.hitColor = 0xffffff;
@@ -2877,7 +3273,12 @@ export class RaidEngine {
     // Kits may still hold a reference; make sure it reads as dead.
     host.hp = Math.min(host.hp, 0);
     host.held = 0;
-    if (host.duelist && host.ryderId) {
+    if (!host.ally && !host.duelist) this.raidEnemiesDown += 1;
+    if (host.ally) {
+      host.cpu?.dispose();
+      host.cpu = undefined;
+    }
+    if (host.duelist && !host.ally && host.ryderId) {
       this.foeHud = {
         ryderId: host.ryderId,
         name: RYDERZ[host.ryderId].name,
@@ -2896,6 +3297,9 @@ export class RaidEngine {
     }
     this.burst(host.pos.clone().setY(1), host.kind === 'broadcaster' ? 0xb84dff : 0x7dff9a, host.kind === 'broadcaster' ? 40 : 16);
     this.hosts = this.hosts.filter((h) => h !== host);
+    if (this.gameMode === GameMode.RAID && this.raidPlan && this.hp <= 0 && this.livingAllies() === 0 && this.phase === 'playing') {
+      this.failRaid();
+    }
     if (flungBy && this.fallen.length < 8) {
       const vel = new THREE.Vector3(flungBy.x, 0, flungBy.z).normalize().multiplyScalar((9 * strength) / Math.max(0.6, host.mass));
       vel.add(host.knock);
@@ -3089,6 +3493,7 @@ export class RaidEngine {
     let best: Host | null = null;
     let bestD = Infinity;
     for (const host of this.hosts) {
+      if (host.ally || host.hp <= 0) continue;
       const d = host.pos.distanceToSquared(from);
       if (d < bestD) {
         bestD = d;
@@ -3176,8 +3581,11 @@ export class RaidEngine {
         cooldown: 0,
         duration: this.moveT[i],
       })),
-      round: this.round,
-      remaining: this.queue.length + this.hosts.length,
+      round: this.gameMode === GameMode.RAID && this.raidPlan ? this.raidWave : this.round,
+      remaining:
+        this.gameMode === GameMode.RAID && this.raidPlan
+          ? this.livingEnemies() + this.queue.length
+          : this.queue.length + this.hosts.length,
       points: this.points,
       phase: this.phase,
       intermissionLeft: this.intermissionLeft,
@@ -3200,8 +3608,20 @@ export class RaidEngine {
         x: this.pos.x,
         z: this.pos.z,
         yaw: this.yaw,
-        enemies: this.hosts.filter((host) => host.hp > 0).map((host) => ({ x: host.pos.x, z: host.pos.z })),
+        enemies: this.hosts.filter((host) => host.hp > 0 && !host.ally).map((host) => ({ x: host.pos.x, z: host.pos.z })),
       },
+      raid:
+        this.gameMode === GameMode.RAID && this.raidPlan
+          ? {
+              wave: this.raidWave,
+              waves: RAID_WAVES,
+              defeated: this.raidEnemiesDown,
+              dealt: Math.round(this.raidDealt + this.hosts.reduce((sum, host) => sum + (host.ally ? host.dealt ?? 0 : 0), 0)),
+              taken: Math.round(this.raidTaken),
+              allies: this.livingAllies(),
+              contributions: this.raidReport().contributions,
+            }
+          : null,
     });
   }
 
@@ -3599,6 +4019,7 @@ export class RaidEngine {
     this.pvpCpu?.dispose();
     this.pvpCpu = null;
     this.hosts.forEach((h) => {
+      h.cpu?.dispose();
       this.scene.remove(h.fighter.humanoid.group);
       disposeObject(h.fighter.humanoid.group);
     });
