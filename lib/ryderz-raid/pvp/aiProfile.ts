@@ -58,6 +58,22 @@ export const RYDER_AI_PROFILES: Record<RyderId, AiProfile> = {
     comboPreference: 0.7,
     punish: 0.66,
   },
+  'marilyn-monroe': {
+    aggression: 0.64,
+    evasiveness: 0.58,
+    preferredRange: 'mid',
+    abilityFrequency: 0.82,
+    comboPreference: 0.4,
+    punish: 0.48,
+  },
+  'martin-luther-king': {
+    aggression: 0.5,
+    evasiveness: 0.52,
+    preferredRange: 'mid',
+    abilityFrequency: 0.76,
+    comboPreference: 0.46,
+    punish: 0.44,
+  },
 };
 
 export function aiProfileFor(id: RyderId | null | undefined): AiProfile {

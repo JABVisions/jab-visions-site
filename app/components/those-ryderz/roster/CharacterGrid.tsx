@@ -7,6 +7,8 @@ import styles from './roster.module.css';
 const FILTER_LABEL: Record<RosterFilter, string> = {
   all: 'All',
   ryder: 'Ryderz',
+  boomer: 'Boomers',
+  future: 'Future',
   villain: 'Villains',
   'jab-visions': 'JAB Visions',
   guest: 'Guests',

@@ -767,10 +767,26 @@ export function buildRyder(spec: RyderSpec, options: { clone?: boolean } = {}): 
   }
 
   const humanoid = buildHumanoid({
-    skin: spec.id === 'aaron' ? 0xc9a882 : spec.id === 'keven' ? 0xe8c4a0 : 0xf0c8a8,
+    skin:
+      spec.id === 'aaron'
+        ? 0xc9a882
+        : spec.id === 'keven'
+          ? 0xe8c4a0
+          : spec.id === 'martin-luther-king'
+            ? 0x7a4e30
+            : spec.id === 'marilyn-monroe'
+              ? 0xf2d2b4
+              : 0xf0c8a8,
     top: spec.color,
     bottom: 0x16141f,
-    hair: spec.id === 'leo' ? 0x1a120c : spec.id === 'zoe' ? 0x3a2418 : 0x120e0c,
+    hair:
+      spec.id === 'marilyn-monroe'
+        ? 0xe6d08a
+        : spec.id === 'leo'
+          ? 0x1a120c
+          : spec.id === 'zoe'
+            ? 0x3a2418
+            : 0x120e0c,
     eyes: spec.color,
     eyeIntensity: 2.4,
     scale: options.clone ? 0.92 : 1,
@@ -828,7 +844,7 @@ export function buildRyder(spec: RyderSpec, options: { clone?: boolean } = {}): 
       });
     }
     return { humanoid, weapons, glowMeshes, meshSource: 'procedural', orbs };
-  } else if (spec.id !== 'agent-nyx') {
+  } else if (spec.id !== 'agent-nyx' && spec.visual.auraStyle !== 'sparkle') {
     const gun = new THREE.Mesh(DART_GUN, aura);
     gun.position.set(0, 0, 0.12);
     addWeapon(gun, 'R');

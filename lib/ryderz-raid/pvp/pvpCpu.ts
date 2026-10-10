@@ -81,6 +81,8 @@ export interface PvpCpuHooks {
   stunPlayer(seconds: number): void;
   suppressPlayer(factor: number): void;
   playerHazards?(): Array<{ x: number; z: number; radius: number; kind: 'drain' | 'stomp' }>;
+  /** Heal the squad, including this CPU, by a fraction of each fighter's maximum health. */
+  healSquad?(fraction: number): void;
 }
 
 interface PlayerBody extends ReactiveBody, KitTarget {
@@ -102,6 +104,9 @@ export class PvpCpu {
   facing = 0;
   iframes = 0;
   readonly profile: AiProfile;
+  get incomingScale() {
+    return this.kit?.incomingScale ?? 1;
+  }
   readonly tuning: AiTuning;
 
   private spec: RyderSpec | null = null;
@@ -388,7 +393,12 @@ export class PvpCpu {
     const len = Math.hypot(mx, mz);
     const striking = this.intent === 'punch' || this.intent === 'kick' || this.intent === 'melee' || this.intent === 'grab' || this.intent === 'attack';
     if (len > 0.08 && this.intent !== 'ability' && !(striking && dist < 2.35)) {
-      const speed = spec.speed * this.tempo() * (this.intent === 'chase' ? 0.96 : 0.82) * (this.burnout ? 0.82 : 1);
+      const speed =
+        spec.speed *
+        this.tempo() *
+        (this.intent === 'chase' ? 0.96 : 0.82) *
+        (this.burnout ? 0.82 : 1) *
+        (this.kit?.moveScale ?? 1);
       const steered = steerVelocity(
         body.pos.x,
         body.pos.z,
@@ -563,7 +573,7 @@ export class PvpCpu {
     _dir.normalize();
     applyReaction(foe, link.preReaction, _dir, 1);
     if (link.trap > 0) foe.held = Math.max(foe.held, link.trap);
-    const chip = spec.meleeDamage * 0.28;
+    const chip = spec.meleeDamage * 0.28 * (this.kit?.outgoingScale ?? 1);
     for (let i = 0; i < link.followUps; i += 1) {
       const damage = chip * (i === 0 ? 1 : 0.86);
       this.scheduler.schedule(this.hooks.time(), 0.18 + i * 0.16, () => {
@@ -581,7 +591,7 @@ export class PvpCpu {
     }
     this.meleeCd = 1 / spec.meleeRate;
     this.body!.swing = true;
-    this.strikePlayer(spec.meleeDamage, MELEE_RANGE, MELEE_ARC, 'basic');
+    this.strikePlayer(spec.meleeDamage * (this.kit?.outgoingScale ?? 1), MELEE_RANGE, MELEE_ARC, 'basic');
   }
 
   private meleeStep(step: MeleeStep) {
@@ -592,7 +602,7 @@ export class PvpCpu {
       _dir.set(Math.sin(this.facing), 0, Math.cos(this.facing));
       this.body.pos.addScaledVector(_dir, step.lunge * 0.65);
       this.place(this.body.pos);
-      const dmg = (this.spec?.meleeDamage ?? 10) * step.damageMul;
+      const dmg = (this.spec?.meleeDamage ?? 10) * step.damageMul * (this.kit?.outgoingScale ?? 1);
       this.strikePlayer(dmg, step.range, step.halfArc, 'basic', step.reaction, step.strength);
     });
   }
@@ -751,7 +761,10 @@ export class PvpCpu {
           cpu.foe.hitColor = color;
         }
       },
-      meleeDamage: () => (cpu.burnout ? (cpu.spec?.meleeDamage ?? 10) * 0.45 : cpu.spec?.meleeDamage ?? 10),
+      meleeDamage: () => {
+        const base = cpu.burnout ? (cpu.spec?.meleeDamage ?? 10) * 0.45 : (cpu.spec?.meleeDamage ?? 10);
+        return base * (cpu.kit?.outgoingScale ?? 1);
+      },
       heightAt: (x: number, z: number) => hooks.heightAt(x, z),
       resolve: (pos: THREE.Vector3) => cpu.place(pos),
       blocked: (x: number, z: number, radius: number) => hooks.blocked(x, z, radius),
@@ -811,7 +824,9 @@ export class PvpCpu {
       },
       pvp: () => true,
       suppress: (factor: number) => hooks.suppressPlayer(factor),
-      canHit: (target: KitTarget) => target.hp > 0,
+      canHit: (target: KitTarget) => target.hp > 0 && target !== (cpu.body as unknown as KitTarget),
+      blessSquad: (fraction: number) => hooks.healSquad?.(fraction),
+      allies: () => [],
     };
   }
 

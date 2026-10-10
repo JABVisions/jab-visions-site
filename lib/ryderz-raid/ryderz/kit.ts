@@ -96,6 +96,13 @@ export interface KitContext {
   suppress?(factor: number): void;
   /** False for allies, defeated bodies, and anyone this mode must not hit. */
   canHit?(target: KitTarget): boolean;
+  /** Living teammates, including the caster when the engine can see them. */
+  allies?(): readonly KitTarget[];
+  /**
+   * Heal every living ally, including the caster, by this fraction of their
+   * own maximum health. One call, not a per-frame tick.
+   */
+  blessSquad?(fraction: number): void;
 }
 
 /** A ground area enemies should leave. `drain` is a standing puddle; `stomp` is an incoming foot. */
@@ -183,6 +190,10 @@ export interface RyderKit {
   readonly busy?: boolean;
   /** Walking speed multiplier this frame (1 = normal). */
   readonly moveScale?: number;
+  /** Multiplier on damage this fighter deals. 1 is their normal strength. */
+  readonly outgoingScale?: number;
+  /** Multiplier on damage this fighter takes. 1 is normal; 0.5 is half. */
+  readonly incomingScale?: number;
   /** Extra yaw on the figure beyond the camera facing (spins). */
   readonly bodyYaw?: number;
   /** 0 → 1 resistance to being hurt: damage, shove and camera shake are scaled down. */

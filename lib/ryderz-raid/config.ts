@@ -2,7 +2,17 @@ import type { GlbRepair } from './mesh-repair';
 import type { BoneKey, MeleeStyle } from './skeletal';
 import { PAD_CHARACTER_GLB } from './dlc/pad';
 
-export type RyderId = 'rubi' | 'leo' | 'aaron' | 'zoe' | 'keven' | 'lilly' | 'kid-paranormal' | 'agent-nyx';
+export type RyderId =
+  | 'rubi'
+  | 'leo'
+  | 'aaron'
+  | 'zoe'
+  | 'keven'
+  | 'lilly'
+  | 'kid-paranormal'
+  | 'agent-nyx'
+  | 'marilyn-monroe'
+  | 'martin-luther-king';
 
 export type AbilityId =
   | 'bladeFan'
@@ -28,7 +38,13 @@ export type AbilityId =
   | 'dimensionalCollapse'
   | 'temporalZap'
   | 'rewindProtocol'
-  | 'zeroHour';
+  | 'zeroHour'
+  | 'showtime'
+  | 'letsBeBad'
+  | 'abracadabra'
+  | 'dreamVision'
+  | 'proclaimPeace'
+  | 'freeAtLast';
 
 export type MoveKey = 'Q' | 'E' | 'R';
 
@@ -62,6 +78,11 @@ export interface RyderVisualProfile {
   depletedAuraIntensity: number;
   /** Aura glow multiplier at full power. */
   poweredAuraIntensity: number;
+  /**
+   * `sparkle` skips Ryderz lightning. Those Boomers use `BoomerAuraSystem`
+   * instead of electrical arcs.
+   */
+  auraStyle?: 'electric' | 'sparkle';
 }
 
 export interface RyderSpec {
@@ -715,9 +736,148 @@ export const RYDERZ: Record<RyderId, RyderSpec> = {
       },
     ],
   },
+  'marilyn-monroe': {
+    id: 'marilyn-monroe',
+    name: 'Marilyn Monroe',
+    title: 'Charity',
+    flaw: 'Charity',
+    role: 'Blue Boomer',
+    color: 0x168bff,
+    colorHex: '#168BFF',
+    accent: 0x66cfff,
+    visual: {
+      primaryColor: 0x168bff,
+      auraColor: 0x66cfff,
+      electricityColor: 0xd8f4ff,
+      depletedAuraIntensity: 0.04,
+      poweredAuraIntensity: 1.15,
+      auraStyle: 'sparkle',
+    },
+    weapon: 'Showtime',
+    portrait: '/assets/those-ryderz/icons/marilyn-monroe.png',
+    icon: '/assets/those-ryderz/icons/marilyn-monroe.png',
+    glb: '/assets/those-ryderz/models/boomers/marilyn-monroe.glb',
+    strikes: ['punch', 'spinKick', 'kick'],
+    maxHp: 110,
+    speed: 6.6,
+    fireRate: 2.4,
+    damage: 8,
+    projectileSpeed: 24,
+    projectileCount: 1,
+    spread: 0.04,
+    shotCost: 3,
+    maxAura: 110,
+    auraRegen: 6,
+    meleeDamage: 16,
+    meleeRate: 1.8,
+    moves: [
+      {
+        id: 'showtime',
+        name: 'Showtime',
+        key: 'Q',
+        description:
+          'Three translucent blue projections cartwheel toward different enemies. Each one hits once for 18, stops at a wall, and fades at 18 metres.',
+        auraCost: 20,
+        drain: 0,
+      },
+      {
+        id: 'letsBeBad',
+        name: "Let's Be Bad",
+        key: 'E',
+        description:
+          'Ribbons pour from her hands for 2.5 seconds. They strike every moment, 7 damage, up to six hits on one target, and hold them for a short restraint.',
+        auraCost: 25,
+        drain: 0,
+      },
+      {
+        id: 'abracadabra',
+        name: 'Abracadabra',
+        key: 'R',
+        description:
+          'A blue wave expands to 12 metres and hits each enemy once for 55. Allies recover 15% of their maximum health. Only an enemy this wave kills bursts into blue dust.',
+        auraCost: 45,
+        drain: 0,
+      },
+    ],
+  },
+  'martin-luther-king': {
+    id: 'martin-luther-king',
+    name: 'Martin Luther King Jr.',
+    title: 'Justice',
+    flaw: 'Justice',
+    role: 'Burgundy Boomer',
+    color: 0x800020,
+    colorHex: '#800020',
+    accent: 0xb22242,
+    visual: {
+      primaryColor: 0x800020,
+      auraColor: 0xb22242,
+      electricityColor: 0xff5c78,
+      depletedAuraIntensity: 0.04,
+      poweredAuraIntensity: 1.15,
+      auraStyle: 'sparkle',
+    },
+    weapon: 'The word',
+    portrait: '/assets/those-ryderz/icons/martin-luther-king.png',
+    icon: '/assets/those-ryderz/icons/martin-luther-king.png',
+    glb: '/assets/those-ryderz/models/boomers/martin-luther-king.glb',
+    strikes: ['punch', 'kick', 'smash'],
+    maxHp: 130,
+    speed: 6.2,
+    fireRate: 2.2,
+    damage: 9,
+    projectileSpeed: 22,
+    projectileCount: 1,
+    spread: 0.05,
+    shotCost: 3,
+    maxAura: 110,
+    auraRegen: 5.6,
+    meleeDamage: 22,
+    meleeRate: 1.7,
+    moves: [
+      {
+        id: 'dreamVision',
+        name: 'Dream Vision',
+        key: 'Q',
+        description:
+          'A burgundy wave washes out to 12 metres and pacifies enemies for 4 seconds. It deals no damage. Heavies resist. Their attacks stop, then they wake up.',
+        auraCost: 25,
+        drain: 0,
+      },
+      {
+        id: 'proclaimPeace',
+        name: 'Proclaim Peace',
+        key: 'E',
+        description:
+          'Hold a bright beam down the aim line for 3 seconds, out to 16 metres. Bodies inside freeze and take 8 damage every half second. Leaving the beam releases them. Walls cut it short.',
+        auraCost: 30,
+        drain: 0,
+      },
+      {
+        id: 'freeAtLast',
+        name: 'Free at Last',
+        key: 'R',
+        description:
+          'For 12 seconds his strength and speed double, and incoming damage is halved. The glow and the trail leave with the blessing. It does not stack.',
+        auraCost: 50,
+        drain: 0,
+      },
+    ],
+  },
 };
 
-export const RYDER_ORDER: RyderId[] = ['rubi', 'leo', 'aaron', 'zoe', 'keven', 'lilly', 'kid-paranormal', 'agent-nyx'];
+export const RYDER_ORDER: RyderId[] = [
+  'rubi',
+  'leo',
+  'aaron',
+  'zoe',
+  'keven',
+  'lilly',
+  'kid-paranormal',
+  'agent-nyx',
+  'marilyn-monroe',
+  'martin-luther-king',
+];
 
 export type EnemyKind = 'walker' | 'sprinter' | 'heavy' | 'thrower' | 'broadcaster';
 
