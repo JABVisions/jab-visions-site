@@ -353,7 +353,7 @@ export function bakeSkinnedMeshes(root: THREE.Object3D) {
 }
 
 /** Clips that are not strikes: locomotion and emotes. */
-const NON_STRIKE_CLIP = /idle|breath|stand|rest|walk|run|jog|sprint|angry|taunt|emote|gesture|cheer|dance|wave|death|die|hit_?react|cast|spell/i;
+const NON_STRIKE_CLIP = /idle|breath|stand|rest|walk|run|jog|sprint|angry|taunt|emote|gesture|cheer|dance|wave|death|die|hit_?react|cast|spell|dive|agree/i;
 const ROOT_BONE = /^(mixamorig)?[_:]?(root|hips?|pelvis|waist)$/i;
 
 /**

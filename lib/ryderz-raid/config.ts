@@ -26,9 +26,9 @@ export type AbilityId =
   | 'phantomGrasp'
   | 'paranormalProjection'
   | 'dimensionalCollapse'
-  | 'nyxSlotQ'
-  | 'nyxSlotE'
-  | 'nyxSlotR';
+  | 'temporalZap'
+  | 'rewindProtocol'
+  | 'zeroHour';
 
 export type MoveKey = 'Q' | 'E' | 'R';
 
@@ -664,49 +664,53 @@ export const RYDERZ: Record<RyderId, RyderSpec> = {
     title: 'P.A.D. Agent',
     flaw: 'Unassigned',
     role: 'Agent',
-    color: 0x7f93a8,
-    colorHex: '#9eb4c8',
+    color: 0x3a4350,
+    colorHex: '#c5d0dc',
     accent: 0x3de7ff,
-    visual: { primaryColor: 0x7f93a8, auraColor: 0x8ec8d8, electricityColor: 0x3de7ff, depletedAuraIntensity: 0.14, poweredAuraIntensity: 1.4 },
-    weapon: 'Unassigned',
+    visual: { primaryColor: 0x3a4350, auraColor: 0x8ec8d8, electricityColor: 0x3de7ff, depletedAuraIntensity: 0.14, poweredAuraIntensity: 1.4 },
+    weapon: 'P.A.D. wrist guard',
     portrait: '/assets/those-ryderz/icons/agent-nyx.webp?v=1',
     icon: '/assets/those-ryderz/icons/agent-nyx.webp?v=1',
-    strikes: ['punch', 'kick', 'slash'],
-    maxHp: 100,
-    speed: 6.6,
+    glb: PAD_CHARACTER_GLB['agent-nyx'] ?? undefined,
+    strikes: ['punch', 'spinKick', 'smash'],
+    maxHp: 104,
+    speed: 7.15,
     fireRate: 3.4,
     damage: 10,
     projectileSpeed: 28,
     projectileCount: 1,
     spread: 0.06,
     shotCost: 2.2,
-    maxAura: 90,
-    auraRegen: 5,
-    meleeDamage: 16,
-    meleeRate: 2,
+    maxAura: 100,
+    auraRegen: 5.2,
+    meleeDamage: 17,
+    meleeRate: 2.15,
     moves: [
       {
-        id: 'nyxSlotQ',
-        name: 'Unassigned',
+        id: 'temporalZap',
+        name: 'Temporal Zap',
         key: 'Q',
-        description: 'P.A.D. moveset has not been supplied. This slot is ready for a future power.',
-        auraCost: 8,
+        description:
+          'Raise the wrist guard, charge a cyan beam, and lock up to five enemies in front of her. Each one is cased in stasis, then released. A dodge out of the cone during the charge escapes it.',
+        auraCost: 16,
         drain: 0,
       },
       {
-        id: 'nyxSlotE',
-        name: 'Unassigned',
+        id: 'rewindProtocol',
+        name: 'Rewind Protocol',
         key: 'E',
-        description: 'P.A.D. moveset has not been supplied. This slot is ready for a future power.',
-        auraCost: 8,
+        description:
+          'Slide back along her own recent path to a safe spot and restore a capped share of the health she lost on the way. Leaves a decoy where she was. Does not rewind anyone else.',
+        auraCost: 12,
         drain: 0,
       },
       {
-        id: 'nyxSlotR',
-        name: 'Unassigned',
+        id: 'zeroHour',
+        name: 'Zero Hour',
         key: 'R',
-        description: 'P.A.D. moveset has not been supplied. This slot is ready for a future power.',
-        auraCost: 8,
+        description:
+          'Open a violet suppression field. Enemies inside move and attack slower, then take one impact when the field closes. She keeps fighting with her hands. It does not stop the world.',
+        auraCost: 18,
         drain: 0,
       },
     ],

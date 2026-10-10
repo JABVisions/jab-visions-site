@@ -185,6 +185,8 @@ interface Host {
   /** Grab state (see `combat.ts`): seconds held by the Ryder, metres pulled under the floor. */
   held: number;
   sink: number;
+  /** Fraction of attack animation rate while a local suppression field covers this host. */
+  attackScale?: number;
   /** How far into a punch-kick chain this host is. Resets after a pause. */
   chain: number;
   /** Physical fighter for civilians. Duelists use PvpCpu instead. */
@@ -321,6 +323,12 @@ export class RaidEngine {
   private readonly p2Striker = new FighterStriker();
   private readonly combatMemory = new CombatMemory();
   private hitStun = 0;
+  /** Seconds Nyx's zap holds the local player. Counts down on its own. */
+  private stasis = 0;
+  /** Speed fraction from an enemy suppression field. 1 is normal, and it expires if nobody refreshes it. */
+  private suppress = 1;
+  private suppressUntil = 0;
+  private casedCpu = false;
   private hitKnock = new THREE.Vector3();
   private airY = 0;
   private airVel = 0;
@@ -1196,7 +1204,8 @@ export class RaidEngine {
     if (this.keys.has('arrowdown')) z += 1;
     if (this.keys.has('arrowleft')) x -= 1;
     if (this.keys.has('arrowright')) x += 1;
-    if (this.recoveryT > 0 || locked || this.pvpCpu?.grabsPlayer()) {
+    if (this.simTime > this.suppressUntil) this.suppress = 1;
+    if (this.recoveryT > 0 || locked || this.pvpCpu?.grabsPlayer() || this.stasis > 0) {
       x = 0;
       z = 0;
     }
@@ -1211,7 +1220,8 @@ export class RaidEngine {
       this.spec.speed *
       (this.sprinting ? SPRINT_MULTIPLIER : 1) *
       (this.burnout ? 0.82 : 1) *
-      (this.kit?.moveScale ?? 1);
+      (this.kit?.moveScale ?? 1) *
+      this.suppress;
     if (this.hitStun > 0.05) speed *= 0.22;
 
     _fwd.set(Math.sin(this.yaw), 0, Math.cos(this.yaw));
@@ -1412,7 +1422,7 @@ export class RaidEngine {
   }
 
   private tryDodge() {
-    if (this.dodgeCd > 0 || this.hitStun > 0.18 || (this.kit?.locked ?? false)) return;
+    if (this.dodgeCd > 0 || this.hitStun > 0.18 || this.stasis > 0 || (this.kit?.locked ?? false)) return;
     let x = this.moveAxis.x;
     let z = this.moveAxis.z;
     if (this.keys.has('arrowup')) z -= 1;
@@ -1437,6 +1447,7 @@ export class RaidEngine {
     this.iframes = Math.max(this.iframes, 0.16);
     this.combatMemory.note('dodge', this.simTime);
     this.striker.interrupt();
+    this.kit?.onDodge?.();
   }
 
   /** Grounded hop. A second press while that hop is still up can mount, for a kit that flies. */
@@ -1470,6 +1481,7 @@ export class RaidEngine {
   /** Punch, kick, grab, and throw. Weapon melee still goes through the Ryder kit. */
   private stepPhysical(dt: number, locked: boolean, busy: boolean) {
     this.hitStun = Math.max(0, this.hitStun - dt);
+    this.stasis = Math.max(0, this.stasis - dt);
     this.takenGap += dt;
     this.dodgeCd = Math.max(0, this.dodgeCd - dt);
     if (this.dodgeT > 0) this.dodgeT = Math.max(0, this.dodgeT - dt);
@@ -1495,7 +1507,7 @@ export class RaidEngine {
           this.world.heightAt(this.pos.x, this.pos.z) + (this.kit?.airY ?? 0) + this.airY - (this.pvpCpu?.playerSink() ?? 0);
       }
     }
-    const canAct = !locked && !busy && this.hitStun < 0.12 && this.dodgeT <= 0;
+    const canAct = !locked && !busy && this.hitStun < 0.12 && this.dodgeT <= 0 && this.stasis <= 0;
     if ((this.punchQueued || this.kickQueued || this.meleeQueued) && canAct) this.faceNearest(3.4);
     if (this.heldThrow && (this.punchQueued || this.kickQueued)) {
       this.releaseHeldThrow();
@@ -1542,9 +1554,10 @@ export class RaidEngine {
       this.dodgeQueued = false;
       if (canAct) this.tryDodge();
     }
-    const frame = this.striker.tick(dt, {
+    const tempo = Math.min(1.2, Math.max(0.4, (this.kit?.haste ?? 1) * this.suppress));
+    const frame = this.striker.tick(dt * tempo, {
       time: this.simTime,
-      stunned: this.hitStun > 0.12,
+      stunned: this.hitStun > 0.12 || this.stasis > 0,
       locked: locked || busy,
       facing: this.yaw,
       x: this.pos.x,
@@ -1601,6 +1614,7 @@ export class RaidEngine {
     if (hit.kind === 'throw') host.held = 0;
     this.hurtHost(host, hit.damage, _tmp, hit.reaction, hit.strength);
     this.kit?.noteHit?.();
+    if (hit.combo.recipeId) this.kit?.noteCombo?.(hit.combo);
     this.combatT = COMBAT_LINGER;
   }
 
@@ -1712,8 +1726,11 @@ export class RaidEngine {
         _tmp.normalize();
         host.lastImpact = { x: _tmp.x, z: _tmp.z, speed: 5, kind: 'melee' };
         this.hurtHost(host, dmg, _tmp, shaped.reaction, shaped.strength);
+        this.kit?.noteHit?.();
         this.particles.emit(host.pos.clone().setY(1.1), 0xffffff, 4, { speed: 3, size: 0.3, life: 0.16 });
       }
+      this.emitSound(step.sound);
+      if (snap.recipeId) this.kit?.noteCombo?.(snap);
       if (step.shockRange && step.shockRange > 0) {
         this.forkShock(
           step.shockRange,
@@ -1748,6 +1765,26 @@ export class RaidEngine {
         duration: 0.35,
       });
     }
+  }
+
+  private setStasis(seconds: number) {
+    const next = Math.max(0, seconds);
+    if (this.stasis <= 0 && next > 0) {
+      this.striker.interrupt();
+      this.dodgeT = 0;
+      this.punchQueued = false;
+      this.kickQueued = false;
+      this.meleeQueued = false;
+    }
+    this.stasis = next;
+  }
+
+  /** A suppression field slows the player until it stops refreshing. The floor keeps her able to move. */
+  private setSuppress(factor: number) {
+    const next = Math.min(1, Math.max(0.55, factor));
+    if (this.simTime > this.suppressUntil) this.suppress = 1;
+    this.suppress = Math.min(this.suppress, next);
+    this.suppressUntil = this.simTime + 0.25;
   }
 
   private hitStop(seconds: number) {
@@ -1866,6 +1903,24 @@ export class RaidEngine {
       cooldown: (id, seconds) => {
         const slot = this.moves.findIndex((move) => move.id === id);
         if (slot >= 0) this.moveCd[slot] = Math.max(this.moveCd[slot], seconds);
+      },
+      vitals: () => ({ hp: this.hp, maxHp: this.maxHp }),
+      hold: (target, seconds) => {
+        const host = target as Host;
+        host.held = Math.max(0, seconds);
+        if (seconds > 0) {
+          host.knock.set(0, 0, 0);
+          host.airVel = 0;
+          host.sink = 0;
+        }
+      },
+      pvp: () => this.gameMode === GameMode.PVP,
+      suppress: (factor) => this.setSuppress(factor),
+      canHit: (target) => {
+        const host = target as Host & { ally?: boolean };
+        if (host.hp <= 0 || host.ally) return false;
+        if (host.controlled && host.duelist && this.gameMode !== GameMode.PVP) return false;
+        return true;
       },
     };
   }
@@ -2324,6 +2379,24 @@ export class RaidEngine {
         continue;
       }
       if (host.duelist && this.pvpCpu) {
+        if (host.held > 0) {
+          if (!this.casedCpu) {
+            this.casedCpu = true;
+            this.pvpCpu.stun();
+          }
+          stepReaction(host, dt);
+          host.knock.set(0, 0, 0);
+          const group = host.fighter.humanoid.group;
+          group.rotation.order = 'YXZ';
+          group.position.copy(host.pos);
+          group.position.y = this.world.heightAt(host.pos.x, host.pos.z) - host.sink;
+          group.rotation.x = 0;
+          this.animateHost(host, dt, 0, time);
+          if (host.hit > 0) flashEmissive(host.fighter.humanoid, host.hitColor, host.hit * 2.4);
+          else flashEmissive(host.fighter.humanoid, 0x3de7ff, 0.35);
+          continue;
+        }
+        this.casedCpu = false;
         this.pvpCpu.update(dt, this.simTime);
         host.aura = this.pvpCpu.aura;
         host.maxAura = this.pvpCpu.maxAura;
@@ -2590,7 +2663,8 @@ export class RaidEngine {
       }
     }
 
-    const frame = striker.tick(dt, {
+    const haste = Math.min(1, Math.max(0.4, host.attackScale ?? 1));
+    const frame = striker.tick(dt * haste, {
       time: this.simTime,
       stunned: host.stagger > 0.05 || host.stun > 0,
       locked: false,
@@ -3147,7 +3221,7 @@ export class RaidEngine {
         playerVelocity: () => this.playerVel,
         playerIntangible: () => this.isPhased(),
         playerWhiff: () => this.striker.exposed,
-        playerStunned: () => this.hitStun > 0.08 || (this.airY > 0.25 && !this.jumping),
+        playerStunned: () => this.hitStun > 0.08 || this.stasis > 0 || (this.airY > 0.25 && !this.jumping),
         playerMemory: () => this.combatMemory.rates(this.simTime),
         heightAt: (x, z) => this.world.heightAt(x, z),
         resolve: (pos) => {
@@ -3158,6 +3232,8 @@ export class RaidEngine {
         blocked: (x, z, radius) =>
           Math.abs(x) > BOUNDARY || Math.abs(z) > BOUNDARY || pointBlocked(x, z, radius, this.world.obstacles),
         hurtPlayer: (amount, dir, kind, physical) => this.hurtPlayer(amount, dir, kind, physical),
+        stunPlayer: (seconds) => this.setStasis(seconds),
+        suppressPlayer: (factor) => this.setSuppress(factor),
         time: () => this.simTime,
         sound: (id) => this.emitSound(id),
         playerHazards: () => this.kit?.hazards?.() ?? [],
@@ -3179,6 +3255,17 @@ export class RaidEngine {
 
   /** Local player 2. I/K move on Z, J/L move on X, U punches. Camera stays on player 1. */
   private driveLocalOpponent(host: Host, dt: number, time: number) {
+    if (host.held > 0) {
+      stepReaction(host, dt);
+      host.knock.set(0, 0, 0);
+      host.fighter.humanoid.group.position.copy(host.pos);
+      host.fighter.humanoid.group.position.y = this.world.heightAt(host.pos.x, host.pos.z) - host.sink;
+      this.animateHost(host, dt, 0, time);
+      this.p2PunchQueued = false;
+      this.p2KickQueued = false;
+      this.p2MeleeQueued = false;
+      return;
+    }
     host.cooldown = Math.max(0, host.cooldown - dt);
     if (host.maxAura) host.aura = Math.min(host.maxAura, (host.aura ?? 0) + dt * 6);
     let mx = 0;

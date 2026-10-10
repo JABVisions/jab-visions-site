@@ -50,7 +50,14 @@ export const RYDER_AI_PROFILES: Record<RyderId, AiProfile> = {
   rubi: { aggression: 0.86, evasiveness: 0.34, preferredRange: 'close', abilityFrequency: 0.74, comboPreference: 0.9, punish: 0.58 },
   lilly: { aggression: 0.48, evasiveness: 0.62, preferredRange: 'mid', abilityFrequency: 0.78, comboPreference: 0.4, punish: 0.5 },
   'kid-paranormal': { aggression: 0.62, evasiveness: 0.7, preferredRange: 'mid', abilityFrequency: 0.82, comboPreference: 0.58, punish: 0.64 },
-  'agent-nyx': { ...DEFAULT_AI_PROFILE },
+  'agent-nyx': {
+    aggression: 0.72,
+    evasiveness: 0.78,
+    preferredRange: 'close',
+    abilityFrequency: 0.74,
+    comboPreference: 0.7,
+    punish: 0.66,
+  },
 };
 
 export function aiProfileFor(id: RyderId | null | undefined): AiProfile {

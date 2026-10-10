@@ -6,6 +6,7 @@ import { ZoeKit } from './zoe';
 import { RubiKit } from './rubi';
 import { LillyKit } from './lilly';
 import { KidParanormalKit } from './kid-paranormal';
+import { NyxKit } from './nyx';
 import type { RyderKit } from './kit';
 
 export type { CameraExtra, HazardZone, KitContext, KitFrame, KitTarget, MeleeStep, RyderKit } from './kit';
@@ -22,6 +23,7 @@ const KITS: Partial<Record<RyderId, () => RyderKit>> = {
   keven: () => new KevenKit(),
   zoe: () => new ZoeKit(),
   'kid-paranormal': () => new KidParanormalKit(),
+  'agent-nyx': () => new NyxKit(),
 };
 
 export function createRyderKit(id: RyderId): RyderKit | null {

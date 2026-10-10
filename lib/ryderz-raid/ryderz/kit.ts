@@ -83,6 +83,19 @@ export interface KitContext {
   heal(amount: number): number;
   /** Hold an ability off the input for `seconds`. */
   cooldown(id: AbilityId, seconds: number): void;
+  /** Current health. Rewind reads this so it can restore a capped loss. */
+  vitals?(): { hp: number; maxHp: number };
+  /**
+   * Hold a target still for `seconds`. `0` releases it. The engine counts the
+   * hold down, so a dropped connection cannot leave anyone frozen.
+   */
+  hold?(target: KitTarget, seconds: number): void;
+  /** True in a Ryder-versus-Ryder match. Durations and slows use the shorter PvP tuning. */
+  pvp?(): boolean;
+  /** Slow the local player. The factor is a fraction of their normal speed, never zero. */
+  suppress?(factor: number): void;
+  /** False for allies, defeated bodies, and anyone this mode must not hit. */
+  canHit?(target: KitTarget): boolean;
 }
 
 /** A ground area enemies should leave. `drain` is a standing puddle; `stomp` is an incoming foot. */
@@ -212,10 +225,16 @@ export interface RyderKit {
   airStrike?(kind: 'punch' | 'kick' | 'melee'): void;
   /** 0–100 charge some kits spend to strengthen the next ability. */
   readonly resonance?: number;
+  /** Attack animation rate. 1 is normal. Kits leave it unset. */
+  readonly haste?: number;
   /** A basic strike just started. Kits dress the swing; damage stays on the striker. */
   onStrike?(style: MeleeStyle): void;
   /** A basic hit connected. Ability damage does not call this. */
   noteHit?(): void;
+  /** A named chain just connected. Unlabeled chains are not reported. */
+  noteCombo?(snap: { recipeId: string | null; label: string; revision: number }): void;
+  /** The dodge dash started. Kits may open a counter window. */
+  onDodge?(): void;
   /** A round began. Kits reset round-scoped meters here. */
   onRound?(): void;
   /** Cut any running sequence (death, Ryder switch, Beacon recovery). */

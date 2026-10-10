@@ -66,9 +66,9 @@ const SIGILS: Record<AbilityId, string> = {
   phantomGrasp: 'PG',
   paranormalProjection: 'PP',
   dimensionalCollapse: '4C',
-  nyxSlotQ: 'NQ',
-  nyxSlotE: 'NE',
-  nyxSlotR: 'NR',
+  temporalZap: 'TZ',
+  rewindProtocol: 'RW',
+  zeroHour: 'ZH',
 };
 
 export function defaultLoadout(id: RyderId): PowerLoadout {
