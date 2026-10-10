@@ -156,11 +156,12 @@ step(kit, 2.2);
 assert.equal(kit.locked, false, 'collapse ends');
 assert.equal(kit.flying, false);
 
-assert.equal(kit.tryAirJump(0.2), true);
-assert.equal(kit.flying, true);
-assert.equal(kit.airY, 1.45);
-step(kit, 0.2, { aura: 0 });
-assert.equal(kit.flying, false, 'hover ends when aura is gone');
-assert.equal(kit.airY, 0);
+const beforeZ = pos.z;
+assert.equal(kit.tryAirJump(0.2, 0.4), true);
+assert.ok(pos.z - beforeZ > 4, 'double jump spits him forward');
+assert.equal(kit.flying, false, 'the goo teleport is not a hover');
+assert.ok(scene.getObjectByName('KidGoo'), 'goo marks the departure');
+step(kit, 0.7);
+assert.equal(scene.getObjectByName('KidGoo'), undefined, 'the splatter fades');
 
 console.log('kid-paranormal.check ok');

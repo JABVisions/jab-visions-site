@@ -3,6 +3,7 @@ import type { AbilityId } from '../config';
 import { HitSet, targetsAlongSegment, targetsInRadius } from '../combat';
 import { TrailRibbon } from '../speed-vfx';
 import type { PoseOverride } from '../skeletal';
+import { AirJumpFx, chestPoint, leapAhead } from './air-jump';
 import type { KitContext, KitFrame, KitTarget, MeleeStep, RyderKit } from './kit';
 
 /**
@@ -201,6 +202,9 @@ export class AaronKit implements RyderKit {
   private ringT = 0;
   private imageT = 0;
   private violetSoft = 0xb59cff;
+  private fx: AirJumpFx | null = null;
+  private veil = 0;
+  private readonly chest = new THREE.Vector3();
 
   constructor() {
     this.thrown = new THREE.Group();
@@ -292,6 +296,8 @@ export class AaronKit implements RyderKit {
     this.bodyGlow = 0;
     this.spinning = false;
     this.comboIndex = 0;
+    this.fx = new AirJumpFx(ctx.scene);
+    this.veil = 0;
   }
 
   detach() {
@@ -302,6 +308,8 @@ export class AaronKit implements RyderKit {
     }
     this.axeTrail.clear();
     this.portals.clear();
+    this.fx?.clear();
+    this.fx = null;
     this.ctx = null;
   }
 
@@ -320,6 +328,8 @@ export class AaronKit implements RyderKit {
     this.axeTrail.clear();
     this.axeTrail.intensity = 0;
     this.showHandAxe(true);
+    this.veil = 0;
+    this.fx?.clear();
   }
 
   // ---------------------------------------------------------------------------
@@ -380,6 +390,25 @@ export class AaronKit implements RyderKit {
   // ---------------------------------------------------------------------------
   // Abilities
   // ---------------------------------------------------------------------------
+
+  tryAirJump(sinceJump: number, _height = 0) {
+    const ctx = this.ctx;
+    if (!ctx || this.locked || this.spinning || sinceJump > 0.9) return false;
+    const from = leapAhead(ctx, 7.5);
+    if (!from) return false;
+    const color = ctx.spec.visual.electricityColor;
+    this.fx?.atoms(chestPoint(ctx, from.x, from.z, this.chest).clone(), color, false);
+    this.fx?.atoms(chestPoint(ctx, ctx.pos.x, ctx.pos.z, this.chest).clone(), color, true);
+    ctx.particles.emit(chestPoint(ctx, from.x, from.z, this.chest), color, 22, { speed: 8, size: 0.16, life: 0.36, spread: 1.1, up: 1.6 });
+    ctx.particles.emit(chestPoint(ctx, from.x, from.z, this.chest), 0xffffff, 10, { speed: 5, size: 0.28, life: 0.24, spread: 0.3, up: 0.4 });
+    ctx.particles.emit(chestPoint(ctx, ctx.pos.x, ctx.pos.z, this.chest), color, 16, { speed: 3.5, size: 0.18, life: 0.32, spread: 0.8, up: 0.8 });
+    this.veil = 0.16;
+    this.bodyOpacity = 0.08;
+    ctx.iframes(0.18);
+    ctx.sound('aaron.atom.swing');
+    ctx.camera.addShake(0.08);
+    return true;
+  }
 
   tryAbility(id: AbilityId) {
     if (!this.ctx) return false;
@@ -1012,11 +1041,15 @@ export class AaronKit implements RyderKit {
       this.updateSwing(frame);
     } else {
       this.poseState = null;
-      this.bodyOpacity = 1;
       this.bodyGlow = 0;
       this.axeTrail.intensity = Math.max(0, this.axeTrail.intensity - dt * 4);
+      if (this.veil > 0) {
+        this.veil = Math.max(0, this.veil - dt);
+        this.bodyOpacity = 0.08 + (1 - this.veil / 0.16) * 0.92;
+      } else this.bodyOpacity = 1;
     }
 
+    this.fx?.step(dt);
     this.axeTrail.update(dt, ctx.cameraObject);
     this.portals.update(dt, ctx.cameraObject);
   }
