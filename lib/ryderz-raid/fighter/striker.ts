@@ -3,7 +3,7 @@ import type { HitReaction } from '../combat';
 import type { MeleeStyle } from '../skeletal';
 import { forkStrike, type CombatAction, type StrikeKind } from './actions';
 import { ComboManager, meleeWantsGrab, reactionForEffect, type ComboSnapshot } from './combo';
-import { actionFor, recipesFor } from './profiles';
+import { actionFor, combatProfileFor, recipesFor } from './profiles';
 
 export interface StrikeTarget {
   ref: object;
@@ -105,6 +105,8 @@ export class FighterStriker {
   private grabWindowUntil = 0;
   private didLunge = false;
   private startedFlag = false;
+  private punchN = 0;
+  private kickN = 0;
 
   setRyder(id: RyderId | null) {
     this.ryderId = id;
@@ -273,6 +275,16 @@ export class FighterStriker {
     this.inputKind = kind;
     this.kind = use;
     this.action = actionFor(use, this.ryderId);
+    const cycle = combatProfileFor(this.ryderId);
+    if (use === 'punch' && cycle.punchCycle?.length) {
+      const style = cycle.punchCycle[this.punchN % cycle.punchCycle.length];
+      this.punchN += 1;
+      this.action = { ...this.action, style };
+    } else if (use === 'kick' && cycle.kickCycle?.length) {
+      const style = cycle.kickCycle[this.kickN % cycle.kickCycle.length];
+      this.kickN += 1;
+      this.action = { ...this.action, style };
+    }
     if (this.fork && (use === 'punch' || use === 'kick' || use === 'melee')) this.action = forkStrike(this.action, use);
     this.phase = 'startup';
     this.elapsed = 0;

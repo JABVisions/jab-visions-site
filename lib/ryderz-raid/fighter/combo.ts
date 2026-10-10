@@ -15,6 +15,8 @@ export interface ComboRecipe {
   id: string;
   sequence: StrikeKind[];
   effect: ComboEffect;
+  /** Shown on the HUD when this chain connects. Unset recipes keep the hit count. */
+  label?: string;
 }
 
 /**
@@ -186,7 +188,7 @@ export class ComboManager {
       powerLeft: powerReady ? Math.max(0, this.powerUntil - time) : 0,
       scale: comboDamageScale(Math.max(1, this.count)),
       stunScale: comboStunScale(Math.max(1, this.count)),
-      label: comboLabel(count, tier, powerReady),
+      label: alive && this.lastRecipe?.label ? this.lastRecipe.label : comboLabel(count, tier, powerReady),
       revision: this.revision,
     };
   }

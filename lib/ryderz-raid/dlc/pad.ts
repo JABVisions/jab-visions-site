@@ -21,7 +21,7 @@ export type PadRyderId = (typeof PAD_RYDER_IDS)[number];
  */
 export const PAD_CHARACTER_GLB: Record<PadRyderId, string | null> = {
   'kid-paranormal': '/assets/those-ryderz/models/kid-paranormal.glb?v=1',
-  'agent-nyx': null,
+  'agent-nyx': '/assets/those-ryderz/models/agent-nyx.glb?v=1',
 };
 
 /** Extra facility meshes can be listed here and loaded by the arena when present. */

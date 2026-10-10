@@ -78,6 +78,8 @@ export interface PvpCpuHooks {
   playerMemory(): CombatRates;
   time(): number;
   sound(id: string): void;
+  stunPlayer(seconds: number): void;
+  suppressPlayer(factor: number): void;
   playerHazards?(): Array<{ x: number; z: number; radius: number; kind: 'drain' | 'stomp' }>;
 }
 
@@ -142,6 +144,21 @@ export class PvpCpu {
 
   grabsPlayer() {
     return (this.foe?.held ?? 0) > 0;
+  }
+
+  /** The duel was cased. Stop the current swing and any power this Ryder had open. */
+  stun() {
+    this.striker.interrupt();
+    this.pending = null;
+    this.script = [];
+    this.kit?.interrupt();
+  }
+
+  private tempo() {
+    const buff = Math.min(1.2, Math.max(1, this.kit?.haste ?? 1));
+    const scale = (this.body as { attackScale?: number } | null)?.attackScale;
+    const slow = typeof scale === 'number' ? Math.min(1, Math.max(0.45, scale)) : 1;
+    return Math.min(1.2, Math.max(0.45, buff * slow));
   }
 
   playerSink() {
@@ -371,7 +388,7 @@ export class PvpCpu {
     const len = Math.hypot(mx, mz);
     const striking = this.intent === 'punch' || this.intent === 'kick' || this.intent === 'melee' || this.intent === 'grab' || this.intent === 'attack';
     if (len > 0.08 && this.intent !== 'ability' && !(striking && dist < 2.35)) {
-      const speed = spec.speed * (this.intent === 'chase' ? 0.96 : 0.82) * (this.burnout ? 0.82 : 1);
+      const speed = spec.speed * this.tempo() * (this.intent === 'chase' ? 0.96 : 0.82) * (this.burnout ? 0.82 : 1);
       const steered = steerVelocity(
         body.pos.x,
         body.pos.z,
@@ -427,7 +444,7 @@ export class PvpCpu {
       const slot = this.bestLinkSlot();
       if (slot != null) this.cast(slot);
     }
-    const frame = this.striker.tick(dt, {
+    const frame = this.striker.tick(dt * this.tempo(), {
       time: this.hooks.time(),
       stunned: false,
       locked: this.kit?.locked ?? false,
@@ -781,6 +798,20 @@ export class PvpCpu {
         const slot = cpu.spec?.moves.findIndex((move) => move.id === id) ?? -1;
         if (slot >= 0) cpu.moveCd[slot] = Math.max(cpu.moveCd[slot], seconds);
       },
+      vitals: () => ({ hp: cpu.body?.hp ?? 0, maxHp: cpu.body?.maxHp ?? 1 }),
+      hold: (target: KitTarget, seconds: number) => {
+        if (target !== cpu.foe || !cpu.foe) return;
+        cpu.foe.held = Math.max(0, seconds);
+        if (seconds > 0) {
+          cpu.foe.knock.set(0, 0, 0);
+          cpu.foe.airVel = 0;
+          cpu.foe.sink = 0;
+        }
+        hooks.stunPlayer(seconds);
+      },
+      pvp: () => true,
+      suppress: (factor: number) => hooks.suppressPlayer(factor),
+      canHit: (target: KitTarget) => target.hp > 0,
     };
   }
 

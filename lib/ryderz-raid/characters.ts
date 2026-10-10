@@ -828,7 +828,7 @@ export function buildRyder(spec: RyderSpec, options: { clone?: boolean } = {}): 
       });
     }
     return { humanoid, weapons, glowMeshes, meshSource: 'procedural', orbs };
-  } else {
+  } else if (spec.id !== 'agent-nyx') {
     const gun = new THREE.Mesh(DART_GUN, aura);
     gun.position.set(0, 0, 0.12);
     addWeapon(gun, 'R');

@@ -30,6 +30,10 @@ export interface CombatProfile {
   melee: MeleeSet;
   combos: ComboRecipe[];
   powerLink: PowerLinkDef;
+  /** Procedural poses cycled by repeated punches. Unset keeps the shared jab. */
+  punchCycle?: MeleeStyle[];
+  /** Procedural poses cycled by repeated kicks. Unset keeps the shared kick. */
+  kickCycle?: MeleeStyle[];
 }
 
 const DEFAULT_LINK: PowerLinkDef = {
@@ -103,11 +107,19 @@ const RYDER_COMBAT: Record<RyderId, CombatProfile> = {
     powerLink: { id: 'grasp-link', abilityId: 'phantomGrasp', label: 'Grasp Link', preReaction: 'stagger', followUps: 1, trap: 0.2 },
   },
   'agent-nyx': {
-    punch: { damageMul: 0.42, recovery: 0.22 },
-    kick: { damageMul: 0.7, knockback: 5.4 },
-    melee: { label: 'Melee', damageMul: 1, reaction: 'knockback', range: 2.1, recovery: 0.48, style: 'slash' },
-    combos: SHARED_COMBOS,
-    powerLink: { id: 'nyx-link', abilityId: 'nyxSlotQ', label: 'Unassigned', preReaction: 'stagger', followUps: 0, trap: 0 },
+    punch: { damageMul: 0.48, recovery: 0.18 },
+    kick: { damageMul: 0.76, knockback: 6.2 },
+    melee: { label: 'Palm strike', damageMul: 1.02, reaction: 'stagger', range: 2.15, recovery: 0.4, style: 'punch' },
+    combos: [
+      ...SHARED_COMBOS,
+      { id: 'temporal-sweep', label: 'Temporal Sweep', sequence: ['kick', 'kick', 'melee'], effect: 'launcher' },
+      { id: 'yesterdays-revenge', label: "Yesterday's Revenge", sequence: ['punch', 'kick', 'kick'], effect: 'heavyKnockback' },
+      { id: 'echo-execution', label: 'Echo Execution', sequence: ['melee', 'punch', 'melee'], effect: 'finisher' },
+      { id: 'palm-cross', label: 'Palm Cross', sequence: ['punch', 'melee', 'punch'], effect: 'stagger' },
+    ],
+    powerLink: { id: 'zap-link', abilityId: 'temporalZap', label: 'Zap Link', preReaction: 'stagger', followUps: 0, trap: 0 },
+    punchCycle: ['punch', 'punchR', 'chop', 'smash'],
+    kickCycle: ['kick', 'spinKick', 'kick', 'spinKick'],
   },
 };
 
