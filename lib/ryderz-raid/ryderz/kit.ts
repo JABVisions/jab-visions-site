@@ -74,6 +74,8 @@ export interface KitContext {
   turn(yaw: number, cut?: boolean): void;
   /** Give aura back (siphons, greed). Clamped to the maximum. */
   gainAura(amount: number): void;
+  /** Spend aura. Returns what remains. Empty aura burns out. */
+  spendAura(amount: number): number;
   /**
    * Restore health. Returns the amount actually gained, which is 0 once the
    * Ryder is already at maximum.
@@ -115,6 +117,10 @@ export interface MeleeStep {
   /** Metres the Ryder steps into the hit. */
   lunge: number;
   sound: string;
+  /** Extra radius that takes a lighter hit when the swing connects. */
+  shockRange?: number;
+  /** Multiplier on melee damage for targets inside the shock but outside the swing. */
+  shockMul?: number;
 }
 
 export interface KitFrame {
@@ -128,6 +134,14 @@ export interface KitFrame {
   aura?: number;
   maxAura?: number;
   burnout?: boolean;
+  /** Space is held. Flight uses this to climb. */
+  ascend?: boolean;
+  /** Control is held. Flight uses this to descend. */
+  descend?: boolean;
+  /** Shift is held. Flight spends more aura and moves faster. */
+  boost?: boolean;
+  /** Hard hit stun. Flight ends. */
+  stunned?: boolean;
 }
 
 export interface RyderKit {
@@ -164,8 +178,12 @@ export interface RyderKit {
   readonly bodyScale?: number;
   /** Multiplier on the Ryder's collision radius. */
   readonly radiusScale?: number;
-  /** Extra third-person distance while the figure is enlarged. */
+  /** Extra third-person distance while the figure is enlarged or airborne. */
   readonly cameraExtra?: CameraExtra | null;
+  /** True while a kit is holding the body off the ground (flight). Engine gravity stays off. */
+  readonly flying?: boolean;
+  /** Aura weapon is live, so punch and kick use the pitchfork hitboxes. */
+  readonly forkArmed?: boolean;
   /** Areas the enemy AI should step out of. */
   hazards?(): HazardZone[];
   attach(ctx: KitContext): void;
@@ -185,6 +203,13 @@ export interface RyderKit {
   rangedShot?(damage: number): boolean;
   /** Next melee step, or null to use the engine's default swing. */
   melee(time: number): MeleeStep | null;
+  /**
+   * A second jump while still in the first hop. `height` is the engine hop
+   * still under her. Return true when the kit takes over the air.
+   */
+  tryAirJump?(sinceJump: number, height: number): boolean;
+  /** Punch, kick, or melee while `flying` is set. Ground strikers stay idle. */
+  airStrike?(kind: 'punch' | 'kick' | 'melee'): void;
   /** Cut any running sequence (death, Ryder switch, Beacon recovery). */
   interrupt(): void;
 }

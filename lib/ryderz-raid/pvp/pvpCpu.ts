@@ -421,6 +421,7 @@ export class PvpCpu {
       this.striker.queue(this.pending);
       this.pending = null;
     }
+    this.striker.setFork(this.kit?.forkArmed ?? false);
     if (this.wantCast && this.chainDelay <= 0 && !(this.kit?.locked ?? false)) {
       this.wantCast = false;
       const slot = this.bestLinkSlot();
@@ -760,6 +761,14 @@ export class PvpCpu {
       gainAura: (amount: number) => {
         cpu.aura = Math.min(cpu.maxAura, cpu.aura + Math.max(0, amount));
         if (cpu.burnout && cpu.aura >= cpu.maxAura * BURNOUT_RECOVERY) cpu.burnout = false;
+      },
+      spendAura: (amount: number) => {
+        cpu.aura = Math.max(0, cpu.aura - Math.max(0, amount));
+        if (cpu.aura <= 0.01) {
+          cpu.aura = 0;
+          cpu.burnout = true;
+        }
+        return cpu.aura;
       },
       heal: (amount: number) => {
         const body = cpu.body;

@@ -92,7 +92,7 @@ const RYDER_COMBAT: Record<RyderId, CombatProfile> = {
     punch: { damageMul: 0.42, recovery: 0.22 },
     kick: { damageMul: 0.8, knockback: 6.6 },
     melee: { label: 'Famine strike', damageMul: 1.02, reaction: 'knockback', range: 2.3, recovery: 0.46, style: 'smash' },
-    combos: SHARED_COMBOS,
+    combos: [...SHARED_COMBOS, { id: 'lilly-crowd', sequence: ['kick', 'kick', 'punch'], effect: 'heavyKnockback' }],
     powerLink: { id: 'drain-link', abilityId: 'soulDrain', label: 'Soul Link', preReaction: 'stagger', followUps: 1, trap: 0.2 },
   },
 };

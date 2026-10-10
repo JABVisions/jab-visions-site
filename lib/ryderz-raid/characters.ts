@@ -16,6 +16,7 @@ import {
 } from './skeletal';
 import { rigFashionBody } from './civilians/fashion-rig';
 import { rigLillyBody } from './ryderz/lilly-rig';
+import { createLillyFork, preloadLillyFork } from './ryderz/lilly-fork';
 import { rigRubiBody } from './ryderz/rubi-rig';
 import { HostGlitch } from './host-glitch';
 import { addOutline, buildHumanoid, glow, toon, type Humanoid } from './toon';
@@ -153,6 +154,7 @@ async function loadGltfTemplate(url: string, label: string, repair?: GlbRepair):
 }
 
 export async function preloadRyderGltf(spec: RyderSpec) {
+  if (spec.id === 'lilly') await preloadLillyFork();
   if (!spec.glb || gltfTemplates.has(spec.id)) return;
   gltfTemplates.set(spec.id, await loadGltfTemplate(spec.glb, spec.id, spec.glbRepair));
 }
@@ -535,6 +537,9 @@ const STRIKE_LUNGE: Record<MeleeStyle, number> = {
   slap: 0.2,
   blast: 0.35,
   smash: 0.38,
+  forkThrust: 0.42,
+  forkSweep: 0.2,
+  forkSlam: 0.16,
 };
 const STRIKE_RELEASE = 0.12;
 
@@ -738,6 +743,12 @@ export function buildRyder(spec: RyderSpec, options: { clone?: boolean } = {}): 
       glowMeshes.push(...orbs.glowMeshes);
       rig.orbs = orbs;
       return { humanoid, weapons, glowMeshes, meshSource: 'gltf' as const, rig, orbs };
+    } else if (spec.id === 'lilly') {
+      const fork = createLillyFork();
+      if (fork) {
+        fork.attach(rig.weaponSocket, humanoid.group);
+        weapons.push(fork.root);
+      }
     }
     // Keven's dart is modelled into his mesh. Rubi's sword is parented to her
     // right hand by the rig, and the energy blade still mounts on the socket.
