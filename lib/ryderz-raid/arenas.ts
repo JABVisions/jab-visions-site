@@ -29,6 +29,8 @@ export interface ArenaDefinition {
   ryderBeaconPoint: ArenaPoint;
   /** Seconds the Beacon needs to recharge after restoring a Ryder. */
   beaconCooldown: number;
+  /** Which built world the engine shows. Omitted arenas stay on the city block. */
+  worldKey?: 'block' | 'pad';
 }
 
 /** @deprecated Use ArenaDefinition. */
@@ -75,6 +77,18 @@ registerArena({
   spawnPoint: { x: 0, z: 6 },
   ryderBeaconPoint: { x: 0, z: -6 },
   beaconCooldown: 10,
+});
+
+registerArena({
+  id: 'training-pad',
+  name: 'Training P.A.D.',
+  setting: 'Paranormal Activity Division',
+  description: 'A circular P.A.D. facility. Stairs reach the balcony, and the east corridor stays on the floor.',
+  available: true,
+  worldKey: 'pad',
+  spawnPoint: { x: 0, z: 8 },
+  ryderBeaconPoint: { x: -8, z: -4 },
+  beaconCooldown: 12,
 });
 
 registerArena({

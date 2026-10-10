@@ -6,7 +6,7 @@ import type { RyderManager } from '@/lib/ryderz-raid/ryder-manager';
 import { useMenuKeys, wrap } from './useMenuKeys';
 import styles from './PauseMenu.module.css';
 
-/** Lists registered arenas. Only the city block exists today; the rest read Coming Soon. */
+/** Lists registered arenas. Unavailable ones stay marked Coming Soon. */
 export default function ArenaSelector({
   manager,
   arenaId,
@@ -37,8 +37,8 @@ export default function ArenaSelector({
     <section className={styles.panel} aria-label="Arena select">
       <header className={styles.panelHead}>
         <p className={styles.eyebrow}>Arena select</p>
-        <h2>Coming soon</h2>
-        <p>The block is the only arena on the signal right now. New arenas register here as they are built.</p>
+        <h2>Choose a floor</h2>
+        <p>The Block is the city raid. Training P.A.D. is the Paranormal Activity Division facility.</p>
       </header>
       <div className={`${styles.scroll} ${styles.options}`} role="listbox" aria-label="Arenas">
         {arenas.map((arena, i) => (

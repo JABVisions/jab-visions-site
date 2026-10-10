@@ -63,6 +63,12 @@ const SIGILS: Record<AbilityId, string> = {
   soulDrain: 'SD',
   giantStep: 'GT',
   animalAllegiance: 'AA',
+  phantomGrasp: 'PG',
+  paranormalProjection: 'PP',
+  dimensionalCollapse: '4C',
+  nyxSlotQ: 'NQ',
+  nyxSlotE: 'NE',
+  nyxSlotR: 'NR',
 };
 
 export function defaultLoadout(id: RyderId): PowerLoadout {

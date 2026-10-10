@@ -210,6 +210,14 @@ export interface RyderKit {
   tryAirJump?(sinceJump: number, height: number): boolean;
   /** Punch, kick, or melee while `flying` is set. Ground strikers stay idle. */
   airStrike?(kind: 'punch' | 'kick' | 'melee'): void;
+  /** 0–100 charge some kits spend to strengthen the next ability. */
+  readonly resonance?: number;
+  /** A basic strike just started. Kits dress the swing; damage stays on the striker. */
+  onStrike?(style: MeleeStyle): void;
+  /** A basic hit connected. Ability damage does not call this. */
+  noteHit?(): void;
+  /** A round began. Kits reset round-scoped meters here. */
+  onRound?(): void;
   /** Cut any running sequence (death, Ryder switch, Beacon recovery). */
   interrupt(): void;
 }

@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
+import { arenaSpec } from '@/lib/ryderz-raid/arenas';
 import { RYDERZ, type RyderId } from '@/lib/ryderz-raid/config';
 import type { RaidEngine } from '@/lib/ryderz-raid/engine';
 import type { GameMode } from '@/lib/ryderz-raid/game-mode';
@@ -24,7 +25,7 @@ const ROOT_ITEMS: NavItem<RootAction>[] = [
   { id: 'resume', label: 'Resume', hint: 'Back onto the block' },
   { id: 'deck', label: 'Power Deck', hint: 'Bind Q · E · R' },
   { id: 'ryder', label: 'Switch Ryder', hint: 'Change who is in play' },
-  { id: 'arena', label: 'Arena', hint: 'Where the raid happens', soon: true },
+  { id: 'arena', label: 'Arena', hint: 'The Block or Training P.A.D.' },
   { id: 'mode', label: 'Game Mode', hint: 'Solo · PvP · Raid' },
   { id: 'settings', label: 'Settings', hint: 'Camera & controls' },
   { id: 'exit', label: 'Exit Raid', hint: 'Drop the signal', danger: true },
@@ -149,7 +150,7 @@ export default function PauseMenu({
             </div>
             <div className={styles.summaryRow}>
               <span>Arena</span>
-              <strong>The Block</strong>
+              <strong>{arenaSpec(arenaId)?.name ?? 'The Block'}</strong>
             </div>
             <div className={styles.summaryRow}>
               <span>Deck</span>

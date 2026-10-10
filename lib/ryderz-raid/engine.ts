@@ -69,6 +69,7 @@ import {
   setHumanoidOpacity,
 } from './toon';
 import { buildWorld, nearDistrictHub, pointBlocked, resolveCircle, steerVelocity, type World } from './world';
+import { buildPadWorld } from './world-pad';
 import { calculatePvPDamage, pvpHealth, PvpCpu, type PvpDamageKind } from './pvp';
 import {
   CombatMemory,
@@ -133,6 +134,8 @@ export interface HudState {
   beacon: BeaconHudState | null;
   /** True for the moment the Beacon is pouring energy back into the Ryder. */
   recovering: boolean;
+  /** Unipolar Resonance, 0–100. Other Ryderz stay at 0. */
+  resonance: number;
   combo: {
     count: number;
     label: string;
@@ -286,6 +289,7 @@ export class RaidEngine {
   private camera: THREE.PerspectiveCamera;
   private rig: ThirdPersonCamera;
   private world: World;
+  private worlds = new Map<'block' | 'pad', World>();
   private particles: ParticleSystem;
   private clock = new THREE.Clock();
   private raf = 0;
@@ -439,6 +443,7 @@ export class RaidEngine {
     this.scene.add(fill);
 
     this.world = buildWorld();
+    this.worlds.set('block', this.world);
     this.scene.add(this.world.group);
     this.scene.updateMatrixWorld(true);
     this.rig = new ThirdPersonCamera(this.camera, this.world.occluders);
@@ -1004,19 +1009,61 @@ export class RaidEngine {
   // ---------------------------------------------------------------------------
 
   /**
-   * Point the raid at an arena definition. The world geometry is still the
-   * city block for every arena; what changes is the fixed points: where the
-   * Ryder drops in and where the single Ryder Beacon stands. Any Beacon from a
-   * previous arena is torn down first so there is never more than one.
+   * Point the raid at an arena. The city stays loaded. Training P.A.D. is
+   * built the first time it is selected, then the two groups swap visibility.
+   * The Beacon is rebuilt at that arena's fixed point.
    */
   loadArena(id: ArenaId) {
     const def = arenaSpec(id) ?? arenaSpec(DEFAULT_ARENA)!;
     this.arena = def;
+    const key = def.worldKey ?? 'block';
+    let next = this.worlds.get(key);
+    if (!next && key === 'pad') {
+      next = buildPadWorld();
+      this.worlds.set('pad', next);
+      this.scene.add(next.group);
+    }
+    if (!next) next = this.worlds.get('block') ?? this.world;
+    if (next !== this.world) {
+      this.world.group.visible = false;
+      next.group.visible = true;
+      this.world = next;
+      this.scene.updateMatrixWorld(true);
+      this.rig.setOccluders(this.world.occluders);
+    }
+    const fog = this.scene.fog as THREE.FogExp2 | null;
+    if (fog) {
+      if (key === 'pad') {
+        fog.color.setHex(0x07141c);
+        fog.density = 0.011;
+      } else {
+        fog.color.setHex(0x1a0c22);
+        fog.density = 0.007;
+      }
+    }
     this.unloadBeacon();
     const point = def.ryderBeaconPoint;
     const position = new THREE.Vector3(point.x, this.world.heightAt(point.x, point.z), point.z);
     this.beacon = new RyderBeacon(position, this.particles, { cooldownDuration: def.beaconCooldown });
     this.scene.add(this.beacon.group);
+    if (this.player) {
+      this.pos.set(def.spawnPoint.x, 0, def.spawnPoint.z);
+      this.player.humanoid.group.position.copy(this.pos);
+      this.player.humanoid.group.position.y = this.world.heightAt(this.pos.x, this.pos.z) + (this.kit?.airY ?? 0);
+      this.rig.snap(this.pos, this.yaw, this.pitch);
+      for (const host of this.hosts) {
+        if (host.hp <= 0) continue;
+        const alley = this.spawnAlley();
+        host.pos.copy(alley.position);
+        host.fighter.humanoid.group.position.copy(host.pos);
+        host.fighter.humanoid.group.position.y = this.world.heightAt(host.pos.x, host.pos.z);
+        this.paintTraining(host, Boolean(this.world.training));
+      }
+      if (def.id === 'training-pad') {
+        this.banner = { title: 'TRAINING P.A.D.', sub: 'JAB VISIONS · PARANORMAL ACTIVITY DIVISION' };
+        this.bannerT = 3.2;
+      }
+    }
   }
 
   getArena(): ArenaDefinition {
@@ -1044,6 +1091,7 @@ export class RaidEngine {
     if (!this.player || this.phase === 'dead' || this.recoveryT > 0 || this.kit?.locked) return;
     const beacon = this.beacon;
     if (!beacon || !beacon.isPlayerInRange(this.pos)) {
+      if (this.trySimConsole()) return;
       this.tryPickup();
       return;
     }
@@ -1061,6 +1109,24 @@ export class RaidEngine {
     this.abilityT = Math.max(this.abilityT, RECOVERY_DURATION);
     this.fireHeld = false;
     this.rig.addKick(0.25);
+  }
+
+  private trySimConsole() {
+    const pads = this.world.interactives;
+    if (!pads?.length || !this.world.toggleBarriers) return false;
+    for (const pad of pads) {
+      const dx = pad.x - this.pos.x;
+      const dz = pad.z - this.pos.z;
+      if (dx * dx + dz * dz > 2.4 * 2.4) continue;
+      const open = this.world.toggleBarriers();
+      this.banner = {
+        title: open ? 'BARRIERS DOWN' : 'SIMULATION LIVE',
+        sub: 'P.A.D. TRAINING',
+      };
+      this.bannerT = 2.2;
+      return true;
+    }
+    return false;
   }
 
   private updateRecovery(dt: number) {
@@ -1508,6 +1574,7 @@ export class RaidEngine {
       if (frame.started) {
         this.meleeStarted = true;
         this.combatT = COMBAT_LINGER;
+        this.kit?.onStrike?.(pose.style);
       }
     }
     if (frame.grab) {
@@ -1533,6 +1600,7 @@ export class RaidEngine {
     host.lastImpact = { x: _tmp.x, z: _tmp.z, speed: hit.knockback, kind: hit.kind };
     if (hit.kind === 'throw') host.held = 0;
     this.hurtHost(host, hit.damage, _tmp, hit.reaction, hit.strength);
+    this.kit?.noteHit?.();
     this.combatT = COMBAT_LINGER;
   }
 
@@ -2083,8 +2151,10 @@ export class RaidEngine {
     this.queue = composeRound(n);
     this.spawnTimer = 0.4;
     const banner = roundBanner(n);
+    if (this.arena.id === 'training-pad' && n === 1) banner.sub = 'P.A.D. · TRAINING FACILITY';
     this.banner = banner;
     this.bannerT = 3.2;
+    this.kit?.onRound?.();
   }
 
   private updateRound(dt: number) {
@@ -2175,6 +2245,44 @@ export class RaidEngine {
       throwWind: 0,
       winding: false,
       follow: null,
+    });
+    const spawned = this.hosts[this.hosts.length - 1];
+    if (spawned && this.world.training) this.paintTraining(spawned, true);
+  }
+
+  /** Holographic paint for hosts inside Training P.A.D. Restored when they leave. */
+  private paintTraining(host: Host, on: boolean) {
+    host.fighter.humanoid.group.traverse((obj) => {
+      const mesh = obj as THREE.Mesh;
+      if (!mesh.isMesh || !mesh.material) return;
+      const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+      for (const mat of mats) {
+        const std = mat as THREE.MeshStandardMaterial;
+        if (!std.emissive) continue;
+        const data = std.userData as {
+          padBase?: { opacity: number; transparent: boolean; emissive: number; intensity: number };
+        };
+        if (!data.padBase) {
+          data.padBase = {
+            opacity: std.opacity,
+            transparent: std.transparent,
+            emissive: std.emissive.getHex(),
+            intensity: std.emissiveIntensity ?? 0,
+          };
+        }
+        const base = data.padBase;
+        if (on) {
+          std.emissive.setHex(0x39e7ff);
+          std.emissiveIntensity = 0.55;
+          std.transparent = true;
+          std.opacity = 0.72;
+        } else {
+          std.emissive.setHex(base.emissive);
+          std.emissiveIntensity = base.intensity;
+          std.transparent = base.transparent;
+          std.opacity = base.opacity;
+        }
+      }
     });
   }
 
@@ -2589,7 +2697,10 @@ export class RaidEngine {
       this.phase = 'dead';
       this.kit?.interrupt();
       this.scheduler.clear();
-      this.banner = { title: 'SIGNAL LOST', sub: 'THE BLOCK TOOK YOU' };
+      this.banner = {
+        title: 'SIGNAL LOST',
+        sub: this.arena.id === 'training-pad' ? 'THE FACILITY TOOK YOU' : 'THE BLOCK TOOK YOU',
+      };
       this.bannerT = 8;
       document.exitPointerLock();
     }
@@ -2913,6 +3024,7 @@ export class RaidEngine {
       powerState: this.powerVfx.currentState,
       beacon: this.beacon ? this.beacon.hudState(this.clock.elapsedTime, this.pos) : null,
       recovering: this.recoveryT > 0,
+      resonance: this.kit?.resonance ?? 0,
       opponent: this.publishFoe(),
       combo: this.comboHud(),
       radar: {

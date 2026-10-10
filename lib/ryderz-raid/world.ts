@@ -17,6 +17,12 @@ export interface World {
   heightAt: (x: number, z: number) => number;
   animate: (time: number) => void;
   dispose: () => void;
+  /** Holographic training facility. Hosts spawned here are painted as projections. */
+  training?: boolean;
+  /** Floor consoles the interact key can use besides the Beacon. */
+  interactives?: { kind: 'sim'; x: number; z: number }[];
+  /** Drop or raise holographic barriers. Returns true when the lane is open. */
+  toggleBarriers?: () => boolean;
 }
 
 /*
