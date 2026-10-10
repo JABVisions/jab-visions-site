@@ -23,6 +23,10 @@ export interface World {
   interactives?: { kind: 'sim'; x: number; z: number }[];
   /** Drop or raise holographic barriers. Returns true when the lane is open. */
   toggleBarriers?: () => boolean;
+  /** Intermediate waypoint when a straight line would miss stairs or a door. */
+  routeTo?: (fromX: number, fromZ: number, toX: number, toZ: number) => { x: number; z: number } | null;
+  /** Doors and other facility motion. Agents are the player and anyone who should trip a trigger. */
+  stepFacility?: (agents: { x: number; z: number }[], dt: number) => void;
 }
 
 /*
