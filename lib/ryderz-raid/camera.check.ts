@@ -1,6 +1,12 @@
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
-import { ThirdPersonCamera, cameraRelativeVelocity, stepYaw } from './camera';
+import { ThirdPersonCamera, cameraRelativeVelocity, keyboardYawDelta, stepYaw } from './camera';
+
+const left = keyboardYawDelta(true, false, 0.1);
+const right = keyboardYawDelta(false, true, 0.1);
+assert.ok(left > 0.3 && left < 0.4, 'A turns the camera left');
+assert.ok(Math.abs(left + right) < 1e-6, 'holding A and D cancels the turn');
+assert.equal(keyboardYawDelta(false, false, 0.5), 0);
 
 const ahead = cameraRelativeVelocity(0, 0, 1);
 assert.ok(ahead.z > 0.9 && Math.abs(ahead.x) < 0.01, 'forward stays on the camera yaw');

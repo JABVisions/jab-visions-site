@@ -28,8 +28,10 @@ export default function PlayerPartyHUD({
     if (!apiRef) return;
     apiRef.current = {
       setLocalVitals(hp, maxHp, aura, maxAura, alive) {
-        if (hpFill.current) hpFill.current.style.width = `${maxHp > 0 ? (hp / maxHp) * 100 : 0}%`;
-        if (auraFill.current) auraFill.current.style.width = `${maxAura > 0 ? (aura / maxAura) * 100 : 0}%`;
+        const healthWidth = `${maxHp > 0 ? Math.max(0, Math.min(100, (hp / maxHp) * 100)) : 0}%`;
+        const auraWidth = `${maxAura > 0 ? Math.max(0, Math.min(100, (aura / maxAura) * 100)) : 0}%`;
+        hpFill.current?.style.setProperty('width', healthWidth, 'important');
+        auraFill.current?.style.setProperty('width', auraWidth, 'important');
         slotRoot.current?.classList.toggle(styles.down, !alive);
       },
     };

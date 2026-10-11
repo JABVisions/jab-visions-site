@@ -14,6 +14,16 @@ function clampPct(value: number, max: number) {
   return Math.max(0, Math.min(100, (value / max) * 100));
 }
 
+/** Paint a semicircle from its real length. CSS dash arrays ignore SVG pathLength, so a 0–100 dash stays visually full. */
+function paintArc(path: SVGPathElement | null, pct: number) {
+  if (!path) return;
+  const length = path.getTotalLength() || 1;
+  const shown = (Math.max(0, Math.min(100, pct)) / 100) * length;
+  const dash = `${shown} ${length}`;
+  path.setAttribute('stroke-dasharray', dash);
+  path.style.strokeDasharray = dash;
+}
+
 const CircularPlayerHUD = forwardRef<
   CircularHudApi,
   { ryderId: RyderId; burnout?: boolean; badge?: string }
@@ -31,8 +41,8 @@ const CircularPlayerHUD = forwardRef<
     setVitals(hp, maxHp, aura, maxAura, isBurnout, resonance = 0) {
       const healthPct = clampPct(hp, maxHp);
       const auraPct = clampPct(aura, maxAura);
-      if (hpArc.current) hpArc.current.style.strokeDasharray = `${healthPct} 100`;
-      if (auraArc.current) auraArc.current.style.strokeDasharray = `${auraPct} 100`;
+      paintArc(hpArc.current, healthPct);
+      paintArc(auraArc.current, auraPct);
       if (hpLabel.current) hpLabel.current.textContent = `${Math.ceil(hp)}`;
       if (auraLabel.current) {
         auraLabel.current.textContent = isBurnout ? 'OUT' : `${Math.ceil(aura)}`;
@@ -64,13 +74,11 @@ const CircularPlayerHUD = forwardRef<
           ref={hpArc}
           className={`${styles.arc} ${styles.health}`}
           d="M 60 14 A 46 46 0 0 0 60 106"
-          pathLength={100}
         />
         <path
           ref={auraArc}
           className={`${styles.arc} ${styles.aura}`}
           d="M 60 14 A 46 46 0 0 1 60 106"
-          pathLength={100}
         />
       </svg>
       <div className={styles.portrait}>

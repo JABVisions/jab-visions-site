@@ -46,6 +46,7 @@ import type { MeleeStyle, PoseOverride } from './skeletal';
 import {
   ThirdPersonCamera,
   cameraRelativeVelocity,
+  keyboardYawDelta,
   stepYaw,
   type CameraConfig,
   type CameraSnapshot,
@@ -1016,6 +1017,11 @@ export class RaidEngine {
     const manualLook = Math.abs(this.lookAcc.x) + Math.abs(this.lookAcc.y) + Math.abs(stick.x) + Math.abs(stick.y) > 0.001;
     if (manualLook) this.recenter = false;
     this.yaw -= (this.lookAcc.x * 0.0031 + stick.x * STICK_YAW_RATE * dt) * sens;
+    this.yaw += keyboardYawDelta(
+      this.keys.has('a') || this.keys.has('arrowleft'),
+      this.keys.has('d') || this.keys.has('arrowright'),
+      dt,
+    );
     this.pitch = clamp(
       this.pitch - (this.lookAcc.y * 0.0024 + stick.y * STICK_PITCH_RATE * dt) * sens,
       cam.pitchMin,
@@ -1427,7 +1433,7 @@ export class RaidEngine {
 
   /**
    * Run direction turns the body. Aiming, striking, and abilities square up to the
-   * camera so attacks still go where the crosshair is. WASD never orbits the camera.
+   * camera so attacks still go where the view is pointed. A and D yaw that view.
    */
   private stepFacing(dt: number) {
     const committed =
@@ -1560,14 +1566,12 @@ export class RaidEngine {
     return { x, y };
   }
 
-  /** Strafe on x, forward/back on z. Positive z is backward, matching the touch stick. */
+  /** Stick strafe on x, keyboard and stick forward/back on z. A and D yaw the camera instead of strafing. Positive z is backward. */
   private readMoveAxes() {
     let x = this.moveAxis.x;
     let z = this.moveAxis.z;
     if (this.keys.has('arrowup') || this.keys.has('w')) z -= 1;
     if (this.keys.has('arrowdown') || this.keys.has('s')) z += 1;
-    if (this.keys.has('arrowleft') || this.keys.has('a')) x -= 1;
-    if (this.keys.has('arrowright') || this.keys.has('d')) x += 1;
     const len = Math.hypot(x, z);
     if (len > 1) {
       x /= len;

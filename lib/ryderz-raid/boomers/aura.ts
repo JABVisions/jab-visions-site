@@ -92,6 +92,7 @@ export class BoomerAuraSystem {
     this.flare = Math.max(0, this.flare - dt * 0.8);
     const rush = moving ? 1.65 : 1;
     const spread = 0.55 + this.charge * 0.45 + this.flare * 0.35;
+    const visible = Math.max(0, Math.min(this.count, Math.round(this.count * Math.min(1, this.charge))));
     for (let i = 0; i < this.count; i += 1) {
       const climb = this.heights[i] + this.time * this.speeds[i] * 0.35 * rush;
       const y = (climb % 1.95) + 0.05;
@@ -104,8 +105,9 @@ export class BoomerAuraSystem {
     }
     const position = this.points.geometry.getAttribute('position') as THREE.BufferAttribute;
     position.needsUpdate = true;
+    this.points.geometry.setDrawRange(0, visible);
     const material = this.points.material as THREE.PointsMaterial;
-    material.opacity = Math.max(0.05, Math.min(1, this.charge));
+    material.opacity = Math.max(0.04, Math.min(1, this.charge));
     material.size = 0.04 + this.flare * 0.03;
   }
 

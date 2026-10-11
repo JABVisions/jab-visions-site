@@ -121,6 +121,18 @@ export function stepYaw(current: number, target: number, radiansPerSecond: numbe
   return current + Math.sign(delta) * max;
 }
 
+/** How fast A and D yaw the camera, in radians per second. */
+export const KEYBOARD_YAW_RATE = 3.2;
+
+/**
+ * Keyboard look. A and Left turn the view left (positive yaw). D and Right turn
+ * it right. W and S stay on movement; they are not part of this delta.
+ */
+export function keyboardYawDelta(left: boolean, right: boolean, dt: number) {
+  const dir = (left ? 1 : 0) - (right ? 1 : 0);
+  return dir * KEYBOARD_YAW_RATE * Math.max(0, dt);
+}
+
 export function cameraRelativeVelocity(yaw: number, strafe: number, forward: number) {
   const fwdX = Math.sin(yaw);
   const fwdZ = Math.cos(yaw);

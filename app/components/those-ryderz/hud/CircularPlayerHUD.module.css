@@ -27,7 +27,6 @@
 }
 
 .arc {
-  stroke-dasharray: 100 100;
   transition: stroke-dasharray 140ms linear;
 }
 
