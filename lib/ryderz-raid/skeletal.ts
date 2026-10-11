@@ -696,6 +696,7 @@ export type AbilityPose =
   | 'flight'
   | 'land'
   | 'channel'
+  | 'whirl'
   | 'summon'
   | 'grow'
   | 'stomp'
@@ -735,6 +736,7 @@ export const POSE_ROOT_DROP: Record<AbilityPose, number> = {
   flight: 0,
   land: 0.22,
   channel: 0.06,
+  whirl: 0,
   summon: 0.02,
   grow: 0.12,
   stomp: 0.16,
@@ -904,6 +906,9 @@ export function poseSkeleton(skel: ProceduralSkeleton, motion: SkeletalMotion) {
         break;
       case 'channel':
         poseChannel(SCRATCH, pose.t);
+        break;
+      case 'whirl':
+        poseWhirl(SCRATCH, pose.t);
         break;
       case 'summon':
         poseSummon(SCRATCH, pose.t);
@@ -2149,6 +2154,37 @@ function poseBlast(A: Angles, p: number) {
   A.upperLegR.x -= 0.35 * crouch - 0.25 * lunge;
   A.lowerLegR.x += 0.6 * crouch + 0.05 * lunge;
   A.footR.x -= 0.2 * lunge;
+}
+
+/**
+ * Held spinning kick. The root yaw spins the whole figure; this pose only
+ * shapes the body. One leg stays extended forward, the support knee is soft,
+ * and the arms counterbalance. `t` loops 0–1 so the stance breathes.
+ */
+function poseWhirl(A: Angles, t: number) {
+  const bob = Math.sin(t * Math.PI * 2);
+  A.upperLegR.x -= 1.05 + 0.05 * bob;
+  A.upperLegR.z -= 0.08;
+  A.lowerLegR.x += 0.12;
+  A.footR.x -= 0.42;
+  A.upperLegL.x -= 0.22;
+  A.upperLegL.z += 0.16;
+  A.lowerLegL.x += 0.58 + 0.06 * bob;
+  A.footL.x -= 0.12;
+  A.hips.x -= 0.05;
+  A.hips.z += 0.1;
+  A.spine.x -= 0.16;
+  A.spine.z -= 0.14;
+  A.spine.y += 0.1 * bob;
+  A.head.x += 0.1;
+  A.head.y -= 0.12 * bob;
+  // Drop the T-pose arms and hold them out, opposite the kick.
+  A.upperArmL.z += 1.05;
+  A.upperArmL.x -= 0.55;
+  A.lowerArmL.x -= 0.22;
+  A.upperArmR.z -= 0.85;
+  A.upperArmR.x += 0.42;
+  A.lowerArmR.x -= 0.18;
 }
 
 /** Spinning back kick: the hips carry the whole body around once, right leg whipped out at the apex. */
