@@ -209,6 +209,10 @@ interface Host {
   heldItem?: ThrowBody | null;
   /** Seconds left in a raise-then-throw. 0 means not winding up. */
   throwWind: number;
+  /** Dream Vision. The host stands and does not attack. Not a lift. */
+  pacified?: number;
+  /** Proclaim Peace. Released as soon as the timer expires. */
+  immobile?: number;
   winding: boolean;
   /** Next physical strike after this one, for a short jab chain. */
   follow: StrikeKind | null;
@@ -2099,6 +2103,15 @@ export class RaidEngine {
         if (host.controlled && host.duelist && this.gameMode !== GameMode.PVP) return false;
         return true;
       },
+      allies: () => this.hosts.filter((host) => host.ally && host.hp > 0),
+      blessSquad: (fraction: number) => {
+        if (fraction <= 0) return;
+        if (this.hp > 0) this.hp = Math.min(this.maxHp, this.hp + this.maxHp * fraction);
+        for (const host of this.hosts) {
+          if (!host.ally || host.hp <= 0) continue;
+          host.hp = Math.min(host.maxHp, host.hp + host.maxHp * fraction);
+        }
+      },
     };
   }
 
@@ -2541,6 +2554,14 @@ export class RaidEngine {
         time: () => this.simTime,
         sound: (soundId) => this.emitSound(soundId),
         playerHazards: () => this.kit?.hazards?.() ?? [],
+        healSquad: (fraction: number) => {
+          if (fraction <= 0) return;
+          if (this.hp > 0) this.hp = Math.min(this.maxHp, this.hp + this.maxHp * fraction);
+          for (const other of this.hosts) {
+            if (!other.ally || other.hp <= 0) continue;
+            other.hp = Math.min(other.maxHp, other.hp + other.maxHp * fraction);
+          }
+        },
       },
       id,
       (this.raidPlan?.difficulty ?? 'normal') as PvpDifficulty,
@@ -2785,7 +2806,14 @@ export class RaidEngine {
     }
 
     for (const host of this.hosts) {
+      host.pacified = Math.max(0, (host.pacified ?? 0) - dt);
+      host.immobile = Math.max(0, (host.immobile ?? 0) - dt);
+      const crowd = (host.pacified ?? 0) > 0 || (host.immobile ?? 0) > 0;
       if (host.ally && host.cpu) {
+        if (crowd) {
+          this.idleCrowd(host, dt, time);
+          continue;
+        }
         this.driveAlly(host, dt);
         continue;
       }
@@ -2809,6 +2837,11 @@ export class RaidEngine {
           this.animateHost(host, dt, 0, time);
           if (host.hit > 0) flashEmissive(host.fighter.humanoid, host.hitColor, host.hit * 2.4);
           else flashEmissive(host.fighter.humanoid, 0x3de7ff, 0.35);
+          continue;
+        }
+        if (crowd) {
+          this.pvpCpu.stun();
+          this.idleCrowd(host, dt, time);
           continue;
         }
         this.casedCpu = false;
@@ -2876,8 +2909,26 @@ export class RaidEngine {
         continue;
       }
 
+      if (crowd) {
+        this.idleCrowd(host, dt, time);
+        continue;
+      }
+
       this.driveCivilian(host, dt, time, phased, shielded);
     }
+  }
+
+  /** Pacified or frozen bodies stay on the ground. They do not rise the way a stun does. */
+  private idleCrowd(host: Host, dt: number, time: number) {
+    host.striker?.interrupt();
+    const group = host.fighter.humanoid.group;
+    group.rotation.order = 'YXZ';
+    group.rotation.x = 0;
+    group.position.copy(host.pos);
+    group.position.y = this.world.heightAt(host.pos.x, host.pos.z);
+    this.animateHost(host, dt, 0, time);
+    if (host.hit > 0) flashEmissive(host.fighter.humanoid, host.hitColor, host.hit * 2.4);
+    else flashEmissive(host.fighter.humanoid, 0x000000, 0);
   }
 
   /** Outward unit vector when a host is standing in one of the player's danger zones. */
@@ -3210,7 +3261,8 @@ export class RaidEngine {
     const scaled = kind ? calculatePvPDamage({ baseDamage: amount, kind }) : amount;
     // A braced Ryder (mid-spin) shrugs most of the blow off: less damage, no shove.
     const braced = clamp(this.kit?.braced ?? 0, 0, 1);
-    this.hp = Math.max(0, this.hp - scaled * (1 - 0.4 * braced));
+    const resist = this.kit?.incomingScale ?? 1;
+    this.hp = Math.max(0, this.hp - scaled * (1 - 0.4 * braced) * resist);
     if (physical) {
       if (this.takenGap > 0.5) this.takenChain = 0;
       this.takenChain += 1;
@@ -3271,6 +3323,7 @@ export class RaidEngine {
   private hurtHost(host: Host, amount: number, dir: THREE.Vector3, reaction?: HitReaction, strength = 1) {
     if (host.hp <= 0) return;
     if (host.ally && !this.allowAllyDamage) return;
+    if (host.ally && host.cpu) amount *= host.cpu.incomingScale;
     if (host.ally && host.cpu && (host.cpu.iframes > 0 || host.cpu.intangible)) return;
     if (host.duelist && !host.ally && !host.controlled && this.pvpCpu && (this.pvpCpu.iframes > 0 || this.pvpCpu.intangible)) return;
     if (this.gameMode === GameMode.PVP && host.duelist) {
@@ -3484,7 +3537,7 @@ export class RaidEngine {
   private meleeDamage() {
     const fists = 1 + 0.25 * this.upgrades.fists;
     const burned = this.burnout ? (this.upgrades.fists >= 3 ? 0.85 : 0.45) : 1;
-    return this.spec.meleeDamage * fists * burned;
+    return this.spec.meleeDamage * fists * burned * (this.kit?.outgoingScale ?? 1);
   }
 
   /**

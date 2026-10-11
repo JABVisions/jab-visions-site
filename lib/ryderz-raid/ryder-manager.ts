@@ -69,6 +69,12 @@ const SIGILS: Record<AbilityId, string> = {
   temporalZap: 'TZ',
   rewindProtocol: 'RW',
   zeroHour: 'ZH',
+  showtime: 'ST',
+  letsBeBad: 'LB',
+  abracadabra: 'AB',
+  dreamVision: 'DV',
+  proclaimPeace: 'PP',
+  freeAtLast: 'FL',
 };
 
 export function defaultLoadout(id: RyderId): PowerLoadout {

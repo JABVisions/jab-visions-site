@@ -121,6 +121,20 @@ const RYDER_COMBAT: Record<RyderId, CombatProfile> = {
     punchCycle: ['punch', 'punchR', 'chop', 'smash'],
     kickCycle: ['kick', 'spinKick', 'kick', 'spinKick'],
   },
+  'marilyn-monroe': {
+    punch: { damageMul: 0.42, recovery: 0.2 },
+    kick: { damageMul: 0.74, knockback: 5.8 },
+    melee: { label: 'Show stop', damageMul: 1, reaction: 'knockback', range: 2.2, recovery: 0.42, style: 'spinKick' },
+    combos: SHARED_COMBOS,
+    powerLink: { id: 'showtime-link', abilityId: 'showtime', label: 'Showtime', preReaction: 'stagger', followUps: 0, trap: 0 },
+  },
+  'martin-luther-king': {
+    punch: { damageMul: 0.5, recovery: 0.22 },
+    kick: { damageMul: 0.82, knockback: 6.4 },
+    melee: { label: 'Cadence', damageMul: 1.08, reaction: 'stagger', range: 2.25, recovery: 0.46, style: 'punch' },
+    combos: SHARED_COMBOS,
+    powerLink: { id: 'dream-link', abilityId: 'dreamVision', label: 'Dream Link', preReaction: 'stagger', followUps: 0, trap: 0 },
+  },
 };
 
 export function combatProfileFor(id: RyderId | null | undefined): CombatProfile {

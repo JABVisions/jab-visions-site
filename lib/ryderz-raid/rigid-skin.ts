@@ -28,6 +28,11 @@ interface Segment {
   bz: number;
 }
 
+/** Mixamo writes `mixamorigHips` with no separator. A leading underscore is the other export. */
+function isHipsName(name: string) {
+  return /^(?:mixamorig)?[_:]?(?:hips|pelvis)$/i.test(name);
+}
+
 /** Index of the bone that owns the mesh, when almost every weight sits on it. */
 function weldedBone(mesh: THREE.SkinnedMesh) {
   const index = mesh.geometry.getAttribute('skinIndex');
@@ -66,7 +71,7 @@ function isBodyWeld(mesh: THREE.SkinnedMesh, meshes: THREE.SkinnedMesh[]) {
   const bone = weldedBone(mesh);
   if (bone < 0) return false;
   const name = mesh.skeleton.bones[bone]?.name ?? '';
-  if (!/(^|_)hips$/i.test(name)) return false;
+  if (!isHipsName(name)) return false;
   const count = mesh.geometry.getAttribute('position')?.count ?? 0;
   let biggest = 0;
   meshes.forEach((other) => {
@@ -198,7 +203,7 @@ function limbsFloat(bones: THREE.Bone[], cloud: Cloud) {
   let sum = 0;
   let samples = 0;
   bones.forEach((bone) => {
-    if (!/hand|foot|lowerarm|lowerleg|forearm|calf/i.test(bone.name)) return;
+    if (!/hand|foot|lowerarm|lowerleg|forearm|calf|(?<!up)leg$/i.test(bone.name)) return;
     const joint = _pos.setFromMatrixPosition(bone.matrixWorld);
     let best = Infinity;
     for (let i = 0; i < count; i += step) {
@@ -386,7 +391,7 @@ function seatFloatingLimbs(mesh: THREE.SkinnedMesh, bindWorld: THREE.Matrix4[]) 
           cloud,
           reach.filter((item) => item.d > maxD * 0.38 && item.d < maxD * 0.58).map((item) => item.id),
         );
-        const upper = find(/upperarm|upper_arm/i);
+        const upper = find(/upperarm|upper_arm|(?<!fore)arm$/i);
         const lower = find(/lowerarm|forearm/i);
         const hand = find(/hand/i);
         const shoulderBone = find(/shoulder|clavicle/i);
@@ -442,7 +447,7 @@ function seatFloatingLimbs(mesh: THREE.SkinnedMesh, bindWorld: THREE.Matrix4[]) 
       const ys = leg.map((id) => at(id, 1)).sort((a, b) => a - b);
       const ankleCut = ys[Math.floor(ys.length * 0.14)];
       const ankle = centroidOf(cloud, leg.filter((id) => at(id, 1) <= ankleCut));
-      const hipsIndex = bones.findIndex((bone) => /(^|_)hips$/i.test(bone.name));
+      const hipsIndex = bones.findIndex((bone) => isHipsName(bone.name));
       // The hip pivot belongs in the pelvis, not halfway down the thigh. A pivot
       // in the thigh makes a kick tear out of the leg instead of swinging from the socket.
       let hip: THREE.Vector3 | null = null;
@@ -460,8 +465,8 @@ function seatFloatingLimbs(mesh: THREE.SkinnedMesh, bindWorld: THREE.Matrix4[]) 
               return up > 0.2 && up < 0.34;
             }),
           ) ?? hip.clone().lerp(ankle, 0.52);
-        const upper = find(/upperleg|thigh/i);
-        const lower = find(/lowerleg|calf/i);
+        const upper = find(/upperleg|thigh|upleg/i);
+        const lower = find(/lowerleg|calf|(?<!up)leg$/i);
         const foot = find(/foot/i);
         const toes = find(/toe/i);
         if (upper >= 0) targets.set(upper, hip.clone());
@@ -552,7 +557,7 @@ function paintWeights(mesh: THREE.SkinnedMesh, bindWorld: THREE.Matrix4[]) {
   };
 
   const keep = /^(?:(?!twist|eye|thumb|index|middle|ring|pinky|end).)*$/i;
-  const named = /neck|head|hips|spine|chest|shoulder|upperarm|lowerarm|forearm|hand|upperleg|thigh|lowerleg|calf|foot|toe/i;
+  const named = /neck|head|hips|spine|chest|shoulder|upperarm|lowerarm|forearm|(?<!fore)arm|hand|upperleg|upleg|thigh|lowerleg|calf|(?<!up)leg|foot|toe/i;
   const major = bones.map((bone, index) => {
     const span = Math.max(
       ...children[index].map((child) => joints[index].distanceTo(joints[child])),
@@ -733,7 +738,7 @@ function paintWeights(mesh: THREE.SkinnedMesh, bindWorld: THREE.Matrix4[]) {
   // Thigh vertices sit close to the pelvis, so a distance bind leaves them on
   // the hips. A kick then hinges in the middle of the thigh. Anything below
   // the crotch belongs to that side's leg.
-  const hipsBone = bones.findIndex((bone) => /(^|_)hips$/i.test(bone.name));
+  const hipsBone = bones.findIndex((bone) => isHipsName(bone.name));
   if (hipsBone >= 0) {
     const xWide = cloud.maxX - cloud.minX >= cloud.maxZ - cloud.minZ;
     const latAxis = xWide ? 0 : 2;
@@ -832,7 +837,7 @@ function paintWeights(mesh: THREE.SkinnedMesh, bindWorld: THREE.Matrix4[]) {
  */
 function closeStance(mesh: THREE.SkinnedMesh) {
   const bones = mesh.skeleton.bones;
-  const hips = bones.find((bone) => /(^|_)hips$/i.test(bone.name));
+  const hips = bones.find((bone) => isHipsName(bone.name));
   if (!hips) return;
   let top: THREE.Object3D = mesh;
   while (top.parent) top = top.parent;
@@ -857,7 +862,7 @@ function closeStance(mesh: THREE.SkinnedMesh) {
   const secondary: 'x' | 'z' = axis === 'x' ? 'z' : 'x';
   ([-1, 1] as const).forEach((sign) => {
     const side = sign < 0 ? 'left' : 'right';
-    const upper = bones.find((bone) => new RegExp(`${side}_?(upperleg|thigh)`, 'i').test(bone.name));
+    const upper = bones.find((bone) => new RegExp(`${side}_?(?:upperleg|thigh|upleg)`, 'i').test(bone.name));
     const foot = bones.find((bone) => new RegExp(`${side}_?foot`, 'i').test(bone.name));
     const parent = upper?.parent;
     if (!upper || !foot || !parent) return;
@@ -888,7 +893,7 @@ function closeStance(mesh: THREE.SkinnedMesh) {
 /** Vertices far from the pelvis that are still weighted to it will stretch into spikes when a limb moves. */
 function anchoredToHips(mesh: THREE.SkinnedMesh) {
   const bones = mesh.skeleton.bones;
-  const hips = bones.findIndex((bone) => /(^|_)hips$/i.test(bone.name));
+  const hips = bones.findIndex((bone) => isHipsName(bone.name));
   const index = mesh.geometry.getAttribute('skinIndex');
   const weight = mesh.geometry.getAttribute('skinWeight');
   if (hips < 0 || !index || !weight) return false;

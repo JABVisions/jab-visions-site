@@ -483,6 +483,15 @@ export class RyderPowerVFX {
     }
     const pct = max > 0 ? Math.max(0, Math.min(1, current / max)) : 0;
     const next = powerState(current, max, usable);
+    if (profile.auraStyle === 'sparkle') {
+      this.state = next;
+      this.hasState = true;
+      this.nextArc = 1;
+      this.auraLevel = next === 'DEPLETED' ? profile.depletedAuraIntensity : profile.poweredAuraIntensity * pct;
+      this.applyAura(time, pct);
+      this.arcs.update(dt, camera);
+      return;
+    }
     if (this.hasState && this.state === 'DEPLETED' && next !== 'DEPLETED') this.surge(1);
     this.state = next;
     this.hasState = true;
@@ -578,8 +587,9 @@ export class RyderPowerVFX {
     this.ring.scale.setScalar(breathe);
     const powered = profile.poweredAuraIntensity || 1;
     const norm = Math.max(0, level) / powered;
-    this.ringMat.opacity = Math.min(1, norm * 0.55);
-    this.discMat.opacity = Math.min(1, norm * 0.22);
+    const sparkle = profile.auraStyle === 'sparkle';
+    this.ringMat.opacity = sparkle ? 0 : Math.min(1, norm * 0.55);
+    this.discMat.opacity = sparkle ? 0 : Math.min(1, norm * 0.22);
   }
 
   dispose() {

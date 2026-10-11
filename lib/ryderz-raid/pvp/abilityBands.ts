@@ -28,6 +28,12 @@ export const ABILITY_BANDS: Record<AbilityId, AbilityBand> = {
   temporalZap: 'long',
   rewindProtocol: 'defensive',
   zeroHour: 'close',
+  showtime: 'mid',
+  letsBeBad: 'close',
+  abracadabra: 'mid',
+  dreamVision: 'mid',
+  proclaimPeace: 'long',
+  freeAtLast: 'movement',
 };
 
 /** 0–1. A close cutter scores almost nothing from across the block. */
