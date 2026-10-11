@@ -29,6 +29,7 @@ import RaidWatch from './modes/RaidWatch';
 import { launchFromSquad, type RaidSquad } from '@/lib/ryderz-raid/raid/squad';
 import PvpFlow, { type PvpLineup } from './modes/PvpFlow';
 import SoloCharacterSelect from './modes/SoloCharacterSelect';
+import PremiereCharacterSelect from './premiere/PremiereCharacterSelect';
 import { NEUTRAL_THEME, RYDER_THEME as AURA } from './menu/theme';
 import RyderzStartScreen from './start/RyderzStartScreen';
 import styles from './RaidGame.module.css';
@@ -55,7 +56,8 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
   // `selected` is the Ryder the raid booted with (it owns the engine's lifetime);
   // the Ryder currently in play lives in the RyderManager and can change mid-raid.
   const [selected, setSelected] = useState<RyderId | null>(null);
-  const [screen, setScreen] = useState<'start' | 'solo-select' | 'pvp' | 'raid-lobby' | 'raid-watch' | 'game'>('start');
+  const [screen, setScreen] = useState<'start' | 'solo-select' | 'pvp' | 'raid-select' | 'raid-lobby' | 'raid-watch' | 'game'>('start');
+  const [raidHost, setRaidHost] = useState<RyderId>('rubi');
   const raidPlanRef = useRef<ReturnType<typeof launchFromSquad> | null>(null);
   const netRef = useRef<{ code: string; guestId: string; authority: boolean } | null>(null);
   const netAt = useRef(0);
@@ -362,7 +364,8 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
     setCamPanel(false);
     setSelected(null);
     const mode = manager.getState().gameMode;
-    setScreen(mode === GameMode.PVP ? 'pvp' : mode === GameMode.RAID ? 'raid-lobby' : 'solo-select');
+    if (mode === GameMode.RAID) setRaidHost(manager.activeRyder);
+    setScreen(mode === GameMode.PVP ? 'pvp' : mode === GameMode.RAID ? 'raid-select' : 'solo-select');
     setPhase('select');
     setPaused(false);
     setBanner(null);
@@ -727,6 +730,7 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
           onContinue={() => {
             if (!saves.loadGame(saveState.activeSlot, manager)) return;
             const loaded = manager.getState();
+            if (loaded.gameMode === GameMode.RAID) setRaidHost(loaded.activeRyder);
             setScreen(loaded.gameMode === GameMode.PVP ? 'pvp' : loaded.gameMode === GameMode.RAID ? 'raid-lobby' : 'solo-select');
           }}
           onNewGame={() => {
@@ -739,7 +743,7 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
           }}
           onPickMode={(mode) => {
             manager.setGameMode(mode);
-            setScreen(mode === GameMode.PVP ? 'pvp' : mode === GameMode.RAID ? 'raid-lobby' : 'solo-select');
+            setScreen(mode === GameMode.PVP ? 'pvp' : mode === GameMode.RAID ? 'raid-select' : 'solo-select');
           }}
         />
       )}
@@ -750,8 +754,21 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
 
       {screen === 'pvp' && <PvpFlow onBack={() => setScreen('start')} onFight={playPvp} />}
 
+      {screen === 'raid-select' && (
+        <PremiereCharacterSelect
+          mode="raid"
+          initialId={raidHost}
+          onBack={() => setScreen('start')}
+          onConfirm={(character) => {
+            if (!character.ryderId) return;
+            setRaidHost(character.ryderId);
+            setScreen('raid-lobby');
+          }}
+        />
+      )}
+
       {screen === 'raid-lobby' && (
-        <RaidLobby onBack={() => setScreen('start')} onStart={playRaid} onSpectate={spectateRaid} />
+        <RaidLobby key={raidHost} hostId={raidHost} onBack={() => setScreen('raid-select')} onStart={playRaid} onSpectate={spectateRaid} />
       )}
       {screen === 'raid-watch' && watchNet && (
         <RaidWatch

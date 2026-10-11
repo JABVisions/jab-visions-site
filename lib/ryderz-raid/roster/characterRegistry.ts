@@ -45,12 +45,12 @@ export interface RaidCharacter {
 }
 
 const FUTURE_CHARACTERS: RaidCharacter[] = [
-  stub('baxter', 'Baxter', 'ryder', true),
-  stub('tj', 'TJ', 'villain', false),
-  stub('ester', 'Ester', 'support', false),
+  stub('baxter', 'Baxter Banks', 'ryder', true, '#f4f6fb'),
+  stub('tj', 'TJ', 'villain', false, '#9aa0a8'),
+  stub('ester', 'Ester Maxin', 'support', false, '#9b5cff'),
 ];
 
-function stub(id: string, name: string, category: CharacterCategory, solo: boolean): RaidCharacter {
+function stub(id: string, name: string, category: CharacterCategory, solo: boolean, color: string): RaidCharacter {
   return {
     id,
     ryderId: null,
@@ -59,7 +59,7 @@ function stub(id: string, name: string, category: CharacterCategory, solo: boole
     category,
     portrait: '',
     modelPath: '',
-    primaryColor: '#39ff6a',
+    primaryColor: color,
     maxHealth: 100,
     maxAura: 100,
     abilities: { q: '—', e: '—', r: '—' },
