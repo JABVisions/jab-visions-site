@@ -342,6 +342,8 @@ export class RaidEngine {
   private jumpAt = -10;
   private jumping = false;
   private queuedMoves = [false, false, false];
+  /** True once the ability key has come up, so a held key cannot switch a power off. */
+  private releaseArmed = [true, true, true];
   private readonly striker = new FighterStriker();
   private readonly playerBody = {};
   private throwables: ThrowableField | null = null;
@@ -554,6 +556,7 @@ export class RaidEngine {
     this.moveCd = [0, 0, 0];
     this.moveT = [0, 0, 0];
     this.queuedMoves = [false, false, false];
+    this.releaseArmed = [true, true, true];
     this.iframes = 0;
     this.recoveryT = 0;
     this.interactQueued = false;
@@ -704,6 +707,7 @@ export class RaidEngine {
     this.moves = moves;
     this.moveCd = [0, 0, 0];
     this.queuedMoves = [false, false, false];
+    this.releaseArmed = [true, true, true];
   }
 
   getLoadout(): AbilitySpec[] {
@@ -747,6 +751,7 @@ export class RaidEngine {
     this.moveCd = [0, 0, 0];
     this.moveT = [0, 0, 0];
     this.queuedMoves = [false, false, false];
+    this.releaseArmed = [true, true, true];
     this.meleeT = 0;
     this.meleeCd = 0;
 
@@ -967,7 +972,17 @@ export class RaidEngine {
 
   private onKeyUp = (e: KeyboardEvent) => {
     this.keys.delete(e.key.toLowerCase());
+    const command = commandForKey(e.key, e.code, 1);
+    if (command === 'ability1') this.releaseArmed[0] = true;
+    if (command === 'ability2') this.releaseArmed[1] = true;
+    if (command === 'ability3') this.releaseArmed[2] = true;
   };
+
+  /** Q/1, E/2, or R/3 is still down, so this press is the one that turned the power on. */
+  private abilityHeld(slot: number) {
+    const keys = slot === 0 ? ['q', '1'] : slot === 1 ? ['e', '2'] : ['r', '3'];
+    return keys.some((key) => this.keys.has(key));
+  }
 
   private onMouseMove = (e: MouseEvent) => {
     if (!this.pointerLocked) return;
@@ -1082,7 +1097,8 @@ export class RaidEngine {
     for (let i = 0; i < 3; i += 1) {
       if (this.queuedMoves[i]) {
         this.queuedMoves[i] = false;
-        if (!locked && (!busy || this.moveT[i] > 0)) this.tryMove(i);
+        const release = this.moves[i]?.id === this.kit?.releaseId;
+        if (!locked && (!busy || this.moveT[i] > 0 || release)) this.tryMove(i);
       }
     }
     this.pollPad();
@@ -2134,9 +2150,16 @@ export class RaidEngine {
   }
 
   private tryMove(slot: number) {
-    if (!this.player || this.burnout) return;
+    if (!this.player) return;
     const move = this.moves[slot];
     if (!move || this.moveCd[slot] > 0) return;
+    if (this.kit?.releaseId === move.id) {
+      if (!this.releaseArmed[slot]) return;
+      this.moveCd[slot] = 0.2;
+      this.kit.endAbility?.(move.id);
+      return;
+    }
+    if (this.burnout) return;
     this.moveCd[slot] = 0.16;
 
     if (move.drain > 0) {
@@ -2179,6 +2202,7 @@ export class RaidEngine {
     const id = move.id;
     // A Ryder kit that owns this power plays it out itself.
     if (this.kit?.tryAbility(id)) {
+      if (this.kit.releaseId === id && this.abilityHeld(slot)) this.releaseArmed[slot] = false;
       this.kitClaimed.add(id);
       this.abilityT = Math.max(this.abilityT, 0.9);
       this.combatMemory.note('ability', this.simTime);

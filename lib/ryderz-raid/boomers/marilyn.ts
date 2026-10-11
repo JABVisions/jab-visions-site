@@ -16,12 +16,14 @@ import {
 
 export const SHOWTIME = { count: 3, damage: 18, range: 18, speed: 14, life: 1.45, cooldown: 5 };
 /**
- * Controllable spinning kick. `moveScale` is 85% of a sprint: the engine
- * turns sprint off while her hands are busy, and 1.28 is that sprint rate.
+ * Controllable spinning kick. She holds it until E is pressed again.
+ * Contact and hit stun do not cancel it. `moveScale` is 85% of a sprint:
+ * the engine turns sprint off while her hands are busy, and 1.28 is that
+ * sprint rate. `guard` is the gap before a second press can switch it off.
  */
 export const LETS_BE_BAD = {
-  duration: 5,
   cooldown: 14,
+  guard: 0.35,
   kickDamage: 9,
   kickInterval: 0.45,
   kickReach: 1.65,
@@ -57,10 +59,9 @@ interface TornadoRibbon {
   turns: number;
 }
 
-/** The spinning kick and the ribbon vortex share one lifetime. */
+/** The spinning kick and the ribbon vortex stay up until she switches them off. */
 interface LetsBeBadState {
   active: boolean;
-  remainingDuration: number;
   moveSpeedMultiplier: number;
   spinSpeed: number;
   kickDamage: number;
@@ -70,7 +71,8 @@ interface LetsBeBadState {
 /**
  * Marilyn Monroe, the Blue Boomer. Charity.
  * Showtime sends three cartwheeling projections. Let's Be Bad is a spinning
- * kick under a reverse ribbon tornado, and she can still steer. Abracadabra
+ * kick under a reverse ribbon tornado. She steers through it, and it stays on
+ * until she presses E again. Abracadabra
  * is one expanding wave: damage once, heal allies, and dust only the enemies
  * that wave actually kills.
  */
@@ -114,6 +116,11 @@ export class MarilynKit implements RyderKit {
     return this.spinning;
   }
 
+  /** E again switches the spin off. Other keys stay blocked while it is on. */
+  get releaseId(): AbilityId | null {
+    return this.spinning ? 'letsBeBad' : null;
+  }
+
   get moveScale() {
     return this.spinning ? LETS_BE_BAD.moveScale : 1;
   }
@@ -125,9 +132,7 @@ export class MarilynKit implements RyderKit {
 
   get pose(): PoseOverride | null {
     if (this.spinning) {
-      const remain = this.spin?.remainingDuration ?? 0;
-      const started = LETS_BE_BAD.duration - remain;
-      const weight = Math.min(1, started / 0.18, remain / 0.28);
+      const weight = Math.min(1, this.spinClock / 0.18);
       const turns = this.spinAngle / (Math.PI * 2);
       return { kind: 'whirl', t: turns - Math.floor(turns), weight };
     }
@@ -247,7 +252,7 @@ export class MarilynKit implements RyderKit {
     this.aura?.setCharge(frame.burnout ? 0 : ratio, this.pulse);
     this.pulse = 0;
     this.aura?.update(frame.dt, frame.moving);
-    if (frame.stunned && this.spinning) this.endSpin();
+    // Contact hit stun must not end the spin. Death, grabs, and beacon recovery call interrupt.
     this.stepProjections(ctx, frame.dt);
     this.stepTornado(ctx, frame.dt);
     this.stepWave(ctx, frame.dt);
@@ -259,6 +264,13 @@ export class MarilynKit implements RyderKit {
     if (id === 'letsBeBad') return this.letsBeBad();
     if (id === 'abracadabra') return this.abracadabra();
     return false;
+  }
+
+  /** E again, or a computer teammate finishing a sweep. Death and grabs use interrupt. */
+  endAbility(id: AbilityId) {
+    if (id !== 'letsBeBad' || !this.spinning) return;
+    this.endSpin();
+    this.ctx?.cooldown('letsBeBad', LETS_BE_BAD.cooldown);
   }
 
   melee(): MeleeStep | null {
@@ -313,14 +325,17 @@ export class MarilynKit implements RyderKit {
 
   private letsBeBad() {
     const ctx = this.ctx;
-    if (!ctx || this.spinning) return false;
-    ctx.cooldown('letsBeBad', LETS_BE_BAD.cooldown);
+    if (!ctx) return false;
+    if (this.spinning) {
+      this.endAbility('letsBeBad');
+      return true;
+    }
+    ctx.cooldown('letsBeBad', LETS_BE_BAD.guard);
     ctx.sound('marilyn.letsBeBad.ribbon');
     ctx.camera.addKick(0.06);
     this.pulse = 1;
     this.spin = {
       active: true,
-      remainingDuration: LETS_BE_BAD.duration,
       moveSpeedMultiplier: LETS_BE_BAD.moveScale,
       spinSpeed: LETS_BE_BAD.spinSpeed,
       kickDamage: LETS_BE_BAD.kickDamage,
@@ -392,7 +407,6 @@ export class MarilynKit implements RyderKit {
 
   private stepTornado(ctx: KitContext, dt: number) {
     if (!this.spin?.active) return;
-    this.spin.remainingDuration -= dt;
     this.spinClock += dt;
     this.spinAngle += LETS_BE_BAD.spinSpeed * dt;
     this.ribbonFlash = Math.max(0, this.ribbonFlash - dt);
@@ -427,7 +441,6 @@ export class MarilynKit implements RyderKit {
     ctx.particles.emit(_sample, 0x66cfff, 2, { speed: 0.8, size: 0.1, life: 0.28, up: 0.35, spread: 0.4 });
     ctx.particles.emit(_look.set(ctx.pos.x, 1.1, ctx.pos.z), 0xd8f4ff, 1, { speed: 1.2, size: 0.08, life: 0.35, up: 0.6, spread: 1 });
     this.strikeSpin(ctx, legYaw);
-    if (this.spin.remainingDuration <= 0) this.endSpin();
   }
 
   private placeGlitter(ctx: KitContext, spin: number) {

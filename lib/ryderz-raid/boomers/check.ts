@@ -124,7 +124,7 @@ assert.equal(dancer.busy, true);
 assert.equal(dancer.steerWhileBusy, true);
 assert.equal(dancer.moveScale, LETS_BE_BAD.moveScale);
 assert.ok(Math.abs(dancer.moveScale - 0.85 * 1.28) < 1e-6);
-assert.equal(dancer.tryAbility('letsBeBad'), false);
+assert.equal(dancer.releaseId, 'letsBeBad');
 assert.equal(visible(spin.scene, 'lets-be-bad-ribbon'), 3);
 assert.equal(visible(spin.scene, 'lets-be-bad-glitter'), 1);
 assert.equal(visible(spin.scene, 'lets-be-bad-glow'), 1);
@@ -165,11 +165,17 @@ for (let i = 0; i < 70; i += 1) dancer.update({ dt: 0.01, time: i * 0.01, speed:
 assert.ok(of(front).filter((hit) => hit.reaction === 'knockback').length > kicksBefore, 'the extended leg comes around for another kick');
 assert.equal(of(front).filter((hit) => hit.reaction === 'stagger').length, ribbonsBefore, 'the ribbon waits out its own interval');
 assert.equal(of(flank).filter((hit) => hit.reaction === 'knockback').length, 0);
-dancer.update({ dt: LETS_BE_BAD.duration, time: 6, speed: 1, sprinting: false, moving: true });
+dancer.update({ dt: 8, time: 6, speed: 1, sprinting: false, moving: true });
+assert.equal(dancer.busy, true, 'the spin stays up past the old five-second mark');
+assert.equal(dancer.releaseId, 'letsBeBad');
+assert.equal(dancer.pose?.weight, 1);
+assert.equal(visible(spin.scene, 'lets-be-bad-ribbon'), 3);
+assert.equal(dancer.tryAbility('letsBeBad'), true);
 assert.equal(dancer.busy, false);
 assert.equal(dancer.bodyYaw, 0);
 assert.equal(dancer.moveScale, 1);
 assert.equal(dancer.steerWhileBusy, false);
+assert.equal(dancer.releaseId, null);
 assert.equal(visible(spin.scene, 'lets-be-bad-ribbon'), 0);
 assert.equal(visible(spin.scene, 'lets-be-bad-glitter'), 0);
 assert.equal(visible(spin.scene, 'lets-be-bad-glow'), 0);
@@ -182,8 +188,10 @@ const dizzy = new MarilynKit();
 dizzy.attach(stunned.ctx);
 dizzy.tryAbility('letsBeBad');
 dizzy.update({ dt: 0.05, time: 0, speed: 0, sprinting: false, moving: false, stunned: true });
-assert.equal(dizzy.busy, false);
-assert.equal(visible(stunned.scene, 'lets-be-bad-ribbon'), 0);
+dizzy.update({ dt: 0.5, time: 1, speed: 0, sprinting: false, moving: false, stunned: true });
+assert.equal(dizzy.busy, true);
+assert.equal(dizzy.releaseId, 'letsBeBad');
+assert.equal(visible(stunned.scene, 'lets-be-bad-ribbon'), 3);
 dizzy.detach();
 
 const cut = harness([]);
@@ -285,6 +293,25 @@ try {
   assert.equal(ally.cpu.sweeping, false);
   assert.equal(visible(ally.scene, 'lets-be-bad-ribbon'), 0);
   ally.cpu.dispose();
+
+  const sweepPack = [foe(0, 3.2, 200), foe(1.1, 3.6, 200)];
+  const sweepAlly = allyCpu(new THREE.Vector3(), sweepPack[0].pos, sweepPack, () => false);
+  let sweepTime = 0;
+  let sweepOn = false;
+  for (let i = 0; i < 240 && !sweepOn; i += 1) {
+    sweepTime += 0.05;
+    sweepAlly.cpu.update(0.05, sweepTime);
+    sweepOn = sweepAlly.cpu.sweeping;
+  }
+  assert.equal(sweepOn, true);
+  const sweepMark = sweepTime;
+  while (sweepTime - sweepMark < 5.4 && sweepAlly.cpu.sweeping) {
+    sweepTime += 0.05;
+    sweepAlly.cpu.update(0.05, sweepTime);
+  }
+  assert.equal(sweepAlly.cpu.sweeping, false, 'a computer Marilyn ends the spin after sweeping the pack');
+  assert.equal(visible(sweepAlly.scene, 'lets-be-bad-ribbon'), 0);
+  sweepAlly.cpu.dispose();
 
   const walled = [foe(0, 4, 200)];
   const held = new THREE.Vector3();

@@ -822,7 +822,7 @@ export const RYDERZ: Record<RyderId, RyderSpec> = {
         name: "Let's Be Bad",
         key: 'E',
         description:
-          'She spins for 5 seconds with one leg kicked forward and a sapphire ribbon tornado overhead. She keeps steering at 85% of her run speed. The kick hits for 9 every 0.45 seconds, and the ribbon hits for 5 every 0.75 seconds inside 2.5 metres.',
+          'She spins with one leg kicked forward and a sapphire ribbon tornado overhead until E is pressed again. Hitting an opponent does not stop it. She keeps steering at 85% of her run speed. The kick hits for 9 every 0.45 seconds, and the ribbon hits for 5 every 0.75 seconds inside 2.5 metres.',
         auraCost: 30,
         drain: 0,
       },
