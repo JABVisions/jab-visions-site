@@ -49,10 +49,12 @@ function controlLabel(slot: SquadSlot) {
 }
 
 export default function RaidLobby({
+  hostId = 'rubi',
   onBack,
   onStart,
   onSpectate,
 }: {
+  hostId?: RyderId;
   onBack: () => void;
   onStart: (squad: RaidSquad, net: { code: string; guestId: string; authority: boolean } | null) => void;
   onSpectate: (net: { code: string; guestId: string }) => void;
@@ -60,7 +62,7 @@ export default function RaidLobby({
   const roster = useMemo(() => playableCharacters(GameMode.RAID), []);
   const arenas = useMemo(() => listArenas().filter((arena) => arena.available), []);
   const [guest, setGuest] = useState('');
-  const [squad, setSquad] = useState<RaidSquad>(() => defaultSquad('rubi'));
+  const [squad, setSquad] = useState<RaidSquad>(() => defaultSquad(hostId));
   const [focus, setFocus] = useState(0);
   const [code, setCode] = useState('');
   const [joinCode, setJoinCode] = useState('');

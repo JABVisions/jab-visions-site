@@ -1,11 +1,10 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import type { RyderId } from '@/lib/ryderz-raid/config';
-import { GameMode } from '@/lib/ryderz-raid/game-mode';
-import { charactersForMode, filterRoster, type RaidCharacter, type RosterFilter } from '@/lib/ryderz-raid/roster';
+import type { RaidCharacter } from '@/lib/ryderz-raid/roster';
 import GlitchButton from '../start/GlitchButton';
-import { CharacterGrid } from '../roster/CharacterGrid';
+import PremiereCharacterSelect from '../premiere/PremiereCharacterSelect';
 import styles from './PvpFlow.module.css';
 
 export type PvpType = 'singlePlayer' | 'localTwoPlayer';
@@ -24,54 +23,47 @@ export default function PvpFlow({
   onBack: () => void;
   onFight: (lineup: PvpLineup) => void;
 }) {
-  const roster = useMemo(() => charactersForMode(GameMode.PVP), []);
   const [step, setStep] = useState<'type' | 'select'>('type');
   const [type, setType] = useState<PvpType>('singlePlayer');
-  const [filter, setFilter] = useState<RosterFilter>('all');
   const [side, setSide] = useState<'p1' | 'p2'>('p1');
   const [p1, setP1] = useState<RaidCharacter | null>(null);
   const [p2, setP2] = useState<RaidCharacter | null>(null);
-  const shown = filterRoster(roster, filter);
+  const [pin, setPin] = useState<{ token: number; id: string | null }>({ token: 0, id: null });
   const active = side === 'p1' ? p1 : p2;
   const ready = Boolean(p1?.ryderId && p2?.ryderId);
 
   const assign = (character: RaidCharacter) => {
     if (!character.ryderId) return;
-    if (side === 'p1') {
-      setP1(character);
-      if (!p2?.ryderId) setSide('p2');
-    } else {
-      setP2(character);
-    }
+    if (side === 'p1') setP1(character);
+    else setP2(character);
   };
 
-  return (
-    <div className={styles.screen}>
-      <header>
-        <p>Those Ryderz · PvP</p>
-        <h2>{step === 'type' ? 'Who is fighting?' : 'Choose your Ryderz.'}</h2>
-        <span>
-          {step === 'type'
-            ? '1 Player picks a Ryder and a CPU opponent. 2 Player puts two local Ryderz in the arena.'
-            : type === 'singlePlayer'
-              ? 'Pick Player 1, then the CPU. The CPU punches, kicks, and spends that Ryder\u2019s powers, aura, and cooldowns.'
-              : 'Player 1 uses the normal controls. Player 2 moves with I J K L and punches with U.'}
-        </span>
-      </header>
-      <button type="button" className={styles.back} onClick={() => (step === 'select' ? setStep('type') : onBack())}>
-        Back
-      </button>
-      {step === 'type' ? (
-        <div className={styles.types}>
-          <GlitchButton label="1 Player" hint="You vs CPU" onClick={() => { setType('singlePlayer'); setStep('select'); }} />
-          <GlitchButton label="2 Player" hint="Local versus" onClick={() => { setType('localTwoPlayer'); setStep('select'); }} />
-          <GlitchButton label="Online" hint="Later" disabled />
-        </div>
-      ) : (
-        <>
+  const focusSide = (next: 'p1' | 'p2') => {
+    setSide(next);
+    const character = next === 'p1' ? p1 : p2;
+    setPin({ token: Date.now(), id: character?.id ?? null });
+  };
+
+  if (step === 'select') {
+    return (
+      <PremiereCharacterSelect
+        mode="pvp"
+        initialId={active?.id ?? p1?.id}
+        pin={pin}
+        onBack={() => setStep('type')}
+        onHighlight={assign}
+        confirmLabel="Fight"
+        confirmDisabled={!ready}
+        onConfirm={(character) => {
+          const nextP1 = side === 'p1' ? character : p1;
+          const nextP2 = side === 'p2' ? character : p2;
+          if (!nextP1?.ryderId || !nextP2?.ryderId) return;
+          onFight({ type, player: nextP1.ryderId, opponent: nextP2.ryderId });
+        }}
+        toolbar={
           <div className={styles.versus}>
             <section className={`${styles.side} ${side === 'p1' ? styles.sideOn : ''}`}>
-              <button type="button" className={styles.pick} onClick={() => setSide('p1')}>
+              <button type="button" className={styles.pick} onClick={() => focusSide('p1')}>
                 <Face character={p1} />
                 <span>
                   <small>Player 1</small>
@@ -82,7 +74,7 @@ export default function PvpFlow({
             </section>
             <div className={styles.vs}>VS</div>
             <section className={`${styles.side} ${side === 'p2' ? styles.sideOn : ''}`}>
-              <button type="button" className={styles.pick} onClick={() => setSide('p2')}>
+              <button type="button" className={styles.pick} onClick={() => focusSide('p2')}>
                 <Face character={p2} />
                 <span>
                   <small>{type === 'singlePlayer' ? 'CPU' : 'Player 2'}</small>
@@ -92,27 +84,26 @@ export default function PvpFlow({
               </button>
             </section>
           </div>
-          <CharacterGrid
-            characters={shown}
-            selectedId={active?.id ?? null}
-            filter={filter}
-            onFilter={setFilter}
-            onSelect={assign}
-          />
-          <div className={styles.actions}>
-            <button
-              type="button"
-              disabled={!ready}
-              onClick={() => {
-                if (!p1?.ryderId || !p2?.ryderId) return;
-                onFight({ type, player: p1.ryderId, opponent: p2.ryderId });
-              }}
-            >
-              Fight
-            </button>
-          </div>
-        </>
-      )}
+        }
+      />
+    );
+  }
+
+  return (
+    <div className={styles.screen}>
+      <header>
+        <p>Those Ryderz · PvP</p>
+        <h2>Who is fighting?</h2>
+        <span>1 Player picks a Ryder and a CPU opponent. 2 Player puts two local Ryderz in the arena.</span>
+      </header>
+      <button type="button" className={styles.back} onClick={onBack}>
+        Back
+      </button>
+      <div className={styles.types}>
+          <GlitchButton label="1 Player" hint="You vs CPU" onClick={() => { setType('singlePlayer'); setStep('select'); }} />
+          <GlitchButton label="2 Player" hint="Local versus" onClick={() => { setType('localTwoPlayer'); setStep('select'); }} />
+          <GlitchButton label="Online" hint="Later" disabled />
+        </div>
     </div>
   );
 }
