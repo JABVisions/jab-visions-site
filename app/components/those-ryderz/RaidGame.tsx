@@ -509,7 +509,7 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
 
           <div className={styles.bottomHud}>
             <p className={styles.hint}>
-              WASD or arrows move the character · Mouse orbits the camera, which follows · Shift sprint · Space jump · X recenters pitch · B swaps shoulder · Click punches up close · Zoe blasts at range · Keven throws darts · C punch · V kick · F / RMB melee, F again throws · Z dodge · Q E R powers · {INTERACT_LABEL} pickup or beacon · Esc pause
+              A D or arrows turn the camera · W S walk along that view · Mouse can still orbit · Shift sprint · Space jump · X recenters pitch · B swaps shoulder · Click punches up close · Zoe blasts at range · Keven throws darts · C punch · V kick · F / RMB melee, F again throws · Z dodge · Q E R powers · {INTERACT_LABEL} pickup or beacon · Esc pause
               {phase === 'intermission' ? ' · Hold the spire to buy strength' : ''}
               {pvpTwo ? ' · P2 IJKL move · U punch · O kick · P melee · N dodge · M jump' : ''}
             </p>
@@ -645,7 +645,7 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
           <button type="button" onClick={() => engineRef.current?.requestPointerLock()}>
             Click to look
           </button>
-          <p>WASD moves the character. The camera follows. Mouse orbits. Esc pauses.</p>
+          <p>A and D turn the camera. W and S walk. The camera follows. Esc pauses.</p>
         </div>
       )}
 
