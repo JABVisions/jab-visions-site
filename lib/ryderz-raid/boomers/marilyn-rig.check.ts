@@ -64,6 +64,7 @@ assert.deepEqual(assessSkinning(scene), [], 'the repainted skin stays on the bon
 const marilyn = RYDERZ['marilyn-monroe'];
 const skeleton = new ProceduralSkeleton(scene, { keep: marilyn.skelKeep });
 skeleton.armHang = marilyn.armHang ?? 0;
+skeleton.sashay = marilyn.sashay ?? false;
 assert.equal(skeleton.isUsable, true, 'mixamorig bones map to a humanoid');
 poseSkeleton(skeleton, { phase: 0, moving: 0, sprinting: false, meleeT: 0 });
 scene.updateMatrixWorld(true);
@@ -73,7 +74,11 @@ const headForward = new THREE.Vector3(0, 0, 1).applyQuaternion(
 assert.ok(headForward.z > 0.5, `marilyn should face raid-forward, head forward z=${headForward.z.toFixed(2)}`);
 const hand = skeleton.bone('handR')!.getWorldPosition(new THREE.Vector3());
 const shoulder = skeleton.bone('upperArmR')!.getWorldPosition(new THREE.Vector3());
-assert.ok(hand.y < shoulder.y - 0.05, `the arms should hang, hand y=${hand.y.toFixed(2)} shoulder y=${shoulder.y.toFixed(2)}`);
+assert.ok(hand.y < shoulder.y - 0.18, `the arms should hang, hand y=${hand.y.toFixed(2)} shoulder y=${shoulder.y.toFixed(2)}`);
+const elbow = skeleton.bone('lowerArmR')!.getWorldPosition(new THREE.Vector3());
+const forearmDrop = elbow.y - hand.y;
+const forearmReach = Math.hypot(hand.x - elbow.x, hand.z - elbow.z);
+assert.ok(forearmDrop > forearmReach, `the elbow should hang, not sit at a right angle (drop ${forearmDrop.toFixed(3)}, out ${forearmReach.toFixed(3)})`);
 
 const bones = mesh.skeleton.bones;
 const armBones = new Set(
@@ -125,6 +130,11 @@ function pose(motion: SkeletalMotion) {
 const idleArms = capture(armVerts);
 const idleLegs = capture(legVerts);
 pose({ phase: 2.1, moving: 1, sprinting: false, meleeT: 0 });
+scene.updateMatrixWorld(true);
+const footL = skeleton.bone('footL')!.getWorldPosition(new THREE.Vector3());
+const footR = skeleton.bone('footR')!.getWorldPosition(new THREE.Vector3());
+assert.ok(Math.abs(footL.z - footR.z) > 0.08, `the stride should split the feet forward, dz=${Math.abs(footL.z - footR.z).toFixed(3)}`);
+assert.ok(Math.abs(footL.x - footR.x) > 0.06, `the stride should open the stance, dx=${Math.abs(footL.x - footR.x).toFixed(3)}`);
 const walked = capture(legVerts);
 const walk = travel(idleLegs, walked);
 pose({ phase: 2.1, moving: 1, sprinting: true, meleeT: 0 });

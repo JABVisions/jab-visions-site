@@ -124,9 +124,11 @@ export interface RyderSpec {
   strikes?: MeleeStyle[];
   /**
    * Figure-space drop applied to both upper arms when those bones are left in
-   * a T-pose export. Positive hangs them from the horizontal rest.
+   * a T-pose export. About π/2 hangs them straight down from the horizontal rest.
    */
   armHang?: number;
+  /** Hip-led stride with the arms left hanging, instead of a combat tuck. */
+  sashay?: boolean;
   /**
    * Procedural-skeleton bones left in the GLB's export pose. Use when a
    * bind-pose correction (hanging a raised arm, unfolding an elbow) would
@@ -759,15 +761,16 @@ export const RYDERZ: Record<RyderId, RyderSpec> = {
       auraStyle: 'sparkle',
     },
     weapon: 'Showtime',
-    portrait: '/assets/those-ryderz/icons/marilyn-monroe.png',
-    icon: '/assets/those-ryderz/icons/marilyn-monroe.png',
+    portrait: '/assets/those-ryderz/icons/marilyn-monroe.webp?v=2',
+    icon: '/assets/those-ryderz/icons/marilyn-monroe.webp?v=2',
     glb: '/assets/those-ryderz/models/boomers/marilyn-monroe.glb',
     strikes: ['punch', 'spinKick', 'kick'],
     // The Mixamo export already faces raid-forward, in a T-pose, with the
     // dress and jacket intact. The shared stance roll reads her right-side
     // bones (they sit on +X) as a backwards torso, yaws her 180°, and twists
     // the jacket off the collar. Leave the export pose and only hang the arms.
-    armHang: 1.15,
+    armHang: 1.52,
+    sashay: true,
     skelKeep: [
       'hips',
       'spine',

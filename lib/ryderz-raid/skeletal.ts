@@ -447,6 +447,8 @@ export class ProceduralSkeleton {
   private keep: Set<BoneKey>;
   /** Extra figure-space drop for upper arms that were exported in a T-pose. */
   armHang = 0;
+  /** Narrow hip-led stride. Arms stay hung instead of tucking into a guard. */
+  sashay = false;
 
   constructor(figure: THREE.Object3D, options?: { keep?: BoneKey[] }) {
     this.figure = figure;
@@ -772,29 +774,43 @@ export function poseSkeleton(skel: ProceduralSkeleton, motion: SkeletalMotion) {
   A.upperArmL.z += Math.sin(breath) * 0.02 * still;
   A.upperArmR.z -= Math.sin(breath) * 0.02 * still;
   // Relaxed combat-ready arms: elbows softly bent, forearms forward.
-  A.lowerArmL.x -= 0.2 * still;
-  A.lowerArmR.x -= 0.2 * still;
-  // A kept T-pose stays horizontal unless something hangs the arms. The drop
-  // is figure-space, so it survives whichever way the export bone was aimed.
+  // A hung T-pose (Marilyn) keeps the elbows straight so the arms fall, astonished.
+  if (!skel.armHang) {
+    A.lowerArmL.x -= 0.2 * still;
+    A.lowerArmR.x -= 0.2 * still;
+  }
+  // Figure-space drop. A full right angle from the horizontal rest hangs the
+  // arms; a little less leaves them open, off the dress, instead of pinned.
   if (skel.armHang) {
     A.upperArmL.z += skel.armHang;
     A.upperArmR.z -= skel.armHang;
-    A.lowerArmL.x -= 0.35;
-    A.lowerArmR.x -= 0.35;
+    A.upperArmL.x -= 0.18;
+    A.upperArmR.x -= 0.18;
   }
-  A.hips.z += Math.sin(breath * 0.5) * 0.015 * still;
+  A.hips.z += Math.sin(breath * 0.5) * (skel.sashay ? 0.05 : 0.015) * still;
 
   // --- Locomotion ------------------------------------------------------------
   if (moving > 0.01) {
     const sL = Math.sin(phase);
     const cL = Math.cos(phase);
-    const legAmp = sprinting ? 0.85 : 0.6;
-    const kneeAmp = sprinting ? 1.35 : 0.75;
-    const armAmp = sprinting ? 0.75 : 0.42;
-    const elbow = sprinting ? 1.0 : 0.45;
+    const sashay = skel.sashay;
+    // Pencil dress: a hip-led step that opens the feet, not a combat split.
+    // The skirt is skinned to the legs, so a big knee throws the hem apart.
+    const legAmp = sashay ? (sprinting ? 0.72 : 0.5) : sprinting ? 0.85 : 0.6;
+    const kneeAmp = sashay ? (sprinting ? 0.82 : 0.48) : sprinting ? 1.35 : 0.75;
+    const armAmp = sashay ? (sprinting ? 0.3 : 0.16) : sprinting ? 0.75 : 0.42;
+    const elbow = sashay ? 0.04 : sprinting ? 1.0 : 0.45;
+    const stance = sashay ? 0.18 : 0;
 
     A.upperLegL.x -= legAmp * sL * moving;
     A.upperLegR.x += legAmp * sL * moving;
+    // Marilyn's export puts the bone named left on −X. +Z still walks a
+    // hanging limb toward +X, so the open stance is the opposite of the
+    // usual left-is-+X sign. The extra opens whichever foot is forward.
+    if (sashay) {
+      A.upperLegL.z -= (stance + 0.1 * Math.max(0, sL)) * moving;
+      A.upperLegR.z += (stance + 0.1 * Math.max(0, -sL)) * moving;
+    }
     A.lowerLegL.x += (0.08 + kneeAmp * Math.max(0, cL)) * moving;
     A.lowerLegR.x += (0.08 + kneeAmp * Math.max(0, -cL)) * moving;
     A.footL.x -= 0.35 * Math.max(0, cL) * moving;
@@ -802,18 +818,22 @@ export function poseSkeleton(skel: ProceduralSkeleton, motion: SkeletalMotion) {
 
     A.upperArmL.x += armAmp * sL * moving;
     A.upperArmR.x -= armAmp * sL * moving;
-    A.lowerArmL.x -= (elbow + 0.25 * Math.max(0, -sL)) * moving;
-    A.lowerArmR.x -= (elbow + 0.25 * Math.max(0, sL)) * moving;
-    A.upperArmL.z += 0.08 * moving;
-    A.upperArmR.z -= 0.08 * moving;
+    A.lowerArmL.x -= (elbow + (sashay ? 0 : 0.25) * Math.max(0, -sL)) * moving;
+    A.lowerArmR.x -= (elbow + (sashay ? 0 : 0.25) * Math.max(0, sL)) * moving;
+    if (!sashay) {
+      A.upperArmL.z += 0.08 * moving;
+      A.upperArmR.z -= 0.08 * moving;
+    }
 
-    const lean = sprinting ? 0.2 : 0.07;
+    const lean = sashay ? (sprinting ? 0.06 : 0.03) : sprinting ? 0.2 : 0.07;
     A.spine.x += lean * moving;
-    A.spine.y += sL * 0.12 * moving;
-    A.hips.y -= sL * 0.09 * moving;
-    A.hips.z += cL * 0.04 * moving;
+    A.spine.y += sL * (sashay ? 0.05 : 0.12) * moving;
+    A.spine.z -= sL * (sashay ? 0.07 : 0) * moving;
+    A.hips.y -= sL * (sashay ? 0.2 : 0.09) * moving;
+    A.hips.z += (sashay ? sL * 0.16 : cL * 0.04) * moving;
+    A.hips.x += (sashay ? Math.cos(phase) * 0.04 : 0) * moving;
     A.head.x -= lean * 0.7 * moving;
-    A.head.y -= sL * 0.08 * moving;
+    A.head.y -= sL * (sashay ? 0.04 : 0.08) * moving;
   }
 
   const pose = motion.pose;

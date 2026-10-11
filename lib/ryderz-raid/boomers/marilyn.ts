@@ -14,9 +14,9 @@ import {
   writeRibbon,
 } from './fx';
 
-export const SHOWTIME = { count: 3, damage: 18, range: 18, speed: 14, life: 1.45, cooldown: 10 };
-export const LETS_BE_BAD = { damage: 7, maxHits: 6, interval: 0.42, duration: 2.5, reach: 2.6, hold: 0.75, cooldown: 12 };
-export const ABRACADABRA = { damage: 55, radius: 12, heal: 0.15, expand: 0.7, cooldown: 25 };
+export const SHOWTIME = { count: 3, damage: 18, range: 18, speed: 14, life: 1.45, cooldown: 5 };
+export const LETS_BE_BAD = { damage: 7, maxHits: 6, interval: 0.42, duration: 2.5, reach: 2.6, hold: 0.75, cooldown: 6 };
+export const ABRACADABRA = { damage: 55, radius: 12, heal: 0.15, expand: 0.7, cooldown: 12 };
 
 const BLUE = 0x168bff;
 const _look = new THREE.Vector3();
