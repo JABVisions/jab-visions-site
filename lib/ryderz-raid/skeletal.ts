@@ -445,6 +445,8 @@ export class ProceduralSkeleton {
   readonly angles: Record<BoneKey, PoseAngles>;
   /** Bones left in the export pose. Neutralisation is skipped so a large bind-pose swing cannot corkscrew geodesic weights; animation still layers on top. */
   private keep: Set<BoneKey>;
+  /** Extra figure-space drop for upper arms that were exported in a T-pose. */
+  armHang = 0;
 
   constructor(figure: THREE.Object3D, options?: { keep?: BoneKey[] }) {
     this.figure = figure;
@@ -772,6 +774,14 @@ export function poseSkeleton(skel: ProceduralSkeleton, motion: SkeletalMotion) {
   // Relaxed combat-ready arms: elbows softly bent, forearms forward.
   A.lowerArmL.x -= 0.2 * still;
   A.lowerArmR.x -= 0.2 * still;
+  // A kept T-pose stays horizontal unless something hangs the arms. The drop
+  // is figure-space, so it survives whichever way the export bone was aimed.
+  if (skel.armHang) {
+    A.upperArmL.z += skel.armHang;
+    A.upperArmR.z -= skel.armHang;
+    A.lowerArmL.x -= 0.35;
+    A.lowerArmR.x -= 0.35;
+  }
   A.hips.z += Math.sin(breath * 0.5) * 0.015 * still;
 
   // --- Locomotion ------------------------------------------------------------

@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { RYDERZ } from '../config';
 import { reskinRigidSkeleton } from '../rigid-skin';
 import { assessSkinning, poseSkeleton, ProceduralSkeleton, type SkeletalMotion } from '../skeletal';
 
@@ -60,9 +61,19 @@ assert.ok(mesh?.isSkinnedMesh, 'marilyn ships a skinned mesh');
 assert.equal(reskinRigidSkeleton(scene), true, 'the hips weld is repainted onto the Mixamo limbs');
 assert.deepEqual(assessSkinning(scene), [], 'the repainted skin stays on the bones it cites');
 
-const skeleton = new ProceduralSkeleton(scene);
+const marilyn = RYDERZ['marilyn-monroe'];
+const skeleton = new ProceduralSkeleton(scene, { keep: marilyn.skelKeep });
+skeleton.armHang = marilyn.armHang ?? 0;
 assert.equal(skeleton.isUsable, true, 'mixamorig bones map to a humanoid');
 poseSkeleton(skeleton, { phase: 0, moving: 0, sprinting: false, meleeT: 0 });
+scene.updateMatrixWorld(true);
+const headForward = new THREE.Vector3(0, 0, 1).applyQuaternion(
+  skeleton.bone('head')!.getWorldQuaternion(new THREE.Quaternion()),
+);
+assert.ok(headForward.z > 0.5, `marilyn should face raid-forward, head forward z=${headForward.z.toFixed(2)}`);
+const hand = skeleton.bone('handR')!.getWorldPosition(new THREE.Vector3());
+const shoulder = skeleton.bone('upperArmR')!.getWorldPosition(new THREE.Vector3());
+assert.ok(hand.y < shoulder.y - 0.05, `the arms should hang, hand y=${hand.y.toFixed(2)} shoulder y=${shoulder.y.toFixed(2)}`);
 
 const bones = mesh.skeleton.bones;
 const armBones = new Set(

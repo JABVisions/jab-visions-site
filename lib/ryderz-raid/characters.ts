@@ -276,7 +276,7 @@ function measureFigure(figure: THREE.Object3D) {
 function wrapGltfAsHumanoid(
   template: GltfTemplate,
   height = 1.88,
-  options: { ownMaterials?: boolean; strikes?: MeleeStyle[]; keep?: BoneKey[] } = {},
+  options: { ownMaterials?: boolean; strikes?: MeleeStyle[]; keep?: BoneKey[]; armHang?: number } = {},
 ): { humanoid: Humanoid; rig: GltfRig } {
   const group = new THREE.Group();
   const figure = template.skinned ? (cloneSkeleton(template.scene) as THREE.Group) : template.scene.clone(true);
@@ -289,6 +289,7 @@ function wrapGltfAsHumanoid(
     const candidate = new ProceduralSkeleton(figure, options.keep ? { keep: options.keep } : undefined);
     if (candidate.isUsable) {
       skeleton = candidate;
+      skeleton.armHang = options.armHang ?? 0;
       skeleton.apply();
     }
   }
@@ -302,7 +303,7 @@ function wrapGltfAsHumanoid(
     -box.min.y * scale,
     -(box.min.z + box.max.z) * 0.5 * scale,
   );
-  // Tripo exports face +Z, which is this game's forward; no yaw correction needed.
+  // Tripo exports face +Z, which is this game's forward.
   figure.rotation.y = 0;
   figure.name = 'TripoFigure';
   group.add(figure);
@@ -721,6 +722,7 @@ export function buildRyder(spec: RyderSpec, options: { clone?: boolean } = {}): 
       strikes: spec.strikes,
       ownMaterials: true,
       keep: spec.skelKeep,
+      armHang: spec.armHang,
     });
     const weapons: THREE.Object3D[] = [];
     const glowMeshes: THREE.Mesh[] = [];

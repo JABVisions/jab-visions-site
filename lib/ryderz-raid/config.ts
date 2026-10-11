@@ -123,6 +123,11 @@ export interface RyderSpec {
   /** Melee animations cycled per swing when the figure is driven by the procedural skeleton. */
   strikes?: MeleeStyle[];
   /**
+   * Figure-space drop applied to both upper arms when those bones are left in
+   * a T-pose export. Positive hangs them from the horizontal rest.
+   */
+  armHang?: number;
+  /**
    * Procedural-skeleton bones left in the GLB's export pose. Use when a
    * bind-pose correction (hanging a raised arm, unfolding an elbow) would
    * corkscrew geodesic skinning. Animation still layers on top of the bind.
@@ -758,6 +763,35 @@ export const RYDERZ: Record<RyderId, RyderSpec> = {
     icon: '/assets/those-ryderz/icons/marilyn-monroe.png',
     glb: '/assets/those-ryderz/models/boomers/marilyn-monroe.glb',
     strikes: ['punch', 'spinKick', 'kick'],
+    // The Mixamo export already faces raid-forward, in a T-pose, with the
+    // dress and jacket intact. The shared stance roll reads her right-side
+    // bones (they sit on +X) as a backwards torso, yaws her 180°, and twists
+    // the jacket off the collar. Leave the export pose and only hang the arms.
+    armHang: 1.15,
+    skelKeep: [
+      'hips',
+      'spine',
+      'chest',
+      'upperChest',
+      'neck',
+      'head',
+      'shoulderL',
+      'shoulderR',
+      'upperArmL',
+      'upperArmR',
+      'lowerArmL',
+      'lowerArmR',
+      'handL',
+      'handR',
+      'upperLegL',
+      'upperLegR',
+      'lowerLegL',
+      'lowerLegR',
+      'footL',
+      'footR',
+      'toesL',
+      'toesR',
+    ],
     maxHp: 110,
     speed: 6.6,
     fireRate: 2.4,
