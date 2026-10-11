@@ -40,7 +40,8 @@ import {
   type HitReaction,
 } from './combat';
 import { AfterimagePool } from './speed-vfx';
-import { createRyderKit, type KitContext, type MeleeStep, type RyderKit } from './ryderz';
+import { createRyderKit, type KitContext, type KitTarget, type MeleeStep, type RyderKit } from './ryderz';
+import { sweepScore } from './pvp/abilityBands';
 import type { MeleeStyle, PoseOverride } from './skeletal';
 import {
   ThirdPersonCamera,
@@ -2562,6 +2563,22 @@ export class RaidEngine {
             other.hp = Math.min(other.maxHp, other.hp + other.maxHp * fraction);
           }
         },
+        raidTargets: () => this.hosts.filter((other) => !other.ally && !other.duelist && other.hp > 0),
+        hurtRaidTarget: (target: KitTarget, amount: number, dir: THREE.Vector3, reaction?: HitReaction, strength = 1) => {
+          const foeHost = target as Host;
+          if (foeHost.ally || foeHost.hp <= 0) return 0;
+          const before = foeHost.hp;
+          host.dealt = (host.dealt ?? 0) + amount;
+          this.allowAllyDamage = true;
+          this.hurtHost(foeHost, amount, dir, reaction, strength);
+          this.allowAllyDamage = false;
+          return Math.max(0, before - Math.max(0, foeHost.hp));
+        },
+        flashRaidTarget: (target: KitTarget, color: number, seconds: number) => {
+          const foeHost = target as Host;
+          foeHost.hit = Math.max(foeHost.hit, seconds);
+          foeHost.hitColor = color;
+        },
       },
       id,
       (this.raidPlan?.difficulty ?? 'normal') as PvpDifficulty,
@@ -2588,7 +2605,10 @@ export class RaidEngine {
         (ally) => ally.ally && ally !== self && ally.hp > 0 && Math.hypot(ally.pos.x - foe.pos.x, ally.pos.z - foe.pos.z) < 5,
       ).length;
       const dist = Math.hypot(self.pos.x - foe.pos.x, self.pos.z - foe.pos.z);
-      const score = crowd * 8 + dist;
+      const pack = foes.filter(
+        (other) => other !== foe && Math.hypot(other.pos.x - foe.pos.x, other.pos.z - foe.pos.z) < 4,
+      ).length;
+      const score = self.cpu?.sweeping ? sweepScore(dist, pack) : crowd * 8 + dist;
       if (score < bestScore) {
         best = foe;
         bestScore = score;

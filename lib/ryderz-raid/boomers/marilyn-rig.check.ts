@@ -147,8 +147,11 @@ pose({ phase: 0, moving: 0, sprinting: false, meleeT: 0, pose: { kind: 'launch',
 const jump = Math.max(travel(idleLegs, capture(legVerts)), travel(idleArms, capture(armVerts)));
 pose({ phase: 0, moving: 0, sprinting: false, meleeT: 0, pose: { kind: 'flip', t: 0.45, weight: 1 } });
 const showtime = travel(idleArms, capture(armVerts));
-pose({ phase: 0, moving: 0, sprinting: false, meleeT: 0, pose: { kind: 'channel', t: 0.5, weight: 1 } });
-const ribbons = travel(idleArms, capture(armVerts));
+pose({ phase: 0, moving: 0, sprinting: false, meleeT: 0, pose: { kind: 'whirl', t: 0.5, weight: 1 } });
+const ribbons = Math.max(travel(idleLegs, capture(legVerts)), travel(idleArms, capture(armVerts)));
+const kickFoot = skeleton.bone('footR')!.getWorldPosition(new THREE.Vector3());
+const standFoot = skeleton.bone('footL')!.getWorldPosition(new THREE.Vector3());
+assert.ok(kickFoot.z > standFoot.z + 0.05, `the spinning kick should extend one leg forward, dz=${(kickFoot.z - standFoot.z).toFixed(3)}`);
 pose({ phase: 0, moving: 0, sprinting: false, meleeT: 0, pose: { kind: 'finish', t: 0.6, weight: 1 } });
 const wave = Math.max(travel(idleArms, capture(armVerts)), travel(idleLegs, capture(legVerts)));
 
@@ -158,7 +161,7 @@ assert.ok(punch > 0.04, `punch should move the arm, moved ${punch.toFixed(3)}`);
 assert.ok(kick > 0.05, `kick should swing the leg, moved ${kick.toFixed(3)}`);
 assert.ok(jump > 0.04, `jump should tuck the body, moved ${jump.toFixed(3)}`);
 assert.ok(showtime > 0.04, `showtime should pose the arms, moved ${showtime.toFixed(3)}`);
-assert.ok(ribbons > 0.04, `ribbons should channel through the arms, moved ${ribbons.toFixed(3)}`);
+assert.ok(ribbons > 0.04, `the spinning kick should pose the whole body, moved ${ribbons.toFixed(3)}`);
 assert.ok(wave > 0.03, `abracadabra should pose the body, moved ${wave.toFixed(3)}`);
 
 console.log('marilyn rig ok', { walk, run, punch, kick, jump, showtime, ribbons, wave });

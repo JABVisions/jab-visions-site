@@ -83,6 +83,10 @@ export interface PvpCpuHooks {
   playerHazards?(): Array<{ x: number; z: number; radius: number; kind: 'drain' | 'stomp' }>;
   /** Heal the squad, including this CPU, by a fraction of each fighter's maximum health. */
   healSquad?(fraction: number): void;
+  /** Living raid enemies. When set, powers hit the pack instead of the one focus. */
+  raidTargets?(): KitTarget[];
+  hurtRaidTarget?(target: KitTarget, damage: number, dir: THREE.Vector3, reaction?: HitReaction, strength?: number): number;
+  flashRaidTarget?(target: KitTarget, color: number, seconds: number): void;
 }
 
 interface PlayerBody extends ReactiveBody, KitTarget {
@@ -149,6 +153,11 @@ export class PvpCpu {
 
   grabsPlayer() {
     return (this.foe?.held ?? 0) > 0;
+  }
+
+  /** True while a power wants this teammate to keep walking through the pack. */
+  get sweeping() {
+    return this.kit?.steerWhileBusy ?? false;
   }
 
   /** The duel was cased. Stop the current swing and any power this Ryder had open. */
@@ -226,8 +235,10 @@ export class PvpCpu {
       this.aimRefresh = 0.7 + Math.random() * 0.7;
     }
 
-    if (!(this.kit?.locked ?? false) && time >= this.decideAt) this.decide(time);
+    const steering = () => (this.kit?.busy ?? false) && (this.kit?.steerWhileBusy ?? false);
+    if (!(this.kit?.locked ?? false) && !steering() && time >= this.decideAt) this.decide(time);
     if (!(this.kit?.locked ?? false) && !(this.kit?.busy ?? false)) this.act(dt, spec);
+    else if (steering()) this.sweep(dt, spec);
     this.stepStriker(dt);
     const moving = this.intent === 'chase' || this.intent === 'reposition' || this.intent === 'evade' || this.intent === 'retreat';
     this.kit?.update({
@@ -242,7 +253,7 @@ export class PvpCpu {
     });
     this.scheduler.update(time);
     this.power?.update(dt, time, this.aura, this.maxAura, !this.burnout, this.hooks.cameraObject);
-    this.separateFromFoe();
+    if (!this.kit?.steerWhileBusy) this.separateFromFoe();
 
     const group = body.fighter.humanoid.group;
     const bodyScale = this.kit?.bodyScale ?? 1;
@@ -422,6 +433,40 @@ export class PvpCpu {
       body.pos.z = foe.pos.z - (dz / dist) * gap;
     }
     this.place(body.pos);
+  }
+
+  /**
+   * Keep chasing while a spin owns her hands. She does not plant, punch, or
+   * get pushed back out of the pack. Walls still steer her around.
+   */
+  private sweep(dt: number, spec: RyderSpec) {
+    const body = this.body;
+    const foe = this.foe;
+    if (!body || !foe) return;
+    const dx = foe.pos.x - body.pos.x;
+    const dz = foe.pos.z - body.pos.z;
+    const dist = Math.hypot(dx, dz) || 0.001;
+    const hazard = this.playerHazard(body.pos.x, body.pos.z);
+    const mx = hazard ? hazard.x : dx / dist;
+    const mz = hazard ? hazard.z : dz / dist;
+    const speed = spec.speed * this.tempo() * 0.96 * (this.burnout ? 0.82 : 1) * (this.kit?.moveScale ?? 1);
+    const steered = steerVelocity(
+      body.pos.x,
+      body.pos.z,
+      mx * speed,
+      mz * speed,
+      body.radius,
+      (x, z, radius) => this.hooks.blocked(x, z, radius),
+      foe.pos.x,
+      foe.pos.z,
+    );
+    body.pos.x += steered.x * dt;
+    body.pos.z += steered.z * dt;
+    const travel = Math.hypot(steered.x, steered.z);
+    if (travel > 0.2) this.facing = Math.atan2(steered.x, steered.z);
+    else if (dist > 0.2) this.facing = Math.atan2(dx, dz);
+    this.place(body.pos);
+    this.intent = 'chase';
   }
 
   /** Body contact keeps people apart. A strike is a hitbox, not a shove. */
@@ -746,9 +791,14 @@ export class PvpCpu {
       yaw: () => cpu.facing,
       time: () => hooks.time(),
       fighter: () => cpu.body?.fighter ?? null,
-      targets: () => (cpu.foe ? [cpu.foe] : []),
+      targets: () => {
+        const raid = hooks.raidTargets?.();
+        if (raid) return raid;
+        return cpu.foe ? [cpu.foe] : [];
+      },
       hurt: (target: KitTarget, damage: number, dir: THREE.Vector3, reaction?: HitReaction, strength = 1) => {
-        if (target !== cpu.foe || cpu.hooks.playerIntangible()) return 0;
+        if (hooks.hurtRaidTarget) return hooks.hurtRaidTarget(target, damage, dir, reaction, strength);
+        if (target !== cpu.foe || cpu.hooks.playerIntangible() || !cpu.foe) return 0;
         const kind: PvpDamageKind = cpu.intentSlot === 2 ? 'ultimate' : 'ability';
         if (reaction) applyReaction(cpu.foe, reaction, dir, strength ?? 1);
         const before = hooks.playerHp();
@@ -756,10 +806,12 @@ export class PvpCpu {
         return Math.max(0, before - hooks.playerHp());
       },
       flash: (target: KitTarget, color: number, seconds: number) => {
-        if (target === cpu.foe) {
+        if (target === cpu.foe && cpu.foe) {
           cpu.foe.hit = Math.max(cpu.foe.hit, seconds);
           cpu.foe.hitColor = color;
+          return;
         }
+        hooks.flashRaidTarget?.(target, color, seconds);
       },
       meleeDamage: () => {
         const base = cpu.burnout ? (cpu.spec?.meleeDamage ?? 10) * 0.45 : (cpu.spec?.meleeDamage ?? 10);

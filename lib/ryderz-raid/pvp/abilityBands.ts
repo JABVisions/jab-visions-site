@@ -36,6 +36,14 @@ export const ABILITY_BANDS: Record<AbilityId, AbilityBand> = {
   freeAtLast: 'movement',
 };
 
+/**
+ * While a spin sweeps the pack, a nearby cluster scores better than a lone
+ * fighter at the same distance. `pack` is how many other enemies stand close.
+ */
+export function sweepScore(dist: number, pack: number) {
+  return dist - pack * 4;
+}
+
 /** 0–1. A close cutter scores almost nothing from across the block. */
 export function bandFit(band: AbilityBand, dist: number): number {
   switch (band) {

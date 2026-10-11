@@ -188,6 +188,11 @@ export interface RyderKit {
    * switched off.
    */
   readonly busy?: boolean;
+  /**
+   * While `busy`, a computer teammate keeps walking toward enemies instead of
+   * planting for the animation. The player already keeps WASD when busy.
+   */
+  readonly steerWhileBusy?: boolean;
   /** Walking speed multiplier this frame (1 = normal). */
   readonly moveScale?: number;
   /** Multiplier on damage this fighter deals. 1 is their normal strength. */

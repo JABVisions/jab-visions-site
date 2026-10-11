@@ -151,6 +151,61 @@ export function ribbonMesh(color: number) {
   return { mesh, positions };
 }
 
+export const TORNADO_STEPS = 64;
+
+/** A long ribbon strip. The tornado uses more samples than the short hand ribbons. */
+export function tornadoRibbon(color: number) {
+  const positions = new Float32Array(TORNADO_STEPS * 2 * 3);
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  const indices: number[] = [];
+  for (let i = 0; i < TORNADO_STEPS - 1; i += 1) {
+    const a = i * 2;
+    indices.push(a, a + 1, a + 2, a + 1, a + 3, a + 2);
+  }
+  geometry.setIndex(indices);
+  geometry.setDrawRange(0, 0);
+  const mesh = new THREE.Mesh(
+    geometry,
+    new THREE.MeshBasicMaterial({
+      color,
+      transparent: true,
+      opacity: 0.78,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    }),
+  );
+  mesh.frustumCulled = false;
+  mesh.name = 'lets-be-bad-ribbon';
+  return { mesh, positions };
+}
+
+/** Ribbon width grows with `t` so the spiral opens as it rises. */
+export function writeTornado(positions: Float32Array, samples: THREE.Vector3[], widthAt: (t: number) => number) {
+  const count = Math.min(samples.length, Math.floor(positions.length / 6));
+  const side = new THREE.Vector3();
+  const forward = new THREE.Vector3();
+  const up = new THREE.Vector3(0, 1, 0);
+  for (let i = 0; i < count; i += 1) {
+    const next = samples[Math.min(count - 1, i + 1)];
+    const prev = samples[Math.max(0, i - 1)];
+    forward.subVectors(next, prev);
+    if (forward.lengthSq() < 1e-6) forward.set(0, 1, 0);
+    side.crossVectors(forward, up);
+    if (side.lengthSq() < 1e-6) side.set(1, 0, 0);
+    side.normalize().multiplyScalar(widthAt(count <= 1 ? 0 : i / (count - 1)));
+    const point = samples[i];
+    const o = i * 6;
+    positions[o] = point.x + side.x;
+    positions[o + 1] = point.y + side.y;
+    positions[o + 2] = point.z + side.z;
+    positions[o + 3] = point.x - side.x;
+    positions[o + 4] = point.y - side.y;
+    positions[o + 5] = point.z - side.z;
+  }
+  return count * 2;
+}
+
 export function writeRibbon(positions: Float32Array, samples: THREE.Vector3[], width: number) {
   const count = Math.min(RIBBON_STEPS, samples.length);
   const side = new THREE.Vector3();

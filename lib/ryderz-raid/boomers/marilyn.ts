@@ -5,22 +5,38 @@ import type { PoseOverride } from '../skeletal';
 import { BoomerAuraSystem } from './aura';
 import {
   FairyDustPool,
+  TORNADO_STEPS,
   auraRing,
-  handPoint,
   livingFoes,
   projectionFigure,
-  ribbonMesh,
+  tornadoRibbon,
   warnMissingBoomerModel,
-  writeRibbon,
+  writeTornado,
 } from './fx';
 
 export const SHOWTIME = { count: 3, damage: 18, range: 18, speed: 14, life: 1.45, cooldown: 5 };
-export const LETS_BE_BAD = { damage: 7, maxHits: 6, interval: 0.42, duration: 2.5, reach: 2.6, hold: 0.75, cooldown: 6 };
+/**
+ * Controllable spinning kick. `moveScale` is 85% of a sprint: the engine
+ * turns sprint off while her hands are busy, and 1.28 is that sprint rate.
+ */
+export const LETS_BE_BAD = {
+  duration: 5,
+  cooldown: 14,
+  kickDamage: 9,
+  kickInterval: 0.45,
+  kickReach: 1.65,
+  ribbonDamage: 5,
+  ribbonInterval: 0.75,
+  ribbonRadius: 2.5,
+  moveScale: 0.85 * 1.28,
+  spinSpeed: 11,
+  kickKnock: 0.48,
+  ribbonKnock: 0.22,
+};
 export const ABRACADABRA = { damage: 55, radius: 12, heal: 0.15, expand: 0.7, cooldown: 12 };
 
 const BLUE = 0x168bff;
 const _look = new THREE.Vector3();
-const _hand = new THREE.Vector3();
 const _sample = new THREE.Vector3();
 
 interface Projection {
@@ -33,27 +49,45 @@ interface Projection {
   hit: boolean;
 }
 
-interface Ribbon {
+interface TornadoRibbon {
   mesh: THREE.Mesh;
   positions: Float32Array;
   samples: THREE.Vector3[];
+  phase: number;
+  turns: number;
+}
+
+/** The spinning kick and the ribbon vortex share one lifetime. */
+interface LetsBeBadState {
+  active: boolean;
+  remainingDuration: number;
+  moveSpeedMultiplier: number;
+  spinSpeed: number;
+  kickDamage: number;
+  ribbonDamage: number;
 }
 
 /**
  * Marilyn Monroe, the Blue Boomer. Charity.
- * Showtime sends three cartwheeling projections. Let's Be Bad draws ribbons
- * that hit on a timer. Abracadabra is one expanding wave: damage once, heal
- * allies, and dust only the enemies that wave actually kills.
+ * Showtime sends three cartwheeling projections. Let's Be Bad is a spinning
+ * kick under a reverse ribbon tornado, and she can still steer. Abracadabra
+ * is one expanding wave: damage once, heal allies, and dust only the enemies
+ * that wave actually kills.
  */
 export class MarilynKit implements RyderKit {
   readonly airY = 0;
   private ctx: KitContext | null = null;
   private aura: BoomerAuraSystem | null = null;
   private projections: Projection[] = [];
-  private ribbons: Ribbon[] = [];
-  private ribbonHits = new Map<Object, number>();
-  private ribbonTime = 0;
-  private ribbonTick = 0;
+  private tornado: TornadoRibbon[] = [];
+  private glitter: THREE.Points | null = null;
+  private footGlow: THREE.Mesh | null = null;
+  private spin: LetsBeBadState | null = null;
+  private spinAngle = 0;
+  private spinClock = 0;
+  private kickAt = new Map<object, number>();
+  private ribbonAt = new Map<object, number>();
+  private ribbonFlash = 0;
   private wave: THREE.Mesh | null = null;
   private waveTime = 0;
   private waveHit = new Set<Object>();
@@ -63,15 +97,40 @@ export class MarilynKit implements RyderKit {
   private channel = 0;
   private pulse = 0;
 
+  private get spinning() {
+    return this.spin?.active ?? false;
+  }
+
   get locked() {
     return this.channel > 0;
   }
 
   get busy() {
-    return this.poseTime > 0 && this.channel <= 0;
+    return this.spinning || (this.poseTime > 0 && this.channel <= 0);
+  }
+
+  /** Computer teammates keep chasing while the kick is spinning. */
+  get steerWhileBusy() {
+    return this.spinning;
+  }
+
+  get moveScale() {
+    return this.spinning ? LETS_BE_BAD.moveScale : 1;
+  }
+
+  /** Visual spin only. Travel facing stays with the camera and the stick. */
+  get bodyYaw() {
+    return this.spinning ? this.spinAngle : 0;
   }
 
   get pose(): PoseOverride | null {
+    if (this.spinning) {
+      const remain = this.spin?.remainingDuration ?? 0;
+      const started = LETS_BE_BAD.duration - remain;
+      const weight = Math.min(1, started / 0.18, remain / 0.28);
+      const turns = this.spinAngle / (Math.PI * 2);
+      return { kind: 'whirl', t: turns - Math.floor(turns), weight };
+    }
     if (!this.poseKind || this.poseTime <= 0) return null;
     return { kind: this.poseKind, t: 1 - Math.min(1, this.poseTime), weight: 1 };
   }
@@ -101,12 +160,35 @@ export class MarilynKit implements RyderKit {
         hit: false,
       });
     }
-    for (let i = 0; i < 2; i += 1) {
-      const ribbon = ribbonMesh(i === 0 ? 0x66cfff : 0xd8f4ff);
+    const layers: Array<[number, number, number]> = [
+      [0x168bff, 0, 2.4],
+      [0x66cfff, 2.1, 3.1],
+      [0xd8f4ff, 4.2, 1.7],
+    ];
+    for (const [color, phase, turns] of layers) {
+      const ribbon = tornadoRibbon(color);
       ribbon.mesh.visible = false;
       ctx.scene.add(ribbon.mesh);
-      this.ribbons.push({ mesh: ribbon.mesh, positions: ribbon.positions, samples: [] });
+      const samples = Array.from({ length: TORNADO_STEPS }, () => new THREE.Vector3());
+      this.tornado.push({ mesh: ribbon.mesh, positions: ribbon.positions, samples, phase, turns });
     }
+    const glitterCount = 42;
+    const glitterPositions = new Float32Array(glitterCount * 3);
+    const glitterGeometry = new THREE.BufferGeometry();
+    glitterGeometry.setAttribute('position', new THREE.BufferAttribute(glitterPositions, 3));
+    this.glitter = new THREE.Points(
+      glitterGeometry,
+      new THREE.PointsMaterial({ color: 0x66cfff, size: 0.07, transparent: true, opacity: 0.9, depthWrite: false }),
+    );
+    this.glitter.name = 'lets-be-bad-glitter';
+    this.glitter.frustumCulled = false;
+    this.glitter.visible = false;
+    ctx.scene.add(this.glitter);
+    this.footGlow = auraRing(0x168bff);
+    this.footGlow.name = 'lets-be-bad-glow';
+    this.footGlow.visible = false;
+    (this.footGlow.material as THREE.MeshBasicMaterial).opacity = 0.38;
+    ctx.scene.add(this.footGlow);
     this.wave = auraRing(0x168bff);
     this.wave.visible = false;
     ctx.scene.add(this.wave);
@@ -128,12 +210,24 @@ export class MarilynKit implements RyderKit {
       });
     }
     this.projections = [];
-    for (const ribbon of this.ribbons) {
+    for (const ribbon of this.tornado) {
       ribbon.mesh.removeFromParent();
       ribbon.mesh.geometry.dispose();
       (ribbon.mesh.material as THREE.Material).dispose();
     }
-    this.ribbons = [];
+    this.tornado = [];
+    if (this.glitter) {
+      this.glitter.removeFromParent();
+      this.glitter.geometry.dispose();
+      (this.glitter.material as THREE.Material).dispose();
+      this.glitter = null;
+    }
+    if (this.footGlow) {
+      this.footGlow.removeFromParent();
+      this.footGlow.geometry.dispose();
+      (this.footGlow.material as THREE.Material).dispose();
+      this.footGlow = null;
+    }
     if (this.wave) {
       this.wave.removeFromParent();
       this.wave.geometry.dispose();
@@ -153,8 +247,9 @@ export class MarilynKit implements RyderKit {
     this.aura?.setCharge(frame.burnout ? 0 : ratio, this.pulse);
     this.pulse = 0;
     this.aura?.update(frame.dt, frame.moving);
+    if (frame.stunned && this.spinning) this.endSpin();
     this.stepProjections(ctx, frame.dt);
-    this.stepRibbons(ctx, frame.dt);
+    this.stepTornado(ctx, frame.dt);
     this.stepWave(ctx, frame.dt);
     this.dust?.update(frame.dt);
   }
@@ -174,10 +269,9 @@ export class MarilynKit implements RyderKit {
     this.channel = 0;
     this.poseTime = 0;
     this.poseKind = null;
-    this.ribbonTime = 0;
     this.waveTime = 0;
+    this.endSpin();
     for (const projection of this.projections) this.retireProjection(projection);
-    for (const ribbon of this.ribbons) ribbon.mesh.visible = false;
     if (this.wave) this.wave.visible = false;
   }
 
@@ -219,18 +313,27 @@ export class MarilynKit implements RyderKit {
 
   private letsBeBad() {
     const ctx = this.ctx;
-    if (!ctx) return false;
+    if (!ctx || this.spinning) return false;
     ctx.cooldown('letsBeBad', LETS_BE_BAD.cooldown);
     ctx.sound('marilyn.letsBeBad.ribbon');
-    ctx.camera.addKick(0.12);
+    ctx.camera.addKick(0.06);
     this.pulse = 1;
-    this.poseKind = 'channel';
-    this.poseTime = LETS_BE_BAD.duration;
-    this.channel = LETS_BE_BAD.duration;
-    this.ribbonTime = LETS_BE_BAD.duration;
-    this.ribbonTick = LETS_BE_BAD.interval;
-    this.ribbonHits.clear();
-    for (const ribbon of this.ribbons) ribbon.mesh.visible = true;
+    this.spin = {
+      active: true,
+      remainingDuration: LETS_BE_BAD.duration,
+      moveSpeedMultiplier: LETS_BE_BAD.moveScale,
+      spinSpeed: LETS_BE_BAD.spinSpeed,
+      kickDamage: LETS_BE_BAD.kickDamage,
+      ribbonDamage: LETS_BE_BAD.ribbonDamage,
+    };
+    this.spinAngle = 0;
+    this.spinClock = 0;
+    this.ribbonFlash = 0;
+    this.kickAt.clear();
+    this.ribbonAt.clear();
+    for (const ribbon of this.tornado) ribbon.mesh.visible = true;
+    if (this.glitter) this.glitter.visible = true;
+    if (this.footGlow) this.footGlow.visible = true;
     return true;
   }
 
@@ -287,65 +390,101 @@ export class MarilynKit implements RyderKit {
     }
   }
 
-  private stepRibbons(ctx: KitContext, dt: number) {
-    if (this.ribbonTime <= 0) return;
-    this.ribbonTime -= dt;
-    const group = ctx.fighter()?.humanoid.group;
-    const flat = this.flatLook(ctx);
-    const yaw = Math.atan2(flat.x, flat.z);
-    this.ribbons.forEach((ribbon, index) => {
-      const side = (index === 0 ? 1 : -1) as 1 | -1;
-      ribbon.samples.length = 0;
-      const origin = group ? handPoint(group, side, _hand) : _hand.set(ctx.pos.x + 0.35 * side, 1.25, ctx.pos.z);
-      for (let i = 0; i < 28; i += 1) {
-        const t = i / 27;
-        const weave = Math.sin(ctx.time() * 9 + t * 7 + index) * 0.28;
-        _sample.set(
-          origin.x + flat.x * t * 3.1 + Math.cos(yaw) * (0.15 * side + weave),
-          origin.y + Math.sin(t * Math.PI) * 0.35 + Math.sin(ctx.time() * 6 + t * 8) * 0.08,
-          origin.z + flat.z * t * 3.1 + Math.sin(yaw) * (0.15 * side + weave),
-        );
-        ribbon.samples.push(_sample.clone());
+  private stepTornado(ctx: KitContext, dt: number) {
+    if (!this.spin?.active) return;
+    this.spin.remainingDuration -= dt;
+    this.spinClock += dt;
+    this.spinAngle += LETS_BE_BAD.spinSpeed * dt;
+    this.ribbonFlash = Math.max(0, this.ribbonFlash - dt);
+    const spin = this.spinAngle;
+    this.tornado.forEach((ribbon) => {
+      const last = ribbon.samples.length - 1;
+      for (let i = 0; i < ribbon.samples.length; i += 1) {
+        const t = last <= 0 ? 0 : i / last;
+        const height = 1.45 + t * 1.9;
+        const radius = 0.22 + t * t * 2.15;
+        const angle = spin * 0.72 + ribbon.phase + t * ribbon.turns * Math.PI * 2;
+        ribbon.samples[i].set(ctx.pos.x + Math.cos(angle) * radius, height, ctx.pos.z + Math.sin(angle) * radius);
       }
-      const count = writeRibbon(ribbon.positions, ribbon.samples, 0.07);
+      const count = writeTornado(ribbon.positions, ribbon.samples, (t) => 0.045 + t * 0.16);
       const position = ribbon.mesh.geometry.getAttribute('position') as THREE.BufferAttribute;
       position.needsUpdate = true;
       const quads = Math.max(0, count / 2 - 1);
       ribbon.mesh.geometry.setDrawRange(0, quads * 6);
       ribbon.mesh.geometry.computeBoundingSphere();
       ribbon.mesh.visible = true;
+      (ribbon.mesh.material as THREE.MeshBasicMaterial).opacity = this.ribbonFlash > 0 ? 1 : 0.72;
     });
-    this.ribbonTick -= dt;
-    if (this.ribbonTick <= 0) {
-      this.ribbonTick += LETS_BE_BAD.interval;
-      this.ribbonStrike(ctx, flat);
+    this.placeGlitter(ctx, spin);
+    if (this.footGlow) {
+      this.footGlow.visible = true;
+      this.footGlow.position.set(ctx.pos.x, 0.05, ctx.pos.z);
+      this.footGlow.rotation.z = spin;
+      this.footGlow.scale.setScalar(1.15);
     }
-    if (this.ribbonTime <= 0) {
-      for (const ribbon of this.ribbons) ribbon.mesh.visible = false;
-    }
+    const legYaw = ctx.yaw() + this.spinAngle;
+    _sample.set(ctx.pos.x + Math.sin(legYaw) * 1.15, 0.82, ctx.pos.z + Math.cos(legYaw) * 1.15);
+    ctx.particles.emit(_sample, 0x66cfff, 2, { speed: 0.8, size: 0.1, life: 0.28, up: 0.35, spread: 0.4 });
+    ctx.particles.emit(_look.set(ctx.pos.x, 1.1, ctx.pos.z), 0xd8f4ff, 1, { speed: 1.2, size: 0.08, life: 0.35, up: 0.6, spread: 1 });
+    this.strikeSpin(ctx, legYaw);
+    if (this.spin.remainingDuration <= 0) this.endSpin();
   }
 
-  private ribbonStrike(ctx: KitContext, flat: THREE.Vector3) {
+  private placeGlitter(ctx: KitContext, spin: number) {
+    const glitter = this.glitter;
+    if (!glitter) return;
+    const position = glitter.geometry.getAttribute('position') as THREE.BufferAttribute;
+    const count = position.count;
+    for (let i = 0; i < count; i += 1) {
+      const t = i / count;
+      const body = i < count - 8;
+      const radius = body ? 0.35 + (i % 5) * 0.12 : 1.05;
+      const y = body ? 0.25 + t * 1.7 : 0.7 + (i % 4) * 0.08;
+      const angle = spin * (body ? 1.4 : 1) + t * Math.PI * 6;
+      position.setXYZ(i, ctx.pos.x + Math.cos(angle) * radius, y, ctx.pos.z + Math.sin(angle) * radius);
+    }
+    position.needsUpdate = true;
+    glitter.visible = true;
+  }
+
+  /** Kick and ribbon keep separate per-target clocks so a frame cannot double-dip one source. */
+  private strikeSpin(ctx: KitContext, legYaw: number) {
+    const now = this.spinClock;
+    const lx = Math.sin(legYaw);
+    const lz = Math.cos(legYaw);
+    let ribbonHit = false;
     for (const foe of livingFoes(ctx.targets(), ctx.canHit)) {
       const dx = foe.pos.x - ctx.pos.x;
       const dz = foe.pos.z - ctx.pos.z;
       const dist = Math.hypot(dx, dz);
-      const ahead = dist < 0.2 || (dx * flat.x + dz * flat.z) / dist > 0.15;
-      let nearRibbon = false;
-      for (const ribbon of this.ribbons) {
-        for (const sample of ribbon.samples) {
-          const gap = Math.hypot(sample.x - foe.pos.x, sample.z - foe.pos.z);
-          if (gap < foe.radius + 0.7) nearRibbon = true;
-        }
+      const away = dist < 1e-4 ? _look.set(lx, 0, lz) : _look.set(dx / dist, 0, dz / dist);
+      if (dist < LETS_BE_BAD.ribbonRadius + foe.radius && now >= (this.ribbonAt.get(foe) ?? 0)) {
+        this.ribbonAt.set(foe, now + LETS_BE_BAD.ribbonInterval);
+        ctx.hurt(foe, LETS_BE_BAD.ribbonDamage, away.clone(), 'stagger', LETS_BE_BAD.ribbonKnock);
+        ctx.flash(foe, 0x66cfff, 0.12);
+        this.dust?.burst(foe.pos.clone().setY(1.35));
+        ribbonHit = true;
       }
-      if (!nearRibbon && !(ahead && dist < LETS_BE_BAD.reach + foe.radius)) continue;
-      const hits = this.ribbonHits.get(foe) ?? 0;
-      if (hits >= LETS_BE_BAD.maxHits) continue;
-      this.ribbonHits.set(foe, hits + 1);
-      ctx.hurt(foe, LETS_BE_BAD.damage, flat, 'stagger', 0.35);
-      ctx.hold?.(foe, LETS_BE_BAD.hold);
-      ctx.flash(foe, 0x66cfff, 0.16);
+      const align = dist < 0.2 ? 1 : (dx * lx + dz * lz) / Math.max(dist, 1e-4);
+      if (dist <= LETS_BE_BAD.kickReach + foe.radius && align > 0.45 && now >= (this.kickAt.get(foe) ?? 0)) {
+        this.kickAt.set(foe, now + LETS_BE_BAD.kickInterval);
+        ctx.hurt(foe, LETS_BE_BAD.kickDamage, away.clone(), 'knockback', LETS_BE_BAD.kickKnock);
+        ctx.flash(foe, 0xd8f4ff, 0.14);
+        this.dust?.burst(foe.pos.clone().setY(0.65));
+        ctx.camera.addShake(0.04);
+      }
     }
+    if (ribbonHit) this.ribbonFlash = 0.16;
+  }
+
+  private endSpin() {
+    if (this.spin) this.spin.active = false;
+    this.spin = null;
+    this.spinAngle = 0;
+    this.ribbonFlash = 0;
+    for (const ribbon of this.tornado) ribbon.mesh.visible = false;
+    if (this.glitter) this.glitter.visible = false;
+    if (this.footGlow) this.footGlow.visible = false;
   }
 
   private stepWave(ctx: KitContext, dt: number) {
