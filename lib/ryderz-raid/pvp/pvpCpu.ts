@@ -94,6 +94,8 @@ interface PlayerBody extends ReactiveBody, KitTarget {
 }
 
 const _dir = new THREE.Vector3();
+/** A computer teammate stops a steered power after this long. The player holds theirs until they switch it off. */
+const STEER_SWEEP_LIMIT = 5;
 
 /**
  * One CPU Ryder. Decisions are scored, then the same kit the player would
@@ -131,6 +133,7 @@ export class PvpCpu {
   private wantCast = false;
   private strikeQueued = false;
   private decideAt = 0.4;
+  private sweepHold = 0;
   private intent: PvpIntent = 'chase';
   private intentSlot: number | null = null;
   private aimX = 0;
@@ -198,6 +201,7 @@ export class PvpCpu {
     this.wantCast = false;
     this.chainLock = 0.35;
     this.decideAt = 0.35 + Math.random() * 0.4;
+    this.sweepHold = 0;
     this.facing = Math.atan2(this.hooks.playerPos.x - body.pos.x, this.hooks.playerPos.z - body.pos.z);
     this.foe = this.makePlayerBody();
     this.power = new RyderPowerVFX(this.hooks.scene, this.hooks.particles);
@@ -237,8 +241,18 @@ export class PvpCpu {
 
     const steering = () => (this.kit?.busy ?? false) && (this.kit?.steerWhileBusy ?? false);
     if (!(this.kit?.locked ?? false) && !steering() && time >= this.decideAt) this.decide(time);
-    if (!(this.kit?.locked ?? false) && !(this.kit?.busy ?? false)) this.act(dt, spec);
-    else if (steering()) this.sweep(dt, spec);
+    if (steering()) {
+      this.sweepHold += dt;
+      this.sweep(dt, spec);
+      const release = this.kit?.releaseId;
+      if (release && this.sweepHold >= STEER_SWEEP_LIMIT) {
+        this.kit?.endAbility?.(release);
+        this.sweepHold = 0;
+      }
+    } else {
+      this.sweepHold = 0;
+      if (!(this.kit?.locked ?? false) && !(this.kit?.busy ?? false)) this.act(dt, spec);
+    }
     this.stepStriker(dt);
     const moving = this.intent === 'chase' || this.intent === 'reposition' || this.intent === 'evade' || this.intent === 'retreat';
     this.kit?.update({
@@ -677,6 +691,11 @@ export class PvpCpu {
     const move = spec?.moves[slot];
     if (!spec || !move || this.burnout) return;
     if (this.moveCd[slot] > 0 || this.rhythm[slot] > 0) return;
+    if (this.kit?.releaseId === move.id) {
+      this.kit.endAbility?.(move.id);
+      this.moveCd[slot] = Math.max(this.moveCd[slot], 0.2);
+      return;
+    }
     if (move.drain > 0) {
       if (this.moveOn[slot]) {
         this.endSlot(slot, move);

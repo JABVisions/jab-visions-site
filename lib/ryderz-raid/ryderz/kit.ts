@@ -193,6 +193,11 @@ export interface RyderKit {
    * planting for the animation. The player already keeps WASD when busy.
    */
   readonly steerWhileBusy?: boolean;
+  /**
+   * The power that is on, so a second press switches it off without spending
+   * aura again. Null while nothing is held.
+   */
+  readonly releaseId?: AbilityId | null;
   /** Walking speed multiplier this frame (1 = normal). */
   readonly moveScale?: number;
   /** Multiplier on damage this fighter deals. 1 is their normal strength. */
