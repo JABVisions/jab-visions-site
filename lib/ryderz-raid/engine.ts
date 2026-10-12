@@ -760,12 +760,13 @@ export class RaidEngine {
   }
 
   /** Snap the local raider onto a point. Headless water checks use this. */
-  debugPlace(x: number, z: number, yaw?: number) {
+  debugPlace(x: number, z: number, yaw?: number, pitch?: number) {
     const floor = this.world.heightAt(x, z);
     if (yaw !== undefined) {
       this.yaw = yaw;
       this.facing = yaw;
     }
+    if (pitch !== undefined) this.pitch = pitch;
     this.pos.set(x, 0, z);
     this.airY = 0;
     this.airVel = 0;
@@ -1499,7 +1500,7 @@ export class RaidEngine {
         fog.density = 0.011;
       } else if (key === 'island') {
         fog.color.setHex(0xb7d4ea);
-        fog.density = 0.0017;
+        fog.density = 0.00085;
       } else {
         fog.color.setHex(0x1a0c22);
         fog.density = 0.007;

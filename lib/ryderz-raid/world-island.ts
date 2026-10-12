@@ -2,11 +2,15 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import type { Obstacle, World } from './world';
 import {
+  ISLAND_CAVE,
+  ISLAND_FALLS,
+  ISLAND_GROTTO,
   ISLAND_HALF,
   ISLAND_SPAN,
   islandAlleys,
   islandFloor,
   islandSurface,
+  rainforestMask,
   sampleIsland,
 } from './island/terrain';
 
@@ -18,7 +22,7 @@ import {
  */
 
 const CHUNK = 4;
-const SEGMENT = 10;
+const SEGMENT = 6;
 
 let clock = 0;
 
@@ -49,10 +53,20 @@ function terrainMaterial() {
         vec3 abyss = vec3(0.02, 0.10, 0.14);
         vec3 col = mix(wet, sand, smoothstep(0.05, 1.15, h));
         col = mix(col, soil, smoothstep(1.15, 2.2, h) * 0.45);
-        col = mix(col, grass, smoothstep(1.6, 4.0, h));
-        col = mix(col, rock, smoothstep(14.0, 26.0, h));
+        col = mix(col, grass, smoothstep(2.0, 8.0, h));
+        float basinX = (vPos.x + 48.0) / 155.0;
+        float basinZ = (vPos.z - 125.0) / 78.0;
+        float basin = clamp(1.0 - (basinX * basinX + basinZ * basinZ), 0.0, 1.0);
+        float canopy = basin * smoothstep(2.2, 5.0, h) * (1.0 - smoothstep(14.0, 22.0, h));
+        col = mix(col, vec3(0.04, 0.24, 0.07), canopy * 0.9);
+        col = mix(col, rock, smoothstep(16.0, 34.0, h));
+        col = mix(col, vec3(0.62, 0.60, 0.56), smoothstep(58.0, 96.0, h));
         float slope = 1.0 - clamp(vNormal.y, 0.0, 1.0);
-        col = mix(col, rock, smoothstep(0.35, 0.72, slope));
+        col = mix(col, rock, smoothstep(0.28, 0.62, slope));
+        float grotto = 0.0;
+        if (vPos.x > 28.0 && vPos.x < 58.0 && vPos.z < -70.0 && vPos.z > -132.0 && vPos.y < 13.0) grotto = 1.0;
+        if (vPos.x > -32.0 && vPos.x < -6.0 && vPos.z < -124.0 && vPos.z > -152.0 && vPos.y < 14.0) grotto = 1.0;
+        col *= mix(1.0, 0.16, grotto);
         if (h < 0.15) {
           float depth = clamp(-h / 16.0, 0.0, 1.0);
           col = mix(col, abyss, depth);
@@ -185,11 +199,42 @@ function placePalms() {
       const jitterX = x + Math.sin(x * 0.17 + z) * 4;
       const jitterZ = z + Math.cos(z * 0.13 + x) * 4;
       const sample = sampleIsland(jitterX, jitterZ);
-      if (sample.depth > 0.25 || sample.floor < 1.7 || sample.floor > 10) continue;
+      if (sample.depth > 0.25 || sample.floor < 1.7 || sample.floor > 18) continue;
       if (Math.abs(jitterX - 128) < 46 && Math.abs(jitterZ - 96) < 38) continue;
       if (Math.hypot(jitterX - 8, jitterZ - 48) < 26) continue;
       if (Math.hypot(jitterX + 76, jitterZ - 248) < 18) continue;
-      if (((x / 16) ^ (z / 16)) % 3 === 0) continue;
+      const forest = rainforestMask(jitterX, jitterZ) > 0.35;
+      if (!forest && ((x / 16) ^ (z / 16)) % 3 === 0) continue;
+      spots.push(new THREE.Vector3(jitterX, sample.floor, jitterZ));
+    }
+  }
+  return spots;
+}
+
+function canopyGeometry() {
+  const trunk = new THREE.CylinderGeometry(0.22, 0.38, 4.6, 5);
+  trunk.translate(0, 2.3, 0);
+  const crown = new THREE.SphereGeometry(2.15, 6, 5);
+  crown.scale(1, 0.7, 1);
+  crown.translate(0, 4.7, 0);
+  const merged = mergeGeometries([trunk, crown], false);
+  if (!merged) return trunk;
+  trunk.dispose();
+  crown.dispose();
+  return merged;
+}
+
+function placeCanopy() {
+  const spots: THREE.Vector3[] = [];
+  for (let x = -220; x <= 120 && spots.length < 520; x += 9) {
+    for (let z = 40; z <= 210 && spots.length < 520; z += 9) {
+      const jitterX = x + Math.sin(x * 0.21 + z * 0.07) * 2.4;
+      const jitterZ = z + Math.cos(z * 0.19 + x * 0.05) * 2.4;
+      if (rainforestMask(jitterX, jitterZ) < 0.28) continue;
+      const sample = sampleIsland(jitterX, jitterZ);
+      if (sample.depth > 0.2 || sample.floor < 2 || sample.floor > 16) continue;
+      if (Math.hypot(jitterX - 8, jitterZ - 48) < 28) continue;
+      if ((x + z) % 18 === 0) continue;
       spots.push(new THREE.Vector3(jitterX, sample.floor, jitterZ));
     }
   }
@@ -197,7 +242,7 @@ function placePalms() {
 }
 
 function placeRocks() {
-  const spots: { pos: THREE.Vector3; scale: number }[] = [];
+  const spots: { pos: THREE.Vector3; scale: number; solid: boolean }[] = [];
   for (let i = 0; i < 180; i += 1) {
     const angle = i * 2.399;
     const radius = 40 + (i % 17) * 16;
@@ -206,7 +251,23 @@ function placeRocks() {
     const sample = sampleIsland(x, z);
     if (sample.floor < -8 || (sample.depth === 0 && sample.floor < 1.2)) continue;
     const scale = sample.depth > 1 ? 1.4 + (i % 5) * 0.35 : 0.8 + (i % 4) * 0.4;
-    spots.push({ pos: new THREE.Vector3(x, sample.floor, z), scale });
+    spots.push({ pos: new THREE.Vector3(x, sample.floor, z), scale, solid: scale > 1.5 && sample.floor > -1 });
+  }
+  const summits = [
+    { x: -48, z: -178 },
+    { x: 62, z: -88 },
+    { x: -150, z: 40 },
+  ];
+  for (const summit of summits) {
+    for (let i = 0; i < 26; i += 1) {
+      const angle = i * 0.86 + summit.x;
+      const radius = 26 + (i % 6) * 16;
+      const x = summit.x + Math.cos(angle) * radius;
+      const z = summit.z + Math.sin(angle) * radius * 0.85;
+      const floor = islandFloor(x, z);
+      if (floor < 16 || floor > 96) continue;
+      spots.push({ pos: new THREE.Vector3(x, floor, z), scale: 2.2 + (i % 4) * 1.15, solid: false });
+    }
   }
   return spots;
 }
@@ -260,6 +321,23 @@ export function buildIslandWorld(): World {
   palmMesh.instanceMatrix.needsUpdate = true;
   group.add(palmMesh);
 
+  const canopy = placeCanopy();
+  const canopyGeo = canopyGeometry();
+  geometries.push(canopyGeo);
+  const canopyMat = new THREE.MeshStandardMaterial({ color: 0x0e4a22, roughness: 0.9 });
+  materials.push(canopyMat);
+  const canopyMesh = new THREE.InstancedMesh(canopyGeo, canopyMat, Math.max(1, canopy.length));
+  canopy.forEach((spot, index) => {
+    dummy.position.copy(spot);
+    dummy.rotation.y = index * 0.9;
+    const scale = 0.85 + (index % 5) * 0.16;
+    dummy.scale.set(scale, scale * (0.9 + (index % 3) * 0.12), scale);
+    dummy.updateMatrix();
+    canopyMesh.setMatrixAt(index, dummy.matrix);
+  });
+  canopyMesh.instanceMatrix.needsUpdate = true;
+  group.add(canopyMesh);
+
   const rocks = placeRocks();
   const rockGeo = new THREE.DodecahedronGeometry(1.1, 0);
   geometries.push(rockGeo);
@@ -272,7 +350,7 @@ export function buildIslandWorld(): World {
     dummy.scale.setScalar(rock.scale);
     dummy.updateMatrix();
     rockMesh.setMatrixAt(index, dummy.matrix);
-    if (rock.scale > 1.5 && rock.pos.y > -1) {
+    if (rock.solid) {
       obstacles.push({ kind: 'circle', x: rock.pos.x, z: rock.pos.z, r: rock.scale * 0.8 });
     }
   });
@@ -309,28 +387,103 @@ export function buildIslandWorld(): World {
     });
   }
 
-  const caveMat = new THREE.MeshStandardMaterial({ color: 0x2a2826, roughness: 1 });
+  const caveMat = new THREE.MeshStandardMaterial({ color: 0x241f1c, roughness: 1 });
   materials.push(caveMat);
-  const ceiling = new THREE.Mesh(new THREE.BoxGeometry(42, 0.8, 12), caveMat);
-  ceiling.position.set(66, 5.6, -128);
+  const caveLength = ISLAND_CAVE.maxZ - ISLAND_CAVE.minZ;
+  const caveWidth = ISLAND_CAVE.maxX - ISLAND_CAVE.minX;
+  const ceiling = new THREE.Mesh(new THREE.BoxGeometry(caveWidth + 8, 8, caveLength - 8), caveMat);
+  ceiling.position.set(
+    (ISLAND_CAVE.minX + ISLAND_CAVE.maxX) / 2,
+    10.4,
+    (ISLAND_CAVE.minZ + ISLAND_CAVE.maxZ) / 2 - 4,
+  );
   group.add(ceiling);
   geometries.push(ceiling.geometry);
-  obstacles.push({ kind: 'box', minX: 46, maxX: 90, minZ: -134.2, maxZ: -132.2 });
-  obstacles.push({ kind: 'box', minX: 46, maxX: 90, minZ: -123.8, maxZ: -121.8 });
+  const grotto = new THREE.Mesh(
+    new THREE.BoxGeometry(ISLAND_GROTTO.maxX - ISLAND_GROTTO.minX + 6, 9, ISLAND_GROTTO.maxZ - ISLAND_GROTTO.minZ + 4),
+    caveMat,
+  );
+  grotto.position.set((ISLAND_GROTTO.minX + ISLAND_GROTTO.maxX) / 2, 9.6, (ISLAND_GROTTO.minZ + ISLAND_GROTTO.maxZ) / 2);
+  group.add(grotto);
+  geometries.push(grotto.geometry);
+  for (const side of [ISLAND_CAVE.minX + 1.5, ISLAND_CAVE.maxX - 1.5]) {
+    const pillar = new THREE.Mesh(new THREE.BoxGeometry(3.4, 8.5, 3.4), caveMat);
+    pillar.position.set(side, ISLAND_CAVE.floor + 4.2, ISLAND_CAVE.maxZ + 1);
+    group.add(pillar);
+    geometries.push(pillar.geometry);
+  }
+  obstacles.push({
+    kind: 'box',
+    minX: ISLAND_CAVE.minX - 2,
+    maxX: ISLAND_CAVE.minX + 2,
+    minZ: ISLAND_CAVE.minZ,
+    maxZ: ISLAND_CAVE.maxZ,
+  });
+  obstacles.push({
+    kind: 'box',
+    minX: ISLAND_CAVE.maxX - 2,
+    maxX: ISLAND_CAVE.maxX + 2,
+    minZ: ISLAND_CAVE.minZ,
+    maxZ: ISLAND_CAVE.maxZ,
+  });
 
-  const fallMat = new THREE.MeshBasicMaterial({
-    color: 0xd7f4ff,
+  const fallMat = new THREE.ShaderMaterial({
     transparent: true,
-    opacity: 0.55,
     depthWrite: false,
     side: THREE.DoubleSide,
+    uniforms: { time: { value: 0 } },
+    vertexShader: `
+      varying vec2 vUv;
+      void main() {
+        vUv = uv;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
+    `,
+    fragmentShader: `
+      uniform float time;
+      varying vec2 vUv;
+      void main() {
+        float streak = 0.45 + 0.55 * sin(vUv.x * 26.0 + vUv.y * 48.0 - time * 7.0);
+        float edge = smoothstep(0.0, 0.08, vUv.x) * smoothstep(1.0, 0.92, vUv.x);
+        vec3 col = mix(vec3(0.62, 0.86, 0.95), vec3(0.95, 0.98, 1.0), streak);
+        gl_FragColor = vec4(col, (0.28 + streak * 0.45) * edge);
+      }
+    `,
   });
-  materials.push(fallMat);
-  const fall = new THREE.Mesh(new THREE.PlaneGeometry(6, 14), fallMat);
-  fall.position.set(-22, 10, -134);
-  fall.rotation.y = 0.4;
-  group.add(fall);
-  geometries.push(fall.geometry);
+  const foamMat = new THREE.MeshBasicMaterial({
+    color: 0xe7f7ff,
+    transparent: true,
+    opacity: 0.45,
+    depthWrite: false,
+  });
+  materials.push(fallMat, foamMat);
+  for (const fall of ISLAND_FALLS) {
+    const top = islandFloor(fall.lipX, fall.lipZ);
+    const bottom = Math.min(0.35, islandFloor(fall.poolX, fall.poolZ));
+    const drop = Math.max(8, top - bottom);
+    const geo = new THREE.PlaneGeometry(fall.halfWidth * 1.7, drop);
+    geometries.push(geo);
+    const sheet = new THREE.Mesh(geo, fallMat);
+    const dx = fall.poolX - fall.lipX;
+    const dz = fall.poolZ - fall.lipZ;
+    const yaw = Math.atan2(dx, dz);
+    sheet.position.set((fall.lipX + fall.poolX) / 2, bottom + drop / 2, (fall.lipZ + fall.poolZ) / 2);
+    sheet.rotation.y = yaw;
+    group.add(sheet);
+    const ribbon = new THREE.Mesh(geo, fallMat);
+    ribbon.position.copy(sheet.position);
+    ribbon.position.x += Math.cos(yaw) * 2.1;
+    ribbon.position.z -= Math.sin(yaw) * 2.1;
+    ribbon.rotation.y = yaw;
+    ribbon.scale.set(0.45, 0.96, 1);
+    group.add(ribbon);
+    const foamGeo = new THREE.CircleGeometry(fall.halfWidth * 0.95, 14);
+    geometries.push(foamGeo);
+    const foam = new THREE.Mesh(foamGeo, foamMat);
+    foam.rotation.x = -Math.PI / 2;
+    foam.position.set(fall.poolX, Math.max(0.2, bottom + 0.35), fall.poolZ);
+    group.add(foam);
+  }
 
   const sky = new THREE.Mesh(
     new THREE.SphereGeometry(1500, 24, 16),
@@ -365,8 +518,7 @@ export function buildIslandWorld(): World {
     clock = time;
     groundMat.uniforms.time.value = time;
     oceanMat.uniforms.time.value = time;
-    fall.position.y = 10 + Math.sin(time * 2.2) * 0.15;
-    fallMat.opacity = 0.42 + Math.sin(time * 3) * 0.08;
+    fallMat.uniforms.time.value = time;
     for (let i = 0; i < palms.length; i += 1) {
       const spot = palms[i];
       dummy.position.copy(spot);
@@ -376,6 +528,16 @@ export function buildIslandWorld(): World {
       palmMesh.setMatrixAt(i, dummy.matrix);
     }
     if (palms.length) palmMesh.instanceMatrix.needsUpdate = true;
+    for (let i = 0; i < canopy.length; i += 1) {
+      const spot = canopy[i];
+      dummy.position.copy(spot);
+      const scale = 0.85 + (i % 5) * 0.16;
+      dummy.scale.set(scale, scale * (0.9 + (i % 3) * 0.12), scale);
+      dummy.rotation.set(Math.sin(time * 0.8 + i) * 0.02, i * 0.9, 0);
+      dummy.updateMatrix();
+      canopyMesh.setMatrixAt(i, dummy.matrix);
+    }
+    if (canopy.length) canopyMesh.instanceMatrix.needsUpdate = true;
   };
 
   const dispose = () => {

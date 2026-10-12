@@ -9,16 +9,56 @@ assert.ok(beacon.depth === 0 && beacon.floor > 0.4, 'the beacon stands on dry gr
 
 const ocean = sampleIsland(0, 700);
 assert.ok(ocean.depth > 8, 'the open ocean is deep enough to dive');
-const peak = islandFloor(-30, -170);
-assert.ok(peak > 30, 'the mountain clears the jungle');
+const peak = islandFloor(-48, -178);
+assert.ok(peak > 80, 'the north summit is a mountain');
+const second = islandFloor(62, -88);
+assert.ok(second > 45, 'a second summit stands east of the first');
+const lip = islandFloor(-20, -122);
+const plunge = islandFloor(-18, -100);
+assert.ok(lip > plunge + 25, 'the main waterfall drops off a cliff');
+const cliff = islandFloor(-230, -40);
+assert.ok(cliff > 12, 'the west coast rises into a cliff');
 const lagoon = sampleIsland(-155, 36);
 assert.ok(lagoon.depth > 2.5, 'the lagoon holds water');
 const resort = sampleIsland(128, 96);
 assert.ok(Math.abs(resort.floor - 1.65) < 0.05 && resort.depth === 0, 'the resort lawn is a flat dry pad');
-const cave = sampleIsland(60, -128);
-assert.ok(cave.floor < 4 && cave.floor > 1.5, 'the cave passage is a walkable floor under the hill');
+const cave = sampleIsland(43, -100);
+const caveHill = islandFloor(18, -100);
+assert.ok(cave.floor < 4 && cave.floor > 1.5, 'the cave passage is a walkable floor');
+assert.ok(caveHill > cave.floor + 8, 'the cave sits under a hill');
+const grotto = islandFloor(-19, -136);
+const grottoRoof = islandFloor(-42, -136);
+assert.ok(grotto < 3 && grottoRoof > grotto + 20, 'a grotto opens in the cliff behind the waterfall');
 const river = sampleIsland(-5, 40);
 assert.ok(river.depth > 0.8, 'the river is deep enough to wade');
+
+const crest = islandFloor(-48, -178);
+const forest = islandFloor(-70, 140);
+assert.ok(forest > 0.8 && forest < 16, 'the rainforest rolls just above the creeks');
+assert.ok(crest > forest + 50, 'the summit stands far above the rainforest');
+assert.ok(crest > spawn.floor + 60, 'climbing the mountain leaves the beach far below');
+const pass = islandFloor(-10, -150);
+assert.ok(pass > 12 && pass < crest - 40 && pass < second - 20, 'the pass is high ground below both summits');
+
+let shoulderHi = 0;
+let shoulderLo = 999;
+for (let i = 0; i < 12; i += 1) {
+  const ang = -Math.PI / 2 + (i / 11 - 0.5) * 1.4;
+  const h = islandFloor(-48 + Math.cos(ang) * 70, -178 + Math.sin(ang) * 70);
+  if (h > shoulderHi) shoulderHi = h;
+  if (h < shoulderLo) shoulderLo = h;
+}
+assert.ok(shoulderHi - shoulderLo > 8, 'a lap around the mountain climbs and drops');
+assert.ok(crest > shoulderLo + 20, 'the crest is higher than the dips on its own slope');
+const westSummit = islandFloor(-100, -55);
+const westFoot = islandFloor(-100, 20);
+assert.ok(westSummit > 30 && sampleIsland(-100, -55).depth === 0, 'the west summit is dry high ground');
+assert.ok(westSummit > westFoot + 12, 'the west summit is above the slope below it');
+
+const creek = sampleIsland(-73, 100);
+const creekBank = islandFloor(-84, 108);
+assert.ok(creek.depth > 0.5, 'a rainforest stream holds water');
+assert.ok(creekBank > creek.floor + 1.2, 'the stream sits in a dip below its bank');
 
 for (const alley of islandAlleys()) {
   const sample = sampleIsland(alley.x, alley.z);
