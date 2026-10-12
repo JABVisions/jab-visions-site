@@ -133,12 +133,19 @@
 }
 
 .down {
-  opacity: 0.55;
-  filter: grayscale(0.7);
+  opacity: 0.78;
+}
+
+.down .portrait img {
+  filter: grayscale(0.85);
 }
 
 .down .status {
   background: #ff3b4a;
+}
+
+.bleeding .hp i {
+  background: linear-gradient(90deg, #ff2a3a, #ff8a4a);
 }
 
 .local {

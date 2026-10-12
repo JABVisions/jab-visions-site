@@ -85,6 +85,11 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
   const [burnout, setBurnout] = useState(false);
   const [banner, setBanner] = useState<HudState['banner']>(null);
   const [survival, setSurvival] = useState<HudState['survival']>(null);
+  const [reviveName, setReviveName] = useState<string | null>(null);
+  const [downed, setDowned] = useState(false);
+  const [fadedOut, setFadedOut] = useState(false);
+  const reviveLeft = useRef<HTMLElement>(null);
+  const downLeftEl = useRef<HTMLElement>(null);
   const [nearShop, setNearShop] = useState(false);
   const [beacon, setBeacon] = useState<HudState['beacon']>(null);
   const [recovering, setRecovering] = useState(false);
@@ -117,13 +122,21 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
     if (next.opponent) {
       foeHud.current?.setVitals(next.opponent.hp, next.opponent.maxHp, next.opponent.aura, next.opponent.maxAura, next.opponent.aura <= 1);
     }
-    partyHud.current?.setLocalVitals(next.hp, next.maxHp, next.aura, next.maxAura, next.hp > 0);
+    if (next.party) {
+      for (const member of next.party) {
+        partyHud.current?.setSlot(member.index, member.hp, member.maxHp, member.aura, member.maxAura, member.alive, member.bleed);
+      }
+    } else {
+      partyHud.current?.setSlot(0, next.hp, next.maxHp, next.aura, next.maxAura, next.hp > 0, 1);
+    }
+    if (reviveLeft.current && next.revive) reviveLeft.current.textContent = `${Math.ceil(next.revive.left)}s`;
+    if (downLeftEl.current && next.down && !next.down.faded) downLeftEl.current.textContent = `${Math.ceil(next.down.left)}s`;
     playerStore.syncLocalVitals({
       health: next.hp,
       maxHealth: next.maxHp,
       aura: next.aura,
       maxAura: next.maxAura,
-      isAlive: next.hp > 0,
+      isAlive: next.hp > 0 && !next.down,
     });
     const net = netRef.current;
     if (net?.authority && engineRef.current && Date.now() - netAt.current > 350) {
@@ -198,6 +211,14 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
     if (!prev || prev.round !== next.round) setRound(next.round);
     if (!prev || prev.survival?.round !== next.survival?.round || prev.survival?.phase !== next.survival?.phase || prev.survival?.cap !== next.survival?.cap) {
       setSurvival(next.survival);
+    }
+    const nextRevive = next.revive?.name ?? null;
+    const nextDown = Boolean(next.down);
+    const nextFaded = Boolean(next.down?.faded);
+    if (!prev || (prev.revive?.name ?? null) !== nextRevive || Boolean(prev.down) !== nextDown || Boolean(prev.down?.faded) !== nextFaded) {
+      setReviveName(nextRevive);
+      setDowned(nextDown);
+      setFadedOut(nextFaded);
     }
     if (!prev || Math.abs(prev.intermissionLeft - next.intermissionLeft) > 0.2) {
       setIntermissionLeft(next.intermissionLeft);
@@ -427,7 +448,7 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
       />
 
       {playing && phase !== 'dead' && phase !== 'victory' && (
-        <div className={styles.overlay} aria-hidden="true">
+        <div className={styles.overlay} aria-hidden="true" data-revive={reviveName ?? ''} data-down={downed ? '1' : '0'}>
           <LowHealthVignette ref={vignette} />
           <ComboIndicator ref={comboHud} />
           <RaidRadar ref={radarHud} />
@@ -512,11 +533,33 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
             </aside>
           ) : null}
 
-          {burnout && !recovering && <div className={styles.burnout}>Aura empty · melee only · weaker blows</div>}
+          {downed && (
+            <div className={styles.downed}>
+              <strong>{fadedOut ? 'You faded out' : 'You are down'}</strong>
+              {fadedOut ? (
+                <span>The squad is still fighting</span>
+              ) : (
+                <span>
+                  A teammate can pick you up · <b ref={downLeftEl} />
+                </span>
+              )}
+            </div>
+          )}
+
+          {burnout && !recovering && !downed && <div className={styles.burnout}>Aura empty · melee only · weaker blows</div>}
 
           {recovering && <div className={styles.recovering} />}
 
-          {beacon?.near && !recovering && (
+          {reviveName && !downed && (
+            <div className={styles.beacon}>
+              <strong>Pick up {reviveName}</strong>
+              <span>
+                {INTERACT_LABEL} · <b ref={reviveLeft} />
+              </span>
+            </div>
+          )}
+
+          {beacon?.near && !recovering && !reviveName && (
             <div className={`${styles.beacon} ${beacon.ready ? '' : styles.beaconCooling}`}>
               <strong>Ryder Beacon</strong>
               <span>Restore Health</span>
@@ -538,7 +581,7 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
 
           <div className={styles.bottomHud}>
             <p className={styles.hint}>
-              A D or arrows turn the camera · W S walk along that view · Mouse can still orbit · Shift sprint · Space jump · X recenters pitch · B swaps shoulder · Click punches up close · Zoe blasts at range · Keven throws darts · C punch · V kick · F / RMB melee, F again throws · Z dodge · Q E R powers · {INTERACT_LABEL} pickup or beacon · Esc pause
+              A D or arrows turn the camera · W S walk along that view · Mouse can still orbit · Shift sprint · Space jump · X recenters pitch · B swaps shoulder · Click punches up close · Zoe blasts at range · Keven throws darts · C punch · V kick · F / RMB melee, F again throws · Z dodge · Q E R powers · {INTERACT_LABEL} picks up a downed teammate or uses the beacon · Esc pause
               {phase === 'intermission' ? ' · Hold the spire to buy strength' : ''}
               {pvpTwo ? ' · P2 IJKL move · U punch · O kick · P melee · N dodge · M jump' : ''}
             </p>
@@ -629,9 +672,9 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
               <button type="button" onClick={() => engineRef.current?.queueAbility(2)}>
                 R
               </button>
-              {beacon?.near && beacon.ready && (
+              {(reviveName || (beacon?.near && beacon.ready)) && (
                 <button type="button" onClick={() => engineRef.current?.queueInteract()}>
-                  USE
+                  {reviveName ? 'PICK UP' : 'USE'}
                 </button>
               )}
             </div>

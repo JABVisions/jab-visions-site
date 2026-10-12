@@ -98,6 +98,7 @@ import {
   type StrikerHit,
 } from './fighter';
 import { CIVILIAN_PROFILES, civilianOrder, profileForKind, type CivilianProfileId } from './civilians/profiles';
+import { DOWN_SECONDS, REVIVE_RANGE, downOpacity, reviveVitals, squadStillStanding } from './raid/downed';
 import { CIVILIAN_REGISTRY, clipHintFor, definitionForProfile, type CivilianDefinition } from './civilians/registry';
 import { ThrowableField, type ThrowBody } from './throwables';
 
@@ -183,6 +184,21 @@ export interface HudState {
     cap: number;
     boss: boolean;
   } | null;
+  /** Live squad bars. Null outside a raid. */
+  party: Array<{
+    index: number;
+    hp: number;
+    maxHp: number;
+    aura: number;
+    maxAura: number;
+    alive: boolean;
+    /** 1 while up. While down, the fraction of the pickup window still left. */
+    bleed: number;
+  }> | null;
+  /** A downed teammate inside pickup range. */
+  revive: { name: string; left: number } | null;
+  /** Local raider is on the ground. */
+  down: { left: number; faded: boolean } | null;
 }
 
 interface Host {
@@ -257,6 +273,10 @@ interface Host {
   ryderId?: RyderId;
   aura?: number;
   maxAura?: number;
+  /** Party strip slot for a raid teammate. */
+  seat?: number;
+  /** Seconds left to be picked up. 0 means this fighter is not down. */
+  down?: number;
 }
 
 /** A defeated host still flying from the blow that killed it. */
@@ -419,6 +439,7 @@ export class RaidEngine {
   private raidDealt = 0;
   private raidTaken = 0;
   private raidDown = false;
+  private downLeft = 0;
   private allowAllyDamage = false;
   private allyInputs = new Map<string, { x: number; z: number; at: number }>();
   private playerVel = new THREE.Vector3();
@@ -592,6 +613,7 @@ export class RaidEngine {
     this.raidDealt = 0;
     this.raidTaken = 0;
     this.raidDown = false;
+    this.downLeft = 0;
     this.pos.set(this.arena.spawnPoint.x, 0, this.arena.spawnPoint.z);
     this.yaw = Math.PI * 0.85;
     this.facing = this.yaw;
@@ -666,6 +688,62 @@ export class RaidEngine {
   /** Movement from a remote human who owns an ally slot. */
   setAllyInput(playerId: string, x: number, z: number) {
     this.allyInputs.set(playerId, { x, z, at: Date.now() });
+  }
+
+  /** Live squad bars, used by the party strip and headless checks. */
+  squadProbe() {
+    return {
+      party: this.gameMode === GameMode.RAID && this.raidPlan ? this.partyRows() : [],
+      down: this.raidDown ? { left: this.downLeft, faded: this.downLeft <= 0 } : null,
+      revive: this.revivePrompt(),
+      allies: this.hosts
+        .filter((host) => host.ally)
+        .map((host) => ({
+          seat: host.seat ?? -1,
+          ryderId: host.ryderId ?? null,
+          hp: host.hp,
+          maxHp: host.maxHp,
+          aura: host.aura ?? 0,
+          maxAura: host.maxAura ?? 0,
+          down: host.down ?? 0,
+        })),
+    };
+  }
+
+  /** Land a hit on the local raider. Down rules match a civilian strike. */
+  strikeSelf(amount: number) {
+    this.hurtPlayer(amount, _tmp.set(0, 0, 1));
+  }
+
+  /** Land a hit on a squadmate through the same damage path enemies use. */
+  strikeSquadmate(seat: number, amount: number) {
+    const host = this.hosts.find((candidate) => candidate.ally && candidate.seat === seat);
+    if (!host) return false;
+    this.allowAllyDamage = true;
+    this.hurtHost(host, amount, _tmp.set(0, 0, 1));
+    this.allowAllyDamage = false;
+    return true;
+  }
+
+  /** Spend a squadmate's aura so the party strip can show it leaving. */
+  drainSquadmate(seat: number, amount: number) {
+    const host = this.hosts.find((candidate) => candidate.ally && candidate.seat === seat);
+    if (!host) return false;
+    host.aura = Math.max(0, (host.aura ?? 0) - amount);
+    if (host.cpu) host.cpu.aura = host.aura ?? 0;
+    return true;
+  }
+
+  /** Stand inside pickup range of a downed squadmate. */
+  standOnSquadmate(seat: number) {
+    const host = this.hosts.find((candidate) => candidate.ally && candidate.seat === seat);
+    if (!host) return false;
+    this.pos.set(host.pos.x + 1.1, 0, host.pos.z);
+    if (this.player) {
+      this.player.humanoid.group.position.copy(this.pos);
+      this.player.humanoid.group.position.y = this.world.heightAt(this.pos.x, this.pos.z);
+    }
+    return true;
   }
 
   /** Authoritative raid picture for the room server. Clients do not invent this. */
@@ -1150,6 +1228,7 @@ export class RaidEngine {
     }
 
     this.updateClones(dt);
+    this.tickSquadDown(dt);
     this.updateHosts(dt, time);
     if (this.heldThrow && this.throwables) {
       const socket = this.player?.rig?.weaponSocket;
@@ -1263,7 +1342,9 @@ export class RaidEngine {
   }
 
   private tryInteract() {
-    if (!this.player || this.phase === 'dead' || this.recoveryT > 0 || this.kit?.locked) return;
+    if (!this.player || this.phase === 'dead' || this.raidDown) return;
+    if (this.pickupNearestAlly()) return;
+    if (this.recoveryT > 0 || this.kit?.locked) return;
     const beacon = this.beacon;
     if (!beacon || !beacon.isPlayerInRange(this.pos)) {
       if (this.trySimConsole()) return;
@@ -1329,6 +1410,7 @@ export class RaidEngine {
   }
 
   private updateAura(dt: number) {
+    if (this.raidDown) return;
     let drain = 0;
     for (let i = 0; i < 3; i += 1) {
       if (this.moveT[i] > 0) drain += this.moves[i].drain;
@@ -1499,6 +1581,11 @@ export class RaidEngine {
   /** Pose runs after the strike window so the fist and the hit share a frame. */
   private presentPlayer(dt: number, time: number) {
     if (!this.player) return;
+    if (this.raidDown) {
+      this.presentDownedFighter(this.player, this.downLeft, dt);
+      return;
+    }
+    this.player.humanoid.group.rotation.x = 0;
     const moving = this.locomote;
     this.facing = this.stepFacing(dt);
     this.player.humanoid.group.rotation.y = this.facing + (this.kit?.bodyYaw ?? 0);
@@ -2510,12 +2597,12 @@ export class RaidEngine {
     let index = 0;
     for (const ally of allies) {
       if (this.disposed) return;
-      await this.spawnAlly(ally.ryderId, index, ally.playerId, ally.human);
+      await this.spawnAlly(ally.ryderId, index, ally.playerId, ally.human, ally.seat);
       index += 1;
     }
   }
 
-  private async spawnAlly(id: RyderId, index: number, playerId: string | null = null, remoteHuman = false) {
+  private async spawnAlly(id: RyderId, index: number, playerId: string | null = null, remoteHuman = false, seat = index + 1) {
     const spec = RYDERZ[id];
     if (spec.glb) {
       await preloadRyderGltf(spec).catch((error) => {
@@ -2577,6 +2664,8 @@ export class RaidEngine {
       aura: spec.maxAura,
       maxAura: spec.maxAura,
       dealt: 0,
+      seat,
+      down: 0,
     };
     let foe: Host | null = null;
     const cpu = new PvpCpu(
@@ -2712,6 +2801,254 @@ export class RaidEngine {
       host.aura = host.cpu.aura;
       host.maxAura = host.cpu.maxAura;
     }
+  }
+
+  /** True while the local raider or a living teammate is still fighting. */
+  private squadUp(except?: Host) {
+    const playerUp = this.hp > 0 && !this.raidDown;
+    const allies = this.hosts.filter(
+      (host) => host.ally && host !== except && host.hp > 0 && (host.down ?? 0) <= 0,
+    ).length;
+    return squadStillStanding(playerUp, allies);
+  }
+
+  private tickSquadDown(dt: number) {
+    if (this.gameMode !== GameMode.RAID || !this.raidPlan || this.phase !== 'playing') return;
+    if (this.raidDown && this.downLeft > 0) {
+      this.downLeft = Math.max(0, this.downLeft - dt);
+      if (this.downLeft <= 0 && !this.squadUp()) this.failRaid();
+    }
+    for (const host of [...this.hosts]) {
+      if (!host.ally || (host.down ?? 0) <= 0) continue;
+      host.down = Math.max(0, (host.down ?? 0) - dt);
+      if ((host.down ?? 0) <= 0) {
+        this.expireAlly(host);
+        if (this.phase === 'playing' && !this.squadUp()) this.failRaid();
+      }
+    }
+  }
+
+  private downAlly(host: Host) {
+    host.hp = 0;
+    host.held = 0;
+    host.cpu?.stun();
+    if (!this.squadUp(host)) {
+      this.expireAlly(host);
+      if (this.phase === 'playing') this.failRaid();
+      return;
+    }
+    if ((host.down ?? 0) > 0) return;
+    host.down = DOWN_SECONDS;
+    const name = host.ryderId ? RYDERZ[host.ryderId].name : 'A TEAMMATE';
+    this.banner = { title: 'SQUAD DOWN', sub: `${name.toUpperCase()} NEEDS A PICKUP` };
+    this.bannerT = 2.2;
+  }
+
+  /** The pickup window ran out. The body has already faded, so it leaves the fight. */
+  private expireAlly(host: Host) {
+    host.hp = 0;
+    host.down = 0;
+    host.cpu?.dispose();
+    host.cpu = undefined;
+    this.hosts = this.hosts.filter((other) => other !== host);
+    this.scene.remove(host.fighter.humanoid.group);
+    disposeObject(host.fighter.humanoid.group);
+  }
+
+  private presentDownedFighter(fighter: Fighter, left: number, dt: number) {
+    const group = fighter.humanoid.group;
+    const yaw = group.rotation.y;
+    if (fighter.meshSource === 'gltf') {
+      animateGltfFighter(fighter, dt, 0, 0, false, 0, false);
+    } else {
+      animateHumanoid(fighter.humanoid, 0, 0, this.simTime);
+    }
+    group.rotation.order = 'YXZ';
+    group.rotation.y = yaw;
+    group.rotation.x = 1.2;
+    const fade = downOpacity(left);
+    setHumanoidOpacity(fighter.humanoid, fade);
+    fighter.glitch?.setOpacity(fade);
+  }
+
+  private presentDownedHost(host: Host, dt: number) {
+    const group = host.fighter.humanoid.group;
+    group.position.copy(host.pos);
+    group.position.y = this.world.heightAt(host.pos.x, host.pos.z);
+    this.presentDownedFighter(host.fighter, host.down ?? 0, dt);
+  }
+
+  private downedPatients(): Array<{ kind: 'local' } | { kind: 'ally'; host: Host }> {
+    const list: Array<{ kind: 'local' } | { kind: 'ally'; host: Host }> = [];
+    if (this.raidDown && this.downLeft > 0) list.push({ kind: 'local' });
+    for (const host of this.hosts) {
+      if (host.ally && (host.down ?? 0) > 0) list.push({ kind: 'ally', host });
+    }
+    return list;
+  }
+
+  private patientPoint(patient: { kind: 'local' } | { kind: 'ally'; host: Host }) {
+    return patient.kind === 'local' ? this.pos : patient.host.pos;
+  }
+
+  /** Closest living teammate peels off to the fighter who is closest to fading. */
+  private reviveClaim(self: Host) {
+    let best: { patient: { kind: 'local' } | { kind: 'ally'; host: Host }; left: number } | null = null;
+    const playerCan = this.hp > 0 && !this.raidDown;
+    for (const patient of this.downedPatients()) {
+      const point = this.patientPoint(patient);
+      const mine = Math.hypot(self.pos.x - point.x, self.pos.z - point.z);
+      let closer = false;
+      for (const other of this.hosts) {
+        if (!other.ally || other === self || other.hp <= 0 || (other.down ?? 0) > 0) continue;
+        if (Math.hypot(other.pos.x - point.x, other.pos.z - point.z) + 0.2 < mine) {
+          closer = true;
+          break;
+        }
+      }
+      if (playerCan && Math.hypot(this.pos.x - point.x, this.pos.z - point.z) + 0.2 < mine) closer = true;
+      if (closer) continue;
+      const left = patient.kind === 'local' ? this.downLeft : (patient.host.down ?? 0);
+      if (!best || left < best.left) best = { patient, left };
+    }
+    return best?.patient ?? null;
+  }
+
+  private stepRevive(host: Host, dt: number) {
+    const patient = this.reviveClaim(host);
+    if (!patient) return false;
+    const point = this.patientPoint(patient);
+    const dx = point.x - host.pos.x;
+    const dz = point.z - host.pos.z;
+    const dist = Math.hypot(dx, dz) || 0.0001;
+    if (dist <= REVIVE_RANGE) {
+      const by = host.ryderId ? RYDERZ[host.ryderId].name : 'A TEAMMATE';
+      this.revivePatient(patient, by);
+      return true;
+    }
+    const step = Math.min(Math.max(0, dist - REVIVE_RANGE * 0.7), host.speed * dt);
+    if (step > 0) {
+      host.pos.x += (dx / dist) * step;
+      host.pos.z += (dz / dist) * step;
+      host.pos.x = clamp(host.pos.x, -BOUNDARY, BOUNDARY);
+      host.pos.z = clamp(host.pos.z, -BOUNDARY, BOUNDARY);
+      resolveCircle(host.pos, host.radius, this.world.obstacles);
+    }
+    const group = host.fighter.humanoid.group;
+    group.position.copy(host.pos);
+    group.position.y = this.world.heightAt(host.pos.x, host.pos.z);
+    group.rotation.order = 'YXZ';
+    group.rotation.x = 0;
+    group.rotation.y = Math.atan2(dx, dz);
+    this.animateHost(host, dt, 1, this.simTime);
+    return true;
+  }
+
+  private revivePatient(patient: { kind: 'local' } | { kind: 'ally'; host: Host }, by: string) {
+    if (patient.kind === 'local') this.reviveLocal(by);
+    else this.reviveAlly(patient.host, by);
+  }
+
+  private reviveLocal(by: string) {
+    const next = reviveVitals(this.maxHp, this.maxAura, this.aura);
+    this.raidDown = false;
+    this.downLeft = 0;
+    this.hp = next.hp;
+    this.aura = next.aura;
+    this.burnout = false;
+    this.iframes = 1.15;
+    if (this.player) {
+      this.player.humanoid.group.rotation.x = 0;
+      setHumanoidOpacity(this.player.humanoid, 1);
+    }
+    this.banner = { title: 'BACK UP', sub: `${by.toUpperCase()} PICKED YOU UP` };
+    this.bannerT = 2;
+    this.particles.emit(this.pos.clone().setY(0.8), this.spec.color, 18, { speed: 5, size: 0.28, life: 0.45, up: 1.2 });
+  }
+
+  private reviveAlly(host: Host, by: string) {
+    const next = reviveVitals(host.maxHp, host.maxAura ?? 0, host.aura ?? 0);
+    host.down = 0;
+    host.hp = next.hp;
+    host.aura = next.aura;
+    host.stagger = 0;
+    host.airY = 0;
+    host.lean = 0;
+    if (host.cpu) {
+      host.cpu.aura = next.aura;
+      host.cpu.maxAura = host.maxAura ?? host.cpu.maxAura;
+      host.cpu.burnout = false;
+      host.cpu.iframes = 1.15;
+      host.cpu.stun();
+    }
+    host.fighter.humanoid.group.rotation.x = 0;
+    setHumanoidOpacity(host.fighter.humanoid, 1);
+    host.fighter.glitch?.setOpacity(1);
+    const name = host.ryderId ? RYDERZ[host.ryderId].name : 'Teammate';
+    this.banner = { title: 'PICKED UP', sub: `${by.toUpperCase()} GOT ${name.toUpperCase()} UP` };
+    this.bannerT = 1.8;
+    this.particles.emit(host.pos.clone().setY(0.8), host.ryderId ? RYDERZ[host.ryderId].color : 0x39ff88, 16, {
+      speed: 5,
+      size: 0.26,
+      life: 0.4,
+      up: 1.1,
+    });
+  }
+
+  private pickupNearestAlly() {
+    const host = this.nearestDownedAlly();
+    if (!host) return false;
+    this.reviveAlly(host, 'You');
+    return true;
+  }
+
+  private nearestDownedAlly() {
+    let best: Host | null = null;
+    let bestD = REVIVE_RANGE * REVIVE_RANGE;
+    for (const host of this.hosts) {
+      if (!host.ally || (host.down ?? 0) <= 0) continue;
+      const d = (host.pos.x - this.pos.x) ** 2 + (host.pos.z - this.pos.z) ** 2;
+      if (d <= bestD) {
+        bestD = d;
+        best = host;
+      }
+    }
+    return best;
+  }
+
+  private revivePrompt(): HudState['revive'] {
+    if (this.raidDown || this.hp <= 0 || this.phase !== 'playing') return null;
+    const host = this.nearestDownedAlly();
+    if (!host?.ryderId) return null;
+    return { name: RYDERZ[host.ryderId].name, left: host.down ?? 0 };
+  }
+
+  private partyRows(): NonNullable<HudState['party']> {
+    const rows: NonNullable<HudState['party']> = [
+      {
+        index: 0,
+        hp: this.raidDown ? 0 : this.hp,
+        maxHp: this.maxHp,
+        aura: this.aura,
+        maxAura: this.maxAura,
+        alive: this.hp > 0 && !this.raidDown,
+        bleed: this.raidDown ? this.downLeft / DOWN_SECONDS : 1,
+      },
+    ];
+    for (const host of this.hosts) {
+      if (!host.ally || host.seat == null) continue;
+      const down = (host.down ?? 0) > 0;
+      rows.push({
+        index: host.seat,
+        hp: down ? 0 : Math.max(0, host.hp),
+        maxHp: host.maxHp,
+        aura: host.aura ?? 0,
+        maxAura: host.maxAura ?? 1,
+        alive: host.hp > 0 && !down,
+        bleed: down ? (host.down ?? 0) / DOWN_SECONDS : host.hp > 0 ? 1 : 0,
+      });
+    }
+    return rows;
   }
 
   private beginRound(n: number) {
@@ -2942,10 +3279,16 @@ export class RaidEngine {
       host.immobile = Math.max(0, (host.immobile ?? 0) - dt);
       const crowd = (host.pacified ?? 0) > 0 || (host.immobile ?? 0) > 0;
       if (host.ally && host.cpu) {
+        if ((host.down ?? 0) > 0) {
+          this.presentDownedHost(host, dt);
+          continue;
+        }
+        host.fighter.humanoid.group.rotation.x = 0;
         if (crowd) {
           this.idleCrowd(host, dt, time);
           continue;
         }
+        if (this.stepRevive(host, dt)) continue;
         this.driveAlly(host, dt);
         continue;
       }
@@ -3431,7 +3774,7 @@ export class RaidEngine {
   }
 
   private hurtPlayer(amount: number, dir: THREE.Vector3, kind?: PvpDamageKind, physical?: PhysicalHit) {
-    if (this.iframes > 0 || this.phase === 'dead' || this.kit?.intangible) return;
+    if (this.iframes > 0 || this.phase === 'dead' || this.kit?.intangible || this.raidDown) return;
     const scaled = kind ? calculatePvPDamage({ baseDamage: amount, kind }) : amount;
     // A braced Ryder (mid-spin) shrugs most of the blow off: less damage, no shove.
     const braced = clamp(this.kit?.braced ?? 0, 0, 1);
@@ -3465,11 +3808,14 @@ export class RaidEngine {
     this.particles.emit(this.pos.clone().setY(1.2), 0xff5570, 14, { speed: 6, size: 0.28, life: 0.4, up: 0.5 });
     if (this.hp <= 0) {
       this.hp = 0;
-      if (this.gameMode === GameMode.RAID && this.raidPlan && this.livingAllies() > 0) {
+      if (this.gameMode === GameMode.RAID && this.raidPlan && this.squadUp()) {
         if (!this.raidDown) {
           this.raidDown = true;
-          this.banner = { title: 'YOU ARE DOWN', sub: 'THE SQUAD IS STILL FIGHTING' };
-          this.bannerT = 3;
+          this.downLeft = DOWN_SECONDS;
+          this.kit?.interrupt();
+          this.striker.interrupt();
+          this.banner = { title: 'YOU ARE DOWN', sub: 'A TEAMMATE CAN PICK YOU UP' };
+          this.bannerT = 2.6;
         }
         return;
       }
@@ -3522,7 +3868,13 @@ export class RaidEngine {
       life: 0.28,
       direction: dir,
     });
-    if (host.hp <= 0) this.killHost(host, reaction && reaction !== 'stagger' ? dir : null, strength);
+    if (host.hp <= 0) {
+      if (host.ally && this.gameMode === GameMode.RAID && this.raidPlan) {
+        this.downAlly(host);
+        return;
+      }
+      this.killHost(host, reaction && reaction !== 'stagger' ? dir : null, strength);
+    }
   }
 
   /**
@@ -3897,6 +4249,12 @@ export class RaidEngine {
               cap: this.survivalPlan.scale.cap,
               boss: this.survivalPlan.boss,
             },
+      party: this.gameMode === GameMode.RAID && this.raidPlan ? this.partyRows() : null,
+      revive: this.gameMode === GameMode.RAID && this.raidPlan ? this.revivePrompt() : null,
+      down:
+        this.gameMode === GameMode.RAID && this.raidPlan && this.raidDown
+          ? { left: this.downLeft, faded: this.downLeft <= 0 }
+          : null,
     });
   }
 
