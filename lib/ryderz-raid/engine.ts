@@ -99,6 +99,13 @@ import {
 } from './fighter';
 import { CIVILIAN_PROFILES, civilianOrder, profileForKind, type CivilianProfileId } from './civilians/profiles';
 import { DOWN_SECONDS, REVIVE_RANGE, downOpacity, reviveVitals, squadStillStanding } from './raid/downed';
+import {
+  MVP_HOLD,
+  REPORT_HOLD,
+  emptyStat,
+  mvpRound,
+  type SquadStatLine,
+} from './raid/statboard';
 import { CIVILIAN_REGISTRY, clipHintFor, definitionForProfile, type CivilianDefinition } from './civilians/registry';
 import { ThrowableField, type ThrowBody } from './throwables';
 
@@ -119,7 +126,7 @@ export interface HudState {
   round: number;
   remaining: number;
   points: number;
-  phase: 'playing' | 'intermission' | 'dead' | 'victory';
+  phase: 'playing' | 'intermission' | 'dead' | 'victory' | 'report';
   /** Set during a versus match. Null in Solo and Raid. */
   opponent: {
     ryderId: RyderId;
@@ -199,6 +206,15 @@ export interface HudState {
   revive: { name: string; left: number } | null;
   /** Local raider is on the ground. */
   down: { left: number; faded: boolean } | null;
+  /** Post-round combat report. Null while a round is still being fought. */
+  statBoard: {
+    round: number;
+    nextRound: number;
+    raid: boolean;
+    mvp: boolean;
+    left: number;
+    lines: SquadStatLine[];
+  } | null;
 }
 
 interface Host {
@@ -441,6 +457,11 @@ export class RaidEngine {
   private raidDown = false;
   private downLeft = 0;
   private allowAllyDamage = false;
+  /** Seat credited for the enemy hit currently being resolved. -1 is nobody. */
+  private creditSeat = -1;
+  private statLines = new Map<number, SquadStatLine>();
+  private reportRound = 0;
+  private reportLeft = 0;
   private allyInputs = new Map<string, { x: number; z: number; at: number }>();
   private playerVel = new THREE.Vector3();
   private pvpHitKind: PvpDamageKind = 'basic';
@@ -614,6 +635,11 @@ export class RaidEngine {
     this.raidTaken = 0;
     this.raidDown = false;
     this.downLeft = 0;
+    this.creditSeat = -1;
+    this.statLines.clear();
+    this.reportRound = 0;
+    this.reportLeft = 0;
+    this.ensureStatLine(0, this.spec.id, 'human');
     this.pos.set(this.arena.spawnPoint.x, 0, this.arena.spawnPoint.z);
     this.yaw = Math.PI * 0.85;
     this.facing = this.yaw;
@@ -713,6 +739,66 @@ export class RaidEngine {
   /** Land a hit on the local raider. Down rules match a civilian strike. */
   strikeSelf(amount: number) {
     this.hurtPlayer(amount, _tmp.set(0, 0, 1));
+  }
+
+  /** Damage the nearest enemy through the local raider's credit. */
+  debugStrikeEnemy(amount: number) {
+    const host = this.nearestHost(this.pos);
+    if (!host) return false;
+    this.hurtHost(host, amount, _tmp.set(0, 0, 1));
+    return host.hp <= 0;
+  }
+
+  /** Damage the nearest enemy and credit that squadmate's seat. */
+  debugAllyStrike(seat: number, amount: number) {
+    const ally = this.hosts.find((host) => host.ally && host.seat === seat);
+    if (!ally) return false;
+    const foe = this.nearestHost(ally.pos);
+    if (!foe) return false;
+    this.creditAlly(ally, () => this.hurtHost(foe, amount, _tmp.set(0, 0, 1)));
+    return foe.hp <= 0;
+  }
+
+  /** Clear the wave without awarding the removed enemies as kills. */
+  debugFinishRound() {
+    this.queue = [];
+    this.reserve = [];
+    const leaving = this.hosts.filter((host) => !host.ally);
+    for (const host of leaving) {
+      this.scene.remove(host.fighter.humanoid.group);
+      disposeObject(host.fighter.humanoid.group);
+    }
+    this.hosts = this.hosts.filter((host) => host.ally);
+  }
+
+  /** Point the live round number at `n` so the next clear can open that report. */
+  debugSetRound(n: number) {
+    if (this.gameMode === GameMode.RAID && this.raidPlan) this.raidWave = n;
+    else this.round = n;
+  }
+
+  /** Skip the report hold. Safe while a round is still being fought. */
+  continueReport() {
+    this.closeStatBoard();
+  }
+
+  /** Copies of the squad lines, for headless checks. */
+  statProbe() {
+    return {
+      phase: this.phase,
+      round: this.reportRound,
+      left: this.reportLeft,
+      wave: this.gameMode === GameMode.RAID && this.raidPlan ? this.raidWave : this.round,
+      enemies: this.livingEnemies(),
+      lines: [...this.statLines.values()].map((line) => ({
+        seat: line.seat,
+        ryderId: line.ryderId,
+        name: line.name,
+        control: line.control,
+        round: { ...line.round },
+        raid: { ...line.raid },
+      })),
+    };
   }
 
   /** Land a hit on a squadmate through the same damage path enemies use. */
@@ -1059,6 +1145,11 @@ export class RaidEngine {
     }
     // Menus own the keyboard while paused; only Escape reaches the raid.
     if (this.paused && e.key !== 'Escape') return;
+    // The combat report owns Enter and X. Escape does not bury the board under pause.
+    if (this.phase === 'report') {
+      if (INTERACT_KEYS.includes(e.key.toLowerCase())) this.interactQueued = true;
+      return;
+    }
     const lower = e.key.toLowerCase();
     if (lower === 'x') this.recenter = true;
     if (lower === 'b') this.swapShoulder();
@@ -1131,6 +1222,10 @@ export class RaidEngine {
   }
 
   private update(dt: number, time: number) {
+    if (this.phase === 'report') {
+      this.tickReport(dt);
+      return;
+    }
     const cam = this.rig.config;
     const sens = cam.lookSensitivity;
     const stick = this.readLookStick();
@@ -2576,12 +2671,7 @@ export class RaidEngine {
       this.spawnTimer += scale.spawnInterval;
     }
     if (this.queue.length === 0 && this.reserve.length === 0 && this.livingEnemies() === 0 && this.raidWave > 0) {
-      this.raidWave += 1;
-      this.applyPlan(directRound(this.raidWave, this.squadSize(), Math.random, this.raidPlan?.difficulty ?? 'normal'));
-      this.spawnTimer = 1.1;
-      const banner = roundBanner(this.raidWave);
-      this.banner = banner;
-      this.bannerT = 2.4;
+      this.openStatBoard();
     }
   }
 
@@ -2590,6 +2680,122 @@ export class RaidEngine {
     this.banner = { title: 'RAID DEFEAT', sub: 'THE SQUAD IS DOWN' };
     this.bannerT = 30;
     if (document.pointerLockElement === this.canvas) document.exitPointerLock();
+  }
+
+  private ensureStatLine(seat: number, ryderId: RyderId, control: SquadStatLine['control']) {
+    if (this.statLines.has(seat)) return;
+    const spec = RYDERZ[ryderId];
+    this.statLines.set(seat, {
+      seat,
+      ryderId,
+      name: spec.name,
+      control,
+      round: emptyStat(),
+      raid: emptyStat(),
+    });
+  }
+
+  /** Ally damage is resolved with that seat as the killer, then the flag is put back. */
+  private creditAlly(host: Host, run: () => void) {
+    const previous = this.creditSeat;
+    this.creditSeat = host.seat ?? -1;
+    this.allowAllyDamage = true;
+    try {
+      run();
+    } finally {
+      this.allowAllyDamage = false;
+      this.creditSeat = previous;
+    }
+  }
+
+  private noteDamage(seat: number, amount: number) {
+    if (this.gameMode === GameMode.PVP || seat < 0 || amount <= 0) return;
+    const line = this.statLines.get(seat);
+    if (!line) return;
+    line.round.damage += amount;
+    line.raid.damage += amount;
+  }
+
+  private noteKill(seat: number) {
+    if (this.gameMode === GameMode.PVP || seat < 0) return;
+    const line = this.statLines.get(seat);
+    if (!line) return;
+    line.round.kills += 1;
+    line.raid.kills += 1;
+  }
+
+  private noteDown(seat: number) {
+    if (this.gameMode === GameMode.PVP || seat < 0) return;
+    const line = this.statLines.get(seat);
+    if (!line) return;
+    line.round.downs += 1;
+    line.raid.downs += 1;
+  }
+
+  private actingSeat() {
+    return this.allowAllyDamage ? this.creditSeat : 0;
+  }
+
+  private openStatBoard() {
+    if (this.gameMode === GameMode.PVP || this.phase === 'report') return;
+    const round = this.gameMode === GameMode.RAID && this.raidPlan ? this.raidWave : this.round;
+    if (round <= 0) return;
+    this.reportRound = round;
+    this.reportLeft = mvpRound(round) ? MVP_HOLD : REPORT_HOLD;
+    this.phase = 'report';
+    if (document.pointerLockElement === this.canvas) document.exitPointerLock();
+  }
+
+  private tickReport(dt: number) {
+    if (this.interactQueued) {
+      this.interactQueued = false;
+      this.closeStatBoard();
+      return;
+    }
+    this.reportLeft = Math.max(0, this.reportLeft - dt);
+    if (this.reportLeft <= 0) this.closeStatBoard();
+  }
+
+  private closeStatBoard() {
+    if (this.phase !== 'report') return;
+    for (const line of this.statLines.values()) line.round = emptyStat();
+    const finished = this.reportRound;
+    this.reportLeft = 0;
+    this.keys.clear();
+    this.interactQueued = false;
+    if (this.gameMode === GameMode.RAID && this.raidPlan) {
+      this.raidWave = finished + 1;
+      this.phase = 'playing';
+      this.applyPlan(directRound(this.raidWave, this.squadSize(), Math.random, this.raidPlan.difficulty ?? 'normal'));
+      this.spawnTimer = 1.1;
+      this.banner = roundBanner(this.raidWave);
+      this.bannerT = 2.4;
+      return;
+    }
+    this.phase = 'intermission';
+    this.intermissionLeft = INTERMISSION;
+    this.points += finished * 250;
+    this.hp = Math.min(this.maxHp, this.hp + 16);
+    this.banner = { title: 'ROUND CLEAR', sub: 'HOLD THE SPIRE · BUY STRENGTH' };
+    this.bannerT = 3;
+  }
+
+  private publishStatBoard(): NonNullable<HudState['statBoard']> {
+    const lines = [...this.statLines.values()]
+      .sort((a, b) => a.seat - b.seat)
+      .map((line) => ({
+        ...line,
+        round: { ...line.round },
+        raid: { ...line.raid },
+      }));
+    return {
+      round: this.reportRound,
+      nextRound: this.reportRound + 1,
+      raid: this.gameMode === GameMode.RAID && Boolean(this.raidPlan),
+      mvp: mvpRound(this.reportRound),
+      left: this.reportLeft,
+      lines,
+    };
   }
 
   private async spawnRaidAllies() {
@@ -2667,6 +2873,7 @@ export class RaidEngine {
       seat,
       down: 0,
     };
+    this.ensureStatLine(seat, id, remoteHuman ? 'human' : 'computer');
     let foe: Host | null = null;
     const cpu = new PvpCpu(
       {
@@ -2697,11 +2904,10 @@ export class RaidEngine {
         },
         blocked: (x, z, radius) => this.npcBlocked(x, z, radius),
         hurtPlayer: (amount, dir, _kind, physical) => {
-          if (!foe || foe.hp <= 0 || foe.ally) return;
+          const target = foe;
+          if (!target || target.hp <= 0 || target.ally) return;
           host.dealt = (host.dealt ?? 0) + amount;
-          this.allowAllyDamage = true;
-          this.hurtHost(foe, amount, dir, physical?.reaction, physical?.strength ?? 1);
-          this.allowAllyDamage = false;
+          this.creditAlly(host, () => this.hurtHost(target, amount, dir, physical?.reaction, physical?.strength ?? 1));
         },
         stunPlayer: (seconds) => {
           if (foe) foe.stun = Math.max(foe.stun, seconds);
@@ -2724,9 +2930,7 @@ export class RaidEngine {
           if (foeHost.ally || foeHost.hp <= 0) return 0;
           const before = foeHost.hp;
           host.dealt = (host.dealt ?? 0) + amount;
-          this.allowAllyDamage = true;
-          this.hurtHost(foeHost, amount, dir, reaction, strength);
-          this.allowAllyDamage = false;
+          this.creditAlly(host, () => this.hurtHost(foeHost, amount, dir, reaction, strength));
           return Math.max(0, before - Math.max(0, foeHost.hp));
         },
         flashRaidTarget: (target: KitTarget, color: number, seconds: number) => {
@@ -2832,12 +3036,14 @@ export class RaidEngine {
     host.hp = 0;
     host.held = 0;
     host.cpu?.stun();
+    const already = (host.down ?? 0) > 0;
+    if (!already) this.noteDown(host.seat ?? -1);
     if (!this.squadUp(host)) {
       this.expireAlly(host);
       if (this.phase === 'playing') this.failRaid();
       return;
     }
-    if ((host.down ?? 0) > 0) return;
+    if (already) return;
     host.down = DOWN_SECONDS;
     const name = host.ryderId ? RYDERZ[host.ryderId].name : 'A TEAMMATE';
     this.banner = { title: 'SQUAD DOWN', sub: `${name.toUpperCase()} NEEDS A PICKUP` };
@@ -3121,12 +3327,7 @@ export class RaidEngine {
       this.spawnTimer += scale.spawnInterval;
     }
     if (this.queue.length === 0 && this.reserve.length === 0 && this.hosts.length === 0 && this.round > 0) {
-      this.phase = 'intermission';
-      this.intermissionLeft = INTERMISSION;
-      this.points += this.round * 250;
-      this.hp = Math.min(this.maxHp, this.hp + 16);
-      this.banner = { title: 'ROUND CLEAR', sub: 'HOLD THE SPIRE · BUY STRENGTH' };
-      this.bannerT = 3;
+      this.openStatBoard();
     }
   }
 
@@ -3812,6 +4013,7 @@ export class RaidEngine {
         if (!this.raidDown) {
           this.raidDown = true;
           this.downLeft = DOWN_SECONDS;
+          this.noteDown(0);
           this.kit?.interrupt();
           this.striker.interrupt();
           this.banner = { title: 'YOU ARE DOWN', sub: 'A TEAMMATE CAN PICK YOU UP' };
@@ -3852,6 +4054,7 @@ export class RaidEngine {
     if (!host.ally && (host.guard ?? 0) > 0) amount *= 0.45;
     if (!host.ally) {
       if (!this.allowAllyDamage) this.raidDealt += amount;
+      if (!host.duelist && this.gameMode !== GameMode.PVP) this.noteDamage(this.actingSeat(), amount);
     } else this.raidTaken += amount;
     host.hp -= amount;
     host.hit = 0.18;
@@ -3885,7 +4088,10 @@ export class RaidEngine {
     // Kits may still hold a reference; make sure it reads as dead.
     host.hp = Math.min(host.hp, 0);
     host.held = 0;
-    if (!host.ally && !host.duelist) this.raidEnemiesDown += 1;
+    if (!host.ally && !host.duelist) {
+      this.raidEnemiesDown += 1;
+      if (this.gameMode !== GameMode.PVP) this.noteKill(this.actingSeat());
+    }
     if (host.ally) {
       host.cpu?.dispose();
       host.cpu = undefined;
@@ -4255,6 +4461,7 @@ export class RaidEngine {
         this.gameMode === GameMode.RAID && this.raidPlan && this.raidDown
           ? { left: this.downLeft, faded: this.downLeft <= 0 }
           : null,
+      statBoard: this.phase === 'report' && this.reportRound > 0 ? this.publishStatBoard() : null,
     });
   }
 
