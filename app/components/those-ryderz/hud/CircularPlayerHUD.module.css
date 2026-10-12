@@ -101,6 +101,13 @@
   text-transform: uppercase;
 }
 
+.caption b.longName {
+  font-size: 0.4rem;
+  letter-spacing: 0;
+  line-height: 1.1;
+  white-space: nowrap;
+}
+
 .caption span {
   color: rgba(229, 246, 234, 0.7);
   font: 700 0.52rem/1.4 ui-monospace, monospace;

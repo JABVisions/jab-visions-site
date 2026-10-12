@@ -87,7 +87,7 @@ const CircularPlayerHUD = forwardRef<
       <div className={styles.bolt} aria-hidden="true" />
       <div className={styles.caption}>
         {badge ? <small>{badge}</small> : null}
-        <b>{spec.name}</b>
+        <b className={spec.name.length > 16 ? styles.longName : undefined}>{spec.name}</b>
         <span>
           HP <em ref={hpLabel}>—</em>
           <i>Aura</i> <em ref={auraLabel}>—</em>

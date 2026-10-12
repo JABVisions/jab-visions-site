@@ -231,7 +231,7 @@ export function writeRibbon(positions: Float32Array, samples: THREE.Vector3[], w
 
 export const BOOMER_GLB = {
   'marilyn-monroe': '/assets/those-ryderz/models/boomers/marilyn-monroe.glb',
-  'martin-luther-king': '/assets/those-ryderz/models/boomers/martin-luther-king.glb',
+  'martin-luther-king': '/assets/those-ryderz/models/boomers/martin-luther-king.glb?v=1',
 } as const;
 
 const warned = new Set<string>();
