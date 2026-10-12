@@ -78,7 +78,7 @@ export default function RaidWatch({
         <span>This screen follows the host simulation. WASD sends your movement to the squad.</span>
       </header>
       <p className={styles.note}>
-        Wave {snap?.wave ?? 0}/{snap?.waves ?? 3} · Enemies left {snap?.enemiesLeft ?? '—'} · Defeated {snap?.defeated ?? 0} · Dealt {snap?.dealt ?? 0} · Taken {snap?.taken ?? 0}
+        {snap?.waves ? `Wave ${snap.wave}/${snap.waves}` : `Round ${snap?.wave ?? 0}`} · Enemies left {snap?.enemiesLeft ?? '—'} · Defeated {snap?.defeated ?? 0} · Dealt {snap?.dealt ?? 0} · Taken {snap?.taken ?? 0}
       </p>
       <div className={styles.seats}>
         {(snap?.fighters ?? room?.squad.slots.map((slot) => ({

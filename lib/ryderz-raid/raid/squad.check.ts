@@ -19,8 +19,11 @@ assert.equal(squadReady(squad), false);
 squad.slots[0].ready = true;
 assert.equal(squadReady(squad), true);
 const wave = waveKinds(1, 5);
-assert.ok(wave.length >= 5 && wave.length <= 8);
-assert.ok(wave.every((kind) => kind === 'walker' || kind === 'sprinter' || kind === 'heavy'));
+assert.ok(wave.length >= 5 && wave.length <= 16);
+assert.ok(wave.every((kind) => kind === 'walker' || kind === 'sprinter' || kind === 'thrower'));
+const street = new Set<string>(wave);
+assert.equal(street.has('heavy'), false);
+assert.equal(street.has('broadcaster'), false);
 
 const host = createRoom('guest-host', 'Ada', 'rubi', 1_000);
 assert.equal(host.squad.slots.filter((slot) => slot.control === 'computer').length, 4);

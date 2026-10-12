@@ -875,13 +875,14 @@ const HOST_TINT: Record<EnemyKind, number> = {
   sprinter: 0xc9ffd2,
   heavy: 0xffc9a6,
   thrower: 0xd6f0ff,
+  adept: 0xe4c6ff,
   broadcaster: 0xd9b3ff,
 };
 
 export function buildHost(kind: EnemyKind, modelPath?: string | null): Fighter {
-  const scale = kind === 'broadcaster' ? 2.05 : kind === 'heavy' ? 1.42 : kind === 'sprinter' ? 0.9 : 1;
+  const scale = kind === 'broadcaster' ? 2.05 : kind === 'heavy' ? 1.42 : kind === 'sprinter' || kind === 'adept' ? 0.9 : 1;
   const eye =
-    kind === 'broadcaster' ? 0xb84dff : kind === 'sprinter' ? 0xb6ff3a : kind === 'heavy' ? 0xff7a1a : 0x5dff9a;
+    kind === 'broadcaster' ? 0xb84dff : kind === 'adept' ? 0xc45cff : kind === 'sprinter' ? 0xb6ff3a : kind === 'heavy' ? 0xff7a1a : 0x5dff9a;
 
   const mapped = modelPath ? civilianByUrl.get(modelPath) : undefined;
   const template = mapped ?? (hostTemplates.length ? hostTemplates[Math.floor(Math.random() * hostTemplates.length)] : undefined);

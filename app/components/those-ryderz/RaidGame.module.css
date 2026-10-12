@@ -60,6 +60,63 @@
   padding: 0 0 8px;
 }
 
+.survival {
+  position: absolute;
+  top: 108px;
+  left: 16px;
+  width: 228px;
+  padding: 10px 12px 8px;
+  border-radius: 12px;
+  background: rgba(6, 8, 14, 0.78);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.35);
+  pointer-events: none;
+}
+
+.survival small {
+  display: block;
+  color: rgba(229, 246, 234, 0.62);
+  font: 800 0.58rem/1 ui-monospace, monospace;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.survival strong {
+  display: block;
+  margin: 2px 0 0;
+  font: 800 1.7rem/1 ui-monospace, monospace;
+}
+
+.survival em {
+  display: block;
+  margin: 2px 0 8px;
+  color: var(--aura, #31ff96);
+  font: 700 0.72rem/1.2 ui-monospace, monospace;
+  font-style: normal;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.survival ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.survival li {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  color: rgba(229, 246, 234, 0.72);
+  font: 700 0.62rem/1.55 ui-monospace, monospace;
+  white-space: nowrap;
+}
+
+.survival b {
+  color: #f7fff9;
+  font-weight: 800;
+}
+
 .vitalDock {
   position: absolute;
   left: 12px;

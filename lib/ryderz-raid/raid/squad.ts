@@ -1,4 +1,5 @@
 import { RYDERZ, RYDER_ORDER, type EnemyKind, type RyderId } from '../config';
+import { directRound } from '../rounds/director';
 
 /** Cooperative raid is allies versus civilians. It is not PvP. */
 export const SQUAD_SIZE = 5;
@@ -143,13 +144,7 @@ export function squadReady(squad: RaidSquad): boolean {
  * Civilian counts grow with the squad and the wave, and stay capped so five
  * fighters plus a wave do not all appear on the same frame.
  */
+/** Opening wave for a squad. Reserves stay with the director until the street thins out. */
 export function waveKinds(wave: number, squadSize: number): EnemyKind[] {
-  const count = Math.min(8, 3 + wave + Math.max(0, squadSize - 2));
-  const kinds: EnemyKind[] = [];
-  for (let i = 0; i < count; i += 1) {
-    if (i % 5 === 4) kinds.push('heavy');
-    else if (i % 3 === 2) kinds.push('sprinter');
-    else kinds.push('walker');
-  }
-  return kinds;
+  return directRound(wave, squadSize, () => 0.15).opening.map((spawn) => spawn.kind);
 }

@@ -415,8 +415,8 @@ function acceptSnapshot(room: RaidRoom, body: RoomAct, now: number) {
   }
   room.snapshot = {
     phase: snap.phase === 'victory' || snap.phase === 'dead' ? snap.phase : 'playing',
-    wave: clampNum(snap.wave, 1, 9),
-    waves: clampNum(snap.waves, 1, 9),
+    wave: clampNum(snap.wave, 1, 999),
+    waves: clampNum(snap.waves, 0, 999),
     enemiesLeft: clampNum(snap.enemiesLeft, 0, 99),
     defeated: clampNum(snap.defeated, 0, 999),
     dealt: clampNum(snap.dealt, 0, 999999),
