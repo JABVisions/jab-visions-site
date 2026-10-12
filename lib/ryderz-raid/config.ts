@@ -860,15 +860,14 @@ export const RYDERZ: Record<RyderId, RyderSpec> = {
       auraStyle: 'sparkle',
     },
     weapon: 'The word',
-    portrait: '/assets/those-ryderz/icons/martin-luther-king.png',
-    icon: '/assets/those-ryderz/icons/martin-luther-king.png',
+    portrait: '/assets/those-ryderz/icons/martin-luther-king.webp?v=1',
+    icon: '/assets/those-ryderz/icons/martin-luther-king.webp?v=1',
     glb: '/assets/those-ryderz/models/boomers/martin-luther-king.glb?v=1',
     strikes: ['punch', 'kick', 'smash'],
-    // Tripo exported him in a T-pose looking along +X. The shared stance roll
-    // treats that rest as a backwards torso and twists the jacket open. Keep
-    // the export pose, turn the whole figure onto raid-forward, and hang the arms.
+    // Tripo exported him in a T-pose already looking along raid-forward (+Z).
+    // A quarter turn put him in profile. The shared stance roll also twists
+    // the jacket open, so keep the export pose and only hang the arms.
     armHang: 1.45,
-    modelYaw: -Math.PI / 2,
     skelKeep: [
       'hips',
       'spine',

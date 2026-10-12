@@ -46,17 +46,36 @@ async function main() {
 
   scene.rotation.y = martin.modelYaw ?? 0;
   scene.updateMatrixWorld(true);
-  const head = skeleton.bone('head')!;
-  const eyeL = skeleton.bone('eyeL')!;
-  const eyeR = skeleton.bone('eyeR')!;
-  const towardEyes = eyeL
-    .getWorldPosition(new THREE.Vector3())
-    .add(eyeR.getWorldPosition(new THREE.Vector3()))
-    .multiplyScalar(0.5)
-    .sub(head.getWorldPosition(new THREE.Vector3()));
-  towardEyes.y = 0;
-  towardEyes.normalize();
-  assert.ok(towardEyes.z > 0.5, `martin should face raid-forward, eye facing z=${towardEyes.z.toFixed(2)}`);
+  mesh.skeleton.update();
+  const sample = new THREE.Vector3();
+  const crown: THREE.Vector3[] = [];
+  const positionAttr = mesh.geometry.getAttribute('position');
+  const sampleStep = Math.max(1, Math.floor(positionAttr.count / 5000));
+  for (let i = 0; i < positionAttr.count; i += sampleStep) {
+    mesh.getVertexPosition(i, sample);
+    sample.applyMatrix4(mesh.matrixWorld);
+    crown.push(sample.clone());
+  }
+  const top = crown.reduce((max, point) => Math.max(max, point.y), -Infinity);
+  const height = top - crown.reduce((min, point) => Math.min(min, point.y), Infinity);
+  const headPts = crown.filter((point) => point.y > top - height * 0.18 && Math.abs(point.x) < 0.16);
+  const mid = headPts.filter((point) => Math.abs(point.x - 0) < 0.04);
+  assert.ok(mid.length > 20, 'the head midline has vertices to read a face from');
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minZ = Infinity;
+  let maxZ = -Infinity;
+  for (const point of headPts) {
+    minX = Math.min(minX, point.x);
+    maxX = Math.max(maxX, point.x);
+    minZ = Math.min(minZ, point.z);
+    maxZ = Math.max(maxZ, point.z);
+  }
+  const earSpan = maxX - minX;
+  const faceDepth = maxZ - minZ;
+  assert.ok(earSpan > faceDepth, `martin should face the camera, not stand sideways (ears ${earSpan.toFixed(3)}, depth ${faceDepth.toFixed(3)})`);
+  const nose = mid.reduce((best, point) => (point.z > best.z ? point : best));
+  assert.ok(nose.z > 0.04, `the nose should point raid-forward, z=${nose.z.toFixed(3)}`);
 
   const hand = skeleton.bone('handR')!.getWorldPosition(new THREE.Vector3());
   const shoulder = skeleton.bone('upperArmR')!.getWorldPosition(new THREE.Vector3());
