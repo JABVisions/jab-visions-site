@@ -109,6 +109,8 @@ export interface RaidAllyLaunch {
   ryderId: RyderId;
   human: boolean;
   playerId: string | null;
+  /** Party strip slot. Slot 0 is the local player and is not spawned as an ally. */
+  seat: number;
 }
 
 export interface RaidLaunch {
@@ -122,9 +124,13 @@ export function launchFromSquad(squad: RaidSquad, localRyder: RyderId): RaidLaun
     difficulty: squad.difficulty,
     arenaId: squad.arenaId,
     allies: squad.slots.flatMap((slot) => {
-      if (!slot.ryderId || slot.ryderId === localRyder && slot.index === 0) return [];
-      if (slot.index === 0) return [];
-      return [{ ryderId: slot.ryderId, human: slot.control === 'human' && !slot.aiCover, playerId: slot.playerId }];
+      if (!slot.ryderId || slot.index === 0 || slot.ryderId === localRyder && slot.index === 0) return [];
+      return [{
+        ryderId: slot.ryderId,
+        human: slot.control === 'human' && !slot.aiCover,
+        playerId: slot.playerId,
+        seat: slot.index,
+      }];
     }),
   };
 }

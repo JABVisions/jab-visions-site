@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, type MutableRefObject } from 'react';
+import { useEffect, useLayoutEffect, useRef, type MutableRefObject } from 'react';
 import { RYDERZ } from '@/lib/ryderz-raid/config';
 import { GameMode } from '@/lib/ryderz-raid/game-mode';
 import type { PartySlot } from '@/lib/ryderz-raid/multiplayer';
@@ -8,8 +8,19 @@ import { RYDER_THEME } from '../menu/theme';
 import styles from './PlayerPartyHUD.module.css';
 
 export type PartyHudApi = {
-  setLocalVitals: (hp: number, maxHp: number, aura: number, maxAura: number, alive: boolean) => void;
+  setSlot: (
+    index: number,
+    hp: number,
+    maxHp: number,
+    aura: number,
+    maxAura: number,
+    alive: boolean,
+    bleed?: number,
+  ) => void;
 };
+
+type SlotNodes = { root: HTMLDivElement | null; hp: HTMLSpanElement | null; aura: HTMLSpanElement | null };
+type SlotVital = { hp: number; maxHp: number; aura: number; maxAura: number; alive: boolean; bleed: number };
 
 export default function PlayerPartyHUD({
   slots,
@@ -20,19 +31,32 @@ export default function PlayerPartyHUD({
   mode: GameMode;
   apiRef?: MutableRefObject<PartyHudApi | null>;
 }) {
-  const hpFill = useRef<HTMLSpanElement>(null);
-  const auraFill = useRef<HTMLSpanElement>(null);
-  const slotRoot = useRef<HTMLDivElement>(null);
+  const nodes = useRef(new Map<number, SlotNodes>());
+  const latest = useRef(new Map<number, SlotVital>());
+
+  const paint = (index: number) => {
+    const node = nodes.current.get(index);
+    const vital = latest.current.get(index);
+    if (!node || !vital) return;
+    const ratio = !vital.alive ? vital.bleed : vital.maxHp > 0 ? vital.hp / vital.maxHp : 0;
+    const healthWidth = `${Math.max(0, Math.min(100, ratio * 100))}%`;
+    const auraWidth = `${vital.maxAura > 0 ? Math.max(0, Math.min(100, (vital.aura / vital.maxAura) * 100)) : 0}%`;
+    node.hp?.style.setProperty('width', healthWidth, 'important');
+    node.aura?.style.setProperty('width', auraWidth, 'important');
+    node.root?.classList.toggle(styles.down, !vital.alive);
+    node.root?.classList.toggle(styles.bleeding, !vital.alive && vital.bleed > 0);
+  };
+
+  useLayoutEffect(() => {
+    latest.current.forEach((_vital, index) => paint(index));
+  });
 
   useEffect(() => {
     if (!apiRef) return;
     apiRef.current = {
-      setLocalVitals(hp, maxHp, aura, maxAura, alive) {
-        const healthWidth = `${maxHp > 0 ? Math.max(0, Math.min(100, (hp / maxHp) * 100)) : 0}%`;
-        const auraWidth = `${maxAura > 0 ? Math.max(0, Math.min(100, (aura / maxAura) * 100)) : 0}%`;
-        hpFill.current?.style.setProperty('width', healthWidth, 'important');
-        auraFill.current?.style.setProperty('width', auraWidth, 'important');
-        slotRoot.current?.classList.toggle(styles.down, !alive);
+      setSlot(index, hp, maxHp, aura, maxAura, alive, bleed = 1) {
+        latest.current.set(index, { hp, maxHp, aura, maxAura, alive, bleed });
+        paint(index);
       },
     };
     return () => {
@@ -55,15 +79,13 @@ export default function PlayerPartyHUD({
         return (
           <div
             key={slot.index}
-            ref={local ? slotRoot : undefined}
+            ref={(el) => {
+              const current = nodes.current.get(slot.index) ?? { root: null, hp: null, aura: null };
+              current.root = el;
+              nodes.current.set(slot.index, current);
+            }}
             role="listitem"
-            className={[
-              styles.slot,
-              empty ? styles.empty : '',
-              local ? styles.local : '',
-              player && !player.isConnected ? styles.offline : '',
-              player && !player.isAlive ? styles.down : '',
-            ].join(' ')}
+            className={[styles.slot, empty ? styles.empty : '', local ? styles.local : '', player && !player.isConnected ? styles.offline : ''].join(' ')}
             style={theme ? { ['--ryder' as string]: theme.aura } : undefined}
             title={empty ? `Player ${slot.index + 1}` : player.displayName}
           >
@@ -77,10 +99,24 @@ export default function PlayerPartyHUD({
               {ryder ? <em>{ryder.flaw}</em> : null}
               <div className={styles.ticks}>
                 <span className={styles.hp}>
-                  <i ref={local ? hpFill : undefined} style={local ? undefined : { width: player ? '100%' : '0%' }} />
+                  <i
+                    ref={(el) => {
+                      const current = nodes.current.get(slot.index) ?? { root: null, hp: null, aura: null };
+                      current.hp = el;
+                      nodes.current.set(slot.index, current);
+                    }}
+                    style={{ width: player ? '100%' : '0%' }}
+                  />
                 </span>
                 <span className={styles.aura}>
-                  <i ref={local ? auraFill : undefined} style={local ? undefined : { width: player ? '100%' : '0%' }} />
+                  <i
+                    ref={(el) => {
+                      const current = nodes.current.get(slot.index) ?? { root: null, hp: null, aura: null };
+                      current.aura = el;
+                      nodes.current.set(slot.index, current);
+                    }}
+                    style={{ width: player ? '100%' : '0%' }}
+                  />
                 </span>
               </div>
             </div>
