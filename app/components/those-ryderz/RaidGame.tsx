@@ -84,6 +84,7 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
   const [paused, setPaused] = useState(false);
   const [burnout, setBurnout] = useState(false);
   const [banner, setBanner] = useState<HudState['banner']>(null);
+  const [survival, setSurvival] = useState<HudState['survival']>(null);
   const [nearShop, setNearShop] = useState(false);
   const [beacon, setBeacon] = useState<HudState['beacon']>(null);
   const [recovering, setRecovering] = useState(false);
@@ -195,6 +196,9 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
     if (!prev || prev.cameraState !== next.cameraState) setCameraState(next.cameraState);
     if (!prev || Math.abs(prev.points - next.points) > 0.5) setPoints(next.points);
     if (!prev || prev.round !== next.round) setRound(next.round);
+    if (!prev || prev.survival?.round !== next.survival?.round || prev.survival?.phase !== next.survival?.phase || prev.survival?.cap !== next.survival?.cap) {
+      setSurvival(next.survival);
+    }
     if (!prev || Math.abs(prev.intermissionLeft - next.intermissionLeft) > 0.2) {
       setIntermissionLeft(next.intermissionLeft);
     }
@@ -485,6 +489,28 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
               <strong>{banner.title}</strong>
             </div>
           )}
+
+          {survival && partyState.mode !== GameMode.PVP && phase === 'playing' ? (
+            <aside className={styles.survival} aria-label="Survival round">
+              <small>Survival round</small>
+              <strong>{survival.round}</strong>
+              <em>{survival.phase}</em>
+              <ul>
+                <li>
+                  Maximum enemy tier <b>{survival.maxTier}</b>
+                </li>
+                <li>
+                  Health multiplier <b>{survival.hp.toFixed(2)}×</b>
+                </li>
+                <li>
+                  Damage multiplier <b>{survival.damage.toFixed(2)}×</b>
+                </li>
+                <li>
+                  Active enemy cap <b>{survival.cap}</b>
+                </li>
+              </ul>
+            </aside>
+          ) : null}
 
           {burnout && !recovering && <div className={styles.burnout}>Aura empty · melee only · weaker blows</div>}
 

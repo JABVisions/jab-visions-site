@@ -1,6 +1,7 @@
 import type { GlbRepair } from './mesh-repair';
 import type { BoneKey, MeleeStyle } from './skeletal';
 import { PAD_CHARACTER_GLB } from './dlc/pad';
+import { directRound, roundScale, roundTitle } from './rounds/director';
 
 export type RyderId =
   | 'rubi'
@@ -949,7 +950,7 @@ export const RYDER_ORDER: RyderId[] = [
   'martin-luther-king',
 ];
 
-export type EnemyKind = 'walker' | 'sprinter' | 'heavy' | 'thrower' | 'broadcaster';
+export type EnemyKind = 'walker' | 'sprinter' | 'heavy' | 'thrower' | 'adept' | 'broadcaster';
 
 export interface EnemySpec {
   kind: EnemyKind;
@@ -1013,6 +1014,18 @@ export const ENEMIES: Record<EnemyKind, EnemySpec> = {
     mass: 1,
     preferredRange: 11,
   },
+  adept: {
+    kind: 'adept',
+    name: 'Signal Adept',
+    hp: 72,
+    speed: 5.1,
+    damage: 14,
+    radius: 0.55,
+    points: 280,
+    scale: 1.02,
+    mass: 0.9,
+    preferredRange: 4.2,
+  },
   broadcaster: {
     kind: 'broadcaster',
     name: 'The Broadcaster',
@@ -1027,40 +1040,24 @@ export const ENEMIES: Record<EnemyKind, EnemySpec> = {
   },
 };
 
+/** Opening roster for a solo round. Raid uses the director directly so reserves stay held back. */
 export function composeRound(round: number): EnemyKind[] {
-  const list: EnemyKind[] = [];
-  const push = (kind: EnemyKind, count: number) => {
-    for (let i = 0; i < count; i += 1) list.push(kind);
-  };
-
-  const base = Math.min(6 + round * 3, 42);
-  push('walker', Math.max(4, Math.round(base * (round < 3 ? 0.9 : 0.52))));
-  if (round >= 2) push('sprinter', Math.round(base * 0.26));
-  if (round >= 3) push('thrower', Math.round(base * 0.14));
-  if (round >= 4) push('heavy', Math.max(1, Math.round(base * 0.1)));
-
-  for (let i = list.length - 1; i > 0; i -= 1) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [list[i], list[j]] = [list[j], list[i]];
-  }
-
-  if (round % 5 === 0) push('broadcaster', Math.max(1, Math.floor(round / 10) + 1));
-  return list;
+  return directRound(round, 1).opening.map((spawn) => spawn.kind);
 }
 
 export function roundScaling(round: number) {
+  const scale = roundScale(round, 1, 'normal');
   return {
-    hp: 1 + (round - 1) * 0.14,
-    speed: 1 + Math.min((round - 1) * 0.025, 0.4),
-    damage: 1 + (round - 1) * 0.06,
-    spawnInterval: Math.max(0.28, 0.9 - round * 0.045),
+    hp: scale.hp,
+    speed: scale.speed,
+    damage: scale.damage,
+    spawnInterval: scale.spawnInterval,
+    cap: scale.cap,
   };
 }
 
 export function roundBanner(round: number) {
-  if (round % 5 === 0) return { title: `ROUND ${round}`, sub: 'THE BROADCASTER IS HERE' };
-  if (round === 1) return { title: 'ROUND 1', sub: 'THE SIGNAL TAKES THE BLOCK' };
-  return { title: `ROUND ${round}`, sub: 'MORE HOSTS ARE TUNING IN' };
+  return roundTitle(round);
 }
 
 export type UpgradeId = 'capacity' | 'signal' | 'fists' | 'vitality' | 'siphon';

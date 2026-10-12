@@ -1,5 +1,6 @@
 import type { EnemyKind } from '../config';
 import type { StrikeKind } from '../fighter/actions';
+import type { RoundTactics } from '../rounds/director';
 
 /**
  * Civilians are ordinary people. Profiles change how they close, how often
@@ -106,7 +107,8 @@ export type CivilianState =
   | 'pickup'
   | 'throw'
   | 'flee'
-  | 'recover';
+  | 'recover'
+  | 'guard';
 
 export interface CivilianSense {
   dist: number;
@@ -119,6 +121,12 @@ export interface CivilianSense {
   recovering: boolean;
   /** 0–1, fresh each decision. */
   rng: number;
+  /** The Ryder is mid-swing. Blockers hold instead of eating the combo. */
+  playerAttacking?: boolean;
+  /** The Ryder is channeling a power. Enforcers and above try to interrupt. */
+  playerChanneling?: boolean;
+  tier?: number;
+  tactics?: RoundTactics;
 }
 
 export interface CivilianOrder {
@@ -135,15 +143,31 @@ const POOL: CivilianProfileId[] = ['brawler', 'aggressive', 'cautious', 'thrower
 export function profileForKind(kind: EnemyKind, rng: number): CivilianProfileId {
   if (kind === 'thrower') return 'thrower';
   if (kind === 'heavy') return rng < 0.75 ? 'brawler' : 'aggressive';
-  if (kind === 'sprinter') return rng < 0.65 ? 'aggressive' : 'brawler';
+  if (kind === 'sprinter' || kind === 'adept') return rng < 0.65 ? 'aggressive' : 'brawler';
   if (kind === 'broadcaster') return 'aggressive';
   return POOL[Math.floor(rng * POOL.length) % POOL.length];
 }
 
 export function civilianOrder(profile: CivilianProfile, sense: CivilianSense): CivilianOrder {
+  const tactics = sense.tactics;
+  const tier = sense.tier ?? 1;
   if (sense.recovering) return { state: 'recover', move: 0, strafe: 0, attack: null };
   if (profile.fleeHp > 0 && sense.hpRatio <= profile.fleeHp) {
     return { state: 'flee', move: -1, strafe: 0.35, attack: null };
+  }
+  if (tactics?.retreat && tier <= 2 && sense.hpRatio < 0.42) {
+    return { state: 'flee', move: -1, strafe: 0.45, attack: null };
+  }
+  if (tactics?.block && tier >= 2 && sense.playerAttacking && sense.dist < profile.attackRange + 0.45) {
+    return { state: 'guard', move: -0.25, strafe: 0.15, attack: null };
+  }
+  if (tactics?.interrupt && tier >= 3 && sense.playerChanneling) {
+    return {
+      state: 'approach',
+      move: 1,
+      strafe: 0,
+      attack: sense.dist <= profile.attackRange ? 'melee' : null,
+    };
   }
   if (sense.holding) {
     if (sense.dist < 11) return { state: 'throw', move: sense.dist < 2.4 ? -0.6 : 0, strafe: 0, attack: 'throwObject' };
@@ -157,6 +181,12 @@ export function civilianOrder(profile: CivilianProfile, sense: CivilianSense): C
   if (wantsProp && sense.throwableDist != null) {
     if (sense.throwableDist < 0.85) return { state: 'pickup', move: 0, strafe: 0, attack: null };
     return { state: 'search', move: 1, strafe: 0, attack: null };
+  }
+  if (tactics?.coordinate && sense.slot % 2 === 1 && sense.dist < profile.preferredDistance + 1.6 && sense.rng < 0.72) {
+    return { state: 'circle', move: 0, strafe: 1, attack: null };
+  }
+  if (tactics?.counter && !sense.playerAttacking && sense.dist <= profile.attackRange && sense.rng < 0.38 + tactics.aggression * 0.2) {
+    return { state: 'attack', move: 0.08, strafe: profile.circle * 0.4, attack: sense.rng < 0.5 ? 'punch' : 'kick' };
   }
   if (sense.slot >= 2 && sense.dist < profile.preferredDistance + 2.2) {
     const poke = sense.rng < 0.22 && sense.dist < profile.attackRange ? 'punch' : null;

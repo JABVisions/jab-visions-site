@@ -14,9 +14,7 @@ import {
   MOVE_KEYS,
   PLAYER_RADIUS,
   RYDERZ,
-  composeRound,
   roundBanner,
-  roundScaling,
   upgradeCost,
   UPGRADES,
   type AbilityId,
@@ -76,7 +74,14 @@ import { buildWorld, nearDistrictHub, pointBlocked, resolveCircle, steerVelocity
 import { buildPadWorld } from './world-pad';
 import { calculatePvPDamage, pvpHealth, PvpCpu, type PvpDamageKind } from './pvp';
 import type { PvpDifficulty } from './pvp/aiProfile';
-import { RAID_WAVES, waveKinds, type RaidLaunch } from './raid/squad';
+import { type RaidLaunch } from './raid/squad';
+import {
+  archetypeById,
+  directRound,
+  type DirectorPlan,
+  type RoundTactics,
+  type SpawnOrder,
+} from './rounds/director';
 import {
   CombatMemory,
   FighterStriker,
@@ -168,10 +173,23 @@ export interface HudState {
     allies: number;
     contributions: { name: string; dealt: number }[];
   } | null;
+  /** Endless survival card. Null in a versus match. */
+  survival: {
+    round: number;
+    phase: string;
+    maxTier: number;
+    hp: number;
+    damage: number;
+    cap: number;
+    boss: boolean;
+  } | null;
 }
 
 interface Host {
   kind: EnemyKind;
+  tier?: number;
+  archetypeId?: string;
+  supernatural?: boolean;
   fighter: Fighter;
   hp: number;
   maxHp: number;
@@ -218,6 +236,10 @@ interface Host {
   winding: boolean;
   /** Next physical strike after this one, for a short jab chain. */
   follow: StrikeKind | null;
+  /** Seconds a raised guard still eats part of an incoming hit. */
+  guard?: number;
+  /** Seconds until a supernatural pulse can fire again. */
+  powerCd?: number;
   /** Last shove, kept so props can read it later. */
   lastImpact?: { x: number; z: number; speed: number; kind: string };
   /** Colour of the current hit flash; hits reset it to white, kits can tint it. */
@@ -432,7 +454,12 @@ export class RaidEngine {
   private round = 0;
   private phase: HudState['phase'] = 'playing';
   private intermissionLeft = 0;
-  private queue: EnemyKind[] = [];
+  private queue: SpawnOrder[] = [];
+  private reserve: SpawnOrder[] = [];
+  private tactics: RoundTactics = directRound(1, 1, () => 0).scale.tactics;
+  private survivalPlan: DirectorPlan = directRound(1, 1, () => 0);
+  private signalHazard: { x: number; z: number; fuse: number } | null = null;
+  private hazardWait = 14;
   private spawnTimer = 0;
   private banner: HudState['banner'] = null;
   private bannerT = 0;
@@ -651,8 +678,8 @@ export class RaidEngine {
     return {
       phase: this.phase === 'victory' ? 'victory' : this.phase === 'dead' ? 'dead' : 'playing',
       wave: this.raidWave,
-      waves: RAID_WAVES,
-      enemiesLeft: this.livingEnemies() + this.queue.length,
+      waves: 0,
+      enemiesLeft: this.livingEnemies() + this.queue.length + this.reserve.length,
       defeated: this.raidEnemiesDown,
       dealt: Math.round(this.raidDealt + this.hosts.reduce((sum, host) => sum + (host.ally ? host.dealt ?? 0 : 0), 0)),
       taken: Math.round(this.raidTaken),
@@ -2427,36 +2454,47 @@ export class RaidEngine {
     return this.hosts.filter((host) => host.ally && host.hp > 0).length;
   }
 
+  private squadSize() {
+    return 1 + (this.raidPlan?.allies.length ?? 0);
+  }
+
+  private applyPlan(plan: DirectorPlan) {
+    this.survivalPlan = plan;
+    this.tactics = plan.scale.tactics;
+    this.queue = plan.opening;
+    this.reserve = plan.reserve;
+    this.signalHazard = null;
+    this.hazardWait = 12;
+  }
+
   private beginRaid() {
     this.raidWave = 1;
     this.phase = 'playing';
-    this.queue = waveKinds(1, 1 + (this.raidPlan?.allies.length ?? 0));
+    this.applyPlan(directRound(1, this.squadSize(), Math.random, this.raidPlan?.difficulty ?? 'normal'));
     this.spawnTimer = 0.6;
-    this.banner = { title: 'RAID', sub: 'WAVE 1 · CIVILIANS INCOMING' };
+    const banner = roundBanner(1);
+    this.banner = { title: banner.title, sub: `RAID · ${banner.sub}` };
     this.bannerT = 2.4;
   }
 
   private updateRaid(dt: number) {
     if (this.phase !== 'playing') return;
-    const cap = 5;
+    this.tickHazard(dt);
+    const scale = this.survivalPlan.scale;
     this.spawnTimer -= dt;
-    while (this.spawnTimer <= 0 && this.queue.length && this.livingEnemies() < cap) {
-      const kind = this.queue.shift();
-      if (kind) this.spawnHost(kind, roundScaling(this.raidWave));
-      this.spawnTimer += 0.85;
+    this.releaseReserve();
+    while (this.spawnTimer <= 0 && this.queue.length && this.livingEnemies() < Math.min(scale.cap, MAX_ALIVE_HOSTS)) {
+      const order = this.queue.shift();
+      if (order) this.spawnHost(order, scale);
+      this.spawnTimer += scale.spawnInterval;
     }
-    if (this.queue.length === 0 && this.livingEnemies() === 0 && this.raidWave > 0) {
-      if (this.raidWave < RAID_WAVES) {
-        this.raidWave += 1;
-        this.queue = waveKinds(this.raidWave, 1 + (this.raidPlan?.allies.length ?? 0));
-        this.spawnTimer = 1.2;
-        this.banner = { title: `WAVE ${this.raidWave}`, sub: 'THE NEXT GROUP IS MOVING IN' };
-        this.bannerT = 2.2;
-      } else {
-        this.phase = 'victory';
-        this.banner = { title: 'RAID VICTORY', sub: 'EVERY WAVE IS DOWN' };
-        this.bannerT = 30;
-      }
+    if (this.queue.length === 0 && this.reserve.length === 0 && this.livingEnemies() === 0 && this.raidWave > 0) {
+      this.raidWave += 1;
+      this.applyPlan(directRound(this.raidWave, this.squadSize(), Math.random, this.raidPlan?.difficulty ?? 'normal'));
+      this.spawnTimer = 1.1;
+      const banner = roundBanner(this.raidWave);
+      this.banner = banner;
+      this.bannerT = 2.4;
     }
   }
 
@@ -2679,13 +2717,50 @@ export class RaidEngine {
   private beginRound(n: number) {
     this.round = n;
     this.phase = 'playing';
-    this.queue = composeRound(n);
+    this.applyPlan(directRound(n, 1));
     this.spawnTimer = 0.4;
     const banner = roundBanner(n);
     if (this.arena.id === 'training-pad' && n === 1) banner.sub = 'P.A.D. · TRAINING FACILITY';
     this.banner = banner;
     this.bannerT = 3.2;
     this.kit?.onRound?.();
+  }
+
+  private releaseReserve() {
+    if (this.queue.length > 0 || this.reserve.length === 0 || this.livingEnemies() > 2) return;
+    this.queue = this.reserve;
+    this.reserve = [];
+    this.spawnTimer = 0.35;
+    this.banner = { title: 'REINFORCEMENTS', sub: 'ANOTHER GROUP IS MOVING IN' };
+    this.bannerT = 2.2;
+  }
+
+  /** A marked patch of street. Apocalypse rounds telegraph it, then it bursts once. */
+  private tickHazard(dt: number) {
+    if (!this.tactics.hazards || this.phase !== 'playing') return;
+    if (!this.signalHazard) {
+      this.hazardWait -= dt;
+      if (this.hazardWait > 0) return;
+      const ang = Math.random() * Math.PI * 2;
+      const dist = 2.2 + Math.random() * 3.4;
+      this.signalHazard = {
+        x: clamp(this.pos.x + Math.sin(ang) * dist, -BOUNDARY, BOUNDARY),
+        z: clamp(this.pos.z + Math.cos(ang) * dist, -BOUNDARY, BOUNDARY),
+        fuse: 1.45,
+      };
+      this.hazardWait = 15;
+    }
+    const hazard = this.signalHazard;
+    this.particles.emit(new THREE.Vector3(hazard.x, 0.15, hazard.z), 0xff4d6a, 3, { speed: 1.4, size: 0.28, life: 0.28, up: 0.5 });
+    hazard.fuse -= dt;
+    if (hazard.fuse > 0) return;
+    const dx = this.pos.x - hazard.x;
+    const dz = this.pos.z - hazard.z;
+    if (this.hp > 0 && dx * dx + dz * dz < 3.1 * 3.1) {
+      this.hurtPlayer(12 * this.survivalPlan.scale.damage, new THREE.Vector3(dx, 0, dz).normalize());
+    }
+    this.particles.emit(new THREE.Vector3(hazard.x, 0.4, hazard.z), 0xff4d6a, 18, { speed: 6, size: 0.36, life: 0.45, up: 1.2 });
+    this.signalHazard = null;
   }
 
   private updateRound(dt: number) {
@@ -2699,14 +2774,16 @@ export class RaidEngine {
       if (this.intermissionLeft <= 0) this.beginRound(this.round + 1);
       return;
     }
-    const scale = roundScaling(this.round);
+    const scale = this.survivalPlan.scale;
+    this.tickHazard(dt);
     this.spawnTimer -= dt;
-    while (this.spawnTimer <= 0 && this.queue.length && this.hosts.length < MAX_ALIVE_HOSTS) {
-      const kind = this.queue.shift();
-      if (kind) this.spawnHost(kind, scale);
+    this.releaseReserve();
+    while (this.spawnTimer <= 0 && this.queue.length && this.livingEnemies() < Math.min(scale.cap, MAX_ALIVE_HOSTS)) {
+      const order = this.queue.shift();
+      if (order) this.spawnHost(order, scale);
       this.spawnTimer += scale.spawnInterval;
     }
-    if (this.queue.length === 0 && this.hosts.length === 0 && this.round > 0) {
+    if (this.queue.length === 0 && this.reserve.length === 0 && this.hosts.length === 0 && this.round > 0) {
       this.phase = 'intermission';
       this.intermissionLeft = INTERMISSION;
       this.points += this.round * 250;
@@ -2731,8 +2808,10 @@ export class RaidEngine {
     return alleys[Math.floor(Math.random() * alleys.length)];
   }
 
-  private spawnHost(kind: EnemyKind, scale: ReturnType<typeof roundScaling>) {
+  private spawnHost(order: SpawnOrder, scale: { hp: number; speed: number; damage: number }) {
+    const kind = order.kind;
     const spec = ENEMIES[kind];
+    const archetype = archetypeById(order.archetypeId);
     const alley = this.spawnAlley();
     const lateral = (Math.random() - 0.5) * 2.4;
     const pos = alley.position.clone();
@@ -2746,6 +2825,9 @@ export class RaidEngine {
     this.scene.add(fighter.humanoid.group);
     this.hosts.push({
       kind,
+      tier: archetype?.tier ?? 1,
+      archetypeId: order.archetypeId,
+      supernatural: Boolean(archetype?.supernatural),
       fighter,
       hp: spec.hp * scale.hp,
       maxHp: spec.hp * scale.hp,
@@ -2780,6 +2862,8 @@ export class RaidEngine {
       throwWind: 0,
       winding: false,
       follow: null,
+      guard: 0,
+      powerCd: archetype?.supernatural ? 2.4 : 0,
     });
     const spawned = this.hosts[this.hosts.length - 1];
     if (spawned && this.world.training) this.paintTraining(spawned, true);
@@ -3010,11 +3094,11 @@ export class RaidEngine {
     const profile = CIVILIAN_PROFILES[host.profileId ?? profileForKind(host.kind, 0.2)];
     if (host.kind === 'broadcaster') {
       host.summon -= dt;
-      if (host.summon <= 0 && this.hosts.length < MAX_ALIVE_HOSTS && this.phase === 'playing') {
-        host.summon = 8;
-        const scale = roundScaling(this.round);
-        this.spawnHost('walker', scale);
-        if (this.hosts.length < MAX_ALIVE_HOSTS) this.spawnHost('sprinter', scale);
+      const phase = host.maxHp > 0 ? host.hp / host.maxHp : 1;
+      if (host.summon <= 0 && this.livingEnemies() < Math.min(this.survivalPlan.scale.cap, MAX_ALIVE_HOSTS) && this.phase === 'playing') {
+        host.summon = phase < 0.3 ? 3.6 : phase < 0.6 ? 5.4 : 8;
+        const caller = phase < 0.3 ? { kind: 'heavy' as const, archetypeId: 'enforcer' } : { kind: 'walker' as const, archetypeId: 'civilian' };
+        this.spawnHost(caller, this.survivalPlan.scale);
       }
     }
 
@@ -3029,6 +3113,8 @@ export class RaidEngine {
     const playerDist = Math.hypot(pdx, pdz) || 0.0001;
     const prop = this.throwables?.nearestFree(host.pos.x, host.pos.z) ?? null;
     const propDist = prop ? Math.hypot(prop.pos.x - host.pos.x, prop.pos.z - host.pos.z) : null;
+    host.powerCd = Math.max(0, (host.powerCd ?? 0) - dt);
+    host.guard = Math.max(0, (host.guard ?? 0) - dt);
     const order = civilianOrder(profile, {
       dist: playerDist,
       hpRatio: host.maxHp > 0 ? host.hp / host.maxHp : 1,
@@ -3037,7 +3123,26 @@ export class RaidEngine {
       slot,
       recovering: striker.busy,
       rng: Math.random(),
+      playerAttacking: this.striker.busy || this.meleeT > 0,
+      playerChanneling: this.moveT.some((left) => left > 0.05),
+      tier: host.tier ?? 1,
+      tactics: this.tactics,
     });
+    if (order.state === 'guard') host.guard = 0.32;
+    if (
+      host.supernatural &&
+      this.tactics.powers &&
+      host.kind !== 'broadcaster' &&
+      (host.powerCd ?? 0) <= 0 &&
+      playerDist < 6.2 &&
+      playerDist > 2.1 &&
+      !phased
+    ) {
+      host.powerCd = 5.4;
+      const pulse = new THREE.Vector3((aim.x - host.pos.x) / playerDist, 0, (aim.z - host.pos.z) / playerDist);
+      this.particles.emit(host.pos.clone().setY(1.2), 0xc45cff, 12, { speed: 5, size: 0.24, life: 0.35, direction: pulse });
+      this.hurtPlayer(host.damage * 0.8, pulse);
+    }
 
     if (order.state === 'pickup' && prop && !host.heldItem && this.throwables?.pickup(host, prop)) {
       host.heldItem = prop;
@@ -3099,10 +3204,18 @@ export class RaidEngine {
       gx = prop.pos.x;
       gz = prop.pos.z;
     } else if (!phased) {
-      const ang = slot * 1.9;
-      const ring = slot >= 2 ? 1.7 : 0;
+      const spread = this.tactics.surround || this.tactics.flank;
+      const ang = spread ? slot * 2.15 + (this.tactics.flank ? 0.7 : 0) : slot * 1.9;
+      const ring = spread ? 1.35 + Math.min(slot, 5) * 0.42 : slot >= 2 ? 1.7 : 0;
       gx += Math.cos(ang) * ring;
       gz += Math.sin(ang) * ring;
+      if (this.tactics.protectElite && (host.tier ?? 1) <= 2) {
+        const elite = this.hosts.find((other) => other !== host && !other.ally && other.hp > 0 && (other.tier ?? 1) >= 4);
+        if (elite) {
+          gx = (elite.pos.x * 2 + chase.x) / 3;
+          gz = (elite.pos.z * 2 + chase.z) / 3;
+        }
+      }
     }
     const hop = this.world.routeTo?.(host.pos.x, host.pos.z, gx, gz);
     if (hop && Math.hypot(hop.x - host.pos.x, hop.z - host.pos.z) > 1.15) {
@@ -3121,9 +3234,12 @@ export class RaidEngine {
       vz *= 0.12;
     }
     const hazard = this.hazardPush(host.pos.x, host.pos.z);
-    if (hazard) {
-      vx = hazard.x;
-      vz = hazard.z;
+    if (hazard && this.tactics.dodgePowers) {
+      vx = hazard.x * (1.1 + hazard.push);
+      vz = hazard.z * (1.1 + hazard.push);
+    } else if (hazard) {
+      vx = vx * 0.65 + hazard.x * 0.28;
+      vz = vz * 0.65 + hazard.z * 0.28;
     }
     const speed = host.speed * profile.speed * (order.state === 'flee' || hazard ? 1.35 : 1);
     const mag = Math.hypot(vx, vz);
@@ -3241,29 +3357,39 @@ export class RaidEngine {
   }
 
   private squadAim(from: Host) {
-    let x = this.pos.x;
-    let z = this.pos.z;
-    let best = this.hp > 0 ? Math.hypot(this.pos.x - from.pos.x, this.pos.z - from.pos.z) : Infinity;
-    let vx = this.playerVel.x;
-    let vz = this.playerVel.z;
-    if (this.hp <= 0) {
-      vx = 0;
-      vz = 0;
+    const choices: { x: number; z: number; vx: number; vz: number; dist: number; hpRatio: number }[] = [];
+    if (this.hp > 0) {
+      choices.push({
+        x: this.pos.x,
+        z: this.pos.z,
+        vx: this.playerVel.x,
+        vz: this.playerVel.z,
+        dist: Math.hypot(this.pos.x - from.pos.x, this.pos.z - from.pos.z),
+        hpRatio: this.maxHp > 0 ? this.hp / this.maxHp : 1,
+      });
     }
     if (this.gameMode === GameMode.RAID) {
       for (const ally of this.hosts) {
         if (!ally.ally || ally.hp <= 0) continue;
-        const dist = Math.hypot(ally.pos.x - from.pos.x, ally.pos.z - from.pos.z);
-        if (dist < best) {
-          best = dist;
-          x = ally.pos.x;
-          z = ally.pos.z;
-          vx = 0;
-          vz = 0;
-        }
+        choices.push({
+          x: ally.pos.x,
+          z: ally.pos.z,
+          vx: 0,
+          vz: 0,
+          dist: Math.hypot(ally.pos.x - from.pos.x, ally.pos.z - from.pos.z),
+          hpRatio: ally.maxHp > 0 ? ally.hp / ally.maxHp : 1,
+        });
       }
     }
-    return { x, z, vx, vz };
+    if (!choices.length) return { x: this.pos.x, z: this.pos.z, vx: 0, vz: 0 };
+    const nearest = choices.reduce((best, choice) => (choice.dist < best.dist ? choice : best));
+    if (this.tactics.targetWeak) {
+      const near = choices.filter((choice) => choice.dist < 18);
+      const pool = near.length ? near : choices;
+      const weakest = pool.reduce((best, choice) => (choice.hpRatio < best.hpRatio ? choice : best));
+      return weakest;
+    }
+    return nearest;
   }
 
   private civilianTargets() {
@@ -3377,6 +3503,7 @@ export class RaidEngine {
     if (this.gameMode === GameMode.PVP && host.duelist) {
       amount = calculatePvPDamage({ baseDamage: amount, kind: this.outgoingPvpKind() });
     }
+    if (!host.ally && (host.guard ?? 0) > 0) amount *= 0.45;
     if (!host.ally) {
       if (!this.allowAllyDamage) this.raidDealt += amount;
     } else this.raidTaken += amount;
@@ -3720,8 +3847,8 @@ export class RaidEngine {
       round: this.gameMode === GameMode.RAID && this.raidPlan ? this.raidWave : this.round,
       remaining:
         this.gameMode === GameMode.RAID && this.raidPlan
-          ? this.livingEnemies() + this.queue.length
-          : this.queue.length + this.hosts.length,
+          ? this.livingEnemies() + this.queue.length + this.reserve.length
+          : this.queue.length + this.reserve.length + this.hosts.length,
       points: this.points,
       phase: this.phase,
       intermissionLeft: this.intermissionLeft,
@@ -3750,7 +3877,7 @@ export class RaidEngine {
         this.gameMode === GameMode.RAID && this.raidPlan
           ? {
               wave: this.raidWave,
-              waves: RAID_WAVES,
+              waves: 0,
               defeated: this.raidEnemiesDown,
               dealt: Math.round(this.raidDealt + this.hosts.reduce((sum, host) => sum + (host.ally ? host.dealt ?? 0 : 0), 0)),
               taken: Math.round(this.raidTaken),
@@ -3758,6 +3885,18 @@ export class RaidEngine {
               contributions: this.raidReport().contributions,
             }
           : null,
+      survival:
+        this.gameMode === GameMode.PVP
+          ? null
+          : {
+              round: this.survivalPlan.round,
+              phase: this.survivalPlan.scale.phase.name,
+              maxTier: this.survivalPlan.scale.maxTier,
+              hp: this.survivalPlan.scale.hp,
+              damage: this.survivalPlan.scale.damage,
+              cap: this.survivalPlan.scale.cap,
+              boss: this.survivalPlan.boss,
+            },
     });
   }
 

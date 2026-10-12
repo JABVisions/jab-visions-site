@@ -37,9 +37,9 @@ export const GAME_MODES: GameModeSpec[] = [
   {
     id: GameMode.RAID,
     name: 'Raid',
-    tagline: 'Cooperative squad versus civilians',
+    tagline: 'Cooperative squad, endless rounds',
     description:
-      'Five allied Ryderz, you plus computer teammates, against civilian waves. Friends can replace a computer slot. Friendly fire is off.',
+      'Five allied Ryderz, you plus computer teammates, against escalating rounds. Friends can replace a computer slot. Friendly fire is off.',
     available: true,
   },
 ];
