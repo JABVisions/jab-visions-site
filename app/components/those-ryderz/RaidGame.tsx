@@ -92,6 +92,13 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
   const reviveLeft = useRef<HTMLElement>(null);
   const downLeftEl = useRef<HTMLElement>(null);
   const [statBoard, setStatBoard] = useState<HudState['statBoard']>(null);
+  const [water, setWater] = useState<HudState['water']>(null);
+  const oxygenFill = useRef<HTMLElement>(null);
+  const waterKey = useRef('');
+  const audioRef = useRef<{
+    setIsland(on: boolean): void;
+    setSubmerged(on: boolean): void;
+  } | null>(null);
   const boardSeconds = useRef<HTMLElement>(null);
   const boardKey = useRef('');
   const [nearShop, setNearShop] = useState(false);
@@ -148,6 +155,14 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
       boardKey.current = nextBoardKey;
       setStatBoard(next.statBoard);
     }
+    if (oxygenFill.current && next.water) oxygenFill.current.style.width = `${Math.round(next.water.oxygen * 100)}%`;
+    const nextWaterKey = next.water ? `${next.water.mode}|${next.water.submerged ? 1 : 0}|${next.water.oxygen < 0.35 ? 1 : 0}` : '';
+    if (waterKey.current !== nextWaterKey) {
+      waterKey.current = nextWaterKey;
+      setWater(next.water);
+    }
+    audioRef.current?.setIsland(Boolean(next.water));
+    audioRef.current?.setSubmerged(Boolean(next.water?.submerged));
     playerStore.syncLocalVitals({
       health: next.hp,
       maxHealth: next.maxHp,
@@ -254,7 +269,14 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
     if (!selected || !canvasRef.current) return;
     let engine: RaidEngine | null = null;
     let cancelled = false;
-    let audio: { play(id: string): void; resume(): Promise<void>; startCity(): void; dispose(): void } | null = null;
+    let audio: {
+      play(id: string): void;
+      resume(): Promise<void>;
+      startCity(): void;
+      setIsland(on: boolean): void;
+      setSubmerged(on: boolean): void;
+      dispose(): void;
+    } | null = null;
     const canvas = canvasRef.current;
     const unlockAudio = () => {
       void audio?.resume();
@@ -269,6 +291,7 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
       if (cancelled || !canvas) return;
       engine = new RaidEngine(canvas, syncHud);
       audio = createRaidAudio();
+      audioRef.current = audio;
       engine.setSoundHook((id) => audio?.play(id));
       audio.startCity();
       void audio.resume();
@@ -296,6 +319,7 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
       window.removeEventListener('resize', onResize);
       window.removeEventListener('pointerdown', unlockAudio);
       window.removeEventListener('keydown', unlockAudio);
+      audioRef.current = null;
       audio?.dispose();
       if (engine) manager.detach(engine);
       engine?.dispose();
@@ -520,6 +544,16 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
           ) : (
             <div className={styles.vitalDock}>
               <CircularPlayerHUD ref={circularHud} ryderId={activeRyder} burnout={burnout} />
+            </div>
+          )}
+
+          {water && water.mode !== 'land' && (
+            <div className={styles.oxygen} data-low={water.oxygen < 0.35 ? '1' : '0'} aria-label="Oxygen">
+              <span>Oxygen</span>
+              <b>
+                <i ref={oxygenFill} style={{ width: `${Math.round(water.oxygen * 100)}%` }} />
+              </b>
+              <em>{water.mode === 'under' ? 'Space to surface' : water.mode === 'wade' ? 'Wading' : 'Ctrl to dive'}</em>
             </div>
           )}
 

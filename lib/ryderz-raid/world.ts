@@ -11,8 +11,16 @@ export interface World {
   group: THREE.Group;
   obstacles: Obstacle[];
   occluders: THREE.Object3D[];
-  alleys: { position: THREE.Vector3; inward: THREE.Vector3 }[];
+  alleys: { position: THREE.Vector3; inward: THREE.Vector3; aquatic?: boolean }[];
   alleyNodes: THREE.Mesh[];
+  bounds?: number;
+  /** How far a spawn looks for a nearby alley. The city uses its district size. */
+  spawnReach?: number;
+  /** Present on arenas with a swimmable volume. Surface height includes the live wave. */
+  water?: {
+    surfaceAt: (x: number, z: number) => number;
+    depthAt: (x: number, z: number) => number;
+  };
   /** Walkable surface height at a point (roads are 0, sidewalks sit on a curb). */
   heightAt: (x: number, z: number) => number;
   animate: (time: number) => void;

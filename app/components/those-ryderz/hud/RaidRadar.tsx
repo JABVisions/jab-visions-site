@@ -79,25 +79,38 @@ const RaidRadar = forwardRef<RadarApi>(function RaidRadar(_, ref) {
       ctx.fillRect(0, 0, size, size);
 
       const plot = radius * 1.42;
-      const toX = (x: number) => cx + (x / MAP) * (plot / 2);
-      const toY = (z: number) => cy + (z / MAP) * (plot / 2);
+      const local = Math.abs(frame.x) > MAP || Math.abs(frame.z) > MAP;
+      const originX = local ? frame.x : 0;
+      const originZ = local ? frame.z : 0;
+      const span = local ? 80 : MAP;
+      const toX = (x: number) => cx + ((x - originX) / span) * (plot / 2);
+      const toY = (z: number) => cy + ((z - originZ) / span) * (plot / 2);
 
       ctx.strokeStyle = 'rgba(158, 255, 196, 0.22)';
       ctx.lineWidth = Math.max(1, size * 0.008);
       ctx.beginPath();
-      ctx.moveTo(toX(-MAP), toY(0));
-      ctx.lineTo(toX(MAP), toY(0));
-      ctx.moveTo(toX(0), toY(-MAP));
-      ctx.lineTo(toX(0), toY(MAP));
+      if (local) {
+        ctx.moveTo(toX(originX - span), toY(originZ));
+        ctx.lineTo(toX(originX + span), toY(originZ));
+        ctx.moveTo(toX(originX), toY(originZ - span));
+        ctx.lineTo(toX(originX), toY(originZ + span));
+      } else {
+        ctx.moveTo(toX(-MAP), toY(0));
+        ctx.lineTo(toX(MAP), toY(0));
+        ctx.moveTo(toX(0), toY(-MAP));
+        ctx.lineTo(toX(0), toY(MAP));
+      }
       ctx.stroke();
 
-      const half = MAP / 2;
       ctx.fillStyle = 'rgba(57, 255, 106, 0.35)';
-      for (const ox of [-half, half]) {
-        for (const oz of [-half, half]) {
-          ctx.beginPath();
-          ctx.arc(toX(ox), toY(oz), Math.max(1.5, size * 0.012), 0, Math.PI * 2);
-          ctx.fill();
+      if (!local) {
+        const half = MAP / 2;
+        for (const ox of [-half, half]) {
+          for (const oz of [-half, half]) {
+            ctx.beginPath();
+            ctx.arc(toX(ox), toY(oz), Math.max(1.5, size * 0.012), 0, Math.PI * 2);
+            ctx.fill();
+          }
         }
       }
 

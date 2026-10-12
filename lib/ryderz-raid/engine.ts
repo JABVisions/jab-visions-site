@@ -72,6 +72,8 @@ import {
 } from './toon';
 import { buildWorld, nearDistrictHub, pointBlocked, resolveCircle, steerVelocity, type World } from './world';
 import { buildPadWorld } from './world-pad';
+import { buildIslandWorld } from './world-island';
+import { emptySwim, shallowDirection, stepSwim, type SwimState, type WaterColumn } from './island/swim';
 import { calculatePvPDamage, pvpHealth, PvpCpu, type PvpDamageKind } from './pvp';
 import type { PvpDifficulty } from './pvp/aiProfile';
 import { type RaidLaunch } from './raid/squad';
@@ -215,6 +217,8 @@ export interface HudState {
     left: number;
     lines: SquadStatLine[];
   } | null;
+  /** Null on arenas with no ocean. Present on dry sand too, so the HUD can tell land from water. */
+  water: { mode: SwimState['mode']; oxygen: number; submerged: boolean } | null;
 }
 
 interface Host {
@@ -293,6 +297,8 @@ interface Host {
   seat?: number;
   /** Seconds left to be picked up. 0 means this fighter is not down. */
   down?: number;
+  /** This fighter can path through deep water and plays the swim stance there. */
+  swims?: boolean;
 }
 
 /** A defeated host still flying from the blow that killed it. */
@@ -372,10 +378,13 @@ export class RaidEngine {
   private onHud: (hud: HudState) => void;
   private renderer: THREE.WebGLRenderer;
   private scene: THREE.Scene;
+  private hemi: THREE.HemisphereLight;
+  private sun: THREE.DirectionalLight;
+  private fill: THREE.DirectionalLight;
   private camera: THREE.PerspectiveCamera;
   private rig: ThirdPersonCamera;
   private world: World;
-  private worlds = new Map<'block' | 'pad', World>();
+  private worlds = new Map<'block' | 'pad' | 'island', World>();
   private particles: ParticleSystem;
   private clock = new THREE.Clock();
   private raf = 0;
@@ -390,6 +399,12 @@ export class RaidEngine {
   private camReady = false;
   private facilityAgents: { x: number; z: number }[] = [];
   private labFog = new THREE.Color();
+  private aboveFog = new THREE.Color(0x1a0c22);
+  private aboveDensity = 0.007;
+  private waterTint = new THREE.Color();
+  private skyColor = new THREE.Color(0x8ec8ea);
+  private swim: SwimState = emptySwim();
+  private swimRise = 0;
   private fireHeld = false;
   private meleeQueued = false;
   private punchQueued = false;
@@ -555,13 +570,14 @@ export class RaidEngine {
     this.scene.fog = new THREE.FogExp2(0x1a0c22, 0.007);
 
     this.camera = new THREE.PerspectiveCamera(58, 1, 0.08, 480);
-    this.scene.add(new THREE.HemisphereLight(0xffd4b8, 0x1a1430, 1.35));
-    const sun = new THREE.DirectionalLight(0xffe6c8, 1.55);
-    sun.position.set(-18, 42, 12);
-    this.scene.add(sun);
-    const fill = new THREE.DirectionalLight(0x66ffaa, 0.35);
-    fill.position.set(16, 10, -20);
-    this.scene.add(fill);
+    this.hemi = new THREE.HemisphereLight(0xffd4b8, 0x1a1430, 1.35);
+    this.scene.add(this.hemi);
+    this.sun = new THREE.DirectionalLight(0xffe6c8, 1.55);
+    this.sun.position.set(-18, 42, 12);
+    this.scene.add(this.sun);
+    this.fill = new THREE.DirectionalLight(0x66ffaa, 0.35);
+    this.fill.position.set(16, 10, -20);
+    this.scene.add(this.fill);
 
     this.world = buildWorld();
     this.worlds.set('block', this.world);
@@ -611,6 +627,8 @@ export class RaidEngine {
     this.hitKnock.set(0, 0, 0);
     this.airY = 0;
     this.airVel = 0;
+    this.swim = emptySwim(this.world.heightAt(this.arena.spawnPoint.x, this.arena.spawnPoint.z));
+    this.swimRise = 0;
     this.takenChain = 0;
     this.takenGap = 0;
     this.dodgeT = 0;
@@ -739,6 +757,89 @@ export class RaidEngine {
   /** Land a hit on the local raider. Down rules match a civilian strike. */
   strikeSelf(amount: number) {
     this.hurtPlayer(amount, _tmp.set(0, 0, 1));
+  }
+
+  /** Snap the local raider onto a point. Headless water checks use this. */
+  debugPlace(x: number, z: number, yaw?: number) {
+    const floor = this.world.heightAt(x, z);
+    if (yaw !== undefined) {
+      this.yaw = yaw;
+      this.facing = yaw;
+    }
+    this.pos.set(x, 0, z);
+    this.airY = 0;
+    this.airVel = 0;
+    this.jumping = false;
+    this.swim = emptySwim(floor);
+    this.swimRise = 0;
+    if (this.player) {
+      this.player.humanoid.group.position.set(x, floor + (this.kit?.airY ?? 0), z);
+    }
+    this.rig.snap(this.pos, this.yaw, this.pitch);
+  }
+
+  debugWaterProbe() {
+    const water = this.world.water;
+    return {
+      arena: this.arena.id,
+      mode: this.swim.mode,
+      oxygen: this.swim.oxygen,
+      feet: this.player?.humanoid.group.position.y ?? this.swim.feetY,
+      floor: this.world.heightAt(this.pos.x, this.pos.z),
+      depth: water ? water.depthAt(this.pos.x, this.pos.z) : 0,
+      surface: water ? water.surfaceAt(this.pos.x, this.pos.z) : 0,
+      bounds: this.limit(),
+      cameraFar: this.camera.far,
+      sky: this.scene.background ? 1 : 0,
+    };
+  }
+
+  /** Park a teammate on the wave so a headless check can read their feet. */
+  debugPlaceAlly(x: number, z: number) {
+    const ally = this.hosts.find((item) => item.ally && item.hp > 0);
+    if (!ally) return null;
+    ally.pos.set(x, 0, z);
+    const y = this.bodyHeight(x, z, true);
+    ally.fighter.humanoid.group.position.set(x, y, z);
+    return { y, depth: this.waterDepth(x, z), swims: Boolean(ally.swims) };
+  }
+
+  /** Drop a terrestrial host in the water and let one step steer them. */
+  debugDropCivilian(x: number, z: number) {
+    const host = this.hosts.find((item) => item.hp > 0 && !item.ally && !item.duelist && !item.swims);
+    if (!host || !this.world.water) return null;
+    host.pos.set(x, 0, z);
+    const before = this.waterDepth(x, z);
+    this.driveCivilian(host, 0.35, this.simTime, false, false);
+    return {
+      before,
+      after: this.waterDepth(host.pos.x, host.pos.z),
+      y: host.fighter.humanoid.group.position.y,
+      x: host.pos.x,
+      z: host.pos.z,
+    };
+  }
+
+  /** Step the swim controller without waiting on the render loop. */
+  debugSimulateWater(seconds: number, input: { rise?: boolean; dive?: boolean; pitch?: number; moving?: boolean } = {}) {
+    const steps = Math.max(1, Math.round(seconds / 0.05));
+    for (let i = 0; i < steps; i += 1) {
+      const column = this.waterColumn(this.pos.x, this.pos.z);
+      const step = stepSwim(this.swim, column, {
+        dt: 0.05,
+        rise: Boolean(input.rise),
+        dive: Boolean(input.dive),
+        pitch: input.pitch ?? this.pitch,
+        moving: Boolean(input.moving),
+        aheadFloor: column?.floor ?? this.world.heightAt(this.pos.x, this.pos.z),
+        aheadDepth: column?.depth ?? 0,
+      });
+      this.swim = step.state;
+      if (this.player && (step.state.mode === 'surface' || step.state.mode === 'under')) {
+        this.player.humanoid.group.position.y = step.state.feetY;
+      }
+    }
+    return this.debugWaterProbe();
   }
 
   /** Damage the nearest enemy through the local raider's credit. */
@@ -1074,7 +1175,7 @@ export class RaidEngine {
     this.cracks.dispose();
     this.afterimages.dispose();
     this.unloadBeacon();
-    this.world.dispose();
+    for (const world of this.worlds.values()) world.dispose();
     this.particles.dispose();
     this.renderer.dispose();
     this.scene.clear();
@@ -1371,46 +1472,98 @@ export class RaidEngine {
       this.worlds.set('pad', next);
       this.scene.add(next.group);
     }
+    if (!next && key === 'island') {
+      next = buildIslandWorld();
+      this.worlds.set('island', next);
+      this.scene.add(next.group);
+    }
     if (!next) next = this.worlds.get('block') ?? this.world;
     if (next !== this.world) {
-      this.world.group.visible = false;
+      const previous = this.world;
+      previous.group.visible = false;
       next.group.visible = true;
       this.world = next;
       this.scene.updateMatrixWorld(true);
       this.rig.setOccluders(this.world.occluders);
+      const island = this.worlds.get('island');
+      if (island && previous === island && next !== island) {
+        this.scene.remove(island.group);
+        island.dispose();
+        this.worlds.delete('island');
+      }
     }
     const fog = this.scene.fog as THREE.FogExp2 | null;
     if (fog) {
       if (key === 'pad') {
         fog.color.setHex(0x07141c);
         fog.density = 0.011;
+      } else if (key === 'island') {
+        fog.color.setHex(0xb7d4ea);
+        fog.density = 0.0017;
       } else {
         fog.color.setHex(0x1a0c22);
         fog.density = 0.007;
       }
+      this.aboveFog.copy(fog.color);
+      this.aboveDensity = fog.density;
+    }
+    this.camera.near = key === 'island' ? 0.3 : 0.08;
+    this.camera.far = key === 'island' ? 1800 : 480;
+    this.camera.updateProjectionMatrix();
+    if (key === 'island') {
+      this.skyColor.setHex(0x8ec8ea);
+      this.scene.background = this.skyColor;
+      this.renderer.setClearColor(0x8ec8ea, 1);
+      this.sun.color.setHex(0xffe0b0);
+      this.sun.intensity = 1.85;
+      this.hemi.color.setHex(0xfff1d6);
+      this.hemi.groundColor.setHex(0x3d6a48);
+      this.hemi.intensity = 1.55;
+      this.fill.color.setHex(0x88c4ff);
+      this.fill.intensity = 0.12;
+    } else {
+      this.scene.background = null;
+      this.renderer.setClearColor(0x0a0614, 1);
+      this.sun.color.setHex(0xffe6c8);
+      this.sun.intensity = 1.55;
+      this.hemi.color.setHex(0xffd4b8);
+      this.hemi.groundColor.setHex(0x1a1430);
+      this.hemi.intensity = 1.35;
+      this.fill.color.setHex(0x66ffaa);
+      this.fill.intensity = 0.35;
     }
     this.unloadBeacon();
     const point = def.ryderBeaconPoint;
     const position = new THREE.Vector3(point.x, this.world.heightAt(point.x, point.z), point.z);
     this.beacon = new RyderBeacon(position, this.particles, { cooldownDuration: def.beaconCooldown });
     this.scene.add(this.beacon.group);
+    const floor = this.world.heightAt(def.spawnPoint.x, def.spawnPoint.z);
+    this.swim = emptySwim(floor);
+    this.swimRise = 0;
     if (this.player) {
       this.pos.set(def.spawnPoint.x, 0, def.spawnPoint.z);
       this.player.humanoid.group.position.copy(this.pos);
-      this.player.humanoid.group.position.y = this.world.heightAt(this.pos.x, this.pos.z) + (this.kit?.airY ?? 0);
+      this.player.humanoid.group.position.y = floor + (this.kit?.airY ?? 0);
       this.facing = this.yaw;
       this.rig.snap(this.pos, this.yaw, this.pitch);
       for (const host of this.hosts) {
         if (host.hp <= 0) continue;
         const alley = this.spawnAlley();
+        host.swims = Boolean(host.ally || host.duelist || alley.aquatic);
         host.pos.copy(alley.position);
         host.fighter.humanoid.group.position.copy(host.pos);
-        host.fighter.humanoid.group.position.y = this.world.heightAt(host.pos.x, host.pos.z);
+        host.fighter.humanoid.group.position.y = this.bodyHeight(host.pos.x, host.pos.z, Boolean(host.swims));
         this.paintTraining(host, Boolean(this.world.training));
       }
       if (def.id === 'training-pad') {
         this.banner = { title: 'TRAINING P.A.D.', sub: 'JAB VISIONS · PARANORMAL ACTIVITY DIVISION' };
         this.bannerT = 3.2;
+      } else if (def.id === 'island-paradise') {
+        this.banner = { title: 'ISLAND PARADISE', sub: 'BEACHES · JUNGLE · OPEN WATER' };
+        this.bannerT = 3.2;
+      } else if (this.banner?.title === 'ISLAND PARADISE') {
+        this.banner = null;
+        this.bannerT = 0;
       }
     }
   }
@@ -1537,6 +1690,102 @@ export class RaidEngine {
     }
   }
 
+  /** City keeps its old edge. Larger arenas publish their own. */
+  private limit() {
+    return this.world.bounds ?? BOUNDARY;
+  }
+
+  private waterDepth(x: number, z: number) {
+    return this.world.water?.depthAt(x, z) ?? 0;
+  }
+
+  /** Feet on the floor, or just under the wave when the body is in deep water. */
+  private bodyHeight(x: number, z: number, swims: boolean) {
+    const floor = this.world.heightAt(x, z);
+    const water = this.world.water;
+    if (!water) return floor;
+    const depth = water.depthAt(x, z);
+    if (depth <= (swims ? 0.9 : 1.05)) return floor;
+    return Math.max(floor + 0.05, water.surfaceAt(x, z) - 1.05);
+  }
+
+  private waterColumn(x: number, z: number): WaterColumn | null {
+    const water = this.world.water;
+    if (!water || this.kit?.flying) return null;
+    const floor = this.world.heightAt(x, z);
+    return { floor, surface: water.surfaceAt(x, z), depth: water.depthAt(x, z) };
+  }
+
+  private waterDrag() {
+    if (this.swim.mode === 'wade') return 0.68;
+    if (this.swim.mode === 'surface') return 0.62;
+    if (this.swim.mode === 'under') return 0.74;
+    return 1;
+  }
+
+  /** Buoyancy, dive, and the slow drown that starts only after the air is gone. */
+  private settleSwim(dt: number, moving: boolean) {
+    const column = this.waterColumn(this.pos.x, this.pos.z);
+    const aheadX = this.pos.x + Math.sin(this.facing) * 1.6;
+    const aheadZ = this.pos.z + Math.cos(this.facing) * 1.6;
+    const rise = this.swimRise > 0 || this.keys.has(' ');
+    if (this.swimRise > 0) this.swimRise = Math.max(0, this.swimRise - dt);
+    const step = stepSwim(this.swim, column, {
+      dt,
+      rise,
+      dive: this.keys.has('control'),
+      pitch: this.pitch,
+      moving,
+      aheadFloor: this.world.heightAt(aheadX, aheadZ),
+      aheadDepth: column ? this.waterDepth(aheadX, aheadZ) : 0,
+    });
+    this.swim = step.state;
+    if (step.exited && step.state.feetY > this.world.heightAt(this.pos.x, this.pos.z) + 0.35) {
+      this.pos.x = clamp(aheadX, -this.limit(), this.limit());
+      this.pos.z = clamp(aheadZ, -this.limit(), this.limit());
+      resolveCircle(this.pos, this.playerRadius(), this.world.obstacles);
+    }
+    if (step.entered && column) {
+      this.airY = 0;
+      this.airVel = 0;
+      this.jumping = false;
+      this.particles.emit(new THREE.Vector3(this.pos.x, column.surface, this.pos.z), 0xcfefff, 16, {
+        speed: 3.4,
+        size: 0.16,
+        life: 0.45,
+        up: 1.5,
+      });
+    }
+    if (this.swim.mode === 'surface' || this.swim.mode === 'under') {
+      this.airY = 0;
+      this.airVel = 0;
+      this.jumping = false;
+    }
+    if (step.submerged && moving) {
+      this.particles.emit(new THREE.Vector3(this.pos.x, this.swim.feetY + 1.05, this.pos.z), 0xd7f6ff, 2, {
+        speed: 1.1,
+        size: 0.08,
+        life: 0.55,
+        up: 1.6,
+      });
+    } else if (this.swim.mode === 'surface' && moving && column) {
+      this.particles.emit(new THREE.Vector3(this.pos.x, column.surface + 0.04, this.pos.z), 0xe7f7ff, 1, {
+        speed: 0.35,
+        size: 0.2,
+        life: 0.32,
+        up: 0.04,
+      });
+    }
+    if (step.hurt > 0 && this.hp > 0 && this.phase !== 'dead' && !this.raidDown) {
+      this.hp = Math.max(0, this.hp - step.hurt);
+      if (this.hp <= 0) {
+        this.hp = 1;
+        this.iframes = 0;
+        this.hurtPlayer(1, _tmp.set(0, 0, 0));
+      }
+    }
+  }
+
   private updatePlayerMove(dt: number, time: number) {
     if (!this.player) return;
     if (this.raidDown) return;
@@ -1559,7 +1808,8 @@ export class RaidEngine {
       (this.sprinting ? SPRINT_MULTIPLIER : 1) *
       (this.burnout ? 0.82 : 1) *
       (this.kit?.moveScale ?? 1) *
-      this.suppress;
+      this.suppress *
+      this.waterDrag();
     if (this.hitStun > 0.05) speed *= 0.22;
 
     const move = cameraRelativeVelocity(this.yaw, x, -z);
@@ -1571,8 +1821,8 @@ export class RaidEngine {
     this.pos.addScaledVector(_tmp, speed * dt);
     this.hitKnock.multiplyScalar(Math.max(0, 1 - dt * 5));
     this.pos.addScaledVector(this.hitKnock, dt);
-    this.pos.x = clamp(this.pos.x, -BOUNDARY, BOUNDARY);
-    this.pos.z = clamp(this.pos.z, -BOUNDARY, BOUNDARY);
+    this.pos.x = clamp(this.pos.x, -this.limit(), this.limit());
+    this.pos.z = clamp(this.pos.z, -this.limit(), this.limit());
     resolveCircle(this.pos, this.playerRadius(), this.world.obstacles);
 
     // Hosts shoulder the Ryder aside, except while a kit sequence is carrying
@@ -1610,10 +1860,13 @@ export class RaidEngine {
     }
     this.lastPos.copy(this.pos);
     this.locomote = Math.min(1, len);
+    this.settleSwim(dt, len > 0.12);
 
     this.player.humanoid.group.position.copy(this.pos);
-    this.player.humanoid.group.position.y =
-      this.world.heightAt(this.pos.x, this.pos.z) + (this.kit?.airY ?? 0) + this.airY - (this.pvpCpu?.playerSink() ?? 0);
+    const swimming = this.swim.mode === 'surface' || this.swim.mode === 'under';
+    this.player.humanoid.group.position.y = swimming
+      ? this.swim.feetY
+      : this.world.heightAt(this.pos.x, this.pos.z) + (this.kit?.airY ?? 0) + this.airY - (this.pvpCpu?.playerSink() ?? 0);
     this.player.humanoid.group.rotation.y = this.facing + (this.kit?.bodyYaw ?? 0);
     const bodyScale = this.kit?.bodyScale ?? 1;
     if (Math.abs(this.player.humanoid.group.scale.x - bodyScale) > 0.0001) {
@@ -1685,9 +1938,13 @@ export class RaidEngine {
     this.facing = this.stepFacing(dt);
     this.player.humanoid.group.rotation.y = this.facing + (this.kit?.bodyYaw ?? 0);
     this.anim += dt * (8 + moving * (this.sprinting ? 9 : 6));
+    const swimPose: PoseOverride | null =
+      this.swim.mode === 'surface' || this.swim.mode === 'under'
+        ? { kind: 'swim', t: (time % 1.15) / 1.15, weight: 1 }
+        : null;
     if (this.player.meshSource === 'gltf') {
       animateGltfFighter(this.player, dt, this.anim, moving, this.sprinting, this.meleeT, this.meleeStarted, {
-        pose: this.kit?.pose ?? this.jumpPose(),
+        pose: this.kit?.pose ?? swimPose ?? this.jumpPose(),
         style: this.strikeOverride ?? undefined,
         camera: this.camera,
       });
@@ -1695,7 +1952,8 @@ export class RaidEngine {
       this.strikeOverride = null;
     } else {
       animateHumanoid(this.player.humanoid, this.anim, moving, time);
-      if (this.meleeT > 0) poseMelee(this.player.humanoid, 1 - this.meleeT);
+      if (swimPose) this.player.humanoid.group.rotation.x = this.swim.mode === 'under' ? 1.05 : 0.9;
+      else if (this.meleeT > 0) poseMelee(this.player.humanoid, 1 - this.meleeT);
       else poseAim(this.player.humanoid, this.pitch);
       this.player.orbs?.update(dt, this.camera);
     }
@@ -1860,6 +2118,10 @@ export class RaidEngine {
 
   /** Grounded hop. A second press while that hop is still up can mount, for a kit that flies. */
   private tryJump() {
+    if (this.swim.mode === 'surface' || this.swim.mode === 'under') {
+      this.swimRise = 0.28;
+      return;
+    }
     const airborne = this.jumping || this.airY > 0.04 || this.airVel > 0.2 || (this.kit?.flying ?? false);
     if (airborne) {
       const since = this.simTime - this.jumpAt;
@@ -1898,6 +2160,10 @@ export class RaidEngine {
       if (!locked) this.tryJump();
     }
     if (this.kit?.flying) {
+      this.airY = 0;
+      this.airVel = 0;
+      this.jumping = false;
+    } else if (this.swim.mode === 'surface' || this.swim.mode === 'under') {
       this.airY = 0;
       this.airVel = 0;
       this.jumping = false;
@@ -1984,8 +2250,8 @@ export class RaidEngine {
     if (frame.lunge) {
       _fwd.set(Math.sin(this.yaw), 0, Math.cos(this.yaw));
       this.pos.addScaledVector(_fwd, frame.lunge);
-      this.pos.x = clamp(this.pos.x, -BOUNDARY, BOUNDARY);
-      this.pos.z = clamp(this.pos.z, -BOUNDARY, BOUNDARY);
+      this.pos.x = clamp(this.pos.x, -this.limit(), this.limit());
+      this.pos.z = clamp(this.pos.z, -this.limit(), this.limit());
       resolveCircle(this.pos, PLAYER_RADIUS, this.world.obstacles);
     }
     const pose = this.striker.pose();
@@ -2114,8 +2380,8 @@ export class RaidEngine {
       _fwd.set(Math.sin(this.yaw), 0, Math.cos(this.yaw));
       // Step into the hit.
       this.pos.addScaledVector(_fwd, step.lunge);
-      this.pos.x = clamp(this.pos.x, -BOUNDARY, BOUNDARY);
-      this.pos.z = clamp(this.pos.z, -BOUNDARY, BOUNDARY);
+      this.pos.x = clamp(this.pos.x, -this.limit(), this.limit());
+      this.pos.z = clamp(this.pos.z, -this.limit(), this.limit());
       resolveCircle(this.pos, PLAYER_RADIUS, this.world.obstacles);
       const color = this.burnout ? 0x8899aa : this.spec.visual.electricityColor;
       this.particles.emit(this.muzzle(), color, 10, { speed: 7, size: 0.26, life: 0.26, direction: _fwd, up: 0.2 });
@@ -2273,11 +2539,11 @@ export class RaidEngine {
       meleeDamage: () => this.meleeDamage(),
       heightAt: (x, z) => this.world.heightAt(x, z),
       resolve: (pos) => {
-        pos.x = clamp(pos.x, -BOUNDARY, BOUNDARY);
-        pos.z = clamp(pos.z, -BOUNDARY, BOUNDARY);
+        pos.x = clamp(pos.x, -this.limit(), this.limit());
+        pos.z = clamp(pos.z, -this.limit(), this.limit());
         resolveCircle(pos, engine.playerRadius(), this.world.obstacles);
       },
-      blocked: (x, z, radius) => Math.abs(x) > BOUNDARY || Math.abs(z) > BOUNDARY || pointBlocked(x, z, radius, this.world.obstacles),
+      blocked: (x, z, radius) => Math.abs(x) > this.limit() || Math.abs(z) > this.limit() || pointBlocked(x, z, radius, this.world.obstacles),
       lookDir: (out) => this.lookDir(out),
       hitStop: (seconds) => this.hitStop(seconds),
       iframes: (seconds) => {
@@ -2489,8 +2755,8 @@ export class RaidEngine {
     const hit = new Set<Host>();
     for (let s = 0; s < 9; s += 0.55) {
       this.pos.addScaledVector(_look, 0.55);
-      this.pos.x = clamp(this.pos.x, -BOUNDARY, BOUNDARY);
-      this.pos.z = clamp(this.pos.z, -BOUNDARY, BOUNDARY);
+      this.pos.x = clamp(this.pos.x, -this.limit(), this.limit());
+      this.pos.z = clamp(this.pos.z, -this.limit(), this.limit());
       resolveCircle(this.pos, PLAYER_RADIUS, this.world.obstacles);
       for (const host of this.hosts) {
         if (hit.has(host)) continue;
@@ -2554,7 +2820,7 @@ export class RaidEngine {
     let dist = 11;
     for (let s = dist; s > 1.2; s -= 0.5) {
       _tmp.copy(from).addScaledVector(_look, s);
-      if (!pointBlocked(_tmp.x, _tmp.z, PLAYER_RADIUS + 0.15, this.world.obstacles) && Math.abs(_tmp.x) < BOUNDARY && Math.abs(_tmp.z) < BOUNDARY) {
+      if (!pointBlocked(_tmp.x, _tmp.z, PLAYER_RADIUS + 0.15, this.world.obstacles) && Math.abs(_tmp.x) < this.limit() && Math.abs(_tmp.z) < this.limit()) {
         dist = s;
         break;
       }
@@ -2655,7 +2921,8 @@ export class RaidEngine {
     this.applyPlan(directRound(1, this.squadSize(), Math.random, this.raidPlan?.difficulty ?? 'normal'));
     this.spawnTimer = 0.6;
     const banner = roundBanner(1);
-    this.banner = { title: banner.title, sub: `RAID · ${banner.sub}` };
+    const place = this.arena.id === 'island-paradise' ? 'THE SIGNAL REACHES THE ISLAND' : banner.sub;
+    this.banner = { title: banner.title, sub: `RAID · ${place}` };
     this.bannerT = 2.4;
   }
 
@@ -2826,7 +3093,7 @@ export class RaidEngine {
     const offset = offsets[index] ?? { x: 1.6 * (index + 1), z: -2 };
     const pos = new THREE.Vector3(this.pos.x + offset.x, 0, this.pos.z + offset.z);
     fighter.humanoid.group.position.copy(pos);
-    fighter.humanoid.group.position.y = this.world.heightAt(pos.x, pos.z);
+    fighter.humanoid.group.position.y = this.bodyHeight(pos.x, pos.z, true);
     this.scene.add(fighter.humanoid.group);
     const focus = new THREE.Vector3(pos.x, 0, pos.z + 4);
     const vel = new THREE.Vector3();
@@ -2872,6 +3139,7 @@ export class RaidEngine {
       dealt: 0,
       seat,
       down: 0,
+      swims: true,
     };
     this.ensureStatLine(seat, id, remoteHuman ? 'human' : 'computer');
     let foe: Host | null = null;
@@ -2896,10 +3164,10 @@ export class RaidEngine {
         playerWhiff: () => false,
         playerStunned: () => (foe?.stagger ?? 0) > 0.08 || (foe?.stun ?? 0) > 0,
         playerMemory: () => ({ punch: 0, kick: 0, melee: 0, ability: 0, dodge: 0, retreat: 0 }),
-        heightAt: (x, z) => this.world.heightAt(x, z),
+        heightAt: (x, z) => this.bodyHeight(x, z, true),
         resolve: (body) => {
-          body.x = clamp(body.x, -BOUNDARY, BOUNDARY);
-          body.z = clamp(body.z, -BOUNDARY, BOUNDARY);
+          body.x = clamp(body.x, -this.limit(), this.limit());
+          body.z = clamp(body.z, -this.limit(), this.limit());
           resolveCircle(body, PLAYER_RADIUS, this.world.obstacles);
         },
         blocked: (x, z, radius) => this.npcBlocked(x, z, radius),
@@ -2983,13 +3251,13 @@ export class RaidEngine {
       if (mag > 0.08) {
         host.pos.x += (remote.x / mag) * host.speed * dt;
         host.pos.z += (remote.z / mag) * host.speed * dt;
-        host.pos.x = clamp(host.pos.x, -BOUNDARY, BOUNDARY);
-        host.pos.z = clamp(host.pos.z, -BOUNDARY, BOUNDARY);
+        host.pos.x = clamp(host.pos.x, -this.limit(), this.limit());
+        host.pos.z = clamp(host.pos.z, -this.limit(), this.limit());
         resolveCircle(host.pos, host.radius, this.world.obstacles);
         host.fighter.humanoid.group.rotation.y = Math.atan2(remote.x, remote.z);
       }
       host.fighter.humanoid.group.position.copy(host.pos);
-      host.fighter.humanoid.group.position.y = this.world.heightAt(host.pos.x, host.pos.z);
+      host.fighter.humanoid.group.position.y = this.bodyHeight(host.pos.x, host.pos.z, true);
       this.animateHost(host, dt, Math.min(1, mag), this.simTime);
       return;
     }
@@ -3080,7 +3348,7 @@ export class RaidEngine {
   private presentDownedHost(host: Host, dt: number) {
     const group = host.fighter.humanoid.group;
     group.position.copy(host.pos);
-    group.position.y = this.world.heightAt(host.pos.x, host.pos.z);
+    group.position.y = this.bodyHeight(host.pos.x, host.pos.z, Boolean(host.swims));
     this.presentDownedFighter(host.fighter, host.down ?? 0, dt);
   }
 
@@ -3136,13 +3404,13 @@ export class RaidEngine {
     if (step > 0) {
       host.pos.x += (dx / dist) * step;
       host.pos.z += (dz / dist) * step;
-      host.pos.x = clamp(host.pos.x, -BOUNDARY, BOUNDARY);
-      host.pos.z = clamp(host.pos.z, -BOUNDARY, BOUNDARY);
+      host.pos.x = clamp(host.pos.x, -this.limit(), this.limit());
+      host.pos.z = clamp(host.pos.z, -this.limit(), this.limit());
       resolveCircle(host.pos, host.radius, this.world.obstacles);
     }
     const group = host.fighter.humanoid.group;
     group.position.copy(host.pos);
-    group.position.y = this.world.heightAt(host.pos.x, host.pos.z);
+    group.position.y = this.bodyHeight(host.pos.x, host.pos.z, true);
     group.rotation.order = 'YXZ';
     group.rotation.x = 0;
     group.rotation.y = Math.atan2(dx, dz);
@@ -3264,6 +3532,7 @@ export class RaidEngine {
     this.spawnTimer = 0.4;
     const banner = roundBanner(n);
     if (this.arena.id === 'training-pad' && n === 1) banner.sub = 'P.A.D. · TRAINING FACILITY';
+    if (this.arena.id === 'island-paradise' && n === 1) banner.sub = 'THE SIGNAL REACHES THE ISLAND';
     this.banner = banner;
     this.bannerT = 3.2;
     this.kit?.onRound?.();
@@ -3287,8 +3556,8 @@ export class RaidEngine {
       const ang = Math.random() * Math.PI * 2;
       const dist = 2.2 + Math.random() * 3.4;
       this.signalHazard = {
-        x: clamp(this.pos.x + Math.sin(ang) * dist, -BOUNDARY, BOUNDARY),
-        z: clamp(this.pos.z + Math.cos(ang) * dist, -BOUNDARY, BOUNDARY),
+        x: clamp(this.pos.x + Math.sin(ang) * dist, -this.limit(), this.limit()),
+        z: clamp(this.pos.z + Math.cos(ang) * dist, -this.limit(), this.limit()),
         fuse: 1.45,
       };
       this.hazardWait = 15;
@@ -3334,7 +3603,7 @@ export class RaidEngine {
   /** Prefer alleys in the block the Ryder is standing in, so a wave still arrives on a four-block map. */
   private spawnAlley() {
     const alleys = this.world.alleys;
-    const reach = DISTRICT_SPAN * 0.65;
+    const reach = this.world.spawnReach ?? DISTRICT_SPAN * 0.65;
     if (Math.random() < 0.65) {
       const here = alleys.filter((alley) => {
         const dx = alley.position.x - this.pos.x;
@@ -3358,11 +3627,13 @@ export class RaidEngine {
     const profileId = profileForKind(kind, Math.random());
     const civilian = definitionForProfile(profileId, Math.random());
     const fighter = buildHost(kind, civilian.modelPath);
+    const swims = Boolean(alley.aquatic);
     fighter.humanoid.group.position.copy(pos);
-    fighter.humanoid.group.position.y = this.world.heightAt(pos.x, pos.z);
+    fighter.humanoid.group.position.y = this.bodyHeight(pos.x, pos.z, swims);
     this.scene.add(fighter.humanoid.group);
     this.hosts.push({
       kind,
+      swims,
       tier: archetype?.tier ?? 1,
       archetypeId: order.archetypeId,
       supernatural: Boolean(archetype?.supernatural),
@@ -3562,11 +3833,11 @@ export class RaidEngine {
       if (host.stagger > 0 || host.airY > 0) {
         host.pos.x += host.knock.x * dt;
         host.pos.z += host.knock.z * dt;
-        host.pos.x = clamp(host.pos.x, -BOUNDARY, BOUNDARY);
-        host.pos.z = clamp(host.pos.z, -BOUNDARY, BOUNDARY);
+        host.pos.x = clamp(host.pos.x, -this.limit(), this.limit());
+        host.pos.z = clamp(host.pos.z, -this.limit(), this.limit());
         resolveCircle(host.pos, host.radius, this.world.obstacles);
         group.position.copy(host.pos);
-        group.position.y = this.world.heightAt(host.pos.x, host.pos.z) + host.airY - host.sink;
+        group.position.y = this.bodyHeight(host.pos.x, host.pos.z, Boolean(host.swims)) + host.airY - host.sink;
         // Reel back from the blow; spin while airborne.
         group.rotation.x = -host.lean * 0.5 - host.tumble;
         this.animateHost(host, dt, 0, time);
@@ -3578,7 +3849,8 @@ export class RaidEngine {
 
       if (host.stun > 0) {
         host.fighter.humanoid.group.position.copy(host.pos);
-        host.fighter.humanoid.group.position.y = this.world.heightAt(host.pos.x, host.pos.z) + Math.min(1.5, host.stun * 0.7);
+        host.fighter.humanoid.group.position.y =
+          this.bodyHeight(host.pos.x, host.pos.z, Boolean(host.swims)) + Math.min(1.5, host.stun * 0.7);
         this.animateHost(host, dt, 0.12, time);
         if (host.hit > 0) flashEmissive(host.fighter.humanoid, host.hitColor, host.hit * 2.4);
         else flashEmissive(host.fighter.humanoid, 0x66cfff, 0.45);
@@ -3601,7 +3873,7 @@ export class RaidEngine {
     group.rotation.order = 'YXZ';
     group.rotation.x = 0;
     group.position.copy(host.pos);
-    group.position.y = this.world.heightAt(host.pos.x, host.pos.z);
+    group.position.y = this.bodyHeight(host.pos.x, host.pos.z, Boolean(host.swims));
     this.animateHost(host, dt, 0, time);
     if (host.hit > 0) flashEmissive(host.fighter.humanoid, host.hitColor, host.hit * 2.4);
     else flashEmissive(host.fighter.humanoid, 0x000000, 0);
@@ -3625,7 +3897,7 @@ export class RaidEngine {
 
   /** Walls, cars, and the map edge. Used so NPCs turn before they grind. */
   private npcBlocked(x: number, z: number, radius: number) {
-    return Math.abs(x) > BOUNDARY || Math.abs(z) > BOUNDARY || pointBlocked(x, z, radius, this.world.obstacles);
+    return Math.abs(x) > this.limit() || Math.abs(z) > this.limit() || pointBlocked(x, z, radius, this.world.obstacles);
   }
 
   /**
@@ -3785,6 +4057,13 @@ export class RaidEngine {
       vx = vx * 0.65 + hazard.x * 0.28;
       vz = vz * 0.65 + hazard.z * 0.28;
     }
+    if (!host.swims && this.waterDepth(host.pos.x, host.pos.z) > 1.05 && this.world.water) {
+      const out = shallowDirection(host.pos.x, host.pos.z, (x, z) => this.world.water?.depthAt(x, z) ?? 0);
+      if (out) {
+        vx = out.x;
+        vz = out.z;
+      }
+    }
     const speed = host.speed * profile.speed * (order.state === 'flee' || hazard ? 1.35 : 1);
     const mag = Math.hypot(vx, vz);
     let travelX = 0;
@@ -3808,8 +4087,8 @@ export class RaidEngine {
       host.pos.x += host.knock.x * dt;
       host.pos.z += host.knock.z * dt;
     }
-    host.pos.x = clamp(host.pos.x, -BOUNDARY, BOUNDARY);
-    host.pos.z = clamp(host.pos.z, -BOUNDARY, BOUNDARY);
+    host.pos.x = clamp(host.pos.x, -this.limit(), this.limit());
+    host.pos.z = clamp(host.pos.z, -this.limit(), this.limit());
     resolveCircle(host.pos, host.radius, this.world.obstacles);
     if (!phased && !this.kit?.passthrough) {
       const sx = host.pos.x - this.pos.x;
@@ -3828,7 +4107,7 @@ export class RaidEngine {
     const facing = Math.atan2(faceX, faceZ);
     const group = host.fighter.humanoid.group;
     group.position.copy(host.pos);
-    group.position.y = this.world.heightAt(host.pos.x, host.pos.z) - host.sink;
+    group.position.y = this.bodyHeight(host.pos.x, host.pos.z, Boolean(host.swims)) - host.sink;
     group.rotation.y = facing;
 
     if (host.heldItem && this.throwables) {
@@ -3961,11 +4240,13 @@ export class RaidEngine {
     throwing = false,
     pose: PoseOverride | null = null,
   ) {
+    const swimming = Boolean(host.swims) && this.waterDepth(host.pos.x, host.pos.z) > 1.05;
+    const stance = pose ?? (swimming ? { kind: 'swim' as const, t: (time % 1.15) / 1.15, weight: 1 } : null);
     if (host.fighter.meshSource === 'gltf') {
       animateGltfFighter(host.fighter, dt, host.anim, moving, host.speed > 5, meleeT, host.swing, {
         style,
         clipHint: clipHintFor(host.animMap, style, throwing),
-        pose,
+        pose: stance,
       });
       host.swing = false;
     } else {
@@ -4030,7 +4311,12 @@ export class RaidEngine {
       this.scheduler.clear();
       this.banner = {
         title: 'SIGNAL LOST',
-        sub: this.arena.id === 'training-pad' ? 'THE FACILITY TOOK YOU' : 'THE BLOCK TOOK YOU',
+        sub:
+          this.arena.id === 'island-paradise' && this.swim.oxygen <= 0
+            ? 'THE OCEAN TOOK YOU'
+            : this.arena.id === 'training-pad'
+              ? 'THE FACILITY TOOK YOU'
+              : 'THE BLOCK TOOK YOU',
       };
       this.bannerT = 8;
       document.exitPointerLock();
@@ -4151,8 +4437,8 @@ export class RaidEngine {
         body.spin *= Math.max(0, 1 - dt * 12);
       }
       body.pos.addScaledVector(body.vel, dt);
-      body.pos.x = clamp(body.pos.x, -BOUNDARY, BOUNDARY);
-      body.pos.z = clamp(body.pos.z, -BOUNDARY, BOUNDARY);
+      body.pos.x = clamp(body.pos.x, -this.limit(), this.limit());
+      body.pos.z = clamp(body.pos.z, -this.limit(), this.limit());
       body.tumble += body.spin * dt;
       const group = body.fighter.humanoid.group;
       group.rotation.order = 'YXZ';
@@ -4214,7 +4500,11 @@ export class RaidEngine {
       bolt.life -= dt;
       bolt.pos.addScaledVector(bolt.vel, dt);
       bolt.mesh.position.copy(bolt.pos);
-      if (bolt.pos.y < 0.15 || bolt.life <= 0 || Math.abs(bolt.pos.x) > BOUNDARY + 4 || Math.abs(bolt.pos.z) > BOUNDARY + 4) {
+      const floor = this.world.heightAt(bolt.pos.x, bolt.pos.z);
+      const water = this.world.water;
+      const surface = water ? water.surfaceAt(bolt.pos.x, bolt.pos.z) : floor;
+      const bed = water && floor < surface ? surface : floor;
+      if (bolt.pos.y < bed + 0.15 || bolt.life <= 0 || Math.abs(bolt.pos.x) > this.limit() + 4 || Math.abs(bolt.pos.z) > this.limit() + 4) {
         this.retireBolt(i);
         continue;
       }
@@ -4338,12 +4628,10 @@ export class RaidEngine {
   }
 
   private updateCamera(dt: number) {
-    // Feet in the world, including stairs, jumps, levitation, and descents.
-    const feet =
-      this.world.heightAt(this.pos.x, this.pos.z) +
-      (this.kit?.airY ?? 0) +
-      this.airY -
-      (this.pvpCpu?.playerSink() ?? 0);
+    // Feet in the world, including stairs, jumps, levitation, and swimming.
+    const feet = this.player
+      ? this.player.humanoid.group.position.y
+      : this.world.heightAt(this.pos.x, this.pos.z) + (this.kit?.airY ?? 0) + this.airY - (this.pvpCpu?.playerSink() ?? 0);
     this.cameraPivot.set(this.pos.x, feet, this.pos.z);
     if (this.camReady) {
       const hop = Math.hypot(this.cameraPivot.x - this.lastCam.x, this.cameraPivot.z - this.lastCam.z);
@@ -4359,6 +4647,20 @@ export class RaidEngine {
     this.rig.update(dt, this.cameraPivot, this.yaw, this.pitch, this.cameraState(), false, _camLead);
     this.stepFacility(dt);
     this.tintPadFog(dt);
+    this.tintWater(dt);
+  }
+
+  /** Under the wave the fog goes deep and close. Back on the beach it restores the arena sky. */
+  private tintWater(dt: number) {
+    const fog = this.scene.fog as THREE.FogExp2 | null;
+    if (!fog || !this.world.water) return;
+    const feet = this.player?.humanoid.group.position.y ?? this.world.heightAt(this.pos.x, this.pos.z);
+    const under = feet + 1.5 < this.world.water.surfaceAt(this.pos.x, this.pos.z);
+    this.waterTint.setHex(under ? 0x07384c : this.aboveFog.getHex());
+    const density = under ? 0.045 : this.aboveDensity;
+    const blend = 1 - Math.exp(-dt * 3.2);
+    fog.color.lerp(this.waterTint, blend);
+    fog.density += (density - fog.density) * blend;
   }
 
   private stepFacility(dt: number) {
@@ -4462,6 +4764,9 @@ export class RaidEngine {
           ? { left: this.downLeft, faded: this.downLeft <= 0 }
           : null,
       statBoard: this.phase === 'report' && this.reportRound > 0 ? this.publishStatBoard() : null,
+      water: this.world.water
+        ? { mode: this.swim.mode, oxygen: this.swim.oxygen, submerged: this.swim.mode === 'under' }
+        : null,
     });
   }
 
@@ -4507,7 +4812,7 @@ export class RaidEngine {
     const fighter = buildRyder(spec, { clone: true });
     const pos = new THREE.Vector3(-Math.sign(this.pos.x || 1) * 8, 0, -Math.sign(this.pos.z || 1) * 8);
     fighter.humanoid.group.position.copy(pos);
-    fighter.humanoid.group.position.y = this.world.heightAt(pos.x, pos.z);
+    fighter.humanoid.group.position.y = this.bodyHeight(pos.x, pos.z, true);
     fighter.humanoid.group.rotation.y = Math.atan2(this.pos.x - pos.x, this.pos.z - pos.z);
     this.scene.add(fighter.humanoid.group);
     const duelHp = pvpHealth(spec.maxHp);
@@ -4544,6 +4849,7 @@ export class RaidEngine {
       winding: false,
       follow: null,
       duelist: true,
+      swims: true,
       controlled,
       ryderId: id,
       aura: spec.maxAura,
@@ -4578,14 +4884,13 @@ export class RaidEngine {
         playerWhiff: () => this.striker.exposed,
         playerStunned: () => this.hitStun > 0.08 || this.stasis > 0 || (this.airY > 0.25 && !this.jumping),
         playerMemory: () => this.combatMemory.rates(this.simTime),
-        heightAt: (x, z) => this.world.heightAt(x, z),
+        heightAt: (x, z) => this.bodyHeight(x, z, true),
         resolve: (pos) => {
-          pos.x = clamp(pos.x, -BOUNDARY, BOUNDARY);
-          pos.z = clamp(pos.z, -BOUNDARY, BOUNDARY);
+          pos.x = clamp(pos.x, -this.limit(), this.limit());
+          pos.z = clamp(pos.z, -this.limit(), this.limit());
           resolveCircle(pos, PLAYER_RADIUS, this.world.obstacles);
         },
-        blocked: (x, z, radius) =>
-          Math.abs(x) > BOUNDARY || Math.abs(z) > BOUNDARY || pointBlocked(x, z, radius, this.world.obstacles),
+        blocked: (x, z, radius) => this.npcBlocked(x, z, radius),
         hurtPlayer: (amount, dir, kind, physical) => this.hurtPlayer(amount, dir, kind, physical),
         stunPlayer: (seconds) => this.setStasis(seconds),
         suppressPlayer: (factor) => this.setSuppress(factor),
@@ -4633,14 +4938,14 @@ export class RaidEngine {
     if (moving > 0) {
       host.pos.x += (mx / moving) * host.speed * dt;
       host.pos.z += (mz / moving) * host.speed * dt;
-      host.pos.x = clamp(host.pos.x, -BOUNDARY, BOUNDARY);
-      host.pos.z = clamp(host.pos.z, -BOUNDARY, BOUNDARY);
+      host.pos.x = clamp(host.pos.x, -this.limit(), this.limit());
+      host.pos.z = clamp(host.pos.z, -this.limit(), this.limit());
       resolveCircle(host.pos, host.radius, this.world.obstacles);
       host.fighter.humanoid.group.rotation.y = Math.atan2(mx, mz);
     }
     this.stepLocalOpponentAir(host, dt);
     host.fighter.humanoid.group.position.copy(host.pos);
-    host.fighter.humanoid.group.position.y = this.world.heightAt(host.pos.x, host.pos.z) + host.airY;
+    host.fighter.humanoid.group.position.y = this.bodyHeight(host.pos.x, host.pos.z, true) + host.airY;
     this.animateHost(host, dt, Math.min(1, moving), time, 0, undefined, false, this.jumpPose(host.airY, host.airVel, this.p2Jumping));
     if (this.p2DodgeT > 0) this.p2DodgeT = Math.max(0, this.p2DodgeT - dt);
     if (this.p2PunchQueued) {

@@ -25,7 +25,7 @@ const ROOT_ITEMS: NavItem<RootAction>[] = [
   { id: 'resume', label: 'Resume', hint: 'Back onto the block' },
   { id: 'deck', label: 'Power Deck', hint: 'Bind Q · E · R' },
   { id: 'ryder', label: 'Switch Ryder', hint: 'Change who is in play' },
-  { id: 'arena', label: 'Arena', hint: 'The Block or Training P.A.D.' },
+  { id: 'arena', label: 'Arena', hint: 'Block, P.A.D., or Island Paradise' },
   { id: 'mode', label: 'Game Mode', hint: 'Solo · PvP · Raid' },
   { id: 'settings', label: 'Settings', hint: 'Camera & controls' },
   { id: 'exit', label: 'Exit Raid', hint: 'Drop the signal', danger: true },

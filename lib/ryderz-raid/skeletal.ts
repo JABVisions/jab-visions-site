@@ -700,7 +700,8 @@ export type AbilityPose =
   | 'summon'
   | 'grow'
   | 'stomp'
-  | 'ride';
+  | 'ride'
+  | 'swim';
 
 export interface PoseOverride {
   kind: AbilityPose;
@@ -741,6 +742,7 @@ export const POSE_ROOT_DROP: Record<AbilityPose, number> = {
   grow: 0.12,
   stomp: 0.16,
   ride: 0,
+  swim: 0,
 };
 
 export interface SkeletalMotion {
@@ -922,6 +924,9 @@ export function poseSkeleton(skel: ProceduralSkeleton, motion: SkeletalMotion) {
       case 'ride':
         poseRide(SCRATCH, pose.t);
         break;
+      case 'swim':
+        poseSwim(SCRATCH, pose.t);
+        break;
     }
     if (pose.lean) {
       SCRATCH.spine.y += pose.lean;
@@ -1091,6 +1096,24 @@ function poseLaunch(A: Angles, t: number) {
   A.footR.x += 0.3 * tuck;
   A.upperLegL.x += 0.25;
   A.footL.x += 0.45;
+}
+
+/** Prone stroke. Retargeted onto the same rig as the other stances. */
+function poseSwim(A: Angles, t: number) {
+  const stroke = Math.sin(t * Math.PI * 2);
+  A.hips.x += 0.95;
+  A.spine.x += 0.35;
+  A.head.x -= 0.25;
+  A.upperArmL.x += 0.4 + stroke * 0.9;
+  A.upperArmR.x += 0.4 - stroke * 0.9;
+  A.upperArmL.z += 0.35;
+  A.upperArmR.z -= 0.35;
+  A.lowerArmL.x -= 0.55 + Math.max(0, stroke) * 0.4;
+  A.lowerArmR.x -= 0.55 + Math.max(0, -stroke) * 0.4;
+  A.upperLegL.x += 0.15 + stroke * 0.35;
+  A.upperLegR.x += 0.15 - stroke * 0.35;
+  A.lowerLegL.x += 0.45 + Math.max(0, -stroke) * 0.35;
+  A.lowerLegR.x += 0.45 + Math.max(0, stroke) * 0.35;
 }
 
 /** Fist-first dive: the whole body pitches over the hips, lead arm driven straight down. */
