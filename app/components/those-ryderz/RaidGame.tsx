@@ -23,6 +23,7 @@ import PvpVersusHUD from './hud/PvpVersusHUD';
 import LowHealthVignette, { type LowHealthVignetteApi } from './hud/LowHealthVignette';
 import ComboIndicator, { type ComboHudApi } from './hud/ComboIndicator';
 import RaidRadar, { type RadarApi } from './hud/RaidRadar';
+import StatBoard from './hud/StatBoard';
 import PauseMenu from './menu/PauseMenu';
 import RaidLobby from './modes/RaidLobby';
 import RaidWatch from './modes/RaidWatch';
@@ -90,6 +91,9 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
   const [fadedOut, setFadedOut] = useState(false);
   const reviveLeft = useRef<HTMLElement>(null);
   const downLeftEl = useRef<HTMLElement>(null);
+  const [statBoard, setStatBoard] = useState<HudState['statBoard']>(null);
+  const boardSeconds = useRef<HTMLElement>(null);
+  const boardKey = useRef('');
   const [nearShop, setNearShop] = useState(false);
   const [beacon, setBeacon] = useState<HudState['beacon']>(null);
   const [recovering, setRecovering] = useState(false);
@@ -131,6 +135,19 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
     }
     if (reviveLeft.current && next.revive) reviveLeft.current.textContent = `${Math.ceil(next.revive.left)}s`;
     if (downLeftEl.current && next.down && !next.down.faded) downLeftEl.current.textContent = `${Math.ceil(next.down.left)}s`;
+    if (boardSeconds.current && next.statBoard) boardSeconds.current.textContent = String(Math.ceil(next.statBoard.left));
+    const nextBoardKey = next.statBoard
+      ? `${next.statBoard.round}|${next.statBoard.mvp ? 1 : 0}|${next.statBoard.lines
+          .map(
+            (line) =>
+              `${line.seat}:${line.control}:${line.round.kills}:${line.round.downs}:${Math.round(line.round.damage)}:${line.raid.kills}:${line.raid.downs}:${Math.round(line.raid.damage)}`,
+          )
+          .join(',')}`
+      : '';
+    if (boardKey.current !== nextBoardKey) {
+      boardKey.current = nextBoardKey;
+      setStatBoard(next.statBoard);
+    }
     playerStore.syncLocalVitals({
       health: next.hp,
       maxHealth: next.maxHp,
@@ -447,7 +464,11 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
         }}
       />
 
-      {playing && phase !== 'dead' && phase !== 'victory' && (
+      {playing && statBoard && phase === 'report' && (
+        <StatBoard board={statBoard} secondsRef={boardSeconds} onContinue={() => engineRef.current?.continueReport()} />
+      )}
+
+      {playing && phase !== 'dead' && phase !== 'victory' && phase !== 'report' && (
         <div className={styles.overlay} aria-hidden="true" data-revive={reviveName ?? ''} data-down={downed ? '1' : '0'}>
           <LowHealthVignette ref={vignette} />
           <ComboIndicator ref={comboHud} />
