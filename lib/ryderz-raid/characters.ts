@@ -67,6 +67,8 @@ export interface GltfRig {
   weaponSocket: THREE.Object3D;
   /** Same for the free hand; null when the rig has no left hand bone. */
   offhandSocket: THREE.Object3D | null;
+  /** Export facing correction. Reapplied every frame because the pose resets rotation. */
+  modelYaw: number;
   /** Zoe's three plasma satellites; other Ryderz leave this unset. */
   orbs?: PlasmaOrbits;
 }
@@ -276,7 +278,7 @@ function measureFigure(figure: THREE.Object3D) {
 function wrapGltfAsHumanoid(
   template: GltfTemplate,
   height = 1.88,
-  options: { ownMaterials?: boolean; strikes?: MeleeStyle[]; keep?: BoneKey[]; armHang?: number; sashay?: boolean } = {},
+  options: { ownMaterials?: boolean; strikes?: MeleeStyle[]; keep?: BoneKey[]; armHang?: number; sashay?: boolean; yaw?: number } = {},
 ): { humanoid: Humanoid; rig: GltfRig } {
   const group = new THREE.Group();
   const figure = template.skinned ? (cloneSkeleton(template.scene) as THREE.Group) : template.scene.clone(true);
@@ -304,8 +306,9 @@ function wrapGltfAsHumanoid(
     -box.min.y * scale,
     -(box.min.z + box.max.z) * 0.5 * scale,
   );
-  // Tripo exports face +Z, which is this game's forward.
-  figure.rotation.y = 0;
+  // Tripo exports usually face +Z, which is this game's forward. A model that
+  // looks along +X passes a yaw so the face still meets the camera.
+  figure.rotation.y = options.yaw ?? 0;
   figure.name = 'TripoFigure';
   group.add(figure);
 
@@ -418,6 +421,7 @@ function wrapGltfAsHumanoid(
     style: options.strikes?.[0] ?? 'chop',
     weaponSocket,
     offhandSocket,
+    modelYaw: options.yaw ?? 0,
   };
 
   const torso = dummyPart('Torso');
@@ -667,7 +671,7 @@ export function animateGltfFighter(
     }
     rig.mixer.update(dt);
     rig.figure.position.copy(rig.basePosition);
-    rig.figure.rotation.set(0, 0, 0);
+    rig.figure.rotation.set(0, rig.modelYaw, 0);
   } else if (rig.skeleton) {
     if (meleeStarted) {
       if (extras?.style) {
@@ -684,7 +688,7 @@ export function animateGltfFighter(
     f.position.y += Math.abs(Math.sin(phase)) * (sprinting ? 0.045 : 0.025) * moving * (pose ? 1 - pose.weight : 1);
     if (pose) f.position.y -= POSE_ROOT_DROP[pose.kind] * Math.min(1, pose.weight);
     f.position.z += swing * STRIKE_LUNGE[rig.style];
-    f.rotation.set(0, 0, 0);
+    f.rotation.set(0, rig.modelYaw, 0);
   } else {
     // --- Puppet fallback for an unrigged mesh -------------------------------
     const f = rig.figure;
@@ -725,6 +729,7 @@ export function buildRyder(spec: RyderSpec, options: { clone?: boolean } = {}): 
       keep: spec.skelKeep,
       armHang: spec.armHang,
       sashay: spec.sashay,
+      yaw: spec.modelYaw,
     });
     const weapons: THREE.Object3D[] = [];
     const glowMeshes: THREE.Mesh[] = [];

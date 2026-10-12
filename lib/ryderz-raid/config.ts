@@ -130,6 +130,11 @@ export interface RyderSpec {
   /** Hip-led stride with the arms left hanging, instead of a combat tuck. */
   sashay?: boolean;
   /**
+   * Rest yaw applied to the figure so its face points along raid-forward (+Z).
+   * Some exports look along +X. The animator puts this back every frame.
+   */
+  modelYaw?: number;
+  /**
    * Procedural-skeleton bones left in the GLB's export pose. Use when a
    * bind-pose correction (hanging a raised arm, unfolding an elbow) would
    * corkscrew geodesic skinning. Animation still layers on top of the bind.
@@ -857,8 +862,37 @@ export const RYDERZ: Record<RyderId, RyderSpec> = {
     weapon: 'The word',
     portrait: '/assets/those-ryderz/icons/martin-luther-king.png',
     icon: '/assets/those-ryderz/icons/martin-luther-king.png',
-    glb: '/assets/those-ryderz/models/boomers/martin-luther-king.glb',
+    glb: '/assets/those-ryderz/models/boomers/martin-luther-king.glb?v=1',
     strikes: ['punch', 'kick', 'smash'],
+    // Tripo exported him in a T-pose looking along +X. The shared stance roll
+    // treats that rest as a backwards torso and twists the jacket open. Keep
+    // the export pose, turn the whole figure onto raid-forward, and hang the arms.
+    armHang: 1.45,
+    modelYaw: -Math.PI / 2,
+    skelKeep: [
+      'hips',
+      'spine',
+      'chest',
+      'upperChest',
+      'neck',
+      'head',
+      'shoulderL',
+      'shoulderR',
+      'upperArmL',
+      'upperArmR',
+      'lowerArmL',
+      'lowerArmR',
+      'handL',
+      'handR',
+      'upperLegL',
+      'upperLegR',
+      'lowerLegL',
+      'lowerLegR',
+      'footL',
+      'footR',
+      'toesL',
+      'toesR',
+    ],
     maxHp: 130,
     speed: 6.2,
     fireRate: 2.2,

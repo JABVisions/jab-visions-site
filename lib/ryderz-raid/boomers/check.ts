@@ -407,6 +407,6 @@ march.detach();
 assert.equal(RYDERZ['marilyn-monroe'].glb, '/assets/those-ryderz/models/boomers/marilyn-monroe.glb');
 assert.equal(RYDERZ['marilyn-monroe'].visual.auraStyle, 'sparkle');
 assert.equal(RYDERZ['martin-luther-king'].visual.auraStyle, 'sparkle');
-assert.equal(RYDERZ['martin-luther-king'].glb, '/assets/those-ryderz/models/boomers/martin-luther-king.glb');
+assert.equal(RYDERZ['martin-luther-king'].glb, '/assets/those-ryderz/models/boomers/martin-luther-king.glb?v=1');
 
 console.log('boomer kits ok');
