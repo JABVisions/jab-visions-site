@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { ledgeDrop, resolveFooting, slopeBlocks } from '../footing';
 import { islandAlleys, islandBeacon, islandFloor, islandSpawn, sampleIsland } from './terrain';
 import { emptySwim, shallowDirection, stepSwim } from './swim';
 
@@ -59,6 +60,18 @@ const creek = sampleIsland(-73, 100);
 const creekBank = islandFloor(-84, 108);
 assert.ok(creek.depth > 0.5, 'a rainforest stream holds water');
 assert.ok(creekBank > creek.floor + 1.2, 'the stream sits in a dip below its bank');
+
+assert.ok(slopeBlocks(8, 0.4, 0.7), 'a cliff face blocks a step');
+assert.equal(slopeBlocks(1.2, 2, 0.7), false, 'a trail is walkable');
+const cliffStep = { x: -20, z: -115 };
+resolveFooting(islandFloor, cliffStep, -20, -102, islandFloor(-20, -102), 0.7);
+assert.ok(Math.abs(cliffStep.z + 102) < 0.2, 'a step into the waterfall cliff is pushed back');
+const trail = { x: -48, z: -168 };
+const trailFrom = islandFloor(-48, -166);
+resolveFooting(islandFloor, trail, -48, -166, trailFrom, 0.7);
+assert.ok(Math.abs(trail.z + 168) < 0.05, 'the mountain trail accepts a short climb');
+assert.ok(ledgeDrop(64, -1, 0.4), 'walking off the lip starts a fall');
+assert.equal(ledgeDrop(10, 9.2, 0.4), false, 'a small dip stays on the ground');
 
 for (const alley of islandAlleys()) {
   const sample = sampleIsland(alley.x, alley.z);

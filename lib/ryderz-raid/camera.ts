@@ -166,6 +166,9 @@ export class ThirdPersonCamera {
   forcedState: CameraState | null = null;
 
   private occluders: THREE.Object3D[];
+  private groundAt: ((x: number, z: number) => number) | null = null;
+  /** Seconds for the pivot to catch the player's feet. Longer while walking. */
+  ySmoothing = 0.08;
   private state: CameraState = 'EXPLORATION';
   private framing: CameraFraming = {
     fov: CAMERA_DEFAULTS.fov,
@@ -197,6 +200,11 @@ export class ThirdPersonCamera {
 
   setOccluders(occluders: THREE.Object3D[]) {
     this.occluders = occluders;
+  }
+
+  /** Ground under a point. The lens is lifted so it cannot sit inside a hill. */
+  setGround(probe: ((x: number, z: number) => number) | null) {
+    this.groundAt = probe;
   }
 
   setConfig(patch: Partial<CameraConfig>) {
@@ -339,8 +347,7 @@ export class ThirdPersonCamera {
     const leadX = lead?.x ?? 0;
     const leadZ = lead?.z ?? 0;
     this.smoothPivot.x = damp(this.smoothPivot.x, playerPos.x + leadX, posTc, dt);
-    // Vertical follow is quicker than horizontal so stairs and jumps stay framed.
-    this.smoothPivot.y = damp(this.smoothPivot.y, playerPos.y, posTc * 0.55, dt);
+    this.smoothPivot.y = damp(this.smoothPivot.y, playerPos.y, instant ? 0 : this.ySmoothing, dt);
     this.smoothPivot.z = damp(this.smoothPivot.z, playerPos.z + leadZ, posTc, dt);
     this.smoothYaw += damp(0, wrapAngle(yaw - this.smoothYaw), rotTc, dt);
     this.smoothPitch = damp(this.smoothPitch, pitch, rotTc, dt);
@@ -396,9 +403,10 @@ export class ThirdPersonCamera {
       const hits = _ray.intersectObjects(this.occluders, false);
       if (hits.length) allowed = Math.min(allowed, Math.max(0, hits[0].distance - pad));
     }
-    // Keep the camera off whatever floor the character is standing on.
+    // On flat streets this keeps the lens off the floor by pulling in. Hills
+    // use the ground lift below, so the same pull does not zoom on every slope.
     const floorY = playerPos.y + 0.32;
-    if (_desired.y < floorY && _dir.y < -1e-4) {
+    if (!this.groundAt && _desired.y < floorY && _dir.y < -1e-4) {
       allowed = Math.min(allowed, (floorY - _origin.y) / _dir.y);
     }
     // A wall closer than the comfort distance wins. Clamping back out to
@@ -406,11 +414,15 @@ export class ThirdPersonCamera {
     allowed = Math.max(0.12, Math.min(fullLen, allowed));
 
     // Snap in fast when blocked, ease back out when clear.
-    const tc = instant ? 0 : allowed < this.collisionDist ? 0.02 : 0.28;
+    const tc = instant ? 0 : allowed < this.collisionDist ? 0.06 : 0.28;
     this.collisionDist = damp(this.collisionDist, allowed, tc, dt);
     this.collisionDist = Math.min(this.collisionDist, fullLen);
 
     this.camera.position.copy(_origin).addScaledVector(_dir, this.collisionDist);
+    if (this.groundAt) {
+      const minY = this.groundAt(this.camera.position.x, this.camera.position.z) + 0.45;
+      if (this.camera.position.y < minY) this.camera.position.y = minY;
+    }
 
     // --- Shake (restrained) -------------------------------------------------
     if (this.trauma > 0) {

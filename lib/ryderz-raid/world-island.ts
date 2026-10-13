@@ -22,7 +22,7 @@ import {
  */
 
 const CHUNK = 4;
-const SEGMENT = 6;
+const SEGMENT = 4;
 
 let clock = 0;
 

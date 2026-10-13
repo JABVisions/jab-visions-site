@@ -70,6 +70,7 @@ import {
   poseMelee,
   setHumanoidOpacity,
 } from './toon';
+import { ledgeDrop, resolveFooting, slopeBlocks, STEP_HEIGHT } from './footing';
 import { buildWorld, nearDistrictHub, pointBlocked, resolveCircle, steerVelocity, type World } from './world';
 import { buildPadWorld } from './world-pad';
 import { buildIslandWorld } from './world-island';
@@ -1367,6 +1368,9 @@ export class RaidEngine {
       if (this.bannerT <= 0) this.banner = null;
     }
 
+    const footX = this.pos.x;
+    const footZ = this.pos.z;
+    const footFloor = this.world.heightAt(footX, footZ);
     this.updateRecovery(dt);
     this.updateAura(dt);
     this.simTime += dt;
@@ -1390,7 +1394,7 @@ export class RaidEngine {
       });
       this.striker.setFork(this.kit.forkArmed ?? false);
     } else this.striker.setFork(false);
-    this.updatePlayerMove(dt, time);
+    this.updatePlayerMove(dt, time, footX, footZ, footFloor);
     const recovering = this.recoveryT > 0;
     const locked = recovering || (this.kit?.locked ?? false);
     // Busy hands (weapon thrown, spinning): only the power that is on may be
@@ -1691,6 +1695,28 @@ export class RaidEngine {
     }
   }
 
+  /**
+   * Cliffs and hillsides stop the body. A walkable trail still climbs, and a
+   * lip that is too steep to walk becomes a fall so the feet never teleport
+   * through the ground.
+   */
+  private holdGround(fromX: number, fromZ: number, fromFloor: number) {
+    if (this.kit?.flying || this.isPhased() || this.kit?.passthrough) return;
+    if (this.swim.mode === 'surface' || this.swim.mode === 'under') return;
+    const clearance = STEP_HEIGHT + Math.max(0, this.airY);
+    const floor = resolveFooting((x, z) => this.world.heightAt(x, z), this.pos, fromX, fromZ, fromFloor, clearance);
+    this.pos.x = clamp(this.pos.x, -this.limit(), this.limit());
+    this.pos.z = clamp(this.pos.z, -this.limit(), this.limit());
+    const run = Math.hypot(this.pos.x - fromX, this.pos.z - fromZ);
+    const airborne = this.airY > 0.05 || this.airVel > 0.2 || this.jumping;
+    const feet = fromFloor + Math.max(0, this.airY);
+    if (!airborne && ledgeDrop(feet, floor, run)) {
+      this.airY = feet - floor;
+      this.airVel = Math.min(0, this.airVel);
+      this.jumping = true;
+    }
+  }
+
   /** City keeps its old edge. Larger arenas publish their own. */
   private limit() {
     return this.world.bounds ?? BOUNDARY;
@@ -1787,7 +1813,7 @@ export class RaidEngine {
     }
   }
 
-  private updatePlayerMove(dt: number, time: number) {
+  private updatePlayerMove(dt: number, time: number, footX: number, footZ: number, footFloor: number) {
     if (!this.player) return;
     if (this.raidDown) return;
     const phased = this.isPhased();
@@ -1825,6 +1851,7 @@ export class RaidEngine {
     this.pos.x = clamp(this.pos.x, -this.limit(), this.limit());
     this.pos.z = clamp(this.pos.z, -this.limit(), this.limit());
     resolveCircle(this.pos, this.playerRadius(), this.world.obstacles);
+    this.holdGround(footX, footZ, footFloor);
 
     // Hosts shoulder the Ryder aside, except while a kit sequence is carrying
     // her through them (dashes decide their own contact).
@@ -1841,6 +1868,7 @@ export class RaidEngine {
         this.pos.z += (dz / d) * push * 0.35;
       }
       resolveCircle(this.pos, this.playerRadius(), this.world.obstacles);
+      this.holdGround(footX, footZ, footFloor);
     }
 
     // Horizontal speed for the kit's speed effects (measured, not commanded,
@@ -3898,7 +3926,21 @@ export class RaidEngine {
 
   /** Walls, cars, and the map edge. Used so NPCs turn before they grind. */
   private npcBlocked(x: number, z: number, radius: number) {
-    return Math.abs(x) > this.limit() || Math.abs(z) > this.limit() || pointBlocked(x, z, radius, this.world.obstacles);
+    if (Math.abs(x) > this.limit() || Math.abs(z) > this.limit() || pointBlocked(x, z, radius, this.world.obstacles)) {
+      return true;
+    }
+    const here = this.world.heightAt(x, z);
+    const reach = Math.max(0.45, radius);
+    const samples: Array<[number, number]> = [
+      [reach, 0],
+      [-reach, 0],
+      [0, reach],
+      [0, -reach],
+    ];
+    for (const [dx, dz] of samples) {
+      if (slopeBlocks(this.world.heightAt(x + dx, z + dz) - here, reach, STEP_HEIGHT)) return true;
+    }
+    return false;
   }
 
   /**
@@ -4636,11 +4678,15 @@ export class RaidEngine {
     this.cameraPivot.set(this.pos.x, feet, this.pos.z);
     if (this.camReady) {
       const hop = Math.hypot(this.cameraPivot.x - this.lastCam.x, this.cameraPivot.z - this.lastCam.z);
-      const rise = Math.abs(this.cameraPivot.y - this.lastCam.y);
-      if (hop > 5 || rise > 2.5) this.rig.relocate(this.cameraPivot);
+      // A hill changes height every step. Only a real teleport should cut the camera.
+      if (hop > 6) this.rig.relocate(this.cameraPivot);
     }
     this.lastCam.copy(this.cameraPivot);
     this.camReady = true;
+    const airborne =
+      this.jumping || this.airY > 0.15 || Math.abs(this.airVel) > 0.45 || this.swim.mode === 'surface' || this.swim.mode === 'under';
+    this.rig.ySmoothing = airborne ? 0.05 : 0.16;
+    this.rig.setGround((x, z) => this.world.heightAt(x, z));
     this.rig.setFramingExtra(this.kit?.cameraExtra ?? null);
     const planar = Math.hypot(this.playerVel.x, this.playerVel.z);
     const lead = planar > 0.4 ? Math.min(0.85, planar * 0.07) / planar : 0;

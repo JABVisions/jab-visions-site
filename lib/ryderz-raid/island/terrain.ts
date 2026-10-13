@@ -270,7 +270,8 @@ export function islandFloor(x: number, z: number, _time = 0) {
   if (inCave) height = Math.min(height, ISLAND_CAVE.floor + Math.pow(Math.abs(x - caveMidX) / caveHalf, 2) * 1.6);
   if (caveMouth) {
     const ramp = (z - ISLAND_CAVE.maxZ) / 24;
-    height = Math.min(height, ISLAND_CAVE.floor + ramp * 8);
+    const eased = ramp * ramp * (3 - 2 * ramp);
+    height = ISLAND_CAVE.floor + (height - ISLAND_CAVE.floor) * eased;
   }
 
   const inGrotto =
