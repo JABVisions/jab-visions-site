@@ -11,8 +11,16 @@ export interface World {
   group: THREE.Group;
   obstacles: Obstacle[];
   occluders: THREE.Object3D[];
-  alleys: { position: THREE.Vector3; inward: THREE.Vector3 }[];
+  alleys: { position: THREE.Vector3; inward: THREE.Vector3; aquatic?: boolean }[];
   alleyNodes: THREE.Mesh[];
+  bounds?: number;
+  /** How far a spawn looks for a nearby alley. The city uses its district size. */
+  spawnReach?: number;
+  /** Present on arenas with a swimmable volume. Surface height includes the live wave. */
+  water?: {
+    surfaceAt: (x: number, z: number) => number;
+    depthAt: (x: number, z: number) => number;
+  };
   /** Walkable surface height at a point (roads are 0, sidewalks sit on a curb). */
   heightAt: (x: number, z: number) => number;
   animate: (time: number) => void;
@@ -1234,7 +1242,7 @@ export function steerVelocity(
 
   const opening = (dx: number, dz: number) => {
     if (!clearDir(dx, dz)) return Infinity;
-    for (let dist = 0.5; dist <= 16; dist += 0.55) {
+    for (let dist = 0.5; dist <= 22; dist += 0.7) {
       const sx = x + dx * dist;
       const sz = z + dz * dist;
       if (blocked(sx, sz, skin)) return Infinity;
@@ -1270,7 +1278,14 @@ export function steerVelocity(
     return { x: bestX * speed, z: bestZ * speed };
   };
 
-  const nearest = (angles: number[]) => {
+  // A long wall has no opening inside the probe. Slide along it, toward the
+  // goal, instead of planting and grinding. Back up only when the sides are shut.
+  const slide = (angles: number[]) => {
+    const gx = goalX - x;
+    const gz = goalZ - z;
+    const gl = Math.hypot(gx, gz) || 1;
+    const gxn = gx / gl;
+    const gzn = gz / gl;
     let best = -Infinity;
     let bestX = 0;
     let bestZ = 0;
@@ -1281,24 +1296,24 @@ export function steerVelocity(
       const dx = nx * c - nz * s;
       const dz = nx * s + nz * c;
       if (!clearDir(dx, dz)) continue;
+      const progress = dx * gxn + dz * gzn;
       const align = nx * dx + nz * dz;
-      if (align > best) {
-        best = align;
+      const score = progress * 2 + align * 0.2;
+      if (score > best) {
+        best = score;
         bestX = dx;
         bestZ = dz;
         found = true;
       }
     }
-    if (!found || best < 0.2) return null;
+    if (!found) return null;
     return { x: bestX * speed, z: bestZ * speed };
   };
 
-  // Slide along the blocked side until the line to the goal is open, and keep
-  // that side so the next step does not turn back into the wall or the car.
   return (
     pick([Math.PI / 2, -Math.PI / 2]) ??
     pick([0.6, -0.6, 1, -1, 1.4, -1.4, 2.2, -2.2]) ??
-    nearest([0.35, -0.35, 0.7, -0.7, 1.15, -1.15, Math.PI / 2, -Math.PI / 2]) ??
+    slide([Math.PI / 2, -Math.PI / 2, 1.2, -1.2, 2.2, -2.2, Math.PI]) ??
     { x: 0, z: 0 }
   );
 }

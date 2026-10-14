@@ -7,6 +7,10 @@ export interface RaidAudio {
   play(id: string): void;
   resume(): Promise<void>;
   startCity(): void;
+  /** Tropical bed instead of traffic. Safe to call every frame. */
+  setIsland(on: boolean): void;
+  /** Muffles the bed while the camera is under the wave. */
+  setSubmerged(on: boolean): void;
   dispose(): void;
   readonly plays: string[];
   readonly city: boolean;
@@ -42,9 +46,15 @@ export function createRaidAudio(): RaidAudio {
   master.connect(ctx.destination);
   const bed = noiseBuffer(ctx, 2);
   const plays: string[] = [];
-  let city: { stop: () => void } | null = null;
+  let city: { stop: () => void; gain: GainNode } | null = null;
   let cityOn = false;
   let timer = 0;
+  let islandOn = false;
+  let surf: { stop: () => void } | null = null;
+  const muffler = ctx.createBiquadFilter();
+  muffler.type = 'lowpass';
+  muffler.frequency.value = 2800;
+  muffler.connect(master);
 
   const whoosh = (heavy: boolean) => {
     const when = ctx.currentTime;
@@ -175,15 +185,21 @@ export function createRaidAudio(): RaidAudio {
     gain.gain.value = 0.07;
     source.connect(filter);
     filter.connect(gain);
-    gain.connect(master);
+    gain.connect(muffler);
     source.start();
     const events = [carPass, carPass, horn, siren];
-    timer = window.setInterval(() => {
-      events[Math.floor(Math.random() * events.length)]();
-    }, 3400);
+    const armTraffic = () => {
+      if (timer || islandOn) return;
+      timer = window.setInterval(() => {
+        events[Math.floor(Math.random() * events.length)]();
+      }, 3400);
+    };
+    armTraffic();
     city = {
+      gain,
       stop: () => {
         window.clearInterval(timer);
+        timer = 0;
         try {
           source.stop();
         } catch {
@@ -193,11 +209,66 @@ export function createRaidAudio(): RaidAudio {
     };
   };
 
+  const setIsland = (on: boolean) => {
+    if (on === islandOn) return;
+    islandOn = on;
+    if (!city) return;
+    if (on) {
+      window.clearInterval(timer);
+      timer = 0;
+      city.gain.gain.value = 0.02;
+      if (!surf) {
+        const source = ctx.createBufferSource();
+        source.buffer = bed;
+        source.loop = true;
+        const filter = ctx.createBiquadFilter();
+        filter.type = 'bandpass';
+        filter.frequency.value = 520;
+        filter.Q.value = 0.6;
+        const gain = ctx.createGain();
+        gain.gain.value = 0.05;
+        source.connect(filter);
+        filter.connect(gain);
+        gain.connect(muffler);
+        source.start();
+        surf = {
+          stop: () => {
+            try {
+              source.stop();
+            } catch {
+              /* already stopped */
+            }
+          },
+        };
+      }
+      return;
+    }
+    surf?.stop();
+    surf = null;
+    city.gain.gain.value = 0.07;
+    if (!timer) {
+      const events = [carPass, carPass, horn, siren];
+      timer = window.setInterval(() => {
+        events[Math.floor(Math.random() * events.length)]();
+      }, 3400);
+    }
+  };
+
+  const setSubmerged = (on: boolean) => {
+    const now = ctx.currentTime;
+    muffler.frequency.cancelScheduledValues(now);
+    muffler.frequency.setTargetAtTime(on ? 420 : 2800, now, 0.08);
+  };
+
   const api: RaidAudio = {
     play,
     resume: () => ctx.resume().then(() => undefined),
     startCity,
+    setIsland,
+    setSubmerged,
     dispose: () => {
+      surf?.stop();
+      surf = null;
       city?.stop();
       city = null;
       cityOn = false;

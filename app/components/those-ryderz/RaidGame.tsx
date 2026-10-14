@@ -23,6 +23,7 @@ import PvpVersusHUD from './hud/PvpVersusHUD';
 import LowHealthVignette, { type LowHealthVignetteApi } from './hud/LowHealthVignette';
 import ComboIndicator, { type ComboHudApi } from './hud/ComboIndicator';
 import RaidRadar, { type RadarApi } from './hud/RaidRadar';
+import RaidMap from './hud/RaidMap';
 import StatBoard from './hud/StatBoard';
 import PauseMenu from './menu/PauseMenu';
 import RaidLobby from './modes/RaidLobby';
@@ -44,6 +45,7 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
   const vignette = useRef<LowHealthVignetteApi>(null);
   const comboHud = useRef<ComboHudApi>(null);
   const radarHud = useRef<RadarApi>(null);
+  const mapHud = useRef<RadarApi>(null);
   const moveRow = useRef<HTMLDivElement>(null);
   const partyHud = useRef<PartyHudApi | null>(null);
   const pvpRef = useRef<PvpLineup | null>(null);
@@ -83,6 +85,7 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
   const [round, setRound] = useState(0);
   const [phase, setPhase] = useState<HudState['phase'] | 'select'>('select');
   const [paused, setPaused] = useState(false);
+  const [mapOpen, setMapOpen] = useState(false);
   const [burnout, setBurnout] = useState(false);
   const [banner, setBanner] = useState<HudState['banner']>(null);
   const [survival, setSurvival] = useState<HudState['survival']>(null);
@@ -92,6 +95,13 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
   const reviveLeft = useRef<HTMLElement>(null);
   const downLeftEl = useRef<HTMLElement>(null);
   const [statBoard, setStatBoard] = useState<HudState['statBoard']>(null);
+  const [water, setWater] = useState<HudState['water']>(null);
+  const oxygenFill = useRef<HTMLElement>(null);
+  const waterKey = useRef('');
+  const audioRef = useRef<{
+    setIsland(on: boolean): void;
+    setSubmerged(on: boolean): void;
+  } | null>(null);
   const boardSeconds = useRef<HTMLElement>(null);
   const boardKey = useRef('');
   const [nearShop, setNearShop] = useState(false);
@@ -122,6 +132,7 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
     vignette.current?.setHealth(next.hp, next.maxHp);
     comboHud.current?.setCombo(next.combo);
     radarHud.current?.draw(next.radar);
+    mapHud.current?.draw(next.radar);
     moveRow.current?.setAttribute('data-link', next.combo.power ? 'true' : 'false');
     if (next.opponent) {
       foeHud.current?.setVitals(next.opponent.hp, next.opponent.maxHp, next.opponent.aura, next.opponent.maxAura, next.opponent.aura <= 1);
@@ -148,6 +159,14 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
       boardKey.current = nextBoardKey;
       setStatBoard(next.statBoard);
     }
+    if (oxygenFill.current && next.water) oxygenFill.current.style.width = `${Math.round(next.water.oxygen * 100)}%`;
+    const nextWaterKey = next.water ? `${next.water.mode}|${next.water.submerged ? 1 : 0}|${next.water.oxygen < 0.35 ? 1 : 0}` : '';
+    if (waterKey.current !== nextWaterKey) {
+      waterKey.current = nextWaterKey;
+      setWater(next.water);
+    }
+    audioRef.current?.setIsland(Boolean(next.water));
+    audioRef.current?.setSubmerged(Boolean(next.water?.submerged));
     playerStore.syncLocalVitals({
       health: next.hp,
       maxHealth: next.maxHp,
@@ -200,6 +219,7 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
       !prev ||
       prev.phase !== next.phase ||
       prev.paused !== next.paused ||
+      prev.mapOpen !== next.mapOpen ||
       prev.burnout !== next.burnout ||
       prev.nearShop !== next.nearShop ||
       prev.recovering !== next.recovering ||
@@ -214,6 +234,7 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
       setPhase(next.phase);
       setHudMoves(next.moves);
       setPaused(next.paused);
+      setMapOpen(next.mapOpen);
       setBurnout(next.burnout);
       setNearShop(next.nearShop);
       setBeacon(next.beacon);
@@ -254,7 +275,14 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
     if (!selected || !canvasRef.current) return;
     let engine: RaidEngine | null = null;
     let cancelled = false;
-    let audio: { play(id: string): void; resume(): Promise<void>; startCity(): void; dispose(): void } | null = null;
+    let audio: {
+      play(id: string): void;
+      resume(): Promise<void>;
+      startCity(): void;
+      setIsland(on: boolean): void;
+      setSubmerged(on: boolean): void;
+      dispose(): void;
+    } | null = null;
     const canvas = canvasRef.current;
     const unlockAudio = () => {
       void audio?.resume();
@@ -269,6 +297,7 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
       if (cancelled || !canvas) return;
       engine = new RaidEngine(canvas, syncHud);
       audio = createRaidAudio();
+      audioRef.current = audio;
       engine.setSoundHook((id) => audio?.play(id));
       audio.startCity();
       void audio.resume();
@@ -296,6 +325,7 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
       window.removeEventListener('resize', onResize);
       window.removeEventListener('pointerdown', unlockAudio);
       window.removeEventListener('keydown', unlockAudio);
+      audioRef.current = null;
       audio?.dispose();
       if (engine) manager.detach(engine);
       engine?.dispose();
@@ -472,7 +502,7 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
         <div className={styles.overlay} aria-hidden="true" data-revive={reviveName ?? ''} data-down={downed ? '1' : '0'}>
           <LowHealthVignette ref={vignette} />
           <ComboIndicator ref={comboHud} />
-          <RaidRadar ref={radarHud} />
+          <RaidRadar ref={radarHud} onOpen={() => engineRef.current?.toggleMap()} />
           <div className={styles.topHud}>
             {partyState.mode === GameMode.RAID ? (
               <PlayerPartyHUD slots={partyState.slots} mode={partyState.mode} apiRef={partyHud} />
@@ -520,6 +550,16 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
           ) : (
             <div className={styles.vitalDock}>
               <CircularPlayerHUD ref={circularHud} ryderId={activeRyder} burnout={burnout} />
+            </div>
+          )}
+
+          {water && water.mode !== 'land' && (
+            <div className={styles.oxygen} data-low={water.oxygen < 0.35 ? '1' : '0'} aria-label="Oxygen">
+              <span>Oxygen</span>
+              <b>
+                <i ref={oxygenFill} style={{ width: `${Math.round(water.oxygen * 100)}%` }} />
+              </b>
+              <em>{water.mode === 'under' ? 'Space to surface' : water.mode === 'wade' ? 'Wading' : 'Ctrl to dive'}</em>
             </div>
           )}
 
@@ -602,7 +642,7 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
 
           <div className={styles.bottomHud}>
             <p className={styles.hint}>
-              A D or arrows turn the camera · W S walk along that view · Mouse can still orbit · Shift sprint · Space jump · X recenters pitch · B swaps shoulder · Click punches up close · Zoe blasts at range · Keven throws darts · C punch · V kick · F / RMB melee, F again throws · Z dodge · Q E R powers · {INTERACT_LABEL} picks up a downed teammate or uses the beacon · Esc pause
+              A D or arrows turn the camera · W S walk along that view · Mouse can still orbit · Shift sprint · Space jump · X recenters pitch · B swaps shoulder · Click punches up close · Zoe blasts at range · Keven throws darts · C punch · V kick · F / RMB melee, F again throws · Z dodge · Q E R powers · {INTERACT_LABEL} picks up a downed teammate or uses the beacon · {pvpTwo ? 'Tab opens the map' : 'Tab or M opens the map'} · Esc pause
               {phase === 'intermission' ? ' · Hold the spire to buy strength' : ''}
               {pvpTwo ? ' · P2 IJKL move · U punch · O kick · P melee · N dodge · M jump' : ''}
             </p>
@@ -733,7 +773,7 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
         />
       )}
 
-      {playing && phase === 'playing' && !paused && !locked && !coarse && !camPanel && (
+      {playing && phase === 'playing' && !paused && !locked && !coarse && !camPanel && !mapOpen && (
         <div className={styles.lock}>
           <button type="button" onClick={() => engineRef.current?.requestPointerLock()}>
             Click to look
@@ -809,6 +849,15 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
             </div>
           </div>
         </div>
+      )}
+
+      {playing && mapOpen && phase !== 'dead' && phase !== 'victory' && phase !== 'report' && (
+        <RaidMap
+          ref={mapHud}
+          place={arenaSpec(managerState.arenaId)?.name ?? 'Raid'}
+          localTwo={pvpTwo}
+          onClose={() => engineRef.current?.toggleMap()}
+        />
       )}
 
       {screen === 'start' && (

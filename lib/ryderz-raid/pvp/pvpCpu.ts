@@ -1,6 +1,5 @@
 import * as THREE from 'three';
 import {
-  BOUNDARY,
   BURNOUT_RECOVERY,
   MELEE_ARC,
   MELEE_RANGE,
@@ -35,7 +34,7 @@ import type { PhysicalHit, StrikeKind } from '../fighter/actions';
 import { FighterStriker } from '../fighter/striker';
 import { combatProfileFor, resolvePowerLink } from '../fighter/profiles';
 import { openingPlan } from '../fighter/planner';
-import { steerVelocity } from '../world';
+import { commitSteer, freshNav, type NavHint } from '../nav';
 
 export interface DuelBody {
   fighter: Fighter;
@@ -87,6 +86,8 @@ export interface PvpCpuHooks {
   raidTargets?(): KitTarget[];
   hurtRaidTarget?(target: KitTarget, damage: number, dir: THREE.Vector3, reaction?: HitReaction, strength?: number): number;
   flashRaidTarget?(target: KitTarget, color: number, seconds: number): void;
+  /** Squad mate with nobody to hit. Chase the player and do not swing at the rally point. */
+  regrouping?(): boolean;
 }
 
 interface PlayerBody extends ReactiveBody, KitTarget {
@@ -140,6 +141,7 @@ export class PvpCpu {
   private aimZ = 0;
   private aimRefresh = 0;
   private disposed = false;
+  private readonly nav: NavHint = freshNav();
 
   constructor(
     private hooks: PvpCpuHooks,
@@ -233,10 +235,11 @@ export class PvpCpu {
     this.regen(dt, spec);
     this.aimRefresh -= dt;
     if (this.aimRefresh <= 0) {
-      const wobble = (1 - this.tuning.prediction) * 1.6;
+      const squad = Boolean(this.hooks.raidTargets);
+      const wobble = (1 - this.tuning.prediction) * (squad ? 0.4 : 1.6);
       this.aimX = (Math.random() * 2 - 1) * wobble;
       this.aimZ = (Math.random() * 2 - 1) * wobble;
-      this.aimRefresh = 0.7 + Math.random() * 0.7;
+      this.aimRefresh = squad ? 0.35 : 0.7 + Math.random() * 0.7;
     }
 
     const steering = () => (this.kit?.busy ?? false) && (this.kit?.steerWhileBusy ?? false);
@@ -302,6 +305,14 @@ export class PvpCpu {
     const foe = this.foe;
     if (!body || !spec || !foe) return;
     const dist = Math.hypot(foe.pos.x - body.pos.x, foe.pos.z - body.pos.z);
+    if (this.hooks.regrouping?.() && !(this.kit?.busy ?? false)) {
+      this.intent = dist > 3.3 ? 'chase' : 'reposition';
+      this.strikeQueued = false;
+      this.pending = null;
+      this.script = [];
+      this.decideAt = time + 0.28;
+      return;
+    }
     if (this.striker.busy || this.pending || this.script.length || this.wantCast) {
       this.decideAt = time + 0.16;
       if (dist > 2.6) this.intent = 'chase';
@@ -364,7 +375,13 @@ export class PvpCpu {
     const dx = foe.pos.x - body.pos.x;
     const dz = foe.pos.z - body.pos.z;
     const dist = Math.hypot(dx, dz) || 0.001;
-    if (dist < 2.05 && (this.intent === 'chase' || this.intent === 'reposition') && !this.striker.busy) {
+    const regrouping = this.hooks.regrouping?.() ?? false;
+    if (regrouping) {
+      this.intent = dist > 3.3 ? 'chase' : 'reposition';
+    } else if (this.hooks.raidTargets && dist > 6 && this.intent !== 'retreat') {
+      this.intent = 'chase';
+    }
+    if (!regrouping && dist < 2.05 && (this.intent === 'chase' || this.intent === 'reposition') && !this.striker.busy) {
       this.intent = 'punch';
       this.strikeQueued = false;
     }
@@ -379,6 +396,9 @@ export class PvpCpu {
     if (this.intent === 'retreat') {
       mx = -mx;
       mz = -mz;
+    } else if (!hazard && regrouping && this.intent === 'reposition') {
+      mx = 0;
+      mz = 0;
     } else if (!hazard && (this.intent === 'evade' || this.intent === 'reposition' || this.intent === 'dodge')) {
       const side = this.profile.evasiveness > 0.5 ? 1 : -1;
       const strafe = this.intent === 'evade' ? 1 : 0.65;
@@ -424,7 +444,8 @@ export class PvpCpu {
         (this.intent === 'chase' ? 0.96 : 0.82) *
         (this.burnout ? 0.82 : 1) *
         (this.kit?.moveScale ?? 1);
-      const steered = steerVelocity(
+      const steered = commitSteer(
+        this.nav,
         body.pos.x,
         body.pos.z,
         (mx / len) * speed,
@@ -433,6 +454,7 @@ export class PvpCpu {
         (x, z, radius) => this.hooks.blocked(x, z, radius),
         foe.pos.x,
         foe.pos.z,
+        dt,
       );
       body.pos.x += steered.x * dt;
       body.pos.z += steered.z * dt;
@@ -464,7 +486,8 @@ export class PvpCpu {
     const mx = hazard ? hazard.x : dx / dist;
     const mz = hazard ? hazard.z : dz / dist;
     const speed = spec.speed * this.tempo() * 0.96 * (this.burnout ? 0.82 : 1) * (this.kit?.moveScale ?? 1);
-    const steered = steerVelocity(
+    const steered = commitSteer(
+      this.nav,
       body.pos.x,
       body.pos.z,
       mx * speed,
@@ -473,6 +496,7 @@ export class PvpCpu {
       (x, z, radius) => this.hooks.blocked(x, z, radius),
       foe.pos.x,
       foe.pos.z,
+      dt,
     );
     body.pos.x += steered.x * dt;
     body.pos.z += steered.z * dt;
@@ -752,8 +776,6 @@ export class PvpCpu {
   }
 
   private place(pos: THREE.Vector3) {
-    pos.x = Math.max(-BOUNDARY, Math.min(BOUNDARY, pos.x));
-    pos.z = Math.max(-BOUNDARY, Math.min(BOUNDARY, pos.z));
     this.hooks.resolve(pos);
   }
 

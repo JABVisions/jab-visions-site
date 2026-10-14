@@ -4,11 +4,23 @@ import { forwardRef, useImperativeHandle, useRef } from 'react';
 import { DISTRICT_SPAN } from '@/lib/ryderz-raid/config';
 import styles from './RaidRadar.module.css';
 
+export type RadarAlly = {
+  x: number;
+  z: number;
+  name: string;
+  color: string;
+  down: boolean;
+};
+
 export type RadarFrame = {
   x: number;
   z: number;
   yaw: number;
+  span: number;
+  terrain: 'island' | 'city';
+  color: string;
   enemies: { x: number; z: number }[];
+  allies: RadarAlly[];
 };
 
 export type RadarApi = {
@@ -42,8 +54,24 @@ function gearPath(ctx: CanvasRenderingContext2D, cx: number, cy: number, radius:
   ctx.closePath();
 }
 
-/** Small gear map of the four city blocks. The loop paints it; React does not rerender per blip. */
-const RaidRadar = forwardRef<RadarApi>(function RaidRadar(_, ref) {
+function paintAlly(ctx: CanvasRenderingContext2D, px: number, py: number, color: string, down: boolean, radius: number) {
+  ctx.beginPath();
+  ctx.arc(px, py, radius, 0, Math.PI * 2);
+  if (down) {
+    ctx.strokeStyle = color;
+    ctx.lineWidth = Math.max(1.25, radius * 0.45);
+    ctx.stroke();
+    return;
+  }
+  ctx.fillStyle = color;
+  ctx.fill();
+  ctx.strokeStyle = '#f4fff8';
+  ctx.lineWidth = Math.max(1, radius * 0.28);
+  ctx.stroke();
+}
+
+/** Small gear map. The loop paints it; React does not rerender per blip. Click or press Tab to open the chart. */
+const RaidRadar = forwardRef<RadarApi, { onOpen?: () => void }>(function RaidRadar({ onOpen }, ref) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   useImperativeHandle(ref, () => ({
@@ -79,25 +107,53 @@ const RaidRadar = forwardRef<RadarApi>(function RaidRadar(_, ref) {
       ctx.fillRect(0, 0, size, size);
 
       const plot = radius * 1.42;
-      const toX = (x: number) => cx + (x / MAP) * (plot / 2);
-      const toY = (z: number) => cy + (z / MAP) * (plot / 2);
+      const local = Math.abs(frame.x) > MAP || Math.abs(frame.z) > MAP;
+      const originX = local ? frame.x : 0;
+      const originZ = local ? frame.z : 0;
+      const span = local ? 80 : MAP;
+      const limit = radius * 0.72;
+      const project = (x: number, z: number) => {
+        let dx = ((x - originX) / span) * (plot / 2);
+        let dy = ((z - originZ) / span) * (plot / 2);
+        const dist = Math.hypot(dx, dy);
+        if (dist > limit) {
+          const scale = limit / dist;
+          dx *= scale;
+          dy *= scale;
+          return { px: cx + dx, py: cy + dy, edge: true };
+        }
+        return { px: cx + dx, py: cy + dy, edge: false };
+      };
 
       ctx.strokeStyle = 'rgba(158, 255, 196, 0.22)';
       ctx.lineWidth = Math.max(1, size * 0.008);
       ctx.beginPath();
-      ctx.moveTo(toX(-MAP), toY(0));
-      ctx.lineTo(toX(MAP), toY(0));
-      ctx.moveTo(toX(0), toY(-MAP));
-      ctx.lineTo(toX(0), toY(MAP));
+      if (local) {
+        ctx.moveTo(cx - plot / 2, cy);
+        ctx.lineTo(cx + plot / 2, cy);
+        ctx.moveTo(cx, cy - plot / 2);
+        ctx.lineTo(cx, cy + plot / 2);
+      } else {
+        const toX = (x: number) => cx + ((x - originX) / span) * (plot / 2);
+        const toY = (z: number) => cy + ((z - originZ) / span) * (plot / 2);
+        ctx.moveTo(toX(-MAP), toY(0));
+        ctx.lineTo(toX(MAP), toY(0));
+        ctx.moveTo(toX(0), toY(-MAP));
+        ctx.lineTo(toX(0), toY(MAP));
+      }
       ctx.stroke();
 
-      const half = MAP / 2;
       ctx.fillStyle = 'rgba(57, 255, 106, 0.35)';
-      for (const ox of [-half, half]) {
-        for (const oz of [-half, half]) {
-          ctx.beginPath();
-          ctx.arc(toX(ox), toY(oz), Math.max(1.5, size * 0.012), 0, Math.PI * 2);
-          ctx.fill();
+      if (!local) {
+        const half = MAP / 2;
+        const toX = (x: number) => cx + (x / span) * (plot / 2);
+        const toY = (z: number) => cy + (z / span) * (plot / 2);
+        for (const ox of [-half, half]) {
+          for (const oz of [-half, half]) {
+            ctx.beginPath();
+            ctx.arc(toX(ox), toY(oz), Math.max(1.5, size * 0.012), 0, Math.PI * 2);
+            ctx.fill();
+          }
         }
       }
 
@@ -112,22 +168,27 @@ const RaidRadar = forwardRef<RadarApi>(function RaidRadar(_, ref) {
         ctx.fillRect(0, 0, size, size);
       }
 
-      ctx.fillStyle = '#ff4b6e';
       const dot = Math.max(2.2, size * 0.018);
+      ctx.fillStyle = '#ff4b6e';
       frame.enemies.forEach((enemy) => {
+        const spot = project(enemy.x, enemy.z);
+        if (spot.edge) return;
         ctx.beginPath();
-        ctx.arc(toX(enemy.x), toY(enemy.z), dot, 0, Math.PI * 2);
+        ctx.arc(spot.px, spot.py, dot, 0, Math.PI * 2);
         ctx.fill();
       });
 
-      const px = toX(frame.x);
-      const py = toY(frame.z);
-      const fx = Math.sin(frame.yaw);
-      const fz = Math.cos(frame.yaw);
+      const allyDot = Math.max(2.6, size * 0.022);
+      frame.allies.forEach((ally) => {
+        const spot = project(ally.x, ally.z);
+        paintAlly(ctx, spot.px, spot.py, ally.color, ally.down || spot.edge, spot.edge ? allyDot * 0.8 : allyDot);
+      });
+
+      const self = project(frame.x, frame.z);
       const len = Math.max(7, size * 0.055);
       ctx.save();
-      ctx.translate(px, py);
-      ctx.rotate(Math.atan2(fx, -fz));
+      ctx.translate(self.px, self.py);
+      ctx.rotate(Math.atan2(Math.sin(frame.yaw), -Math.cos(frame.yaw)));
       ctx.fillStyle = '#f4fff8';
       ctx.beginPath();
       ctx.moveTo(0, -len);
@@ -147,9 +208,10 @@ const RaidRadar = forwardRef<RadarApi>(function RaidRadar(_, ref) {
   }));
 
   return (
-    <div className={styles.radar} aria-hidden="true">
+    <button type="button" className={styles.radar} aria-label="Open map" onClick={() => onOpen?.()}>
       <canvas ref={canvasRef} className={styles.canvas} />
-    </div>
+      <span className={styles.caption}>MAP</span>
+    </button>
   );
 });
 

@@ -8,6 +8,7 @@
  * arena, so there is exactly one Beacon per arena and nothing spawns at random.
  */
 import { HOME_DISTRICT } from './config';
+import { islandBeacon, islandSpawn } from './island/terrain';
 
 export type ArenaId = string;
 
@@ -30,7 +31,7 @@ export interface ArenaDefinition {
   /** Seconds the Beacon needs to recharge after restoring a Ryder. */
   beaconCooldown: number;
   /** Which built world the engine shows. Omitted arenas stay on the city block. */
-  worldKey?: 'block' | 'pad';
+  worldKey?: 'block' | 'pad' | 'island';
 }
 
 /** @deprecated Use ArenaDefinition. */
@@ -89,6 +90,18 @@ registerArena({
   spawnPoint: { x: 0, z: 8 },
   ryderBeaconPoint: { x: -8, z: -4 },
   beaconCooldown: 12,
+});
+
+registerArena({
+  id: 'island-paradise',
+  name: 'Island Paradise',
+  setting: 'Tropical ocean',
+  description: 'A swimmable island. Beaches, jungle, a beachfront resort, and open water.',
+  available: true,
+  worldKey: 'island',
+  spawnPoint: islandSpawn(),
+  ryderBeaconPoint: islandBeacon(),
+  beaconCooldown: DEFAULT_BEACON_COOLDOWN,
 });
 
 registerArena({
