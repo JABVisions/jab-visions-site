@@ -42,6 +42,8 @@ export interface RaidCharacter {
   aiProfile: AiProfile;
   /** Punch, kick, melee, combos, and the power that a chain can unlock. */
   combatProfile: CombatProfile;
+  /** Body the figure was built as. Omitted entries are human. */
+  species?: 'human' | 'mermaid';
 }
 
 const FUTURE_CHARACTERS: RaidCharacter[] = [
@@ -107,6 +109,7 @@ function fromSpec(spec: RyderSpec): RaidCharacter {
     playable: true,
     aiProfile: aiProfileFor(spec.id),
     combatProfile: combatProfileFor(spec.id),
+    species: spec.species,
   };
 }
 

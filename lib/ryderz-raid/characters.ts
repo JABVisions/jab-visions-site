@@ -280,7 +280,7 @@ function measureFigure(figure: THREE.Object3D) {
 function wrapGltfAsHumanoid(
   template: GltfTemplate,
   height = 1.88,
-  options: { ownMaterials?: boolean; strikes?: MeleeStyle[]; keep?: BoneKey[]; armHang?: number; sashay?: boolean; yaw?: number } = {},
+  options: { ownMaterials?: boolean; strikes?: MeleeStyle[]; keep?: BoneKey[]; armHang?: number; sashay?: boolean; yaw?: number; tail?: boolean } = {},
 ): { humanoid: Humanoid; rig: GltfRig } {
   const group = new THREE.Group();
   const figure = template.skinned ? (cloneSkeleton(template.scene) as THREE.Group) : template.scene.clone(true);
@@ -295,6 +295,7 @@ function wrapGltfAsHumanoid(
       skeleton = candidate;
       skeleton.armHang = options.armHang ?? 0;
       skeleton.sashay = options.sashay ?? false;
+      skeleton.tail = options.tail ?? false;
       skeleton.apply();
     }
   }
@@ -745,6 +746,7 @@ export function buildRyder(spec: RyderSpec, options: { clone?: boolean } = {}): 
       armHang: spec.armHang,
       sashay: spec.sashay,
       yaw: spec.modelYaw,
+      tail: spec.species === 'mermaid',
     });
     const weapons: THREE.Object3D[] = [];
     const glowMeshes: THREE.Mesh[] = [];

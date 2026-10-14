@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { RYDERZ, type RyderId } from '@/lib/ryderz-raid/config';
+import { RYDERZ, fighterKind, type RyderId } from '@/lib/ryderz-raid/config';
 import { GameMode } from '@/lib/ryderz-raid/game-mode';
 import type { RaidCharacter } from '@/lib/ryderz-raid/roster';
 import {
@@ -236,7 +236,7 @@ export default function PremiereCharacterSelect({
               <>
                 <small>{focused.universe}</small>
                 <h3>{focused.name}</h3>
-                <p>{spec ? `${spec.role} · ${spec.title}` : 'Not playable yet'}</p>
+                <p>{spec ? `${fighterKind(spec)} · ${spec.title}` : 'Not playable yet'}</p>
                 {spec ? (
                   <ul>
                     {spec.moves.map((move) => (

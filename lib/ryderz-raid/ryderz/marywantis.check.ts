@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import * as THREE from 'three';
-import { RYDERZ } from '../config';
+import { RYDERZ, fighterKind, fighterMark } from '../config';
+import { poseSkeleton, ProceduralSkeleton } from '../skeletal';
 import { applyReaction } from '../combat';
 import { combatProfileFor } from '../fighter/profiles';
 import { aiProfileFor } from '../pvp/aiProfile';
@@ -100,6 +101,9 @@ const ctx = {
 
 const spec = RYDERZ.marywantis;
 assert.equal(spec.name, 'Marywantis');
+assert.equal(spec.species, 'mermaid');
+assert.equal(fighterKind(spec), 'Mermaid');
+assert.equal(fighterMark(spec, 'Tide'), 'Mermaid');
 assert.equal(spec.glb, '/assets/those-ryderz/models/marywantis.glb?v=1');
 assert.deepEqual(spec.moves.map((move) => move.id), ['callMercy', 'finKick', 'wavePool']);
 assert.equal(spec.visual.auraStyle, 'sparkle');
@@ -237,5 +241,50 @@ const choice = choosePvpAction(
 );
 assert.equal(choice.intent, 'ability');
 assert.equal(choice.slot, 2, 'a grouped pack is a wave pool');
+
+function limb(name: string, parent: THREE.Object3D, x: number, y: number, z: number) {
+  const bone = new THREE.Bone();
+  bone.name = name;
+  bone.position.set(x, y, z);
+  parent.add(bone);
+  return bone;
+}
+
+const figure = new THREE.Group();
+const hips = limb('Hips', figure, 0, 0.9, 0);
+const spine = limb('Spine', hips, 0, 0.12, 0);
+limb('Left_UpperArm', spine, 0.16, 0.2, 0);
+limb('Right_UpperArm', spine, -0.16, 0.2, 0);
+const leftThigh = limb('Left_UpperLeg', hips, 0.08, -0.04, 0);
+const rightThigh = limb('Right_UpperLeg', hips, -0.08, -0.04, 0);
+limb('Left_LowerLeg', leftThigh, 0, -0.4, 0);
+limb('Right_LowerLeg', rightThigh, 0, -0.4, 0);
+const tail = new ProceduralSkeleton(figure, { keep: spec.skelKeep });
+tail.tail = true;
+for (const phase of [0.4, 1.2, 2.1, 3.4]) {
+  poseSkeleton(tail, { phase, moving: 1, sprinting: false, meleeT: 0 });
+  const left = tail.angles.upperLegL;
+  const right = tail.angles.upperLegR;
+  assert.ok(Math.abs(left.x - right.x) < 0.001, `tail pitch stays closed at ${phase}`);
+  assert.ok(Math.abs(left.z - right.z) < 0.001, `tail yaw stays closed at ${phase}`);
+}
+poseSkeleton(tail, { phase: 1.2, moving: 1, sprinting: true, meleeT: 0 });
+assert.ok(Math.abs(tail.angles.upperLegL.x) > 0.05, 'the fin still flicks while she moves');
+poseSkeleton(tail, {
+  phase: 0.2,
+  moving: 1,
+  sprinting: false,
+  meleeT: 0,
+  pose: { kind: 'ride', t: 0.4, weight: 1 },
+});
+assert.ok(Math.abs(tail.angles.upperLegL.z - tail.angles.upperLegR.z) < 0.001, 'surfing does not open the fin');
+poseSkeleton(tail, {
+  phase: 0,
+  moving: 0,
+  sprinting: false,
+  meleeT: 0.4,
+  meleeStyle: 'spinKick',
+});
+assert.ok(Math.abs(tail.angles.upperLegL.x - tail.angles.upperLegR.x) < 0.001, 'a kick does not split the tail');
 
 console.log('marywantis ok');

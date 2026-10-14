@@ -449,6 +449,8 @@ export class ProceduralSkeleton {
   armHang = 0;
   /** Narrow hip-led stride. Arms stay hung instead of tucking into a guard. */
   sashay = false;
+  /** One fin. Both legs pitch and yaw together so a tail cannot split into a stride. */
+  tail = false;
 
   constructor(figure: THREE.Object3D, options?: { keep?: BoneKey[] }) {
     this.figure = figure;
@@ -792,9 +794,17 @@ export function poseSkeleton(skel: ProceduralSkeleton, motion: SkeletalMotion) {
     A.upperArmR.x -= 0.18;
   }
   A.hips.z += Math.sin(breath * 0.5) * (skel.sashay ? 0.05 : 0.015) * still;
+  if (skel.tail) {
+    const sway = Math.sin(breath * 0.65) * 0.05 * still;
+    A.upperLegL.z += sway;
+    A.upperLegR.z += sway;
+    A.hips.y += sway * 0.5;
+  }
 
   // --- Locomotion ------------------------------------------------------------
-  if (moving > 0.01) {
+  if (moving > 0.01 && skel.tail) {
+    poseTail(A, phase, moving, sprinting);
+  } else if (moving > 0.01) {
     const sL = Math.sin(phase);
     const cL = Math.cos(phase);
     const sashay = skel.sashay;
@@ -983,7 +993,49 @@ export function poseSkeleton(skel: ProceduralSkeleton, motion: SkeletalMotion) {
     }
   }
 
+  if (skel.tail) sealTail(A);
   skel.apply();
+}
+
+/** Shared tail flick. Both legs take the same pitch and yaw. */
+function poseTail(A: Angles, phase: number, moving: number, sprinting: boolean) {
+  const flick = Math.sin(phase);
+  const curl = Math.cos(phase);
+  const pitch = (sprinting ? 0.34 : 0.22) * flick * moving;
+  const bend = (sprinting ? 0.28 : 0.16) * Math.max(0, curl) * moving;
+  const yaw = (sprinting ? 0.2 : 0.12) * Math.sin(phase * 0.5) * moving;
+  A.upperLegL.x += pitch;
+  A.upperLegR.x += pitch;
+  A.lowerLegL.x += bend;
+  A.lowerLegR.x += bend;
+  A.upperLegL.z += yaw;
+  A.upperLegR.z += yaw;
+  A.hips.y += yaw * 0.85;
+  A.hips.z += flick * 0.04 * moving;
+  A.spine.x += (sprinting ? 0.1 : 0.05) * moving;
+  A.spine.y += flick * 0.06 * moving;
+  const sweep = (sprinting ? 0.38 : 0.22) * flick * moving;
+  A.upperArmL.x += sweep;
+  A.upperArmR.x -= sweep * 0.35;
+  A.upperArmL.z += 0.06 * moving;
+  A.upperArmR.z -= 0.06 * moving;
+  A.head.x -= 0.05 * moving;
+  A.head.y -= flick * 0.04 * moving;
+}
+
+/** Drop any left/right split so a fin stays one shape through kicks and stances. */
+function sealTail(A: Angles) {
+  const pair = (left: BoneKey, right: BoneKey) => {
+    const L = A[left];
+    const R = A[right];
+    L.x = R.x = (L.x + R.x) * 0.5;
+    L.y = R.y = (L.y + R.y) * 0.5;
+    L.z = R.z = (L.z + R.z) * 0.5;
+  };
+  pair('upperLegL', 'upperLegR');
+  pair('lowerLegL', 'lowerLegR');
+  pair('footL', 'footR');
+  pair('toesL', 'toesR');
 }
 
 type Angles = Record<BoneKey, PoseAngles>;

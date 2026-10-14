@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { RYDERZ, fighterKind } from '../config';
 import { GameMode } from '../game-mode';
 import {
   canConfirmFighter,
@@ -36,6 +37,9 @@ assert.equal(premiereCategory(marilyn), 'boomerz');
 const mary = roster.find((character) => character.id === 'marywantis');
 assert.equal(premiereCategory(mary!), 'jab-visions');
 assert.equal(mary?.universe, 'JAB Visions Universe');
+assert.equal(mary?.species, 'mermaid');
+assert.equal(fighterKind(RYDERZ.marywantis), 'Mermaid');
+assert.equal(fighterKind(RYDERZ.rubi), RYDERZ.rubi.role);
 
 const six = lineupFormation(6, 1.2);
 assert.equal(six.length, 6);

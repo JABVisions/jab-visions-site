@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
 import { arenaSpec } from '@/lib/ryderz-raid/arenas';
-import { RYDERZ, type RyderId } from '@/lib/ryderz-raid/config';
+import { RYDERZ, fighterKind, fighterMark, type RyderId } from '@/lib/ryderz-raid/config';
 import type { RaidEngine } from '@/lib/ryderz-raid/engine';
 import type { GameMode } from '@/lib/ryderz-raid/game-mode';
 import { INPUT_SLOTS, type RyderManager } from '@/lib/ryderz-raid/ryder-manager';
@@ -180,13 +180,13 @@ export default function PauseMenu({
       <aside className={styles.showcase} aria-label={`${spec.name} preview`}>
         <div className={styles.aura} aria-hidden="true" />
         <span className={styles.watermark} aria-hidden="true">
-          {theme.label} Ryder
+          {fighterMark(spec, theme.label)}
         </span>
         <RyderShowcase ryderId={shown} poseKey={poseKey} />
         <div className={styles.caption}>
           <h3>
             <small>
-              {theme.label} Ryder · {spec.role}
+              {fighterMark(spec, theme.label)} · {spec.species === 'mermaid' ? spec.title : spec.role}
             </small>
             {spec.name}
           </h3>

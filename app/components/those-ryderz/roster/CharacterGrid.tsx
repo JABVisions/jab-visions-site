@@ -64,7 +64,7 @@ export function CharacterGrid({
               <span>
                 <strong>{character.name}</strong>
                 <small>{character.universe}</small>
-                <em>{locked ? 'Soon' : character.category}</em>
+                <em>{locked ? 'Soon' : character.species === 'mermaid' ? 'Mermaid' : character.category}</em>
               </span>
             </button>
           );

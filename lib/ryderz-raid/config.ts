@@ -145,6 +145,23 @@ export interface RyderSpec {
    * corkscrew geodesic skinning. Animation still layers on top of the bind.
    */
   skelKeep?: BoneKey[];
+  /**
+   * Body the figure was built as. Omitted fighters are human. A mermaid keeps
+   * one tail instead of a two-leg stride, and select copy names her a mermaid.
+   */
+  species?: FighterSpecies;
+}
+
+export type FighterSpecies = 'human' | 'mermaid';
+
+/** Class shown on select and pause. Mermaids are not filed as human Ryders. */
+export function fighterKind(spec: { species?: FighterSpecies; role: string }): string {
+  return spec.species === 'mermaid' ? 'Mermaid' : spec.role;
+}
+
+/** Pause watermark. A mermaid is not stamped with a Ryder name. */
+export function fighterMark(spec: { species?: FighterSpecies }, themeLabel: string): string {
+  return spec.species === 'mermaid' ? 'Mermaid' : `${themeLabel} Ryder`;
 }
 
 export const ARENA_HALF = 30;
@@ -960,7 +977,9 @@ export const RYDERZ: Record<RyderId, RyderSpec> = {
     portrait: '/assets/those-ryderz/icons/marywantis.webp?v=2',
     icon: '/assets/those-ryderz/icons/marywantis.webp?v=2',
     glb: '/assets/those-ryderz/models/marywantis.glb?v=1',
+    species: 'mermaid',
     strikes: ['spinKick', 'kick', 'blast', 'slap'],
+    skelKeep: ['upperLegL', 'upperLegR', 'lowerLegL', 'lowerLegR', 'footL', 'footR', 'toesL', 'toesR'],
     maxHp: 110,
     speed: 7.2,
     fireRate: 3.2,
