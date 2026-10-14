@@ -23,6 +23,7 @@ import PvpVersusHUD from './hud/PvpVersusHUD';
 import LowHealthVignette, { type LowHealthVignetteApi } from './hud/LowHealthVignette';
 import ComboIndicator, { type ComboHudApi } from './hud/ComboIndicator';
 import RaidRadar, { type RadarApi } from './hud/RaidRadar';
+import RaidMap from './hud/RaidMap';
 import StatBoard from './hud/StatBoard';
 import PauseMenu from './menu/PauseMenu';
 import RaidLobby from './modes/RaidLobby';
@@ -44,6 +45,7 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
   const vignette = useRef<LowHealthVignetteApi>(null);
   const comboHud = useRef<ComboHudApi>(null);
   const radarHud = useRef<RadarApi>(null);
+  const mapHud = useRef<RadarApi>(null);
   const moveRow = useRef<HTMLDivElement>(null);
   const partyHud = useRef<PartyHudApi | null>(null);
   const pvpRef = useRef<PvpLineup | null>(null);
@@ -83,6 +85,7 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
   const [round, setRound] = useState(0);
   const [phase, setPhase] = useState<HudState['phase'] | 'select'>('select');
   const [paused, setPaused] = useState(false);
+  const [mapOpen, setMapOpen] = useState(false);
   const [burnout, setBurnout] = useState(false);
   const [banner, setBanner] = useState<HudState['banner']>(null);
   const [survival, setSurvival] = useState<HudState['survival']>(null);
@@ -129,6 +132,7 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
     vignette.current?.setHealth(next.hp, next.maxHp);
     comboHud.current?.setCombo(next.combo);
     radarHud.current?.draw(next.radar);
+    mapHud.current?.draw(next.radar);
     moveRow.current?.setAttribute('data-link', next.combo.power ? 'true' : 'false');
     if (next.opponent) {
       foeHud.current?.setVitals(next.opponent.hp, next.opponent.maxHp, next.opponent.aura, next.opponent.maxAura, next.opponent.aura <= 1);
@@ -215,6 +219,7 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
       !prev ||
       prev.phase !== next.phase ||
       prev.paused !== next.paused ||
+      prev.mapOpen !== next.mapOpen ||
       prev.burnout !== next.burnout ||
       prev.nearShop !== next.nearShop ||
       prev.recovering !== next.recovering ||
@@ -229,6 +234,7 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
       setPhase(next.phase);
       setHudMoves(next.moves);
       setPaused(next.paused);
+      setMapOpen(next.mapOpen);
       setBurnout(next.burnout);
       setNearShop(next.nearShop);
       setBeacon(next.beacon);
@@ -496,7 +502,7 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
         <div className={styles.overlay} aria-hidden="true" data-revive={reviveName ?? ''} data-down={downed ? '1' : '0'}>
           <LowHealthVignette ref={vignette} />
           <ComboIndicator ref={comboHud} />
-          <RaidRadar ref={radarHud} />
+          <RaidRadar ref={radarHud} onOpen={() => engineRef.current?.toggleMap()} />
           <div className={styles.topHud}>
             {partyState.mode === GameMode.RAID ? (
               <PlayerPartyHUD slots={partyState.slots} mode={partyState.mode} apiRef={partyHud} />
@@ -636,7 +642,7 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
 
           <div className={styles.bottomHud}>
             <p className={styles.hint}>
-              A D or arrows turn the camera · W S walk along that view · Mouse can still orbit · Shift sprint · Space jump · X recenters pitch · B swaps shoulder · Click punches up close · Zoe blasts at range · Keven throws darts · C punch · V kick · F / RMB melee, F again throws · Z dodge · Q E R powers · {INTERACT_LABEL} picks up a downed teammate or uses the beacon · Esc pause
+              A D or arrows turn the camera · W S walk along that view · Mouse can still orbit · Shift sprint · Space jump · X recenters pitch · B swaps shoulder · Click punches up close · Zoe blasts at range · Keven throws darts · C punch · V kick · F / RMB melee, F again throws · Z dodge · Q E R powers · {INTERACT_LABEL} picks up a downed teammate or uses the beacon · {pvpTwo ? 'Tab opens the map' : 'Tab or M opens the map'} · Esc pause
               {phase === 'intermission' ? ' · Hold the spire to buy strength' : ''}
               {pvpTwo ? ' · P2 IJKL move · U punch · O kick · P melee · N dodge · M jump' : ''}
             </p>
@@ -767,7 +773,7 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
         />
       )}
 
-      {playing && phase === 'playing' && !paused && !locked && !coarse && !camPanel && (
+      {playing && phase === 'playing' && !paused && !locked && !coarse && !camPanel && !mapOpen && (
         <div className={styles.lock}>
           <button type="button" onClick={() => engineRef.current?.requestPointerLock()}>
             Click to look
@@ -843,6 +849,15 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
             </div>
           </div>
         </div>
+      )}
+
+      {playing && mapOpen && phase !== 'dead' && phase !== 'victory' && phase !== 'report' && (
+        <RaidMap
+          ref={mapHud}
+          place={arenaSpec(managerState.arenaId)?.name ?? 'Raid'}
+          localTwo={pvpTwo}
+          onClose={() => engineRef.current?.toggleMap()}
+        />
       )}
 
       {screen === 'start' && (

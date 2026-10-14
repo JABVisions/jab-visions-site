@@ -90,6 +90,7 @@ import {
   FighterStriker,
   combatProfileFor,
   commandForKey,
+  isMapKey,
   meleeWantsGrab,
   reactionForEffect,
   recipesFor,
@@ -146,6 +147,8 @@ export interface HudState {
   upgrades: Record<UpgradeId, number>;
   pointerLocked: boolean;
   paused: boolean;
+  /** Full-arena chart. Tab toggles it. M toggles it unless that key is player 2's jump. */
+  mapOpen: boolean;
   ryderId: RyderId;
   ryderName: string;
   meleeOnly: boolean;
@@ -168,12 +171,17 @@ export interface HudState {
     powerLabel: string;
     powerLeft: number;
   };
-  /** Player and living hostiles, in world metres, for the corner map. */
+  /** Player, living hostiles, and squadmates, in world metres. */
   radar: {
     x: number;
     z: number;
     yaw: number;
+    /** Half-width of this arena in metres. The opened map draws the whole span. */
+    span: number;
+    terrain: 'island' | 'city';
+    color: string;
     enemies: { x: number; z: number }[];
+    allies: { x: number; z: number; name: string; color: string; down: boolean }[];
   };
   raid: {
     wave: number;
@@ -391,6 +399,7 @@ export class RaidEngine {
   private raf = 0;
   private disposed = false;
   private paused = true;
+  private mapOpen = false;
   private keys = new Set<string>();
   private moveAxis = { x: 0, z: 0 };
   private lookAcc = { x: 0, y: 0 };
@@ -667,6 +676,7 @@ export class RaidEngine {
     this.abilityT = 0;
     this.sprinting = false;
     this.paused = false;
+    this.mapOpen = false;
     this.phase = 'playing';
     this.rig.snap(this.pos, this.yaw, this.pitch);
     this.camReady = false;
@@ -987,9 +997,17 @@ export class RaidEngine {
 
   setPaused(value: boolean) {
     this.paused = value;
+    if (value) this.mapOpen = false;
     if (value && document.pointerLockElement === this.canvas) {
       document.exitPointerLock();
     }
+  }
+
+  /** Open or close the full-arena map. The corner radar stays up either way. */
+  toggleMap() {
+    if (this.paused || this.phase === 'report' || this.phase === 'dead' || this.phase === 'victory') return;
+    this.mapOpen = !this.mapOpen;
+    if (this.mapOpen && document.pointerLockElement === this.canvas) document.exitPointerLock();
   }
 
   /** Rebind Q / E / R. Sustained powers that leave the deck are switched off first. */
@@ -1070,6 +1088,7 @@ export class RaidEngine {
   }
 
   requestPointerLock() {
+    if (this.mapOpen || this.paused) return;
     this.canvas.requestPointerLock();
   }
 
@@ -1253,6 +1272,13 @@ export class RaidEngine {
       if (INTERACT_KEYS.includes(e.key.toLowerCase())) this.interactQueued = true;
       return;
     }
+    const typing = (e.target as HTMLElement | null)?.tagName;
+    if (typing !== 'INPUT' && typing !== 'TEXTAREA' && isMapKey(e.key, e.code, this.pvpLocalTwo)) {
+      e.preventDefault();
+      const live = this.phase === 'playing' || this.phase === 'intermission';
+      if (this.mapOpen || live) this.toggleMap();
+      return;
+    }
     const lower = e.key.toLowerCase();
     if (lower === 'x') this.recenter = true;
     if (lower === 'b') this.swapShoulder();
@@ -1261,6 +1287,10 @@ export class RaidEngine {
     if (command) this.queueCommand(command, rival ? 2 : 1);
     if (INTERACT_KEYS.includes(e.key.toLowerCase())) this.interactQueued = true;
     if (e.key === 'Escape') {
+      if (this.mapOpen) {
+        this.mapOpen = false;
+        return;
+      }
       if (this.tuneMode) {
         if (document.pointerLockElement === this.canvas) document.exitPointerLock();
       } else {
@@ -1290,7 +1320,7 @@ export class RaidEngine {
   };
 
   private onMouseDown = (e: MouseEvent) => {
-    if (this.paused) return;
+    if (this.paused || this.mapOpen) return;
     if (this.phase === 'playing' && document.pointerLockElement !== this.canvas) {
       const lock = this.canvas.requestPointerLock();
       if (lock && typeof (lock as Promise<void>).catch === 'function') void (lock as Promise<void>).catch(() => {});
@@ -3039,6 +3069,7 @@ export class RaidEngine {
     this.reportRound = round;
     this.reportLeft = mvpRound(round) ? MVP_HOLD : REPORT_HOLD;
     this.phase = 'report';
+    this.mapOpen = false;
     if (document.pointerLockElement === this.canvas) document.exitPointerLock();
   }
 
@@ -4764,6 +4795,7 @@ export class RaidEngine {
       upgrades: { ...this.upgrades },
       pointerLocked: this.pointerLocked,
       paused: this.paused,
+      mapOpen: this.mapOpen,
       ryderId: this.spec.id,
       ryderName: this.spec.name,
       meleeOnly: this.burnout,
@@ -4778,7 +4810,19 @@ export class RaidEngine {
         x: this.pos.x,
         z: this.pos.z,
         yaw: this.yaw,
+        span: this.limit(),
+        terrain: this.arena.worldKey === 'island' ? 'island' : 'city',
+        color: this.spec.colorHex,
         enemies: this.hosts.filter((host) => host.hp > 0 && !host.ally).map((host) => ({ x: host.pos.x, z: host.pos.z })),
+        allies: this.hosts
+          .filter((host) => host.ally && (host.hp > 0 || (host.down ?? 0) > 0))
+          .map((host) => ({
+            x: host.pos.x,
+            z: host.pos.z,
+            name: host.ryderId ? RYDERZ[host.ryderId].name : 'Ally',
+            color: host.ryderId ? RYDERZ[host.ryderId].colorHex : '#66e7ff',
+            down: (host.down ?? 0) > 0,
+          })),
       },
       raid:
         this.gameMode === GameMode.RAID && this.raidPlan

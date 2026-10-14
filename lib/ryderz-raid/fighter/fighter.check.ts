@@ -1,7 +1,7 @@
 import { comboDamageScale, comboStunScale } from './actions';
 import { ComboManager, COMBO_WINDOW, matchRecipe, meleeWantsGrab, POWER_LINK_WINDOW, SHARED_COMBOS } from './combo';
 import { hostStrikeDamage, nextHostStrike } from './hostStriker';
-import { commandForKey } from './input';
+import { commandForKey, isMapKey } from './input';
 import { CombatMemory } from './memory';
 import { openingPlan } from './planner';
 import { actionFor, combatProfileFor } from './profiles';
@@ -84,6 +84,9 @@ assert(commandForKey('f', 'KeyF', 1) === 'melee', 'F stays melee');
 assert(commandForKey(' ', 'Space', 1) === 'jump', 'Space jumps');
 assert(commandForKey('m', 'KeyM', 2) === 'jump', 'player 2 jumps with M');
 assert(commandForKey('m', 'KeyM', 1) === null, 'M does not jump for player 1');
+assert(isMapKey('m', 'KeyM', false), 'M opens the map when player 2 is not on this keyboard');
+assert(isMapKey('Tab', 'Tab', true), 'Tab opens the map in local versus');
+assert(!isMapKey('m', 'KeyM', true), 'local versus keeps M as player 2 jump');
 assert(commandForKey('q', 'KeyQ', 1) === 'ability1', 'Q stays the first power');
 assert(commandForKey('u', 'KeyU', 2) === 'punch', 'player 2 punches with U');
 assert(commandForKey('u', 'KeyU', 1) === null, 'U does not punch for player 1');

@@ -35,6 +35,13 @@ export const PAD_BUTTON: Record<CombatCommand, number> = {
   ability3: 7,
 };
 
+/** Tab opens the raid map. M does too, except in local versus where M is player 2's jump. */
+export function isMapKey(key: string, code: string, localTwoPlayer: boolean) {
+  if (code === 'Tab') return true;
+  if (localTwoPlayer) return false;
+  return key.toLowerCase() === 'm';
+}
+
 export function commandForKey(key: string, code: string, player: 1 | 2): CombatCommand | null {
   const lower = key.toLowerCase();
   if (player === 1) {
