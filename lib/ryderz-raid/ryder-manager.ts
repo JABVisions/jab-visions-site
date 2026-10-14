@@ -75,6 +75,9 @@ const SIGILS: Record<AbilityId, string> = {
   dreamVision: 'DV',
   proclaimPeace: 'PP',
   freeAtLast: 'FL',
+  callMercy: 'CM',
+  finKick: 'FK',
+  wavePool: 'WP',
 };
 
 export function defaultLoadout(id: RyderId): PowerLoadout {

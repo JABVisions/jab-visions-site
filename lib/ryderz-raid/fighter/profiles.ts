@@ -135,6 +135,18 @@ const RYDER_COMBAT: Record<RyderId, CombatProfile> = {
     combos: SHARED_COMBOS,
     powerLink: { id: 'dream-link', abilityId: 'dreamVision', label: 'Dream Link', preReaction: 'stagger', followUps: 0, trap: 0 },
   },
+  marywantis: {
+    punch: { damageMul: 0.44, recovery: 0.18 },
+    kick: { damageMul: 0.8, knockback: 6.8 },
+    melee: { label: 'Tide palm', damageMul: 1.02, reaction: 'knockback', range: 2.2, recovery: 0.4, style: 'spinKick' },
+    combos: [
+      ...SHARED_COMBOS,
+      { id: 'tide-wheel', label: 'Tide Wheel', sequence: ['kick', 'kick', 'melee'], effect: 'heavyKnockback' },
+    ],
+    powerLink: { id: 'fin-link', abilityId: 'finKick', label: 'Fin Link', preReaction: 'stagger', followUps: 1, trap: 0 },
+    punchCycle: ['punch', 'slap', 'chop'],
+    kickCycle: ['kick', 'spinKick', 'kick'],
+  },
 };
 
 export function combatProfileFor(id: RyderId | null | undefined): CombatProfile {

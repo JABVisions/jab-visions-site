@@ -13,7 +13,8 @@ export type RyderId =
   | 'kid-paranormal'
   | 'agent-nyx'
   | 'marilyn-monroe'
-  | 'martin-luther-king';
+  | 'martin-luther-king'
+  | 'marywantis';
 
 export type AbilityId =
   | 'bladeFan'
@@ -45,7 +46,10 @@ export type AbilityId =
   | 'abracadabra'
   | 'dreamVision'
   | 'proclaimPeace'
-  | 'freeAtLast';
+  | 'freeAtLast'
+  | 'callMercy'
+  | 'finKick'
+  | 'wavePool';
 
 export type MoveKey = 'Q' | 'E' | 'R';
 
@@ -935,6 +939,70 @@ export const RYDERZ: Record<RyderId, RyderSpec> = {
       },
     ],
   },
+  marywantis: {
+    id: 'marywantis',
+    name: 'Marywantis',
+    title: 'Tidecaller',
+    flaw: 'Tempestuous',
+    role: 'Controller',
+    color: 0x00c4cc,
+    colorHex: '#00e5ff',
+    accent: 0x0a84ff,
+    visual: {
+      primaryColor: 0x00c4cc,
+      auraColor: 0x00e5ff,
+      electricityColor: 0x9af6ff,
+      depletedAuraIntensity: 0.12,
+      poweredAuraIntensity: 1.7,
+      auraStyle: 'sparkle',
+    },
+    weapon: 'Living Water',
+    portrait: '/assets/those-ryderz/icons/marywantis.webp',
+    icon: '/assets/those-ryderz/icons/marywantis.webp',
+    glb: '/assets/those-ryderz/models/marywantis.glb?v=1',
+    strikes: ['spinKick', 'kick', 'blast', 'slap'],
+    maxHp: 110,
+    speed: 7.2,
+    fireRate: 3.2,
+    damage: 11,
+    projectileSpeed: 28,
+    projectileCount: 1,
+    spread: 0.04,
+    shotCost: 2.4,
+    maxAura: 115,
+    auraRegen: 5.6,
+    meleeDamage: 20,
+    meleeRate: 2.1,
+    moves: [
+      {
+        id: 'callMercy',
+        name: 'Call Mercy',
+        key: 'Q',
+        description:
+          'Summons Mercy, a water guardian, for 12 seconds. She imprisons up to three enemies. The prisons drown them over time, then burst. Bosses are shoved, not caged. 24 second cooldown.',
+        auraCost: 22,
+        drain: 0,
+      },
+      {
+        id: 'finKick',
+        name: 'Fin Kick',
+        key: 'E',
+        description:
+          'A steerable cartwheel of four watery hits, then a crescent kick that knocks back. Steer with movement. 9 second cooldown.',
+        auraCost: 14,
+        drain: 0,
+      },
+      {
+        id: 'wavePool',
+        name: 'Wave Pool',
+        key: 'R',
+        description:
+          'A whirlpool for 7 seconds. It pulls, lifts, and spins enemies caught inside, then bursts outward. Bosses stay on the ground. Nobody is thrown through walls or out of the arena. 45 second cooldown.',
+        auraCost: 34,
+        drain: 0,
+      },
+    ],
+  },
 };
 
 export const RYDER_ORDER: RyderId[] = [
@@ -948,6 +1016,7 @@ export const RYDER_ORDER: RyderId[] = [
   'agent-nyx',
   'marilyn-monroe',
   'martin-luther-king',
+  'marywantis',
 ];
 
 export type EnemyKind = 'walker' | 'sprinter' | 'heavy' | 'thrower' | 'adept' | 'broadcaster';

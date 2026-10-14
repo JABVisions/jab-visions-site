@@ -548,6 +548,7 @@ export class RaidEngine {
   /** Per-Ryder combat kit (null for Ryderz still on the generic moves). */
   private kit: RyderKit | null = null;
   private kitContext: KitContext | null = null;
+  private clipTokenSeen = -1;
   /** Ability ids the current kit has claimed via `tryAbility`. */
   private kitClaimed = new Set<AbilityId>();
   private scheduler = new HitScheduler();
@@ -2006,9 +2007,14 @@ export class RaidEngine {
         ? { kind: 'swim', t: (time % 1.15) / 1.15, weight: 1 }
         : null;
     if (this.player.meshSource === 'gltf') {
-      animateGltfFighter(this.player, dt, this.anim, moving, this.sprinting, this.meleeT, this.meleeStarted, {
+      const token = this.kit?.clipToken ?? -1;
+      const hinted = token !== this.clipTokenSeen && Boolean(this.kit?.clipHint);
+      if (token !== this.clipTokenSeen) this.clipTokenSeen = token;
+      animateGltfFighter(this.player, dt, this.anim, moving, this.sprinting, this.meleeT, this.meleeStarted || hinted, {
         pose: this.kit?.pose ?? swimPose ?? this.jumpPose(),
         style: this.strikeOverride ?? undefined,
+        clipHint: hinted ? this.kit?.clipHint ?? undefined : undefined,
+        clipSeconds: hinted ? this.kit?.clipSeconds : undefined,
         camera: this.camera,
       });
       this.meleeStarted = false;
@@ -2544,6 +2550,7 @@ export class RaidEngine {
     const kit = createRyderKit(this.spec.id);
     if (!kit || !this.player) return;
     this.kit = kit;
+    this.clipTokenSeen = -1;
     this.kitContext = this.makeKitContext();
     kit.attach(this.kitContext);
   }
@@ -3258,6 +3265,15 @@ export class RaidEngine {
           }
         },
         raidTargets: () => this.hosts.filter((other) => !other.ally && !other.duelist && other.hp > 0),
+        holdRaidTarget: (target: KitTarget, seconds: number) => {
+          const foeHost = target as Host;
+          if (!this.hosts.includes(foeHost) || foeHost.ally || foeHost.hp <= 0) return;
+          foeHost.held = Math.max(0, seconds);
+          if (seconds > 0) {
+            foeHost.knock.set(0, 0, 0);
+            foeHost.airVel = 0;
+          }
+        },
         hurtRaidTarget: (target: KitTarget, amount: number, dir: THREE.Vector3, reaction?: HitReaction, strength = 1) => {
           const foeHost = target as Host;
           if (foeHost.ally || foeHost.hp <= 0) return 0;

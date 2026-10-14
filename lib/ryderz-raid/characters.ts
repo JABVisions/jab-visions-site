@@ -80,6 +80,8 @@ export interface AnimateExtras {
   style?: MeleeStyle;
   /** Substring of a baked clip name, from a civilian or Ryder animation map. */
   clipHint?: string;
+  /** When set with a clip hint, the strike plays across this many seconds. */
+  clipSeconds?: number;
   camera?: THREE.Camera;
 }
 
@@ -590,6 +592,7 @@ function animateSkeletonWithStrikes(
   pose: PoseOverride | null,
   style?: MeleeStyle,
   clipHint?: string,
+  clipSeconds?: number,
 ) {
   const skeleton = rig.skeleton!;
   const mixer = rig.mixer!;
@@ -608,10 +611,11 @@ function animateSkeletonWithStrikes(
     const strike = hinted ?? rig.strikes[index];
     rig.strikeIndex += 1;
     const length = strike.getClip().duration || STRIKE_TIME;
-    strike.timeScale = length / STRIKE_TIME;
+    const window = clipSeconds && clipSeconds > 0.2 ? clipSeconds : STRIKE_TIME;
+    strike.timeScale = length / window;
     strike.reset().fadeIn(0.05).play();
     rig.strike = strike;
-    rig.attackLeft = STRIKE_TIME;
+    rig.attackLeft = window;
     rig.strikeRelease = STRIKE_RELEASE;
   }
   if (!rig.strike) return;
@@ -650,7 +654,18 @@ export function animateGltfFighter(
   const pose = extras?.pose && extras.pose.weight > 0 ? extras.pose : null;
 
   if (rig.skeleton && rig.mixer && rig.strikes.length) {
-    animateSkeletonWithStrikes(rig, dt, phase, moving, sprinting, meleeStarted, pose, extras?.style, extras?.clipHint);
+    animateSkeletonWithStrikes(
+      rig,
+      dt,
+      phase,
+      moving,
+      sprinting,
+      meleeStarted,
+      pose,
+      extras?.style,
+      extras?.clipHint,
+      extras?.clipSeconds,
+    );
   } else if (rig.mixer) {
     if (meleeStarted && rig.actions.attack) {
       const attack = rig.actions.attack;

@@ -9,6 +9,7 @@ import { KidParanormalKit } from './kid-paranormal';
 import { NyxKit } from './nyx';
 import { MarilynKit } from '../boomers/marilyn';
 import { MartinKit } from '../boomers/martin';
+import { MarywantisKit } from './marywantis';
 import type { RyderKit } from './kit';
 
 export type { CameraExtra, HazardZone, KitContext, KitFrame, KitTarget, MeleeStep, RyderKit } from './kit';
@@ -28,6 +29,7 @@ const KITS: Partial<Record<RyderId, () => RyderKit>> = {
   'agent-nyx': () => new NyxKit(),
   'marilyn-monroe': () => new MarilynKit(),
   'martin-luther-king': () => new MartinKit(),
+  marywantis: () => new MarywantisKit(),
 };
 
 export function createRyderKit(id: RyderId): RyderKit | null {

@@ -248,6 +248,15 @@ export interface RyderKit {
   readonly resonance?: number;
   /** Attack animation rate. 1 is normal. Kits leave it unset. */
   readonly haste?: number;
+  /**
+   * Baked clip to play when `clipToken` changes. A substring of the clip name,
+   * such as `cartwheel`. Cleared by the animator after that one start.
+   */
+  readonly clipHint?: string | null;
+  /** Increments each time `clipHint` should start. */
+  readonly clipToken?: number;
+  /** Seconds to fit the hinted clip into. Unset uses the melee window. */
+  readonly clipSeconds?: number;
   /** A basic strike just started. Kits dress the swing; damage stays on the striker. */
   onStrike?(style: MeleeStyle): void;
   /** A basic hit connected. Ability damage does not call this. */
