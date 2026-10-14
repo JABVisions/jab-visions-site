@@ -39,7 +39,6 @@ import {
 } from './combat';
 import { AfterimagePool } from './speed-vfx';
 import { createRyderKit, type KitContext, type KitTarget, type MeleeStep, type RyderKit } from './ryderz';
-import { sweepScore } from './pvp/abilityBands';
 import type { MeleeStyle, PoseOverride } from './skeletal';
 import {
   ThirdPersonCamera,
@@ -71,7 +70,8 @@ import {
   setHumanoidOpacity,
 } from './toon';
 import { ledgeDrop, resolveFooting, slopeBlocks, STEP_HEIGHT } from './footing';
-import { buildWorld, nearDistrictHub, pointBlocked, resolveCircle, steerVelocity, type World } from './world';
+import { allyFocusIndex, commitSteer, formUp, freshNav, pressTarget, type NavHint, type TrackPoint } from './nav';
+import { buildWorld, nearDistrictHub, pointBlocked, resolveCircle, type World } from './world';
 import { buildPadWorld } from './world-pad';
 import { buildIslandWorld } from './world-island';
 import { emptySwim, shallowDirection, stepSwim, type SwimState, type WaterColumn } from './island/swim';
@@ -308,6 +308,10 @@ interface Host {
   down?: number;
   /** This fighter can path through deep water and plays the swim stance there. */
   swims?: boolean;
+  /** Wall-slide memory so a blocked step does not grind in place. */
+  nav?: NavHint;
+  /** This raid teammate is already committed to a host and may chase a little farther. */
+  pressing?: boolean;
 }
 
 /** A defeated host still flying from the blow that killed it. */
@@ -3203,6 +3207,7 @@ export class RaidEngine {
     };
     this.ensureStatLine(seat, id, remoteHuman ? 'human' : 'computer');
     let foe: Host | null = null;
+    let regroup = true;
     const cpu = new PvpCpu(
       {
         scene: this.scene,
@@ -3266,42 +3271,49 @@ export class RaidEngine {
           foeHost.hit = Math.max(foeHost.hit, seconds);
           foeHost.hitColor = color;
         },
+        regrouping: () => regroup,
       },
       id,
       (this.raidPlan?.difficulty ?? 'normal') as PvpDifficulty,
     );
     cpu.attach(host, spec);
     host.cpu = cpu;
-    const aim = () => {
-      foe = this.allyTarget(host);
-      if (foe) {
-        focus.copy(foe.pos);
-        vel.copy(foe.knock);
+    let trackedX = 0;
+    let trackedZ = 0;
+    const aim = (dt = 0.05) => {
+      const foes = this.hosts.filter((other) => !other.ally && !other.duelist && other.hp > 0);
+      const index = allyFocusIndex(
+        host.pos,
+        this.pos,
+        foes.map((other) => ({ x: other.pos.x, z: other.pos.z, hp: other.hp })),
+        Boolean(host.pressing),
+      );
+      const target = index >= 0 ? foes[index] : null;
+      if (target) {
+        if (foe !== target) vel.set(0, 0, 0);
+        else {
+          const step = Math.max(0.016, dt);
+          vel.set((target.pos.x - trackedX) / step, 0, (target.pos.z - trackedZ) / step);
+        }
+        trackedX = target.pos.x;
+        trackedZ = target.pos.z;
+        host.pressing = true;
+        regroup = false;
+        foe = target;
+        const leadX = Math.max(-2.2, Math.min(2.2, vel.x * 0.22));
+        const leadZ = Math.max(-2.2, Math.min(2.2, vel.z * 0.22));
+        focus.set(target.pos.x + leadX, 0, target.pos.z + leadZ);
+        return;
       }
+      host.pressing = false;
+      regroup = true;
+      foe = null;
+      vel.set(0, 0, 0);
+      const spot = formUp(this.pos.x, this.pos.z, host.seat ?? 1);
+      focus.set(spot.x, 0, spot.z);
     };
-    (host as Host & { aim?: () => void }).aim = aim;
+    (host as Host & { aim?: (dt?: number) => void }).aim = aim;
     this.hosts.push(host);
-  }
-
-  private allyTarget(self: Host): Host | null {
-    const foes = this.hosts.filter((host) => !host.ally && !host.duelist && host.hp > 0);
-    let best: Host | null = null;
-    let bestScore = Infinity;
-    for (const foe of foes) {
-      const crowd = this.hosts.filter(
-        (ally) => ally.ally && ally !== self && ally.hp > 0 && Math.hypot(ally.pos.x - foe.pos.x, ally.pos.z - foe.pos.z) < 5,
-      ).length;
-      const dist = Math.hypot(self.pos.x - foe.pos.x, self.pos.z - foe.pos.z);
-      const pack = foes.filter(
-        (other) => other !== foe && Math.hypot(other.pos.x - foe.pos.x, other.pos.z - foe.pos.z) < 4,
-      ).length;
-      const score = self.cpu?.sweeping ? sweepScore(dist, pack) : crowd * 8 + dist;
-      if (score < bestScore) {
-        best = foe;
-        bestScore = score;
-      }
-    }
-    return best;
   }
 
   private driveAlly(host: Host, dt: number) {
@@ -3321,8 +3333,8 @@ export class RaidEngine {
       this.animateHost(host, dt, Math.min(1, mag), this.simTime);
       return;
     }
-    const aim = (host as Host & { aim?: () => void }).aim;
-    aim?.();
+    const aim = (host as Host & { aim?: (dt?: number) => void }).aim;
+    aim?.(dt);
     if (host.held > 0) {
       stepReaction(host, dt);
       host.cpu?.stun();
@@ -4090,7 +4102,7 @@ export class RaidEngine {
     const chase = this.squadAim(host);
     let gx = chase.x;
     let gz = chase.z;
-    if ((order.state === 'search' || order.state === 'pickup') && prop) {
+    if ((order.state === 'search' || order.state === 'pickup') && prop && (propDist ?? 99) < 14) {
       gx = prop.pos.x;
       gz = prop.pos.z;
     } else if (!phased) {
@@ -4143,7 +4155,9 @@ export class RaidEngine {
     let travelX = 0;
     let travelZ = 0;
     if (mag > 0.05) {
-      const steered = steerVelocity(
+      if (!host.nav) host.nav = freshNav();
+      const steered = commitSteer(
+        host.nav,
         host.pos.x,
         host.pos.z,
         (vx / mag) * speed,
@@ -4152,6 +4166,7 @@ export class RaidEngine {
         (x, z, radius) => this.npcBlocked(x, z, radius),
         gx,
         gz,
+        dt,
       );
       travelX = steered.x;
       travelZ = steered.z;
@@ -4254,15 +4269,15 @@ export class RaidEngine {
   }
 
   private squadAim(from: Host) {
-    const choices: { x: number; z: number; vx: number; vz: number; dist: number; hpRatio: number }[] = [];
+    const choices: TrackPoint[] = [];
     if (this.hp > 0) {
       choices.push({
         x: this.pos.x,
         z: this.pos.z,
         vx: this.playerVel.x,
         vz: this.playerVel.z,
-        dist: Math.hypot(this.pos.x - from.pos.x, this.pos.z - from.pos.z),
         hpRatio: this.maxHp > 0 ? this.hp / this.maxHp : 1,
+        weight: 0.62,
       });
     }
     if (this.gameMode === GameMode.RAID) {
@@ -4273,20 +4288,13 @@ export class RaidEngine {
           z: ally.pos.z,
           vx: 0,
           vz: 0,
-          dist: Math.hypot(ally.pos.x - from.pos.x, ally.pos.z - from.pos.z),
           hpRatio: ally.maxHp > 0 ? ally.hp / ally.maxHp : 1,
+          weight: 1,
         });
       }
     }
     if (!choices.length) return { x: this.pos.x, z: this.pos.z, vx: 0, vz: 0 };
-    const nearest = choices.reduce((best, choice) => (choice.dist < best.dist ? choice : best));
-    if (this.tactics.targetWeak) {
-      const near = choices.filter((choice) => choice.dist < 18);
-      const pool = near.length ? near : choices;
-      const weakest = pool.reduce((best, choice) => (choice.hpRatio < best.hpRatio ? choice : best));
-      return weakest;
-    }
-    return nearest;
+    return pressTarget(from.pos.x, from.pos.z, choices, this.tactics.targetWeak);
   }
 
   private civilianTargets() {
