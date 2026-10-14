@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import * as THREE from 'three';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { RYDERZ, fighterKind, fighterMark } from '../config';
 import { poseSkeleton, ProceduralSkeleton } from '../skeletal';
 import { applyReaction } from '../combat';
@@ -287,4 +289,83 @@ poseSkeleton(tail, {
 });
 assert.ok(Math.abs(tail.angles.upperLegL.x - tail.angles.upperLegR.x) < 0.001, 'a kick does not split the tail');
 
-console.log('marywantis ok');
+function strippedGlb(path: string) {
+  const file = readFileSync(path);
+  const jsonLength = file.readUInt32LE(12);
+  const source = JSON.parse(file.slice(20, 20 + jsonLength).toString('utf8')) as {
+    materials?: Array<{ normalTexture?: unknown; emissiveTexture?: unknown; pbrMetallicRoughness?: Record<string, unknown> }>;
+    images?: unknown[];
+    textures?: unknown[];
+  };
+  for (const material of source.materials ?? []) {
+    delete material.normalTexture;
+    delete material.emissiveTexture;
+    if (material.pbrMetallicRoughness) {
+      delete material.pbrMetallicRoughness.baseColorTexture;
+      delete material.pbrMetallicRoughness.metallicRoughnessTexture;
+    }
+  }
+  source.images = [];
+  source.textures = [];
+  const jsonChunk = Buffer.from(JSON.stringify(source));
+  const jsonPad = Buffer.alloc((4 - (jsonChunk.length % 4)) % 4, 0x20);
+  const binStart = 20 + jsonLength;
+  const binLength = file.readUInt32LE(binStart);
+  const bin = file.slice(binStart + 8, binStart + 8 + binLength);
+  const header = Buffer.alloc(12);
+  const jsonHeader = Buffer.alloc(8);
+  const binHeader = Buffer.alloc(8);
+  const total = 12 + 8 + jsonChunk.length + jsonPad.length + 8 + bin.length;
+  header.writeUInt32LE(0x46546c67, 0);
+  header.writeUInt32LE(2, 4);
+  header.writeUInt32LE(total, 8);
+  jsonHeader.writeUInt32LE(jsonChunk.length + jsonPad.length, 0);
+  jsonHeader.writeUInt32LE(0x4e4f534a, 4);
+  binHeader.writeUInt32LE(bin.length, 0);
+  binHeader.writeUInt32LE(0x004e4942, 4);
+  return Buffer.concat([header, jsonHeader, jsonChunk, jsonPad, binHeader, bin]);
+}
+
+function footGap(skeleton: ProceduralSkeleton) {
+  const left = skeleton.bone('footL')!.getWorldPosition(new THREE.Vector3());
+  const right = skeleton.bone('footR')!.getWorldPosition(new THREE.Vector3());
+  return Math.hypot(left.x - right.x, left.z - right.z);
+}
+
+async function tailOnTheModel() {
+  const file = strippedGlb(fileURLToPath(new URL('../../../public/assets/those-ryderz/models/marywantis.glb', import.meta.url)));
+  const gltf = await new Promise<{ scene: THREE.Group }>((resolve, reject) => {
+    new GLTFLoader().parse(file.buffer.slice(file.byteOffset, file.byteOffset + file.byteLength), '', resolve, reject);
+  });
+  const mermaid = new ProceduralSkeleton(gltf.scene, { keep: spec.skelKeep });
+  assert.equal(mermaid.isUsable, true);
+  mermaid.tail = true;
+  poseSkeleton(mermaid, { phase: 0, moving: 0, sprinting: false, meleeT: 0 });
+  gltf.scene.updateMatrixWorld(true);
+  const rest = footGap(mermaid);
+  let widest = rest;
+  for (const phase of [0.3, 0.8, 1.4, 2.2, 3.1, 4.4]) {
+    poseSkeleton(mermaid, { phase, moving: 1, sprinting: true, meleeT: 0 });
+    gltf.scene.updateMatrixWorld(true);
+    widest = Math.max(widest, footGap(mermaid));
+  }
+  assert.ok(widest < rest * 1.35, `mermaid walk keeps the fin together (rest ${rest.toFixed(3)}, walk ${widest.toFixed(3)})`);
+
+  const human = gltf.scene.clone(true);
+  const stride = new ProceduralSkeleton(human);
+  stride.tail = false;
+  let split = 0;
+  for (const phase of [0.3, 0.8, 1.4, 2.2]) {
+    poseSkeleton(stride, { phase, moving: 1, sprinting: true, meleeT: 0 });
+    human.updateMatrixWorld(true);
+    split = Math.max(split, footGap(stride));
+  }
+  assert.ok(split > widest * 1.4, `a human stride opens the feet (human ${split.toFixed(3)}, mermaid ${widest.toFixed(3)})`);
+}
+
+tailOnTheModel()
+  .then(() => console.log('marywantis ok'))
+  .catch((error) => {
+    console.error(error);
+    process.exit(1);
+  });
