@@ -997,7 +997,7 @@ export const RYDERZ: Record<RyderId, RyderSpec> = {
         name: 'Call Mercy',
         key: 'Q',
         description:
-          'Summons Mercy, a water guardian, for 12 seconds. She imprisons up to three enemies. The prisons drown them over time, then burst. Bosses are shoved, not caged. 24 second cooldown.',
+          'Summons Mercy, a water guardian, for 12 seconds. She imprisons up to three enemies. The prisons drown them over time, then burst. Bosses are shoved, not caged. No cooldown. The tide cuts out at random.',
         auraCost: 22,
         drain: 0,
       },
@@ -1006,7 +1006,7 @@ export const RYDERZ: Record<RyderId, RyderSpec> = {
         name: 'Fin Kick',
         key: 'E',
         description:
-          'A steerable cartwheel of four watery hits, then a crescent kick that knocks back. Steer with movement. 9 second cooldown.',
+          'A steerable cartwheel of four watery hits, then a crescent kick that knocks back. Steer with movement. No cooldown. The tide cuts out at random.',
         auraCost: 14,
         drain: 0,
       },
@@ -1015,7 +1015,7 @@ export const RYDERZ: Record<RyderId, RyderSpec> = {
         name: 'Wave Pool',
         key: 'R',
         description:
-          'A whirlpool for 7 seconds. It pulls, lifts, and spins enemies caught inside, then bursts outward. Bosses stay on the ground. Nobody is thrown through walls or out of the arena. 45 second cooldown.',
+          'A whirlpool for 7 seconds. It pulls, lifts, and spins enemies caught inside, then bursts outward. Bosses stay on the ground. Nobody is thrown through walls or out of the arena. No cooldown. The tide cuts out at random.',
         auraCost: 34,
         drain: 0,
       },

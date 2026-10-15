@@ -10,7 +10,7 @@ import { combatProfileFor } from '../fighter/profiles';
 import { aiProfileFor } from '../pvp/aiProfile';
 import { choosePvpAction } from '../pvp/decide';
 import type { KitContext, KitTarget } from './kit';
-import { FINISHER_DAMAGE, MERCY_CAP, MarywantisKit, POOL_RADIUS, tideBoss } from './marywantis';
+import { FINISHER_DAMAGE, MERCY_CAP, MarywantisKit, POOL_RADIUS, TIDE_DRY_MAX, TIDE_DRY_MIN, tideBoss } from './marywantis';
 
 function body(x: number, z: number, hp = 200, extra: { kind?: string; tier?: number } = {}): KitTarget & { kind?: string; tier?: number } {
   return {
@@ -130,6 +130,8 @@ assert.ok(clips.some((name) => /conjuring/i.test(name)));
 
 const kit = new MarywantisKit();
 kit.attach(ctx);
+kit.tideLive = 90;
+kit.tideDry = 0;
 assert.ok(scene.getObjectByName('TideOrbit'));
 
 function step(dt = 0.05, moving = false, boost = false) {
@@ -139,7 +141,7 @@ function step(dt = 0.05, moving = false, boost = false) {
 
 targets = [...pack, boss, friend];
 assert.equal(kit.tryAbility('callMercy'), true);
-assert.ok(cooldowns.includes('callMercy'));
+assert.equal(cooldowns.length, 0, 'powers have no cooldown');
 assert.ok(scene.getObjectByName('Mercy'));
 for (let i = 0; i < 40; i += 1) step(0.05);
 const caged = pack.filter((target) => target.held > 0);
@@ -219,6 +221,24 @@ assert.equal(scene.getObjectByName('SurfWave')?.visible, true);
 assert.ok(rings.length > prints, 'surfing leaves wet prints');
 step(0.05, false, false);
 assert.equal(kit.airY, 0);
+
+kit.tideLive = 0.04;
+kit.tideDry = 0;
+const casts = cooldowns.length;
+step(0.1);
+assert.equal(kit.powersDown, true);
+assert.ok(kit.tideDry >= TIDE_DRY_MIN - 0.11 && kit.tideDry <= TIDE_DRY_MAX);
+assert.equal(kit.tryAbility('callMercy'), false);
+assert.equal(kit.tryAbility('finKick'), false);
+assert.equal(kit.tryAbility('wavePool'), false);
+assert.equal(scene.getObjectByName('Mercy'), undefined);
+assert.equal(cooldowns.length, casts, 'a blackout is not a cooldown');
+const dry = kit.tideDry;
+step(dry + 0.05);
+assert.equal(kit.powersDown, false);
+assert.equal(kit.tryAbility('finKick'), true);
+assert.equal(cooldowns.length, casts);
+kit.interrupt();
 
 const choice = choosePvpAction(
   {

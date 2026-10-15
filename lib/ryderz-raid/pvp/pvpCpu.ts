@@ -338,7 +338,7 @@ export class PvpCpu {
     const slots: AbilityRead[] = spec.moves.map((move, index) => ({
       band: ABILITY_BANDS[move.id],
       affordable: move.drain > 0 ? this.aura > 2 : this.aura >= move.auraCost,
-      cooling: this.rhythm[index] > 0 || this.moveCd[index] > 0,
+      cooling: Boolean(this.kit?.powersDown) || this.rhythm[index] > 0 || this.moveCd[index] > 0,
       ultimate: index === 2,
       active: this.moveOn[index],
     }));
@@ -726,7 +726,7 @@ export class PvpCpu {
   private cast(slot: number) {
     const spec = this.spec;
     const move = spec?.moves[slot];
-    if (!spec || !move || this.burnout) return;
+    if (!spec || !move || this.burnout || this.kit?.powersDown) return;
     if (this.moveCd[slot] > 0 || this.rhythm[slot] > 0) return;
     if (this.kit?.releaseId === move.id) {
       this.kit.endAbility?.(move.id);

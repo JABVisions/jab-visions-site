@@ -218,6 +218,8 @@ export interface RyderKit {
   readonly flying?: boolean;
   /** Aura weapon is live, so punch and kick use the pitchfork hitboxes. */
   readonly forkArmed?: boolean;
+  /** Powers are in a random blackout. Melee and movement still work. */
+  readonly powersDown?: boolean;
   /** Areas the enemy AI should step out of. */
   hazards?(): HazardZone[];
   attach(ctx: KitContext): void;

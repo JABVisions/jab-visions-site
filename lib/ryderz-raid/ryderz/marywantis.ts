@@ -12,12 +12,18 @@ import type { KitContext, KitFrame, KitTarget, MeleeStep, RyderKit } from './kit
 export const MERCY_LIFE = 12;
 export const MERCY_LIFE_PVP = 4;
 export const MERCY_CAP = 3;
-export const MERCY_CD = 24;
-export const FIN_CD = 9;
 export const POOL_LIFE = 7;
 export const POOL_LIFE_PVP = 4.2;
-export const POOL_CD = 45;
 export const POOL_RADIUS = 7.2;
+/** Powers stay up this long, then cut out. No per-move cooldown. */
+export const TIDE_LIVE_MIN = 8;
+export const TIDE_LIVE_MAX = 15;
+export const TIDE_DRY_MIN = 5;
+export const TIDE_DRY_MAX = 10;
+const TIDE_LIVE_MIN_PVP = 6;
+const TIDE_LIVE_MAX_PVP = 11;
+const TIDE_DRY_MIN_PVP = 4;
+const TIDE_DRY_MAX_PVP = 7;
 
 const DROWN_EVERY = 0.5;
 const DROWN_DAMAGE = 3.2;
@@ -160,6 +166,10 @@ export class MarywantisKit implements RyderKit {
   private castLeft = 0;
   private foot = 0;
   private surfing = false;
+  /** Seconds the tide stays usable. Zero while it is out. */
+  tideLive = TIDE_LIVE_MAX;
+  /** Seconds until powers return. Zero while they work. */
+  tideDry = 0;
   clipHint: string | null = null;
   clipToken = 0;
   clipSeconds = 0.8;
@@ -192,6 +202,10 @@ export class MarywantisKit implements RyderKit {
     return this.surfing ? 0.12 : 0;
   }
 
+  get powersDown() {
+    return this.tideDry > 0;
+  }
+
   get bodyYaw() {
     if (!this.fin) return 0;
     return Math.sin(this.fin.age * 16) * 0.4;
@@ -211,6 +225,8 @@ export class MarywantisKit implements RyderKit {
 
   attach(ctx: KitContext) {
     this.ctx = ctx;
+    this.tideDry = 0;
+    this.tideLive = this.rollLive();
     const orbit = new THREE.Group();
     orbit.name = 'TideOrbit';
     for (let i = 0; i < 7; i += 1) {
@@ -263,6 +279,7 @@ export class MarywantisKit implements RyderKit {
     const time = frame.time;
     for (const mat of this.mats) mat.uniforms.uTime.value = time;
     this.castLeft = Math.max(0, this.castLeft - frame.dt);
+    this.stepTide(frame.dt);
     this.stepOrbit(time);
     this.stepSurf(frame);
     this.stepMercy(frame);
@@ -271,10 +288,41 @@ export class MarywantisKit implements RyderKit {
   }
 
   tryAbility(id: AbilityId) {
+    if (this.powersDown) return false;
     if (id === 'callMercy') return this.beginMercy();
     if (id === 'finKick') return this.beginFin();
     if (id === 'wavePool') return this.beginPool();
     return false;
+  }
+
+  private stepTide(dt: number) {
+    if (this.tideDry > 0) {
+      this.tideDry = Math.max(0, this.tideDry - dt);
+      if (this.tideDry === 0) this.tideLive = this.rollLive();
+      return;
+    }
+    this.tideLive = Math.max(0, this.tideLive - dt);
+    if (this.tideLive > 0) return;
+    this.tideDry = this.rollDry();
+    this.interrupt();
+    const ctx = this.ctx;
+    if (!ctx) return;
+    ctx.rings.spawn(ctx.pos.clone(), 0x9ad7ff, { radius: 1.4, duration: 0.4, y: 0.08 });
+    ctx.particles.emit(ctx.pos.clone().setY(1.1), FOAM, 14, { speed: 3.2, size: 0.2, life: 0.45, up: 1.2, gravity: 3 });
+  }
+
+  private rollLive() {
+    const pvp = this.ctx?.pvp?.() ?? false;
+    return this.span(pvp ? TIDE_LIVE_MIN_PVP : TIDE_LIVE_MIN, pvp ? TIDE_LIVE_MAX_PVP : TIDE_LIVE_MAX);
+  }
+
+  private rollDry() {
+    const pvp = this.ctx?.pvp?.() ?? false;
+    return this.span(pvp ? TIDE_DRY_MIN_PVP : TIDE_DRY_MIN, pvp ? TIDE_DRY_MAX_PVP : TIDE_DRY_MAX);
+  }
+
+  private span(min: number, max: number) {
+    return min + Math.random() * (max - min);
   }
 
   private beginMercy() {
@@ -302,7 +350,6 @@ export class MarywantisKit implements RyderKit {
     this.mercy = { group, life: pvp ? MERCY_LIFE_PVP : MERCY_LIFE, max: pvp ? MERCY_LIFE_PVP : MERCY_LIFE, bossHit: new Set() };
     this.castLeft = 0.35;
     this.playClip('conjuring', 1);
-    ctx.cooldown('callMercy', MERCY_CD);
     ctx.sound('marywantis.mercy');
     ctx.rings.spawn(group.position.clone(), AQUA, { radius: 1.6, duration: 0.45, y: 0.08 });
     return true;
@@ -313,7 +360,6 @@ export class MarywantisKit implements RyderKit {
     if (!ctx || this.fin) return Boolean(this.fin);
     this.fin = { age: 0, next: 0.1, swings: 0, wave: null };
     this.playClip('cartwheel', 0.85);
-    ctx.cooldown('finKick', FIN_CD);
     ctx.sound('marywantis.fin');
     return true;
   }
@@ -350,7 +396,6 @@ export class MarywantisKit implements RyderKit {
     };
     this.castLeft = 0.32;
     this.playClip('conjuring', 1.05);
-    ctx.cooldown('wavePool', POOL_CD);
     ctx.sound('marywantis.pool');
     ctx.rings.spawn(group.position.clone(), AQUA, { radius: POOL_RADIUS, duration: 0.6, y: 0.05 });
     return true;
@@ -379,7 +424,7 @@ export class MarywantisKit implements RyderKit {
     const ctx = this.ctx;
     const surf = this.surf;
     if (!ctx || !surf) return;
-    this.surfing = Boolean(frame.boost && frame.moving && !this.fin && this.castLeft <= 0);
+    this.surfing = Boolean(frame.boost && frame.moving && !this.fin && this.castLeft <= 0 && !this.powersDown);
     surf.visible = this.surfing;
     if (!this.surfing) return;
     const yaw = ctx.yaw();

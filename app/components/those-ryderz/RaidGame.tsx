@@ -87,6 +87,7 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
   const [paused, setPaused] = useState(false);
   const [mapOpen, setMapOpen] = useState(false);
   const [burnout, setBurnout] = useState(false);
+  const [tideOut, setTideOut] = useState(false);
   const [banner, setBanner] = useState<HudState['banner']>(null);
   const [survival, setSurvival] = useState<HudState['survival']>(null);
   const [reviveName, setReviveName] = useState<string | null>(null);
@@ -209,11 +210,13 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
       if (!el) return;
       el.textContent = next.burnout
         ? 'NO AURA'
-        : move.duration > 0
-          ? 'ON'
-          : move.ready
-            ? `${move.key}  READY`
-            : 'LOW';
+        : next.tideOut
+          ? 'OUT'
+          : move.duration > 0
+            ? 'ON'
+            : move.ready
+              ? `${move.key}  READY`
+              : 'LOW';
     });
     if (
       !prev ||
@@ -221,6 +224,7 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
       prev.paused !== next.paused ||
       prev.mapOpen !== next.mapOpen ||
       prev.burnout !== next.burnout ||
+      prev.tideOut !== next.tideOut ||
       prev.nearShop !== next.nearShop ||
       prev.recovering !== next.recovering ||
       (prev.beacon?.near ?? false) !== (next.beacon?.near ?? false) ||
@@ -236,6 +240,7 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
       setPaused(next.paused);
       setMapOpen(next.mapOpen);
       setBurnout(next.burnout);
+      setTideOut(next.tideOut);
       setNearShop(next.nearShop);
       setBeacon(next.beacon);
       setRecovering(next.recovering);
@@ -608,6 +613,7 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
           )}
 
           {burnout && !recovering && !downed && <div className={styles.burnout}>Aura empty · melee only · weaker blows</div>}
+          {tideOut && !burnout && !downed && <div className={styles.burnout}>Tide out · melee only · get clear of the hosts</div>}
 
           {recovering && <div className={styles.recovering} />}
 

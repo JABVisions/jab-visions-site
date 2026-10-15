@@ -152,6 +152,8 @@ export interface HudState {
   ryderId: RyderId;
   ryderName: string;
   meleeOnly: boolean;
+  /** Marywantis's tide cut out. Powers are dead until it comes back. */
+  tideOut: boolean;
   cameraState: CameraState;
   /** HIGH / LOW / DEPLETED, as the electricity system reads it. */
   powerState: PowerState;
@@ -2697,7 +2699,7 @@ export class RaidEngine {
   private tryMove(slot: number) {
     if (!this.player) return;
     const move = this.moves[slot];
-    if (!move || this.moveCd[slot] > 0) return;
+    if (!move || this.moveCd[slot] > 0 || this.kit?.powersDown) return;
     if (this.kit?.releaseId === move.id) {
       if (!this.releaseArmed[slot]) return;
       this.moveCd[slot] = 0.2;
@@ -4802,6 +4804,7 @@ export class RaidEngine {
         name: move.name,
         ready:
           !this.burnout &&
+          !this.kit?.powersDown &&
           (this.moveT[i] > 0 ||
             (move.drain > 0 ? this.aura > 1 : this.aura >= move.auraCost)),
         cooldown: 0,
@@ -4823,7 +4826,8 @@ export class RaidEngine {
       mapOpen: this.mapOpen,
       ryderId: this.spec.id,
       ryderName: this.spec.name,
-      meleeOnly: this.burnout,
+      meleeOnly: this.burnout || Boolean(this.kit?.powersDown),
+      tideOut: Boolean(this.kit?.powersDown),
       cameraState: this.rig.getState(),
       powerState: this.powerVfx.currentState,
       beacon: this.beacon ? this.beacon.hudState(this.clock.elapsedTime, this.pos) : null,
