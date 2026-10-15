@@ -80,6 +80,8 @@ export interface AnimateExtras {
   style?: MeleeStyle;
   /** Substring of a baked clip name, from a civilian or Ryder animation map. */
   clipHint?: string;
+  /** When set with a clip hint, the strike plays across this many seconds. */
+  clipSeconds?: number;
   camera?: THREE.Camera;
 }
 
@@ -278,7 +280,7 @@ function measureFigure(figure: THREE.Object3D) {
 function wrapGltfAsHumanoid(
   template: GltfTemplate,
   height = 1.88,
-  options: { ownMaterials?: boolean; strikes?: MeleeStyle[]; keep?: BoneKey[]; armHang?: number; sashay?: boolean; yaw?: number } = {},
+  options: { ownMaterials?: boolean; strikes?: MeleeStyle[]; keep?: BoneKey[]; armHang?: number; sashay?: boolean; yaw?: number; tail?: boolean } = {},
 ): { humanoid: Humanoid; rig: GltfRig } {
   const group = new THREE.Group();
   const figure = template.skinned ? (cloneSkeleton(template.scene) as THREE.Group) : template.scene.clone(true);
@@ -293,6 +295,7 @@ function wrapGltfAsHumanoid(
       skeleton = candidate;
       skeleton.armHang = options.armHang ?? 0;
       skeleton.sashay = options.sashay ?? false;
+      skeleton.tail = options.tail ?? false;
       skeleton.apply();
     }
   }
@@ -590,6 +593,7 @@ function animateSkeletonWithStrikes(
   pose: PoseOverride | null,
   style?: MeleeStyle,
   clipHint?: string,
+  clipSeconds?: number,
 ) {
   const skeleton = rig.skeleton!;
   const mixer = rig.mixer!;
@@ -608,10 +612,11 @@ function animateSkeletonWithStrikes(
     const strike = hinted ?? rig.strikes[index];
     rig.strikeIndex += 1;
     const length = strike.getClip().duration || STRIKE_TIME;
-    strike.timeScale = length / STRIKE_TIME;
+    const window = clipSeconds && clipSeconds > 0.2 ? clipSeconds : STRIKE_TIME;
+    strike.timeScale = length / window;
     strike.reset().fadeIn(0.05).play();
     rig.strike = strike;
-    rig.attackLeft = STRIKE_TIME;
+    rig.attackLeft = window;
     rig.strikeRelease = STRIKE_RELEASE;
   }
   if (!rig.strike) return;
@@ -650,7 +655,18 @@ export function animateGltfFighter(
   const pose = extras?.pose && extras.pose.weight > 0 ? extras.pose : null;
 
   if (rig.skeleton && rig.mixer && rig.strikes.length) {
-    animateSkeletonWithStrikes(rig, dt, phase, moving, sprinting, meleeStarted, pose, extras?.style, extras?.clipHint);
+    animateSkeletonWithStrikes(
+      rig,
+      dt,
+      phase,
+      moving,
+      sprinting,
+      meleeStarted,
+      pose,
+      extras?.style,
+      extras?.clipHint,
+      extras?.clipSeconds,
+    );
   } else if (rig.mixer) {
     if (meleeStarted && rig.actions.attack) {
       const attack = rig.actions.attack;
@@ -730,6 +746,7 @@ export function buildRyder(spec: RyderSpec, options: { clone?: boolean } = {}): 
       armHang: spec.armHang,
       sashay: spec.sashay,
       yaw: spec.modelYaw,
+      tail: spec.species === 'mermaid',
     });
     const weapons: THREE.Object3D[] = [];
     const glowMeshes: THREE.Mesh[] = [];

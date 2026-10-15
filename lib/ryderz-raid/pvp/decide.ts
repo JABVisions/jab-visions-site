@@ -50,6 +50,8 @@ export interface CombatRead {
   /** Next strike in a chain the CPU already started. */
   nextStrike?: StrikeKind | null;
   memory?: CombatRates;
+  /** Other enemies standing near the focus. Grouped packs favor area ultimates. */
+  pack?: number;
   slots: AbilityRead[];
 }
 
@@ -141,6 +143,9 @@ export function choosePvpAction(read: CombatRead, profile: AiProfile, tuning: Ai
     if (slot.band === 'defensive' && (read.foeAttacking || hurting)) score += 0.28 + profile.evasiveness * 0.35;
     if (slot.band === 'movement' && (read.dist > preferred || read.foeAttacking)) score += 0.22 + profile.evasiveness * 0.15;
     if (slot.ultimate && finisher) score += 0.3 + profile.aggression * 0.28;
+    if (slot.ultimate && (read.pack ?? 0) >= 2 && (slot.band === 'mid' || slot.band === 'close')) {
+      score += 0.42 + Math.min(0.28, ((read.pack ?? 0) - 2) * 0.08);
+    }
     if (read.dist < 2.5 && slot.band !== 'defensive' && slot.band !== 'movement') score *= 0.62;
     if (read.powerLink && fit > 0.35) score += 0.55 + profile.abilityFrequency * 0.15;
     if (slot.band === 'close' && read.dist > 8) score = 0.03;

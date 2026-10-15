@@ -42,6 +42,8 @@ export interface RaidCharacter {
   aiProfile: AiProfile;
   /** Punch, kick, melee, combos, and the power that a chain can unlock. */
   combatProfile: CombatProfile;
+  /** Body the figure was built as. Omitted entries are human. */
+  species?: 'human' | 'mermaid';
 }
 
 const FUTURE_CHARACTERS: RaidCharacter[] = [
@@ -74,16 +76,25 @@ function stub(id: string, name: string, category: CharacterCategory, solo: boole
 }
 
 const BOOMER_IDS = new Set<RyderId>(['marilyn-monroe', 'martin-luther-king']);
+const JAB_VISIONS_IDS = new Set<RyderId>(['marywantis']);
+
+function rosterHome(id: RyderId): { universe: string; category: CharacterCategory } {
+  if (BOOMER_IDS.has(id)) return { universe: 'Those Boomers', category: 'boomer' };
+  const pad = padCharacterMeta(id);
+  if (pad) return pad;
+  if (JAB_VISIONS_IDS.has(id)) return { universe: 'JAB Visions Universe', category: 'jab-visions' };
+  return { universe: 'Those Ryderz', category: 'ryder' };
+}
 
 function fromSpec(spec: RyderSpec): RaidCharacter {
   const [q, e, r] = spec.moves;
-  const boomer = BOOMER_IDS.has(spec.id);
+  const home = rosterHome(spec.id);
   return {
     id: spec.id,
     ryderId: spec.id,
     name: spec.name,
-    universe: boomer ? 'Those Boomers' : padCharacterMeta(spec.id)?.universe ?? 'Those Ryderz',
-    category: boomer ? 'boomer' : padCharacterMeta(spec.id)?.category ?? 'ryder',
+    universe: home.universe,
+    category: home.category,
     portrait: spec.icon || spec.portrait,
     modelPath: spec.glb ?? '',
     primaryColor: spec.colorHex,
@@ -98,6 +109,7 @@ function fromSpec(spec: RyderSpec): RaidCharacter {
     playable: true,
     aiProfile: aiProfileFor(spec.id),
     combatProfile: combatProfileFor(spec.id),
+    species: spec.species,
   };
 }
 

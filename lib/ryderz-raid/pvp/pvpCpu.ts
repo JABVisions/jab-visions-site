@@ -86,8 +86,12 @@ export interface PvpCpuHooks {
   raidTargets?(): KitTarget[];
   hurtRaidTarget?(target: KitTarget, damage: number, dir: THREE.Vector3, reaction?: HitReaction, strength?: number): number;
   flashRaidTarget?(target: KitTarget, color: number, seconds: number): void;
+  /** Freeze a raid enemy in place. `0` lets the hold timer run out. */
+  holdRaidTarget?(target: KitTarget, seconds: number): void;
   /** Squad mate with nobody to hit. Chase the player and do not swing at the rally point. */
   regrouping?(): boolean;
+  /** Water depth in metres. A mermaid swims once this passes chest height. */
+  waterDepth?(x: number, z: number): number;
 }
 
 interface PlayerBody extends ReactiveBody, KitTarget {
@@ -141,6 +145,7 @@ export class PvpCpu {
   private aimZ = 0;
   private aimRefresh = 0;
   private disposed = false;
+  private clipSeen = -1;
   private readonly nav: NavHint = freshNav();
 
   constructor(
@@ -287,9 +292,16 @@ export class PvpCpu {
     body.anim += dt * 6;
     if (body.fighter.meshSource === 'gltf') {
       const pose = this.striker.pose();
-      animateGltfFighter(body.fighter, dt, body.anim, moving ? 1 : 0, this.intent === 'chase', pose ? 1 - pose.p : 0, body.swing, {
+      const token = this.kit?.clipToken ?? -1;
+      const hinted = token !== this.clipSeen && Boolean(this.kit?.clipHint);
+      if (token !== this.clipSeen) this.clipSeen = token;
+      const depth = this.hooks.waterDepth?.(body.pos.x, body.pos.z) ?? 0;
+      const swimming = this.spec?.species === 'mermaid' && depth > 1.05;
+      animateGltfFighter(body.fighter, dt, body.anim, moving ? 1 : 0, this.intent === 'chase', pose ? 1 - pose.p : 0, body.swing || hinted, {
         style: pose?.style,
-        pose: this.kit?.pose ?? null,
+        pose: this.kit?.pose ?? (swimming ? { kind: 'swim', t: (time % 1.15) / 1.15, weight: 1 } : null),
+        clipHint: hinted ? this.kit?.clipHint ?? undefined : undefined,
+        clipSeconds: hinted ? this.kit?.clipSeconds : undefined,
       });
       body.swing = false;
     } else {
@@ -326,7 +338,7 @@ export class PvpCpu {
     const slots: AbilityRead[] = spec.moves.map((move, index) => ({
       band: ABILITY_BANDS[move.id],
       affordable: move.drain > 0 ? this.aura > 2 : this.aura >= move.auraCost,
-      cooling: this.rhythm[index] > 0 || this.moveCd[index] > 0,
+      cooling: Boolean(this.kit?.powersDown) || this.rhythm[index] > 0 || this.moveCd[index] > 0,
       ultimate: index === 2,
       active: this.moveOn[index],
     }));
@@ -346,6 +358,7 @@ export class PvpCpu {
         powerLink: this.striker.combo.powerReady(time),
         nextStrike: this.pending,
         memory: this.hooks.playerMemory(),
+        pack: this.packNear(foe),
         slots,
       },
       this.profile,
@@ -713,7 +726,7 @@ export class PvpCpu {
   private cast(slot: number) {
     const spec = this.spec;
     const move = spec?.moves[slot];
-    if (!spec || !move || this.burnout) return;
+    if (!spec || !move || this.burnout || this.kit?.powersDown) return;
     if (this.moveCd[slot] > 0 || this.rhythm[slot] > 0) return;
     if (this.kit?.releaseId === move.id) {
       this.kit.endAbility?.(move.id);
@@ -737,7 +750,7 @@ export class PvpCpu {
     this.aura = Math.max(0, this.aura - move.auraCost);
     if (this.aura <= 0.01) this.burnout = true;
     const owned = this.kit?.tryAbility(move.id) ?? false;
-    this.moveCd[slot] = 0.2;
+    this.moveCd[slot] = Math.max(this.moveCd[slot], 0.2);
     this.noteCast(slot);
     if (!owned) {
       this.aura = Math.min(this.maxAura, this.aura + move.auraCost);
@@ -773,6 +786,17 @@ export class PvpCpu {
     const rate = this.burnout ? spec.auraRegen * 0.5 : spec.auraRegen;
     this.aura = Math.min(this.maxAura, this.aura + rate * dt);
     if (this.burnout && this.aura >= this.maxAura * BURNOUT_RECOVERY) this.burnout = false;
+  }
+
+  private packNear(focus: { pos: THREE.Vector3 }) {
+    const raid = this.hooks.raidTargets?.();
+    if (!raid) return 0;
+    let count = 0;
+    for (const other of raid) {
+      if (other === focus || other.hp <= 0) continue;
+      if (Math.hypot(other.pos.x - focus.pos.x, other.pos.z - focus.pos.z) < 8) count += 1;
+    }
+    return count;
   }
 
   private place(pos: THREE.Vector3) {
@@ -906,6 +930,10 @@ export class PvpCpu {
       },
       vitals: () => ({ hp: cpu.body?.hp ?? 0, maxHp: cpu.body?.maxHp ?? 1 }),
       hold: (target: KitTarget, seconds: number) => {
+        if (hooks.holdRaidTarget) {
+          hooks.holdRaidTarget(target, seconds);
+          return;
+        }
         if (target !== cpu.foe || !cpu.foe) return;
         cpu.foe.held = Math.max(0, seconds);
         if (seconds > 0) {
@@ -915,7 +943,7 @@ export class PvpCpu {
         }
         hooks.stunPlayer(seconds);
       },
-      pvp: () => true,
+      pvp: () => !hooks.raidTargets,
       suppress: (factor: number) => hooks.suppressPlayer(factor),
       canHit: (target: KitTarget) => target.hp > 0 && target !== (cpu.body as unknown as KitTarget),
       blessSquad: (fraction: number) => hooks.healSquad?.(fraction),

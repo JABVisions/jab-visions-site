@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState, type RefObject } from 'react';
-import { RYDERZ, type RyderId } from '@/lib/ryderz-raid/config';
+import { RYDERZ, fighterKind, type RyderId } from '@/lib/ryderz-raid/config';
 import type { HudState } from '@/lib/ryderz-raid/engine';
 import { callSign, formatStat, rankLines, sumStats, type StatView } from '@/lib/ryderz-raid/raid/statboard';
 import { RYDER_THEME } from '../menu/theme';
@@ -88,7 +88,15 @@ export default function StatBoard({
                 <img src={spec.icon || spec.portrait} alt="" />
                 <div className={styles.who}>
                   <strong>{callSign(row.name)}</strong>
-                  <em>{row.control === 'human' ? 'Human' : 'Computer'}</em>
+                  <em>
+                    {spec.species === 'mermaid'
+                      ? row.control === 'computer'
+                        ? 'Mermaid · Computer'
+                        : fighterKind(spec)
+                      : row.control === 'human'
+                        ? 'Human'
+                        : 'Computer'}
+                  </em>
                 </div>
                 <div className={styles.stats}>
                   <div className={styles.stat}>

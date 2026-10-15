@@ -152,6 +152,8 @@ export interface HudState {
   ryderId: RyderId;
   ryderName: string;
   meleeOnly: boolean;
+  /** Marywantis's tide cut out. Powers are dead until it comes back. */
+  tideOut: boolean;
   cameraState: CameraState;
   /** HIGH / LOW / DEPLETED, as the electricity system reads it. */
   powerState: PowerState;
@@ -548,6 +550,7 @@ export class RaidEngine {
   /** Per-Ryder combat kit (null for Ryderz still on the generic moves). */
   private kit: RyderKit | null = null;
   private kitContext: KitContext | null = null;
+  private clipTokenSeen = -1;
   /** Ability ids the current kit has claimed via `tryAbility`. */
   private kitClaimed = new Set<AbilityId>();
   private scheduler = new HitScheduler();
@@ -2006,9 +2009,14 @@ export class RaidEngine {
         ? { kind: 'swim', t: (time % 1.15) / 1.15, weight: 1 }
         : null;
     if (this.player.meshSource === 'gltf') {
-      animateGltfFighter(this.player, dt, this.anim, moving, this.sprinting, this.meleeT, this.meleeStarted, {
+      const token = this.kit?.clipToken ?? -1;
+      const hinted = token !== this.clipTokenSeen && Boolean(this.kit?.clipHint);
+      if (token !== this.clipTokenSeen) this.clipTokenSeen = token;
+      animateGltfFighter(this.player, dt, this.anim, moving, this.sprinting, this.meleeT, this.meleeStarted || hinted, {
         pose: this.kit?.pose ?? swimPose ?? this.jumpPose(),
         style: this.strikeOverride ?? undefined,
+        clipHint: hinted ? this.kit?.clipHint ?? undefined : undefined,
+        clipSeconds: hinted ? this.kit?.clipSeconds : undefined,
         camera: this.camera,
       });
       this.meleeStarted = false;
@@ -2544,6 +2552,7 @@ export class RaidEngine {
     const kit = createRyderKit(this.spec.id);
     if (!kit || !this.player) return;
     this.kit = kit;
+    this.clipTokenSeen = -1;
     this.kitContext = this.makeKitContext();
     kit.attach(this.kitContext);
   }
@@ -2690,7 +2699,7 @@ export class RaidEngine {
   private tryMove(slot: number) {
     if (!this.player) return;
     const move = this.moves[slot];
-    if (!move || this.moveCd[slot] > 0) return;
+    if (!move || this.moveCd[slot] > 0 || this.kit?.powersDown) return;
     if (this.kit?.releaseId === move.id) {
       if (!this.releaseArmed[slot]) return;
       this.moveCd[slot] = 0.2;
@@ -3230,6 +3239,7 @@ export class RaidEngine {
         playerStunned: () => (foe?.stagger ?? 0) > 0.08 || (foe?.stun ?? 0) > 0,
         playerMemory: () => ({ punch: 0, kick: 0, melee: 0, ability: 0, dodge: 0, retreat: 0 }),
         heightAt: (x, z) => this.bodyHeight(x, z, true),
+        waterDepth: (x, z) => this.waterDepth(x, z),
         resolve: (body) => {
           body.x = clamp(body.x, -this.limit(), this.limit());
           body.z = clamp(body.z, -this.limit(), this.limit());
@@ -3258,6 +3268,15 @@ export class RaidEngine {
           }
         },
         raidTargets: () => this.hosts.filter((other) => !other.ally && !other.duelist && other.hp > 0),
+        holdRaidTarget: (target: KitTarget, seconds: number) => {
+          const foeHost = target as Host;
+          if (!this.hosts.includes(foeHost) || foeHost.ally || foeHost.hp <= 0) return;
+          foeHost.held = Math.max(0, seconds);
+          if (seconds > 0) {
+            foeHost.knock.set(0, 0, 0);
+            foeHost.airVel = 0;
+          }
+        },
         hurtRaidTarget: (target: KitTarget, amount: number, dir: THREE.Vector3, reaction?: HitReaction, strength = 1) => {
           const foeHost = target as Host;
           if (foeHost.ally || foeHost.hp <= 0) return 0;
@@ -4785,6 +4804,7 @@ export class RaidEngine {
         name: move.name,
         ready:
           !this.burnout &&
+          !this.kit?.powersDown &&
           (this.moveT[i] > 0 ||
             (move.drain > 0 ? this.aura > 1 : this.aura >= move.auraCost)),
         cooldown: 0,
@@ -4806,7 +4826,8 @@ export class RaidEngine {
       mapOpen: this.mapOpen,
       ryderId: this.spec.id,
       ryderName: this.spec.name,
-      meleeOnly: this.burnout,
+      meleeOnly: this.burnout || Boolean(this.kit?.powersDown),
+      tideOut: Boolean(this.kit?.powersDown),
       cameraState: this.rig.getState(),
       powerState: this.powerVfx.currentState,
       beacon: this.beacon ? this.beacon.hudState(this.clock.elapsedTime, this.pos) : null,
@@ -4984,6 +5005,7 @@ export class RaidEngine {
         playerStunned: () => this.hitStun > 0.08 || this.stasis > 0 || (this.airY > 0.25 && !this.jumping),
         playerMemory: () => this.combatMemory.rates(this.simTime),
         heightAt: (x, z) => this.bodyHeight(x, z, true),
+        waterDepth: (x, z) => this.waterDepth(x, z),
         resolve: (pos) => {
           pos.x = clamp(pos.x, -this.limit(), this.limit());
           pos.z = clamp(pos.z, -this.limit(), this.limit());

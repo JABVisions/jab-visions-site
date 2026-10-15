@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { RYDERZ, fighterKind } from '../config';
 import { GameMode } from '../game-mode';
 import {
   canConfirmFighter,
@@ -21,6 +22,8 @@ for (const name of ['Keven Hart', 'Leo Montana', 'Aaron Addams', 'Zoe Folie', 'R
 assert.deepEqual(names('boomerz'), ['Marilyn Monroe', 'Martin Luther King Jr.']);
 assert.ok(names('jab-visions').includes('Kid Paranormal'));
 assert.ok(names('jab-visions').includes('Agent Yesterday-Nyx'));
+assert.ok(names('jab-visions').includes('Marywantis'));
+assert.equal(ryderz.includes('Marywantis'), false);
 assert.equal(names('boomerz').some((name) => ryderz.includes(name)), false);
 
 const baxter = roster.find((character) => character.id === 'baxter');
@@ -31,6 +34,12 @@ assert.ok(baxter && !baxter.playable && baxter.modelPath === '');
 assert.ok(rubi && canConfirmFighter(rubi, GameMode.RAID) && rubi.modelPath.includes('rubi-wong.glb'));
 assert.ok(marilyn && marilyn.abilities.e === "Let's Be Bad" && marilyn.abilities.q === 'Showtime' && marilyn.abilities.r === 'Abracadabra');
 assert.equal(premiereCategory(marilyn), 'boomerz');
+const mary = roster.find((character) => character.id === 'marywantis');
+assert.equal(premiereCategory(mary!), 'jab-visions');
+assert.equal(mary?.universe, 'JAB Visions Universe');
+assert.equal(mary?.species, 'mermaid');
+assert.equal(fighterKind(RYDERZ.marywantis), 'Mermaid');
+assert.equal(fighterKind(RYDERZ.rubi), RYDERZ.rubi.role);
 
 const six = lineupFormation(6, 1.2);
 assert.equal(six.length, 6);

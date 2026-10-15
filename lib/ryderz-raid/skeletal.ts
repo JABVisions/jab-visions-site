@@ -449,6 +449,8 @@ export class ProceduralSkeleton {
   armHang = 0;
   /** Narrow hip-led stride. Arms stay hung instead of tucking into a guard. */
   sashay = false;
+  /** In the water the legs close into one fin. On land the stride stays human. */
+  tail = false;
 
   constructor(figure: THREE.Object3D, options?: { keep?: BoneKey[] }) {
     this.figure = figure;
@@ -925,7 +927,8 @@ export function poseSkeleton(skel: ProceduralSkeleton, motion: SkeletalMotion) {
         poseRide(SCRATCH, pose.t);
         break;
       case 'swim':
-        poseSwim(SCRATCH, pose.t);
+        if (skel.tail) poseMermaidSwim(SCRATCH, pose.t);
+        else poseSwim(SCRATCH, pose.t);
         break;
     }
     if (pose.lean) {
@@ -984,6 +987,34 @@ export function poseSkeleton(skel: ProceduralSkeleton, motion: SkeletalMotion) {
   }
 
   skel.apply();
+}
+
+/** Prone dolphin kick. The human stance is pinched shut, then both legs kick as one fin. */
+function poseMermaidSwim(A: Angles, t: number) {
+  const stroke = Math.sin(t * Math.PI * 2);
+  const curl = Math.cos(t * Math.PI * 2);
+  A.hips.x += 1.15;
+  A.spine.x += 0.5;
+  A.chest.x += 0.12;
+  A.head.x -= 0.35;
+  A.upperArmL.x -= 0.85 + stroke * 0.4;
+  A.upperArmR.x -= 0.85 + stroke * 0.4;
+  A.upperArmL.z += 0.2;
+  A.upperArmR.z -= 0.2;
+  A.lowerArmL.x -= 0.4 + Math.max(0, stroke) * 0.35;
+  A.lowerArmR.x -= 0.4 + Math.max(0, stroke) * 0.35;
+  const kick = 0.5 * stroke;
+  const bend = 0.7 + Math.max(0, curl) * 0.45;
+  A.upperLegL.x += kick;
+  A.upperLegR.x += kick;
+  A.lowerLegL.x += bend;
+  A.lowerLegR.x += bend;
+  A.footL.x -= 0.25;
+  A.footR.x -= 0.25;
+  // Inward yaw undoes the standing split so the fins meet.
+  A.upperLegL.z -= 0.28;
+  A.upperLegR.z += 0.28;
+  A.hips.y += 0.14 * stroke;
 }
 
 type Angles = Record<BoneKey, PoseAngles>;

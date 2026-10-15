@@ -13,7 +13,8 @@ export type RyderId =
   | 'kid-paranormal'
   | 'agent-nyx'
   | 'marilyn-monroe'
-  | 'martin-luther-king';
+  | 'martin-luther-king'
+  | 'marywantis';
 
 export type AbilityId =
   | 'bladeFan'
@@ -45,7 +46,10 @@ export type AbilityId =
   | 'abracadabra'
   | 'dreamVision'
   | 'proclaimPeace'
-  | 'freeAtLast';
+  | 'freeAtLast'
+  | 'callMercy'
+  | 'finKick'
+  | 'wavePool';
 
 export type MoveKey = 'Q' | 'E' | 'R';
 
@@ -141,6 +145,23 @@ export interface RyderSpec {
    * corkscrew geodesic skinning. Animation still layers on top of the bind.
    */
   skelKeep?: BoneKey[];
+  /**
+   * Body the figure was built as. Omitted fighters are human. A mermaid is
+   * named a mermaid, walks on land, and swims with one tail in the water.
+   */
+  species?: FighterSpecies;
+}
+
+export type FighterSpecies = 'human' | 'mermaid';
+
+/** Class shown on select and pause. Mermaids are not filed as human Ryders. */
+export function fighterKind(spec: { species?: FighterSpecies; role: string }): string {
+  return spec.species === 'mermaid' ? 'Mermaid' : spec.role;
+}
+
+/** Pause watermark. A mermaid is not stamped with a Ryder name. */
+export function fighterMark(spec: { species?: FighterSpecies }, themeLabel: string): string {
+  return spec.species === 'mermaid' ? 'Mermaid' : `${themeLabel} Ryder`;
 }
 
 export const ARENA_HALF = 30;
@@ -935,6 +956,71 @@ export const RYDERZ: Record<RyderId, RyderSpec> = {
       },
     ],
   },
+  marywantis: {
+    id: 'marywantis',
+    name: 'Marywantis',
+    title: 'Tidecaller',
+    flaw: 'Tempestuous',
+    role: 'Controller',
+    color: 0x00c4cc,
+    colorHex: '#00e5ff',
+    accent: 0x0a84ff,
+    visual: {
+      primaryColor: 0x00c4cc,
+      auraColor: 0x00e5ff,
+      electricityColor: 0x9af6ff,
+      depletedAuraIntensity: 0.12,
+      poweredAuraIntensity: 1.7,
+      auraStyle: 'sparkle',
+    },
+    weapon: 'Living Water',
+    portrait: '/assets/those-ryderz/icons/marywantis.webp?v=2',
+    icon: '/assets/those-ryderz/icons/marywantis.webp?v=2',
+    glb: '/assets/those-ryderz/models/marywantis.glb?v=1',
+    species: 'mermaid',
+    strikes: ['spinKick', 'kick', 'blast', 'slap'],
+    maxHp: 110,
+    speed: 7.2,
+    fireRate: 3.2,
+    damage: 11,
+    projectileSpeed: 28,
+    projectileCount: 1,
+    spread: 0.04,
+    shotCost: 2.4,
+    maxAura: 115,
+    auraRegen: 5.6,
+    meleeDamage: 20,
+    meleeRate: 2.1,
+    moves: [
+      {
+        id: 'callMercy',
+        name: 'Call Mercy',
+        key: 'Q',
+        description:
+          'Summons Mercy, a water guardian, for 12 seconds. She imprisons up to three enemies. The prisons drown them over time, then burst. Bosses are shoved, not caged. No cooldown. The tide cuts out at random.',
+        auraCost: 22,
+        drain: 0,
+      },
+      {
+        id: 'finKick',
+        name: 'Fin Kick',
+        key: 'E',
+        description:
+          'A steerable cartwheel of four watery hits, then a crescent kick that knocks back. Steer with movement. No cooldown. The tide cuts out at random.',
+        auraCost: 14,
+        drain: 0,
+      },
+      {
+        id: 'wavePool',
+        name: 'Wave Pool',
+        key: 'R',
+        description:
+          'A whirlpool for 7 seconds. It pulls, lifts, and spins enemies caught inside, then bursts outward. Bosses stay on the ground. Nobody is thrown through walls or out of the arena. No cooldown. The tide cuts out at random.',
+        auraCost: 34,
+        drain: 0,
+      },
+    ],
+  },
 };
 
 export const RYDER_ORDER: RyderId[] = [
@@ -948,6 +1034,7 @@ export const RYDER_ORDER: RyderId[] = [
   'agent-nyx',
   'marilyn-monroe',
   'martin-luther-king',
+  'marywantis',
 ];
 
 export type EnemyKind = 'walker' | 'sprinter' | 'heavy' | 'thrower' | 'adept' | 'broadcaster';

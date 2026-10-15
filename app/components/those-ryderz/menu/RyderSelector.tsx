@@ -2,7 +2,7 @@
 
 import Image from 'next/image';
 import { useEffect, useState } from 'react';
-import { RYDERZ, RYDER_ORDER, type RyderId } from '@/lib/ryderz-raid/config';
+import { RYDERZ, RYDER_ORDER, fighterKind, fighterMark, type RyderId } from '@/lib/ryderz-raid/config';
 import type { RyderManager } from '@/lib/ryderz-raid/ryder-manager';
 import { RYDER_THEME } from './theme';
 import { useMenuKeys, wrap } from './useMenuKeys';
@@ -109,7 +109,7 @@ export default function RyderSelector({
                 <div className={styles.ryderPortrait}>
                   <Image src={ryder.icon} alt="" fill unoptimized sizes="200px" />
                 </div>
-                <small>{theme.label} Ryder</small>
+                <small>{fighterMark(ryder, theme.label)}</small>
                 <strong>{ryder.name}</strong>
                 {id === activeRyder && <span className={styles.tag}>In play</span>}
               </button>
@@ -126,7 +126,7 @@ export default function RyderSelector({
             <>
               <div className={styles.summaryRow}>
                 <span>
-                  {ryder.role} · {ryder.title}
+                  {fighterKind(ryder)} · {ryder.title}
                 </span>
                 <strong>{ryder.flaw}</strong>
               </div>
