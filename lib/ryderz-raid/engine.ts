@@ -3237,6 +3237,7 @@ export class RaidEngine {
         playerStunned: () => (foe?.stagger ?? 0) > 0.08 || (foe?.stun ?? 0) > 0,
         playerMemory: () => ({ punch: 0, kick: 0, melee: 0, ability: 0, dodge: 0, retreat: 0 }),
         heightAt: (x, z) => this.bodyHeight(x, z, true),
+        waterDepth: (x, z) => this.waterDepth(x, z),
         resolve: (body) => {
           body.x = clamp(body.x, -this.limit(), this.limit());
           body.z = clamp(body.z, -this.limit(), this.limit());
@@ -5000,6 +5001,7 @@ export class RaidEngine {
         playerStunned: () => this.hitStun > 0.08 || this.stasis > 0 || (this.airY > 0.25 && !this.jumping),
         playerMemory: () => this.combatMemory.rates(this.simTime),
         heightAt: (x, z) => this.bodyHeight(x, z, true),
+        waterDepth: (x, z) => this.waterDepth(x, z),
         resolve: (pos) => {
           pos.x = clamp(pos.x, -this.limit(), this.limit());
           pos.z = clamp(pos.z, -this.limit(), this.limit());

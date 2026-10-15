@@ -261,33 +261,29 @@ const leftThigh = limb('Left_UpperLeg', hips, 0.08, -0.04, 0);
 const rightThigh = limb('Right_UpperLeg', hips, -0.08, -0.04, 0);
 limb('Left_LowerLeg', leftThigh, 0, -0.4, 0);
 limb('Right_LowerLeg', rightThigh, 0, -0.4, 0);
-const tail = new ProceduralSkeleton(figure, { keep: spec.skelKeep });
+const tail = new ProceduralSkeleton(figure);
 tail.tail = true;
-for (const phase of [0.4, 1.2, 2.1, 3.4]) {
-  poseSkeleton(tail, { phase, moving: 1, sprinting: false, meleeT: 0 });
-  const left = tail.angles.upperLegL;
-  const right = tail.angles.upperLegR;
-  assert.ok(Math.abs(left.x - right.x) < 0.001, `tail pitch stays closed at ${phase}`);
-  assert.ok(Math.abs(left.z - right.z) < 0.001, `tail yaw stays closed at ${phase}`);
-}
 poseSkeleton(tail, { phase: 1.2, moving: 1, sprinting: true, meleeT: 0 });
-assert.ok(Math.abs(tail.angles.upperLegL.x) > 0.05, 'the fin still flicks while she moves');
+assert.ok(tail.angles.upperLegL.x * tail.angles.upperLegR.x < 0, 'on land the legs stride opposite');
 poseSkeleton(tail, {
-  phase: 0.2,
+  phase: 1.2,
   moving: 1,
-  sprinting: false,
+  sprinting: true,
   meleeT: 0,
-  pose: { kind: 'ride', t: 0.4, weight: 1 },
+  pose: { kind: 'swim', t: 0.25, weight: 1 },
 });
-assert.ok(Math.abs(tail.angles.upperLegL.z - tail.angles.upperLegR.z) < 0.001, 'surfing does not open the fin');
-poseSkeleton(tail, {
+assert.ok(Math.abs(tail.angles.upperLegL.x - tail.angles.upperLegR.x) < 0.001, 'in the water both legs kick together');
+assert.ok(tail.angles.upperLegL.z * tail.angles.upperLegR.z < 0, 'the standing split pinches shut');
+assert.ok(tail.angles.hips.x > 0.6, 'she pitches forward to swim');
+const walker = new ProceduralSkeleton(figure.clone(true));
+poseSkeleton(walker, {
   phase: 0,
   moving: 0,
   sprinting: false,
-  meleeT: 0.4,
-  meleeStyle: 'spinKick',
+  meleeT: 0,
+  pose: { kind: 'swim', t: 0.25, weight: 1 },
 });
-assert.ok(Math.abs(tail.angles.upperLegL.x - tail.angles.upperLegR.x) < 0.001, 'a kick does not split the tail');
+assert.ok(Math.abs(walker.angles.upperLegL.x - walker.angles.upperLegR.x) > 0.2, 'other fighters still flutter-kick');
 
 function strippedGlb(path: string) {
   const file = readFileSync(path);
@@ -337,30 +333,34 @@ async function tailOnTheModel() {
   const gltf = await new Promise<{ scene: THREE.Group }>((resolve, reject) => {
     new GLTFLoader().parse(file.buffer.slice(file.byteOffset, file.byteOffset + file.byteLength), '', resolve, reject);
   });
-  const mermaid = new ProceduralSkeleton(gltf.scene, { keep: spec.skelKeep });
+  const mermaid = new ProceduralSkeleton(gltf.scene);
   assert.equal(mermaid.isUsable, true);
   mermaid.tail = true;
   poseSkeleton(mermaid, { phase: 0, moving: 0, sprinting: false, meleeT: 0 });
   gltf.scene.updateMatrixWorld(true);
-  const rest = footGap(mermaid);
-  let widest = rest;
+  const standing = footGap(mermaid);
+  let widest = standing;
   for (const phase of [0.3, 0.8, 1.4, 2.2, 3.1, 4.4]) {
     poseSkeleton(mermaid, { phase, moving: 1, sprinting: true, meleeT: 0 });
     gltf.scene.updateMatrixWorld(true);
     widest = Math.max(widest, footGap(mermaid));
   }
-  assert.ok(widest < rest * 1.35, `mermaid walk keeps the fin together (rest ${rest.toFixed(3)}, walk ${widest.toFixed(3)})`);
+  assert.ok(widest > standing + 0.04, `on land her stride opens the feet (stand ${standing.toFixed(3)}, walk ${widest.toFixed(3)})`);
 
-  const human = gltf.scene.clone(true);
-  const stride = new ProceduralSkeleton(human);
-  stride.tail = false;
-  let split = 0;
-  for (const phase of [0.3, 0.8, 1.4, 2.2]) {
-    poseSkeleton(stride, { phase, moving: 1, sprinting: true, meleeT: 0 });
-    human.updateMatrixWorld(true);
-    split = Math.max(split, footGap(stride));
+  let swimGap = Infinity;
+  for (const t of [0.1, 0.25, 0.55, 0.8]) {
+    poseSkeleton(mermaid, {
+      phase: 0,
+      moving: 1,
+      sprinting: false,
+      meleeT: 0,
+      pose: { kind: 'swim', t, weight: 1 },
+    });
+    gltf.scene.updateMatrixWorld(true);
+    swimGap = Math.min(swimGap, footGap(mermaid));
+    assert.ok(mermaid.angles.hips.x > 0.6, 'the swim pitches her forward');
   }
-  assert.ok(split > widest * 1.4, `a human stride opens the feet (human ${split.toFixed(3)}, mermaid ${widest.toFixed(3)})`);
+  assert.ok(swimGap < standing * 0.75, `in the water the fin closes past a standing stance (swim ${swimGap.toFixed(3)}, stand ${standing.toFixed(3)})`);
 }
 
 tailOnTheModel()

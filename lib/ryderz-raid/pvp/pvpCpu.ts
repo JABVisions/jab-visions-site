@@ -90,6 +90,8 @@ export interface PvpCpuHooks {
   holdRaidTarget?(target: KitTarget, seconds: number): void;
   /** Squad mate with nobody to hit. Chase the player and do not swing at the rally point. */
   regrouping?(): boolean;
+  /** Water depth in metres. A mermaid swims once this passes chest height. */
+  waterDepth?(x: number, z: number): number;
 }
 
 interface PlayerBody extends ReactiveBody, KitTarget {
@@ -293,9 +295,11 @@ export class PvpCpu {
       const token = this.kit?.clipToken ?? -1;
       const hinted = token !== this.clipSeen && Boolean(this.kit?.clipHint);
       if (token !== this.clipSeen) this.clipSeen = token;
+      const depth = this.hooks.waterDepth?.(body.pos.x, body.pos.z) ?? 0;
+      const swimming = this.spec?.species === 'mermaid' && depth > 1.05;
       animateGltfFighter(body.fighter, dt, body.anim, moving ? 1 : 0, this.intent === 'chase', pose ? 1 - pose.p : 0, body.swing || hinted, {
         style: pose?.style,
-        pose: this.kit?.pose ?? null,
+        pose: this.kit?.pose ?? (swimming ? { kind: 'swim', t: (time % 1.15) / 1.15, weight: 1 } : null),
         clipHint: hinted ? this.kit?.clipHint ?? undefined : undefined,
         clipSeconds: hinted ? this.kit?.clipSeconds : undefined,
       });

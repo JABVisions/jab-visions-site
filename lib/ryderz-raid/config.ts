@@ -146,8 +146,8 @@ export interface RyderSpec {
    */
   skelKeep?: BoneKey[];
   /**
-   * Body the figure was built as. Omitted fighters are human. A mermaid keeps
-   * one tail instead of a two-leg stride, and select copy names her a mermaid.
+   * Body the figure was built as. Omitted fighters are human. A mermaid is
+   * named a mermaid, walks on land, and swims with one tail in the water.
    */
   species?: FighterSpecies;
 }
@@ -979,7 +979,6 @@ export const RYDERZ: Record<RyderId, RyderSpec> = {
     glb: '/assets/those-ryderz/models/marywantis.glb?v=1',
     species: 'mermaid',
     strikes: ['spinKick', 'kick', 'blast', 'slap'],
-    skelKeep: ['upperLegL', 'upperLegR', 'lowerLegL', 'lowerLegR', 'footL', 'footR', 'toesL', 'toesR'],
     maxHp: 110,
     speed: 7.2,
     fireRate: 3.2,

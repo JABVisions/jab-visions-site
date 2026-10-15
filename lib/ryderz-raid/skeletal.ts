@@ -449,7 +449,7 @@ export class ProceduralSkeleton {
   armHang = 0;
   /** Narrow hip-led stride. Arms stay hung instead of tucking into a guard. */
   sashay = false;
-  /** One fin. Both legs pitch and yaw together so a tail cannot split into a stride. */
+  /** In the water the legs close into one fin. On land the stride stays human. */
   tail = false;
 
   constructor(figure: THREE.Object3D, options?: { keep?: BoneKey[] }) {
@@ -794,17 +794,9 @@ export function poseSkeleton(skel: ProceduralSkeleton, motion: SkeletalMotion) {
     A.upperArmR.x -= 0.18;
   }
   A.hips.z += Math.sin(breath * 0.5) * (skel.sashay ? 0.05 : 0.015) * still;
-  if (skel.tail) {
-    const sway = Math.sin(breath * 0.65) * 0.05 * still;
-    A.upperLegL.z += sway;
-    A.upperLegR.z += sway;
-    A.hips.y += sway * 0.5;
-  }
 
   // --- Locomotion ------------------------------------------------------------
-  if (moving > 0.01 && skel.tail) {
-    poseTail(A, phase, moving, sprinting);
-  } else if (moving > 0.01) {
+  if (moving > 0.01) {
     const sL = Math.sin(phase);
     const cL = Math.cos(phase);
     const sashay = skel.sashay;
@@ -935,7 +927,8 @@ export function poseSkeleton(skel: ProceduralSkeleton, motion: SkeletalMotion) {
         poseRide(SCRATCH, pose.t);
         break;
       case 'swim':
-        poseSwim(SCRATCH, pose.t);
+        if (skel.tail) poseMermaidSwim(SCRATCH, pose.t);
+        else poseSwim(SCRATCH, pose.t);
         break;
     }
     if (pose.lean) {
@@ -993,49 +986,35 @@ export function poseSkeleton(skel: ProceduralSkeleton, motion: SkeletalMotion) {
     }
   }
 
-  if (skel.tail) sealTail(A);
   skel.apply();
 }
 
-/** Shared tail flick. Both legs take the same pitch and yaw. */
-function poseTail(A: Angles, phase: number, moving: number, sprinting: boolean) {
-  const flick = Math.sin(phase);
-  const curl = Math.cos(phase);
-  const pitch = (sprinting ? 0.34 : 0.22) * flick * moving;
-  const bend = (sprinting ? 0.28 : 0.16) * Math.max(0, curl) * moving;
-  const yaw = (sprinting ? 0.2 : 0.12) * Math.sin(phase * 0.5) * moving;
-  A.upperLegL.x += pitch;
-  A.upperLegR.x += pitch;
+/** Prone dolphin kick. The human stance is pinched shut, then both legs kick as one fin. */
+function poseMermaidSwim(A: Angles, t: number) {
+  const stroke = Math.sin(t * Math.PI * 2);
+  const curl = Math.cos(t * Math.PI * 2);
+  A.hips.x += 1.15;
+  A.spine.x += 0.5;
+  A.chest.x += 0.12;
+  A.head.x -= 0.35;
+  A.upperArmL.x -= 0.85 + stroke * 0.4;
+  A.upperArmR.x -= 0.85 + stroke * 0.4;
+  A.upperArmL.z += 0.2;
+  A.upperArmR.z -= 0.2;
+  A.lowerArmL.x -= 0.4 + Math.max(0, stroke) * 0.35;
+  A.lowerArmR.x -= 0.4 + Math.max(0, stroke) * 0.35;
+  const kick = 0.5 * stroke;
+  const bend = 0.7 + Math.max(0, curl) * 0.45;
+  A.upperLegL.x += kick;
+  A.upperLegR.x += kick;
   A.lowerLegL.x += bend;
   A.lowerLegR.x += bend;
-  A.upperLegL.z += yaw;
-  A.upperLegR.z += yaw;
-  A.hips.y += yaw * 0.85;
-  A.hips.z += flick * 0.04 * moving;
-  A.spine.x += (sprinting ? 0.1 : 0.05) * moving;
-  A.spine.y += flick * 0.06 * moving;
-  const sweep = (sprinting ? 0.38 : 0.22) * flick * moving;
-  A.upperArmL.x += sweep;
-  A.upperArmR.x -= sweep * 0.35;
-  A.upperArmL.z += 0.06 * moving;
-  A.upperArmR.z -= 0.06 * moving;
-  A.head.x -= 0.05 * moving;
-  A.head.y -= flick * 0.04 * moving;
-}
-
-/** Drop any left/right split so a fin stays one shape through kicks and stances. */
-function sealTail(A: Angles) {
-  const pair = (left: BoneKey, right: BoneKey) => {
-    const L = A[left];
-    const R = A[right];
-    L.x = R.x = (L.x + R.x) * 0.5;
-    L.y = R.y = (L.y + R.y) * 0.5;
-    L.z = R.z = (L.z + R.z) * 0.5;
-  };
-  pair('upperLegL', 'upperLegR');
-  pair('lowerLegL', 'lowerLegR');
-  pair('footL', 'footR');
-  pair('toesL', 'toesR');
+  A.footL.x -= 0.25;
+  A.footR.x -= 0.25;
+  // Inward yaw undoes the standing split so the fins meet.
+  A.upperLegL.z -= 0.28;
+  A.upperLegR.z += 0.28;
+  A.hips.y += 0.14 * stroke;
 }
 
 type Angles = Record<BoneKey, PoseAngles>;
