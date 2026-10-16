@@ -282,12 +282,14 @@ export default function DropsBucket({
   // TEMP: for testability until auth/users are wired
   selfUser = "me",
   statsOverride,
+  accountBrain,
   isActive = true,
 }: {
   title?: string;
   subtitle?: string;
   selfUser?: string;
   statsOverride?: BucketStatsOverride;
+  accountBrain?: BucketBrainState | null;
   isActive?: boolean;
 }) {
   const [brain, setBrain] = useState<BucketBrainState>(EMPTY_BRAIN);
@@ -351,8 +353,18 @@ export default function DropsBucket({
   // Keep brain synced (local demo). We can remove once backend real-time exists.
   useEffect(() => {
     if (!isActive) return;
+    let cancelled = false;
+    void import("@/lib/board/bucketBrainSync").then(async (mod) => {
+      const adopted = mod.adoptLegacyBucketIntoBrain();
+      if (!cancelled) setBrain(adopted);
+      const synced = await mod.syncBucketBrain();
+      if (!cancelled && synced) setBrain(synced);
+    });
     const t = window.setInterval(() => setBrain(readBrain()), 1200);
-    return () => window.clearInterval(t);
+    return () => {
+      cancelled = true;
+      window.clearInterval(t);
+    };
   }, [isActive]);
 
   useEffect(() => {
@@ -382,8 +394,9 @@ export default function DropsBucket({
     );
     const map = new Map<string, BoardActivity>();
     for (const it of items) if (it?.id) map.set(String(it.id), it);
+    const sourceBrain = accountBrain === undefined ? brain : accountBrain ?? EMPTY_BRAIN;
     for (const folder of FOLDERS) {
-      const bucketItems = (brain as any)[folder.key] as BucketEntry[] | undefined;
+      const bucketItems = (sourceBrain as any)[folder.key] as BucketEntry[] | undefined;
       if (!Array.isArray(bucketItems)) continue;
       for (const entry of bucketItems) {
         const memoryActivity = memoryDropToActivity(entry);
@@ -393,10 +406,12 @@ export default function DropsBucket({
       }
     }
     return map;
-  }, [brain.updatedAt, open]);
+  }, [accountBrain, brain, open]);
+
+  const displayBrain = accountBrain === undefined ? brain : accountBrain ?? EMPTY_BRAIN;
 
   const counts = useMemo(() => {
-    if (statsOverride) {
+    if (accountBrain === undefined && statsOverride) {
       return {
         pass: statsOverride.pass,
         pin: statsOverride.pin,
@@ -404,14 +419,14 @@ export default function DropsBucket({
       };
     }
     return {
-      pass: brain.pass.filter((entry) => !isBucketCommentMemory(entry)).length,
-      pin: brain.pin.filter((entry) => !isBucketCommentMemory(entry)).length,
-      push: brain.push.filter((entry) => !isBucketCommentMemory(entry)).length,
+      pass: displayBrain.pass.filter((entry) => !isBucketCommentMemory(entry)).length,
+      pin: displayBrain.pin.filter((entry) => !isBucketCommentMemory(entry)).length,
+      push: displayBrain.push.filter((entry) => !isBucketCommentMemory(entry)).length,
     };
-  }, [brain, statsOverride]);
+  }, [accountBrain, displayBrain, statsOverride]);
 
   const list = useMemo(() => {
-    const raw = ((brain as any)[active] as BucketEntry[] | undefined) ?? [];
+    const raw = ((displayBrain as any)[active] as BucketEntry[] | undefined) ?? [];
     return [...raw]
       .filter((entry) => !isBucketCommentMemory(entry))
       .map((entry) => ({
@@ -426,19 +441,27 @@ export default function DropsBucket({
         if (bWave !== aWave) return bWave - aWave;
         return (b.savedAt ?? 0) - (a.savedAt ?? 0);
       });
-  }, [active, brain]);
+  }, [active, displayBrain]);
 
   // Waves
   const my = String(selfUser || "me").trim().toLowerCase();
-  const inbound = useMemo(() => brain.waves.filter((w) => w.to === my), [brain.waves, my]);
-  const outbound = useMemo(() => brain.waves.filter((w) => w.from === my), [brain.waves, my]);
+  const inbound = useMemo(
+    () => displayBrain.waves.filter((w) => w.to === my),
+    [displayBrain.waves, my]
+  );
+  const outbound = useMemo(
+    () => displayBrain.waves.filter((w) => w.from === my),
+    [displayBrain.waves, my]
+  );
 
   const mutualsForMe = useMemo(() => {
-    return brain.mutuals.filter((m) => m.a === my || m.b === my);
-  }, [brain.mutuals, my]);
+    return displayBrain.mutuals.filter((m) => m.a === my || m.b === my);
+  }, [displayBrain.mutuals, my]);
 
-  const waveCount = statsOverride?.waves ?? inbound.length;
-  const mutualCount = statsOverride?.mutuals ?? mutualsForMe.length;
+  const waveCount =
+    accountBrain === undefined && statsOverride ? statsOverride.waves : inbound.length;
+  const mutualCount =
+    accountBrain === undefined && statsOverride ? statsOverride.mutuals : mutualsForMe.length;
 
   function handleBucketWave(entry: BucketEntry, item: BoardActivity | null) {
     const result = waveBucketDrop(active, entry.activityId, my || "me");

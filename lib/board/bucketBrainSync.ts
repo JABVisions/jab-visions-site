@@ -221,27 +221,99 @@ function sameBrain(left: BucketBrainState, right: BucketBrainState) {
   return JSON.stringify(compactBucketBrain(left)) === JSON.stringify(compactBucketBrain(right));
 }
 
+function entryCount(state: BucketBrainState) {
+  const compact = compactBucketBrain(state);
+  return (
+    compact.pass.length +
+    compact.pin.length +
+    compact.push.length +
+    compact.waves.length +
+    compact.mutuals.length
+  );
+}
+
+export function shouldPushBucketBrain(
+  local: BucketBrainState,
+  remote: BucketBrainState,
+  merged: BucketBrainState
+) {
+  if (sameBrain(remote, merged)) return false;
+  const localCount = entryCount(local);
+  const remoteCount = entryCount(remote);
+  if (localCount === 0 && remoteCount === 0) return false;
+  if (localCount === 0 && remoteCount > 0) return false;
+  return true;
+}
+
+const LEGACY_BUCKET_KEY = "jab_board_bucket_v1";
+
+export function adoptLegacyBucketIntoBrain() {
+  if (typeof window === "undefined") return readBrain();
+  try {
+    const raw = window.localStorage.getItem(LEGACY_BUCKET_KEY);
+    if (!raw) return readBrain();
+    const parsed = JSON.parse(raw) as Partial<BucketBrainState>;
+    const legacy = parseBucketBrain({
+      pass: parsed.pass,
+      pin: parsed.pin,
+      push: parsed.push,
+      updatedAt: parsed.updatedAt,
+    });
+    const local = readBrain();
+    const merged = mergeBucketBrains(local, legacy);
+    if (!sameBrain(local, merged)) writeBrain(merged, { sync: false });
+    return merged;
+  } catch {
+    return readBrain();
+  }
+}
+
 let syncing = false;
 let pending = false;
+let listenersReady = false;
 
-export async function syncBucketBrain() {
-  if (typeof window === "undefined") return;
+function installBucketSyncListeners() {
+  if (listenersReady || typeof window === "undefined") return;
+  listenersReady = true;
+  window.addEventListener("focus", () => {
+    void syncBucketBrain();
+  });
+  window.setInterval(() => {
+    void syncBucketBrain();
+  }, 15000);
+  try {
+    const sb = supabaseBrowser();
+    sb.auth.onAuthStateChange((event, session) => {
+      if (!session?.user) return;
+      if (event === "SIGNED_IN" || event === "INITIAL_SESSION" || event === "TOKEN_REFRESHED") {
+        void syncBucketBrain();
+      }
+    });
+  } catch {
+    // Focus and the interval retry once the session is readable.
+  }
+}
+
+export async function syncBucketBrain(): Promise<BucketBrainState | null> {
+  if (typeof window === "undefined") return null;
+  installBucketSyncListeners();
   if (syncing) {
     pending = true;
-    return;
+    return null;
   }
   syncing = true;
   try {
+    const adopted = adoptLegacyBucketIntoBrain();
     const sb = supabaseBrowser();
     const { data: auth } = await sb.auth.getUser();
-    if (!auth?.user) return;
+    if (!auth?.user) return adopted;
 
     const { data: profile, error } = await sb
       .from("profiles")
       .select("board_style")
       .eq("id", auth.user.id)
       .maybeSingle();
-    if (error || !profile) return;
+    if (error || !profile) return adopted;
 
     const boardStyle =
       profile.board_style && typeof profile.board_style === "object" ? profile.board_style : {};
@@ -250,7 +322,7 @@ export async function syncBucketBrain() {
     const merged = mergeBucketBrains(local, remote);
 
     if (!sameBrain(local, merged)) writeBrain(merged, { sync: false });
-    if (sameBrain(remote, merged)) return;
+    if (!shouldPushBucketBrain(local, remote, merged)) return merged;
 
     await sb
       .from("profiles")
@@ -269,8 +341,10 @@ export async function syncBucketBrain() {
         },
       })
       .eq("id", auth.user.id);
+    return merged;
   } catch {
     // This device keeps its bucket if the account copy cannot be reached.
+    return readBrain();
   } finally {
     syncing = false;
     if (pending) {

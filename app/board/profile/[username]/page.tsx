@@ -15,7 +15,8 @@ import { boardDropToActivity } from "@/lib/board/boardDropActivity";
 import { dedupeActivity, mergeActivityWithFeed } from "@/lib/board/feedActivity";
 import { EVENTS, readFeed } from "@/lib/boardStore";
 import { readPayDrops, type PayDrop } from "@/lib/board/paydrops";
-import { EVT_UPDATED, readBrain } from "@/lib/board/bucketBrain";
+import { EVT_UPDATED, readBrain, type BucketBrainState } from "@/lib/board/bucketBrain";
+import { parseBucketBrain } from "@/lib/board/bucketBrainSync";
 import { persistWave } from "@/lib/board/persistWave";
 import { resolveLinkPreviewImage } from "@/lib/board/linkPreviewImages";
 import {
@@ -498,7 +499,7 @@ export default function ProfileBoardViewPage({
   const [boardDropsLoading, setBoardDropsLoading] = useState(true);
   const [signedUrlByKey, setSignedUrlByKey] = useState<Record<string, string>>({});
   const [orbitState, setOrbitState] = useState<"idle" | "requested" | "connected">("idle");
-  const [bucketStats, setBucketStats] = useState<BucketStats | null>(null);
+  const [accountBrain, setAccountBrain] = useState<BucketBrainState | null>(null);
   const [remoteUserId, setRemoteUserId] = useState<string | null>(null);
   const [selfUser, setSelfUser] = useState("");
   const [waveNotice, setWaveNotice] = useState<string | null>(null);
@@ -597,7 +598,7 @@ export default function ProfileBoardViewPage({
     const base = STATIC_PROFILES[routeKey] ?? fallbackFromOrb;
     setProfile(base);
     setAuraIntensity(70);
-    setBucketStats(null);
+    setAccountBrain(null);
     setRemoteUserId(null);
   }, [routeKey, fallbackFromOrb]);
 
@@ -739,24 +740,9 @@ export default function ProfileBoardViewPage({
           profileRow?.board_style && typeof profileRow.board_style === "object"
             ? profileRow.board_style
             : {};
-        const rawStats = (boardStyle as any).bucketStats;
-
-        if (!rawStats || typeof rawStats !== "object") {
-          setBucketStats(null);
-          return;
-        }
-
-        setBucketStats({
-          pass: Number(rawStats.pass ?? 0),
-          pin: Number(rawStats.pin ?? 0),
-          push: Number(rawStats.push ?? 0),
-          waves: Number(rawStats.waves ?? 0),
-          mutuals: Number(rawStats.mutuals ?? 0),
-          updatedAt:
-            typeof rawStats.updatedAt === "number" ? rawStats.updatedAt : undefined,
-        });
+        setAccountBrain(parseBucketBrain((boardStyle as { bucketBrain?: unknown }).bucketBrain));
       } catch {
-        setBucketStats(null);
+        setAccountBrain(parseBucketBrain(null));
       }
     }
 
@@ -1821,7 +1807,7 @@ export default function ProfileBoardViewPage({
                     title={`${profile.displayName}'s Drops Bucket`}
                     subtitle="Pass, pin, and push the drops you want to carry forward from this board."
                     selfUser={routeKey}
-                    statsOverride={bucketStats ?? undefined}
+                    accountBrain={accountBrain}
                   />
                 </div>
               </section>

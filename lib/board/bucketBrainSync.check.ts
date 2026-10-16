@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mergeBucketBrains, type BucketBrainState } from "./bucketBrainSync";
+import { mergeBucketBrains, shouldPushBucketBrain, type BucketBrainState } from "./bucketBrainSync";
 import type { BucketBrainState as Brain } from "./bucketBrain";
 
 function brain(partial: Partial<Brain>): BucketBrainState {
@@ -40,5 +40,10 @@ assert.equal(merged.pin.find((entry) => entry.activityId === "drop-c")?.item?.ti
 const again = mergeBucketBrains(merged, ipad);
 assert.equal(again.pin.length, 2);
 assert.equal(again.pass.length, 1);
+
+const empty = brain({ updatedAt: 0 });
+assert.equal(shouldPushBucketBrain(empty, empty, empty), false);
+assert.equal(shouldPushBucketBrain(empty, phone, phone), false);
+assert.equal(shouldPushBucketBrain(phone, empty, phone), true);
 
 console.log("bucket brain sync checks passed");
