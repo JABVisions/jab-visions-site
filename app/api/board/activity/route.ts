@@ -327,6 +327,11 @@ export async function GET(req: Request) {
   const url = new URL(req.url);
   const limit = Math.max(1, Math.min(200, Number(url.searchParams.get("limit") || 80)));
   const offset = Math.max(0, Number(url.searchParams.get("offset") || 0));
+  // Profile drops are mixed in after the query, so paging the activity table
+  // alone and then keeping only the first page of the mix repeats the newest
+  // posts and drops everything behind them. Pull a window from the start and
+  // slice the merged list.
+  const pageEnd = Math.min(400, Math.max(offset + limit, limit));
   const kinds = url.searchParams
     .getAll("kind")
     .map((kind) => cleanKind(kind))
@@ -337,7 +342,7 @@ export async function GET(req: Request) {
     .from("board_activity")
     .select("*")
     .order("created_at", { ascending: false })
-    .range(offset, offset + limit - 1);
+    .range(0, pageEnd - 1);
 
   if (roomId) {
     activityQuery = supabase
@@ -345,7 +350,7 @@ export async function GET(req: Request) {
       .select("*")
       .or(roomActivityOrFilter(roomId))
       .order("created_at", { ascending: false })
-      .range(offset, offset + limit - 1);
+      .range(0, pageEnd - 1);
   }
 
   if (kinds.length) {
@@ -362,7 +367,7 @@ export async function GET(req: Request) {
               .from("board_drops")
               .select("*")
               .order("created_at", { ascending: false })
-              .limit(limit),
+              .limit(pageEnd),
             "board_drops"
           ),
       roomId
@@ -372,7 +377,7 @@ export async function GET(req: Request) {
               .from("board_posts")
               .select("*")
               .order("created_at", { ascending: false })
-              .limit(limit),
+              .limit(pageEnd),
             "board_posts"
           ),
       roomId
@@ -382,7 +387,7 @@ export async function GET(req: Request) {
               .from("posts")
               .select("*")
               .order("created_at", { ascending: false })
-              .limit(limit),
+              .limit(pageEnd),
             "posts"
           ),
       selectRows<any>(
@@ -429,7 +434,7 @@ export async function GET(req: Request) {
     );
   });
 
-  return new Response(JSON.stringify({ ok: true, items: visible.slice(0, limit) }), {
+  return new Response(JSON.stringify({ ok: true, items: visible.slice(offset, offset + limit) }), {
     status: 200,
     headers: { "content-type": "application/json" },
   });

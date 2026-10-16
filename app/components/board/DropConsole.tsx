@@ -559,11 +559,23 @@ export default function DropConsole({
         const currentDrops = Array.isArray((boardStyle as any).boardDrops)
           ? (boardStyle as any).boardDrops
           : [];
+        const deletedIds = new Set(
+          (Array.isArray((boardStyle as any).boardDropsDeleted)
+            ? (boardStyle as any).boardDropsDeleted
+            : []
+          ).map(String)
+        );
         const dropId = String(drop.id ?? "");
+        if (dropId && deletedIds.has(dropId)) return true;
         const boardDrops = [
           drop,
-          ...currentDrops.filter((item: any) => String(item?.id ?? "") !== dropId),
-        ].slice(0, 120);
+          ...currentDrops.filter((item: any) => {
+            const id = String(item?.id ?? "");
+            return id && id !== dropId && !deletedIds.has(id);
+          }),
+        ]
+          .sort((a: any, b: any) => Number(b?.createdAt ?? 0) - Number(a?.createdAt ?? 0))
+          .slice(0, 200);
 
         const { data: updatedProfile, error: updateError } = await sb
           .from("profiles")

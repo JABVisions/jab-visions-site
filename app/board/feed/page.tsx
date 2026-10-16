@@ -170,6 +170,24 @@ function isHiddenPrivateDrop(item: BoardActivity, viewerId: string) {
   );
 }
 
+function pendingLocalFeedItems(remote: BoardActivity[], viewerId: string) {
+  const remoteIds = new Set(remote.map((item) => item.id));
+  const remoteDropIds = new Set(
+    remote
+      .map((item) => String(item.meta?.dropId || "").trim())
+      .filter(Boolean)
+  );
+  return getLocalActivity().filter((item) => {
+    if (!item.id.startsWith("local_")) return false;
+    if (item.meta?.visibility === "private") return false;
+    if (viewerId && item.user_id && item.user_id !== viewerId) return false;
+    if (remoteIds.has(item.id)) return false;
+    const dropId = String(item.meta?.dropId || "").trim();
+    if (dropId && remoteDropIds.has(dropId)) return false;
+    return true;
+  });
+}
+
 async function fetchSupabaseActivity(opts: {
   limit: number;
   offset: number;
@@ -300,9 +318,15 @@ export default function HomeBoardFeedPage() {
       try {
         const { data: auth } = await sb.auth.getUser();
         if (auth.user?.id) {
-          void reconcileLocalActivityToRemote(sb, auth.user.id).catch(() => {});
-          void recoverOrphanedDescriptDrops(sb, auth.user.id).catch(() => {});
+          await Promise.race([
+            Promise.allSettled([
+              reconcileLocalActivityToRemote(sb, auth.user.id),
+              recoverOrphanedDescriptDrops(sb, auth.user.id),
+            ]),
+            new Promise((resolve) => window.setTimeout(resolve, 6000)),
+          ]);
         }
+        if (!alive) return;
         const data = await Promise.race([
           fetchSupabaseActivity({ limit: PAGE_SIZE, offset: 0, kinds }),
           new Promise<BoardActivity[]>((_, reject) =>
@@ -313,9 +337,14 @@ export default function HomeBoardFeedPage() {
         if (!alive) return;
 
         const cleaned = Array.isArray(data) ? data : [];
+        const viewerId = auth.user?.id || viewerUserId;
+        const withPending = dedupeActivity([
+          ...pendingLocalFeedItems(cleaned, viewerId),
+          ...cleaned,
+        ]);
         const nextItems = mergeActivityWithFeed(
-          (cleaned.length ? cleaned : visibleFallbackItems).filter(
-            (item) => !isHiddenPrivateDrop(item, viewerUserId)
+          (withPending.length ? withPending : visibleFallbackItems).filter(
+            (item) => !isHiddenPrivateDrop(item, viewerId)
           ),
           readFeed()
         );
@@ -331,7 +360,22 @@ export default function HomeBoardFeedPage() {
     }
 
     run();
-    const onFeedUpdated = () => syncFromLocal();
+    const onFeedUpdated = () => {
+      if (!alive) return;
+      setItems((prev) => {
+        try {
+          const merged = mergeActivityWithFeed(
+            dedupeActivity([...getLocalActivity(), ...prev]),
+            readFeed()
+          );
+          return (kinds?.length ? merged.filter((item) => kinds.includes(item.kind)) : merged).filter(
+            (item) => !isHiddenPrivateDrop(item, viewerUserId)
+          );
+        } catch {
+          return prev;
+        }
+      });
+    };
     window.addEventListener(EVENTS.feedUpdated, onFeedUpdated as EventListener);
     window.addEventListener(BOARD_PROJECTS_UPDATED_EVENT, onFeedUpdated as EventListener);
     window.addEventListener(PROJECT_DROPS_UPDATED_EVENT, onFeedUpdated as EventListener);

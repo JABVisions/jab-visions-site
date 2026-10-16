@@ -148,6 +148,7 @@ export type DropItem = {
   thoughtFormat?: "text" | "voice" | "doodle";
   thoughtText?: string;
   fromDescript?: boolean;
+  updatedAt?: number;
 };
 
 const STORAGE_KEY = "jab_board_drops_v2";
@@ -295,6 +296,13 @@ function thoughtFormatFromFile(file: File | null): DropItem["thoughtFormat"] {
   if (isAudioFile(file)) return "voice";
   if (isImageFile(file)) return "doodle";
   return "text";
+}
+
+function collectDeletedDropIds(userId: string | null, remoteDeleted: unknown) {
+  const remote = Array.isArray(remoteDeleted)
+    ? remoteDeleted.map(String).filter(Boolean)
+    : [];
+  return Array.from(new Set([...remote, ...readDeletedDropIds(userId)])).slice(0, 500);
 }
 
 function readDeletedDropIds(userId: string | null) {
@@ -534,6 +542,8 @@ function normalizeDropItems(input: unknown, userId: string | null): DropItem[] {
           ? x.thoughtFormat
           : undefined,
       thoughtText: typeof x.thoughtText === "string" ? x.thoughtText : undefined,
+      updatedAt:
+        typeof x.updatedAt === "number" && Number.isFinite(x.updatedAt) ? x.updatedAt : undefined,
     };
       const coords = storageCoordsFromDrop(item);
       if (coords) {
@@ -642,6 +652,85 @@ function dedupeDropItems(items: DropItem[]) {
   }
 
   return Array.from(map.values()).sort((a, b) => b.createdAt - a.createdAt);
+}
+
+function dropRevisionTime(item: DropItem) {
+  const updated = Number(item.updatedAt);
+  if (Number.isFinite(updated) && updated > 0) return updated;
+  const created = Number(item.createdAt);
+  return Number.isFinite(created) && created > 0 ? created : 0;
+}
+
+function overlayDefinedDrop(base: DropItem, overlay: DropItem): DropItem {
+  const next: DropItem = { ...base };
+  (Object.keys(overlay) as (keyof DropItem)[]).forEach((key) => {
+    const value = overlay[key];
+    if (value == null || value === "") return;
+    if (Array.isArray(value) && value.length === 0) return;
+    (next as Record<string, unknown>)[key] = value;
+  });
+  return next;
+}
+
+function mergeDropCopiesByRevision(left: DropItem, right: DropItem): DropItem {
+  const leftTime = dropRevisionTime(left);
+  const rightTime = dropRevisionTime(right);
+  const primary =
+    rightTime > leftTime
+      ? right
+      : rightTime < leftTime
+        ? left
+        : dropCompletenessScore(right) >= dropCompletenessScore(left)
+          ? right
+          : left;
+  const secondary = primary === right ? left : right;
+  const preferMusic = (a?: string | null, b?: string | null) => {
+    if (a && /soundcloud\.com|spotify\.com|music\.apple\.com/i.test(a)) return a;
+    if (b && /soundcloud\.com|spotify\.com|music\.apple\.com/i.test(b)) return b;
+    return a || b || undefined;
+  };
+  const createdCandidates = [left.createdAt, right.createdAt].filter((value) => value > 0);
+  const overlaid = overlayDefinedDrop(secondary, primary);
+  return {
+    ...overlaid,
+    url: preferMusic(primary.url, secondary.url) || overlaid.url,
+    embedUrl: preferMusic(primary.embedUrl, secondary.embedUrl) ?? overlaid.embedUrl ?? null,
+    linkUrl: primary.linkUrl || secondary.linkUrl || overlaid.linkUrl,
+    mediaUrl: preferMusic(primary.mediaUrl, secondary.mediaUrl) || overlaid.mediaUrl,
+    previewImage: primary.previewImage || secondary.previewImage || overlaid.previewImage,
+    bucket: primary.bucket || secondary.bucket || overlaid.bucket,
+    storagePath: primary.storagePath || secondary.storagePath || overlaid.storagePath,
+    createdAt: createdCandidates.length ? Math.min(...createdCandidates) : primary.createdAt,
+    updatedAt: Math.max(leftTime, rightTime) || undefined,
+  };
+}
+
+function mergeDropListsPreferringNewer(local: DropItem[], remote: DropItem[]) {
+  const map = new Map<string, DropItem>();
+  for (const item of [...remote, ...local]) {
+    const key = dropDedupeKey(item);
+    if (!key) continue;
+    const previous = map.get(key);
+    if (!previous) {
+      map.set(key, item);
+      continue;
+    }
+    if (!dropFamiliesCompatible(previous, item)) {
+      map.set(`${key}#${item.id || "keep"}`, item);
+      continue;
+    }
+    map.set(key, mergeDropCopiesByRevision(previous, item));
+  }
+  return Array.from(map.values()).sort((a, b) => b.createdAt - a.createdAt);
+}
+
+function sameDropSignature(left: DropItem[], right: DropItem[]) {
+  const signature = (items: DropItem[]) =>
+    items
+      .map((item) => `${item.id}:${dropRevisionTime(item)}:${item.title}`)
+      .sort()
+      .join("|");
+  return signature(left) === signature(right);
 }
 
 function readBestLocalDropItems() {
@@ -909,22 +998,27 @@ export default function DropTile() {
           profile?.board_style && typeof profile.board_style === "object"
             ? (profile.board_style as any)
             : null;
+        const deletedIds = collectDeletedDropIds(userId, boardStyle?.boardDropsDeleted);
+        const deleted = new Set(deletedIds);
         const remoteDrops = normalizeDropItems(boardStyle?.boardDrops, userId).filter(
-          (drop) => !isCloudProjectDrop(drop)
+          (drop) => !isCloudProjectDrop(drop) && !deleted.has(drop.id)
         );
         if (cancelled) return;
 
-        const mergedDrops = dedupeDropItems([...localDrops, ...remoteDrops]).filter(
-          (drop) => !isCloudProjectDrop(drop)
+        const localKept = localDrops.filter(
+          (drop) => !isCloudProjectDrop(drop) && !deleted.has(drop.id)
         );
-        if (!mergedDrops.length) return;
+        const mergedDrops = mergeDropListsPreferringNewer(localKept, remoteDrops);
+        if (!mergedDrops.length && !deletedIds.length) return;
 
         setDrops(mergedDrops);
         const key = scopedStorageKey(STORAGE_KEY, userId);
         if (key) localStorage.setItem(key, JSON.stringify(mergedDrops));
+        const deletedKey = scopedStorageKey(DELETED_STORAGE_KEY, userId);
+        if (deletedKey) localStorage.setItem(deletedKey, JSON.stringify(deletedIds));
 
         const remoteIds = new Set(remoteDrops.map((drop) => drop.id));
-        const recoveredLocalDrops = localDrops.filter((drop) => !remoteIds.has(drop.id));
+        const recoveredLocalDrops = localKept.filter((drop) => !remoteIds.has(drop.id));
         if (recoveredLocalDrops.length) {
           const { data: recoveredProfile, error: recoveryError } = await supabase
             .from("profiles")
@@ -935,7 +1029,7 @@ export default function DropTile() {
                   mergedDrops,
                   boardStyle?.boardDrops
                 ),
-                boardDropsDeleted: readDeletedDropIds(userId),
+                boardDropsDeleted: deletedIds,
               },
             })
             .eq("id", userId)
@@ -982,6 +1076,17 @@ export default function DropTile() {
         profile?.board_style && typeof profile.board_style === "object"
           ? profile.board_style
           : {};
+      const deletedIds = collectDeletedDropIds(
+        userId,
+        (currentStyle as { boardDropsDeleted?: unknown }).boardDropsDeleted
+      );
+      const deleted = new Set(deletedIds);
+      const remoteDrops = normalizeDropItems(
+        (currentStyle as { boardDrops?: unknown }).boardDrops,
+        userId
+      ).filter((drop) => !isCloudProjectDrop(drop) && !deleted.has(drop.id));
+      const localDrops = next.filter((drop) => !isCloudProjectDrop(drop) && !deleted.has(drop.id));
+      const mergedDrops = mergeDropListsPreferringNewer(localDrops, remoteDrops);
 
       const { data: updatedProfile, error: updateError } = await supabase
         .from("profiles")
@@ -989,12 +1094,12 @@ export default function DropTile() {
           board_style: {
             ...currentStyle,
             boardDrops: mergeCollectionPreservingProjectDrops(
-              next,
-              Array.isArray((currentStyle as any).boardDrops)
-                ? (currentStyle as any).boardDrops
+              mergedDrops,
+              Array.isArray((currentStyle as { boardDrops?: unknown }).boardDrops)
+                ? (currentStyle as { boardDrops: unknown[] }).boardDrops
                 : []
             ),
-            boardDropsDeleted: readDeletedDropIds(userId),
+            boardDropsDeleted: deletedIds,
           },
         })
         .eq("id", userId)
@@ -1002,6 +1107,23 @@ export default function DropTile() {
         .maybeSingle();
       if (updateError) throw updateError;
       if (!updatedProfile?.id) throw new Error("Profile Drop save did not update a row.");
+
+      if (!sameDropSignature(localDrops, mergedDrops)) {
+        setDrops(mergedDrops);
+        try {
+          const key = scopedStorageKey(STORAGE_KEY, userId);
+          if (key) localStorage.setItem(key, JSON.stringify(mergedDrops));
+          const deletedKey = scopedStorageKey(DELETED_STORAGE_KEY, userId);
+          if (deletedKey) localStorage.setItem(deletedKey, JSON.stringify(deletedIds));
+        } catch {
+          // The account copy is already merged.
+        }
+        window.dispatchEvent(
+          new CustomEvent(DROPS_UPDATED_EVENT, {
+            detail: { userId, drops: mergedDrops },
+          })
+        );
+      }
       return true;
     } catch (error) {
       console.error("[DropTile] profile Drop sync failed", error);

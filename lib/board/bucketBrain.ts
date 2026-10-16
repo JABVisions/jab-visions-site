@@ -292,12 +292,14 @@ export function compactMemoryDrop(item?: BucketMemoryDrop | null): BucketMemoryD
   };
 }
 
-export function writeBrain(next: BucketBrainState) {
+export function writeBrain(next: BucketBrainState, options?: { sync?: boolean }) {
   if (typeof window === "undefined") return;
   const { next: clean } = sanitizeBrainState(next);
+  let stored = false;
   try {
     window.localStorage.setItem(BUCKET_BRAIN_KEY, JSON.stringify(clean));
     window.dispatchEvent(new Event(EVT_UPDATED));
+    stored = true;
   } catch {
     try {
       const slim: BucketBrainState = {
@@ -308,9 +310,13 @@ export function writeBrain(next: BucketBrainState) {
       };
       window.localStorage.setItem(BUCKET_BRAIN_KEY, JSON.stringify(slim));
       window.dispatchEvent(new Event(EVT_UPDATED));
+      stored = true;
     } catch {
       // Safari private mode / quota — keep Bucket usable in-memory.
     }
+  }
+  if (stored && options?.sync !== false) {
+    void import("./bucketBrainSync").then((mod) => mod.scheduleBucketBrainSync());
   }
 }
 
@@ -491,6 +497,7 @@ export function installBucketDepositBridge() {
   if (depositBridgeCount === 0) {
     window.addEventListener(EVT_DEPOSIT, onBucketDeposit as EventListener);
     purgeCommentMemoryFromFolders();
+    void import("./bucketBrainSync").then((mod) => mod.syncBucketBrain());
   }
   depositBridgeCount += 1;
 
