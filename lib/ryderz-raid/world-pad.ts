@@ -214,7 +214,6 @@ function appendSquareHall(
   textures: THREE.Texture[],
   white: THREE.Material,
   trim: THREE.Material,
-  led: THREE.Material,
   securedMat: THREE.Material,
 ) {
   const spanX = SQUARE_LAB.east - SQUARE_LAB.west;
@@ -226,9 +225,9 @@ function appendSquareHall(
     color: 0xf7f9fc,
     map: tile,
     metalness: 0.05,
-    roughness: 0.36,
-    emissive: 0xd5e2ef,
-    emissiveIntensity: 0.16,
+    roughness: 0.42,
+    emissive: 0xc5d4e4,
+    emissiveIntensity: 0.05,
   });
   const floor = new THREE.Mesh(new THREE.BoxGeometry(spanX + 0.15, 0.2, spanZ + 0.1), floorMat);
   floor.position.set(cx, FLOOR - 0.05, 0);
@@ -267,15 +266,21 @@ function appendSquareHall(
   );
   ceiling.receiveShadow = false;
 
+  const panelLight = new THREE.MeshStandardMaterial({
+    color: 0xf4f8fc,
+    emissive: 0xd5e4f2,
+    emissiveIntensity: 0.45,
+    roughness: 0.45,
+  });
   for (let col = 0; col < 3; col += 1) {
     for (let row = 0; row < 3; row += 1) {
-      const light = new THREE.Mesh(new THREE.BoxGeometry(1.35, 0.05, 0.72), led);
+      const light = new THREE.Mesh(new THREE.BoxGeometry(1.35, 0.05, 0.72), panelLight);
       light.position.set(cx - 4.4 + col * 4.4, FLOOR + wallH - 0.04, -4.2 + row * 4.2);
       group.add(light);
     }
   }
   for (const z of [SQUARE_LAB.half - 0.34, -SQUARE_LAB.half + 0.34]) {
-    const cove = new THREE.Mesh(new THREE.BoxGeometry(spanX - 1.4, 0.06, 0.1), led);
+    const cove = new THREE.Mesh(new THREE.BoxGeometry(spanX - 1.4, 0.06, 0.1), panelLight);
     cove.position.set(cx, FLOOR + wallH - 0.12, z);
     group.add(cove);
   }
@@ -335,10 +340,10 @@ function appendSquareHall(
   secured.rotation.y = -Math.PI / 2;
   group.add(secured);
 
-  const roomLight = new THREE.PointLight(0xf7fbff, 11, 24, 1.35);
-  roomLight.position.set(cx, FLOOR + 3.35, 0);
-  const mouthLight = new THREE.PointLight(0xf4f8ff, 8, 16, 1.4);
-  mouthLight.position.set(SQUARE_LAB.east - 2.4, FLOOR + 3.2, 0);
+  const roomLight = new THREE.PointLight(0xf7fbff, 2.6, 20, 1.6);
+  roomLight.position.set(cx, FLOOR + 3.15, 0);
+  const mouthLight = new THREE.PointLight(0xf4f8ff, 2.1, 14, 1.7);
+  mouthLight.position.set(SQUARE_LAB.east - 2.4, FLOOR + 3.05, 0);
   group.add(roomLight, mouthLight);
 }
 
@@ -497,7 +502,7 @@ function buildObservationWing(
     group.add(windowB);
   }
   addBox(group, obstacles, occluders, whiteTrim, -54.4, FLOOR + 0.08, 2.4, 28, 0.06, 0.08, false, false);
-  appendSquareHall(group, obstacles, occluders, textures, white, whiteTrim, led, securedMat);
+  appendSquareHall(group, obstacles, occluders, textures, white, whiteTrim, securedMat);
 
   const deckLight = new THREE.PointLight(0x9aefff, 8, 18, 1.4);
   deckLight.position.set(-28, FLOOR + 3.4, 0);
