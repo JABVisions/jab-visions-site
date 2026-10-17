@@ -26,7 +26,8 @@ export default function BoardFeedVideo({
       className={className}
       autoPlay={autoPlay}
       offscreenPause={!autoPlay}
-      preload={poster ? "none" : "metadata"}
+      preserveAspect
+      preload="metadata"
       onError={onError}
     />
   );

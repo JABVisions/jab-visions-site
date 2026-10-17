@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import BoardPlayableVideo from "./BoardPlayableVideo";
+import { filmedCameraConstraints, startViewfinderRecording, type ViewfinderRecording } from "@/lib/board/videoFrame";
 import styles from "./CameraDropPortal.module.css";
 
 type CaptureMode = "photo" | "video";
@@ -44,6 +45,7 @@ export default function CameraDropPortal({
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
+  const viewfinderRecRef = useRef<ViewfinderRecording | null>(null);
   const chunksRef = useRef<Blob[]>([]);
 
   const [mounted, setMounted] = useState(false);
@@ -64,6 +66,11 @@ export default function CameraDropPortal({
   }, []);
 
   const stopCamera = useCallback(() => {
+    if (viewfinderRecRef.current) {
+      const recording = viewfinderRecRef.current;
+      viewfinderRecRef.current = null;
+      recording.stop();
+    }
     recorderRef.current?.state === "recording" && recorderRef.current.stop();
     recorderRef.current = null;
     streamRef.current?.getTracks().forEach((track) => track.stop());
@@ -84,12 +91,7 @@ export default function CameraDropPortal({
       return;
     }
 
-    const videoConstraints = {
-      facingMode: { ideal: nextFacingMode },
-      width: { ideal: 1080 },
-      height: { ideal: 1350 },
-      aspectRatio: { ideal: 4 / 5 },
-    };
+    const videoConstraints = filmedCameraConstraints(nextFacingMode);
 
     try {
       let stream: MediaStream;
@@ -204,6 +206,29 @@ export default function CameraDropPortal({
     }
     chunksRef.current = [];
     const mimeType = preferredRecordingMimeType();
+    const video = videoRef.current;
+    const displayedRatio = video && video.clientWidth > 0 && video.clientHeight > 0
+      ? video.clientWidth / video.clientHeight
+      : 4 / 5;
+    const viewfinder = video
+      ? startViewfinderRecording({
+          video,
+          stream: streamRef.current,
+          frameRatio: displayedRatio,
+          mirror: facingMode === "user",
+          mimeType,
+        })
+      : null;
+    if (viewfinder) {
+      viewfinderRecRef.current = viewfinder;
+      void viewfinder.done.then((blob) => {
+        if (viewfinderRecRef.current === viewfinder) viewfinderRecRef.current = null;
+        setCaptured(blob);
+        setRecording(false);
+      });
+      setRecording(true);
+      return;
+    }
     const recorder = mimeType
       ? new MediaRecorder(streamRef.current, { mimeType })
       : new MediaRecorder(streamRef.current);
@@ -221,6 +246,12 @@ export default function CameraDropPortal({
   }
 
   function stopRecording() {
+    if (viewfinderRecRef.current) {
+      const recording = viewfinderRecRef.current;
+      viewfinderRecRef.current = null;
+      recording.stop();
+      return;
+    }
     const rec = recorderRef.current;
     if (!rec || rec.state !== "recording") return;
     try {

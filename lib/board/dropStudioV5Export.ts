@@ -12,6 +12,7 @@ import {
   type DropStudioV5Session,
 } from "@/lib/board/dropStudioV5";
 import { gradeActive, gradeToFilter, joinFilters, motionAt, type DropStudioV5Grade, type DropStudioV5Motion } from "@/lib/board/dropStudioV5Grade";
+import { coverCropWithin } from "@/lib/board/videoFrame";
 
 export type DropStudioV5ExportClip = {
   mediaKey: string;
@@ -189,11 +190,7 @@ function drawCoverCrop(
   width: number,
   height: number
 ) {
-  const frame = crop ?? { x: 0, y: 0, w: 1, h: 1 };
-  const sx = frame.x * sourceWidth;
-  const sy = frame.y * sourceHeight;
-  const sw = Math.max(1, frame.w * sourceWidth);
-  const sh = Math.max(1, frame.h * sourceHeight);
+  const { sx, sy, sw, sh } = coverCropWithin(sourceWidth, sourceHeight, crop, width, height);
   ctx.drawImage(source, sx, sy, sw, sh, 0, 0, width, height);
 }
 

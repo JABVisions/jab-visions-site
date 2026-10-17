@@ -1987,7 +1987,7 @@ function BucketDropCard({
         .mediaFrame { background: rgba(255, 255, 255, 0.04); }
         .mediaFrame.imageMediaFrame { overflow: hidden; }
         .img { width: 100%; max-width: 100%; height: auto; max-height: min(90vh, 1400px); object-fit: contain; display: block; }
-        .vid { width: 100%; display: block; background: #000; max-height: 520px; }
+        .vid { width: 100%; max-width: 100%; height: auto; display: block; background: #000; max-height: min(82vh, 960px); object-fit: contain; }
         .aud { width: 100%; display: block; padding: 10px; }
 
         .embedFoot { display: flex; gap: 10px; align-items: center; justify-content: space-between; padding: 10px 12px; background: rgba(0, 0, 0, 0.18); border-top: 1px solid rgba(120, 255, 240, 0.10); }

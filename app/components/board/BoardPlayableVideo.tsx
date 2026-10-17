@@ -5,6 +5,7 @@ import {
   finishStuckVideo,
   videoErrorNeedsSrcRefresh,
 } from "@/lib/board/playableVideo";
+import { lockFilmedVideoAspect } from "@/lib/board/videoFrame";
 
 type Props = {
   src: string;
@@ -18,6 +19,8 @@ type Props = {
   preload?: "none" | "metadata" | "auto";
   /** Pause and drop the decoder when the tape leaves the feed viewport. */
   offscreenPause?: boolean;
+  /** Size the element to the encoded frame so a card cannot stretch it. */
+  preserveAspect?: boolean;
   onError?: () => void;
   onPlay?: () => void;
   onPause?: () => void;
@@ -49,6 +52,7 @@ export default function BoardPlayableVideo({
   loop,
   preload,
   offscreenPause = false,
+  preserveAspect = false,
   onError,
   onPlay,
   onPause,
@@ -102,17 +106,24 @@ export default function BoardPlayableVideo({
       unstick();
     };
 
+    const lockAspect = () => {
+      if (preserveAspect) lockFilmedVideoAspect(el);
+    };
+    el.addEventListener("loadedmetadata", lockAspect);
+    if (el.videoWidth) lockAspect();
+
     el.addEventListener("playing", onPlaying);
     el.addEventListener("waiting", onWaiting);
     el.addEventListener("stalled", onWaiting);
     el.addEventListener("timeupdate", onTimeUpdate);
     return () => {
+      el.removeEventListener("loadedmetadata", lockAspect);
       el.removeEventListener("playing", onPlaying);
       el.removeEventListener("waiting", onWaiting);
       el.removeEventListener("stalled", onWaiting);
       el.removeEventListener("timeupdate", onTimeUpdate);
     };
-  }, [src, loop]);
+  }, [src, loop, preserveAspect]);
 
   if (!src) return null;
 

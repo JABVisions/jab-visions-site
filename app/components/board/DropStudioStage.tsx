@@ -38,6 +38,7 @@ import {
   normalizeDropMediaRotation,
   resolveDropMediaFrame,
 } from "@/lib/board/mediaFormat";
+import { filmedCameraConstraints, startViewfinderRecording, type ViewfinderRecording } from "@/lib/board/videoFrame";
 import {
   boardDropFramePixelSize,
   canvasToJpegBlob,
@@ -533,6 +534,7 @@ export default function DropStudioStage({
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
+  const viewfinderRecRef = useRef<ViewfinderRecording | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const fileRef = useRef<File | null>(null);
   const urlRef = useRef<string>("");
@@ -1500,6 +1502,11 @@ export default function DropStudioStage({
     setStudioMicStream(null);
     studioTakeRef.current?.dispose();
     studioTakeRef.current = null;
+    if (viewfinderRecRef.current) {
+      const recording = viewfinderRecRef.current;
+      viewfinderRecRef.current = null;
+      recording.stop();
+    }
     if (recorderRef.current?.state === "recording") {
       try {
         recorderRef.current.stop();
@@ -1581,12 +1588,7 @@ export default function DropStudioStage({
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
           audio: mode === "video",
-          video: {
-            facingMode: { ideal: nextFacing },
-            width: { ideal: 1080 },
-            height: { ideal: 1350 },
-            aspectRatio: { ideal: 4 / 5 },
-          },
+          video: filmedCameraConstraints(nextFacing),
         });
         streamRef.current = stream;
         if (videoRef.current) {
@@ -2505,6 +2507,29 @@ export default function DropStudioStage({
     }
     chunksRef.current = [];
     const mt = preferredVideoMime();
+    const video = videoRef.current;
+    const displayedRatio = video && video.clientWidth > 0 && video.clientHeight > 0
+      ? video.clientWidth / video.clientHeight
+      : dropFrameAspectRatio(captureMediaFrame);
+    const viewfinder = video
+      ? startViewfinderRecording({
+          video,
+          stream: streamRef.current,
+          frameRatio: displayedRatio,
+          mirror: facing === "user",
+          mimeType: mt,
+        })
+      : null;
+    if (viewfinder) {
+      viewfinderRecRef.current = viewfinder;
+      void viewfinder.done.then((blob) => {
+        if (viewfinderRecRef.current === viewfinder) viewfinderRecRef.current = null;
+        commitBlob(blob, "video", "capture");
+        setRecording(false);
+      });
+      setRecording(true);
+      return;
+    }
     const rec = mt ? new MediaRecorder(streamRef.current, { mimeType: mt }) : new MediaRecorder(streamRef.current);
     recorderRef.current = rec;
     rec.ondataavailable = (e) => e.data.size > 0 && chunksRef.current.push(e.data);
@@ -2536,6 +2561,12 @@ export default function DropStudioStage({
     }
   }
   function stopRecording() {
+    if (viewfinderRecRef.current) {
+      const recording = viewfinderRecRef.current;
+      viewfinderRecRef.current = null;
+      recording.stop();
+      return;
+    }
     const rec = recorderRef.current;
     if (!rec || rec.state !== "recording") return;
     try {
