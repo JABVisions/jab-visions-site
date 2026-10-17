@@ -1,0 +1,930 @@
+'use client';
+
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import {
+  INTERACT_LABEL,
+  UPGRADE_ORDER,
+  UPGRADES,
+  upgradeCost,
+  type RyderId,
+  type UpgradeId,
+} from '@/lib/ryderz-raid/config';
+import { arenaSpec } from '@/lib/ryderz-raid/arenas';
+import type { CameraState } from '@/lib/ryderz-raid/camera';
+import type { HudState, RaidEngine } from '@/lib/ryderz-raid/engine';
+import { GameMode } from '@/lib/ryderz-raid/game-mode';
+import { PlayerStore } from '@/lib/ryderz-raid/multiplayer';
+import { RyderManager } from '@/lib/ryderz-raid/ryder-manager';
+import { SaveManager } from '@/lib/ryderz-raid/saves/saveManager';
+import CameraTuningPanel, { loadStoredCameraConfig } from './CameraTuningPanel';
+import CircularPlayerHUD, { type CircularHudApi } from './hud/CircularPlayerHUD';
+import PlayerPartyHUD, { type PartyHudApi } from './hud/PlayerPartyHUD';
+import PvpVersusHUD from './hud/PvpVersusHUD';
+import LowHealthVignette, { type LowHealthVignetteApi } from './hud/LowHealthVignette';
+import ComboIndicator, { type ComboHudApi } from './hud/ComboIndicator';
+import RaidRadar, { type RadarApi } from './hud/RaidRadar';
+import RaidMap from './hud/RaidMap';
+import StatBoard from './hud/StatBoard';
+import PauseMenu from './menu/PauseMenu';
+import RaidLobby from './modes/RaidLobby';
+import RaidWatch from './modes/RaidWatch';
+import { launchFromSquad, type RaidSquad } from '@/lib/ryderz-raid/raid/squad';
+import PvpFlow, { type PvpLineup } from './modes/PvpFlow';
+import SoloCharacterSelect from './modes/SoloCharacterSelect';
+import PremiereCharacterSelect from './premiere/PremiereCharacterSelect';
+import { NEUTRAL_THEME, RYDER_THEME as AURA } from './menu/theme';
+import RyderzStartScreen from './start/RyderzStartScreen';
+import styles from './RaidGame.module.css';
+
+export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'page' }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const engineRef = useRef<RaidEngine | null>(null);
+  const hudRef = useRef<HudState | null>(null);
+  const circularHud = useRef<CircularHudApi>(null);
+  const foeHud = useRef<CircularHudApi>(null);
+  const vignette = useRef<LowHealthVignetteApi>(null);
+  const comboHud = useRef<ComboHudApi>(null);
+  const radarHud = useRef<RadarApi>(null);
+  const mapHud = useRef<RadarApi>(null);
+  const moveRow = useRef<HTMLDivElement>(null);
+  const partyHud = useRef<PartyHudApi | null>(null);
+  const pvpRef = useRef<PvpLineup | null>(null);
+  const pointsRef = useRef<HTMLElement>(null);
+  const remainingRef = useRef<HTMLElement>(null);
+  const roundRef = useRef<HTMLElement>(null);
+  const moveStatus = useRef<Array<HTMLSpanElement | null>>([null, null, null]);
+  const nubRef = useRef<HTMLDivElement>(null);
+  const lookLast = useRef<{ x: number; y: number; id: number } | null>(null);
+
+  // `selected` is the Ryder the raid booted with (it owns the engine's lifetime);
+  // the Ryder currently in play lives in the RyderManager and can change mid-raid.
+  const [selected, setSelected] = useState<RyderId | null>(null);
+  const [screen, setScreen] = useState<'start' | 'solo-select' | 'pvp' | 'raid-select' | 'raid-lobby' | 'raid-watch' | 'game'>('start');
+  const [raidHost, setRaidHost] = useState<RyderId>('rubi');
+  const raidPlanRef = useRef<ReturnType<typeof launchFromSquad> | null>(null);
+  const netRef = useRef<{ code: string; guestId: string; authority: boolean } | null>(null);
+  const netAt = useRef(0);
+  const [watchNet, setWatchNet] = useState<{ code: string; guestId: string } | null>(null);
+  const [pvpOpponent, setPvpOpponent] = useState<RyderId | null>(null);
+  const [pvpLabel, setPvpLabel] = useState('CPU');
+  const [pvpTwo, setPvpTwo] = useState(false);
+  const manager = useMemo(() => new RyderManager(), []);
+  const playerStore = useMemo(() => new PlayerStore(), []);
+  const saves = useMemo(() => new SaveManager(), []);
+  const subscribe = useCallback((listener: () => void) => manager.subscribe(listener), [manager]);
+  const getSnapshot = useCallback(() => manager.getState(), [manager]);
+  const managerState = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+  const subscribeSaves = useCallback((listener: () => void) => saves.subscribe(listener), [saves]);
+  const getSaves = useCallback(() => saves.getState(), [saves]);
+  const saveState = useSyncExternalStore(subscribeSaves, getSaves, getSaves);
+  const subscribePlayers = useCallback((listener: () => void) => playerStore.subscribe(listener), [playerStore]);
+  const getPlayers = useCallback(() => playerStore.getState(), [playerStore]);
+  const partyState = useSyncExternalStore(subscribePlayers, getPlayers, getPlayers);
+  const activeRyder = managerState.activeRyder;
+  const [hudMoves, setHudMoves] = useState<HudState['moves']>([]);
+  const [round, setRound] = useState(0);
+  const [phase, setPhase] = useState<HudState['phase'] | 'select'>('select');
+  const [paused, setPaused] = useState(false);
+  const [mapOpen, setMapOpen] = useState(false);
+  const [burnout, setBurnout] = useState(false);
+  const [tideOut, setTideOut] = useState(false);
+  const [banner, setBanner] = useState<HudState['banner']>(null);
+  const [survival, setSurvival] = useState<HudState['survival']>(null);
+  const [reviveName, setReviveName] = useState<string | null>(null);
+  const [downed, setDowned] = useState(false);
+  const [fadedOut, setFadedOut] = useState(false);
+  const reviveLeft = useRef<HTMLElement>(null);
+  const downLeftEl = useRef<HTMLElement>(null);
+  const [statBoard, setStatBoard] = useState<HudState['statBoard']>(null);
+  const [water, setWater] = useState<HudState['water']>(null);
+  const oxygenFill = useRef<HTMLElement>(null);
+  const waterKey = useRef('');
+  const audioRef = useRef<{
+    setIsland(on: boolean): void;
+    setSubmerged(on: boolean): void;
+  } | null>(null);
+  const boardSeconds = useRef<HTMLElement>(null);
+  const boardKey = useRef('');
+  const [nearShop, setNearShop] = useState(false);
+  const [beacon, setBeacon] = useState<HudState['beacon']>(null);
+  const [recovering, setRecovering] = useState(false);
+  const beaconCooldown = useRef<HTMLSpanElement>(null);
+  const beaconTrack = useRef<HTMLElement>(null);
+  const [locked, setLocked] = useState(false);
+  const [moveReady, setMoveReady] = useState([false, false, false]);
+  const [points, setPoints] = useState(0);
+  const [upgrades, setUpgrades] = useState<HudState['upgrades']>({
+    capacity: 0,
+    signal: 0,
+    fists: 0,
+    vitality: 0,
+    siphon: 0,
+  });
+  const [intermissionLeft, setIntermissionLeft] = useState(0);
+  const [coarse, setCoarse] = useState(false);
+  const [camPanel, setCamPanel] = useState(false);
+  const [cameraState, setCameraState] = useState<CameraState>('EXPLORATION');
+  const [engineReady, setEngineReady] = useState<RaidEngine | null>(null);
+
+  const syncHud = useCallback((next: HudState) => {
+    const prev = hudRef.current;
+    hudRef.current = next;
+    circularHud.current?.setVitals(next.hp, next.maxHp, next.aura, next.maxAura, next.burnout, next.resonance);
+    vignette.current?.setHealth(next.hp, next.maxHp);
+    comboHud.current?.setCombo(next.combo);
+    radarHud.current?.draw(next.radar);
+    mapHud.current?.draw(next.radar);
+    moveRow.current?.setAttribute('data-link', next.combo.power ? 'true' : 'false');
+    if (next.opponent) {
+      foeHud.current?.setVitals(next.opponent.hp, next.opponent.maxHp, next.opponent.aura, next.opponent.maxAura, next.opponent.aura <= 1);
+    }
+    if (next.party) {
+      for (const member of next.party) {
+        partyHud.current?.setSlot(member.index, member.hp, member.maxHp, member.aura, member.maxAura, member.alive, member.bleed);
+      }
+    } else {
+      partyHud.current?.setSlot(0, next.hp, next.maxHp, next.aura, next.maxAura, next.hp > 0, 1);
+    }
+    if (reviveLeft.current && next.revive) reviveLeft.current.textContent = `${Math.ceil(next.revive.left)}s`;
+    if (downLeftEl.current && next.down && !next.down.faded) downLeftEl.current.textContent = `${Math.ceil(next.down.left)}s`;
+    if (boardSeconds.current && next.statBoard) boardSeconds.current.textContent = String(Math.ceil(next.statBoard.left));
+    const nextBoardKey = next.statBoard
+      ? `${next.statBoard.round}|${next.statBoard.mvp ? 1 : 0}|${next.statBoard.lines
+          .map(
+            (line) =>
+              `${line.seat}:${line.control}:${line.round.kills}:${line.round.downs}:${Math.round(line.round.damage)}:${line.raid.kills}:${line.raid.downs}:${Math.round(line.raid.damage)}`,
+          )
+          .join(',')}`
+      : '';
+    if (boardKey.current !== nextBoardKey) {
+      boardKey.current = nextBoardKey;
+      setStatBoard(next.statBoard);
+    }
+    if (oxygenFill.current && next.water) oxygenFill.current.style.width = `${Math.round(next.water.oxygen * 100)}%`;
+    const nextWaterKey = next.water ? `${next.water.mode}|${next.water.submerged ? 1 : 0}|${next.water.oxygen < 0.35 ? 1 : 0}` : '';
+    if (waterKey.current !== nextWaterKey) {
+      waterKey.current = nextWaterKey;
+      setWater(next.water);
+    }
+    audioRef.current?.setIsland(Boolean(next.water));
+    audioRef.current?.setSubmerged(Boolean(next.water?.submerged));
+    playerStore.syncLocalVitals({
+      health: next.hp,
+      maxHealth: next.maxHp,
+      aura: next.aura,
+      maxAura: next.maxAura,
+      isAlive: next.hp > 0 && !next.down,
+    });
+    const net = netRef.current;
+    if (net?.authority && engineRef.current && Date.now() - netAt.current > 350) {
+      netAt.current = Date.now();
+      const snapshot = engineRef.current.raidReport();
+      void fetch('/api/raid/room', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ action: 'snapshot', code: net.code, guestId: net.guestId, snapshot }),
+      });
+      void fetch(`/api/raid/room?code=${net.code}&guest=${net.guestId}`)
+        .then((response) => response.json())
+        .then((room) => {
+          const inputs = room.inputs ?? {};
+          for (const playerId of Object.keys(inputs)) {
+            const input = inputs[playerId];
+            if (playerId !== net.guestId) engineRef.current?.setAllyInput(playerId, input.x, input.z);
+          }
+        })
+        .catch(() => {});
+    }
+    if (pointsRef.current) pointsRef.current.textContent = String(next.points);
+    if (next.beacon && beaconCooldown.current) {
+      beaconCooldown.current.textContent = `${Math.ceil(next.beacon.cooldownLeft)}s`;
+    }
+    if (next.beacon && beaconTrack.current) {
+      const frac = next.beacon.cooldownDuration > 0 ? 1 - next.beacon.cooldownLeft / next.beacon.cooldownDuration : 1;
+      beaconTrack.current.style.width = `${Math.round(frac * 100)}%`;
+    }
+    if (remainingRef.current) remainingRef.current.textContent = String(next.remaining);
+    if (roundRef.current) roundRef.current.textContent = String(next.round);
+    next.moves.forEach((move, i) => {
+      const el = moveStatus.current[i];
+      if (!el) return;
+      el.textContent = next.burnout
+        ? 'NO AURA'
+        : next.tideOut
+          ? 'OUT'
+          : move.duration > 0
+            ? 'ON'
+            : move.ready
+              ? `${move.key}  READY`
+              : 'LOW';
+    });
+    if (
+      !prev ||
+      prev.phase !== next.phase ||
+      prev.paused !== next.paused ||
+      prev.mapOpen !== next.mapOpen ||
+      prev.burnout !== next.burnout ||
+      prev.tideOut !== next.tideOut ||
+      prev.nearShop !== next.nearShop ||
+      prev.recovering !== next.recovering ||
+      (prev.beacon?.near ?? false) !== (next.beacon?.near ?? false) ||
+      (prev.beacon?.ready ?? false) !== (next.beacon?.ready ?? false) ||
+      (prev.beacon?.recharging ?? false) !== (next.beacon?.recharging ?? false) ||
+      prev.pointerLocked !== next.pointerLocked ||
+      prev.banner?.title !== next.banner?.title ||
+      prev.moves.length !== next.moves.length ||
+      prev.moves.some((m, i) => m.ready !== next.moves[i]?.ready || m.id !== next.moves[i]?.id)
+    ) {
+      setPhase(next.phase);
+      setHudMoves(next.moves);
+      setPaused(next.paused);
+      setMapOpen(next.mapOpen);
+      setBurnout(next.burnout);
+      setTideOut(next.tideOut);
+      setNearShop(next.nearShop);
+      setBeacon(next.beacon);
+      setRecovering(next.recovering);
+      setLocked(next.pointerLocked);
+      setMoveReady(next.moves.map((m) => m.ready));
+      setBanner(next.banner);
+      setUpgrades(next.upgrades);
+    }
+    if (!prev || prev.cameraState !== next.cameraState) setCameraState(next.cameraState);
+    if (!prev || Math.abs(prev.points - next.points) > 0.5) setPoints(next.points);
+    if (!prev || prev.round !== next.round) setRound(next.round);
+    if (!prev || prev.survival?.round !== next.survival?.round || prev.survival?.phase !== next.survival?.phase || prev.survival?.cap !== next.survival?.cap) {
+      setSurvival(next.survival);
+    }
+    const nextRevive = next.revive?.name ?? null;
+    const nextDown = Boolean(next.down);
+    const nextFaded = Boolean(next.down?.faded);
+    if (!prev || (prev.revive?.name ?? null) !== nextRevive || Boolean(prev.down) !== nextDown || Boolean(prev.down?.faded) !== nextFaded) {
+      setReviveName(nextRevive);
+      setDowned(nextDown);
+      setFadedOut(nextFaded);
+    }
+    if (!prev || Math.abs(prev.intermissionLeft - next.intermissionLeft) > 0.2) {
+      setIntermissionLeft(next.intermissionLeft);
+    }
+  }, [playerStore]);
+
+  useEffect(() => {
+    const mq = window.matchMedia('(pointer: coarse)');
+    const apply = () => setCoarse(mq.matches);
+    apply();
+    mq.addEventListener('change', apply);
+    return () => mq.removeEventListener('change', apply);
+  }, []);
+
+  useEffect(() => {
+    if (!selected || !canvasRef.current) return;
+    let engine: RaidEngine | null = null;
+    let cancelled = false;
+    let audio: {
+      play(id: string): void;
+      resume(): Promise<void>;
+      startCity(): void;
+      setIsland(on: boolean): void;
+      setSubmerged(on: boolean): void;
+      dispose(): void;
+    } | null = null;
+    const canvas = canvasRef.current;
+    const unlockAudio = () => {
+      void audio?.resume();
+    };
+    window.addEventListener('pointerdown', unlockAudio);
+    window.addEventListener('keydown', unlockAudio);
+    (async () => {
+      const [{ RaidEngine }, { createRaidAudio }] = await Promise.all([
+        import('@/lib/ryderz-raid/engine'),
+        import('@/lib/ryderz-raid/raid-audio'),
+      ]);
+      if (cancelled || !canvas) return;
+      engine = new RaidEngine(canvas, syncHud);
+      audio = createRaidAudio();
+      audioRef.current = audio;
+      engine.setSoundHook((id) => audio?.play(id));
+      audio.startCity();
+      void audio.resume();
+      engineRef.current = engine;
+      manager.attach(engine);
+      engine.setRaidPlan(raidPlanRef.current);
+      engine.setPvpSetup(
+        pvpRef.current
+          ? { opponentId: pvpRef.current.opponent, localTwoPlayer: pvpRef.current.type === 'localTwoPlayer' }
+          : null,
+      );
+      const stored = loadStoredCameraConfig();
+      if (stored) engine.setCameraConfig(stored);
+      setEngineReady(engine);
+      await engine.start(selected, manager.loadoutSpecs(selected));
+      if (cancelled) {
+        engine.dispose();
+        if (engineRef.current === engine) engineRef.current = null;
+      }
+    })();
+    const onResize = () => engineRef.current?.resize();
+    window.addEventListener('resize', onResize);
+    return () => {
+      cancelled = true;
+      window.removeEventListener('resize', onResize);
+      window.removeEventListener('pointerdown', unlockAudio);
+      window.removeEventListener('keydown', unlockAudio);
+      audioRef.current = null;
+      audio?.dispose();
+      if (engine) manager.detach(engine);
+      engine?.dispose();
+      engineRef.current = null;
+      setEngineReady(null);
+    };
+  }, [selected, syncHud, manager]);
+
+  useEffect(() => {
+    const engine = engineRef.current;
+    if (!engine) return;
+    engine.setTuneMode(camPanel);
+    if (camPanel && document.pointerLockElement) document.exitPointerLock();
+    if (!camPanel) engine.setCameraPreviewState(null);
+  }, [camPanel, engineReady]);
+
+  const boot = (id: RyderId) => {
+    manager.setActiveRyder(id);
+    saves.saveGame(manager);
+    setSelected(id);
+    setScreen('game');
+    setPhase('playing');
+    setPaused(false);
+  };
+
+  const playSolo = (id: RyderId) => {
+    pvpRef.current = null;
+    raidPlanRef.current = null;
+    netRef.current = null;
+    setPvpOpponent(null);
+    setPvpTwo(false);
+    manager.setGameMode(GameMode.SOLO);
+    playerStore.configure({ mode: GameMode.SOLO, localRyder: id });
+    boot(id);
+  };
+
+  const playPvp = (lineup: PvpLineup) => {
+    pvpRef.current = lineup;
+    raidPlanRef.current = null;
+    netRef.current = null;
+    setPvpOpponent(lineup.opponent);
+    setPvpLabel(lineup.type === 'localTwoPlayer' ? 'P2' : 'CPU');
+    setPvpTwo(lineup.type === 'localTwoPlayer');
+    manager.setGameMode(GameMode.PVP);
+    playerStore.configure({ mode: GameMode.PVP, localRyder: lineup.player });
+    boot(lineup.player);
+  };
+
+  const playRaid = (squad: RaidSquad, net: { code: string; guestId: string; authority: boolean } | null) => {
+    const ryder = squad.slots[0]?.ryderId;
+    if (!ryder) return;
+    pvpRef.current = null;
+    raidPlanRef.current = launchFromSquad(squad, ryder);
+    netRef.current = net;
+    setPvpOpponent(null);
+    setPvpTwo(false);
+    manager.setArena(squad.arenaId);
+    manager.setGameMode(GameMode.RAID);
+    playerStore.configure({
+      mode: GameMode.RAID,
+      localRyder: ryder,
+      seats: squad.slots
+        .filter((slot) => slot.ryderId)
+        .map((slot) => ({
+          index: slot.index,
+          displayName: slot.displayName,
+          ryderId: slot.ryderId,
+          isLocal: slot.index === 0,
+        })),
+    });
+    boot(ryder);
+  };
+
+  const spectateRaid = (net: { code: string; guestId: string }) => {
+    setWatchNet(net);
+    setScreen('raid-watch');
+  };
+
+  useEffect(() => {
+    if (screen !== 'game') return;
+    const isScrollKey = (e: KeyboardEvent) =>
+      e.code === 'ArrowUp' ||
+      e.code === 'ArrowDown' ||
+      e.code === 'ArrowLeft' ||
+      e.code === 'ArrowRight' ||
+      e.code === 'Space' ||
+      e.code === 'PageUp' ||
+      e.code === 'PageDown' ||
+      e.code === 'Home' ||
+      e.code === 'End';
+    const onKey = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement | null)?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+      if (e.code === 'Backquote') {
+        e.preventDefault();
+        setCamPanel((open) => !open);
+        return;
+      }
+      if (isScrollKey(e)) e.preventDefault();
+    };
+    window.addEventListener('keydown', onKey, { capture: true });
+    return () => window.removeEventListener('keydown', onKey, { capture: true });
+  }, [screen]);
+
+  const changeRyder = () => {
+    engineRef.current?.dispose();
+    engineRef.current = null;
+    setCamPanel(false);
+    setSelected(null);
+    const mode = manager.getState().gameMode;
+    if (mode === GameMode.RAID) setRaidHost(manager.activeRyder);
+    setScreen(mode === GameMode.PVP ? 'pvp' : mode === GameMode.RAID ? 'raid-select' : 'solo-select');
+    setPhase('select');
+    setPaused(false);
+    setBanner(null);
+    setNearShop(false);
+    setBeacon(null);
+    setRecovering(false);
+  };
+
+  const exitToStart = () => {
+    changeRyder();
+    setScreen('start');
+  };
+
+  const resume = () => {
+    engineRef.current?.setPaused(false);
+    engineRef.current?.requestPointerLock();
+  };
+
+  const replay = () => {
+    if (!selected) return;
+    void engineRef.current?.start(activeRyder, manager.loadoutSpecs(activeRyder));
+    engineRef.current?.setPaused(false);
+  };
+
+  const buy = (id: UpgradeId) => {
+    engineRef.current?.buyUpgrade(id);
+  };
+
+  const onStick = (clientX: number, clientY: number, target: HTMLElement) => {
+    const rect = target.getBoundingClientRect();
+    const nx = (clientX - (rect.left + rect.width / 2)) / (rect.width / 2);
+    const ny = (clientY - (rect.top + rect.height / 2)) / (rect.height / 2);
+    const x = Math.max(-1, Math.min(1, nx));
+    const z = Math.max(-1, Math.min(1, ny));
+    engineRef.current?.setMoveAxis(x, z);
+    if (nubRef.current) {
+      nubRef.current.style.transform = `translate(calc(-50% + ${x * 28}px), calc(-50% + ${z * 28}px))`;
+    }
+  };
+
+  const aura = selected ? AURA[activeRyder] : NEUTRAL_THEME;
+  const playing = screen === 'game' && Boolean(selected);
+
+  return (
+    <div
+      className={`${styles.shell} ${layout === 'page' ? styles.page : styles.embed}`}
+      style={{ ['--aura' as string]: aura.aura, ['--aura-soft' as string]: aura.soft }}
+    >
+      <canvas
+        ref={canvasRef}
+        className={`${styles.canvas} ${!playing || paused || phase === 'dead' || phase === 'victory' ? styles.paused : ''}`}
+        onClick={() => {
+          if (playing && phase === 'playing' && !paused) engineRef.current?.requestPointerLock();
+        }}
+      />
+
+      {playing && statBoard && phase === 'report' && (
+        <StatBoard board={statBoard} secondsRef={boardSeconds} onContinue={() => engineRef.current?.continueReport()} />
+      )}
+
+      {playing && phase !== 'dead' && phase !== 'victory' && phase !== 'report' && (
+        <div className={styles.overlay} aria-hidden="true" data-revive={reviveName ?? ''} data-down={downed ? '1' : '0'}>
+          <LowHealthVignette ref={vignette} />
+          <ComboIndicator ref={comboHud} />
+          <RaidRadar ref={radarHud} onOpen={() => engineRef.current?.toggleMap()} />
+          <div className={styles.topHud}>
+            {partyState.mode === GameMode.RAID ? (
+              <PlayerPartyHUD slots={partyState.slots} mode={partyState.mode} apiRef={partyHud} />
+            ) : null}
+            <div className={styles.chips}>
+              {partyState.mode !== GameMode.PVP ? (
+                <>
+                  <div className={styles.chip}>
+                    Round <strong ref={roundRef}>0</strong>
+                  </div>
+                  <div className={styles.chip}>
+                    Hosts <strong ref={remainingRef}>0</strong>
+                  </div>
+                  <div className={styles.chip}>
+                    Signal pts <strong ref={pointsRef}>0</strong>
+                  </div>
+                </>
+              ) : null}
+              <div className={styles.chip}>
+                Mode <strong>{partyState.mode}</strong>
+              </div>
+              <div className={styles.chip}>
+                Arena <strong>{arenaSpec(managerState.arenaId)?.name ?? 'The Block'}</strong>
+              </div>
+              <button
+                type="button"
+                className={`${styles.chip} ${styles.chipBtn} ${camPanel ? styles.chipOn : ''}`}
+                onClick={() => setCamPanel((open) => !open)}
+                title="Camera tuning (dev) · `"
+              >
+                Cam <strong>{cameraState}</strong>
+              </button>
+            </div>
+          </div>
+
+          {partyState.mode === GameMode.PVP && pvpOpponent ? (
+            <PvpVersusHUD
+              playerId={activeRyder}
+              opponentId={pvpOpponent}
+              opponentLabel={pvpLabel}
+              playerRef={circularHud}
+              opponentRef={foeHud}
+              burnout={burnout}
+            />
+          ) : (
+            <div className={styles.vitalDock}>
+              <CircularPlayerHUD ref={circularHud} ryderId={activeRyder} burnout={burnout} />
+            </div>
+          )}
+
+          {water && water.mode !== 'land' && (
+            <div className={styles.oxygen} data-low={water.oxygen < 0.35 ? '1' : '0'} aria-label="Oxygen">
+              <span>Oxygen</span>
+              <b>
+                <i ref={oxygenFill} style={{ width: `${Math.round(water.oxygen * 100)}%` }} />
+              </b>
+              <em>{water.mode === 'under' ? 'Space to surface' : water.mode === 'wade' ? 'Wading' : 'Ctrl to dive'}</em>
+            </div>
+          )}
+
+          <div className={styles.crosshair} />
+
+          {banner && (
+            <div className={styles.banner}>
+              <span>{banner.sub}</span>
+              <strong>{banner.title}</strong>
+            </div>
+          )}
+
+          {survival && partyState.mode !== GameMode.PVP && phase === 'playing' ? (
+            <aside className={styles.survival} aria-label="Survival round">
+              <small>Survival round</small>
+              <strong>{survival.round}</strong>
+              <em>{survival.phase}</em>
+              <ul>
+                <li>
+                  Maximum enemy tier <b>{survival.maxTier}</b>
+                </li>
+                <li>
+                  Health multiplier <b>{survival.hp.toFixed(2)}×</b>
+                </li>
+                <li>
+                  Damage multiplier <b>{survival.damage.toFixed(2)}×</b>
+                </li>
+                <li>
+                  Active enemy cap <b>{survival.cap}</b>
+                </li>
+              </ul>
+            </aside>
+          ) : null}
+
+          {downed && (
+            <div className={styles.downed}>
+              <strong>{fadedOut ? 'You faded out' : 'You are down'}</strong>
+              {fadedOut ? (
+                <span>The squad is still fighting</span>
+              ) : (
+                <span>
+                  A teammate can pick you up · <b ref={downLeftEl} />
+                </span>
+              )}
+            </div>
+          )}
+
+          {burnout && !recovering && !downed && <div className={styles.burnout}>Aura empty · melee only · weaker blows</div>}
+          {tideOut && !burnout && !downed && <div className={styles.burnout}>Tide out · melee only · get clear of the hosts</div>}
+
+          {recovering && <div className={styles.recovering} />}
+
+          {reviveName && !downed && (
+            <div className={styles.beacon}>
+              <strong>Pick up {reviveName}</strong>
+              <span>
+                {INTERACT_LABEL} · <b ref={reviveLeft} />
+              </span>
+            </div>
+          )}
+
+          {beacon?.near && !recovering && !reviveName && (
+            <div className={`${styles.beacon} ${beacon.ready ? '' : styles.beaconCooling}`}>
+              <strong>Ryder Beacon</strong>
+              <span>Restore Health</span>
+              <span>Restore Power</span>
+              {beacon.ready ? (
+                <em>{INTERACT_LABEL} · Activate</em>
+              ) : (
+                <>
+                  <em>
+                    Recharging · <span ref={beaconCooldown}>{Math.ceil(beacon.cooldownLeft)}s</span>
+                  </em>
+                  <div className={styles.beaconTrack}>
+                    <i ref={beaconTrack} />
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+
+          <div className={styles.bottomHud}>
+            <p className={styles.hint}>
+              A D or arrows turn the camera · W S walk along that view · Mouse can still orbit · Shift sprint · Space jump · X recenters pitch · B swaps shoulder · Click punches up close · Zoe blasts at range · Keven throws darts · C punch · V kick · F / RMB melee, F again throws · Z dodge · Q E R powers · {INTERACT_LABEL} picks up a downed teammate or uses the beacon · {pvpTwo ? 'Tab opens the map' : 'Tab or M opens the map'} · Esc pause
+              {phase === 'intermission' ? ' · Hold the spire to buy strength' : ''}
+              {pvpTwo ? ' · P2 IJKL move · U punch · O kick · P melee · N dodge · M jump' : ''}
+            </p>
+            <div ref={moveRow} className={styles.moveRow}>
+              {hudMoves.map((move, i) => (
+                <div
+                  key={`${move.key}-${move.id}`}
+                  className={`${styles.ability} ${moveReady[i] ? styles.ready : ''}`}
+                >
+                  <span
+                    ref={(node) => {
+                      moveStatus.current[i] = node;
+                    }}
+                  >
+                    {move.key}
+                  </span>
+                  <b>{move.name}</b>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className={`${styles.touch} ${styles.hiddenTouch}`}>
+        {playing && phase === 'playing' && !paused && (
+          <>
+            <div
+              className={styles.stick}
+              onPointerDown={(e) => {
+                (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+                onStick(e.clientX, e.clientY, e.currentTarget);
+              }}
+              onPointerMove={(e) => {
+                if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+                  onStick(e.clientX, e.clientY, e.currentTarget);
+                }
+              }}
+              onPointerUp={(e) => {
+                engineRef.current?.setMoveAxis(0, 0);
+                if (nubRef.current) nubRef.current.style.transform = 'translate(-50%, -50%)';
+                e.currentTarget.releasePointerCapture(e.pointerId);
+              }}
+            >
+              <div ref={nubRef} className={styles.nub} />
+            </div>
+            <div
+              className={styles.look}
+              onPointerDown={(e) => {
+                (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+                lookLast.current = { x: e.clientX, y: e.clientY, id: e.pointerId };
+              }}
+              onPointerMove={(e) => {
+                const last = lookLast.current;
+                if (!last || last.id !== e.pointerId) return;
+                engineRef.current?.setLookDelta(e.clientX - last.x, e.clientY - last.y);
+                lookLast.current = { x: e.clientX, y: e.clientY, id: e.pointerId };
+              }}
+              onPointerUp={() => {
+                lookLast.current = null;
+              }}
+            />
+            <div className={styles.touchBtns}>
+              <button type="button" onPointerDown={() => engineRef.current?.setFireHeld(true)} onPointerUp={() => engineRef.current?.setFireHeld(false)}>
+                FIRE
+              </button>
+              <button type="button" onClick={() => engineRef.current?.queuePunch()}>
+                PUNCH
+              </button>
+              <button type="button" onClick={() => engineRef.current?.queueKick()}>
+                KICK
+              </button>
+              <button type="button" onClick={() => engineRef.current?.queueMelee()}>
+                MELEE
+              </button>
+              <button type="button" onClick={() => engineRef.current?.queueDodge()}>
+                DODGE
+              </button>
+              <button type="button" onClick={() => engineRef.current?.queueJump()}>
+                JUMP
+              </button>
+              <button type="button" onClick={() => engineRef.current?.queueAbility(0)}>
+                Q
+              </button>
+              <button type="button" onClick={() => engineRef.current?.queueAbility(1)}>
+                E
+              </button>
+              <button type="button" onClick={() => engineRef.current?.queueAbility(2)}>
+                R
+              </button>
+              {(reviveName || (beacon?.near && beacon.ready)) && (
+                <button type="button" onClick={() => engineRef.current?.queueInteract()}>
+                  {reviveName ? 'PICK UP' : 'USE'}
+                </button>
+              )}
+            </div>
+          </>
+        )}
+      </div>
+
+      {playing && nearShop && (
+        <aside className={styles.shop}>
+          <h3>Spire Shop · {Math.ceil(intermissionLeft)}s</h3>
+          <ul>
+            {UPGRADE_ORDER.map((id) => {
+              const spec = UPGRADES[id];
+              const level = upgrades[id];
+              const cost = upgradeCost(id, level);
+              const maxed = level >= spec.maxLevel;
+              return (
+                <li key={id}>
+                  <button type="button" disabled={maxed || points < cost} onClick={() => buy(id)}>
+                    {spec.name} {maxed ? 'MAX' : `Lv ${level} · ${cost}`}
+                    <em>{spec.description}</em>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </aside>
+      )}
+
+      {playing && camPanel && phase !== 'dead' && (
+        <CameraTuningPanel
+          engine={engineReady}
+          liveState={cameraState}
+          onClose={() => setCamPanel(false)}
+        />
+      )}
+
+      {playing && phase === 'playing' && !paused && !locked && !coarse && !camPanel && !mapOpen && (
+        <div className={styles.lock}>
+          <button type="button" onClick={() => engineRef.current?.requestPointerLock()}>
+            Click to look
+          </button>
+          <p>A and D turn the camera. W and S walk. The camera follows. Esc pauses.</p>
+        </div>
+      )}
+
+      {playing && paused && phase !== 'dead' && phase !== 'victory' && !camPanel && (
+        <PauseMenu
+          manager={manager}
+          engine={engineReady}
+          activeRyder={activeRyder}
+          gameMode={managerState.gameMode}
+          arenaId={managerState.arenaId}
+          round={round}
+          points={points}
+          layout={layout}
+          onResume={resume}
+          onExit={exitToStart}
+          onOpenCameraTuning={() => setCamPanel(true)}
+        />
+      )}
+
+      {playing && phase === 'dead' && (
+        <div className={styles.modal}>
+          <div className={styles.modalCard}>
+            <p>Those Ryderz: Raid</p>
+            <h3>{partyState.mode === GameMode.RAID ? 'Raid defeat' : 'Signal lost'}</h3>
+            <p>
+              {partyState.mode === GameMode.RAID
+                ? `The squad is down. Enemies defeated ${hudRef.current?.raid?.defeated ?? 0}. Damage dealt ${hudRef.current?.raid?.dealt ?? 0}. Damage taken ${hudRef.current?.raid?.taken ?? 0}.`
+                : 'The mind-controlled block overran you. Come back with more aura discipline — powers drain, and fists are all that is left when the signal runs dry.'}
+            </p>
+            <div className={styles.actions}>
+              <button type="button" onClick={replay}>
+                Drop in again
+              </button>
+              <button type="button" onClick={changeRyder}>
+                Change Ryder
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {playing && phase === 'victory' && (
+        <div className={styles.modal}>
+          <div className={styles.modalCard}>
+            <p>{partyState.mode === GameMode.RAID ? 'Those Ryderz · Raid' : 'Those Ryderz · PvP'}</p>
+            <h3>{partyState.mode === GameMode.RAID ? 'Raid victory' : 'You win'}</h3>
+            <p>
+              {partyState.mode === GameMode.RAID
+                ? `All waves are down. Enemies defeated ${hudRef.current?.raid?.defeated ?? 0}. Damage dealt ${hudRef.current?.raid?.dealt ?? 0}. Damage taken ${hudRef.current?.raid?.taken ?? 0}.`
+                : 'The other Ryder is down. Rematch keeps the same lineup.'}
+            </p>
+            {partyState.mode === GameMode.RAID ? (
+              <ul>
+                {(hudRef.current?.raid?.contributions ?? []).map((row) => (
+                  <li key={row.name}>
+                    {row.name}: {row.dealt}
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+            <div className={styles.actions}>
+              <button type="button" onClick={replay}>
+                Rematch
+              </button>
+              <button type="button" onClick={changeRyder}>
+                Change Ryderz
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {playing && mapOpen && phase !== 'dead' && phase !== 'victory' && phase !== 'report' && (
+        <RaidMap
+          ref={mapHud}
+          place={arenaSpec(managerState.arenaId)?.name ?? 'Raid'}
+          localTwo={pvpTwo}
+          onClose={() => engineRef.current?.toggleMap()}
+        />
+      )}
+
+      {screen === 'start' && (
+        <RyderzStartScreen
+          slots={saveState.slots}
+          activeSlot={saveState.activeSlot}
+          lastMode={managerState.gameMode}
+          onSelectSlot={(index) => saves.selectSlot(index)}
+          onContinue={() => {
+            if (!saves.loadGame(saveState.activeSlot, manager)) return;
+            const loaded = manager.getState();
+            if (loaded.gameMode === GameMode.RAID) setRaidHost(loaded.activeRyder);
+            setScreen(loaded.gameMode === GameMode.PVP ? 'pvp' : loaded.gameMode === GameMode.RAID ? 'raid-lobby' : 'solo-select');
+          }}
+          onNewGame={() => {
+            const empty = saveState.slots.find((slot) => slot.empty);
+            const index = empty?.slotIndex ?? saveState.activeSlot;
+            saves.deleteSave(index);
+            saves.selectSlot(index);
+            manager.resetSession();
+            playerStore.configure({ mode: GameMode.SOLO, localRyder: null });
+          }}
+          onPickMode={(mode) => {
+            manager.setGameMode(mode);
+            setScreen(mode === GameMode.PVP ? 'pvp' : mode === GameMode.RAID ? 'raid-select' : 'solo-select');
+          }}
+        />
+      )}
+
+      {screen === 'solo-select' && (
+        <SoloCharacterSelect initialId={activeRyder} onBack={() => setScreen('start')} onPlay={playSolo} />
+      )}
+
+      {screen === 'pvp' && <PvpFlow onBack={() => setScreen('start')} onFight={playPvp} />}
+
+      {screen === 'raid-select' && (
+        <PremiereCharacterSelect
+          mode="raid"
+          initialId={raidHost}
+          onBack={() => setScreen('start')}
+          onConfirm={(character) => {
+            if (!character.ryderId) return;
+            setRaidHost(character.ryderId);
+            setScreen('raid-lobby');
+          }}
+        />
+      )}
+
+      {screen === 'raid-lobby' && (
+        <RaidLobby key={raidHost} hostId={raidHost} onBack={() => setScreen('raid-select')} onStart={playRaid} onSpectate={spectateRaid} />
+      )}
+      {screen === 'raid-watch' && watchNet && (
+        <RaidWatch
+          code={watchNet.code}
+          guestId={watchNet.guestId}
+          onLeave={() => {
+            setWatchNet(null);
+            setScreen('raid-lobby');
+          }}
+        />
+      )}
+    </div>
+  );
+}
