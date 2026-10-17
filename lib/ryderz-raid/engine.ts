@@ -77,6 +77,7 @@ import { buildIslandWorld } from './world-island';
 import { emptySwim, shallowDirection, stepSwim, type SwimState, type WaterColumn } from './island/swim';
 import { calculatePvPDamage, pvpHealth, PvpCpu, type PvpDamageKind } from './pvp';
 import type { PvpDifficulty } from './pvp/aiProfile';
+import { arenaChangeRestarts, canAssumeAlly, carriedVitals } from './raid/control';
 import { type RaidLaunch } from './raid/squad';
 import {
   archetypeById,
@@ -214,6 +215,10 @@ export interface HudState {
     alive: boolean;
     /** 1 while up. While down, the fraction of the pickup window still left. */
     bleed: number;
+    /** This bar is the fighter the local player is driving. */
+    yours: boolean;
+    /** A CPU teammate who can be taken over by tapping the bar. */
+    playable: boolean;
   }> | null;
   /** A downed teammate inside pickup range. */
   revive: { name: string; left: number } | null;
@@ -487,6 +492,14 @@ export class RaidEngine {
   private raidTaken = 0;
   private raidDown = false;
   private downLeft = 0;
+  /** Party seat the local input is driving. Seat 0 until a bar hands over a CPU ally. */
+  private controlledSeat = 0;
+  /** The Ryder a fresh start of this match puts back in the player's hands. */
+  private homeId: RyderId | null = null;
+  private homeMoves: AbilitySpec[] | null = null;
+  private startToken = 0;
+  /** Seats whose body has already faded, so the bar stays up and untappable. */
+  private closedSeats = new Set<number>();
   private allowAllyDamage = false;
   /** Seat credited for the enemy hit currently being resolved. -1 is nobody. */
   private creditSeat = -1;
@@ -622,9 +635,14 @@ export class RaidEngine {
   }
 
   async start(id: RyderId, moves?: AbilitySpec[]) {
+    const token = ++this.startToken;
     this.clearCombat();
     this.spec = RYDERZ[id];
     this.moves = moves?.length === 3 ? moves : this.spec.moves;
+    this.homeId = id;
+    this.homeMoves = this.moves;
+    this.controlledSeat = 0;
+    this.closedSeats.clear();
     this.upgrades = emptyUpgrades();
     this.maxHp = this.gameMode === GameMode.PVP ? pvpHealth(this.spec.maxHp) : this.spec.maxHp;
     this.hp = this.maxHp;
@@ -697,7 +715,7 @@ export class RaidEngine {
       preloadHostGltf(),
     ]);
     await preloadCivilianModels(CIVILIAN_REGISTRY.map((entry) => entry.modelPath));
-    if (this.disposed) return;
+    if (this.disposed || token !== this.startToken) return;
 
     this.player = buildRyder(this.spec);
     this.scene.add(this.player.humanoid.group);
@@ -720,7 +738,7 @@ export class RaidEngine {
     if (this.gameMode === GameMode.PVP && this.pvpSetup) {
       this.pvpLocalTwo = this.pvpSetup.localTwoPlayer;
       await this.spawnDuelist(this.pvpSetup.opponentId, this.pvpSetup.localTwoPlayer);
-      if (this.disposed) return;
+      if (this.disposed || token !== this.startToken) return;
       this.round = 0;
       this.queue = [];
       this.phase = 'playing';
@@ -732,7 +750,7 @@ export class RaidEngine {
     } else if (this.gameMode === GameMode.RAID && this.raidPlan) {
       this.pvpLocalTwo = false;
       await this.spawnRaidAllies();
-      if (this.disposed) return;
+      if (this.disposed || token !== this.startToken) return;
       this.beginRaid();
     } else {
       this.pvpLocalTwo = false;
@@ -1086,12 +1104,142 @@ export class RaidEngine {
     this.scene.add(this.player.humanoid.group);
     this.powerVfx.attach(this.player, spec.visual);
     this.bindKit();
+    if (this.controlledSeat === 0) {
+      this.homeId = spec.id;
+      this.homeMoves = this.moves;
+    }
     this.particles.emit(this.pos.clone().setY(1.1), spec.color, 30, {
       speed: 7,
       size: 0.32,
       life: 0.6,
       up: 1.2,
     });
+  }
+
+  /** True once a fighter is in the world, so a floor change knows a match is underway. */
+  matchLive() {
+    return Boolean(this.player) && !this.disposed;
+  }
+
+  /**
+   * Take over a CPU teammate. Their body, vital fraction, and seat become the
+   * local fighter. The body you leave is handed to the CPU at your old seat.
+   * Another human's bar is not a switch.
+   */
+  assumeAlly(seat: number, moves?: AbilitySpec[]) {
+    const host = this.hosts.find((entry) => entry.ally && entry.seat === seat);
+    if (
+      !host?.ryderId ||
+      !this.player ||
+      !canAssumeAlly({
+        raid: this.gameMode === GameMode.RAID && Boolean(this.raidPlan),
+        phase: this.phase,
+        seat,
+        controlledSeat: this.controlledSeat,
+        remoteHuman: Boolean(host?.remoteHuman),
+        hp: host?.hp ?? 0,
+        down: host?.down ?? 0,
+      })
+    ) {
+      return false;
+    }
+    this.switchToken += 1;
+    const spec = RYDERZ[host.ryderId];
+    const leavingId = this.spec.id;
+    const leavingSeat = this.controlledSeat;
+    const leavingFighter = this.player;
+    const leaving = {
+      x: this.pos.x,
+      z: this.pos.z,
+      yaw: this.facing,
+      airY: this.airY,
+      airVel: this.airVel,
+      hp: this.hp,
+      maxHp: this.maxHp,
+      aura: this.aura,
+      maxAura: this.maxAura,
+      down: this.raidDown ? this.downLeft : 0,
+    };
+    const incomingDown = host.down ?? 0;
+    const incoming = carriedVitals(
+      { hp: host.hp, maxHp: host.maxHp, aura: host.aura ?? 0, maxAura: host.maxAura ?? spec.maxAura },
+      spec.maxHp + this.upgrades.vitality * 25,
+      spec.maxAura + this.upgrades.capacity * 20,
+      incomingDown,
+    );
+    const arrived = { x: host.pos.x, z: host.pos.z, yaw: host.fighter.humanoid.group.rotation.y, airY: host.airY, airVel: host.airVel };
+    const incomingFighter = host.fighter;
+
+    this.endAllMoves();
+    this.unbindKit();
+    host.cpu?.dispose();
+    host.cpu = undefined;
+    this.hosts = this.hosts.filter((entry) => entry !== host);
+
+    this.spec = spec;
+    this.moves = moves?.length === 3 ? moves : spec.moves;
+    this.player = incomingFighter;
+    this.controlledSeat = seat;
+    this.closedSeats.delete(seat);
+    this.maxHp = incoming.maxHp;
+    this.hp = incoming.hp;
+    this.maxAura = incoming.maxAura;
+    this.aura = incoming.aura;
+    this.raidDown = incomingDown > 0;
+    this.downLeft = incomingDown;
+    this.pos.set(arrived.x, 0, arrived.z);
+    this.airY = arrived.airY;
+    this.airVel = arrived.airVel;
+    this.jumping = false;
+    this.yaw = arrived.yaw;
+    this.facing = arrived.yaw;
+    this.moveCd = [0, 0, 0];
+    this.moveT = [0, 0, 0];
+    this.queuedMoves = [false, false, false];
+    this.releaseArmed = [true, true, true];
+    this.meleeT = 0;
+    this.meleeCd = 0;
+    this.burnout = false;
+    this.iframes = Math.max(this.iframes, 0.2);
+    this.striker.reset();
+    this.striker.setRyder(spec.id);
+    const group = incomingFighter.humanoid.group;
+    group.rotation.order = 'YXZ';
+    group.rotation.x = 0;
+    group.rotation.z = 0;
+    group.rotation.y = arrived.yaw;
+    group.position.set(arrived.x, this.bodyHeight(arrived.x, arrived.z, true) + (this.airY > 0 ? this.airY : 0), arrived.z);
+    setHumanoidOpacity(incomingFighter.humanoid, 1);
+    this.powerVfx.attach(incomingFighter, spec.visual);
+    this.bindKit();
+    this.rig.snap(this.pos, this.yaw, this.pitch);
+    this.markSeatControl(seat, 'human');
+    this.markSeatControl(leavingSeat, 'computer');
+
+    const leftSpec = RYDERZ[leavingId];
+    const leftVitals = carriedVitals(
+      { hp: leaving.hp, maxHp: leaving.maxHp, aura: leaving.aura, maxAura: leaving.maxAura },
+      leftSpec.maxHp,
+      leftSpec.maxAura,
+      leaving.down,
+    );
+    this.spawnAlly(leavingId, 0, null, false, leavingSeat, {
+      fighter: leavingFighter,
+      x: leaving.x,
+      z: leaving.z,
+      yaw: leaving.yaw,
+      airY: leaving.airY,
+      airVel: leaving.airVel,
+      hp: leftVitals.hp,
+      maxHp: leftVitals.maxHp,
+      aura: leftVitals.aura,
+      maxAura: leftVitals.maxAura,
+      down: leaving.down,
+    });
+    this.banner = { title: spec.name.toUpperCase(), sub: 'YOU TAKE THE LEAD' };
+    this.bannerT = 1.6;
+    this.particles.emit(this.pos.clone().setY(1.1), spec.color, 22, { speed: 6, size: 0.28, life: 0.45, up: 1 });
+    return true;
   }
 
   requestPointerLock() {
@@ -1504,8 +1652,9 @@ export class RaidEngine {
    * built the first time it is selected, then the two groups swap visibility.
    * The Beacon is rebuilt at that arena's fixed point.
    */
-  loadArena(id: ArenaId) {
+  loadArena(id: ArenaId, options?: { restart?: boolean }) {
     const def = arenaSpec(id) ?? arenaSpec(DEFAULT_ARENA)!;
+    const restart = Boolean(options?.restart && this.player);
     this.arena = def;
     const key = def.worldKey ?? 'block';
     let next = this.worlds.get(key);
@@ -1582,6 +1731,10 @@ export class RaidEngine {
     const floor = this.world.heightAt(def.spawnPoint.x, def.spawnPoint.z);
     this.swim = emptySwim(floor);
     this.swimRise = 0;
+    if (restart) {
+      void this.restartMatch();
+      return;
+    }
     if (this.player) {
       this.pos.set(def.spawnPoint.x, 0, def.spawnPoint.z);
       this.player.humanoid.group.position.copy(this.pos);
@@ -1612,6 +1765,15 @@ export class RaidEngine {
 
   getArena(): ArenaDefinition {
     return this.arena;
+  }
+
+  /** Start the current mode over on the floor that is already loaded. */
+  async restartMatch() {
+    const id = this.homeId ?? this.spec?.id;
+    if (!id || !this.player) return;
+    this.paused = false;
+    this.mapOpen = false;
+    await this.start(id, this.homeMoves ?? undefined);
   }
 
   /** Read-only view of the Beacon for menus; null when the arena has none. */
@@ -3072,7 +3234,12 @@ export class RaidEngine {
   }
 
   private actingSeat() {
-    return this.allowAllyDamage ? this.creditSeat : 0;
+    return this.allowAllyDamage ? this.creditSeat : this.controlledSeat;
+  }
+
+  private markSeatControl(seat: number, control: SquadStatLine['control']) {
+    const line = this.statLines.get(seat);
+    if (line) line.control = control;
   }
 
   private openStatBoard() {
@@ -3148,15 +3315,34 @@ export class RaidEngine {
     }
   }
 
-  private async spawnAlly(id: RyderId, index: number, playerId: string | null = null, remoteHuman = false, seat = index + 1) {
+  private async spawnAlly(
+    id: RyderId,
+    index: number,
+    playerId: string | null = null,
+    remoteHuman = false,
+    seat = index + 1,
+    placed?: {
+      fighter: Fighter;
+      x: number;
+      z: number;
+      yaw: number;
+      airY: number;
+      airVel: number;
+      hp: number;
+      maxHp: number;
+      aura: number;
+      maxAura: number;
+      down: number;
+    },
+  ) {
     const spec = RYDERZ[id];
-    if (spec.glb) {
+    if (!placed?.fighter && spec.glb) {
       await preloadRyderGltf(spec).catch((error) => {
         console.warn('[raid] failed to load ally GLB, using block figure', error);
       });
     }
     if (this.disposed) return;
-    const fighter = buildRyder(spec, { clone: true });
+    const fighter = placed?.fighter ?? buildRyder(spec, { clone: true });
     const offsets = [
       { x: 2.4, z: -1.6 },
       { x: -2.4, z: -1.6 },
@@ -3164,17 +3350,26 @@ export class RaidEngine {
       { x: -1.35, z: -3.6 },
     ];
     const offset = offsets[index] ?? { x: 1.6 * (index + 1), z: -2 };
-    const pos = new THREE.Vector3(this.pos.x + offset.x, 0, this.pos.z + offset.z);
+    const pos = placed
+      ? new THREE.Vector3(placed.x, 0, placed.z)
+      : new THREE.Vector3(this.pos.x + offset.x, 0, this.pos.z + offset.z);
     fighter.humanoid.group.position.copy(pos);
     fighter.humanoid.group.position.y = this.bodyHeight(pos.x, pos.z, true);
+    if (placed) {
+      fighter.humanoid.group.rotation.order = 'YXZ';
+      fighter.humanoid.group.rotation.x = 0;
+      fighter.humanoid.group.rotation.z = 0;
+      fighter.humanoid.group.rotation.y = placed.yaw;
+      setHumanoidOpacity(fighter.humanoid, 1);
+    }
     this.scene.add(fighter.humanoid.group);
     const focus = new THREE.Vector3(pos.x, 0, pos.z + 4);
     const vel = new THREE.Vector3();
     const host: Host = {
       kind: 'walker',
       fighter,
-      hp: spec.maxHp,
-      maxHp: spec.maxHp,
+      hp: placed?.hp ?? spec.maxHp,
+      maxHp: placed?.maxHp ?? spec.maxHp,
       pos,
       radius: PLAYER_RADIUS,
       speed: spec.speed * 0.92,
@@ -3190,8 +3385,8 @@ export class RaidEngine {
       stun: 0,
       swing: false,
       stagger: 0,
-      airY: 0,
-      airVel: 0,
+      airY: placed?.airY ?? 0,
+      airVel: placed?.airVel ?? 0,
       lean: 0,
       spin: 0,
       tumble: 0,
@@ -3207,11 +3402,11 @@ export class RaidEngine {
       playerId,
       remoteHuman,
       ryderId: id,
-      aura: spec.maxAura,
-      maxAura: spec.maxAura,
+      aura: placed?.aura ?? spec.maxAura,
+      maxAura: placed?.maxAura ?? spec.maxAura,
       dealt: 0,
       seat,
-      down: 0,
+      down: placed?.down ?? 0,
       swims: true,
     };
     this.ensureStatLine(seat, id, remoteHuman ? 'human' : 'computer');
@@ -3332,6 +3527,10 @@ export class RaidEngine {
       focus.set(spot.x, 0, spot.z);
     };
     (host as Host & { aim?: (dt?: number) => void }).aim = aim;
+    if ((host.down ?? 0) > 0) {
+      host.hp = 0;
+      host.cpu?.stun();
+    }
     this.hosts.push(host);
   }
 
@@ -3415,6 +3614,7 @@ export class RaidEngine {
     host.down = 0;
     host.cpu?.dispose();
     host.cpu = undefined;
+    if (host.seat != null) this.closedSeats.add(host.seat);
     this.hosts = this.hosts.filter((other) => other !== host);
     this.scene.remove(host.fighter.humanoid.group);
     disposeObject(host.fighter.humanoid.group);
@@ -3591,17 +3791,19 @@ export class RaidEngine {
   private partyRows(): NonNullable<HudState['party']> {
     const rows: NonNullable<HudState['party']> = [
       {
-        index: 0,
+        index: this.controlledSeat,
         hp: this.raidDown ? 0 : this.hp,
         maxHp: this.maxHp,
         aura: this.aura,
         maxAura: this.maxAura,
         alive: this.hp > 0 && !this.raidDown,
         bleed: this.raidDown ? this.downLeft / DOWN_SECONDS : 1,
+        yours: true,
+        playable: false,
       },
     ];
     for (const host of this.hosts) {
-      if (!host.ally || host.seat == null) continue;
+      if (!host.ally || host.seat == null || host.seat === this.controlledSeat) continue;
       const down = (host.down ?? 0) > 0;
       rows.push({
         index: host.seat,
@@ -3611,6 +3813,30 @@ export class RaidEngine {
         maxAura: host.maxAura ?? 1,
         alive: host.hp > 0 && !down,
         bleed: down ? (host.down ?? 0) / DOWN_SECONDS : host.hp > 0 ? 1 : 0,
+        yours: false,
+        playable: canAssumeAlly({
+          raid: true,
+          phase: this.phase,
+          seat: host.seat,
+          controlledSeat: this.controlledSeat,
+          remoteHuman: Boolean(host.remoteHuman),
+          hp: host.hp,
+          down: host.down ?? 0,
+        }),
+      });
+    }
+    for (const seat of this.closedSeats) {
+      if (seat === this.controlledSeat || rows.some((row) => row.index === seat)) continue;
+      rows.push({
+        index: seat,
+        hp: 0,
+        maxHp: 1,
+        aura: 0,
+        maxAura: 1,
+        alive: false,
+        bleed: 0,
+        yours: false,
+        playable: false,
       });
     }
     return rows;
@@ -4395,7 +4621,7 @@ export class RaidEngine {
         if (!this.raidDown) {
           this.raidDown = true;
           this.downLeft = DOWN_SECONDS;
-          this.noteDown(0);
+          this.noteDown(this.controlledSeat);
           this.kit?.interrupt();
           this.striker.interrupt();
           this.banner = { title: 'YOU ARE DOWN', sub: 'A TEAMMATE CAN PICK YOU UP' };

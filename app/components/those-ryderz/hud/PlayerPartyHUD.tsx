@@ -16,20 +16,33 @@ export type PartyHudApi = {
     maxAura: number,
     alive: boolean,
     bleed?: number,
+    control?: { yours: boolean; playable: boolean },
   ) => void;
 };
 
 type SlotNodes = { root: HTMLDivElement | null; hp: HTMLSpanElement | null; aura: HTMLSpanElement | null };
-type SlotVital = { hp: number; maxHp: number; aura: number; maxAura: number; alive: boolean; bleed: number };
+type SlotVital = {
+  hp: number;
+  maxHp: number;
+  aura: number;
+  maxAura: number;
+  alive: boolean;
+  bleed: number;
+  yours: boolean;
+  playable: boolean;
+};
 
 export default function PlayerPartyHUD({
   slots,
   mode,
   apiRef,
+  onPlay,
 }: {
   slots: PartySlot[];
   mode: GameMode;
   apiRef?: MutableRefObject<PartyHudApi | null>;
+  /** Take over the CPU teammate in this party seat. */
+  onPlay?: (index: number) => void;
 }) {
   const nodes = useRef(new Map<number, SlotNodes>());
   const latest = useRef(new Map<number, SlotVital>());
@@ -45,6 +58,14 @@ export default function PlayerPartyHUD({
     node.aura?.style.setProperty('width', auraWidth, 'important');
     node.root?.classList.toggle(styles.down, !vital.alive);
     node.root?.classList.toggle(styles.bleeding, !vital.alive && vital.bleed > 0);
+    node.root?.classList.toggle(styles.local, vital.yours);
+    node.root?.classList.toggle(styles.playable, vital.playable);
+    if (node.root) {
+      node.root.tabIndex = vital.playable ? 0 : -1;
+      node.root.setAttribute('aria-pressed', vital.yours ? 'true' : 'false');
+      const name = node.root.querySelector('strong')?.textContent || 'teammate';
+      node.root.title = vital.playable ? `Play as ${name}` : name;
+    }
   };
 
   useLayoutEffect(() => {
@@ -54,8 +75,18 @@ export default function PlayerPartyHUD({
   useEffect(() => {
     if (!apiRef) return;
     apiRef.current = {
-      setSlot(index, hp, maxHp, aura, maxAura, alive, bleed = 1) {
-        latest.current.set(index, { hp, maxHp, aura, maxAura, alive, bleed });
+      setSlot(index, hp, maxHp, aura, maxAura, alive, bleed = 1, control) {
+        const previous = latest.current.get(index);
+        latest.current.set(index, {
+          hp,
+          maxHp,
+          aura,
+          maxAura,
+          alive,
+          bleed,
+          yours: control?.yours ?? previous?.yours ?? false,
+          playable: control?.playable ?? previous?.playable ?? false,
+        });
         paint(index);
       },
     };
@@ -88,6 +119,17 @@ export default function PlayerPartyHUD({
             className={[styles.slot, empty ? styles.empty : '', local ? styles.local : '', player && !player.isConnected ? styles.offline : ''].join(' ')}
             style={theme ? { ['--ryder' as string]: theme.aura } : undefined}
             title={empty ? `Player ${slot.index + 1}` : player.displayName}
+            onClick={() => {
+              const vital = latest.current.get(slot.index);
+              if (vital?.playable) onPlay?.(slot.index);
+            }}
+            onKeyDown={(event) => {
+              if (event.key !== 'Enter' && event.key !== ' ') return;
+              const vital = latest.current.get(slot.index);
+              if (!vital?.playable) return;
+              event.preventDefault();
+              onPlay?.(slot.index);
+            }}
           >
             <div className={styles.portrait}>
               {ryder ? <img src={ryder.icon} alt="" /> : <span>{slot.index + 1}</span>}

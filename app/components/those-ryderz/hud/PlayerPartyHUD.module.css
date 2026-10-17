@@ -153,6 +153,21 @@
   box-shadow: 0 0 18px color-mix(in srgb, var(--ryder) 28%, transparent);
 }
 
+.playable {
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+.playable:hover,
+.playable:focus-visible {
+  border-color: color-mix(in srgb, var(--ryder) 80%, white);
+  box-shadow: 0 0 16px color-mix(in srgb, var(--ryder) 35%, transparent);
+}
+
+.playable .meta small::after {
+  content: ' · play';
+}
+
 .solo .slot:not(.local) {
   opacity: 0.22;
 }

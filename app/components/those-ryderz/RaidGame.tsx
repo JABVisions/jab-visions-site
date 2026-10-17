@@ -140,10 +140,16 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
     }
     if (next.party) {
       for (const member of next.party) {
-        partyHud.current?.setSlot(member.index, member.hp, member.maxHp, member.aura, member.maxAura, member.alive, member.bleed);
+        partyHud.current?.setSlot(member.index, member.hp, member.maxHp, member.aura, member.maxAura, member.alive, member.bleed, {
+          yours: member.yours,
+          playable: member.playable,
+        });
       }
     } else {
       partyHud.current?.setSlot(0, next.hp, next.maxHp, next.aura, next.maxAura, next.hp > 0, 1);
+    }
+    if (!prev || prev.ryderId !== next.ryderId) {
+      if (manager.activeRyder !== next.ryderId) manager.setActiveRyder(next.ryderId);
     }
     if (reviveLeft.current && next.revive) reviveLeft.current.textContent = `${Math.ceil(next.revive.left)}s`;
     if (downLeftEl.current && next.down && !next.down.faded) downLeftEl.current.textContent = `${Math.ceil(next.down.left)}s`;
@@ -266,7 +272,7 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
     if (!prev || Math.abs(prev.intermissionLeft - next.intermissionLeft) > 0.2) {
       setIntermissionLeft(next.intermissionLeft);
     }
-  }, [playerStore]);
+  }, [playerStore, manager]);
 
   useEffect(() => {
     const mq = window.matchMedia('(pointer: coarse)');
@@ -462,9 +468,11 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
   };
 
   const replay = () => {
-    if (!selected) return;
-    void engineRef.current?.start(activeRyder, manager.loadoutSpecs(activeRyder));
-    engineRef.current?.setPaused(false);
+    const engine = engineRef.current;
+    if (!engine) return;
+    if (engine.matchLive()) void engine.restartMatch();
+    else if (selected) void engine.start(activeRyder, manager.loadoutSpecs(activeRyder));
+    engine.setPaused(false);
   };
 
   const buy = (id: UpgradeId) => {
@@ -503,16 +511,31 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
         <StatBoard board={statBoard} secondsRef={boardSeconds} onContinue={() => engineRef.current?.continueReport()} />
       )}
 
+      {playing && partyState.mode === GameMode.RAID && phase !== 'dead' && phase !== 'victory' && phase !== 'report' && (
+        <div className={styles.partyDock}>
+          <PlayerPartyHUD
+            slots={partyState.slots}
+            mode={partyState.mode}
+            apiRef={partyHud}
+            onPlay={(index) => {
+              const engine = engineRef.current;
+              if (!engine) return;
+              const seat = partyState.slots.find((slot) => slot.index === index);
+              const ryder = seat?.player?.selectedRyder;
+              const tookOver = engine.assumeAlly(index, ryder ? manager.loadoutSpecs(ryder) : undefined);
+              if (tookOver) engine.setPaused(false);
+            }}
+          />
+        </div>
+      )}
+
       {playing && phase !== 'dead' && phase !== 'victory' && phase !== 'report' && (
         <div className={styles.overlay} aria-hidden="true" data-revive={reviveName ?? ''} data-down={downed ? '1' : '0'}>
           <LowHealthVignette ref={vignette} />
           <ComboIndicator ref={comboHud} />
           <RaidRadar ref={radarHud} onOpen={() => engineRef.current?.toggleMap()} />
           <div className={styles.topHud}>
-            {partyState.mode === GameMode.RAID ? (
-              <PlayerPartyHUD slots={partyState.slots} mode={partyState.mode} apiRef={partyHud} />
-            ) : null}
-            <div className={styles.chips}>
+            <div className={`${styles.chips} ${partyState.mode === GameMode.RAID ? styles.chipsBelowParty : ''}`}>
               {partyState.mode !== GameMode.PVP ? (
                 <>
                   <div className={styles.chip}>
@@ -648,7 +671,7 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
 
           <div className={styles.bottomHud}>
             <p className={styles.hint}>
-              A D or arrows turn the camera · W S walk along that view · Mouse can still orbit · Shift sprint · Space jump · X recenters pitch · B swaps shoulder · Click punches up close · Zoe blasts at range · Keven throws darts · C punch · V kick · F / RMB melee, F again throws · Z dodge · Q E R powers · {INTERACT_LABEL} picks up a downed teammate or uses the beacon · {pvpTwo ? 'Tab opens the map' : 'Tab or M opens the map'} · Esc pause
+              A D or arrows turn the camera · W S walk along that view · Mouse can still orbit · Shift sprint · Space jump · X recenters pitch · B swaps shoulder · Click punches up close · Zoe blasts at range · Keven throws darts · C punch · V kick · F / RMB melee, F again throws · Z dodge · Q E R powers · {INTERACT_LABEL} picks up a downed teammate or uses the beacon · Tap a teammate's bar to play them · {pvpTwo ? 'Tab opens the map' : 'Tab or M opens the map'} · Esc pause
               {phase === 'intermission' ? ' · Hold the spire to buy strength' : ''}
               {pvpTwo ? ' · P2 IJKL move · U punch · O kick · P melee · N dodge · M jump' : ''}
             </p>

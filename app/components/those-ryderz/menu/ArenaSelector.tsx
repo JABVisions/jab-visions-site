@@ -38,7 +38,7 @@ export default function ArenaSelector({
       <header className={styles.panelHead}>
         <p className={styles.eyebrow}>Arena select</p>
         <h2>Choose a floor</h2>
-        <p>The Block is the city. Training P.A.D. is the facility. Island Paradise is the ocean.</p>
+        <p>The Block is the city. Training P.A.D. is the facility. Island Paradise is the ocean. Choosing another floor restarts the match.</p>
       </header>
       <div className={`${styles.scroll} ${styles.options}`} role="listbox" aria-label="Arenas">
         {arenas.map((arena, i) => (
