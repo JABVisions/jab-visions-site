@@ -247,4 +247,22 @@ assert(forumDropPrimaryTag({ destinationType: "feed", dropType: "Media" }) === n
 assert(forumDropMediaChip("Media") === "Vision", "media type can stay as a secondary Vision chip");
 assert(!/vision drop/i.test(forumDropPrimaryTag({ destinationType: "room", roomId: "jab-lit" }) || ""), "Room tag is not Vision Drop");
 
+const profileFallback = applyForumRoomFeedCopy({
+  title: "Drop in JAB Comics",
+  body: "New media drop from Johnandy.",
+  meta: {
+    source: "forum_room_studio",
+    destinationType: "room",
+    origin: "create",
+    roomId: "jab-comics",
+    roomName: "JAB Comics",
+    authorName: "Johnandy",
+  },
+});
+assert(profileFallback?.title === "Added a Drop to JAB Comics", "profile fallback title becomes the Forum sentence");
+assert(
+  profileFallback?.body === "Johnandy added a Drop to 💥 JAB Comics.",
+  "profile fallback body names who added the Drop"
+);
+
 console.log("forumRoomFeedCopy.check.ts: ok");

@@ -27,6 +27,8 @@ import {
   type BoardActivity,
   type BoardActivityKind,
 } from "@/lib/board/activity";
+import { activityForumPath } from "@/lib/board/boardAuthor";
+import { mergeActivityRecords } from "@/lib/board/activityMerge";
 import { dedupeActivity, mergeActivityWithFeed } from "@/lib/board/feedActivity";
 import {
   BOARD_PROJECTS_UPDATED_EVENT,
@@ -168,6 +170,14 @@ function isHiddenPrivateDrop(item: BoardActivity, viewerId: string) {
     String(item.user_id || "") !== viewerId &&
     String(item.meta?.recipientUserId || "") !== viewerId
   );
+}
+
+function localForumFeedItems(viewerId: string) {
+  return getLocalActivity().filter((item) => {
+    if (item.meta?.visibility === "private") return false;
+    if (viewerId && item.user_id && item.user_id !== viewerId) return false;
+    return Boolean(activityForumPath(item));
+  });
 }
 
 function pendingLocalFeedItems(remote: BoardActivity[], viewerId: string) {
@@ -339,6 +349,7 @@ export default function HomeBoardFeedPage() {
         const cleaned = Array.isArray(data) ? data : [];
         const viewerId = auth.user?.id || viewerUserId;
         const withPending = dedupeActivity([
+          ...localForumFeedItems(viewerId),
           ...pendingLocalFeedItems(cleaned, viewerId),
           ...cleaned,
         ]);
@@ -440,14 +451,7 @@ export default function HomeBoardFeedPage() {
         if (index === -1) return prev;
         const current = prev[index];
         const next = [...prev];
-        next[index] = {
-          ...current,
-          ...a,
-          meta: {
-            ...(current.meta && typeof current.meta === "object" ? current.meta : {}),
-            ...(a.meta && typeof a.meta === "object" ? a.meta : {}),
-          },
-        };
+        next[index] = mergeActivityRecords(a, current);
         return next;
       });
     };

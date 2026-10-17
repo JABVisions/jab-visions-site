@@ -5,7 +5,7 @@ import "./activityCard.css";
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Eye, EyeOff, SlidersHorizontal } from "lucide-react";
+import { Eye, EyeOff, MessageSquareText, SlidersHorizontal } from "lucide-react";
 import {
   activityMatchesDropId,
   appendLocalActivity,
@@ -70,6 +70,8 @@ import {
   applyForumRoomFeedCopy,
   forumDropMediaChip,
   forumDropPrimaryTag,
+  forumRoomDisplayName,
+  recoverForumNavigationMeta,
 } from "@/lib/board/forumRoomFeedCopy";
 import {
   activityForumPath,
@@ -587,10 +589,17 @@ function ActivityCard({
   // id-based ownership check (drops store the author's user_id as a uuid).
   const [currentAuthUserId, setCurrentAuthUserId] = useState("");
 
+  const rawMeta = (item as any)?.meta;
+  const storedMeta = rawMeta && typeof rawMeta === "object" ? rawMeta : null;
+  const meta = recoverForumNavigationMeta(
+    storedMeta,
+    metaString(item?.title),
+    metaString((item as any)?.body, (item as any)?.text)
+  ) as Record<string, any>;
   const forumCopy = applyForumRoomFeedCopy({
     title: metaString(item?.title),
     body: metaString((item as any)?.body, (item as any)?.text),
-    meta: item?.meta && typeof item.meta === "object" ? (item.meta as Record<string, unknown>) : null,
+    meta,
   });
   const title = replacePlaceholderActor(
     forumCopy?.title || metaString(item?.title) || "Drop",
@@ -603,8 +612,6 @@ function ActivityCard({
   const id = String((item as any)?.id || "");
   const timeLabel = formatDropTime((item as any)?.created_at);
 
-  const rawMeta = (item as any)?.meta;
-  const meta = rawMeta && typeof rawMeta === "object" ? rawMeta : null;
   const preview = meta?.preview ?? meta ?? null;
   const storedSoundCloudEmbed = metaString(meta?.embedUrl, preview?.embedUrl);
   const rawHref =
@@ -678,11 +685,16 @@ function ActivityCard({
     typeof meta?.authorAuraIntensity === "number"
       ? Math.max(0.22, Math.min(1, meta.authorAuraIntensity / 100))
       : Math.max(0.22, Math.min(1, authorProfile.auraIntensity / 100));
-  const forumHref = activityForumPath(item);
+  const forumHref = activityForumPath({ ...item, meta });
+  const forumRoom = forumRoomDisplayName({
+    roomId: metaString(meta?.roomId, meta?.forumRoomId),
+    roomName: metaString(meta?.roomName),
+    roomIcon: metaString(meta?.roomIcon),
+  });
   const forumLinkLabel = metaString(meta?.conversationTitle)
     ? `Open ${metaString(meta?.conversationTitle)}`
-    : metaString(meta?.roomName)
-      ? `Open ${metaString(meta?.roomName)}`
+    : forumRoom.name && forumRoom.name !== "a Room"
+      ? `Open ${forumRoom.name}`
       : "Open Room";
   function goToForumRoom(event?: React.SyntheticEvent) {
     event?.preventDefault();
@@ -1763,6 +1775,7 @@ function ActivityCard({
           onPointerDown={(event) => event.stopPropagation()}
           onClick={goToForumRoom}
         >
+          <MessageSquareText size={13} strokeWidth={2.4} aria-hidden />
           {forumLinkLabel}
         </button>
       ) : null}

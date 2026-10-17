@@ -212,6 +212,8 @@
           position: relative;
           z-index: 3;
           display: inline-flex;
+          align-items: center;
+          gap: 6px;
           margin-top: 8px;
           border-radius: 999px;
           border: 1px solid rgba(110, 231, 183, 0.28);
@@ -224,6 +226,11 @@
           text-transform: uppercase;
           text-decoration: none;
           cursor: pointer;
+        }
+
+        .forumRoomLink svg {
+          flex: 0 0 auto;
+          color: rgba(139, 92, 255, 0.95);
         }
 
         .authorMark {

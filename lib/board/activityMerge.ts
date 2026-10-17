@@ -1,4 +1,5 @@
 import type { BoardActivity } from "@/lib/board/activity";
+import { activityForumPath } from "@/lib/board/boardAuthor";
 import {
   activityLooksLikeStoredImage,
   activityLooksLikeStoredVideo,
@@ -6,6 +7,11 @@ import {
   preferFeedMediaUrl,
   preferStreamingHref,
 } from "@/lib/board/feedDropMedia";
+import {
+  applyForumRoomFeedCopy,
+  isGeneratedProfileDropBody,
+  recoverForumNavigationMeta,
+} from "@/lib/board/forumRoomFeedCopy";
 import { isProjectRoomDropActivity } from "@/lib/board/projectRoomDrop";
 import { isSoundCloudUrl } from "@/lib/board/soundCloudEmbed";
 
@@ -131,6 +137,88 @@ function preferMusicHref(preferred?: string | null, fallback?: string | null) {
   return preferStreamingHref(preferred, fallback) || preferFeedMediaUrl(preferred, fallback);
 }
 
+function filledMetaText(value: unknown) {
+  if (typeof value !== "string") return "";
+  const trimmed = value.trim();
+  if (!trimmed || trimmed === "null" || trimmed === "undefined") return "";
+  return trimmed;
+}
+
+const FORUM_SOURCES = new Set(["forum_room_studio", "forum_room_share"]);
+const FORUM_ORIGINS = new Set(["create", "share", "conversation"]);
+
+function preferForumMetaValue(
+  key: string,
+  preferred: Record<string, any>,
+  fallback: Record<string, any>
+) {
+  const primary = filledMetaText(preferred[key]);
+  const secondary = filledMetaText(fallback[key]);
+  if (key === "source") {
+    if (FORUM_SOURCES.has(primary)) return primary;
+    if (FORUM_SOURCES.has(secondary)) return secondary;
+    return primary || secondary;
+  }
+  if (key === "origin") {
+    if (FORUM_ORIGINS.has(primary)) return primary;
+    if (!primary && FORUM_ORIGINS.has(secondary)) return secondary;
+    return primary || secondary;
+  }
+  return primary || secondary;
+}
+
+function isForumAttributionCopy(title: unknown, body: unknown) {
+  const heading = String(title || "").trim();
+  const sentence = String(body || "").trim();
+  return (
+    /^added a drop to\s+/i.test(heading) ||
+    /\b(?:added a drop to|replied with a drop|shared a drop in)\b/i.test(sentence)
+  );
+}
+
+function isGenericProfileDropCopy(title: unknown, body: unknown) {
+  if (isForumAttributionCopy(title, body)) return false;
+  const heading = String(title || "").trim();
+  const sentence = String(body || "").trim();
+  return /^drop in\s+/i.test(heading) || isGeneratedProfileDropBody(sentence);
+}
+
+/** Keep the Forum Room sentence when the profile board copy is the generic fallback. */
+function preferForumFeedCopy(preferred: BoardActivity, fallback: BoardActivity) {
+  const preferredForum = isForumAttributionCopy(preferred.title, preferred.body);
+  const fallbackForum = isForumAttributionCopy(fallback.title, fallback.body);
+  const preferredGeneric = isGenericProfileDropCopy(preferred.title, preferred.body);
+  const fallbackGeneric = isGenericProfileDropCopy(fallback.title, fallback.body);
+  if (fallbackForum && preferredGeneric) return fallback;
+  if (preferredForum && fallbackGeneric) return preferred;
+  return null;
+}
+
+export function presentForumDrop(item: BoardActivity): BoardActivity {
+  if (!item) return item;
+  const recovered = recoverForumNavigationMeta(metaRecord(item), item.title, item.body);
+  const rewritten = applyForumRoomFeedCopy({
+    title: item.title,
+    body: item.body,
+    meta: recovered,
+  });
+  const next: BoardActivity = {
+    ...item,
+    title: rewritten?.title || item.title,
+    body: rewritten?.body || item.body,
+    meta: recovered,
+  };
+  const forumHref = activityForumPath(next);
+  if (!forumHref) return next;
+  return {
+    ...next,
+    meta: {
+      ...recovered,
+      forumHref,
+    },
+  };
+}
+
 export function mergeActivityRecords(
   preferred: BoardActivity,
   fallback: BoardActivity
@@ -153,6 +241,19 @@ export function mergeActivityRecords(
   const href = musicFirst
     ? preferMusicHref(musicFirst.href, musicFirst === preferred ? fallback.href : preferred.href)
     : preferMusicHref(preferred.href, fallback.href);
+  const forumCopy = musicFirst ? null : preferForumFeedCopy(preferred, fallback);
+  const forumMeta = {
+    roomId: preferForumMetaValue("roomId", preferredMeta, fallbackMeta),
+    forumRoomId: preferForumMetaValue("forumRoomId", preferredMeta, fallbackMeta),
+    roomName: preferForumMetaValue("roomName", preferredMeta, fallbackMeta),
+    roomIcon: preferForumMetaValue("roomIcon", preferredMeta, fallbackMeta),
+    destinationType: preferForumMetaValue("destinationType", preferredMeta, fallbackMeta),
+    conversationId: preferForumMetaValue("conversationId", preferredMeta, fallbackMeta),
+    conversationTitle: preferForumMetaValue("conversationTitle", preferredMeta, fallbackMeta),
+    forumHref: preferForumMetaValue("forumHref", preferredMeta, fallbackMeta),
+    source: preferForumMetaValue("source", preferredMeta, fallbackMeta),
+    origin: preferForumMetaValue("origin", preferredMeta, fallbackMeta),
+  };
 
   return {
     ...fallback,
@@ -162,16 +263,22 @@ export function mergeActivityRecords(
           title: musicFirst.title || preferred.title || fallback.title,
           body: musicFirst.body || preferred.body || fallback.body,
         }
-      : {
-          title: preferred.title || fallback.title,
-          body: preferred.body || fallback.body,
-        }),
+      : forumCopy
+        ? {
+            title: forumCopy.title || preferred.title || fallback.title,
+            body: forumCopy.body || preferred.body || fallback.body,
+          }
+        : {
+            title: preferred.title || fallback.title,
+            body: preferred.body || fallback.body,
+          }),
     href,
     image_url: preferred.image_url || fallback.image_url,
     meta: {
       ...fallbackMeta,
       ...preferredMeta,
-      origin: preferredMeta.origin || fallbackMeta.origin || null,
+      ...Object.fromEntries(Object.entries(forumMeta).filter(([, value]) => value)),
+      origin: forumMeta.origin || preferredMeta.origin || fallbackMeta.origin || null,
       dropId: preferredMeta.dropId || fallbackMeta.dropId || null,
       mediaKind: musicFirst
         ? musicFirst.meta?.mediaKind || preferredMeta.mediaKind || fallbackMeta.mediaKind || null
@@ -236,8 +343,9 @@ export function dedupeActivity(items: BoardActivity[]) {
   const map = new Map<string, BoardActivity>();
   const aliases = new Map<string, string>();
 
-  for (const item of items) {
-    if (!item?.id) continue;
+  for (const raw of items) {
+    if (!raw?.id) continue;
+    const item = presentForumDrop(raw);
     const meta = metaRecord(item);
     const family = activityDropFamily(item);
     const isPushed = Boolean(meta.isPushed);
@@ -382,9 +490,11 @@ export function dedupeActivity(items: BoardActivity[]) {
       (nextScore === previousScore && activitySortTime(item) > activitySortTime(previous));
     map.set(
       key,
-      preferNext
-        ? mergeActivityRecords(item, previous)
-        : mergeActivityRecords(previous, item)
+      presentForumDrop(
+        preferNext
+          ? mergeActivityRecords(item, previous)
+          : mergeActivityRecords(previous, item)
+      )
     );
     for (const alias of itemAliases) aliases.set(alias, key);
     for (const alias of weakAliases) {

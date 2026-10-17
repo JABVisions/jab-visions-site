@@ -1,4 +1,4 @@
-import { getRoomById } from "@/lib/board/rooms/catalog";
+import { BOARD_ROOM_CATALOG, getRoomById } from "@/lib/board/rooms/catalog";
 import type { DropDestination } from "@/lib/board/dropDestination";
 import { isForumRoomDestination } from "@/lib/board/dropDestination";
 import { pickBoardDisplayName } from "@/lib/board/boardAuthor";
@@ -101,6 +101,109 @@ export function copyFromDropDestination(
       destination.type === "room_conversation" ? destination.conversationTitle : undefined,
     actorName: extras?.actorName,
   });
+}
+
+function cleanMetaText(value: unknown): string {
+  if (typeof value !== "string") return "";
+  const trimmed = value.trim();
+  if (!trimmed || trimmed === "null" || trimmed === "undefined") return "";
+  return trimmed;
+}
+
+function catalogRoomByName(name: string) {
+  const target = name.trim().toLowerCase();
+  if (!target) return null;
+  return (
+    BOARD_ROOM_CATALOG.find((room) => {
+      const display = forumRoomDisplayName({ roomId: room.id, roomName: room.name }).name;
+      return display.toLowerCase() === target || room.name.toLowerCase() === target;
+    }) ?? null
+  );
+}
+
+/** "Drop in JAB Comics" / "Johnandy added a Drop to JAB Comics." names a real Forum Room. */
+export function forumRoomReferencedByCopy(title: unknown, body: unknown) {
+  const titleText = String(title || "").trim();
+  const bodyText = String(body || "").trim();
+  const titleName =
+    /^drop in\s+(.+)$/i.exec(titleText)?.[1]?.trim() ||
+    /^added a drop to\s+(.+)$/i.exec(titleText)?.[1]?.trim() ||
+    "";
+  const fromTitle = titleName ? catalogRoomByName(titleName) : null;
+  if (fromTitle) return fromTitle;
+  if (!/\b(?:added a drop to|shared a drop in|replied with a drop in)\b/i.test(bodyText)) {
+    return null;
+  }
+  const rooms = [...BOARD_ROOM_CATALOG].sort((a, b) => b.name.length - a.name.length);
+  return (
+    rooms.find((room) => {
+      const escaped = room.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      return new RegExp(
+        `\\b(?:added a drop to|shared a drop in|replied with a drop in)\\b[^\\n]*\\b${escaped}\\b`,
+        "i"
+      ).test(bodyText);
+    }) ?? null
+  );
+}
+
+/**
+ * Profile-board copies of a Forum Drop often arrive without roomId. The title
+ * and sentence still name the room, and that is enough to keep the Open button.
+ */
+export function recoverForumNavigationMeta(
+  meta: Record<string, unknown> | null | undefined,
+  title?: unknown,
+  body?: unknown
+): Record<string, unknown> {
+  const base = meta && typeof meta === "object" ? { ...meta } : {};
+  const destinationType = cleanMetaText(base.destinationType);
+  const source = cleanMetaText(base.source);
+  const origin = cleanMetaText(base.origin);
+  const cardStyle = cleanMetaText(base.cardStyle);
+  if (
+    destinationType === "project_room" ||
+    destinationType === "feed" ||
+    cardStyle === "project_room_drop" ||
+    origin === "project_room" ||
+    source === "drop_studio"
+  ) {
+    return base;
+  }
+
+  const existingRoom = cleanMetaText(base.roomId) || cleanMetaText(base.forumRoomId);
+  const alreadyForum =
+    destinationType === "room" ||
+    destinationType === "room_conversation" ||
+    source === "forum_room_studio" ||
+    source === "forum_room_share";
+  if (existingRoom && alreadyForum) return base;
+
+  const room = existingRoom ? getRoomById(existingRoom) : forumRoomReferencedByCopy(title, body);
+  if (!existingRoom && !room) return base;
+
+  const roomId = existingRoom || room?.id || "";
+  if (!roomId) return base;
+  const nextDestination =
+    destinationType === "room" || destinationType === "room_conversation" ? destinationType : "room";
+  const nextSource =
+    source === "forum_room_studio" || source === "forum_room_share" ? source : "forum_room_studio";
+  const nextOrigin =
+    origin === "create" || origin === "share" || origin === "conversation" ? origin : origin || "create";
+
+  return {
+    ...base,
+    roomId,
+    forumRoomId: cleanMetaText(base.forumRoomId) || roomId,
+    roomName: cleanMetaText(base.roomName) || room?.name || null,
+    roomIcon: cleanMetaText(base.roomIcon) || room?.icon || null,
+    destinationType: nextDestination,
+    source: nextSource,
+    origin: nextOrigin,
+  };
+}
+
+export function isGeneratedProfileDropBody(value: unknown): boolean {
+  return /^new .+ drop (added to board|from .+)\.?$/i.test(String(value || "").trim());
 }
 
 export function isForumRoomActivityMeta(meta: Record<string, unknown> | null | undefined): boolean {
@@ -236,7 +339,7 @@ export function applyForumRoomFeedCopy(item: {
   const keepBody =
     rawBody &&
     !looksLikeMediaFileName(rawBody) &&
-    !/^new .+ drop added to board\.?$/i.test(rawBody) &&
+    !isGeneratedProfileDropBody(rawBody) &&
     !/^shared drop$/i.test(rawBody) &&
     !/\bBoard User\b/.test(rawBody);
   return {
