@@ -35,6 +35,7 @@ import { FighterStriker } from '../fighter/striker';
 import { combatProfileFor, resolvePowerLink } from '../fighter/profiles';
 import { openingPlan } from '../fighter/planner';
 import { commitSteer, freshNav, type NavHint } from '../nav';
+import { PowerOutage, abilityLockout, type PowerClock } from '../power-outage';
 
 export interface DuelBody {
   fighter: Fighter;
@@ -104,7 +105,8 @@ const STEER_SWEEP_LIMIT = 5;
 
 /**
  * One CPU Ryder. Decisions are scored, then the same kit the player would
- * use plays the power. Aura, cooldowns and a rhythm gap keep it from spamming.
+ * use plays the power. Aura and a short rhythm gap keep it from spamming.
+ * Q, E, and R have no cooldown. A random blackout is the only stop.
  */
 export class PvpCpu {
   abilitiesCast = 0;
@@ -145,6 +147,7 @@ export class PvpCpu {
   private aimZ = 0;
   private aimRefresh = 0;
   private disposed = false;
+  private powerOut = new PowerOutage(false);
   private clipSeen = -1;
   private readonly nav: NavHint = freshNav();
 
@@ -189,9 +192,20 @@ export class PvpCpu {
     return this.foe?.sink ?? 0;
   }
 
+  powerClock(): PowerClock {
+    return this.powerOut.snapshot();
+  }
+
+  /** Keep a blackout that belonged to this body before it changed hands. */
+  takePower(clock: PowerClock) {
+    this.powerOut.adopt(clock);
+    if (clock.dry > 0) this.aura = 0;
+  }
+
   attach(body: DuelBody, spec: RyderSpec) {
     this.disposeKit();
     this.spec = spec;
+    this.powerOut = new PowerOutage(!this.hooks.raidTargets);
     this.body = body;
     this.maxAura = spec.maxAura;
     this.aura = spec.maxAura;
@@ -272,9 +286,10 @@ export class PvpCpu {
       aura: this.aura,
       maxAura: this.maxAura,
       burnout: this.burnout,
+      powersDown: this.powerOut.down,
     });
     this.scheduler.update(time);
-    this.power?.update(dt, time, this.aura, this.maxAura, !this.burnout, this.hooks.cameraObject);
+    this.power?.update(dt, time, this.aura, this.maxAura, !this.burnout && !this.powerOut.down, this.hooks.cameraObject);
     if (!this.kit?.steerWhileBusy) this.separateFromFoe();
 
     const group = body.fighter.humanoid.group;
@@ -338,7 +353,7 @@ export class PvpCpu {
     const slots: AbilityRead[] = spec.moves.map((move, index) => ({
       band: ABILITY_BANDS[move.id],
       affordable: move.drain > 0 ? this.aura > 2 : this.aura >= move.auraCost,
-      cooling: Boolean(this.kit?.powersDown) || this.rhythm[index] > 0 || this.moveCd[index] > 0,
+      cooling: this.powerOut.down || Boolean(this.kit?.powersDown) || this.rhythm[index] > 0 || this.moveCd[index] > 0,
       ultimate: index === 2,
       active: this.moveOn[index],
     }));
@@ -726,7 +741,7 @@ export class PvpCpu {
   private cast(slot: number) {
     const spec = this.spec;
     const move = spec?.moves[slot];
-    if (!spec || !move || this.burnout || this.kit?.powersDown) return;
+    if (!spec || !move || this.burnout || this.powerOut.down || this.kit?.powersDown) return;
     if (this.moveCd[slot] > 0 || this.rhythm[slot] > 0) return;
     if (this.kit?.releaseId === move.id) {
       this.kit.endAbility?.(move.id);
@@ -773,6 +788,21 @@ export class PvpCpu {
   }
 
   private regen(dt: number, spec: RyderSpec) {
+    const shift = this.powerOut.step(dt, !this.hooks.raidTargets, this.aura);
+    if (shift.cut) {
+      this.aura = 0;
+      for (let i = 0; i < 3; i += 1) if (this.moveOn[i]) this.endSlot(i, spec.moves[i]);
+      this.kit?.interrupt();
+      return;
+    }
+    if (shift.back) {
+      this.aura = Math.min(this.maxAura, shift.aura);
+      this.burnout = this.aura <= 0.01;
+      if (this.aura >= this.maxAura * BURNOUT_RECOVERY) this.burnout = false;
+    } else if (this.powerOut.down) {
+      this.aura = 0;
+      return;
+    }
     let drain = 0;
     for (let i = 0; i < 3; i += 1) if (this.moveOn[i]) drain += spec.moves[i].drain;
     if (drain > 0) {
@@ -906,7 +936,12 @@ export class PvpCpu {
         cpu.facing = yaw;
       },
       gainAura: (amount: number) => {
-        cpu.aura = Math.min(cpu.maxAura, cpu.aura + Math.max(0, amount));
+        const gain = Math.max(0, amount);
+        if (cpu.powerOut.down) {
+          cpu.powerOut.stashed = Math.min(cpu.maxAura, cpu.powerOut.stashed + gain);
+          return;
+        }
+        cpu.aura = Math.min(cpu.maxAura, cpu.aura + gain);
         if (cpu.burnout && cpu.aura >= cpu.maxAura * BURNOUT_RECOVERY) cpu.burnout = false;
       },
       spendAura: (amount: number) => {
@@ -925,8 +960,10 @@ export class PvpCpu {
         return body.hp - before;
       },
       cooldown: (id: AbilitySpec['id'], seconds: number) => {
+        const hold = abilityLockout(seconds);
+        if (hold <= 0) return;
         const slot = cpu.spec?.moves.findIndex((move) => move.id === id) ?? -1;
-        if (slot >= 0) cpu.moveCd[slot] = Math.max(cpu.moveCd[slot], seconds);
+        if (slot >= 0) cpu.moveCd[slot] = Math.max(cpu.moveCd[slot], hold);
       },
       vitals: () => ({ hp: cpu.body?.hp ?? 0, maxHp: cpu.body?.maxHp ?? 1 }),
       hold: (target: KitTarget, seconds: number) => {

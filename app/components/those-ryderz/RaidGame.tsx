@@ -129,7 +129,14 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
   const syncHud = useCallback((next: HudState) => {
     const prev = hudRef.current;
     hudRef.current = next;
-    circularHud.current?.setVitals(next.hp, next.maxHp, next.aura, next.maxAura, next.burnout, next.resonance);
+    circularHud.current?.setVitals(
+      next.hp,
+      next.maxHp,
+      next.aura,
+      next.maxAura,
+      next.burnout || next.tideOut,
+      next.resonance,
+    );
     vignette.current?.setHealth(next.hp, next.maxHp);
     comboHud.current?.setCombo(next.combo);
     radarHud.current?.draw(next.radar);
@@ -635,8 +642,10 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
             </div>
           )}
 
-          {burnout && !recovering && !downed && <div className={styles.burnout}>Aura empty · melee only · weaker blows</div>}
-          {tideOut && !burnout && !downed && <div className={styles.burnout}>Tide out · melee only · get clear of the hosts</div>}
+          {burnout && !tideOut && !recovering && !downed && (
+            <div className={styles.burnout}>Aura empty · melee only · weaker blows</div>
+          )}
+          {tideOut && !downed && <div className={styles.burnout}>Powers out · melee only · get clear of the hosts</div>}
 
           {recovering && <div className={styles.recovering} />}
 

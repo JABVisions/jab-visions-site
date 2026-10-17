@@ -5,9 +5,9 @@ import type { PoseOverride } from '../skeletal';
 import { BoomerAuraSystem } from './aura';
 import { auraRing, beamVolume, livingFoes, pacify, warnMissingBoomerModel, xrayOverlay, type CrowdBody } from './fx';
 
-export const DREAM_VISION = { radius: 12, pacify: 4, expand: 0.65, cooldown: 14 };
-export const PROCLAIM_PEACE = { range: 16, duration: 3, tick: 0.5, damage: 8, cooldown: 16 };
-export const FREE_AT_LAST = { duration: 12, strength: 2, speed: 2, endurance: 0.5, cooldown: 30 };
+export const DREAM_VISION = { radius: 12, pacify: 4, expand: 0.65 };
+export const PROCLAIM_PEACE = { range: 16, duration: 3, tick: 0.5, damage: 8 };
+export const FREE_AT_LAST = { duration: 12, strength: 2, speed: 2, endurance: 0.5 };
 
 const BURGUNDY = 0x800020;
 const _look = new THREE.Vector3();
@@ -164,7 +164,6 @@ export class MartinKit implements RyderKit {
   private dreamVision() {
     const ctx = this.ctx;
     if (!ctx || !this.wave) return false;
-    ctx.cooldown('dreamVision', DREAM_VISION.cooldown);
     ctx.sound('martin.dreamVision.scan');
     ctx.camera.addKick(0.16);
     this.pulse = 1;
@@ -180,7 +179,6 @@ export class MartinKit implements RyderKit {
   private proclaimPeace() {
     const ctx = this.ctx;
     if (!ctx || !this.beam) return false;
-    ctx.cooldown('proclaimPeace', PROCLAIM_PEACE.cooldown);
     ctx.sound('martin.proclaimPeace.beam');
     ctx.camera.addKick(0.12);
     this.pulse = 1;
@@ -196,7 +194,6 @@ export class MartinKit implements RyderKit {
   private freeAtLast() {
     const ctx = this.ctx;
     if (!ctx) return false;
-    ctx.cooldown('freeAtLast', FREE_AT_LAST.cooldown);
     ctx.sound('martin.freeAtLast.empower');
     ctx.camera.addKick(0.22);
     ctx.camera.addFovPunch(4);

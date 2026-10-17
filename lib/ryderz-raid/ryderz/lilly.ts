@@ -19,11 +19,9 @@ import {
 } from './lilly-flight';
 import type { HazardZone, KitContext, KitFrame, KitTarget, MeleeStep, RyderKit } from './kit';
 import {
-  GIANT_COOLDOWN,
   GIANT_HOLD,
   GIANT_MOVE,
   GIANT_SCALE,
-  SOUL_COOLDOWN,
   SOUL_DPS,
   SOUL_HEAL_RATIO,
   SOUL_RADIUS,
@@ -32,7 +30,6 @@ import {
   STOMP_SHOCK,
   STOMP_SHOCK_DAMAGE,
   STOMP_TELEGRAPH,
-  SUMMON_COOLDOWN,
   SUMMON_DURATION,
   healFromDamage,
   radiusForScale,
@@ -265,7 +262,6 @@ export class LillyKit implements RyderKit {
     if (id !== 'soulDrain') return;
     this.drainOn = false;
     this.ctx?.sound('lilly.drain.end');
-    this.ctx?.cooldown('soulDrain', SOUL_COOLDOWN);
   }
 
   update(frame: KitFrame) {
@@ -300,7 +296,6 @@ export class LillyKit implements RyderKit {
     this.grow = { phase: 'plant', t: 0, held: 0, stride: 0, foot: 0, telegraph: null };
     this.ctx?.sound('lilly.giant.start');
     this.ctx?.camera.addShake(0.2);
-    this.ctx?.cooldown('giantStep', GIANT_COOLDOWN);
     return true;
   }
 
@@ -308,7 +303,6 @@ export class LillyKit implements RyderKit {
     if (this.summonT >= 0 || (this.grow && this.grow.phase !== 'giant')) return true;
     this.summonT = 0;
     this.ctx?.sound('lilly.summon.start');
-    this.ctx?.cooldown('animalAllegiance', SUMMON_COOLDOWN);
     return true;
   }
 

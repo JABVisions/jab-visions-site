@@ -6,11 +6,9 @@
 export const SOUL_RADIUS = 4.6;
 export const SOUL_DPS = 16;
 export const SOUL_HEAL_RATIO = 0.4;
-export const SOUL_COOLDOWN = 6;
 
 export const GIANT_SCALE = 4;
 export const GIANT_HOLD = 8;
-export const GIANT_COOLDOWN = 14;
 export const GIANT_MOVE = 0.68;
 
 export const STOMP_CORE = 1.15;
@@ -19,7 +17,6 @@ export const STOMP_CORE_DAMAGE = 36;
 export const STOMP_SHOCK_DAMAGE = 12;
 export const STOMP_TELEGRAPH = 0.28;
 
-export const SUMMON_COOLDOWN = 11;
 export const SUMMON_DURATION = 1.75;
 
 export interface CircleBody {

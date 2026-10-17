@@ -11,7 +11,7 @@ import type { MeleeStyle, PoseOverride } from '../skeletal';
 /**
  * A Ryder combat kit owns one Ryder's physical moves: how her abilities play
  * out over time, what her melee combo is, and how she dresses her own speed.
- * The engine keeps ownership of inputs, aura costs, cooldowns, the Power Deck,
+ * The engine keeps ownership of inputs, aura costs, the random power blackout, the Power Deck,
  * switching, rounds and enemies; a kit only drives the player body and asks
  * the engine to hurt things through the context it is handed.
  */
@@ -81,7 +81,10 @@ export interface KitContext {
    * Ryder is already at maximum.
    */
   heal(amount: number): number;
-  /** Hold an ability off the input for `seconds`. */
+  /**
+   * A tap guard under half a second may debounce a toggle. Longer requests are
+   * ignored: Q, E, and R have no cooldown. The power blackout is the stop.
+   */
   cooldown(id: AbilityId, seconds: number): void;
   /** Current health. Rewind reads this so it can restore a capped loss. */
   vitals?(): { hp: number; maxHp: number };
@@ -162,6 +165,8 @@ export interface KitFrame {
   boost?: boolean;
   /** Hard hit stun. Flight ends. */
   stunned?: boolean;
+  /** The shared power blackout. Kits drop casts, surf, and aura dressing while this is set. */
+  powersDown?: boolean;
 }
 
 export interface RyderKit {

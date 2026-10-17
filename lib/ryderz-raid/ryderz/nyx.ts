@@ -31,7 +31,6 @@ const HOLD_PVE = 4;
 const HOLD_PVP = 1.5;
 const IMMUNE_PVE = 2.8;
 const IMMUNE_PVP = 3.5;
-const ZAP_CD = 18;
 
 const REWIND_WINDOW = 2.4;
 const REWIND_SAMPLE = 0.08;
@@ -40,7 +39,6 @@ const REWIND_SLIDE = 0.4;
 const HEAL_CAP = 24;
 const HEAL_CAP_OVERDRIVE = 36;
 const HEAL_FRACTION = 0.5;
-const REWIND_CD = 12;
 const DECOY_LIFE = 2;
 
 const ZERO_WARN = 0.35;
@@ -50,7 +48,6 @@ const ZERO_RADIUS_OVERDRIVE = 8;
 const SLOW_PVE = 0.45;
 const SLOW_PVP = 0.72;
 const ZERO_BURST = 12;
-const ZERO_CD = 16;
 
 const METER_MAX = 100;
 const METER_HIT = 14;
@@ -502,7 +499,6 @@ export class NyxKit implements RyderKit {
         boosted,
         healed: false,
       };
-      this.ctx.cooldown('rewindProtocol', REWIND_CD);
       this.ctx.sound('nyx.rewind.swing');
       this.ctx.iframes(0.35);
       return true;
@@ -524,7 +520,6 @@ export class NyxKit implements RyderKit {
         shards: this.spawnShards(),
         burst: false,
       };
-      this.ctx.cooldown('zeroHour', ZERO_CD);
       this.ctx.sound('nyx.zero.swing');
       return true;
     }
@@ -629,7 +624,6 @@ export class NyxKit implements RyderKit {
         zap.captures.push({ target, left: duration, casing, beam });
         ctx.particles.emit(target.pos.clone().setY(1.1), CYAN, 12, { speed: 6, size: 0.18, life: 0.35, up: 0.8 });
       }
-      ctx.cooldown('temporalZap', ZAP_CD);
       ctx.sound('nyx.zap.hit');
       ctx.hitStop(0.04);
       return;

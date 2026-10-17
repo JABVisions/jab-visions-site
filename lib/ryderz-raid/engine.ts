@@ -25,6 +25,7 @@ import {
   type UpgradeId,
 } from './config';
 import { GameMode } from './game-mode';
+import { PowerOutage, abilityLockout, type PowerClock } from './power-outage';
 import { DEFAULT_ARENA, arenaSpec, type ArenaDefinition, type ArenaId } from './arenas';
 import { RyderBeacon, type BeaconHudState } from './beacon';
 import { RyderPowerVFX, type PowerState } from './power-vfx';
@@ -529,6 +530,8 @@ export class RaidEngine {
   private aura = 100;
   private maxAura = 100;
   private burnout = false;
+  /** Random stretch where Q, E, and R stop and the aura goes dark. */
+  private powerOut = new PowerOutage(false);
   private fireCd = 0;
   private meleeCd = 0;
   private meleeT = 0;
@@ -649,6 +652,7 @@ export class RaidEngine {
     this.maxAura = this.spec.maxAura;
     this.aura = this.maxAura;
     this.burnout = false;
+    this.powerOut = new PowerOutage(this.gameMode === GameMode.PVP);
     this.points = 0;
     this.round = 0;
     this.fireCd = 0;
@@ -897,6 +901,39 @@ export class RaidEngine {
     return foe.hp <= 0;
   }
 
+  /** Live power-blackout clock, for headless checks. */
+  powerProbe() {
+    return {
+      down: this.powerOut.down,
+      live: this.powerOut.live,
+      dry: this.powerOut.dry,
+      stashed: this.powerOut.stashed,
+      aura: this.aura,
+      moveCd: [...this.moveCd] as [number, number, number],
+      inWorld: Boolean(this.player),
+    };
+  }
+
+  /** Force the random stop so a check can see the aura go dark. */
+  debugCutPowers(seconds = 4) {
+    this.powerOut.cutNow(seconds, this.aura);
+    this.aura = 0;
+    this.endAllMoves();
+    this.kit?.interrupt();
+  }
+
+  /**
+   * Cast Q/E/R through the real gate. Clears only the tap debounce first, so a
+   * multi-second lockout still shows up as `locked`.
+   */
+  debugCast(slot: number) {
+    if (this.moveCd[slot] !== undefined) this.moveCd[slot] = 0;
+    const before = this.aura;
+    this.tryMove(slot);
+    const moveCd = this.moveCd[slot] ?? 0;
+    return { spent: before - this.aura, aura: this.aura, moveCd, locked: moveCd > 0.45, down: this.powerOut.down };
+  }
+
   /** Clear the wave without awarding the removed enemies as kills. */
   debugFinishRound() {
     this.queue = [];
@@ -1078,13 +1115,15 @@ export class RaidEngine {
     this.endAllMoves();
     this.unbindKit();
     const hpFrac = this.maxHp > 0 ? this.hp / this.maxHp : 1;
-    const auraFrac = this.maxAura > 0 ? this.aura / this.maxAura : 1;
+    const carriedAura = this.powerOut.down ? this.powerOut.stashed : this.aura;
+    const auraFrac = this.maxAura > 0 ? carriedAura / this.maxAura : 1;
     this.spec = spec;
     this.moves = moves?.length === 3 ? moves : spec.moves;
     this.maxHp = spec.maxHp + this.upgrades.vitality * 25;
     this.hp = Math.max(1, this.maxHp * hpFrac);
     this.maxAura = spec.maxAura + this.upgrades.capacity * 20;
     this.aura = this.maxAura * auraFrac;
+    this.powerOut = new PowerOutage(this.gameMode === GameMode.PVP);
     this.moveCd = [0, 0, 0];
     this.moveT = [0, 0, 0];
     this.queuedMoves = [false, false, false];
@@ -1160,6 +1199,8 @@ export class RaidEngine {
       maxAura: this.maxAura,
       down: this.raidDown ? this.downLeft : 0,
     };
+    const incomingClock = host.cpu?.powerClock() ?? null;
+    const leavingClock = this.powerOut.snapshot();
     const incomingDown = host.down ?? 0;
     const incoming = carriedVitals(
       { hp: host.hp, maxHp: host.maxHp, aura: host.aura ?? 0, maxAura: host.maxAura ?? spec.maxAura },
@@ -1185,6 +1226,9 @@ export class RaidEngine {
     this.hp = incoming.hp;
     this.maxAura = incoming.maxAura;
     this.aura = incoming.aura;
+    if (incomingClock) this.powerOut.adopt(incomingClock);
+    else this.powerOut = new PowerOutage(false);
+    if (this.powerOut.down) this.aura = 0;
     this.raidDown = incomingDown > 0;
     this.downLeft = incomingDown;
     this.pos.set(arrived.x, 0, arrived.z);
@@ -1235,6 +1279,7 @@ export class RaidEngine {
       aura: leftVitals.aura,
       maxAura: leftVitals.maxAura,
       down: leaving.down,
+      power: leavingClock,
     });
     this.banner = { title: spec.name.toUpperCase(), sub: 'YOU TAKE THE LEAD' };
     this.bannerT = 1.6;
@@ -1572,6 +1617,7 @@ export class RaidEngine {
         aura: this.aura,
         maxAura: this.maxAura,
         burnout: this.burnout,
+        powersDown: this.powerOut.down,
         ascend: this.keys.has(' '),
         descend: this.keys.has('control'),
         boost: this.keys.has('shift'),
@@ -1640,7 +1686,7 @@ export class RaidEngine {
     this.cracks.update(dt);
     this.afterimages.update(dt);
     this.beacon?.update(dt, time, this.pos, this.spec.visual.auraColor, this.camera);
-    this.powerVfx.update(dt, time, this.aura, this.maxAura, !this.burnout, this.camera);
+    this.powerVfx.update(dt, time, this.aura, this.maxAura, !this.burnout && !this.powerOut.down, this.camera);
   }
 
   // ---------------------------------------------------------------------------
@@ -1810,7 +1856,8 @@ export class RaidEngine {
     // Recovery: the Ryder holds still while the Beacon pours energy back in.
     // Bars ramp over the sequence (so the HUD visibly fills) and land on max.
     this.recoveryT = RECOVERY_DURATION;
-    this.recoveryFrom = { hp: this.hp, aura: this.aura };
+    this.recoveryFrom = { hp: this.hp, aura: this.powerOut.down ? this.powerOut.stashed : this.aura };
+    this.powerOut.resume(this.gameMode === GameMode.PVP);
     this.kit?.interrupt();
     this.burnout = false;
     this.iframes = Math.max(this.iframes, RECOVERY_DURATION + 0.3);
@@ -1863,6 +1910,29 @@ export class RaidEngine {
 
   private updateAura(dt: number) {
     if (this.raidDown) return;
+    if (this.phase === 'playing' && this.recoveryT <= 0) {
+      const shift = this.powerOut.step(dt, this.gameMode === GameMode.PVP, this.aura);
+      if (shift.cut) {
+        this.aura = 0;
+        this.endAllMoves();
+        this.kit?.interrupt();
+        this.banner = { title: 'POWERS OUT', sub: 'Melee only · get clear of the hosts' };
+        this.bannerT = 2.6;
+        this.particles.emit(this.pos.clone().setY(1.1), 0x8899aa, 16, { speed: 3.2, size: 0.22, life: 0.4, up: 0.6 });
+        return;
+      }
+      if (shift.back) {
+        this.aura = Math.min(this.maxAura, shift.aura);
+        this.burnout = this.aura <= 0.01;
+        if (this.aura >= this.maxAura * BURNOUT_RECOVERY) this.burnout = false;
+        this.banner = { title: 'POWERS BACK', sub: 'Aura is live' };
+        this.bannerT = 1.6;
+        this.powerVfx.surge(1);
+      } else if (this.powerOut.down) {
+        this.aura = 0;
+        return;
+      }
+    }
     let drain = 0;
     for (let i = 0; i < 3; i += 1) {
       if (this.moveT[i] > 0) drain += this.moves[i].drain;
@@ -1886,6 +1956,7 @@ export class RaidEngine {
   }
 
   private spendAura(amount: number) {
+    if (this.powerOut.down) return;
     this.aura = Math.max(0, this.aura - amount);
     if (this.aura <= 0.01) {
       this.aura = 0;
@@ -2117,7 +2188,7 @@ export class RaidEngine {
     setHumanoidOpacity(this.player.humanoid, Math.min(kitOpacity, genericFade, camFade));
     // Kit-driven body glow (phasing, charging). Written every frame while lit and
     // once more when it goes out so the materials never keep a stale tint.
-    const kitGlow = this.kit?.glow ?? 0;
+    const kitGlow = this.powerOut.down ? 0 : (this.kit?.glow ?? 0);
     if (kitGlow > 0 || this.playerGlow > 0) {
       flashEmissive(this.player.humanoid, kitGlow > 0 ? this.spec.visual.auraColor : 0x000000, kitGlow * 0.9);
       this.playerGlow = kitGlow;
@@ -2203,7 +2274,7 @@ export class RaidEngine {
   }
 
   private tryFire() {
-    if (!this.player || this.burnout || this.fireCd > 0) return;
+    if (!this.player || this.burnout || this.powerOut.down || this.fireCd > 0) return;
     // Plasma balls belong to Zoe. Keven looses an arrow. The other Ryderz stay in melee.
     if (this.spec.id === 'keven') {
       const volleyCost = this.spec.shotCost;
@@ -2799,7 +2870,12 @@ export class RaidEngine {
         }
       },
       gainAura: (amount) => {
-        this.aura = Math.min(this.maxAura, this.aura + Math.max(0, amount));
+        const gain = Math.max(0, amount);
+        if (this.powerOut.down) {
+          this.powerOut.stashed = Math.min(this.maxAura, this.powerOut.stashed + gain);
+          return;
+        }
+        this.aura = Math.min(this.maxAura, this.aura + gain);
         if (this.burnout && this.aura >= this.maxAura * BURNOUT_RECOVERY) this.burnout = false;
       },
       spendAura: (amount) => {
@@ -2812,8 +2888,10 @@ export class RaidEngine {
         return this.hp - before;
       },
       cooldown: (id, seconds) => {
+        const hold = abilityLockout(seconds);
+        if (hold <= 0) return;
         const slot = this.moves.findIndex((move) => move.id === id);
-        if (slot >= 0) this.moveCd[slot] = Math.max(this.moveCd[slot], seconds);
+        if (slot >= 0) this.moveCd[slot] = Math.max(this.moveCd[slot], hold);
       },
       vitals: () => ({ hp: this.hp, maxHp: this.maxHp }),
       hold: (target, seconds) => {
@@ -2861,7 +2939,7 @@ export class RaidEngine {
   private tryMove(slot: number) {
     if (!this.player) return;
     const move = this.moves[slot];
-    if (!move || this.moveCd[slot] > 0 || this.kit?.powersDown) return;
+    if (!move || this.moveCd[slot] > 0 || this.powerOut.down || this.kit?.powersDown) return;
     if (this.kit?.releaseId === move.id) {
       if (!this.releaseArmed[slot]) return;
       this.moveCd[slot] = 0.2;
@@ -3333,6 +3411,7 @@ export class RaidEngine {
       aura: number;
       maxAura: number;
       down: number;
+      power?: PowerClock;
     },
   ) {
     const spec = RYDERZ[id];
@@ -3491,6 +3570,10 @@ export class RaidEngine {
       (this.raidPlan?.difficulty ?? 'normal') as PvpDifficulty,
     );
     cpu.attach(host, spec);
+    if (placed?.power) {
+      cpu.takePower(placed.power);
+      if (placed.power.dry > 0) host.aura = 0;
+    }
     host.cpu = cpu;
     let trackedX = 0;
     let trackedZ = 0;
@@ -5017,6 +5100,10 @@ export class RaidEngine {
     fog.density += (density - fog.density) * blend;
   }
 
+  private powersOut() {
+    return this.powerOut.down || Boolean(this.kit?.powersDown);
+  }
+
   private emitHud() {
     this.onHud({
       hp: this.hp,
@@ -5030,7 +5117,7 @@ export class RaidEngine {
         name: move.name,
         ready:
           !this.burnout &&
-          !this.kit?.powersDown &&
+          !this.powersOut() &&
           (this.moveT[i] > 0 ||
             (move.drain > 0 ? this.aura > 1 : this.aura >= move.auraCost)),
         cooldown: 0,
@@ -5052,8 +5139,8 @@ export class RaidEngine {
       mapOpen: this.mapOpen,
       ryderId: this.spec.id,
       ryderName: this.spec.name,
-      meleeOnly: this.burnout || Boolean(this.kit?.powersDown),
-      tideOut: Boolean(this.kit?.powersDown),
+      meleeOnly: this.burnout || this.powersOut(),
+      tideOut: this.powersOut(),
       cameraState: this.rig.getState(),
       powerState: this.powerVfx.currentState,
       beacon: this.beacon ? this.beacon.hudState(this.clock.elapsedTime, this.pos) : null,

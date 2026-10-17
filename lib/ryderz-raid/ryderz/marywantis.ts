@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import type { AbilityId } from '../config';
+import { POWER_DRY_MAX, POWER_DRY_MIN, POWER_LIVE_MAX, POWER_LIVE_MIN } from '../power-outage';
 import type { PoseOverride } from '../skeletal';
 import type { KitContext, KitFrame, KitTarget, MeleeStep, RyderKit } from './kit';
 
@@ -15,15 +16,14 @@ export const MERCY_CAP = 3;
 export const POOL_LIFE = 7;
 export const POOL_LIFE_PVP = 4.2;
 export const POOL_RADIUS = 7.2;
-/** Powers stay up this long, then cut out. No per-move cooldown. */
-export const TIDE_LIVE_MIN = 8;
-export const TIDE_LIVE_MAX = 15;
-export const TIDE_DRY_MIN = 5;
-export const TIDE_DRY_MAX = 10;
-const TIDE_LIVE_MIN_PVP = 6;
-const TIDE_LIVE_MAX_PVP = 11;
-const TIDE_DRY_MIN_PVP = 4;
-const TIDE_DRY_MAX_PVP = 7;
+/**
+ * The shared power blackout. Marywantis still calls the dry stretch a tide,
+ * and the same windows apply to every fighter.
+ */
+export const TIDE_LIVE_MIN = POWER_LIVE_MIN;
+export const TIDE_LIVE_MAX = POWER_LIVE_MAX;
+export const TIDE_DRY_MIN = POWER_DRY_MIN;
+export const TIDE_DRY_MAX = POWER_DRY_MAX;
 
 const DROWN_EVERY = 0.5;
 const DROWN_DAMAGE = 3.2;
@@ -166,10 +166,8 @@ export class MarywantisKit implements RyderKit {
   private castLeft = 0;
   private foot = 0;
   private surfing = false;
-  /** Seconds the tide stays usable. Zero while it is out. */
-  tideLive = TIDE_LIVE_MAX;
-  /** Seconds until powers return. Zero while they work. */
-  tideDry = 0;
+  /** The engine's blackout, mirrored so surf and casts stop the same frame. */
+  private fedDown = false;
   clipHint: string | null = null;
   clipToken = 0;
   clipSeconds = 0.8;
@@ -203,7 +201,7 @@ export class MarywantisKit implements RyderKit {
   }
 
   get powersDown() {
-    return this.tideDry > 0;
+    return this.fedDown;
   }
 
   get bodyYaw() {
@@ -225,8 +223,7 @@ export class MarywantisKit implements RyderKit {
 
   attach(ctx: KitContext) {
     this.ctx = ctx;
-    this.tideDry = 0;
-    this.tideLive = this.rollLive();
+    this.fedDown = false;
     const orbit = new THREE.Group();
     orbit.name = 'TideOrbit';
     for (let i = 0; i < 7; i += 1) {
@@ -279,7 +276,9 @@ export class MarywantisKit implements RyderKit {
     const time = frame.time;
     for (const mat of this.mats) mat.uniforms.uTime.value = time;
     this.castLeft = Math.max(0, this.castLeft - frame.dt);
-    this.stepTide(frame.dt);
+    const down = Boolean(frame.powersDown);
+    if (down && !this.fedDown) this.onTideOut();
+    this.fedDown = down;
     this.stepOrbit(time);
     this.stepSurf(frame);
     this.stepMercy(frame);
@@ -295,34 +294,12 @@ export class MarywantisKit implements RyderKit {
     return false;
   }
 
-  private stepTide(dt: number) {
-    if (this.tideDry > 0) {
-      this.tideDry = Math.max(0, this.tideDry - dt);
-      if (this.tideDry === 0) this.tideLive = this.rollLive();
-      return;
-    }
-    this.tideLive = Math.max(0, this.tideLive - dt);
-    if (this.tideLive > 0) return;
-    this.tideDry = this.rollDry();
+  private onTideOut() {
     this.interrupt();
     const ctx = this.ctx;
     if (!ctx) return;
     ctx.rings.spawn(ctx.pos.clone(), 0x9ad7ff, { radius: 1.4, duration: 0.4, y: 0.08 });
     ctx.particles.emit(ctx.pos.clone().setY(1.1), FOAM, 14, { speed: 3.2, size: 0.2, life: 0.45, up: 1.2, gravity: 3 });
-  }
-
-  private rollLive() {
-    const pvp = this.ctx?.pvp?.() ?? false;
-    return this.span(pvp ? TIDE_LIVE_MIN_PVP : TIDE_LIVE_MIN, pvp ? TIDE_LIVE_MAX_PVP : TIDE_LIVE_MAX);
-  }
-
-  private rollDry() {
-    const pvp = this.ctx?.pvp?.() ?? false;
-    return this.span(pvp ? TIDE_DRY_MIN_PVP : TIDE_DRY_MIN, pvp ? TIDE_DRY_MAX_PVP : TIDE_DRY_MAX);
-  }
-
-  private span(min: number, max: number) {
-    return min + Math.random() * (max - min);
   }
 
   private beginMercy() {

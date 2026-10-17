@@ -133,7 +133,7 @@ assert.equal(behind.held, 0, 'enemies behind her are ignored');
 assert.equal(wide.held, 0, 'enemies outside the cone are ignored');
 assert.equal(already.held, 1, 'an enemy already cased is not captured again');
 assert.ok(cased.every((target) => target.hp === 71), 'each lock deals 9 damage');
-assert.ok(cooldowns.includes('temporalZap'));
+assert.equal(cooldowns.length, 0, 'Temporal Zap has no cooldown');
 assert.ok(scene.getObjectByName('NyxStasis'));
 assert.ok(scene.getObjectByName('NyxBeam'));
 

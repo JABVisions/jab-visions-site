@@ -14,7 +14,7 @@ import {
   writeTornado,
 } from './fx';
 
-export const SHOWTIME = { count: 3, damage: 18, range: 18, speed: 14, life: 1.45, cooldown: 5 };
+export const SHOWTIME = { count: 3, damage: 18, range: 18, speed: 14, life: 1.45 };
 /**
  * Controllable spinning kick. She holds it until E is pressed again.
  * Contact and hit stun do not cancel it. `moveScale` is 85% of a sprint:
@@ -22,7 +22,6 @@ export const SHOWTIME = { count: 3, damage: 18, range: 18, speed: 14, life: 1.45
  * sprint rate. `guard` is the gap before a second press can switch it off.
  */
 export const LETS_BE_BAD = {
-  cooldown: 14,
   guard: 0.35,
   kickDamage: 9,
   kickInterval: 0.45,
@@ -35,7 +34,7 @@ export const LETS_BE_BAD = {
   kickKnock: 0.48,
   ribbonKnock: 0.22,
 };
-export const ABRACADABRA = { damage: 55, radius: 12, heal: 0.15, expand: 0.7, cooldown: 12 };
+export const ABRACADABRA = { damage: 55, radius: 12, heal: 0.15, expand: 0.7 };
 
 const BLUE = 0x168bff;
 const _look = new THREE.Vector3();
@@ -270,7 +269,6 @@ export class MarilynKit implements RyderKit {
   endAbility(id: AbilityId) {
     if (id !== 'letsBeBad' || !this.spinning) return;
     this.endSpin();
-    this.ctx?.cooldown('letsBeBad', LETS_BE_BAD.cooldown);
   }
 
   melee(): MeleeStep | null {
@@ -290,7 +288,6 @@ export class MarilynKit implements RyderKit {
   private showtime() {
     const ctx = this.ctx;
     if (!ctx) return false;
-    ctx.cooldown('showtime', SHOWTIME.cooldown);
     ctx.sound('marilyn.showtime.spawn');
     ctx.camera.addKick(0.18);
     this.pulse = 1;
@@ -355,7 +352,6 @@ export class MarilynKit implements RyderKit {
   private abracadabra() {
     const ctx = this.ctx;
     if (!ctx || !this.wave) return false;
-    ctx.cooldown('abracadabra', ABRACADABRA.cooldown);
     ctx.sound('marilyn.abracadabra.burst');
     ctx.camera.addKick(0.28);
     ctx.camera.addShake(0.16);

@@ -38,6 +38,7 @@ function harness(targets: CrowdBody[], blocked?: (x: number, z: number) => boole
   const hurts: { target: KitTarget; damage: number; reaction?: string }[] = [];
   const blessings: number[] = [];
   const holds: number[] = [];
+  const locks: number[] = [];
   let hp = startHp;
   const ctx = {
     pos,
@@ -80,7 +81,9 @@ function harness(targets: CrowdBody[], blocked?: (x: number, z: number) => boole
       hp = Math.min(110, hp + amount);
       return hp - before;
     },
-    cooldown() {},
+    cooldown: (_id: string, seconds: number) => {
+      locks.push(seconds);
+    },
     vitals: () => ({ hp, maxHp: 110 }),
     hold: (_target: KitTarget, seconds: number) => {
       holds.push(seconds);
@@ -91,7 +94,7 @@ function harness(targets: CrowdBody[], blocked?: (x: number, z: number) => boole
       hp = Math.min(110, hp + 110 * fraction);
     },
   } as unknown as KitContext;
-  return { scene, ctx, hurts, blessings, holds, hp: () => hp };
+  return { scene, ctx, hurts, blessings, holds, locks, hp: () => hp };
 }
 
 function visible(scene: THREE.Scene, name: string) {
@@ -360,7 +363,9 @@ const dream = harness([foe(0, 3, 90), foe(2, 3, 120, 'heavy')]);
 const martin = new MartinKit();
 martin.attach(dream.ctx);
 const before = dream.hurts.length;
-martin.tryAbility('dreamVision');
+assert.equal(martin.tryAbility('dreamVision'), true);
+assert.equal(martin.tryAbility('dreamVision'), true, 'Dream Vision can be cast again immediately');
+assert.ok(dream.locks.every((seconds) => seconds <= 0.4), `Martin has no ability cooldown, saw ${dream.locks.join(',')}`);
 for (let i = 0; i < 10; i += 1) martin.update({ dt: 0.1, time: i, speed: 0, sprinting: false, moving: false });
 assert.equal(dream.hurts.length, before);
 assert.equal((dream.ctx.targets()[0] as CrowdBody).hp, 90);
