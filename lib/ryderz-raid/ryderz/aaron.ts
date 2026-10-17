@@ -3,7 +3,7 @@ import type { AbilityId } from '../config';
 import { HitSet, targetsAlongSegment, targetsInRadius } from '../combat';
 import { TrailRibbon } from '../speed-vfx';
 import type { PoseOverride } from '../skeletal';
-import { AirJumpFx, chestPoint, leapAhead } from './air-jump';
+import { chestPoint, leapAhead } from './air-jump';
 import type { KitContext, KitFrame, KitTarget, MeleeStep, RyderKit } from './kit';
 
 /**
@@ -13,8 +13,10 @@ import type { KitContext, KitFrame, KitTarget, MeleeStep, RyderKit } from './kit
  *                      loop launching every host it crosses and curves back
  *                      into his hand.
  * E  Shadow Strike     dissolve into a portal, reappear behind the nearest
- *                      host, one flat cut at neck height. Nobody near: a
- *                      short step through the dark toward the aim.
+ *                      host, then a flat slash of black energy at neck
+ *                      height. Nobody near: a short step through the dark
+ *                      toward the aim, still followed by the slash.
+ * The double-jump teleport uses those same portals.
  * R  Greed Swing       toggle: axe held out flat, Aaron spins while the
  *                      player steers; the spin ramps up over two seconds,
  *                      every host it meets is thrown and feeds aura back;
@@ -179,6 +181,94 @@ class ShadowPortalPool {
   }
 }
 
+const SLASH_ARC = Math.PI * 1.2;
+const SLASH_CORE = new THREE.TorusGeometry(0.78, 0.07, 6, 22, SLASH_ARC);
+const SLASH_RIM = new THREE.TorusGeometry(0.78, 0.022, 5, 22, SLASH_ARC);
+
+/**
+ * The cut that follows a shadow teleport: a black crescent with a violet
+ * edge, flat at neck height, opening along the swing.
+ */
+class ShadowSlashPool {
+  readonly group = new THREE.Group();
+  private items: Array<{
+    root: THREE.Group;
+    core: THREE.MeshBasicMaterial;
+    rim: THREE.MeshBasicMaterial;
+    life: number;
+    max: number;
+  }> = [];
+
+  constructor(count: number) {
+    this.group.name = 'ShadowSlashes';
+    for (let i = 0; i < count; i += 1) {
+      const root = new THREE.Group();
+      const core = new THREE.MeshBasicMaterial({
+        color: 0x07040c,
+        transparent: true,
+        opacity: 0,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+      });
+      const rim = new THREE.MeshBasicMaterial({
+        color: 0x8a3dff,
+        transparent: true,
+        opacity: 0,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+        toneMapped: false,
+      });
+      const coreMesh = new THREE.Mesh(SLASH_CORE, core);
+      const rimMesh = new THREE.Mesh(SLASH_RIM, rim);
+      coreMesh.renderOrder = 5;
+      rimMesh.renderOrder = 6;
+      root.add(coreMesh, rimMesh);
+      root.visible = false;
+      this.group.add(root);
+      this.items.push({ root, core, rim, life: 0, max: 1 });
+    }
+  }
+
+  setColor(color: THREE.ColorRepresentation) {
+    for (const item of this.items) item.rim.color.set(color);
+  }
+
+  spawn(pos: THREE.Vector3, yaw: number) {
+    const item = this.items.find((i) => i.life <= 0) ?? this.items.reduce((a, b) => (a.life < b.life ? a : b));
+    item.root.position.copy(pos);
+    item.root.rotation.set(-Math.PI / 2, yaw, 0);
+    item.root.visible = true;
+    item.life = 0.38;
+    item.max = 0.38;
+    item.root.scale.setScalar(0.35);
+  }
+
+  update(dt: number) {
+    for (const item of this.items) {
+      if (item.life <= 0) continue;
+      item.life -= dt;
+      if (item.life <= 0) {
+        item.root.visible = false;
+        continue;
+      }
+      const p = 1 - item.life / item.max;
+      const open = p < 0.28 ? Math.sin((p / 0.28) * Math.PI * 0.5) : 1;
+      const fade = p < 0.45 ? 1 : Math.max(0, 1 - (p - 0.45) / 0.55);
+      item.root.scale.setScalar(0.45 + open * 0.9);
+      item.core.opacity = 0.92 * fade;
+      item.rim.opacity = 0.85 * fade * (0.65 + 0.35 * open);
+    }
+  }
+
+  clear() {
+    for (const item of this.items) {
+      item.life = 0;
+      item.root.visible = false;
+    }
+  }
+}
+
 export class AaronKit implements RyderKit {
   private ctx: KitContext | null = null;
   private seq: Sequence | null = null;
@@ -197,12 +287,12 @@ export class AaronKit implements RyderKit {
   private spinDisc: THREE.Mesh;
   private axeTrail: TrailRibbon;
   private portals: ShadowPortalPool;
+  private slashes: ShadowSlashPool;
   private sparkT = 0;
   private debrisT = 0;
   private ringT = 0;
   private imageT = 0;
   private violetSoft = 0xb59cff;
-  private fx: AirJumpFx | null = null;
   private veil = 0;
   private readonly chest = new THREE.Vector3();
 
@@ -218,7 +308,8 @@ export class AaronKit implements RyderKit {
     this.thrown.add(this.spinDisc);
     // Long enough to draw most of the loop behind the blade so its orbit can be read.
     this.axeTrail = new TrailRibbon(0x8a3dff, { life: 0.7, width: 0.55, spacing: 0.12, points: 48 });
-    this.portals = new ShadowPortalPool(3, 0x8a3dff);
+    this.portals = new ShadowPortalPool(6, 0x8a3dff);
+    this.slashes = new ShadowSlashPool(4);
   }
 
   get locked() {
@@ -273,9 +364,10 @@ export class AaronKit implements RyderKit {
     const electric = ctx.spec.visual.electricityColor;
     this.axeTrail.setColor(electric);
     this.portals.setColor(electric);
+    this.slashes.setColor(electric);
     (this.spinDisc.material as THREE.MeshBasicMaterial).color.set(electric);
     this.violetSoft = new THREE.Color(electric).lerp(WHITE, 0.5).getHex();
-    ctx.scene.add(this.thrown, this.axeTrail.mesh, this.portals.group);
+    ctx.scene.add(this.thrown, this.axeTrail.mesh, this.portals.group, this.slashes.group);
     const fighter = ctx.fighter();
     if (fighter) ctx.afterimages.bind(fighter, ctx.spec.visual.auraColor);
     // The thrown axe is a copy of the one in his hand, so the two never differ.
@@ -296,20 +388,18 @@ export class AaronKit implements RyderKit {
     this.bodyGlow = 0;
     this.spinning = false;
     this.comboIndex = 0;
-    this.fx = new AirJumpFx(ctx.scene);
     this.veil = 0;
   }
 
   detach() {
     this.interrupt();
     if (this.ctx) {
-      this.ctx.scene.remove(this.thrown, this.axeTrail.mesh, this.portals.group);
+      this.ctx.scene.remove(this.thrown, this.axeTrail.mesh, this.portals.group, this.slashes.group);
       this.ctx.afterimages.unbind();
     }
     this.axeTrail.clear();
     this.portals.clear();
-    this.fx?.clear();
-    this.fx = null;
+    this.slashes.clear();
     this.ctx = null;
   }
 
@@ -329,7 +419,7 @@ export class AaronKit implements RyderKit {
     this.axeTrail.intensity = 0;
     this.showHandAxe(true);
     this.veil = 0;
-    this.fx?.clear();
+    this.slashes.clear();
   }
 
   // ---------------------------------------------------------------------------
@@ -396,16 +486,19 @@ export class AaronKit implements RyderKit {
     if (!ctx || this.locked || this.spinning || sinceJump > 0.9) return false;
     const from = leapAhead(ctx, 7.5);
     if (!from) return false;
-    const color = ctx.spec.visual.electricityColor;
-    this.fx?.atoms(chestPoint(ctx, from.x, from.z, this.chest).clone(), color, false);
-    this.fx?.atoms(chestPoint(ctx, ctx.pos.x, ctx.pos.z, this.chest).clone(), color, true);
-    ctx.particles.emit(chestPoint(ctx, from.x, from.z, this.chest), color, 22, { speed: 8, size: 0.16, life: 0.36, spread: 1.1, up: 1.6 });
-    ctx.particles.emit(chestPoint(ctx, from.x, from.z, this.chest), 0xffffff, 10, { speed: 5, size: 0.28, life: 0.24, spread: 0.3, up: 0.4 });
-    ctx.particles.emit(chestPoint(ctx, ctx.pos.x, ctx.pos.z, this.chest), color, 16, { speed: 3.5, size: 0.18, life: 0.32, spread: 0.8, up: 0.8 });
+    const aura = ctx.spec.visual.auraColor;
+    const electric = ctx.spec.visual.electricityColor;
+    const left = chestPoint(ctx, from.x, from.z, this.chest).clone();
+    const arrived = chestPoint(ctx, ctx.pos.x, ctx.pos.z, this.chest).clone();
+    this.portals.open(left, 0.95, 0.5);
+    this.implode(left, aura, 16, 1.4, 6, 0.17);
+    this.portals.open(arrived, 1.0, 0.55);
+    this.implode(arrived, electric, 14, 1.3, 7, 0.16);
+    ctx.particles.emit(arrived, SILVER, 4, { speed: 1.5, size: 0.3, life: 0.2 });
     this.veil = 0.16;
     this.bodyOpacity = 0.08;
     ctx.iframes(0.18);
-    ctx.sound('aaron.atom.swing');
+    ctx.sound('aaron.strike.step');
     ctx.camera.addShake(0.08);
     return true;
   }
@@ -752,6 +845,13 @@ export class AaronKit implements RyderKit {
     this.portals.open(_p, 1.0, 0.55);
     this.implode(_p, electric, 14, 1.3, 7, 0.16);
     ctx.particles.emit(_p, SILVER, 4, { speed: 1.5, size: 0.3, life: 0.2 });
+    // The black cut follows the teleport, through a host's neck or out ahead of a step.
+    if (seq.target) {
+      _q.copy(seq.target.pos).setY(ctx.heightAt(seq.target.pos.x, seq.target.pos.z) + NECK_HEIGHT);
+    } else {
+      _q.set(ctx.pos.x + Math.sin(seq.faceYaw) * 0.7, _p.y + (NECK_HEIGHT - 1), ctx.pos.z + Math.cos(seq.faceYaw) * 0.7);
+    }
+    this.slashes.spawn(_q, seq.faceYaw);
     _q.copy(ctx.pos).setY(ctx.heightAt(ctx.pos.x, ctx.pos.z) + 0.05);
     ctx.rings.spawn(_q, aura, { radius: 1.5, duration: 0.3 });
     ctx.power.boost(1.4);
@@ -1049,8 +1149,8 @@ export class AaronKit implements RyderKit {
       } else this.bodyOpacity = 1;
     }
 
-    this.fx?.step(dt);
     this.axeTrail.update(dt, ctx.cameraObject);
     this.portals.update(dt, ctx.cameraObject);
+    this.slashes.update(dt);
   }
 }

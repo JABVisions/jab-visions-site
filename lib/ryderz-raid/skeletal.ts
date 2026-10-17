@@ -447,6 +447,11 @@ export class ProceduralSkeleton {
   private keep: Set<BoneKey>;
   /** Extra figure-space drop for upper arms that were exported in a T-pose. */
   armHang = 0;
+  /**
+   * Extra figure-space drop for clavicles that were exported shrugged into a
+   * T. The sign lowers both shoulders without flipping which side they sit on.
+   */
+  shoulderDrop = 0;
   /** Narrow hip-led stride. Arms stay hung instead of tucking into a guard. */
   sashay = false;
   /** In the water the legs close into one fin. On land the stride stays human. */
@@ -792,6 +797,12 @@ export function poseSkeleton(skel: ProceduralSkeleton, motion: SkeletalMotion) {
     A.upperArmR.z -= skel.armHang;
     A.upperArmL.x -= 0.18;
     A.upperArmR.x -= 0.18;
+  }
+  // A shrugged export keeps the clavicle aimed up. Tip both shoulders down
+  // in place so the arms hang from a relaxed line, the way Leo's do.
+  if (skel.shoulderDrop) {
+    A.shoulderL.z += skel.shoulderDrop;
+    A.shoulderR.z -= skel.shoulderDrop;
   }
   A.hips.z += Math.sin(breath * 0.5) * (skel.sashay ? 0.05 : 0.015) * still;
 

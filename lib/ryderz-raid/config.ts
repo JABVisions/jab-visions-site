@@ -132,6 +132,11 @@ export interface RyderSpec {
    * a T-pose export. About π/2 hangs them straight down from the horizontal rest.
    */
   armHang?: number;
+  /**
+   * Figure-space drop for clavicles exported in a shrugged T. Paired with
+   * armHang so the shoulders rest down without re-solving the torso.
+   */
+  shoulderDrop?: number;
   /** Hip-led stride with the arms left hanging, instead of a combat tuck. */
   sashay?: boolean;
   /**
@@ -795,8 +800,10 @@ export const RYDERZ: Record<RyderId, RyderSpec> = {
     // The Mixamo export already faces raid-forward, in a T-pose, with the
     // dress and jacket intact. The shared stance roll reads her right-side
     // bones (they sit on +X) as a backwards torso, yaws her 180°, and twists
-    // the jacket off the collar. Leave the export pose and only hang the arms.
+    // the jacket off the collar. Leave that pose, hang the arms, and tip the
+    // shrugged clavicles down into the same relaxed line Leo stands in.
     armHang: 1.52,
+    shoulderDrop: 0.36,
     sashay: true,
     skelKeep: [
       'hips',
@@ -888,8 +895,11 @@ export const RYDERZ: Record<RyderId, RyderSpec> = {
     strikes: ['punch', 'kick', 'smash'],
     // Tripo exported him in a T-pose already looking along raid-forward (+Z).
     // A quarter turn put him in profile. The shared stance roll also twists
-    // the jacket open, so keep the export pose and only hang the arms.
+    // the jacket open, so keep the export pose, hang the arms, and drop the
+    // raised clavicles. His shoulders start higher than Marilyn's, so the
+    // drop is a little larger to land on the same relaxed line.
     armHang: 1.45,
+    shoulderDrop: 0.5,
     skelKeep: [
       'hips',
       'spine',

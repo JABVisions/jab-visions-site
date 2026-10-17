@@ -36,6 +36,7 @@ async function main() {
   const martin = RYDERZ['martin-luther-king'];
   const skeleton = new ProceduralSkeleton(scene, { keep: martin.skelKeep });
   skeleton.armHang = martin.armHang ?? 0;
+  skeleton.shoulderDrop = martin.shoulderDrop ?? 0;
   assert.equal(skeleton.isUsable, true, 'the Tripo bones map to a humanoid');
   const pose = (motion: SkeletalMotion) => {
     poseSkeleton(skeleton, motion);
@@ -81,6 +82,11 @@ async function main() {
   const shoulder = skeleton.bone('upperArmR')!.getWorldPosition(new THREE.Vector3());
   const elbow = skeleton.bone('lowerArmR')!.getWorldPosition(new THREE.Vector3());
   assert.ok(hand.y < shoulder.y - 0.12, `the arms should hang, hand y=${hand.y.toFixed(2)} shoulder y=${shoulder.y.toFixed(2)}`);
+  const clavicle = skeleton.bone('shoulderR')!.getWorldPosition(new THREE.Vector3());
+  const upper = skeleton.bone('upperArmR')!.getWorldPosition(new THREE.Vector3());
+  const clav = upper.clone().sub(clavicle);
+  assert.ok(-clav.y / clav.length() > 0.08, `the shoulders should rest down, not shrugged (down=${(-clav.y / clav.length()).toFixed(2)})`);
+  assert.ok(upper.x > clavicle.x - 0.01, `the right shoulder should stay out from the chest (arm x=${upper.x.toFixed(2)}, shoulder x=${clavicle.x.toFixed(2)})`);
   const forearmDrop = elbow.y - hand.y;
   const forearmReach = Math.hypot(hand.x - elbow.x, hand.z - elbow.z);
   assert.ok(

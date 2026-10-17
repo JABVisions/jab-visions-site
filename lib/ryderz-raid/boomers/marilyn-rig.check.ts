@@ -64,6 +64,7 @@ assert.deepEqual(assessSkinning(scene), [], 'the repainted skin stays on the bon
 const marilyn = RYDERZ['marilyn-monroe'];
 const skeleton = new ProceduralSkeleton(scene, { keep: marilyn.skelKeep });
 skeleton.armHang = marilyn.armHang ?? 0;
+skeleton.shoulderDrop = marilyn.shoulderDrop ?? 0;
 skeleton.sashay = marilyn.sashay ?? false;
 assert.equal(skeleton.isUsable, true, 'mixamorig bones map to a humanoid');
 poseSkeleton(skeleton, { phase: 0, moving: 0, sprinting: false, meleeT: 0 });
@@ -75,6 +76,11 @@ assert.ok(headForward.z > 0.5, `marilyn should face raid-forward, head forward z
 const hand = skeleton.bone('handR')!.getWorldPosition(new THREE.Vector3());
 const shoulder = skeleton.bone('upperArmR')!.getWorldPosition(new THREE.Vector3());
 assert.ok(hand.y < shoulder.y - 0.18, `the arms should hang, hand y=${hand.y.toFixed(2)} shoulder y=${shoulder.y.toFixed(2)}`);
+const clavicle = skeleton.bone('shoulderR')!.getWorldPosition(new THREE.Vector3());
+const upper = skeleton.bone('upperArmR')!.getWorldPosition(new THREE.Vector3());
+const clav = upper.clone().sub(clavicle);
+assert.ok(-clav.y / clav.length() > 0.08, `the shoulders should rest down, not shrugged (down=${(-clav.y / clav.length()).toFixed(2)})`);
+assert.ok(upper.x > clavicle.x - 0.01, `the right shoulder should stay out from the chest (arm x=${upper.x.toFixed(2)}, shoulder x=${clavicle.x.toFixed(2)})`);
 const elbow = skeleton.bone('lowerArmR')!.getWorldPosition(new THREE.Vector3());
 const forearmDrop = elbow.y - hand.y;
 const forearmReach = Math.hypot(hand.x - elbow.x, hand.z - elbow.z);
