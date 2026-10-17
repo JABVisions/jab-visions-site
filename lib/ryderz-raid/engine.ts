@@ -1733,7 +1733,7 @@ export class RaidEngine {
     if (fog) {
       if (key === 'pad') {
         fog.color.setHex(0x07141c);
-        fog.density = 0.011;
+        fog.density = 0.006;
       } else if (key === 'island') {
         fog.color.setHex(0xb7d4ea);
         fog.density = 0.00085;
@@ -5094,7 +5094,7 @@ export class RaidEngine {
     if (!fog || this.arena.id !== 'training-pad') return;
     const inLab = this.pos.x < -41 && this.world.heightAt(this.pos.x, this.pos.z) > 3;
     this.labFog.setHex(inLab ? 0xe7eef2 : 0x07141c);
-    const density = inLab ? 0.0045 : 0.011;
+    const density = inLab ? 0.0045 : 0.006;
     const blend = 1 - Math.exp(-dt * 2.4);
     fog.color.lerp(this.labFog, blend);
     fog.density += (density - fog.density) * blend;
