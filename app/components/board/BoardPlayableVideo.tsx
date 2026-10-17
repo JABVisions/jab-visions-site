@@ -95,6 +95,7 @@ export default function BoardPlayableVideo({
       if (el.preload !== "auto") el.preload = "auto";
       el.setAttribute("playsinline", "true");
       el.setAttribute("webkit-playsinline", "true");
+      el.closest(".mediaFrame")?.classList.add("is-playing");
     };
 
     const onWaiting = () => {

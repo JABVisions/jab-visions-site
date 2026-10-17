@@ -1,5 +1,12 @@
 import assert from "node:assert/strict";
-import { coverCropRect, coverCropWithin, evenFrameSize, filmedCameraConstraints } from "./videoFrame";
+import {
+  coverCropRect,
+  coverCropWithin,
+  evenFrameSize,
+  filmedCameraConstraints,
+  visionFrameAspect,
+  visionFrameIsLandscape,
+} from "./videoFrame";
 
 const wide = coverCropRect(1920, 1080, 4 / 5);
 assert.equal(Math.round(wide.sh), 1080, "a wide sensor keeps its height when cropped to 4:5");
@@ -28,5 +35,11 @@ assert.equal(camera.resizeMode?.ideal, "crop-and-scale");
 assert.equal(camera.aspectRatio && typeof camera.aspectRatio === "object" && "ideal" in camera.aspectRatio
   ? camera.aspectRatio.ideal
   : 0, 4 / 5);
+
+assert.equal(visionFrameIsLandscape(768, 960), false, "4:5 portrait is not landscape");
+assert.equal(visionFrameAspect(768, 960), "4 / 5", "portrait vision drops use 4:5");
+assert.equal(visionFrameAspect(1080, 1920), "4 / 5", "tall phone video still presents as 4:5");
+assert.equal(visionFrameIsLandscape(1920, 1080), true, "wide video is landscape");
+assert.equal(visionFrameAspect(1920, 1080), "1920 / 1080", "landscape video keeps its own frame");
 
 console.log("videoFrame.check ok");

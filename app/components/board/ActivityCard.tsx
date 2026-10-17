@@ -1869,7 +1869,10 @@ function ActivityCard({
           )}
 
           {embed.kind === "video" && (
-            <div className="mediaFrame">
+            <div className="mediaFrame videoMediaFrame">
+              {resolvedPosterImage ? (
+                <img className="vidThumb" src={resolvedPosterImage} alt="" />
+              ) : null}
               <BoardFeedVideo
                 className="vid"
                 src={playableFeedMediaSrc(embed.url)}
@@ -2008,7 +2011,10 @@ function ActivityCard({
       ) : null}
 
       {!showEmbed && !isDescriptDrop && !isDropbookSlide && isStoredVideoDrop ? (
-        <div className="mediaFrame storedVideoFrame">
+        <div className="mediaFrame videoMediaFrame storedVideoFrame">
+          {resolvedPosterImage ? (
+            <img className="vidThumb" src={resolvedPosterImage} alt="" />
+          ) : null}
           <BoardFeedVideo
             className="vid"
             src={playableFeedMediaSrc(signedPreviewImage)}

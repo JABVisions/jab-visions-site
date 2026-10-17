@@ -213,17 +213,33 @@ export function startViewfinderRecording(opts: {
   return { stop, done };
 }
 
-/** Pin a feed video element to the aspect it was encoded with. */
+/** Portrait Vision drops use the 4:5 Board frame. Landscape files keep their own ratio. */
+export const VISION_PORTRAIT_ASPECT = "4 / 5";
+
+export function visionFrameIsLandscape(width: number, height: number) {
+  return Boolean(width && height && width / height > 1.05);
+}
+
+export function visionFrameAspect(width: number, height: number) {
+  if (!visionFrameIsLandscape(width, height)) return VISION_PORTRAIT_ASPECT;
+  return `${Math.round(width)} / ${Math.round(height)}`;
+}
+
+/** Size the feed frame: 4:5 for portrait, the file's own ratio when it is landscape. */
 export function lockFilmedVideoAspect(el: HTMLVideoElement) {
   const w = el.videoWidth;
   const h = el.videoHeight;
   if (!w || !h) return;
-  el.style.aspectRatio = `${w} / ${h}`;
-  el.style.height = "auto";
-  el.style.objectFit = "contain";
+  const landscape = visionFrameIsLandscape(w, h);
+  el.style.width = "100%";
+  el.style.height = "100%";
+  el.style.objectFit = "cover";
+  el.style.aspectRatio = "";
   const host = el.closest(".mediaFrame");
   if (host instanceof HTMLElement) {
-    host.style.aspectRatio = "auto";
+    host.classList.toggle("is-wide", landscape);
+    host.classList.add("has-frame");
+    host.style.aspectRatio = visionFrameAspect(w, h);
     host.style.height = "auto";
   }
 }

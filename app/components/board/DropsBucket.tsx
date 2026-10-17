@@ -1796,7 +1796,7 @@ function BucketDropCard({
           )}
 
           {embed.kind === "video" && (
-            <div className="mediaFrame">
+            <div className="mediaFrame videoMediaFrame">
               <BoardFeedVideo
                 className="vid"
                 src={embed.url}
@@ -1987,7 +1987,9 @@ function BucketDropCard({
         .mediaFrame { background: rgba(255, 255, 255, 0.04); }
         .mediaFrame.imageMediaFrame { overflow: hidden; }
         .img { width: 100%; max-width: 100%; height: auto; max-height: min(90vh, 1400px); object-fit: contain; display: block; }
-        .vid { width: 100%; max-width: 100%; height: auto; display: block; background: #000; max-height: min(82vh, 960px); object-fit: contain; }
+        .mediaFrame.videoMediaFrame { position: relative; width: 100%; aspect-ratio: 4 / 5; height: auto; overflow: hidden; background: #000; }
+        .mediaFrame.videoMediaFrame.is-wide { aspect-ratio: 16 / 9; }
+        .videoMediaFrame .vid { position: absolute; inset: 0; width: 100%; height: 100%; max-height: none; object-fit: cover; display: block; background: #000; }
         .aud { width: 100%; display: block; padding: 10px; }
 
         .embedFoot { display: flex; gap: 10px; align-items: center; justify-content: space-between; padding: 10px 12px; background: rgba(0, 0, 0, 0.18); border-top: 1px solid rgba(120, 255, 240, 0.10); }
