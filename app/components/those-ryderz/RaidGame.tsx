@@ -29,6 +29,7 @@ import PauseMenu from './menu/PauseMenu';
 import RaidLobby from './modes/RaidLobby';
 import RaidWatch from './modes/RaidWatch';
 import { launchFromSquad, type RaidSquad } from '@/lib/ryderz-raid/raid/squad';
+import { subscribeRaidLive } from '@/lib/ryderz-raid/raid/liveRoom';
 import PvpFlow, { type PvpLineup } from './modes/PvpFlow';
 import SoloCharacterSelect from './modes/SoloCharacterSelect';
 import PremiereCharacterSelect from './premiere/PremiereCharacterSelect';
@@ -421,6 +422,18 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
     setWatchNet(net);
     setScreen('raid-watch');
   };
+
+  useEffect(() => {
+    if (screen !== 'game') return;
+    const net = netRef.current;
+    if (!net?.authority) return;
+    return subscribeRaidLive(net.code, {
+      onIntent: (intent) => {
+        if (intent.intent !== 'input' || intent.guestId === net.guestId) return;
+        engineRef.current?.setAllyInput(intent.guestId, intent.x, intent.z);
+      },
+    });
+  }, [screen, selected]);
 
   useEffect(() => {
     if (screen !== 'game') return;

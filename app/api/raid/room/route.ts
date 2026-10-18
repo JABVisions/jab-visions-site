@@ -6,7 +6,9 @@ export const dynamic = 'force-dynamic';
 
 /**
  * Authoritative raid rooms for this Node process.
- * A serverless host with more than one instance will not share these rooms.
+ * A serverless host with more than one instance will not share this map.
+ * Clients also publish the roster on the raid live channel so a joined
+ * player still has a seat when the create and join land on different instances.
  */
 export async function GET(request: Request) {
   const url = new URL(request.url);

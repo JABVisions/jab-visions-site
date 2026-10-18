@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import type { RoomView } from '@/lib/ryderz-raid/raid/roomStore';
+import { sendRaidIntent, subscribeRaidLive } from '@/lib/ryderz-raid/raid/liveRoom';
 import styles from './RaidLobby.module.css';
 
 /**
@@ -29,9 +30,27 @@ export default function RaidWatch({
     };
     void pull();
     const timer = window.setInterval(() => void pull(), 250);
+    const unsubscribe = subscribeRaidLive(code, {
+      onRoom: (room) => {
+        if (stop) return;
+        setRoom((current) => ({
+          code: room.code,
+          lifecycle: room.lifecycle,
+          squad: room.squad,
+          youAreHost: false,
+          youAreAuthority: false,
+          yourSlot: room.squad.slots.find((slot) => slot.playerId === guestId)?.index ?? current?.yourSlot ?? null,
+          members: room.squad.slots.filter((slot) => slot.control === 'human').length,
+          snapshot: current?.snapshot ?? null,
+          inputs: current?.inputs ?? {},
+          countdownLeft: room.lifecycle === 'COUNTDOWN' ? current?.countdownLeft ?? 3 : 0,
+        }));
+      },
+    });
     return () => {
       stop = true;
       window.clearInterval(timer);
+      unsubscribe();
     };
   }, [code, guestId]);
 
@@ -65,6 +84,7 @@ export default function RaidWatch({
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ action: 'input', code, guestId, x: axes.x, z: axes.z }),
       });
+      void sendRaidIntent(code, { intent: 'input', guestId, x: axes.x, z: axes.z });
     }, 120);
     return () => window.clearInterval(timer);
   }, [axes.x, axes.z, code, guestId]);
@@ -75,7 +95,7 @@ export default function RaidWatch({
       <header>
         <p>Those Ryderz · Raid room {code}</p>
         <h2>{room?.lifecycle ?? 'Connecting'}</h2>
-        <span>This screen follows the host simulation. WASD sends your movement to the squad.</span>
+        <span>You are in the raid. WASD moves your fighter in the host&apos;s room.</span>
       </header>
       <p className={styles.note}>
         {snap?.waves ? `Wave ${snap.wave}/${snap.waves}` : `Round ${snap?.wave ?? 0}`} · Enemies left {snap?.enemiesLeft ?? '—'} · Defeated {snap?.defeated ?? 0} · Dealt {snap?.dealt ?? 0} · Taken {snap?.taken ?? 0}

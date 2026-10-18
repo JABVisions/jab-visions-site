@@ -1045,7 +1045,7 @@ export class RaidEngine {
           x: host.pos.x,
           z: host.pos.z,
           ally: Boolean(host.ally),
-          human: false,
+          human: Boolean(host.ally && host.remoteHuman),
         })),
       ],
     } as const;

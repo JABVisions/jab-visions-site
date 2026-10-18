@@ -132,7 +132,7 @@ export class PlayerStore {
         const spec = seat.ryderId ? RYDERZ[seat.ryderId] : null;
         return {
           id: seat.isLocal ? LOCAL_PLAYER_ID : `player-${seat.index + 1}`,
-          displayName: spec?.name ?? seat.displayName,
+          displayName: seat.displayName || spec?.name || 'Raider',
           playerIndex: seat.index,
           partyId: DEFAULT_PARTY_ID,
           selectedRyder: seat.ryderId,

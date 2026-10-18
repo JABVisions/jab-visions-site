@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { RyderId } from '@/lib/ryderz-raid/config';
 import { RYDERZ } from '@/lib/ryderz-raid/config';
 import { listArenas } from '@/lib/ryderz-raid/arenas';
@@ -14,6 +14,8 @@ import {
   type RaidSquad,
   type SquadSlot,
 } from '@/lib/ryderz-raid/raid/squad';
+import { applyGuestIntent, seatMissing, type LiveGuest } from '@/lib/ryderz-raid/raid/online';
+import { raidLiveEnabled, sendRaidIntent, sendRaidRoom, subscribeRaidLive } from '@/lib/ryderz-raid/raid/liveRoom';
 import type { RoomView } from '@/lib/ryderz-raid/raid/roomStore';
 import { CharacterGrid } from '../roster/CharacterGrid';
 import styles from './RaidLobby.module.css';
@@ -68,10 +70,18 @@ export default function RaidLobby({
   const [joinCode, setJoinCode] = useState('');
   const [status, setStatus] = useState('Offline squad. Create a room when friends are ready to replace a computer slot.');
   const [error, setError] = useState('');
-  const [netGuest, setNetGuest] = useState('');
-  const launched = useMemo(() => ({ current: false }), []);
+  const [amHost, setAmHost] = useState(true);
+  const launched = useRef(false);
+  const squadRef = useRef(squad);
+  const amHostRef = useRef(true);
+  const lifeRef = useRef<'LOBBY' | 'READY' | 'COUNTDOWN' | 'IN_PROGRESS'>('LOBBY');
+  const liveGuests = useRef<LiveGuest[]>([]);
+  const liveAt = useRef(0);
+  squadRef.current = squad;
+  amHostRef.current = amHost;
   const focused = squad.slots[focus];
   const online = Boolean(code);
+  const mine = squad.slots.find((slot) => slot.playerId === guest) ?? squad.slots[0];
 
   useEffect(() => {
     setGuest(guestId());
@@ -84,16 +94,23 @@ export default function RaidLobby({
       const response = await fetch(`/api/raid/room?code=${code}&guest=${guest}`);
       if (!response.ok || stop) return;
       const room = (await response.json()) as RoomView;
-      setSquad(room.squad);
-      setNetGuest(guest);
-      const humans = room.squad.slots.filter((slot) => slot.control === 'human').length;
-      const computers = room.squad.slots.filter((slot) => slot.control === 'computer').length;
-      setStatus(`${room.lifecycle} · ${humans} human · ${computers} computer · ${room.youAreHost ? 'you are host' : 'joined'}`);
       if (launched.current) return;
-      if (room.lifecycle === 'IN_PROGRESS' && room.youAreAuthority) {
+      if (!room.youAreHost && liveAt.current > 0 && !room.squad.slots.some((slot) => slot.playerId === guest)) {
+        return;
+      }
+      const seated = room.youAreHost ? seatMissing(room.squad, liveGuests.current) : room.squad;
+      setAmHost(room.youAreHost);
+      setSquad(seated);
+      if (room.lifecycle === 'IN_PROGRESS' || room.lifecycle === 'COUNTDOWN' || room.lifecycle === 'LOBBY' || room.lifecycle === 'READY') {
+        lifeRef.current = room.lifecycle === 'COUNTDOWN' ? 'COUNTDOWN' : room.lifecycle === 'IN_PROGRESS' ? 'IN_PROGRESS' : room.lifecycle;
+      }
+      const humans = seated.slots.filter((slot) => slot.control === 'human').length;
+      const computers = seated.slots.filter((slot) => slot.control === 'computer').length;
+      setStatus(`${room.lifecycle} · ${humans} human · ${computers} computer · ${room.youAreHost ? 'you are host' : 'joined'}`);
+      if ((room.lifecycle === 'IN_PROGRESS' || room.lifecycle === 'COUNTDOWN') && room.youAreAuthority) {
         launched.current = true;
-        onStart(room.squad, { code: room.code, guestId: guest, authority: true });
-      } else if (room.lifecycle === 'IN_PROGRESS' && !room.youAreAuthority) {
+        onStart(seated, { code: room.code, guestId: guest, authority: true });
+      } else if ((room.lifecycle === 'IN_PROGRESS' || room.lifecycle === 'COUNTDOWN') && !room.youAreAuthority) {
         launched.current = true;
         onSpectate({ code: room.code, guestId: guest });
       }
@@ -104,7 +121,62 @@ export default function RaidLobby({
       stop = true;
       window.clearInterval(timer);
     };
-  }, [code, guest, launched, onStart, onSpectate]);
+  }, [code, guest, onStart, onSpectate]);
+
+  useEffect(() => {
+    if (!code || !guest) return;
+    return subscribeRaidLive(code, {
+      onRoom: (room) => {
+        if (amHostRef.current || room.hostGuestId === guest) return;
+        liveAt.current = Date.now();
+        setSquad(room.squad);
+        setAmHost(false);
+        const humans = room.squad.slots.filter((slot) => slot.control === 'human').length;
+        const computers = room.squad.slots.filter((slot) => slot.control === 'computer').length;
+        setStatus(`${room.lifecycle} · ${humans} human · ${computers} computer · joined`);
+        if (launched.current) return;
+        if (room.lifecycle === 'IN_PROGRESS' || room.lifecycle === 'COUNTDOWN') {
+          launched.current = true;
+          onSpectate({ code: room.code, guestId: guest });
+        }
+      },
+      onIntent: (intent) => {
+        if (!amHostRef.current || intent.guestId === guest || intent.intent === 'input') return;
+        const applied = applyGuestIntent(squadRef.current, liveGuests.current, intent);
+        liveGuests.current = applied.guests;
+        squadRef.current = applied.squad;
+        setSquad(applied.squad);
+        const humans = applied.squad.slots.filter((slot) => slot.control === 'human').length;
+        const computers = applied.squad.slots.filter((slot) => slot.control === 'computer').length;
+        setStatus(`${lifeRef.current} · ${humans} human · ${computers} computer · you are host`);
+      },
+    });
+  }, [code, guest, onSpectate]);
+
+  useEffect(() => {
+    if (!code || !guest || !amHost) return;
+    const send = () => {
+      void sendRaidRoom({
+        code,
+        hostGuestId: guest,
+        lifecycle: lifeRef.current,
+        squad: squadRef.current,
+      });
+    };
+    send();
+    const timer = window.setInterval(send, 600);
+    return () => window.clearInterval(timer);
+  }, [code, guest, amHost]);
+
+  useEffect(() => {
+    if (!code || !guest || amHost) return;
+    const announce = () => {
+      void sendRaidIntent(code, { intent: 'join', guestId: guest, name: 'Raider' });
+    };
+    announce();
+    const timer = window.setInterval(announce, 800);
+    return () => window.clearInterval(timer);
+  }, [code, guest, amHost]);
 
   const patchLocal = (index: number, ryderId: RyderId) => {
     setSquad((current) => ({
@@ -125,9 +197,12 @@ export default function RaidLobby({
   const selectCharacter = async (ryderId: RyderId) => {
     if (!focused) return;
     if (online) {
+      if (focused.playerId === guest) {
+        void sendRaidIntent(code, { intent: 'character', guestId: guest, slot: focused.index, ryderId });
+      }
       try {
         const room = await roomPost({ action: 'character', code, guestId: guest, slot: focused.index, ryderId });
-        setSquad(room.squad);
+        setSquad(amHostRef.current ? seatMissing(room.squad, liveGuests.current) : room.squad);
         setError('');
       } catch (reason) {
         setError(reason instanceof Error ? reason.message : 'could not change character');
@@ -145,47 +220,108 @@ export default function RaidLobby({
         name: 'Host',
         ryderId: squad.slots[0].ryderId,
       });
+      liveGuests.current = [];
+      lifeRef.current = 'LOBBY';
+      setAmHost(true);
       setCode(room.code);
       setSquad(room.squad);
       setError('');
-      setStatus(`Room ${room.code} is live.`);
+      setStatus(`Room ${room.code} is live. Share this code.`);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'could not create room');
     }
   };
 
   const join = async () => {
+    const typed = joinCode.trim().toUpperCase();
+    if (!/^[A-Z0-9]{6}$/.test(typed)) {
+      setError('Enter the 6 character code');
+      return;
+    }
     try {
       const room = await roomPost({
         action: 'join',
-        code: joinCode.trim().toUpperCase(),
+        code: typed,
         guestId: guest,
         name: 'Raider',
       });
+      setAmHost(room.youAreHost);
       setCode(room.code);
       setSquad(room.squad);
       setError('');
+      setStatus(room.youAreHost ? 'You are the host.' : 'You are in the room.');
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : 'could not join');
+      const message = reason instanceof Error ? reason.message : 'could not join';
+      if (message === 'room not found' && raidLiveEnabled()) {
+        setAmHost(false);
+        setCode(typed);
+        setError('');
+        setStatus('Looking for that raid room…');
+        return;
+      }
+      setError(message);
     }
   };
 
   const ready = async () => {
+    const slot = squad.slots.find((entry) => entry.playerId === guest) ?? squad.slots[0];
+    const nextReady = !slot?.ready;
     if (online) {
-      const mine = squad.slots.find((slot) => slot.playerId === guest);
-      const room = await roomPost({ action: 'ready', code, guestId: guest, ready: !mine?.ready });
-      setSquad(room.squad);
+      if (!amHostRef.current) {
+        void sendRaidIntent(code, { intent: 'ready', guestId: guest, ready: nextReady, name: slot?.displayName || 'Raider' });
+      }
+      try {
+        const room = await roomPost({ action: 'ready', code, guestId: guest, ready: nextReady });
+        setSquad(amHostRef.current ? seatMissing(room.squad, liveGuests.current) : room.squad);
+        setError('');
+      } catch (reason) {
+        if (!amHostRef.current) {
+          setSquad((current) => ({
+            ...current,
+            slots: current.slots.map((entry) => (entry.playerId === guest ? { ...entry, ready: nextReady } : entry)),
+          }));
+        }
+        setError(reason instanceof Error ? reason.message : 'could not ready');
+      }
       return;
     }
     setSquad((current) => ({
       ...current,
-      slots: current.slots.map((slot) => (slot.index === 0 ? { ...slot, ready: !slot.ready } : slot)),
+      slots: current.slots.map((entry) => (entry.index === 0 ? { ...entry, ready: !entry.ready } : entry)),
     }));
   };
 
-  const start = () => {
-    if (!squadReady(squad)) return;
-    onStart(squad, online ? { code, guestId: netGuest || guest, authority: true } : null);
+  const start = async () => {
+    if (online && !amHostRef.current) return;
+    const current = squadRef.current;
+    if (!squadReady(current)) return;
+    if (!online) {
+      onStart(current, null);
+      return;
+    }
+    launched.current = true;
+    let next = seatMissing(current, liveGuests.current);
+    try {
+      const room = await roomPost({ action: 'start', code, guestId: guest });
+      next = seatMissing(room.squad, liveGuests.current);
+    } catch (reason) {
+      next = seatMissing(squadRef.current, liveGuests.current);
+      const message = reason instanceof Error ? reason.message : '';
+      if (message === 'host only') {
+        launched.current = false;
+        setError(message);
+        return;
+      }
+      if (!squadReady(next)) {
+        launched.current = false;
+        setError(message || 'squad is not ready');
+        return;
+      }
+    }
+    lifeRef.current = 'IN_PROGRESS';
+    squadRef.current = next;
+    await sendRaidRoom({ code, hostGuestId: guest, lifecycle: 'IN_PROGRESS', squad: next });
+    onStart(next, { code, guestId: guest, authority: true });
   };
 
   return (
@@ -211,7 +347,7 @@ export default function RaidLobby({
               <small>
                 P{slot.index + 1} · {controlLabel(slot)}
               </small>
-              <strong>{spec?.name ?? slot.displayName}</strong>
+              <strong>{slot.control === 'human' ? slot.displayName : spec?.name ?? slot.displayName}</strong>
               <em>{slot.connected ? (slot.ready ? 'Ready' : 'Not ready') : 'Waiting'}</em>
             </button>
           );
@@ -227,7 +363,11 @@ export default function RaidLobby({
             value={squad.difficulty}
             onChange={(event) => {
               const difficulty = event.target.value as RaidDifficulty;
-              if (online) void roomPost({ action: 'difficulty', code, guestId: guest, difficulty }).then(setRoom(setSquad)).catch(() => {});
+              if (online) {
+                void roomPost({ action: 'difficulty', code, guestId: guest, difficulty })
+                  .then((room) => setSquad(amHostRef.current ? seatMissing(room.squad, liveGuests.current) : room.squad))
+                  .catch(() => {});
+              }
               else setSquad((current) => ({ ...current, difficulty }));
             }}
           >
@@ -242,7 +382,11 @@ export default function RaidLobby({
             value={squad.arenaId}
             onChange={(event) => {
               const arenaId = event.target.value;
-              if (online) void roomPost({ action: 'arena', code, guestId: guest, arenaId }).then((room) => setSquad(room.squad));
+              if (online) {
+                void roomPost({ action: 'arena', code, guestId: guest, arenaId }).then((room) =>
+                  setSquad(amHostRef.current ? seatMissing(room.squad, liveGuests.current) : room.squad),
+                );
+              }
               else setSquad((current) => ({ ...current, arenaId }));
             }}
           >
@@ -254,10 +398,10 @@ export default function RaidLobby({
           </select>
         </label>
         <button type="button" onClick={() => void ready()}>
-          {squad.slots[0].ready ? 'Unready' : 'Ready'}
+          {mine?.ready ? 'Unready' : 'Ready'}
         </button>
-        <button type="button" disabled={!squadReady(squad)} onClick={start}>
-          Start raid
+        <button type="button" disabled={!squadReady(squad) || (online && !amHost)} onClick={() => void start()}>
+          {online && !amHost ? 'Waiting for host' : 'Start raid'}
         </button>
         <button type="button" onClick={() => void create()}>
           Create online room
@@ -294,8 +438,4 @@ export default function RaidLobby({
       />
     </div>
   );
-}
-
-function setRoom(setSquad: (squad: RaidSquad) => void) {
-  return (room: RoomView) => setSquad(room.squad);
 }
