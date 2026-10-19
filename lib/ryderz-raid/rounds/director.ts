@@ -11,7 +11,9 @@ export type RoundPhaseId = 'street' | 'resistance' | 'elite' | 'superhuman' | 'a
 
 export type EnemyStyle = 'strike' | 'dodge' | 'block' | 'grab' | 'throw' | 'weapon' | 'power' | 'boss';
 
-export type RaidDifficultyName = 'easy' | 'normal' | 'hard';
+export type RaidDifficultyName = 'easy' | 'normal' | 'hard' | 'nightmare';
+
+export type WarzoneEventId = 'storm' | 'breach' | 'secrets' | 'boss';
 
 export interface EnemyArchetype {
   id: string;
@@ -65,6 +67,8 @@ export interface RoundScale {
   speed: number;
   spawnInterval: number;
   cap: number;
+  /** Total hosts this round. The live cap is how many think at once. */
+  population: number;
   tactics: RoundTactics;
 }
 
@@ -79,6 +83,7 @@ export interface DirectorPlan {
   opening: SpawnOrder[];
   reserve: SpawnOrder[];
   boss: boolean;
+  event: WarzoneEventId | null;
 }
 
 export const TIERS: Record<EnemyTier, { classification: string; intelligence: string }> = {
@@ -260,21 +265,70 @@ export function tacticsForRound(round: number): RoundTactics {
     counter: n >= 8,
     surround: n >= 6,
     coordinate: n >= 11,
-    interrupt: n >= 21,
+    interrupt: n >= 16,
     targetWeak: n >= 21,
     retreat: n >= 31,
     protectElite: n >= 41,
     powers: n >= 21,
-    hazards: n >= 41,
+    hazards: n >= 16,
     aggression: Math.min(1, 0.22 + (n - 1) * 0.016),
   };
 }
 
 const DIFFICULTY = {
-  easy: { hp: 0.85, damage: 0.82, cap: -1 },
-  normal: { hp: 1, damage: 1, cap: 0 },
-  hard: { hp: 1.12, damage: 1.08, cap: 1 },
+  easy: { hp: 0.85, damage: 0.82, cap: -1, pop: 0.8 },
+  normal: { hp: 1, damage: 1, cap: 0, pop: 1 },
+  hard: { hp: 1.12, damage: 1.08, cap: 1, pop: 1.12 },
+  nightmare: { hp: 1.3, damage: 1.22, cap: 2, pop: 1.3 },
 } as const;
+
+/** Normal solo anchors. Later rounds keep climbing until the active-budget cap. */
+const POPULATION_ANCHORS: Array<[number, number]> = [
+  [1, 8],
+  [5, 15],
+  [10, 26],
+  [15, 40],
+  [20, 56],
+  [25, 72],
+  [30, 90],
+];
+
+export function populationForRound(round: number) {
+  const n = Math.max(1, Math.floor(round));
+  const last = POPULATION_ANCHORS[POPULATION_ANCHORS.length - 1];
+  if (n >= last[0]) return Math.min(140, Math.round(last[1] + (n - last[0]) * 3.6));
+  for (let i = 0; i < POPULATION_ANCHORS.length - 1; i += 1) {
+    const [a, av] = POPULATION_ANCHORS[i];
+    const [b, bv] = POPULATION_ANCHORS[i + 1];
+    if (n <= b) {
+      const t = (n - a) / (b - a);
+      return Math.round(av + (bv - av) * t);
+    }
+  }
+  return POPULATION_ANCHORS[0][1];
+}
+
+/**
+ * Every fifth round the arena changes. Tens are bosses. The other fives cycle
+ * storm, secret doors, storm, then a breach.
+ */
+export function warzoneEvent(round: number): WarzoneEventId | null {
+  const n = Math.max(1, Math.floor(round));
+  if (n < 5 || n % 5 !== 0) return null;
+  if (n % 10 === 0) return 'boss';
+  const index = Math.floor((n / 5 - 1) / 2) % 4;
+  if (index === 1) return 'secrets';
+  if (index === 3) return 'breach';
+  return 'storm';
+}
+
+export function warzoneLabel(event: WarzoneEventId | null) {
+  if (event === 'storm') return 'SUPERNATURAL STORM';
+  if (event === 'breach') return 'REINFORCEMENTS BREACH';
+  if (event === 'secrets') return 'SECRET DOORS UNLOCK';
+  if (event === 'boss') return 'A BOSS EMERGES';
+  return null;
+}
 
 /**
  * Normal solo round 15 is the balancing anchor: tier 4, 1.63× health,
@@ -289,6 +343,7 @@ export function roundScale(round: number, squadSize = 1, difficulty: RaidDifficu
   const hp = (1 + (n - 1) * 0.045) * (1 + allies * 0.06) * tune.hp;
   const damage = (1 + (n - 1) * (0.25 / 14)) * (1 + allies * 0.03) * tune.damage;
   const cap = Math.max(4, Math.min(16, 6 + Math.floor((n - 1) * (5 / 14)) + allies + tune.cap));
+  const population = Math.max(4, Math.round(populationForRound(n) * tune.pop * (1 + allies * 0.08)));
   return {
     round: n,
     phase,
@@ -298,6 +353,7 @@ export function roundScale(round: number, squadSize = 1, difficulty: RaidDifficu
     speed: 1 + Math.min((n - 1) * 0.012, 0.3),
     spawnInterval: Math.max(0.34, 0.95 - (n - 1) * 0.012),
     cap,
+    population,
     tactics: tacticsForRound(n),
   };
 }
@@ -322,9 +378,8 @@ function pickArchetype(round: number, rng: () => number): EnemyArchetype {
 /** The invisible director: who shows up, who waits in reserve, and how hard they think. */
 export function directRound(round: number, squadSize = 1, rng: () => number = Math.random, difficulty: RaidDifficultyName = 'normal'): DirectorPlan {
   const scale = roundScale(round, squadSize, difficulty);
-  const budget = Math.max(scale.cap, Math.round(scale.cap * (scale.round < 6 ? 1.15 : 1.4)));
   const opening: SpawnOrder[] = [];
-  for (let i = 0; i < budget; i += 1) {
+  for (let i = 0; i < scale.population; i += 1) {
     const entry = pickArchetype(scale.round, rng);
     opening.push({ kind: entry.kind, archetypeId: entry.id });
   }
@@ -335,12 +390,15 @@ export function directRound(round: number, squadSize = 1, rng: () => number = Ma
   }
   const boss = bossRound(scale.round);
   if (boss) opening.unshift({ kind: 'broadcaster', archetypeId: 'broadcaster' });
-  return { round: scale.round, scale, opening, reserve, boss };
+  return { round: scale.round, scale, opening, reserve, boss, event: warzoneEvent(scale.round) };
 }
 
 export function roundTitle(round: number) {
   const phase = phaseForRound(round);
+  const event = warzoneEvent(round);
+  const eventLine = event && event !== 'boss' ? warzoneLabel(event) : null;
   if (round === 1) return { title: 'ROUND 1', sub: 'THE SIGNAL TAKES THE BLOCK' };
   if (bossRound(round)) return { title: `ROUND ${round}`, sub: 'THE BROADCASTER IS HERE' };
+  if (eventLine) return { title: `ROUND ${round}`, sub: eventLine };
   return { title: `ROUND ${round}`, sub: phase.name.toUpperCase() };
 }

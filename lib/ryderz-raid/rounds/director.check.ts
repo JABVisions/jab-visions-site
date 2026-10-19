@@ -8,7 +8,9 @@ import {
   phaseForRound,
   registerEnemyArchetype,
   resetArchetypesForTests,
+  populationForRound,
   roundScale,
+  warzoneEvent,
 } from './director';
 
 const street = phaseForRound(1);
@@ -31,11 +33,22 @@ assert.equal(anchor.cap, 11);
 assert.equal(anchor.tactics.powers, false);
 assert.equal(anchor.tactics.hazards, false);
 assert.equal(anchor.tactics.coordinate, true);
+assert.equal(anchor.tactics.interrupt, false);
+assert.equal(anchor.population, 40);
+assert.equal(populationForRound(1), 8);
+assert.equal(populationForRound(5), 15);
+assert.equal(populationForRound(10), 26);
+assert.equal(populationForRound(20), 56);
+assert.equal(populationForRound(25), 72);
+assert.equal(populationForRound(30), 90);
+assert.ok(populationForRound(31) > 90);
+assert.ok(populationForRound(50) <= 140);
 
 const early = directRound(1, 1, () => 0.2);
 assert.equal(early.boss, false);
 assert.equal(early.reserve.length, 0);
-assert.ok(early.opening.length >= 4);
+assert.equal(early.event, null);
+assert.equal(early.opening.length + early.reserve.length, 8);
 assert.ok(early.opening.every((spawn) => spawn.kind === 'walker' || spawn.kind === 'sprinter' || spawn.kind === 'thrower'));
 
 const sixth = directRound(6, 1, () => 0.5);
@@ -44,6 +57,16 @@ assert.ok(sixth.reserve.length > 0);
 assert.equal(sixth.scale.maxTier, 3);
 assert.ok(sixth.opening.concat(sixth.reserve).every((spawn) => spawn.kind !== 'adept' && spawn.kind !== 'broadcaster'));
 
+assert.equal(warzoneEvent(4), null);
+assert.equal(warzoneEvent(5), 'storm');
+assert.equal(warzoneEvent(10), 'boss');
+assert.equal(warzoneEvent(15), 'secrets');
+assert.equal(warzoneEvent(20), 'boss');
+assert.equal(warzoneEvent(25), 'storm');
+assert.equal(warzoneEvent(35), 'breach');
+assert.equal(roundScale(16).tactics.hazards, true);
+assert.equal(roundScale(16).tactics.interrupt, true);
+assert.equal(roundScale(20).tactics.interrupt, true);
 assert.equal(bossRound(9), false);
 assert.equal(bossRound(10), true);
 const tenth = directRound(10, 1, () => 0.4);
@@ -69,6 +92,12 @@ assert.ok(squad.hp > anchor.hp);
 assert.ok(squad.hp < anchor.hp * 1.4);
 const easy = roundScale(15, 1, 'easy');
 assert.ok(easy.hp < anchor.hp);
+assert.ok(easy.population < anchor.population);
+const nightmare = roundScale(15, 1, 'nightmare');
+assert.ok(nightmare.hp > roundScale(15, 1, 'hard').hp);
+assert.ok(nightmare.population > anchor.population);
+assert.ok(nightmare.cap <= 16);
+assert.equal(directRound(1, 1, () => 0.2, 'nightmare').reserve.length, 0);
 
 assert.throws(() =>
   registerEnemyArchetype({

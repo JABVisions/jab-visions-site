@@ -38,7 +38,9 @@ const SLIDERS: SliderDef[] = [
   { key: 'rotationSmoothing', label: 'Rotation smoothing', min: 0, max: 0.25, step: 0.005, unit: 's' },
   { key: 'stateBlend', label: 'State blend', min: 0, max: 0.8, step: 0.01, unit: 's' },
   { key: 'sprintPullback', label: 'Sprint pullback', min: 0, max: 2.5, step: 0.05, unit: 'm' },
-  { key: 'lookSensitivity', label: 'Look sensitivity', min: 0.3, max: 2.5, step: 0.05, unit: '×' },
+  { key: 'lookSensitivity', label: 'Mouse sensitivity', min: 0.3, max: 2.5, step: 0.05, unit: '×' },
+  { key: 'stickSensitivity', label: 'Controller sensitivity', min: 0.3, max: 2.5, step: 0.05, unit: '×' },
+  { key: 'lookInvertY', label: 'Invert look', min: 0, max: 1, step: 1 },
   { key: 'collisionRadius', label: 'Collision radius', min: 0.1, max: 0.8, step: 0.02, unit: 'm' },
 ];
 
@@ -209,7 +211,7 @@ export default function CameraTuningPanel({
         </button>
       </div>
       <p className={styles.camHint}>
-        ` toggles this panel · Esc releases the mouse without pausing · A and D turn the camera · W and S walk
+        ` toggles this panel · Esc releases the mouse without pausing · WASD moves with the camera · K changes the camera mode
         along that view · Mouse can still orbit · Shift sprints · hold LMB for AIM
       </p>
     </aside>

@@ -374,6 +374,7 @@ export default function RaidLobby({
             <option value="easy">Easy</option>
             <option value="normal">Normal</option>
             <option value="hard">Hard</option>
+            <option value="nightmare">Nightmare</option>
           </select>
         </label>
         <label>

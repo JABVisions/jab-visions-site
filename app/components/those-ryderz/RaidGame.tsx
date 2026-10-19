@@ -10,7 +10,7 @@ import {
   type UpgradeId,
 } from '@/lib/ryderz-raid/config';
 import { arenaSpec } from '@/lib/ryderz-raid/arenas';
-import type { CameraState } from '@/lib/ryderz-raid/camera';
+import { CAMERA_MODE_LABEL, type CameraMode, type CameraState } from '@/lib/ryderz-raid/camera';
 import type { HudState, RaidEngine } from '@/lib/ryderz-raid/engine';
 import { GameMode } from '@/lib/ryderz-raid/game-mode';
 import { PlayerStore } from '@/lib/ryderz-raid/multiplayer';
@@ -125,6 +125,11 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
   const [coarse, setCoarse] = useState(false);
   const [camPanel, setCamPanel] = useState(false);
   const [cameraState, setCameraState] = useState<CameraState>('EXPLORATION');
+  const [cameraMode, setCameraMode] = useState<CameraMode>('standard');
+  const [lockOn, setLockOn] = useState(false);
+  const [difficulty, setDifficulty] = useState('NORMAL');
+  const [heldWeapon, setHeldWeapon] = useState('');
+  const [warzone, setWarzone] = useState('');
   const [engineReady, setEngineReady] = useState<RaidEngine | null>(null);
 
   const syncHud = useCallback((next: HudState) => {
@@ -264,6 +269,14 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
       setUpgrades(next.upgrades);
     }
     if (!prev || prev.cameraState !== next.cameraState) setCameraState(next.cameraState);
+    if (!prev || prev.cameraMode !== next.cameraMode) setCameraMode(next.cameraMode);
+    if (!prev || prev.lockOn !== next.lockOn) setLockOn(next.lockOn);
+    if (!prev || prev.difficulty !== next.difficulty) setDifficulty(next.difficulty);
+    if (!prev || prev.heldWeapon !== next.heldWeapon) setHeldWeapon(next.heldWeapon);
+    if (!prev || prev.warzone !== next.warzone) setWarzone(next.warzone);
+    const upgradeKey = UPGRADE_ORDER.map((id) => next.upgrades[id]).join(',');
+    const prevUpgradeKey = prev ? UPGRADE_ORDER.map((id) => prev.upgrades[id]).join(',') : '';
+    if (upgradeKey !== prevUpgradeKey) setUpgrades(next.upgrades);
     if (!prev || Math.abs(prev.points - next.points) > 0.5) setPoints(next.points);
     if (!prev || prev.round !== next.round) setRound(next.round);
     if (!prev || prev.survival?.round !== next.survival?.round || prev.survival?.phase !== next.survival?.phase || prev.survival?.cap !== next.survival?.cap) {
@@ -321,6 +334,9 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
       audio.startCity();
       void audio.resume();
       engineRef.current = engine;
+      if (process.env.NODE_ENV !== 'production') {
+        (window as unknown as { __raid?: RaidEngine }).__raid = engine;
+      }
       manager.attach(engine);
       engine.setRaidPlan(raidPlanRef.current);
       engine.setPvpSetup(
@@ -567,6 +583,9 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
                   <div className={styles.chip}>
                     Signal pts <strong ref={pointsRef}>0</strong>
                   </div>
+                  <div className={styles.chip}>
+                    Difficulty <strong>{difficulty}</strong>
+                  </div>
                 </>
               ) : null}
               <div className={styles.chip}>
@@ -579,10 +598,20 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
                 type="button"
                 className={`${styles.chip} ${styles.chipBtn} ${camPanel ? styles.chipOn : ''}`}
                 onClick={() => setCamPanel((open) => !open)}
-                title="Camera tuning (dev) · `"
+                title={`Camera tuning · ${cameraState}${lockOn ? ' · locked' : ''}`}
               >
-                Cam <strong>{cameraState}</strong>
+                Cam <strong>{CAMERA_MODE_LABEL[cameraMode]}</strong>
               </button>
+              {heldWeapon ? (
+                <div className={styles.chip}>
+                  Weapon <strong>{heldWeapon}</strong>
+                </div>
+              ) : null}
+              {warzone ? (
+                <div className={styles.chip}>
+                  Warzone <strong>{warzone}</strong>
+                </div>
+              ) : null}
             </div>
           </div>
 
@@ -693,7 +722,7 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
 
           <div className={styles.bottomHud}>
             <p className={styles.hint}>
-              A D or arrows turn the camera · W S walk along that view · Mouse can still orbit · Shift sprint · Space jump · X recenters pitch · B swaps shoulder · Click punches up close · Zoe blasts at range · Keven throws darts · C punch · V kick · F / RMB melee, F again throws · Z dodge · Q E R powers · {INTERACT_LABEL} picks up a downed teammate or uses the beacon · Tap a teammate's bar to play them · {pvpTwo ? 'Tab opens the map' : 'Tab or M opens the map'} · Esc pause
+              WASD moves with the camera · S runs toward the lens · Mouse and the right stick look · G or middle mouse locks on · H cycles targets · K cycles Standard, Combat Focus, and Cinematic · Shift sprint · Space jump · X recenters pitch · B swaps shoulder · Click punches up close · Zoe blasts at range · Keven throws darts · C punch · V kick · F / RMB melee, F again throws · Z dodge · Q E R powers · {INTERACT_LABEL} uses a rack, chest, secret, beacon, or downed teammate · Tap a teammate's bar to play them · {pvpTwo ? 'Tab opens the map' : 'Tab or M opens the map'} · Esc pause
               {phase === 'intermission' ? ' · Hold the spire to buy strength' : ''}
               {pvpTwo ? ' · P2 IJKL move · U punch · O kick · P melee · N dodge · M jump' : ''}
             </p>
@@ -794,9 +823,9 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
         )}
       </div>
 
-      {playing && nearShop && (
-        <aside className={styles.shop}>
-          <h3>Spire Shop · {Math.ceil(intermissionLeft)}s</h3>
+      {playing && partyState.mode !== GameMode.PVP && (nearShop || phase === 'report') && (
+        <aside className={`${styles.shop} ${phase === 'report' ? styles.shopOver : ''}`}>
+          <h3>{phase === 'report' ? 'Raid upgrades' : `Spire Shop · ${Math.ceil(intermissionLeft)}s`}</h3>
           <ul>
             {UPGRADE_ORDER.map((id) => {
               const spec = UPGRADES[id];
@@ -829,7 +858,7 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
           <button type="button" onClick={() => engineRef.current?.requestPointerLock()}>
             Click to look
           </button>
-          <p>A and D turn the camera. W and S walk. The camera follows. Esc pauses.</p>
+          <p>WASD moves with the camera. G locks on. K changes the camera. Esc pauses.</p>
         </div>
       )}
 
@@ -842,6 +871,7 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
           arenaId={managerState.arenaId}
           round={round}
           points={points}
+          upgrades={upgrades}
           layout={layout}
           onResume={resume}
           onExit={exitToStart}

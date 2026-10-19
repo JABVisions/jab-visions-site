@@ -44,6 +44,10 @@ export interface CameraConfig {
   sprintPullback: number;
   /** Mouse look multiplier. */
   lookSensitivity: number;
+  /** Right-stick look multiplier. Independent of the mouse. */
+  stickSensitivity: number;
+  /** 1 flips vertical look. 0 keeps the default. */
+  lookInvertY: number;
   /** Radius used by the pseudo-spherecast when resolving collisions. */
   collisionRadius: number;
   /** Closest the camera may be pulled toward the pivot by collision. */
@@ -61,10 +65,12 @@ export const CAMERA_DEFAULTS: CameraConfig = {
   shoulderX: 0.42,
   shoulderY: 0,
   positionSmoothing: 0.05,
-  rotationSmoothing: 0,
+  rotationSmoothing: 0.035,
   stateBlend: 0.18,
   sprintPullback: 0.35,
   lookSensitivity: 1,
+  stickSensitivity: 1,
+  lookInvertY: 0,
   collisionRadius: 0.32,
   minDistance: 0.85,
   pitchMin: -1.05,
@@ -76,6 +82,47 @@ export type CameraFraming = Pick<
   CameraConfig,
   'fov' | 'distance' | 'height' | 'targetHeight' | 'shoulderX' | 'shoulderY'
 >;
+
+/** Player-selectable rigs. Standard is the default. Framing states still stack on top. */
+export type CameraMode = 'standard' | 'combat' | 'cinematic';
+
+export const CAMERA_MODE_ORDER: CameraMode[] = ['standard', 'combat', 'cinematic'];
+
+export const CAMERA_MODE_LABEL: Record<CameraMode, string> = {
+  standard: 'Standard',
+  combat: 'Combat Focus',
+  cinematic: 'Cinematic',
+};
+
+export const CAMERA_MODE_PRESETS: Record<CameraMode, Partial<CameraConfig>> = {
+  standard: {
+    fov: 78,
+    distance: 4.5,
+    height: 0.6,
+    shoulderX: 0.42,
+    positionSmoothing: 0.05,
+    rotationSmoothing: 0.035,
+    stateBlend: 0.18,
+  },
+  combat: {
+    fov: 70,
+    distance: 3.45,
+    height: 0.42,
+    shoulderX: 0.58,
+    positionSmoothing: 0.04,
+    rotationSmoothing: 0.028,
+    stateBlend: 0.12,
+  },
+  cinematic: {
+    fov: 88,
+    distance: 6.6,
+    height: 1.05,
+    shoulderX: 0.18,
+    positionSmoothing: 0.12,
+    rotationSmoothing: 0.09,
+    stateBlend: 0.32,
+  },
+};
 
 export const CAMERA_STATE_OFFSETS: Record<CameraState, Partial<CameraFraming>> = {
   EXPLORATION: {},
@@ -159,11 +206,21 @@ function wrapAngle(a: number) {
   return a;
 }
 
+/** Frame-rate-independent ease toward an angle, taking the short way around. */
+export function dampAngle(current: number, target: number, timeConstant: number, dt: number) {
+  const goal = wrapAngle(target);
+  if (timeConstant <= 0 || dt <= 0) return goal;
+  const delta = wrapAngle(goal - current);
+  const step = 1 - Math.exp(-dt / timeConstant);
+  return wrapAngle(current + delta * step);
+}
+
 export class ThirdPersonCamera {
   readonly camera: THREE.PerspectiveCamera;
   config: CameraConfig = { ...CAMERA_DEFAULTS };
   /** When set, overrides the state the engine asks for (debug preview). */
   forcedState: CameraState | null = null;
+  private mode: CameraMode = 'standard';
 
   private occluders: THREE.Object3D[];
   private groundAt: ((x: number, z: number) => number) | null = null;
@@ -209,6 +266,29 @@ export class ThirdPersonCamera {
 
   setConfig(patch: Partial<CameraConfig>) {
     Object.assign(this.config, patch);
+  }
+
+  getMode() {
+    return this.mode;
+  }
+
+  /**
+   * Swap Standard, Combat Focus, or Cinematic. Sensitivity, invert, and the
+   * collision shell stay where the player left them.
+   */
+  setMode(mode: CameraMode) {
+    this.mode = mode;
+    const keep = {
+      lookSensitivity: this.config.lookSensitivity,
+      stickSensitivity: this.config.stickSensitivity,
+      lookInvertY: this.config.lookInvertY,
+      collisionRadius: this.config.collisionRadius,
+      minDistance: this.config.minDistance,
+      pitchMin: this.config.pitchMin,
+      pitchMax: this.config.pitchMax,
+      sprintPullback: this.config.sprintPullback,
+    };
+    this.config = { ...CAMERA_DEFAULTS, ...CAMERA_MODE_PRESETS[mode], ...keep };
   }
 
   getState(): CameraState {
@@ -349,7 +429,7 @@ export class ThirdPersonCamera {
     this.smoothPivot.x = damp(this.smoothPivot.x, playerPos.x + leadX, posTc, dt);
     this.smoothPivot.y = damp(this.smoothPivot.y, playerPos.y, instant ? 0 : this.ySmoothing, dt);
     this.smoothPivot.z = damp(this.smoothPivot.z, playerPos.z + leadZ, posTc, dt);
-    this.smoothYaw += damp(0, wrapAngle(yaw - this.smoothYaw), rotTc, dt);
+    this.smoothYaw = dampAngle(this.smoothYaw, yaw, rotTc, dt);
     this.smoothPitch = damp(this.smoothPitch, pitch, rotTc, dt);
 
     // --- Kick spring (ability / landing / hit response) ---------------------

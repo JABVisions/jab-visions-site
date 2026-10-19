@@ -42,11 +42,14 @@ import { AfterimagePool } from './speed-vfx';
 import { createRyderKit, type KitContext, type KitTarget, type MeleeStep, type RyderKit } from './ryderz';
 import type { MeleeStyle, PoseOverride } from './skeletal';
 import {
+  CAMERA_MODE_LABEL,
+  CAMERA_MODE_ORDER,
   ThirdPersonCamera,
   cameraRelativeVelocity,
-  keyboardYawDelta,
+  dampAngle,
   stepYaw,
   type CameraConfig,
+  type CameraMode,
   type CameraSnapshot,
   type CameraState,
 } from './camera';
@@ -68,6 +71,7 @@ import {
   glow,
   poseAim,
   poseMelee,
+  toon,
   setHumanoidOpacity,
 } from './toon';
 import { ledgeDrop, resolveFooting, slopeBlocks, STEP_HEIGHT } from './footing';
@@ -79,10 +83,13 @@ import { emptySwim, shallowDirection, stepSwim, type SwimState, type WaterColumn
 import { calculatePvPDamage, pvpHealth, PvpCpu, type PvpDamageKind } from './pvp';
 import type { PvpDifficulty } from './pvp/aiProfile';
 import { arenaChangeRestarts, canAssumeAlly, carriedVitals } from './raid/control';
+import { RAID_REWARDS, killReward } from './raid/rewards';
+import { fieldStations, nearestStation, type FieldStation } from './raid/stations';
 import { type RaidLaunch } from './raid/squad';
 import {
   archetypeById,
   directRound,
+  warzoneLabel,
   type DirectorPlan,
   type RoundTactics,
   type SpawnOrder,
@@ -157,6 +164,11 @@ export interface HudState {
   /** Marywantis's tide cut out. Powers are dead until it comes back. */
   tideOut: boolean;
   cameraState: CameraState;
+  cameraMode: CameraMode;
+  lockOn: boolean;
+  difficulty: string;
+  heldWeapon: string;
+  warzone: string;
   /** HIGH / LOW / DEPLETED, as the electricity system reads it. */
   powerState: PowerState;
   /** The arena's Ryder Beacon, relative to the player. */
@@ -233,6 +245,8 @@ export interface HudState {
     mvp: boolean;
     left: number;
     lines: SquadStatLine[];
+    pointsEarned: number;
+    upgradesBought: number;
   } | null;
   /** Null on arenas with no ocean. Present on dry sand too, so the HUD can tell land from water. */
   water: { mode: SwimState['mode']; oxygen: number; submerged: boolean } | null;
@@ -320,6 +334,8 @@ interface Host {
   nav?: NavHint;
   /** This raid teammate is already committed to a host and may chase a little farther. */
   pressing?: boolean;
+  /** Frames skipped while this host is far enough to simulate cheaply. */
+  lodTick?: number;
 }
 
 /** A defeated host still flying from the blow that killed it. */
@@ -540,6 +556,14 @@ export class RaidEngine {
   private iframes = 0;
   private anim = 0;
   private points = 0;
+  private pointsEarnedRound = 0;
+  private upgradesBought = 0;
+  private cameraMode: CameraMode = 'standard';
+  private lockTarget: Host | null = null;
+  private stormT = 0;
+  private stations: FieldStation[] = [];
+  private stationRoot: THREE.Group | null = null;
+  private stationViews: THREE.Object3D[] = [];
   private round = 0;
   private phase: HudState['phase'] = 'playing';
   private intermissionLeft = 0;
@@ -762,6 +786,10 @@ export class RaidEngine {
       this.beginRound(1);
     }
     this.spawnThrowables();
+    if (this.gameMode !== GameMode.PVP) {
+      this.spawnStations();
+      this.restockStations();
+    }
   }
 
   /** Cooperative squad. Cleared by Solo and PvP starts. */
@@ -797,6 +825,43 @@ export class RaidEngine {
   /** Land a hit on the local raider. Down rules match a civilian strike. */
   strikeSelf(amount: number) {
     this.hurtPlayer(amount, _tmp.set(0, 0, 1));
+  }
+
+  /** Read the rig after a scripted key hold. Movement must not drag the yaw. */
+  debugControlProbe() {
+    const look = new THREE.Vector3();
+    this.camera.getWorldDirection(look);
+    return {
+      yaw: this.yaw,
+      facing: this.facing,
+      pitch: this.pitch,
+      x: this.pos.x,
+      z: this.pos.z,
+      mode: this.cameraMode,
+      lock: Boolean(this.lockTarget),
+      camX: this.camera.position.x,
+      camZ: this.camera.position.z,
+      lookX: look.x,
+      lookZ: look.z,
+      weapon: this.heldThrow?.stats.kind ?? '',
+      points: this.points,
+      round: this.round,
+      stations: this.stations.length,
+      paused: this.paused,
+      chest: this.stations.find((station) => station.kind === 'chest') ?? null,
+    };
+  }
+
+  /** Run the sim with one key held. Headless checks use this instead of the render loop. */
+  debugNudge(key: string, seconds: number) {
+    const lower = key.toLowerCase();
+    this.onKeyDown(new KeyboardEvent('keydown', { key: lower }));
+    this.keys.add(lower);
+    const dt = 1 / 60;
+    const steps = Math.max(1, Math.round(Math.max(0, seconds) / dt));
+    for (let i = 0; i < steps; i += 1) this.update(dt, this.simTime);
+    this.keys.delete(lower);
+    return this.debugControlProbe();
   }
 
   /** Snap the local raider onto a point. Headless water checks use this. */
@@ -1359,13 +1424,19 @@ export class RaidEngine {
   }
 
   buyUpgrade(id: UpgradeId) {
-    if (this.phase !== 'intermission' || this.pos.length() > 6.2) return false;
+    const hub = this.phase === 'intermission' && this.pos.length() <= 6.2;
+    const between = this.phase === 'report';
+    const pausedBuy = this.paused && this.gameMode !== GameMode.PVP && this.phase !== 'dead' && this.phase !== 'victory';
+    if (!hub && !between && !pausedBuy) return false;
     const level = this.upgrades[id];
     if (level >= UPGRADES[id].maxLevel) return false;
     const cost = upgradeCost(id, level);
     if (this.points < cost) return false;
     this.points -= cost;
     this.upgrades[id] += 1;
+    this.upgradesBought += 1;
+    this.banner = { title: UPGRADES[id].name.toUpperCase(), sub: 'RAID UPGRADE' };
+    this.bannerT = 1.4;
     if (id === 'capacity') {
       this.maxAura = this.spec.maxAura + this.upgrades.capacity * 20;
       this.aura = Math.min(this.maxAura, this.aura + 28);
@@ -1482,6 +1553,9 @@ export class RaidEngine {
     const lower = e.key.toLowerCase();
     if (lower === 'x') this.recenter = true;
     if (lower === 'b') this.swapShoulder();
+    if (lower === 'k') this.cycleCameraMode();
+    if (lower === 'g') this.toggleLock();
+    if (lower === 'h') this.cycleLock();
     const rival = this.pvpLocalTwo ? commandForKey(e.key, e.code, 2) : null;
     const command = rival ?? commandForKey(e.key, e.code, 1);
     if (command) this.queueCommand(command, rival ? 2 : 1);
@@ -1526,6 +1600,10 @@ export class RaidEngine {
       if (lock && typeof (lock as Promise<void>).catch === 'function') void (lock as Promise<void>).catch(() => {});
     }
     if (e.button === 0) this.fireHeld = true;
+    if (e.button === 1) {
+      e.preventDefault();
+      this.toggleLock();
+    }
     if (e.button === 2) {
       e.preventDefault();
       this.meleeQueued = true;
@@ -1561,26 +1639,31 @@ export class RaidEngine {
     }
     const cam = this.rig.config;
     const sens = cam.lookSensitivity;
+    const stickSens = cam.stickSensitivity;
+    const invert = cam.lookInvertY >= 0.5 ? -1 : 1;
     const stick = this.readLookStick();
     const manualLook = Math.abs(this.lookAcc.x) + Math.abs(this.lookAcc.y) + Math.abs(stick.x) + Math.abs(stick.y) > 0.001;
-    if (manualLook) this.recenter = false;
-    this.yaw -= (this.lookAcc.x * 0.0031 + stick.x * STICK_YAW_RATE * dt) * sens;
-    this.yaw += keyboardYawDelta(
-      this.keys.has('a') || this.keys.has('arrowleft'),
-      this.keys.has('d') || this.keys.has('arrowright'),
-      dt,
-    );
+    if (manualLook) {
+      this.recenter = false;
+      this.lockTarget = null;
+    }
+    this.yaw -= this.lookAcc.x * 0.0031 * sens + stick.x * STICK_YAW_RATE * dt * stickSens;
     this.pitch = clamp(
-      this.pitch - (this.lookAcc.y * 0.0024 + stick.y * STICK_PITCH_RATE * dt) * sens,
+      this.pitch - (this.lookAcc.y * 0.0024 * sens + stick.y * STICK_PITCH_RATE * dt * stickSens) * invert,
       cam.pitchMin,
       cam.pitchMax,
     );
     this.lookAcc.x = 0;
     this.lookAcc.y = 0;
+    this.stepLockOn(dt);
     if (this.recenter) {
       const home = 0.2;
       this.pitch += (home - this.pitch) * (1 - Math.exp(-dt / 0.16));
       if (Math.abs(this.pitch - home) < 0.012) this.recenter = false;
+    }
+    if (this.stormT > 0) {
+      this.stormT = Math.max(0, this.stormT - dt);
+      if (this.stormT > 0 && Math.random() < dt * 3) this.rig.addShake(0.22);
     }
     this.combatT = Math.max(0, this.combatT - dt);
     this.abilityT = Math.max(0, this.abilityT - dt);
@@ -1844,6 +1927,7 @@ export class RaidEngine {
     if (this.pickupNearestAlly()) return;
     if (this.recoveryT > 0 || this.kit?.locked) return;
     const beacon = this.beacon;
+    if (this.tryFieldStation()) return;
     if (!beacon || !beacon.isPlayerInRange(this.pos)) {
       if (this.trySimConsole()) return;
       this.tryPickup();
@@ -2204,8 +2288,9 @@ export class RaidEngine {
   }
 
   /**
-   * Run direction turns the body. Aiming, striking, and abilities square up to the
-   * camera so attacks still go where the view is pointed. A and D yaw that view.
+   * Run direction turns the body, including a run back toward the camera.
+   * Aiming, striking, and abilities square the body up to the view. The view
+   * itself stays where the player left it.
    */
   private stepFacing(dt: number) {
     const committed =
@@ -2269,8 +2354,7 @@ export class RaidEngine {
     const dx = near.pos.x - this.pos.x;
     const dz = near.pos.z - this.pos.z;
     if (dx * dx + dz * dz > range * range) return;
-    this.yaw = Math.atan2(dx, dz);
-    this.facing = this.yaw;
+    this.facing = Math.atan2(dx, dz);
   }
 
   private tryFire() {
@@ -2353,10 +2437,12 @@ export class RaidEngine {
     return { x, y };
   }
 
-  /** Stick strafe on x, keyboard and stick forward/back on z. A and D yaw the camera instead of strafing. Positive z is backward. */
+  /** Stick and A/D strafe on x. W/S and arrows move on z. Positive z is backward, so S runs toward the camera. */
   private readMoveAxes() {
     let x = this.moveAxis.x;
     let z = this.moveAxis.z;
+    if (this.keys.has('a') || this.keys.has('arrowleft')) x -= 1;
+    if (this.keys.has('d') || this.keys.has('arrowright')) x += 1;
     if (this.keys.has('arrowup') || this.keys.has('w')) z -= 1;
     if (this.keys.has('arrowdown') || this.keys.has('s')) z += 1;
     const len = Math.hypot(x, z);
@@ -3221,10 +3307,16 @@ export class RaidEngine {
   private applyPlan(plan: DirectorPlan) {
     this.survivalPlan = plan;
     this.tactics = plan.scale.tactics;
-    this.queue = plan.opening;
-    this.reserve = plan.reserve;
+    this.queue = plan.opening.slice();
+    this.reserve = plan.reserve.slice();
     this.signalHazard = null;
     this.hazardWait = 12;
+    this.stormT = plan.event === 'storm' ? 16 : 0;
+    if (plan.event === 'breach' && this.reserve.length) {
+      const spill = Math.ceil(this.reserve.length / 2);
+      this.queue.push(...this.reserve.splice(0, spill));
+    }
+    this.restockStations();
   }
 
   private beginRaid() {
@@ -3326,6 +3418,8 @@ export class RaidEngine {
     if (round <= 0) return;
     this.reportRound = round;
     this.reportLeft = mvpRound(round) ? MVP_HOLD : REPORT_HOLD;
+    if (this.gameMode === GameMode.RAID && this.raidPlan) this.awardPoints(RAID_REWARDS.round);
+    else this.awardPoints(round * 250);
     this.phase = 'report';
     this.mapOpen = false;
     if (document.pointerLockElement === this.canvas) document.exitPointerLock();
@@ -3350,6 +3444,7 @@ export class RaidEngine {
     this.interactQueued = false;
     if (this.gameMode === GameMode.RAID && this.raidPlan) {
       this.raidWave = finished + 1;
+      this.pointsEarnedRound = 0;
       this.phase = 'playing';
       this.applyPlan(directRound(this.raidWave, this.squadSize(), Math.random, this.raidPlan.difficulty ?? 'normal'));
       this.spawnTimer = 1.1;
@@ -3359,7 +3454,7 @@ export class RaidEngine {
     }
     this.phase = 'intermission';
     this.intermissionLeft = INTERMISSION;
-    this.points += finished * 250;
+    this.pointsEarnedRound = 0;
     this.hp = Math.min(this.maxHp, this.hp + 16);
     this.banner = { title: 'ROUND CLEAR', sub: 'HOLD THE SPIRE · BUY STRENGTH' };
     this.bannerT = 3;
@@ -3380,6 +3475,8 @@ export class RaidEngine {
       mvp: mvpRound(this.reportRound),
       left: this.reportLeft,
       lines,
+      pointsEarned: this.pointsEarnedRound,
+      upgradesBought: this.upgradesBought,
     };
   }
 
@@ -3567,7 +3664,7 @@ export class RaidEngine {
         regrouping: () => regroup,
       },
       id,
-      (this.raidPlan?.difficulty ?? 'normal') as PvpDifficulty,
+      this.allyDifficulty(),
     );
     cpu.attach(host, spec);
     if (placed?.power) {
@@ -4002,7 +4099,8 @@ export class RaidEngine {
 
   /** Prefer alleys in the block the Ryder is standing in, so a wave still arrives on a four-block map. */
   private spawnAlley() {
-    const alleys = this.world.alleys;
+    const clear = this.world.alleys.filter((alley) => this.spawnAllowed(alley.position));
+    const alleys = clear.length ? clear : this.world.alleys;
     const reach = this.world.spawnReach ?? DISTRICT_SPAN * 0.65;
     if (Math.random() < 0.65) {
       const here = alleys.filter((alley) => {
@@ -4219,6 +4317,31 @@ export class RaidEngine {
         if (host.hit > 0) flashEmissive(host.fighter.humanoid, host.hitColor, host.hit * 2.4);
         else flashEmissive(host.fighter.humanoid, 0x000000, 0);
         continue;
+      }
+
+      const farX = host.pos.x - this.pos.x;
+      const farZ = host.pos.z - this.pos.z;
+      if (
+        !host.ally &&
+        !host.duelist &&
+        host.stagger <= 0 &&
+        host.airY <= 0 &&
+        farX * farX + farZ * farZ > 46 * 46
+      ) {
+        host.lodTick = (host.lodTick ?? 0) + 1;
+        if (host.lodTick % 3 !== 0) {
+          const dist = Math.hypot(farX, farZ) || 1;
+          host.pos.x -= (farX / dist) * host.speed * 0.45 * dt;
+          host.pos.z -= (farZ / dist) * host.speed * 0.45 * dt;
+          host.pos.x = clamp(host.pos.x, -this.limit(), this.limit());
+          host.pos.z = clamp(host.pos.z, -this.limit(), this.limit());
+          resolveCircle(host.pos, host.radius, this.world.obstacles);
+          group.position.copy(host.pos);
+          group.position.y = this.bodyHeight(host.pos.x, host.pos.z, Boolean(host.swims));
+          group.rotation.y = Math.atan2(-farX, -farZ);
+          this.animateHost(host, dt, 0.45, time);
+          continue;
+        }
       }
 
       // Physical hit reactions: staggered hosts stop and reel, launched hosts
@@ -4806,7 +4929,11 @@ export class RaidEngine {
       this.banner = { title: 'YOU WIN', sub: 'OPPONENT DOWN' };
       this.bannerT = 30;
     } else {
-      this.points += host.points;
+      if (!host.ally) {
+        const boss = host.kind === 'broadcaster' || (host.tier ?? 1) >= 6;
+        this.awardPoints(killReward(host.tier ?? 1, boss));
+        if (flungBy) this.awardPoints(RAID_REWARDS.finisher);
+      }
       this.aura = Math.min(this.maxAura, this.aura + KILL_AURA_SIPHON + this.upgrades.siphon * 4);
     }
     this.burst(host.pos.clone().setY(1), host.kind === 'broadcaster' ? 0xb84dff : 0x7dff9a, host.kind === 'broadcaster' ? 40 : 16);
@@ -5029,6 +5156,7 @@ export class RaidEngine {
     if (this.phase === 'dead') return 'EXPLORATION';
     if (this.fireHeld && !this.burnout) return 'AIM';
     if (this.abilityT > 0 || this.kit?.locked || this.kit?.busy || this.moveT.some((t) => t > 0)) return 'ABILITY';
+    if (this.lockTarget && this.lockTarget.hp > 0) return 'LOCK_ON';
     if (this.sprinting) return 'SPRINT';
     if (this.combatT > 0) return 'COMBAT';
     for (const host of this.hosts) {
@@ -5054,7 +5182,16 @@ export class RaidEngine {
       this.jumping || this.airY > 0.15 || Math.abs(this.airVel) > 0.45 || this.swim.mode === 'surface' || this.swim.mode === 'under';
     this.rig.ySmoothing = airborne ? 0.05 : 0.16;
     this.rig.setGround((x, z) => this.world.heightAt(x, z));
-    this.rig.setFramingExtra(this.kit?.cameraExtra ?? null);
+    const extra = {
+      distance: this.kit?.cameraExtra?.distance ?? 0,
+      height: this.kit?.cameraExtra?.height ?? 0,
+      targetHeight: this.kit?.cameraExtra?.targetHeight ?? 0,
+    };
+    if (this.livingEnemies() > 6) {
+      extra.distance += 1.15;
+      extra.height += 0.22;
+    }
+    this.rig.setFramingExtra(extra.distance || extra.height || extra.targetHeight ? extra : null);
     const planar = Math.hypot(this.playerVel.x, this.playerVel.z);
     const lead = planar > 0.4 ? Math.min(0.85, planar * 0.07) / planar : 0;
     _camLead.set(this.playerVel.x * lead, 0, this.playerVel.z * lead);
@@ -5142,6 +5279,11 @@ export class RaidEngine {
       meleeOnly: this.burnout || this.powersOut(),
       tideOut: this.powersOut(),
       cameraState: this.rig.getState(),
+      cameraMode: this.cameraMode,
+      lockOn: Boolean(this.lockTarget && this.lockTarget.hp > 0),
+      difficulty: (this.raidPlan?.difficulty ?? 'normal').toUpperCase(),
+      heldWeapon: this.heldThrow && !this.heldThrow.broken ? this.heldThrow.stats.kind : '',
+      warzone: warzoneLabel(this.survivalPlan.event) ?? '',
       powerState: this.powerVfx.currentState,
       beacon: this.beacon ? this.beacon.hudState(this.clock.elapsedTime, this.pos) : null,
       recovering: this.recoveryT > 0,
@@ -5472,6 +5614,152 @@ export class RaidEngine {
         else host.stagger = Math.max(host.stagger, 0.35);
       }
     }
+  }
+
+  private awardPoints(amount: number) {
+    if (!Number.isFinite(amount) || amount <= 0 || this.gameMode === GameMode.PVP) return;
+    this.points += amount;
+    this.pointsEarnedRound += amount;
+  }
+
+  private allyDifficulty(): PvpDifficulty {
+    const name = this.raidPlan?.difficulty ?? 'normal';
+    if (name === 'nightmare') return 'hard';
+    return name;
+  }
+
+  private stepLockOn(dt: number) {
+    const target = this.lockTarget;
+    if (!target || target.hp <= 0 || target.ally || !this.hosts.includes(target)) {
+      this.lockTarget = null;
+      return;
+    }
+    const aim = Math.atan2(target.pos.x - this.pos.x, target.pos.z - this.pos.z);
+    this.yaw = dampAngle(this.yaw, aim, 0.12, dt);
+  }
+
+  private livingFoes() {
+    return this.hosts.filter((host) => !host.ally && !host.duelist && host.hp > 0);
+  }
+
+  private toggleLock() {
+    if (this.lockTarget && this.lockTarget.hp > 0) {
+      this.lockTarget = null;
+      return;
+    }
+    this.lockTarget = this.nearestHost(this.pos);
+  }
+
+  private cycleLock() {
+    const foes = this.livingFoes();
+    if (!foes.length) {
+      this.lockTarget = null;
+      return;
+    }
+    const ordered = foes
+      .map((host) => ({ host, angle: Math.atan2(host.pos.x - this.pos.x, host.pos.z - this.pos.z) }))
+      .sort((a, b) => a.angle - b.angle);
+    const index = ordered.findIndex((row) => row.host === this.lockTarget);
+    this.lockTarget = ordered[(index + 1) % ordered.length].host;
+  }
+
+  private cycleCameraMode() {
+    const index = CAMERA_MODE_ORDER.indexOf(this.cameraMode);
+    this.cameraMode = CAMERA_MODE_ORDER[(index + 1) % CAMERA_MODE_ORDER.length];
+    this.rig.setMode(this.cameraMode);
+    this.banner = { title: CAMERA_MODE_LABEL[this.cameraMode].toUpperCase(), sub: 'CAMERA' };
+    this.bannerT = 1.2;
+  }
+
+  private openPoint(x: number, z: number) {
+    if (!pointBlocked(x, z, 0.7, this.world.obstacles)) return { x, z };
+    for (let radius = 1.2; radius <= 8; radius += 1.2) {
+      for (let step = 0; step < 8; step += 1) {
+        const angle = (step / 8) * Math.PI * 2;
+        const nx = x + Math.cos(angle) * radius;
+        const nz = z + Math.sin(angle) * radius;
+        if (!pointBlocked(nx, nz, 0.7, this.world.obstacles)) return { x: nx, z: nz };
+      }
+    }
+    return { x, z };
+  }
+
+  private spawnAllowed(position: THREE.Vector3) {
+    if (pointBlocked(position.x, position.z, 0.6, this.world.obstacles)) return false;
+    const dx = position.x - this.pos.x;
+    const dz = position.z - this.pos.z;
+    const reach = dx * dx + dz * dz;
+    if (reach > 8 * 8) return true;
+    const dist = Math.sqrt(reach) || 1;
+    const facing = (dx / dist) * Math.sin(this.yaw) + (dz / dist) * Math.cos(this.yaw);
+    return facing < 0.2;
+  }
+
+  private spawnStations() {
+    if (this.stationRoot) {
+      this.scene.remove(this.stationRoot);
+      disposeObject(this.stationRoot);
+    }
+    const originX = this.arena.spawnPoint.x;
+    const originZ = this.arena.spawnPoint.z;
+    this.stations = fieldStations().map((station) => {
+      const spot = this.openPoint(originX + station.x, originZ + station.z);
+      return { ...station, x: spot.x, z: spot.z };
+    });
+    this.stationViews = [];
+    const root = new THREE.Group();
+    root.name = 'raid-stations';
+    for (const station of this.stations) {
+      const mesh = new THREE.Group();
+      const color = station.kind === 'weapon' ? 0xc9a36a : station.kind === 'chest' ? 0xd4a017 : 0x7a5cff;
+      const body = new THREE.Mesh(
+        station.kind === 'weapon' ? new THREE.BoxGeometry(0.18, 1.15, 0.9) : new THREE.BoxGeometry(0.7, 0.42, 0.48),
+        toon(color, { emissive: color, emissiveIntensity: station.kind === 'secret' ? 0.35 : 0.08 }),
+      );
+      body.position.y = station.kind === 'weapon' ? 1.05 : 0.28;
+      mesh.add(body);
+      mesh.position.set(station.x, this.world.heightAt(station.x, station.z), station.z);
+      root.add(mesh);
+      this.stationViews.push(mesh);
+    }
+    this.stationRoot = root;
+    this.scene.add(root);
+  }
+
+  private restockStations() {
+    this.stations.forEach((station, index) => {
+      station.claimed = false;
+      const view = this.stationViews[index];
+      if (view) view.visible = true;
+      if (station.kind !== 'weapon' || !this.throwables) return;
+      if (this.throwables.nearestFree(station.x, station.z, 1.6)) return;
+      this.throwables.place(station.weapon ?? 'brick', station.x, station.z);
+    });
+  }
+
+  private tryFieldStation() {
+    const station = nearestStation(this.stations, this.pos.x, this.pos.z, 1.8);
+    if (!station) return false;
+    if (station.kind === 'weapon') {
+      const item = this.throwables?.nearestFree(station.x, station.z, 1.8);
+      if (!item || !this.throwables?.pickup(this.playerBody, item)) return false;
+      this.heldThrow = item;
+      this.banner = { title: 'WEAPON TAKEN', sub: item.stats.kind.toUpperCase() };
+      this.bannerT = 1.4;
+      return true;
+    }
+    station.claimed = true;
+    const view = this.stationViews[this.stations.indexOf(station)];
+    if (view) view.visible = false;
+    if (station.kind === 'chest') {
+      this.awardPoints(RAID_REWARDS.chest);
+      this.banner = { title: 'TREASURE', sub: '+300 RAID POINTS' };
+    } else {
+      this.awardPoints(RAID_REWARDS.secret);
+      this.banner = { title: 'SECRET ROOM', sub: '+750 RAID POINTS' };
+    }
+    this.bannerT = 1.8;
+    return true;
   }
 
   private spawnThrowables() {

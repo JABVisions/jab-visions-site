@@ -917,6 +917,10 @@
   text-decoration: none;
 }
 
+.shopOver {
+  z-index: 9;
+}
+
 .shop {
   position: absolute;
   right: 16px;

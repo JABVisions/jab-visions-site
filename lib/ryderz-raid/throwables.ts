@@ -121,6 +121,32 @@ export class ThrowableField {
     });
   }
 
+  /** Drop another street prop. Weapon racks call this when a round restocks. */
+  place(kind: ThrowableKind, x: number, z: number): ThrowBody {
+    const mesh = propMesh(kind);
+    const pos = new THREE.Vector3(x, 0, z);
+    mesh.position.copy(pos);
+    this.scene.add(mesh);
+    const item: ThrowBody = {
+      id: this.seq,
+      stats: THROWABLE_STATS[kind],
+      mesh,
+      pos,
+      vel: new THREE.Vector3(),
+      heldBy: null,
+      gripped: false,
+      lastThrower: null,
+      safeUntil: 0,
+      flying: false,
+      dealt: false,
+      broken: false,
+      spin: 0,
+    };
+    this.seq += 1;
+    this.items.push(item);
+    return item;
+  }
+
   nearestFree(x: number, z: number, max = 14): ThrowBody | null {
     let best: ThrowBody | null = null;
     let bestD = max * max;

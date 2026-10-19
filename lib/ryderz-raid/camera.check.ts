@@ -1,12 +1,27 @@
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
-import { ThirdPersonCamera, cameraRelativeVelocity, keyboardYawDelta, stepYaw } from './camera';
+import {
+  CAMERA_MODE_PRESETS,
+  ThirdPersonCamera,
+  cameraRelativeVelocity,
+  dampAngle,
+  keyboardYawDelta,
+  stepYaw,
+} from './camera';
 
 const left = keyboardYawDelta(true, false, 0.1);
 const right = keyboardYawDelta(false, true, 0.1);
-assert.ok(left > 0.3 && left < 0.4, 'A turns the camera left');
+assert.ok(left > 0.3 && left < 0.4, 'the unused keyboard-yaw helper still turns left');
 assert.ok(Math.abs(left + right) < 1e-6, 'holding A and D cancels the turn');
 assert.equal(keyboardYawDelta(false, false, 0.5), 0);
+
+const eased = dampAngle(0, Math.PI / 2, 0.2, 1 / 60);
+assert.ok(eased > 0.05 && eased < 0.25, 'yaw eases instead of snapping in one frame');
+const around = dampAngle(Math.PI - 0.05, -Math.PI + 0.05, 0.05, 1 / 60);
+assert.ok(around > 3 || around < -3, 'damping takes the short way around');
+assert.ok(CAMERA_MODE_PRESETS.combat.distance! < CAMERA_MODE_PRESETS.standard.distance!);
+assert.ok(CAMERA_MODE_PRESETS.cinematic.distance! > CAMERA_MODE_PRESETS.standard.distance!);
+assert.ok((CAMERA_MODE_PRESETS.cinematic.rotationSmoothing ?? 0) > (CAMERA_MODE_PRESETS.standard.rotationSmoothing ?? 0));
 
 const ahead = cameraRelativeVelocity(0, 0, 1);
 assert.ok(ahead.z > 0.9 && Math.abs(ahead.x) < 0.01, 'forward stays on the camera yaw');
@@ -42,5 +57,21 @@ const before = camera.position.x;
 rig.update(1 / 60, feet, Math.PI / 2, 0.35, 'EXPLORATION', true, lead);
 assert.ok(camera.position.x > before + 0.4, 'lead opens the frame ahead of the run');
 assert.ok(Math.abs(camera.position.y - (feet.y + 2.2)) < 3, 'vertical lead is ignored');
+
+const slowCam = new THREE.PerspectiveCamera(60, 16 / 9, 0.1, 200);
+const slow = new ThirdPersonCamera(slowCam, []);
+const home = new THREE.Vector3(0, 0, 0);
+slow.setMode('cinematic');
+slow.snap(home, 0, 0.2);
+assert.ok(slow.snapshot().framing.distance > 6, 'cinematic framing pulls back');
+slow.setMode('combat');
+slow.update(1 / 60, home, 0, 0.2, 'EXPLORATION', true);
+assert.ok(slow.snapshot().framing.distance < 4, 'combat focus tightens the frame');
+slow.setConfig({ rotationSmoothing: 0.2 });
+slow.snap(home, 0, 0.2);
+slow.update(1 / 60, home, Math.PI / 2, 0.2, 'EXPLORATION');
+const slowLook = new THREE.Vector3();
+slowCam.getWorldDirection(slowLook);
+assert.ok(slowLook.x < 0.45, 'a yaw change eases in instead of snapping the rig');
 
 console.log('camera follow ok');

@@ -6,7 +6,7 @@ export const SQUAD_SIZE = 5;
 export const RAID_WAVES = 3;
 
 export type SlotControl = 'human' | 'computer' | 'open' | 'disconnected' | 'reconnecting';
-export type RaidDifficulty = 'easy' | 'normal' | 'hard';
+export type RaidDifficulty = 'easy' | 'normal' | 'hard' | 'nightmare';
 
 export type RaidLifecycle =
   | 'LOBBY'

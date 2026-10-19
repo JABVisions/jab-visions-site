@@ -3,9 +3,9 @@
 import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
 import { arenaSpec } from '@/lib/ryderz-raid/arenas';
-import { RYDERZ, fighterKind, fighterMark, type RyderId } from '@/lib/ryderz-raid/config';
+import { RYDERZ, UPGRADE_ORDER, UPGRADES, fighterKind, fighterMark, upgradeCost, type RyderId, type UpgradeId } from '@/lib/ryderz-raid/config';
 import type { RaidEngine } from '@/lib/ryderz-raid/engine';
-import type { GameMode } from '@/lib/ryderz-raid/game-mode';
+import { GameMode } from '@/lib/ryderz-raid/game-mode';
 import { INPUT_SLOTS, type RyderManager } from '@/lib/ryderz-raid/ryder-manager';
 import ArenaSelector from './ArenaSelector';
 import GameModeSelector from './GameModeSelector';
@@ -18,7 +18,7 @@ import { RYDER_THEME } from './theme';
 import { useMenuKeys, wrap } from './useMenuKeys';
 import styles from './PauseMenu.module.css';
 
-type View = 'root' | 'deck' | 'ryder' | 'arena' | 'mode' | 'settings';
+type View = 'root' | 'deck' | 'upgrades' | 'ryder' | 'arena' | 'mode' | 'settings';
 type RootAction = View | 'resume' | 'exit';
 
 const ROOT_ITEMS: NavItem<RootAction>[] = [
@@ -44,6 +44,7 @@ export default function PauseMenu({
   arenaId,
   round,
   points,
+  upgrades,
   layout,
   onResume,
   onExit,
@@ -57,6 +58,7 @@ export default function PauseMenu({
   arenaId: string;
   round: number;
   points: number;
+  upgrades: Record<UpgradeId, number>;
   layout: 'embed' | 'page';
   onResume: () => void;
   onExit: () => void;
@@ -69,6 +71,14 @@ export default function PauseMenu({
   const [preview, setPreview] = useState<RyderId | null>(null);
   const [switching, setSwitching] = useState(false);
 
+  const rootItems: NavItem<RootAction>[] =
+    gameMode === GameMode.PVP
+      ? ROOT_ITEMS
+      : [
+          ROOT_ITEMS[0],
+          { id: 'upgrades', label: 'Raid Upgrades', hint: 'Spend signal on this match' },
+          ...ROOT_ITEMS.slice(1),
+        ];
   const shown = preview ?? activeRyder;
   const spec = RYDERZ[shown];
   const theme = RYDER_THEME[shown];
@@ -89,9 +99,17 @@ export default function PauseMenu({
   };
 
   useMenuKeys((key) => {
-    if (key === 'up') setIndex((i) => wrap(i - 1, ROOT_ITEMS.length));
-    else if (key === 'down') setIndex((i) => wrap(i + 1, ROOT_ITEMS.length));
-    else if (key === 'confirm' || key === 'right') activate(ROOT_ITEMS[index].id);
+    if (key === 'back') {
+      back();
+      return true;
+    }
+    return false;
+  }, view === 'upgrades');
+
+  useMenuKeys((key) => {
+    if (key === 'up') setIndex((i) => wrap(i - 1, rootItems.length));
+    else if (key === 'down') setIndex((i) => wrap(i + 1, rootItems.length));
+    else if (key === 'confirm' || key === 'right') activate(rootItems[index].id);
     else if (key === 'back') onResume();
     else return false;
     return true;
@@ -125,7 +143,7 @@ export default function PauseMenu({
             </small>
           </h1>
         </div>
-        <PauseMenuNavigation items={ROOT_ITEMS} index={index} onFocus={setIndex} onSelect={activate} />
+        <PauseMenuNavigation items={rootItems} index={index} onFocus={setIndex} onSelect={activate} />
         {layout === 'embed' && (
           <Link href="/those-ryderz/raid" className={styles.ghostBtn}>
             Fullscreen
@@ -160,6 +178,37 @@ export default function PauseMenu({
         </section>
       )}
       {view === 'deck' && <PowerDeck manager={manager} ryderId={activeRyder} active onBack={back} />}
+      {view === 'upgrades' && (
+        <section className={styles.panel} aria-label="Raid upgrades">
+          <header className={styles.panelHead}>
+            <p className={styles.eyebrow}>Match upgrades</p>
+            <h2>{points} signal</h2>
+            <p>These last for this fight. Permanent mastery is separate.</p>
+          </header>
+          <div className={styles.scroll}>
+            {UPGRADE_ORDER.map((id) => {
+              const spec = UPGRADES[id];
+              const level = upgrades[id] ?? 0;
+              const cost = upgradeCost(id, level);
+              const maxed = level >= spec.maxLevel;
+              return (
+                <button
+                  key={id}
+                  type="button"
+                  className={styles.ghostBtn}
+                  disabled={maxed || points < cost}
+                  onClick={() => engine?.buyUpgrade(id)}
+                >
+                  {spec.name} {maxed ? 'MAX' : `Lv ${level} · ${cost}`}
+                </button>
+              );
+            })}
+            <button type="button" className={styles.ghostBtn} onClick={back}>
+              Back
+            </button>
+          </div>
+        </section>
+      )}
       {view === 'ryder' && (
         <RyderSelector
           manager={manager}

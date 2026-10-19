@@ -319,7 +319,7 @@ function setReady(room: RaidRoom, body: RoomAct) {
 function setDifficulty(room: RaidRoom, body: RoomAct) {
   if (body.guestId !== room.hostGuestId) throw new Error('host only');
   if (room.lifecycle !== 'LOBBY' && room.lifecycle !== 'READY') throw new Error('roster is locked');
-  if (body.difficulty === 'easy' || body.difficulty === 'normal' || body.difficulty === 'hard') {
+  if (body.difficulty === 'easy' || body.difficulty === 'normal' || body.difficulty === 'hard' || body.difficulty === 'nightmare') {
     room.squad.difficulty = body.difficulty;
   }
 }

@@ -68,6 +68,14 @@ export default function StatBoard({
             <dt>Total downs</dt>
             <dd>{formatStat(totals.downs)}</dd>
           </div>
+          <div>
+            <dt>Points earned</dt>
+            <dd>{formatStat(board.pointsEarned)}</dd>
+          </div>
+          <div>
+            <dt>Upgrades</dt>
+            <dd>{formatStat(board.upgradesBought)}</dd>
+          </div>
         </dl>
 
         <ol className={styles.rows}>
