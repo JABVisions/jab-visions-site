@@ -77,6 +77,7 @@ import {
 import { ledgeDrop, resolveFooting, slopeBlocks, STEP_HEIGHT } from './footing';
 import { allyFocusIndex, commitSteer, formUp, freshNav, pressTarget, type NavHint, type TrackPoint } from './nav';
 import { buildWorld, nearDistrictHub, pointBlocked, resolveCircle, type World } from './world';
+import { chartBlocks, type MapBlock } from './map-chart';
 import { buildPadWorld } from './world-pad';
 import { buildIslandWorld } from './world-island';
 import { emptySwim, shallowDirection, stepSwim, type SwimState, type WaterColumn } from './island/swim';
@@ -196,6 +197,7 @@ export interface HudState {
     span: number;
     terrain: 'island' | 'city';
     color: string;
+    blocks: MapBlock[];
     enemies: { x: number; z: number }[];
     allies: { x: number; z: number; name: string; color: string; down: boolean }[];
   };
@@ -564,6 +566,9 @@ export class RaidEngine {
   private stations: FieldStation[] = [];
   private stationRoot: THREE.Group | null = null;
   private stationViews: THREE.Object3D[] = [];
+  private chart: MapBlock[] = [];
+  private chartSig = 0;
+  private chartWorld: World | null = null;
   private round = 0;
   private phase: HudState['phase'] = 'playing';
   private intermissionLeft = 0;
@@ -847,6 +852,7 @@ export class RaidEngine {
       points: this.points,
       round: this.round,
       stations: this.stations.length,
+      blocks: this.mapChart().length,
       paused: this.paused,
       chest: this.stations.find((station) => station.kind === 'chest') ?? null,
     };
@@ -5241,6 +5247,25 @@ export class RaidEngine {
     return this.powerOut.down || Boolean(this.kit?.powersDown);
   }
 
+  /** Cached footprints. Rebuilt when the arena swaps or a barrier opens. */
+  private mapChart(): MapBlock[] {
+    const list = this.world.obstacles;
+    let sig = list.length;
+    for (let i = 0; i < list.length; i += 1) {
+      const obstacle = list[i];
+      if (obstacle.kind === 'box') {
+        sig = Math.imul(sig, 33) + Math.round(obstacle.minX * 10 + obstacle.maxZ * 10);
+      } else {
+        sig = Math.imul(sig, 33) + Math.round(obstacle.x * 10 + obstacle.r * 100);
+      }
+    }
+    if (this.chartWorld === this.world && sig === this.chartSig) return this.chart;
+    this.chartWorld = this.world;
+    this.chartSig = sig;
+    this.chart = chartBlocks(list);
+    return this.chart;
+  }
+
   private emitHud() {
     this.onHud({
       hp: this.hp,
@@ -5297,6 +5322,7 @@ export class RaidEngine {
         span: this.limit(),
         terrain: this.arena.worldKey === 'island' ? 'island' : 'city',
         color: this.spec.colorHex,
+        blocks: this.mapChart(),
         enemies: this.hosts.filter((host) => host.hp > 0 && !host.ally).map((host) => ({ x: host.pos.x, z: host.pos.z })),
         allies: this.hosts
           .filter((host) => host.ally && (host.hp > 0 || (host.down ?? 0) > 0))

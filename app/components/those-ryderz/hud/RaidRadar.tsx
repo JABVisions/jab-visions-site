@@ -2,6 +2,8 @@
 
 import { forwardRef, useImperativeHandle, useRef } from 'react';
 import { DISTRICT_SPAN } from '@/lib/ryderz-raid/config';
+import type { MapBlock } from '@/lib/ryderz-raid/map-chart';
+import { paintStructures } from './map-structures';
 import styles from './RaidRadar.module.css';
 
 export type RadarAlly = {
@@ -19,6 +21,8 @@ export type RadarFrame = {
   span: number;
   terrain: 'island' | 'city';
   color: string;
+  /** Walls, buildings, and other footprints the fighter cannot walk through. */
+  blocks: MapBlock[];
   enemies: { x: number; z: number }[];
   allies: RadarAlly[];
 };
@@ -142,6 +146,10 @@ const RaidRadar = forwardRef<RadarApi, { onOpen?: () => void }>(function RaidRad
         ctx.lineTo(toX(0), toY(MAP));
       }
       ctx.stroke();
+
+      const toChartX = (x: number) => cx + ((x - originX) / span) * (plot / 2);
+      const toChartY = (z: number) => cy + ((z - originZ) / span) * (plot / 2);
+      paintStructures(ctx, frame.blocks, toChartX, toChartY, (plot / 2) / span);
 
       ctx.fillStyle = 'rgba(57, 255, 106, 0.35)';
       if (!local) {

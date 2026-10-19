@@ -4,6 +4,7 @@ import { forwardRef, useImperativeHandle, useRef } from 'react';
 import { islandFloor } from '@/lib/ryderz-raid/island/terrain';
 import { DISTRICT_SPAN } from '@/lib/ryderz-raid/config';
 import type { RadarApi, RadarFrame } from './RaidRadar';
+import { paintStructures } from './map-structures';
 import styles from './RaidMap.module.css';
 
 let stamp: { key: string; canvas: HTMLCanvasElement } | null = null;
@@ -138,6 +139,7 @@ const RaidMap = forwardRef<RadarApi, { place: string; localTwo: boolean; onClose
           }
         }
       }
+      paintStructures(ctx, frame.blocks, toX, toY, plot / (span * 2));
       ctx.restore();
 
       ctx.strokeStyle = 'rgba(57, 255, 106, 0.85)';
@@ -289,6 +291,9 @@ const RaidMap = forwardRef<RadarApi, { place: string; localTwo: boolean; onClose
           </span>
           <span>
             <i className={styles.ally} /> Allies
+          </span>
+          <span>
+            <i className={styles.wall} /> Structures
           </span>
           <span>
             <i className={styles.host} /> Hosts
