@@ -170,14 +170,26 @@ export function stepYaw(current: number, target: number, radiansPerSecond: numbe
 
 /** How fast A and D yaw the camera, in radians per second. */
 export const KEYBOARD_YAW_RATE = 3.2;
+/** How fast W and S pitch the camera, in radians per second. */
+export const KEYBOARD_PITCH_RATE = 1.55;
 
 /**
- * Keyboard look. A and Left turn the view left (positive yaw). D and Right turn
- * it right. W and S stay on movement; they are not part of this delta.
+ * Keyboard look. A turns the view left (positive yaw). D turns it right.
+ * Arrow keys stay on movement and are not part of this delta.
  */
 export function keyboardYawDelta(left: boolean, right: boolean, dt: number) {
   const dir = (left ? 1 : 0) - (right ? 1 : 0);
   return dir * KEYBOARD_YAW_RATE * Math.max(0, dt);
+}
+
+/**
+ * W looks up and S looks down. Positive pitch puts the camera above the
+ * fighter, so looking up is a negative delta. `invert` flips the pair.
+ */
+export function keyboardPitchDelta(up: boolean, down: boolean, dt: number, invert = 1) {
+  const dir = (down ? 1 : 0) - (up ? 1 : 0);
+  const sign = invert < 0 ? -1 : 1;
+  return dir * KEYBOARD_PITCH_RATE * Math.max(0, dt) * sign;
 }
 
 export function cameraRelativeVelocity(yaw: number, strafe: number, forward: number) {

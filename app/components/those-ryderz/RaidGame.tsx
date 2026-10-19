@@ -722,7 +722,7 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
 
           <div className={styles.bottomHud}>
             <p className={styles.hint}>
-              WASD moves with the camera · S runs toward the lens · Mouse and the right stick look · G or middle mouse locks on · H cycles targets · K cycles Standard, Combat Focus, and Cinematic · Shift sprint · Space jump · X recenters pitch · B swaps shoulder · Click punches up close · Zoe blasts at range · Keven throws darts · C punch · V kick · F / RMB melee, F again throws · Z dodge · Q E R powers · {INTERACT_LABEL} uses a rack, chest, secret, beacon, or downed teammate · Tap a teammate's bar to play them · {pvpTwo ? 'Tab opens the map' : 'Tab or M opens the map'} · Esc pause
+              WASD turns and tilts the camera · Arrows move with the view · Mouse and the right stick look · G or middle mouse locks on · H cycles targets · K cycles Standard, Combat Focus, and Cinematic · Shift sprint · Space jump · X recenters pitch · B swaps shoulder · Click punches up close · Zoe blasts at range · Keven throws darts · C punch · V kick · F / RMB melee, F again throws · Z dodge · Q E R powers · {INTERACT_LABEL} uses a rack, chest, secret, beacon, or downed teammate · Tap a teammate's bar to play them · {pvpTwo ? 'Tab opens the map' : 'Tab or M opens the map'} · Esc pause
               {phase === 'intermission' ? ' · Hold the spire to buy strength' : ''}
               {pvpTwo ? ' · P2 IJKL move · U punch · O kick · P melee · N dodge · M jump' : ''}
             </p>
@@ -858,7 +858,7 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
           <button type="button" onClick={() => engineRef.current?.requestPointerLock()}>
             Click to look
           </button>
-          <p>WASD moves with the camera. G locks on. K changes the camera. Esc pauses.</p>
+          <p>WASD turns the camera. Arrows move. G locks on. K changes the camera. Esc pauses.</p>
         </div>
       )}
 

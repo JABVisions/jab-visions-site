@@ -47,6 +47,8 @@ import {
   ThirdPersonCamera,
   cameraRelativeVelocity,
   dampAngle,
+  keyboardPitchDelta,
+  keyboardYawDelta,
   stepYaw,
   type CameraConfig,
   type CameraMode,
@@ -1648,14 +1650,26 @@ export class RaidEngine {
     const stickSens = cam.stickSensitivity;
     const invert = cam.lookInvertY >= 0.5 ? -1 : 1;
     const stick = this.readLookStick();
-    const manualLook = Math.abs(this.lookAcc.x) + Math.abs(this.lookAcc.y) + Math.abs(stick.x) + Math.abs(stick.y) > 0.001;
+    const keyLeft = this.keys.has('a');
+    const keyRight = this.keys.has('d');
+    const keyUp = this.keys.has('w');
+    const keyDown = this.keys.has('s');
+    const manualLook =
+      keyLeft ||
+      keyRight ||
+      keyUp ||
+      keyDown ||
+      Math.abs(this.lookAcc.x) + Math.abs(this.lookAcc.y) + Math.abs(stick.x) + Math.abs(stick.y) > 0.001;
     if (manualLook) {
       this.recenter = false;
       this.lockTarget = null;
     }
     this.yaw -= this.lookAcc.x * 0.0031 * sens + stick.x * STICK_YAW_RATE * dt * stickSens;
+    this.yaw += keyboardYawDelta(keyLeft, keyRight, dt);
     this.pitch = clamp(
-      this.pitch - (this.lookAcc.y * 0.0024 * sens + stick.y * STICK_PITCH_RATE * dt * stickSens) * invert,
+      this.pitch -
+        (this.lookAcc.y * 0.0024 * sens + stick.y * STICK_PITCH_RATE * dt * stickSens) * invert +
+        keyboardPitchDelta(keyUp, keyDown, dt, invert),
       cam.pitchMin,
       cam.pitchMax,
     );
@@ -2443,14 +2457,14 @@ export class RaidEngine {
     return { x, y };
   }
 
-  /** Stick and A/D strafe on x. W/S and arrows move on z. Positive z is backward, so S runs toward the camera. */
+  /** Stick and arrows move. WASD is the camera, so it never lands in this vector. Positive z is backward. */
   private readMoveAxes() {
     let x = this.moveAxis.x;
     let z = this.moveAxis.z;
-    if (this.keys.has('a') || this.keys.has('arrowleft')) x -= 1;
-    if (this.keys.has('d') || this.keys.has('arrowright')) x += 1;
-    if (this.keys.has('arrowup') || this.keys.has('w')) z -= 1;
-    if (this.keys.has('arrowdown') || this.keys.has('s')) z += 1;
+    if (this.keys.has('arrowleft')) x -= 1;
+    if (this.keys.has('arrowright')) x += 1;
+    if (this.keys.has('arrowup')) z -= 1;
+    if (this.keys.has('arrowdown')) z += 1;
     const len = Math.hypot(x, z);
     if (len > 1) {
       x /= len;

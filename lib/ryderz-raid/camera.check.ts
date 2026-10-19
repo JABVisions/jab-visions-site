@@ -5,15 +5,22 @@ import {
   ThirdPersonCamera,
   cameraRelativeVelocity,
   dampAngle,
+  keyboardPitchDelta,
   keyboardYawDelta,
   stepYaw,
 } from './camera';
 
 const left = keyboardYawDelta(true, false, 0.1);
 const right = keyboardYawDelta(false, true, 0.1);
-assert.ok(left > 0.3 && left < 0.4, 'the unused keyboard-yaw helper still turns left');
+assert.ok(left > 0.3 && left < 0.4, 'A turns the camera left');
 assert.ok(Math.abs(left + right) < 1e-6, 'holding A and D cancels the turn');
 assert.equal(keyboardYawDelta(false, false, 0.5), 0);
+const lookUp = keyboardPitchDelta(true, false, 0.1);
+const lookDown = keyboardPitchDelta(false, true, 0.1);
+assert.ok(lookUp < -0.14 && lookUp > -0.17, 'W looks up');
+assert.ok(Math.abs(lookUp + lookDown) < 1e-6, 'holding W and S cancels the tilt');
+assert.ok(keyboardPitchDelta(true, false, 0.1, -1) > 0.14, 'invert look flips W');
+assert.equal(keyboardPitchDelta(false, false, 0.5), 0);
 
 const eased = dampAngle(0, Math.PI / 2, 0.2, 1 / 60);
 assert.ok(eased > 0.05 && eased < 0.25, 'yaw eases instead of snapping in one frame');
