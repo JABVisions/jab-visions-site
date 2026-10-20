@@ -26,9 +26,12 @@ const SEGMENT = 4;
 
 let clock = 0;
 
+const trails = [0, 1, 2, 3].map(() => new THREE.Vector2(8000, 8000));
+let trailWrite = 0;
+
 function terrainMaterial() {
   return new THREE.ShaderMaterial({
-    uniforms: { time: { value: 0 } },
+    uniforms: { time: { value: 0 }, trails: { value: trails } },
     vertexShader: `
       varying vec3 vPos;
       varying vec3 vNormal;
@@ -43,26 +46,51 @@ function terrainMaterial() {
       varying vec3 vPos;
       varying vec3 vNormal;
       uniform float time;
+      uniform vec2 trails[4];
+      float hash(vec2 p) {
+        return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+      }
       void main() {
         float h = vPos.y;
-        vec3 sand = vec3(0.83, 0.71, 0.45);
-        vec3 wet = vec3(0.55, 0.46, 0.30);
-        vec3 grass = vec3(0.13, 0.40, 0.16);
+        float grain = hash(floor(vPos.xz * 6.0));
+        float mote = hash(floor(vPos.xz * 1.7 + 4.0));
+        vec3 sand = vec3(0.86, 0.74, 0.46);
+        sand = mix(sand * 0.78, sand, grain);
+        vec3 wet = vec3(0.48, 0.40, 0.26);
+        vec3 grass = mix(vec3(0.16, 0.46, 0.18), vec3(0.10, 0.32, 0.12), mote);
         vec3 soil = vec3(0.34, 0.26, 0.14);
         vec3 rock = vec3(0.45, 0.43, 0.40);
         vec3 abyss = vec3(0.02, 0.10, 0.14);
         vec3 col = mix(wet, sand, smoothstep(0.05, 1.15, h));
+        float wash = smoothstep(0.0, 0.35, h) * (1.0 - smoothstep(0.35, 0.9, h));
+        col = mix(col, vec3(0.72, 0.64, 0.46), wash * 0.35);
+        if (grain > 0.92 && h > 0.4 && h < 2.2) col = mix(col, vec3(0.93, 0.9, 0.82), 0.55);
         col = mix(col, soil, smoothstep(1.15, 2.2, h) * 0.45);
         col = mix(col, grass, smoothstep(2.0, 8.0, h));
+        float gust = 0.5 + 0.5 * sin(vPos.x * 0.15 + vPos.z * 0.11 + time * 1.4);
+        col = mix(col, col * vec3(0.86, 1.08, 0.9), smoothstep(2.2, 6.0, h) * (1.0 - smoothstep(16.0, 26.0, h)) * gust * 0.22);
+        float flower = hash(floor(vPos.xz * 0.85));
+        if (flower > 0.86 && h > 3.0 && h < 14.0) {
+          col = mix(col, flower > 0.93 ? vec3(0.93, 0.78, 0.28) : vec3(0.86, 0.36, 0.48), 0.7);
+        }
         float basinX = (vPos.x + 48.0) / 155.0;
         float basinZ = (vPos.z - 125.0) / 78.0;
         float basin = clamp(1.0 - (basinX * basinX + basinZ * basinZ), 0.0, 1.0);
         float canopy = basin * smoothstep(2.2, 5.0, h) * (1.0 - smoothstep(14.0, 22.0, h));
         col = mix(col, vec3(0.04, 0.24, 0.07), canopy * 0.9);
+        float vx = (vPos.x - 46.0) / 34.0;
+        float vz = (vPos.z - 4.0) / 26.0;
+        float valley = 1.0 - clamp(vx * vx + vz * vz, 0.0, 1.0);
+        col = mix(col, vec3(0.34, 0.62, 0.24), valley * smoothstep(4.0, 8.0, h) * (1.0 - smoothstep(14.0, 18.0, h)));
         col = mix(col, rock, smoothstep(16.0, 34.0, h));
         col = mix(col, vec3(0.62, 0.60, 0.56), smoothstep(58.0, 96.0, h));
         float slope = 1.0 - clamp(vNormal.y, 0.0, 1.0);
         col = mix(col, rock, smoothstep(0.28, 0.62, slope));
+        float scuff = 0.0;
+        for (int i = 0; i < 4; i++) {
+          scuff = max(scuff, 1.0 - smoothstep(0.28, 1.15, length(vPos.xz - trails[i])));
+        }
+        col = mix(col, col * vec3(0.72, 0.66, 0.5), scuff * (h < 2.4 ? 0.8 : 0.35));
         float grotto = 0.0;
         if (vPos.x > 28.0 && vPos.x < 58.0 && vPos.z < -70.0 && vPos.z > -132.0 && vPos.y < 13.0) grotto = 1.0;
         if (vPos.x > -32.0 && vPos.x < -6.0 && vPos.z < -124.0 && vPos.z > -152.0 && vPos.y < 14.0) grotto = 1.0;
@@ -128,7 +156,10 @@ function waterMaterial(depthMap: THREE.DataTexture) {
         col += vec3(1.0, 0.92, 0.75) * spec * (0.35 + fres);
         float shore = smoothstep(0.16, 0.0, vDepth);
         float foam = shore * (0.55 + 0.45 * sin(vWorld.x * 0.55 + vWorld.z * 0.4 + time * 2.6));
+        foam += shore * 0.35 * sin(vWorld.x * 1.3 - vWorld.z * 0.9 + time * 3.4);
         col = mix(col, vec3(0.92, 0.96, 0.95), clamp(foam, 0.0, 1.0) * 0.85);
+        float caustic = sin(vWorld.x * 0.42 + time * 1.4) * sin(vWorld.z * 0.33 - time * 1.1);
+        col += vec3(0.35, 0.7, 0.62) * caustic * caustic * (1.0 - smoothstep(0.02, 0.4, vDepth)) * 0.28;
         float alpha = mix(0.55, 0.88, fres);
         alpha = mix(alpha, 0.42, shore);
         if (!gl_FrontFacing) {
@@ -560,6 +591,12 @@ export function buildIslandWorld(): World {
       depthAt: (x, z) => sampleIsland(x, z, clock).depth,
     },
     heightAt: (x, z) => islandFloor(x, z),
+    stepTrail: (x, z) => {
+      const last = trails[trailWrite];
+      if (Math.hypot(last.x - x, last.y - z) < 0.85 && last.x < 4000) return;
+      trailWrite = (trailWrite + 1) % trails.length;
+      trails[trailWrite].set(x, z);
+    },
     animate,
     dispose,
   };

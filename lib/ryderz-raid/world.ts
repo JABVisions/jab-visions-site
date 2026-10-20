@@ -35,6 +35,8 @@ export interface World {
   routeTo?: (fromX: number, fromZ: number, toX: number, toZ: number) => { x: number; z: number } | null;
   /** Doors and other facility motion. Agents are the player and anyone who should trip a trigger. */
   stepFacility?: (agents: { x: number; z: number }[], dt: number) => void;
+  /** Latest footfall, so sand and grass can scuff under the fighter. */
+  stepTrail?: (x: number, z: number) => void;
 }
 
 /*

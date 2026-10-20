@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { ledgeDrop, resolveFooting, slopeBlocks } from '../footing';
-import { islandAlleys, islandBeacon, islandFloor, islandSpawn, sampleIsland } from './terrain';
+import { ISLAND_LANDMARKS, ISLAND_VALLEY, islandAlleys, islandBeacon, islandFloor, islandSpawn, islandZone, sampleIsland } from './terrain';
 import { emptySwim, shallowDirection, stepSwim } from './swim';
 
 const spawn = sampleIsland(islandSpawn().x, islandSpawn().z);
@@ -129,5 +129,57 @@ assert.equal(shore.state.feetY, 0.8);
 
 const push = shallowDirection(0, 0, (x, z) => (z > 2 ? 0.1 : 4));
 assert.ok(push && push.z > 0.5, 'terrestrial hosts are pointed toward the shallows');
+
+assert.equal(islandZone(islandSpawn().x, islandSpawn().z), 'beach');
+assert.equal(islandZone(-70, 140), 'jungle');
+assert.equal(islandZone(-48, -178), 'summit');
+assert.equal(islandZone(ISLAND_VALLEY.x, ISLAND_VALLEY.z), 'valley');
+const valley = sampleIsland(ISLAND_VALLEY.x, ISLAND_VALLEY.z);
+assert.ok(valley.depth === 0 && valley.floor > 6 && valley.floor < 14, 'the hidden valley is dry grass');
+assert.equal(islandZone(-8, -66), 'basin');
+assert.equal(islandZone(-100, -8), 'highlands');
+const landmarkZone: Record<string, string> = {
+  Beach: 'beach',
+  Jungle: 'jungle',
+  Valley: 'valley',
+  Highlands: 'highlands',
+  Falls: 'basin',
+  Summit: 'summit',
+};
+for (const mark of ISLAND_LANDMARKS) {
+  const expect = landmarkZone[mark.name];
+  if (expect) assert.equal(islandZone(mark.x, mark.z), expect, `${mark.name} sits in its zone`);
+}
+
+function canWalk(tx: number, tz: number) {
+  let x = islandSpawn().x;
+  let z = islandSpawn().z;
+  let floor = islandFloor(x, z);
+  for (let i = 0; i < 900; i += 1) {
+    if (Math.hypot(tx - x, tz - z) < 8) return true;
+    const heading = Math.atan2(tx - x, tz - z);
+    let moved = false;
+    for (const bias of [0, 0.35, -0.35, 0.8, -0.8, 1.3, -1.3, 2.1, -2.1]) {
+      const angle = heading + bias;
+      const pos = { x: x + Math.sin(angle) * 2.2, z: z + Math.cos(angle) * 2.2 };
+      const next = resolveFooting(islandFloor, pos, x, z, floor, 0.7);
+      if (Math.hypot(pos.x - x, pos.z - z) < 0.45) continue;
+      const progress = Math.hypot(tx - x, tz - z) - Math.hypot(tx - pos.x, tz - pos.z);
+      if (bias !== 0 && progress < 0.2) continue;
+      x = pos.x;
+      z = pos.z;
+      floor = next;
+      moved = true;
+      break;
+    }
+    if (!moved) return false;
+  }
+  return false;
+}
+
+assert.ok(canWalk(ISLAND_VALLEY.x, ISLAND_VALLEY.z), 'the hidden valley is reachable from the beach');
+assert.ok(canWalk(40, -48), 'the cave approach is a graded path');
+assert.ok(canWalk(-100, -8), 'the west ridge can be climbed');
+assert.ok(canWalk(-48, -178), 'the summit is still a walk from the beach');
 
 console.log('island paradise ok');

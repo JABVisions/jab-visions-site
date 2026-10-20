@@ -19,10 +19,11 @@ import { useMenuKeys, wrap } from './useMenuKeys';
 import styles from './PauseMenu.module.css';
 
 type View = 'root' | 'deck' | 'upgrades' | 'ryder' | 'arena' | 'mode' | 'settings';
-type RootAction = View | 'resume' | 'exit';
+type RootAction = View | 'resume' | 'exit' | 'map';
 
 const ROOT_ITEMS: NavItem<RootAction>[] = [
   { id: 'resume', label: 'Resume', hint: 'Back onto the block' },
+  { id: 'map', label: 'Map', hint: 'Open the terrain chart' },
   { id: 'deck', label: 'Power Deck', hint: 'Bind Q · E · R' },
   { id: 'ryder', label: 'Switch Ryder', hint: 'Change who is in play' },
   { id: 'arena', label: 'Arena', hint: 'Block, P.A.D., or Island Paradise' },
@@ -48,6 +49,7 @@ export default function PauseMenu({
   layout,
   onResume,
   onExit,
+  onOpenMap,
   onRyderSwitched,
   onOpenCameraTuning,
 }: {
@@ -62,6 +64,7 @@ export default function PauseMenu({
   layout: 'embed' | 'page';
   onResume: () => void;
   onExit: () => void;
+  onOpenMap?: () => void;
   onRyderSwitched?: (id: RyderId) => void;
   onOpenCameraTuning?: () => void;
 }) {
@@ -95,6 +98,7 @@ export default function PauseMenu({
   const activate = (id: RootAction) => {
     if (id === 'resume') onResume();
     else if (id === 'exit') onExit();
+    else if (id === 'map') onOpenMap?.();
     else setView(id);
   };
 

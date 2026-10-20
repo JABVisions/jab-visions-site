@@ -70,7 +70,21 @@ const waiting = civilianOrder(CIVILIAN_PROFILES.aggressive, {
   recovering: false,
   rng: 0.9,
 });
-assert(waiting.state === 'circle', 'later civilians hang off the pile instead of stacking');
+assert(waiting.state === 'attack' && waiting.attack != null, 'a host already in reach swings instead of circling');
+assert(Math.abs(waiting.strafe) < 0.6, 'attack slots sidestep instead of orbiting');
+
+for (const slot of [0, 1, 2, 3, 4]) {
+  const packed = civilianOrder(CIVILIAN_PROFILES.cautious, {
+    dist: 2.1,
+    hpRatio: 1,
+    holding: false,
+    throwableDist: null,
+    slot,
+    recovering: false,
+    rng: 0.95,
+  });
+  assert(packed.state === 'attack' && packed.attack != null, `slot ${slot} attacks inside range`);
+}
 
 assert(profileForKind('thrower', 0.1) === 'thrower', 'thrower spawns stay throwers');
 assert(profileForKind('walker', 0) === 'brawler', 'walkers can come out as brawlers');

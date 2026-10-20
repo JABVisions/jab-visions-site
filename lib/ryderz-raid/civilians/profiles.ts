@@ -182,34 +182,23 @@ export function civilianOrder(profile: CivilianProfile, sense: CivilianSense): C
     if (sense.throwableDist < 0.85) return { state: 'pickup', move: 0, strafe: 0, attack: null };
     return { state: 'search', move: 1, strafe: 0, attack: null };
   }
-  if (tactics?.coordinate && sense.slot % 2 === 1 && sense.dist < profile.preferredDistance + 1.6 && sense.rng < 0.72) {
-    return { state: 'circle', move: 0, strafe: 1, attack: null };
-  }
-  if (tactics?.counter && !sense.playerAttacking && sense.dist <= profile.attackRange && sense.rng < 0.38 + tactics.aggression * 0.2) {
-    return { state: 'attack', move: 0.08, strafe: profile.circle * 0.4, attack: sense.rng < 0.5 ? 'punch' : 'kick' };
-  }
-  if (sense.slot >= 2 && sense.dist < profile.preferredDistance + 2.2) {
-    const poke = sense.rng < 0.22 && sense.dist < profile.attackRange ? 'punch' : null;
-    return { state: 'circle', move: 0, strafe: 1, attack: poke };
-  }
-  if (sense.dist > profile.preferredDistance + 0.4) {
-    return { state: 'approach', move: 1, strafe: profile.circle * 0.25, attack: null };
-  }
-  if (sense.dist < profile.preferredDistance - 0.45) {
-    return { state: 'backOff', move: -1, strafe: profile.circle, attack: null };
-  }
-  let attack: CivilianAttack | null = null;
-  if (sense.dist <= profile.attackRange) {
-    const kickAt = profile.punch + profile.kick;
-    const meleeAt = kickAt + profile.melee;
-    if (sense.rng < profile.punch) attack = 'punch';
-    else if (sense.rng < kickAt) attack = 'kick';
-    else if (sense.rng < meleeAt) attack = 'melee';
-  }
-  return {
-    state: 'attack',
-    move: profile.circle > 0.5 ? 0 : 0.05,
-    strafe: profile.circle,
-    attack,
+  // Attack slots stand a half-step apart. They step in and swing; they do not orbit.
+  const flank = ((sense.slot % 5) - 2) * 0.16;
+  const kickAt = profile.punch + profile.kick;
+  const meleeAt = kickAt + profile.melee;
+  const swing = (): CivilianAttack => {
+    if (sense.rng < profile.punch) return 'punch';
+    if (sense.rng < kickAt) return 'kick';
+    if (sense.rng < meleeAt) return 'melee';
+    return 'punch';
   };
+  if (sense.dist <= profile.attackRange) {
+    // A cautious host steps back only when they are inside the player. Otherwise the swing starts now.
+    if (profile.retreat > 0.55 && sense.dist < profile.preferredDistance - 0.55) {
+      return { state: 'backOff', move: -0.45, strafe: flank, attack: null };
+    }
+    const closing = sense.dist > Math.min(profile.preferredDistance, profile.attackRange - 0.15) + 0.2;
+    return { state: 'attack', move: closing ? 0.55 : 0.05, strafe: flank, attack: swing() };
+  }
+  return { state: 'approach', move: 1, strafe: flank * 0.5, attack: null };
 }

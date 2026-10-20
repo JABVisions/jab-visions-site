@@ -1,7 +1,7 @@
 'use client';
 
 import { forwardRef, useImperativeHandle, useRef } from 'react';
-import { islandFloor } from '@/lib/ryderz-raid/island/terrain';
+import { ISLAND_LANDMARKS, islandChartColor } from '@/lib/ryderz-raid/island/terrain';
 import { DISTRICT_SPAN } from '@/lib/ryderz-raid/config';
 import type { RadarApi, RadarFrame } from './RaidRadar';
 import { paintStructures } from './map-structures';
@@ -10,7 +10,7 @@ import styles from './RaidMap.module.css';
 let stamp: { key: string; canvas: HTMLCanvasElement } | null = null;
 
 function terrainStamp(span: number) {
-  const key = `island:${Math.round(span)}`;
+  const key = `island:zones:${Math.round(span)}`;
   if (stamp?.key === key) return stamp.canvas;
   const n = 168;
   const canvas = document.createElement('canvas');
@@ -24,37 +24,8 @@ function terrainStamp(span: number) {
     const wz = ((y + 0.5) / n) * span * 2 - span;
     for (let x = 0; x < n; x += 1) {
       const wx = ((x + 0.5) / n) * span * 2 - span;
-      const h = islandFloor(wx, wz);
+      const [r, g, b] = islandChartColor(wx, wz);
       const i = (y * n + x) * 4;
-      let r = 12;
-      let g = 48;
-      let b = 68;
-      if (h <= 0.2) {
-        const deep = Math.max(0, Math.min(1, -h / 8));
-        r = 14 + (1 - deep) * 16;
-        g = 52 + (1 - deep) * 64;
-        b = 74 + (1 - deep) * 28;
-      } else if (h < 2.4) {
-        r = 198;
-        g = 176;
-        b = 124;
-      } else if (h < 12) {
-        r = 36;
-        g = 128;
-        b = 62;
-      } else if (h < 32) {
-        r = 18;
-        g = 82;
-        b = 48;
-      } else if (h < 68) {
-        r = 118;
-        g = 112;
-        b = 104;
-      } else {
-        r = 220;
-        g = 216;
-        b = 204;
-      }
       px[i] = r;
       px[i + 1] = g;
       px[i + 2] = b;
@@ -139,7 +110,32 @@ const RaidMap = forwardRef<RadarApi, { place: string; localTwo: boolean; onClose
           }
         }
       }
+      if (frame.terrain === 'island' && frame.explored && frame.exploreN) {
+        const n = frame.exploreN;
+        const cell = plot / n;
+        ctx.fillStyle = 'rgba(4, 10, 8, 0.78)';
+        for (let iz = 0; iz < n; iz += 1) {
+          for (let ix = 0; ix < n; ix += 1) {
+            if (frame.explored[iz * n + ix]) continue;
+            ctx.fillRect(pad + ix * cell, pad + iz * cell, cell + 1, cell + 1);
+          }
+        }
+      }
       paintStructures(ctx, frame.blocks, toX, toY, plot / (span * 2));
+      if (frame.terrain === 'island') {
+        ctx.fillStyle = 'rgba(244, 255, 248, 0.9)';
+        ctx.font = `600 ${Math.max(10, size * 0.02)}px ui-monospace, monospace`;
+        ctx.textAlign = 'left';
+        const n = frame.exploreN ?? 0;
+        for (const mark of ISLAND_LANDMARKS) {
+          if (frame.explored && n > 0) {
+            const ix = Math.floor(((mark.x + span) / (span * 2)) * n);
+            const iz = Math.floor(((mark.z + span) / (span * 2)) * n);
+            if (ix < 0 || iz < 0 || ix >= n || iz >= n || !frame.explored[iz * n + ix]) continue;
+          }
+          ctx.fillText(mark.name, toX(mark.x) + 4, toY(mark.z));
+        }
+      }
       ctx.restore();
 
       ctx.strokeStyle = 'rgba(57, 255, 106, 0.85)';

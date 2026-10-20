@@ -154,10 +154,25 @@ export const ISLAND_STREAMS: IslandStream[] = [
 
 function carveStream(height: number, x: number, z: number, stream: IslandStream) {
   const dist = distToSegment(x, z, stream.ax, stream.az, stream.bx, stream.bz);
-  if (dist >= stream.half) return height;
-  const along = 1 - dist / stream.half;
-  if (height > 14) return height - along * Math.min(10, 3.2 + height * 0.06);
-  return Math.min(height, stream.bed + dist * 0.22);
+  // Highland creeks stay dry gullies. Lowland creeks hold water. Both banks
+  // ease out, so a walker who steps in can step back out.
+  if (height > 14) {
+    const bank = stream.half + 6;
+    if (dist >= bank) return height;
+    const cut = Math.min(8, 2.2 + height * 0.05);
+    const channel = stream.half * 0.5;
+    if (dist <= channel) return height - cut;
+    const u = (dist - channel) / (bank - channel);
+    return height - cut * (1 - smooth(u));
+  }
+  const bank = stream.half + 14;
+  if (dist >= bank) return height;
+  const channel = stream.half * 0.62;
+  const bed = stream.bed + Math.min(dist, channel) * 0.06;
+  if (dist <= channel) return Math.min(height, bed);
+  const u = (dist - channel) / (bank - channel);
+  const lip = stream.bed + channel * 0.06;
+  return Math.min(height, lip + (height - lip) * smooth(u));
 }
 
 /** Banks falling toward the main river, so the channel sits in a valley. */
@@ -250,6 +265,8 @@ export function islandFloor(x: number, z: number, _time = 0) {
   const clearing = Math.hypot(x - 8, z - 48);
   if (clearing < 24) height = 3.1 + clearing * 0.01;
 
+  height = carveHiddenValley(height, x, z);
+
   for (const fall of ISLAND_FALLS) height = carveFall(height, x, z, fall);
 
   const river = distToSegment(x, z, -18, -96, 12, 250);
@@ -278,7 +295,97 @@ export function islandFloor(x: number, z: number, _time = 0) {
     x > ISLAND_GROTTO.minX && x < ISLAND_GROTTO.maxX && z > ISLAND_GROTTO.minZ && z < ISLAND_GROTTO.maxZ;
   if (inGrotto) height = Math.min(height, ISLAND_GROTTO.floor);
 
+  // Graded roads through the cliffs that used to stop a walk: off the
+  // clearing into the valley, up to the cave, and along the west ridge.
+  height = cutPath(height, x, z, 18, 42, 46, 6, 18, 3.2, 9);
+  height = cutPath(height, x, z, 12, 40, 40, -48, 16, 3.2, 8);
+  height = cutPath(height, x, z, -16, 14, 38, -44, 14, 1.8, 14);
+  height = cutPath(height, x, z, -78, 128, -104, -24, 12, 4.2, 22);
+
   return height;
+}
+
+/** Open grassland tucked into the east highlands. The rim eases out, so the bowl is a walk. */
+export const ISLAND_VALLEY = { x: 46, z: 4, rx: 34, rz: 26, floor: 9 };
+
+function carveHiddenValley(height: number, x: number, z: number) {
+  const nx = (x - ISLAND_VALLEY.x) / ISLAND_VALLEY.rx;
+  const nz = (z - ISLAND_VALLEY.z) / ISLAND_VALLEY.rz;
+  const e = nx * nx + nz * nz;
+  if (e >= 1) return height;
+  const bowl = smooth(1 - e);
+  const meadow = ISLAND_VALLEY.floor + e * 12;
+  const pulled = Math.max(2.8, Math.min(height, meadow));
+  return height * (1 - bowl) + pulled * bowl;
+}
+
+/** Lower a corridor to a linear grade. The edges blend so the cut is a slope, not a slot. */
+function cutPath(
+  height: number,
+  x: number,
+  z: number,
+  ax: number,
+  az: number,
+  bx: number,
+  bz: number,
+  half: number,
+  h0: number,
+  h1: number,
+) {
+  const abx = bx - ax;
+  const abz = bz - az;
+  const lenSq = abx * abx + abz * abz || 1;
+  const t = ((x - ax) * abx + (z - az) * abz) / lenSq;
+  if (t < -0.04 || t > 1.04) return height;
+  const dist = distToSegment(x, z, ax, az, bx, bz);
+  if (dist >= half) return height;
+  const edge = smooth(1 - dist / half);
+  const along = Math.max(0, Math.min(1, t));
+  const bed = h0 + (h1 - h0) * along;
+  // Only cut high ground. A creek or pool already below the grade stays open.
+  if (height <= bed) return height;
+  return height * (1 - edge) + bed * edge;
+}
+
+export type IslandZone = 'ocean' | 'beach' | 'jungle' | 'highlands' | 'valley' | 'basin' | 'summit';
+
+/** Paint colors for the chart. They come from the live zones, not a separate drawing. */
+export const ISLAND_ZONE_COLOR: Record<IslandZone, [number, number, number]> = {
+  ocean: [16, 72, 98],
+  beach: [214, 188, 128],
+  jungle: [16, 96, 44],
+  highlands: [96, 98, 80],
+  valley: [78, 164, 64],
+  basin: [32, 122, 116],
+  summit: [220, 220, 210],
+};
+
+/** Which of the six battlefields a point belongs to. Ocean is the water around them. */
+export function islandZone(x: number, z: number): IslandZone {
+  const h = islandFloor(x, z);
+  const vx = (x - ISLAND_VALLEY.x) / ISLAND_VALLEY.rx;
+  const vz = (z - ISLAND_VALLEY.z) / ISLAND_VALLEY.rz;
+  if (vx * vx + vz * vz < 0.82 && h > 2.5 && h < 16) return 'valley';
+  if (h > 64) return 'summit';
+  // The river, falls, and pools stay a basin even where the bed is under the surface.
+  const inland = coastRadius(x, z) - Math.hypot(x, z);
+  if (distToSegment(x, z, -20, -122, 12, 190) < 16 && h < 22 && inland > -30) return 'basin';
+  if (h < 0.2) return 'ocean';
+  if (h > 18) return 'highlands';
+  if (rainforestMask(x, z) > 0.22) return 'jungle';
+  if (h < 2.8) return 'beach';
+  return 'jungle';
+}
+
+export function islandChartColor(x: number, z: number): [number, number, number] {
+  const h = islandFloor(x, z);
+  const [r, g, b] = ISLAND_ZONE_COLOR[islandZone(x, z)];
+  if (h < 0.2) {
+    const deep = Math.max(0, Math.min(1, -h / 14));
+    return [Math.round(r * (1 - deep * 0.65)), Math.round(g * (1 - deep * 0.45)), Math.round(b * (1 - deep * 0.2))];
+  }
+  if (h > 78) return [232, 230, 222];
+  return [r, g, b];
 }
 
 export function sampleIsland(x: number, z: number, time = 0): IslandSample {
@@ -295,6 +402,18 @@ export function islandSpawn() {
 export function islandBeacon() {
   return { x: -62, z: 232 };
 }
+
+/** Named places on the chart. Coordinates are the real terrain, not a separate drawing. */
+export const ISLAND_LANDMARKS: { x: number; z: number; name: string }[] = [
+  { x: -76, z: 248, name: 'Beach' },
+  { x: -70, z: 140, name: 'Jungle' },
+  { x: 46, z: 4, name: 'Valley' },
+  { x: -100, z: -8, name: 'Highlands' },
+  { x: -18, z: -96, name: 'Falls' },
+  { x: -48, z: -178, name: 'Summit' },
+  { x: 43, z: -90, name: 'Cave' },
+  { x: 128, z: 96, name: 'Resort' },
+];
 
 export interface IslandAlley {
   x: number;
@@ -314,6 +433,8 @@ export function islandAlleys(): IslandAlley[] {
     { x: 8, z: 48, ix: 0, iz: 1 },
     { x: -40, z: -16, ix: 1, iz: 0.2 },
     { x: 43, z: -62, ix: 0, iz: -1 },
+    { x: 46, z: 4, ix: 0, iz: 1 },
+    { x: -100, z: -8, ix: 0, iz: 1 },
     { x: -140, z: 28, ix: 1, iz: 0, aquatic: true },
   ];
 }

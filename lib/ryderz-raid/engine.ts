@@ -200,6 +200,9 @@ export interface HudState {
     terrain: 'island' | 'city';
     color: string;
     blocks: MapBlock[];
+    /** Cells the squad has walked, row-major over the island span. Absent off the island. */
+    explored?: Uint8Array;
+    exploreN?: number;
     enemies: { x: number; z: number }[];
     allies: { x: number; z: number; name: string; color: string; down: boolean }[];
   };
@@ -271,6 +274,11 @@ interface Host {
   mass: number;
   preferredRange: number;
   cooldown: number;
+  /** Last combat decision, for the island warzone readout. */
+  aiState?: string;
+  aiDist?: number;
+  aiAttack?: string | null;
+  aiWhy?: string;
   anim: number;
   hit: number;
   knock: THREE.Vector3;
@@ -565,12 +573,15 @@ export class RaidEngine {
   private cameraMode: CameraMode = 'standard';
   private lockTarget: Host | null = null;
   private stormT = 0;
+  private sandT = 0;
   private stations: FieldStation[] = [];
   private stationRoot: THREE.Group | null = null;
   private stationViews: THREE.Object3D[] = [];
   private chart: MapBlock[] = [];
   private chartSig = 0;
   private chartWorld: World | null = null;
+  private readonly exploreN = 48;
+  private explored = new Uint8Array(48 * 48);
   private round = 0;
   private phase: HudState['phase'] = 'playing';
   private intermissionLeft = 0;
@@ -860,6 +871,20 @@ export class RaidEngine {
     };
   }
 
+  /** Living hosts and why their last swing did or did not start. */
+  debugFoes() {
+    return this.hosts
+      .filter((host) => host.hp > 0 && !host.ally)
+      .slice(0, 8)
+      .map((host) => ({
+        state: host.aiState ?? '',
+        dist: host.aiDist ?? 0,
+        attack: host.aiAttack ?? null,
+        why: host.aiWhy ?? '',
+        cooldown: host.cooldown,
+      }));
+  }
+
   /** Run the sim with one key held. Headless checks use this instead of the render loop. */
   debugNudge(key: string, seconds: number) {
     const lower = key.toLowerCase();
@@ -1140,7 +1165,7 @@ export class RaidEngine {
 
   /** Open or close the full-arena map. The corner radar stays up either way. */
   toggleMap() {
-    if (this.paused || this.phase === 'report' || this.phase === 'dead' || this.phase === 'victory') return;
+    if (this.phase === 'report' || this.phase === 'dead' || this.phase === 'victory') return;
     this.mapOpen = !this.mapOpen;
     if (this.mapOpen && document.pointerLockElement === this.canvas) document.exitPointerLock();
   }
@@ -1729,6 +1754,9 @@ export class RaidEngine {
       this.striker.setFork(this.kit.forkArmed ?? false);
     } else this.striker.setFork(false);
     this.updatePlayerMove(dt, time, footX, footZ, footFloor);
+    this.world.stepTrail?.(this.pos.x, this.pos.z);
+    this.markExplored(this.pos.x, this.pos.z);
+    this.kickSand(dt, footFloor);
     const recovering = this.recoveryT > 0;
     const locked = recovering || (this.kit?.locked ?? false);
     // Busy hands (weapon thrown, spinning): only the power that is on may be
@@ -1823,6 +1851,7 @@ export class RaidEngine {
       previous.group.visible = false;
       next.group.visible = true;
       this.world = next;
+      this.explored.fill(0);
       this.scene.updateMatrixWorld(true);
       this.rig.setOccluders(this.world.occluders);
       const island = this.worlds.get('island');
@@ -2185,6 +2214,33 @@ export class RaidEngine {
         this.hurtPlayer(1, _tmp.set(0, 0, 0));
       }
     }
+  }
+
+  /** Mark a patch of the island chart as walked. The grid matches the full arena span. */
+  private markExplored(x: number, z: number) {
+    if (this.arena.worldKey !== 'island') return;
+    const span = Math.max(8, this.limit());
+    const cell = (span * 2) / this.exploreN;
+    const ix = Math.floor((x + span) / cell);
+    const iz = Math.floor((z + span) / cell);
+    for (let dz = -1; dz <= 1; dz += 1) {
+      for (let dx = -1; dx <= 1; dx += 1) {
+        const cx = ix + dx;
+        const cz = iz + dz;
+        if (cx < 0 || cz < 0 || cx >= this.exploreN || cz >= this.exploreN) continue;
+        this.explored[cz * this.exploreN + cx] = 1;
+      }
+    }
+  }
+
+  /** A short scuff on dry island sand while sprinting. Kept sparse so the beach does not fill with sprites. */
+  private kickSand(dt: number, floor: number) {
+    if (this.arena.worldKey !== 'island' || !this.sprinting || floor < 0.15 || floor > 1.8) return;
+    if (this.waterDepth(this.pos.x, this.pos.z) > 0.08) return;
+    this.sandT -= dt;
+    if (this.sandT > 0) return;
+    this.sandT = 0.16;
+    this.particles.emit(this.pos.clone().setY(floor + 0.05), 0xd9c48a, 3, { speed: 1.3, size: 0.07, life: 0.26, up: 0.35 });
   }
 
   private updatePlayerMove(dt: number, time: number, footX: number, footZ: number, footFloor: number) {
@@ -4501,6 +4557,18 @@ export class RaidEngine {
       tier: host.tier ?? 1,
       tactics: this.tactics,
     });
+    host.aiState = order.state;
+    host.aiDist = playerDist;
+    host.aiAttack = order.attack;
+    host.aiWhy = striker.busy
+      ? 'animation'
+      : host.cooldown > 0
+        ? 'cooldown'
+        : phased
+          ? 'phased'
+          : order.attack
+            ? 'clear'
+            : order.state;
     if (order.state === 'guard') host.guard = 0.32;
     if (
       host.supernatural &&
@@ -4579,7 +4647,7 @@ export class RaidEngine {
     } else if (!phased) {
       const spread = this.tactics.surround || this.tactics.flank;
       const ang = spread ? slot * 2.15 + (this.tactics.flank ? 0.7 : 0) : slot * 1.9;
-      const ring = spread ? 1.35 + Math.min(slot, 5) * 0.42 : slot >= 2 ? 1.7 : 0;
+      const ring = 0.85 + Math.min(slot, 4) * 0.16;
       gx += Math.cos(ang) * ring;
       gz += Math.sin(ang) * ring;
       if (this.tactics.protectElite && (host.tier ?? 1) <= 2) {
@@ -4659,6 +4727,16 @@ export class RaidEngine {
         host.pos.x += (sx / sd) * (min - sd);
         host.pos.z += (sz / sd) * (min - sd);
       }
+    }
+    for (const other of this.hosts) {
+      if (other === host || other.hp <= 0) continue;
+      const ox = host.pos.x - other.pos.x;
+      const oz = host.pos.z - other.pos.z;
+      const od = Math.hypot(ox, oz) || 0.0001;
+      const gap = host.radius + other.radius + 0.35;
+      if (od >= gap) continue;
+      host.pos.x += (ox / od) * (gap - od) * 0.5;
+      host.pos.z += (oz / od) * (gap - od) * 0.5;
     }
 
     const faceAt = this.squadAim(host);
@@ -5337,6 +5415,8 @@ export class RaidEngine {
         terrain: this.arena.worldKey === 'island' ? 'island' : 'city',
         color: this.spec.colorHex,
         blocks: this.mapChart(),
+        explored: this.arena.worldKey === 'island' ? this.explored : undefined,
+        exploreN: this.exploreN,
         enemies: this.hosts.filter((host) => host.hp > 0 && !host.ally).map((host) => ({ x: host.pos.x, z: host.pos.z })),
         allies: this.hosts
           .filter((host) => host.ally && (host.hp > 0 || (host.down ?? 0) > 0))

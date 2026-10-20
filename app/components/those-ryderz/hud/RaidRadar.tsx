@@ -3,7 +3,7 @@
 import { forwardRef, useImperativeHandle, useRef } from 'react';
 import { DISTRICT_SPAN } from '@/lib/ryderz-raid/config';
 import type { MapBlock } from '@/lib/ryderz-raid/map-chart';
-import { paintStructures } from './map-structures';
+import { paintIslandGround, paintStructures } from './map-structures';
 import styles from './RaidRadar.module.css';
 
 export type RadarAlly = {
@@ -23,6 +23,9 @@ export type RadarFrame = {
   color: string;
   /** Walls, buildings, and other footprints the fighter cannot walk through. */
   blocks: MapBlock[];
+  /** Walked cells on the island chart. Missing off the island. */
+  explored?: Uint8Array;
+  exploreN?: number;
   enemies: { x: number; z: number }[];
   allies: RadarAlly[];
 };
@@ -115,6 +118,11 @@ const RaidRadar = forwardRef<RadarApi, { onOpen?: () => void }>(function RaidRad
       const originX = local ? frame.x : 0;
       const originZ = local ? frame.z : 0;
       const span = local ? 80 : MAP;
+      if (frame.terrain === 'island') {
+        const groundX = (x: number) => cx + ((x - originX) / span) * (plot / 2);
+        const groundY = (z: number) => cy + ((z - originZ) / span) * (plot / 2);
+        paintIslandGround(ctx, originX, originZ, span, groundX, groundY);
+      }
       const limit = radius * 0.72;
       const project = (x: number, z: number) => {
         let dx = ((x - originX) / span) * (plot / 2);

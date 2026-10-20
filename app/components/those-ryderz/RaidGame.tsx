@@ -875,6 +875,7 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
           layout={layout}
           onResume={resume}
           onExit={exitToStart}
+          onOpenMap={() => engineRef.current?.toggleMap()}
           onOpenCameraTuning={() => setCamPanel(true)}
         />
       )}
