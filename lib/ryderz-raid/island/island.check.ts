@@ -182,4 +182,58 @@ assert.ok(canWalk(40, -48), 'the cave approach is a graded path');
 assert.ok(canWalk(-100, -8), 'the west ridge can be climbed');
 assert.ok(canWalk(-48, -178), 'the summit is still a walk from the beach');
 
+function canClimb(ox: number, oz: number) {
+  const start = islandFloor(ox, oz);
+  let gained = 0;
+  for (let i = 0; i < 16; i += 1) {
+    const ang = (i / 16) * Math.PI * 2;
+    let x = ox;
+    let z = oz;
+    let floor = start;
+    let maxH = floor;
+    for (let s = 0; s < 160; s += 1) {
+      const pos = { x: x + Math.sin(ang) * 0.4, z: z + Math.cos(ang) * 0.4 };
+      const next = resolveFooting(islandFloor, pos, x, z, floor, 0.7);
+      if (Math.hypot(pos.x - x, pos.z - z) < 0.05) break;
+      x = pos.x;
+      z = pos.z;
+      floor = next;
+      if (floor > maxH) maxH = floor;
+      if (Math.hypot(x - ox, z - oz) > 48) break;
+    }
+    if (maxH > start + 4) gained += 1;
+  }
+  return gained;
+}
+
+assert.ok(canClimb(ISLAND_VALLEY.x, ISLAND_VALLEY.z) >= 8, 'the valley has climbs out, not a bowl you cannot leave');
+assert.ok(canClimb(8, 48) >= 4, 'the clearing rises into the hills instead of a wall');
+
+function canLeave(ox: number, oz: number, distance: number) {
+  let left = 0;
+  for (let i = 0; i < 16; i += 1) {
+    const ang = (i / 16) * Math.PI * 2;
+    let x = ox;
+    let z = oz;
+    let floor = islandFloor(ox, oz);
+    for (let s = 0; s < 200; s += 1) {
+      const pos = { x: x + Math.sin(ang) * 0.4, z: z + Math.cos(ang) * 0.4 };
+      const next = resolveFooting(islandFloor, pos, x, z, floor, 0.7);
+      if (Math.hypot(pos.x - x, pos.z - z) < 0.05) break;
+      x = pos.x;
+      z = pos.z;
+      floor = next;
+      if (Math.hypot(x - ox, z - oz) >= distance) {
+        left += 1;
+        break;
+      }
+    }
+  }
+  return left;
+}
+
+assert.ok(canLeave(ISLAND_VALLEY.x, ISLAND_VALLEY.z, 42) >= 14, 'the valley can be walked out of');
+assert.ok(canLeave(8, 48, 36) >= 12, 'the clearing can be walked off of');
+assert.ok(canLeave(128, 96, 48) >= 12, 'the resort lawn can be walked off of');
+
 console.log('island paradise ok');

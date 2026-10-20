@@ -196,8 +196,8 @@ function carveFall(height: number, x: number, z: number, fall: IslandFall) {
   return Math.min(height, fall.pool + (1 - u) * (fall.lip - fall.pool));
 }
 
-/** Walkable floor, including the seabed. Independent of the wave so tests stay stable. */
-export function islandFloor(x: number, z: number, _time = 0) {
+/** Unfiltered height. Gameplay uses islandFloor, which eases walls into walkable rises. */
+function rawIslandFloor(x: number, z: number, _time = 0) {
   const dist = Math.hypot(x, z);
   const coast = coastRadius(x, z);
   const inland = coast - dist;
@@ -303,6 +303,108 @@ export function islandFloor(x: number, z: number, _time = 0) {
   height = cutPath(height, x, z, -78, 128, -104, -24, 12, 4.2, 22);
 
   return height;
+}
+
+const RAMP_MIN = -380;
+const RAMP_CELL = 3;
+const RAMP_GRADE = 0.7;
+const RAMP_N = Math.ceil(760 / RAMP_CELL) + 1;
+let rampGrid: Float32Array | null = null;
+
+/** Waterfall lip, cave roof, and the west sea cliff stay steep. Summits are pinned separately. */
+function keepSteep(x: number, z: number, h: number) {
+  if (x < -170 && h > 11 && Math.abs(z + 8) < 120) return true;
+  if (distToSegment(x, z, -32, -140, -6, -96) < 16 && h > 18) return true;
+  if (x > -46 && x < -4 && z < -118 && z > -156 && h > 16) return true;
+  if (x > 14 && x < 70 && z < -70 && z > -140 && h > 12) return true;
+  return false;
+}
+
+function buildRamp() {
+  const n = RAMP_N;
+  const height = new Float32Array(n * n);
+  const pin = new Uint8Array(n * n);
+  for (let iz = 0; iz < n; iz += 1) {
+    const z = RAMP_MIN + iz * RAMP_CELL;
+    for (let ix = 0; ix < n; ix += 1) {
+      const x = RAMP_MIN + ix * RAMP_CELL;
+      const h = rawIslandFloor(x, z);
+      const i = iz * n + ix;
+      height[i] = h;
+      pin[i] = keepSteep(x, z, h) ? 1 : 0;
+    }
+  }
+  for (let iz = 1; iz < n - 1; iz += 1) {
+    for (let ix = 1; ix < n - 1; ix += 1) {
+      const i = iz * n + ix;
+      const h = height[i];
+      if (h < 40) continue;
+      const taller =
+        h >= height[i - 1] &&
+        h >= height[i + 1] &&
+        h >= height[i - n] &&
+        h >= height[i + n];
+      if (taller) pin[i] = 1;
+    }
+  }
+  const maxRise = RAMP_CELL * RAMP_GRADE;
+  for (let pass = 0; pass < n; pass += 1) {
+    let changed = false;
+    for (let iz = 0; iz < n; iz += 1) {
+      for (let ix = 0; ix < n; ix += 1) {
+        const i = iz * n + ix;
+        if (pin[i]) continue;
+        let h = height[i];
+        if (iz > 0) h = Math.min(h, height[i - n] + maxRise);
+        if (iz + 1 < n) h = Math.min(h, height[i + n] + maxRise);
+        if (ix > 0) h = Math.min(h, height[i - 1] + maxRise);
+        if (ix + 1 < n) h = Math.min(h, height[i + 1] + maxRise);
+        if (h < height[i] - 0.02) {
+          height[i] = h;
+          changed = true;
+        }
+      }
+    }
+    if (!changed) break;
+  }
+  rampGrid = height;
+}
+
+function rampField(x: number, z: number) {
+  if (!rampGrid) buildRamp();
+  const grid = rampGrid as Float32Array;
+  const fx = (x - RAMP_MIN) / RAMP_CELL;
+  const fz = (z - RAMP_MIN) / RAMP_CELL;
+  if (fx < 0 || fz < 0 || fx > RAMP_N - 1 || fz > RAMP_N - 1) return null;
+  const x0 = Math.floor(fx);
+  const z0 = Math.floor(fz);
+  const x1 = Math.min(RAMP_N - 1, x0 + 1);
+  const z1 = Math.min(RAMP_N - 1, z0 + 1);
+  const tx = fx - x0;
+  const tz = fz - z0;
+  const n = RAMP_N;
+  const a = grid[z0 * n + x0];
+  const b = grid[z0 * n + x1];
+  const c = grid[z1 * n + x0];
+  const d = grid[z1 * n + x1];
+  return {
+    h: a + (b - a) * tx + (c - a) * tz + (a - b - c + d) * tx * tz,
+    low: Math.min(a, b, c, d),
+  };
+}
+
+/**
+ * Walkable floor. Rising ground is a slope the body can climb. A flat pad
+ * meets that slope across the cell, instead of running into the raw wall.
+ * Water the grid missed stays cut.
+ */
+export function islandFloor(x: number, z: number, time = 0) {
+  const raw = rawIslandFloor(x, z, time);
+  if (keepSteep(x, z, raw)) return raw;
+  const field = rampField(x, z);
+  if (!field) return raw;
+  if (raw < 0.15 && raw + 0.45 < field.low) return raw;
+  return field.h;
 }
 
 /** Open grassland tucked into the east highlands. The rim eases out, so the bowl is a walk. */
