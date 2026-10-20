@@ -4807,7 +4807,7 @@ export class RaidEngine {
     this.animateHost(host, dt, moving, time, pose ? 1 - pose.p : 0, pose?.style, host.winding);
     if (swayed && host.hit <= 0.02) {
       host.hit = 0.14;
-      host.hitColor = 0xb01030;
+      host.hitColor = 0x228b22;
     }
     if (host.hit > 0) flashEmissive(host.fighter.humanoid, host.hitColor, host.hit * 2.4);
     else flashEmissive(host.fighter.humanoid, 0x000000, 0);

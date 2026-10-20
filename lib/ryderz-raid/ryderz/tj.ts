@@ -23,10 +23,10 @@ import {
  * None of them has a cooldown. The shared power blackout is the only stop.
  */
 
-const CRIMSON = 0xc41a32;
-const BURGUNDY = 0x6e1024;
-const SMOKE = 0x14080c;
-const EYE = 0xff2448;
+const FOREST = 0x228b22;
+const DEEP = 0x145214;
+const SMOKE = 0x101610;
+const EYE = 0x8ed36a;
 
 const SHOT_GAP = 0.09;
 const PELLET = 7;
@@ -163,8 +163,8 @@ export class TjKit implements RyderKit {
     this.gesture = Math.max(this.gesture, 0.45);
     this.playGuns('shooting guns');
     const caught = this.markCrowd('control', CONTROL_RADIUS, CONTROL_CAP);
-    ctx.rings.spawn(ctx.pos.clone(), CRIMSON, { radius: CONTROL_RADIUS, duration: 0.7, y: 0.15 });
-    ctx.rings.spawn(ctx.pos.clone(), BURGUNDY, { radius: CONTROL_RADIUS * 0.55, duration: 0.5, y: 1.1 });
+    ctx.rings.spawn(ctx.pos.clone(), FOREST, { radius: CONTROL_RADIUS, duration: 0.7, y: 0.15 });
+    ctx.rings.spawn(ctx.pos.clone(), DEEP, { radius: CONTROL_RADIUS * 0.55, duration: 0.5, y: 1.1 });
     ctx.particles.emit(ctx.pos.clone().setY(1.4), SMOKE, 16, { speed: 2.2, size: 0.45, life: 0.7, up: 0.6 });
     ctx.sound('tj.mind-control');
     return caught >= 0;
@@ -221,7 +221,7 @@ export class TjKit implements RyderKit {
       if (!spin.applied) {
         spin.applied = true;
         this.markCrowd('riot', RIOT_RADIUS, RIOT_CAP);
-        ctx.rings.spawn(ctx.pos.clone(), CRIMSON, { radius: RIOT_RADIUS, duration: 0.85, y: 0.2 });
+        ctx.rings.spawn(ctx.pos.clone(), FOREST, { radius: RIOT_RADIUS, duration: 0.85, y: 0.2 });
         ctx.particles.emit(ctx.pos.clone().setY(0.4), SMOKE, 28, { speed: 6, size: 0.7, life: 0.8, up: 0.3 });
       }
       this.spin = null;
@@ -237,7 +237,7 @@ export class TjKit implements RyderKit {
       const seconds = swaySeconds(mode, influenceRank(body));
       applySway(body, mode, now, seconds);
       ctx.flash(body, EYE, 0.35);
-      ctx.particles.emit(body.pos.clone().setY(1.55), CRIMSON, 6, { speed: 1.4, size: 0.16, life: 0.4, up: 0.8 });
+      ctx.particles.emit(body.pos.clone().setY(1.55), FOREST, 6, { speed: 1.4, size: 0.16, life: 0.4, up: 0.8 });
     }
     return crowd.length;
   }
@@ -256,7 +256,7 @@ export class TjKit implements RyderKit {
     const dx = Math.sin(yaw);
     const dz = Math.cos(yaw);
     this.tracer(ctx.pos.x, ctx.pos.z, dx, dz, Math.min(range, 18));
-    ctx.particles.emit(new THREE.Vector3(ctx.pos.x + dx * 0.55, 1.35, ctx.pos.z + dz * 0.55), CRIMSON, 3, {
+    ctx.particles.emit(new THREE.Vector3(ctx.pos.x + dx * 0.55, 1.35, ctx.pos.z + dz * 0.55), FOREST, 3, {
       speed: 2,
       size: 0.08,
       life: 0.08,
@@ -296,7 +296,7 @@ export class TjKit implements RyderKit {
     if (_hit.lengthSq() < 0.0001) _hit.set(0, 0, 1);
     else _hit.normalize();
     ctx.hurt(target, damage, _hit, reaction, strength);
-    ctx.particles.emit(target.pos.clone().setY(1.15), CRIMSON, 4, { speed: 4, size: 0.1, life: 0.16, direction: _hit });
+    ctx.particles.emit(target.pos.clone().setY(1.15), FOREST, 4, { speed: 4, size: 0.1, life: 0.16, direction: _hit });
   }
 
   private tracer(x: number, z: number, dx: number, dz: number, length: number) {
@@ -316,7 +316,7 @@ export class TjKit implements RyderKit {
   private makeTracer() {
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute('position', new THREE.Float32BufferAttribute(new Float32Array(6), 3));
-    const material = new THREE.LineBasicMaterial({ color: CRIMSON, transparent: true, opacity: 0.9 });
+    const material = new THREE.LineBasicMaterial({ color: FOREST, transparent: true, opacity: 0.9 });
     const mesh = new THREE.Line(geometry, material);
     mesh.frustumCulled = false;
     const tracer = { mesh, life: 0 };
