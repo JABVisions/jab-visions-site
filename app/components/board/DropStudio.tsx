@@ -17,6 +17,7 @@ import DropChipWorkbench from "./DropChipWorkbench";
 import DropStudioArtPalette from "./DropStudioArtPalette";
 import DropStudioOverlay from "./DropStudioOverlay";
 import DropStudioPaletteDeck, { type ObjectTool } from "./DropStudioPaletteDeck";
+import { EMPTY_ART_PNG, studioObjectTools } from "@/lib/board/artBrush";
 import DropStudioV5Timeline from "./DropStudioV5Timeline";
 import BoardPlayableVideo from "./BoardPlayableVideo";
 import { useDropStudioV5Runtime } from "./useDropStudioV5Runtime";
@@ -271,6 +272,7 @@ function DropStudio({
   operatingTable = false,
   enableArtTools = false,
   artTools,
+  preferArt = false,
   onMediaError,
   studioV5 = false,
   studioDraftId,
@@ -289,6 +291,8 @@ function DropStudio({
   enableArtTools?: boolean;
   /** Art brush tools — rendered below object tool panels in the Palette drawer. */
   artTools?: React.ReactNode;
+  /** Open on the Art tool. Used by standalone Art drops. */
+  preferArt?: boolean;
   /** Rebuild preview URL if a blob fails to paint (e.g. revoked object URL). */
   onMediaError?: () => void;
   /** Incremental V5 timeline. Off restores V4 layout and behavior. */
@@ -298,9 +302,10 @@ function DropStudio({
 }) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const previewRef = useRef<HTMLDivElement | null>(null);
+  const layerHostRef = useRef<HTMLDivElement | null>(null);
   const [studioLayout, setStudioLayout] = useState<DropStudioV5Layout>("phone");
   const [timelineOpen, setTimelineOpen] = useState(false);
-  const [tool, setTool] = useState<Tool>("text");
+  const [tool, setTool] = useState<Tool>(preferArt && enableArtTools ? "art" : "text");
   const [text, setText] = useState("");
   const [dragging, setDragging] = useState<{
     kind: "text" | "sticker";
@@ -381,6 +386,12 @@ function DropStudio({
       }
     }
   }, [timelineOn, v5.audioPreviewTimeSeconds, v5.audioPreviewUrl, v5.audioSpeed, v5.audioVolume, v5.scrubbing]);
+
+  function selectTool(next: Tool) {
+    setTool(next);
+    if (next !== "art") return;
+    previewRef.current?.querySelectorAll("video").forEach((video) => video.pause());
+  }
 
   function update(next: DropCustomization) {
     onChange(compactDropCustomizations(next) ?? {});
@@ -598,6 +609,13 @@ function DropStudio({
             <div key={motion} className={styles[`motion_${motion}`] ?? styles.motion_glow} aria-hidden />
           ))
         : null}
+      {enableArtTools ? (
+        <div
+          ref={layerHostRef}
+          className={styles.artLayerHost}
+          data-active={tool === "art" ? "1" : "0"}
+        />
+      ) : null}
       <DropStudioOverlay
         customizations={
           operatingTable && normalized.artOverlayUrl
@@ -616,7 +634,7 @@ function DropStudio({
 
   const hintEl = (
     <div className={styles.hint}>
-      Drag labels and emojis. Use the layer list to remove anything on mobile.
+      Drag labels and emojis. Double-click one to remove it.
     </div>
   );
 
@@ -662,18 +680,6 @@ function DropStudio({
                 Add Text
               </button>
             </div>
-            {(normalized.textLabels?.length ?? 0) > 0 ? (
-              <div className={styles.layerList} aria-label="Text labels on this drop">
-                {normalized.textLabels?.map((label) => (
-                  <div className={styles.layerRow} key={label.id}>
-                    <span>{label.text}</span>
-                    <button type="button" onClick={() => removeItem("text", label.id)}>
-                      Remove
-                    </button>
-                  </div>
-                ))}
-              </div>
-            ) : null}
           </div>
         ) : null}
 
@@ -702,18 +708,6 @@ function DropStudio({
                 </div>
               ))}
             </div>
-            {(normalized.stickers?.length ?? 0) > 0 ? (
-              <div className={styles.layerList} aria-label="Stickers on this drop">
-                {normalized.stickers?.map((sticker) => (
-                  <div className={styles.layerRow} key={sticker.id}>
-                    <span>{sticker.value ?? sticker.label}</span>
-                    <button type="button" onClick={() => removeItem("sticker", sticker.id)}>
-                      Remove
-                    </button>
-                  </div>
-                ))}
-              </div>
-            ) : null}
           </div>
         ) : null}
 
@@ -846,23 +840,32 @@ function DropStudio({
 
   const drawerEl = <div className={drawerClassName}>{drawerPanelsEl}</div>;
 
+  const artSurfaceStyle = {
+    ...mediaRotationStyle,
+    ...(timelineOn && v5.previewClipPath ? { clipPath: v5.previewClipPath } : null),
+  };
   const inlineArtTools =
     operatingTable && enableArtTools ? (
       <>
         <DropStudioArtPalette
           hostRef={previewRef}
+          layerHostRef={layerHostRef}
+          active={tool === "art"}
           initialOverlayUrl={timelineOn ? undefined : normalized.artOverlayUrl}
           restoreKey={timelineOn && v5.artRestoreNonce ? String(v5.artRestoreNonce) : ""}
           restoreUrl={timelineOn ? v5.editingArtUrl : undefined}
           clearToken={timelineOn ? v5.clearArtToken : 0}
           live={!timelineOn || v5.editingArtLive}
           placement={timelineOn && v5.editingArtLive ? v5.editingArtPlacement : undefined}
+          surfaceStyle={artSurfaceStyle}
+          rotationDeg={normalizeDropMediaRotation(normalized.effects?.rotation ?? 0)}
           onOverlayChange={(artOverlayUrl) => {
             if (timelineOn && artOverlayUrl) v5.rememberArt(artOverlayUrl);
+            else if (timelineOn && v5.editingArtId) v5.rememberArt(EMPTY_ART_PNG);
             update({ ...normalized, artOverlayUrl });
           }}
         />
-        {artTools}
+        {tool === "art" ? artTools : null}
       </>
     ) : enableArtTools ? (
       artTools
@@ -871,8 +874,9 @@ function DropStudio({
   const deckPanelEl = (
     <DropStudioPaletteDeck
       tool={tool}
-      onToolChange={setTool}
-      drawer={drawerPanelsEl}
+      tools={studioObjectTools(Boolean(enableArtTools))}
+      onToolChange={selectTool}
+      drawer={tool === "art" ? null : drawerPanelsEl}
       artTools={inlineArtTools}
     />
   );

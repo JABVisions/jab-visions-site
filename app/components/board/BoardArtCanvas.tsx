@@ -27,6 +27,7 @@ import {
   artDraftObjectUrl,
 } from "@/lib/board/artDraftSession";
 import { ART_BLEND_STRENGTH, grabArtSmudge, stampArtSmudge } from "@/lib/board/artSmudge";
+import { pointerToArtSurface, strokeAlphaForMode, strokeCompositeForMode } from "@/lib/board/artBrush";
 
 function hslToHex(h: number, s: number, l: number) {
   const sN = s / 100;
@@ -338,8 +339,19 @@ export default function BoardArtCanvas({
   }, [initialOverlayUrl]);
 
   function pointFromXY(clientX: number, clientY: number) {
-    const r = canvasRef.current!.getBoundingClientRect();
-    return { x: clientX - r.left, y: clientY - r.top };
+    const canvas = canvasRef.current;
+    if (!canvas) return { x: 0, y: 0 };
+    const rect = canvas.getBoundingClientRect();
+    return pointerToArtSurface({
+      clientX,
+      clientY,
+      centerX: rect.left + rect.width / 2,
+      centerY: rect.top + rect.height / 2,
+      layoutWidth: canvas.clientWidth || rect.width,
+      layoutHeight: canvas.clientHeight || rect.height,
+      boxWidth: rect.width,
+      boxHeight: rect.height,
+    });
   }
 
   function snapshotCanvas(source: HTMLCanvasElement) {
@@ -454,13 +466,8 @@ export default function BoardArtCanvas({
       return;
     }
 
-    if (brushMode === "erase") {
-      ctx.globalCompositeOperation = "destination-out";
-      ctx.globalAlpha = 1;
-    } else {
-      ctx.globalCompositeOperation = "source-over";
-      ctx.globalAlpha = opacity;
-    }
+    ctx.globalCompositeOperation = strokeCompositeForMode(brushMode);
+    ctx.globalAlpha = strokeAlphaForMode(brushMode, opacity);
     ctx.strokeStyle = color;
     ctx.fillStyle = color;
     ctx.lineWidth = size;
@@ -611,6 +618,21 @@ export default function BoardArtCanvas({
     }, "image/png");
   }
 
+  const layerStrip = (
+    <ArtLayerStrip
+      layers={layers.layers}
+      activeId={layers.activeLayerId}
+      onSelect={layers.selectLayer}
+      onAdd={layers.addLayer}
+      onDelete={layers.removeLayer}
+      onHide={layers.hideLayer}
+      onDrop={(action) => {
+        if (action.type === "merge") layers.mergeLayers(action.draggedId, action.targetId);
+        else layers.reorderLayer(action.draggedId, action.index);
+      }}
+    />
+  );
+
   const stageEl = (
     <div
       data-art-canvas-stage
@@ -626,23 +648,21 @@ export default function BoardArtCanvas({
         <video
           src={backgroundVideoUrl}
           className={styles.bg}
-          autoPlay
-          loop
           muted
           playsInline
-          preload="auto"
+          preload="metadata"
           controls={false}
           aria-label="Video preview behind Art Palette"
           onLoadedData={(event) => {
             const el = event.currentTarget;
+            el.pause();
             if (el.currentTime === 0) {
               try {
                 el.currentTime = 0.05;
               } catch {
-                // ignore
+                // A paused frame is enough to draw over.
               }
             }
-            void el.play().catch(() => {});
           }}
         />
       ) : backgroundImageUrl ? (
@@ -656,6 +676,7 @@ export default function BoardArtCanvas({
           crossOrigin="anonymous"
         />
       ) : null}
+      <div className={styles.stageLayerDock}>{layerStrip}</div>
       <canvas ref={underRef} className={styles.canvasUnder} aria-hidden />
       <canvas
         ref={canvasRef}
@@ -699,24 +720,7 @@ export default function BoardArtCanvas({
     </div>
   );
 
-  const layerStrip = (
-    <ArtLayerStrip
-      layers={layers.layers}
-      activeId={layers.activeLayerId}
-      onSelect={layers.selectLayer}
-      onAdd={layers.addLayer}
-      onDelete={layers.removeLayer}
-      onHide={layers.hideLayer}
-      onDrop={(action) => {
-        if (action.type === "merge") layers.mergeLayers(action.draggedId, action.targetId);
-        else layers.reorderLayer(action.draggedId, action.index);
-      }}
-    />
-  );
-
   const artToolsEl = (
-    <>
-    {layerStrip}
     <ArtPaletteTools
       wheelRef={wheelRef}
       color={color}
@@ -757,7 +761,6 @@ export default function BoardArtCanvas({
       onClear={clearCanvas}
       onSave={save}
     />
-    </>
   );
 
   const toolsEl = (

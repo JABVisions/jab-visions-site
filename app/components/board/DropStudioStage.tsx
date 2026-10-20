@@ -4113,6 +4113,7 @@ export default function DropStudioStage({
                           mode === "art" ||
                           (studioV5 && (mode === "photo" || mode === "video"))
                         }
+                        preferArt={mode === "art"}
                         studioV5={studioV5}
                         studioDraftId={studioDraftId}
                         onV5Change={rememberV5}

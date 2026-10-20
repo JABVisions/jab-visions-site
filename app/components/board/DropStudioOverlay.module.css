@@ -213,6 +213,43 @@
   animation: shimmerSweep 3.6s ease-in-out infinite;
 }
 
+.itemWrap {
+  position: absolute;
+  z-index: 2;
+  transform: translate(-50%, -50%);
+  max-width: 80%;
+}
+
+.itemWrap .item {
+  position: relative;
+  left: auto;
+  top: auto;
+  transform: none;
+  max-width: 100%;
+}
+
+.removeItem {
+  position: absolute;
+  top: -7px;
+  right: -7px;
+  z-index: 3;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(8, 12, 18, 0.88);
+  color: #fff;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1;
+  pointer-events: auto;
+  cursor: pointer;
+}
+
 .item {
   position: absolute;
   z-index: 2;
