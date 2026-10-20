@@ -4560,15 +4560,15 @@ export class RaidEngine {
     host.aiState = order.state;
     host.aiDist = playerDist;
     host.aiAttack = order.attack;
-    host.aiWhy = striker.busy
-      ? 'animation'
-      : host.cooldown > 0
-        ? 'cooldown'
-        : phased
-          ? 'phased'
-          : order.attack
-            ? 'clear'
-            : order.state;
+    host.aiWhy = !order.attack
+      ? order.state
+      : striker.busy
+        ? 'animation'
+        : host.cooldown > 0
+          ? 'cooldown'
+          : phased
+            ? 'phased'
+            : 'clear';
     if (order.state === 'guard') host.guard = 0.32;
     if (
       host.supernatural &&
