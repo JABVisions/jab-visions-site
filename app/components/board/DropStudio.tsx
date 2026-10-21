@@ -996,8 +996,10 @@ function DropStudio({
           onSelectClip={v5.selectClip}
           onScrub={v5.scrub}
           onImportAudio={(file) => {
-            if (file.type.startsWith("video/")) void v5.importVideo(file);
-            else void v5.importAudio(file);
+            void v5.importAudio(file);
+          }}
+          onImportVideo={(files) => {
+            void v5.importVideos(files);
           }}
           onSplit={v5.split}
           onReorder={v5.reorder}

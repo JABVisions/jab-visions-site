@@ -131,11 +131,13 @@ export function useDropStudioV5Runtime({
   }, [session]);
 
   const commit = useCallback((next: DropStudioV5Session, recordHistory = true) => {
+    const previous = sessionRef.current;
     if (recordHistory) {
-      setHistory((prev) => pushV5History(prev, session));
+      setHistory((prev) => pushV5History(prev, previous));
     }
+    sessionRef.current = next;
     setSession(next);
-  }, [session]);
+  }, []);
 
   useEffect(() => {
     if (!enabled || mediaKind !== "video" || !mediaUrl) return;
@@ -251,16 +253,27 @@ export function useDropStudioV5Runtime({
       if (draftId && canPersistDropStudioV5Media(file.size)) {
         void saveDropStudioV5Media(draftId, key, file);
       }
-      commit(
-        importVideoClip(session, {
-          mediaKey: key,
-          name: file.name.replace(/\.[^.]+$/, "").slice(0, 24) || "Clip",
-          kind: "video",
-          sourceDurationMs: duration,
-        })
-      );
+      const next = importVideoClip(sessionRef.current, {
+        mediaKey: key,
+        name: file.name.replace(/\.[^.]+$/, "").slice(0, 24) || "Clip",
+        kind: "video",
+        sourceDurationMs: duration,
+      });
+      if (next === sessionRef.current) return;
+      const added = next.tracks.find((track) => track.kind === "video")?.clips.at(-1);
+      commit(added ? setPlayhead(next, added.offsetMs) : next);
+      if (added) setSelectedClipId(added.id);
     },
-    [commit, draftId, session]
+    [commit, draftId]
+  );
+
+  const importVideos = useCallback(
+    async (files: File[]) => {
+      for (const file of files) {
+        await importVideo(file);
+      }
+    },
+    [importVideo]
   );
 
   const importAudio = useCallback(
@@ -578,6 +591,7 @@ export function useDropStudioV5Runtime({
     },
     recordVoice,
     importVideo,
+    importVideos,
     importAudio,
     applyDuration,
     scrub,

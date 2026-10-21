@@ -203,6 +203,29 @@
   display: none;
 }
 
+.addClip {
+  position: absolute;
+  top: 6px;
+  bottom: 6px;
+  width: 88px;
+  margin: 0;
+  padding: 0 8px;
+  border-radius: 10px;
+  border: 1px dashed rgba(127, 245, 231, 0.55);
+  background: rgba(127, 245, 231, 0.08);
+  color: #e8fff8;
+  font: inherit;
+  font-size: 0.62rem;
+  font-weight: 850;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+}
+
+.addClip:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
 .aspects,
 .cropRow {
   display: flex;

@@ -5,6 +5,8 @@ import {
   DROP_STUDIO_V5_ASPECTS,
   V5_SPEEDS,
   clipPlayableMs,
+  clipEndMs,
+  MAX_V5_VIDEO_CLIPS,
   sessionDurationMs,
   type DropStudioV5ArtAction,
   type DropStudioV5Aspect,
@@ -41,6 +43,7 @@ export default function DropStudioV5Timeline({
   onSelectClip,
   onScrub,
   onImportAudio,
+  onImportVideo,
   onSplit,
   onReorder,
   onDelete,
@@ -77,6 +80,7 @@ export default function DropStudioV5Timeline({
   onSelectClip: (clipId: string) => void;
   onScrub: (ms: number) => void;
   onImportAudio: (file: File) => void;
+  onImportVideo?: (files: File[]) => void;
   onSplit: () => void;
   onReorder: (direction: -1 | 1) => void;
   onDelete: () => void;
@@ -107,6 +111,7 @@ export default function DropStudioV5Timeline({
 }) {
   const presetRef = useRef("cinematic");
   const audioInputRef = useRef<HTMLInputElement | null>(null);
+  const videoInputRef = useRef<HTMLInputElement | null>(null);
   const clipNodes = useRef<Map<string, HTMLDivElement>>(new Map());
   const [zoom, setZoom] = useState(1);
   const [activeTool, setActiveTool] = useState<PhoneEditTool>("trim");
@@ -122,7 +127,14 @@ export default function DropStudioV5Timeline({
   const selectedEffect = effectClips.find((clip) => clip.id === selectedClipId);
   const duration = Math.max(sessionDurationMs(session), 4_000);
   const pxPerMs = timelinePxPerMs(zoom);
-  const width = Math.max(280, LANE_LABEL_WIDTH + duration * pxPerMs);
+  const videoClipCount = session.tracks.find((track) => track.kind === "video")?.clips.length ?? 0;
+  const videoFull = videoClipCount >= MAX_V5_VIDEO_CLIPS;
+  const width = Math.max(280, LANE_LABEL_WIDTH + duration * pxPerMs + 108);
+
+  function pickVideos() {
+    if (videoFull) return;
+    videoInputRef.current?.click();
+  }
   const ticks = Array.from({ length: Math.floor(duration / 1000) + 1 }, (_, index) => index * 1000);
 
   function scrubFromEvent(event: ReactPointerEvent<HTMLDivElement>) {
@@ -264,11 +276,26 @@ export default function DropStudioV5Timeline({
           <button type="button" disabled={!canRedo} onClick={onRedo}>
             Redo
           </button>
+          <button type="button" onClick={pickVideos} disabled={videoFull || !onImportVideo} title={videoFull ? "The timeline holds 8 video clips" : "Add a video after the last clip"}>
+            Add clip
+          </button>
+          <input
+            ref={videoInputRef}
+            className={styles.hiddenInput}
+            type="file"
+            accept="video/*"
+            multiple
+            onChange={(event) => {
+              const files = Array.from(event.currentTarget.files ?? []);
+              event.currentTarget.value = "";
+              if (files.length) onImportVideo?.(files);
+            }}
+          />
           <input
             ref={audioInputRef}
             className={styles.hiddenInput}
             type="file"
-            accept="audio/*,video/*"
+            accept="audio/*"
             onChange={(event) => {
               const file = event.currentTarget.files?.[0];
               event.currentTarget.value = "";
@@ -309,6 +336,18 @@ export default function DropStudioV5Timeline({
             <div className={styles.lane} key={track.id}>
               <div className={styles.laneLabel}>{track.label}</div>
               <div className={styles.laneClips}>
+                {track.kind === "video" ? (
+                  <button
+                    type="button"
+                    className={styles.addClip}
+                    style={{ left: Math.max(...track.clips.map((clip) => clipEndMs(clip)), 0) * pxPerMs }}
+                    disabled={videoFull || !onImportVideo}
+                    onPointerDown={(event) => event.stopPropagation()}
+                    onClick={pickVideos}
+                  >
+                    {videoFull ? "Full" : "Add clip"}
+                  </button>
+                ) : null}
                 {track.clips.map((sourceClip) => {
                   const clip = shownClip(sourceClip);
                   const clipClass = `${styles.clip} ${track.kind === "audio" ? styles.clipAudio : ""} ${
@@ -369,11 +408,13 @@ export default function DropStudioV5Timeline({
         </div>
       </div>
       <p className={styles.note}>
-        {activeTool === "trim"
-          ? "Drag a clip edge to trim. Drag the clip to rearrange it."
-          : extraClipCount > 0
-            ? "Done renders this timeline with one decoder. The draft stays if that render fails."
-            : "One decoder preview. Trim, crop, and extra audio render on Done."}
+        {videoFull
+          ? "This timeline holds 8 video clips. Delete one to add another."
+          : activeTool === "trim"
+            ? "Add clip places another video after the last one. Drag an edge to trim."
+            : extraClipCount > 0
+              ? "Done renders this timeline with one decoder. The draft stays if that render fails."
+              : "Add clip places another video after this one."}
       </p>
       </div>
       <aside className={styles.inspector} aria-label="Clip settings">
