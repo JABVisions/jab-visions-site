@@ -84,7 +84,7 @@ registerArena({
   id: 'training-pad',
   name: 'Training P.A.D.',
   setting: 'Paranormal Activity Division',
-  description: 'A circular P.A.D. facility. Stairs reach the balcony, and the east corridor stays on the floor.',
+  description: 'A walled P.A.D. lab. Stairs reach the balcony, the east corridor stays on the floor, and the west tunnel opens into a white square hall.',
   available: true,
   worldKey: 'pad',
   spawnPoint: { x: 0, z: 8 },

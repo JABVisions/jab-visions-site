@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { addOutline } from './toon';
 import type { Obstacle, World } from './world';
 
 /**
@@ -6,8 +7,12 @@ import type { Obstacle, World } from './world';
  * the arena is selected so the city block does not load it.
  *
  * Walkable height is a single surface: the chamber floor, three stair ramps,
- * and a balcony ring. Nothing stacks a floor on top of another walkable cell,
- * which is what the raid's height field can carry.
+ * a balcony ring, the observation deck, the west lab tunnel, and the white
+ * square hall that tunnel opens into. Nothing stacks a floor on top of another
+ * walkable cell, which is what the raid's height field can carry.
+ *
+ * The shell is a solid lab wall. Players leave through the east corridor or the
+ * west deck, and both of those are closed rooms.
  */
 
 const FLOOR = 4.4;
@@ -69,6 +74,37 @@ function holo(color: number, opacity: number) {
   });
 }
 
+/** Crisp white tile. Null during the headless check, where there is no canvas. */
+function labTileTexture() {
+  if (typeof document === 'undefined') return null;
+  const canvas = document.createElement('canvas');
+  canvas.width = 128;
+  canvas.height = 128;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return null;
+  ctx.fillStyle = '#f5f8fc';
+  ctx.fillRect(0, 0, 128, 128);
+  ctx.strokeStyle = '#c3ceda';
+  ctx.lineWidth = 4;
+  ctx.strokeRect(2, 2, 124, 124);
+  ctx.strokeStyle = '#d7e0ea';
+  ctx.lineWidth = 1;
+  for (let i = 16; i < 128; i += 16) {
+    ctx.beginPath();
+    ctx.moveTo(i, 2);
+    ctx.lineTo(i, 126);
+    ctx.moveTo(2, i);
+    ctx.lineTo(126, i);
+    ctx.stroke();
+  }
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  texture.repeat.set(8, 8);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  return texture;
+}
+
 /** Observation deck meets the west stair at full height. The hall continues west of the door. */
 const DECK_EAST = -17.35;
 const DECK_WEST = -40.6;
@@ -77,6 +113,14 @@ const HALL_EAST = -40.15;
 const HALL_WEST = -68.2;
 const HALL_HALF_Z = 3.55;
 const DOOR_X = -40.4;
+/**
+ * White square laboratory the tunnel opens into.
+ * `east` is the open mouth; `west` and `half` are the outer wall centers.
+ */
+export const SQUARE_LAB = { east: -68.2, west: -84.6, half: 8 };
+const SQUARE_WALL = 0.46;
+/** Clear mouth between the tunnel walls. Wider than a fighter, flush with the tunnel. */
+const MOUTH_HALF = 3.48;
 
 /** 0 on the chamber floor, rising through the stairs, FLOOR on the balcony, deck, and lab hall. */
 export function padHeight(x: number, z: number) {
@@ -94,6 +138,14 @@ export function padHeight(x: number, z: number) {
   }
   if (x <= DECK_EAST && x >= DECK_WEST && Math.abs(z) <= DECK_HALF_Z) return FLOOR;
   if (x <= HALL_EAST && x >= HALL_WEST && Math.abs(z) <= HALL_HALF_Z) return FLOOR;
+  const inset = SQUARE_WALL * 0.55;
+  if (
+    x <= SQUARE_LAB.east &&
+    x >= SQUARE_LAB.west + inset &&
+    Math.abs(z) <= SQUARE_LAB.half - inset
+  ) {
+    return FLOOR;
+  }
   const r = Math.hypot(x, z);
   if (r >= 16.15 && r <= 23.35 && Math.abs(Math.atan2(z, x)) > 0.62) return FLOOR;
   return 0;
@@ -154,11 +206,153 @@ function addBox(
   return mesh;
 }
 
+/** White square laboratory. The east wall is open across the tunnel mouth. */
+function appendSquareHall(
+  group: THREE.Group,
+  obstacles: Obstacle[],
+  occluders: THREE.Object3D[],
+  textures: THREE.Texture[],
+  white: THREE.Material,
+  trim: THREE.Material,
+  securedMat: THREE.Material,
+) {
+  const spanX = SQUARE_LAB.east - SQUARE_LAB.west;
+  const spanZ = SQUARE_LAB.half * 2;
+  const cx = (SQUARE_LAB.east + SQUARE_LAB.west) / 2;
+  const tile = labTileTexture();
+  if (tile) textures.push(tile);
+  const floorMat = new THREE.MeshStandardMaterial({
+    color: 0xf7f9fc,
+    map: tile,
+    metalness: 0.05,
+    roughness: 0.42,
+    emissive: 0xc5d4e4,
+    emissiveIntensity: 0.05,
+  });
+  const floor = new THREE.Mesh(new THREE.BoxGeometry(spanX + 0.15, 0.2, spanZ + 0.1), floorMat);
+  floor.position.set(cx, FLOOR - 0.05, 0);
+  floor.receiveShadow = false;
+  group.add(floor);
+
+  const wallH = 4.35;
+  const wallY = FLOOR + wallH / 2;
+  const north = addBox(
+    group, obstacles, occluders, white,
+    cx, wallY, SQUARE_LAB.half, spanX + SQUARE_WALL, wallH, SQUARE_WALL, true, true,
+  );
+  const south = addBox(
+    group, obstacles, occluders, white,
+    cx, wallY, -SQUARE_LAB.half, spanX + SQUARE_WALL, wallH, SQUARE_WALL, true, true,
+  );
+  const west = addBox(
+    group, obstacles, occluders, white,
+    SQUARE_LAB.west, wallY, 0, SQUARE_WALL, wallH, spanZ + SQUARE_WALL, true, true,
+  );
+  const jambDepth = SQUARE_LAB.half - MOUTH_HALF;
+  const jambZ = MOUTH_HALF + jambDepth / 2;
+  const eastNorth = addBox(
+    group, obstacles, occluders, white,
+    SQUARE_LAB.east, wallY, jambZ, SQUARE_WALL, wallH, jambDepth + 0.06, true, true,
+  );
+  const eastSouth = addBox(
+    group, obstacles, occluders, white,
+    SQUARE_LAB.east, wallY, -jambZ, SQUARE_WALL, wallH, jambDepth + 0.06, true, true,
+  );
+  for (const wall of [north, south, west, eastNorth, eastSouth]) addOutline(wall, 0.035);
+
+  const ceiling = addBox(
+    group, obstacles, occluders, white,
+    cx, FLOOR + wallH + 0.06, 0, spanX - 0.2, 0.14, spanZ - 0.2, false, true,
+  );
+  ceiling.receiveShadow = false;
+
+  const panelLight = new THREE.MeshStandardMaterial({
+    color: 0xf4f8fc,
+    emissive: 0xd5e4f2,
+    emissiveIntensity: 0.45,
+    roughness: 0.45,
+  });
+  for (let col = 0; col < 3; col += 1) {
+    for (let row = 0; row < 3; row += 1) {
+      const light = new THREE.Mesh(new THREE.BoxGeometry(1.35, 0.05, 0.72), panelLight);
+      light.position.set(cx - 4.4 + col * 4.4, FLOOR + wallH - 0.04, -4.2 + row * 4.2);
+      group.add(light);
+    }
+  }
+  for (const z of [SQUARE_LAB.half - 0.34, -SQUARE_LAB.half + 0.34]) {
+    const cove = new THREE.Mesh(new THREE.BoxGeometry(spanX - 1.4, 0.06, 0.1), panelLight);
+    cove.position.set(cx, FLOOR + wallH - 0.12, z);
+    group.add(cove);
+  }
+
+  for (const z of [SQUARE_LAB.half - 0.3, -(SQUARE_LAB.half - 0.3)]) {
+    addBox(group, obstacles, occluders, trim, cx, FLOOR + 0.1, z, spanX - 1.4, 0.16, 0.08, false, false);
+    for (const x of [cx - 4.6, cx - 1.5, cx + 1.6, cx + 4.7]) {
+      addBox(group, obstacles, occluders, trim, x, wallY, z, 0.05, wallH * 0.78, 0.04, false, false);
+    }
+  }
+  for (const z of [-4.6, 0, 4.6]) {
+    addBox(
+      group, obstacles, occluders, trim,
+      SQUARE_LAB.west + 0.28, wallY, z, 0.04, wallH * 0.7, 0.05, false, false,
+    );
+  }
+
+  const bench = new THREE.MeshStandardMaterial({ color: 0xe7eef5, metalness: 0.25, roughness: 0.4 });
+  for (const z of [5.42, -5.42]) {
+    for (const x of [cx - 3.2, cx + 2.8]) {
+      const top = addBox(group, obstacles, occluders, bench, x, FLOOR + 0.46, z, 2.15, 0.72, 0.58, true, false);
+      addOutline(top, 0.02);
+    }
+  }
+
+  const cabinetMat = holo(0xd7fbff, 0.24);
+  for (const z of [6.82, -6.82]) {
+    const cabinet = new THREE.Mesh(new THREE.BoxGeometry(2.2, 1.7, 0.34), cabinetMat);
+    cabinet.position.set(cx + 0.2, FLOOR + 1.15, z);
+    group.add(cabinet);
+    obstacles.push({
+      kind: 'box',
+      minX: cx + 0.2 - 1.1,
+      maxX: cx + 0.2 + 1.1,
+      minZ: z - 0.2,
+      maxZ: z + 0.2,
+    });
+    const shelf = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.05, 0.22), trim);
+    shelf.position.set(cx + 0.2, FLOOR + 1.15, z);
+    group.add(shelf);
+  }
+
+  for (let i = 0; i < 7; i += 1) {
+    const stripe = new THREE.Mesh(
+      new THREE.BoxGeometry(0.2, 0.02, 6.5),
+      new THREE.MeshStandardMaterial({ color: i % 2 ? 0x14181e : 0xf0c431, roughness: 0.55 }),
+    );
+    stripe.position.set(SQUARE_LAB.east - 0.85 - i * 0.2, FLOOR + 0.021, 0);
+    group.add(stripe);
+  }
+
+  const securedDoor = new THREE.Mesh(new THREE.BoxGeometry(0.07, 3.05, 2.45), securedMat);
+  securedDoor.position.set(SQUARE_LAB.west + 0.3, FLOOR + 1.82, 0);
+  group.add(securedDoor);
+  const secured = new THREE.Mesh(new THREE.PlaneGeometry(1.55, 0.36), securedMat);
+  secured.position.set(SQUARE_LAB.west + 0.36, FLOOR + 2.82, 0);
+  secured.rotation.y = -Math.PI / 2;
+  group.add(secured);
+
+  const roomLight = new THREE.PointLight(0xf7fbff, 2.6, 20, 1.6);
+  roomLight.position.set(cx, FLOOR + 3.15, 0);
+  const mouthLight = new THREE.PointLight(0xf4f8ff, 2.1, 14, 1.7);
+  mouthLight.position.set(SQUARE_LAB.east - 2.4, FLOOR + 3.05, 0);
+  group.add(roomLight, mouthLight);
+}
+
 function buildObservationWing(
   group: THREE.Group,
   obstacles: Obstacle[],
   occluders: THREE.Object3D[],
   pulse: THREE.Material[],
+  textures: THREE.Texture[],
 ) {
   const deckMat = metal(0x1c2430, 0x062028, 0.22);
   const railMat = metal(0x8fdfff, 0x39e7ff, 0.45);
@@ -204,8 +398,10 @@ function buildObservationWing(
   southRail.rotation.z = stairPitch;
 
   // Deck shell. The east face stays open over the arena, with a glass rail.
-  addBox(group, obstacles, occluders, metal(0x121820), -29, FLOOR + 2.15, 8.85, 22.6, 4.3, 0.28, true, true);
-  addBox(group, obstacles, occluders, metal(0x121820), -29, FLOOR + 2.15, -8.85, 22.6, 4.3, 0.28, true, true);
+  const deckNorth = addBox(group, obstacles, occluders, metal(0x121820), -29, FLOOR + 2.15, 8.85, 22.6, 4.3, 0.28, true, true);
+  const deckSouth = addBox(group, obstacles, occluders, metal(0x121820), -29, FLOOR + 2.15, -8.85, 22.6, 4.3, 0.28, true, true);
+  addOutline(deckNorth, 0.04);
+  addOutline(deckSouth, 0.04);
   const ceiling = addBox(group, obstacles, occluders, metal(0x10161e), -29.4, FLOOR + 4.35, 0, 22.2, 0.22, 17.2, false, true);
   ceiling.receiveShadow = false;
   for (let i = 0; i < 4; i += 1) {
@@ -279,13 +475,15 @@ function buildObservationWing(
   const rightHit: Obstacle = { kind: 'box', minX: DOOR_X - 0.2, maxX: DOOR_X + 0.2, minZ: 0.01, maxZ: 1.43 };
   obstacles.push(leftHit, rightHit);
 
-  // White laboratory hall, square in section, ending at a secured door.
-  const hallFloor = new THREE.Mesh(new THREE.BoxGeometry(28.2, 0.2, 7.1), white);
-  hallFloor.position.set(-54.2, FLOOR - 0.06, 0);
+  // White laboratory tunnel. The west end is open into the square hall.
+  const hallFloor = new THREE.Mesh(new THREE.BoxGeometry(29.2, 0.2, 7.1), white);
+  hallFloor.position.set(-54.7, FLOOR - 0.06, 0);
   group.add(hallFloor);
-  addBox(group, obstacles, occluders, white, -54.2, FLOOR + 2.05, 3.65, 27.6, 4.1, 0.22, true, true);
-  addBox(group, obstacles, occluders, white, -54.2, FLOOR + 2.05, -3.65, 27.6, 4.1, 0.22, true, true);
-  const hallCeiling = addBox(group, obstacles, occluders, white, -54.2, FLOOR + 4.15, 0, 27.6, 0.18, 7.1, false, true);
+  const hallNorth = addBox(group, obstacles, occluders, white, -54.55, FLOOR + 2.05, 3.65, 28.5, 4.1, 0.22, true, true);
+  const hallSouth = addBox(group, obstacles, occluders, white, -54.55, FLOOR + 2.05, -3.65, 28.5, 4.1, 0.22, true, true);
+  addOutline(hallNorth, 0.03);
+  addOutline(hallSouth, 0.03);
+  const hallCeiling = addBox(group, obstacles, occluders, white, -54.55, FLOOR + 4.15, 0, 28.5, 0.18, 7.1, false, true);
   hallCeiling.receiveShadow = false;
   for (let i = 0; i < 6; i += 1) {
     const light = new THREE.Mesh(new THREE.BoxGeometry(3.2, 0.06, 1.1), led);
@@ -303,16 +501,8 @@ function buildObservationWing(
     windowB.rotation.y = Math.PI;
     group.add(windowB);
   }
-  addBox(group, obstacles, occluders, whiteTrim, -54.2, FLOOR + 0.08, 2.4, 27, 0.06, 0.08, false, false);
-  // Full end cap so the corridor does not open onto the void. The red panel is the secured door.
-  addBox(group, obstacles, occluders, white, HALL_WEST + 0.2, FLOOR + 2.15, 0, 0.36, 4.4, 7.3, true, true);
-  const securedDoor = new THREE.Mesh(new THREE.BoxGeometry(0.08, 3.15, 2.35), securedMat);
-  securedDoor.position.set(HALL_WEST + 0.46, FLOOR + 1.9, 0);
-  group.add(securedDoor);
-  const secured = new THREE.Mesh(new THREE.PlaneGeometry(1.5, 0.36), securedMat);
-  secured.position.set(HALL_WEST + 0.52, FLOOR + 2.7, 0);
-  secured.rotation.y = Math.PI / 2;
-  group.add(secured);
+  addBox(group, obstacles, occluders, whiteTrim, -54.4, FLOOR + 0.08, 2.4, 28, 0.06, 0.08, false, false);
+  appendSquareHall(group, obstacles, occluders, textures, white, whiteTrim, securedMat);
 
   const deckLight = new THREE.PointLight(0x9aefff, 8, 18, 1.4);
   deckLight.position.set(-28, FLOOR + 3.4, 0);
@@ -382,23 +572,39 @@ export function buildPadWorld(): World {
   });
   const wallMat = metal(0x2a3542, 0x12343f, 0.18);
   const trimMat = metal(0x8fdfff, 0x39e7ff, 0.85);
-  const darkMat = metal(0x10151c, 0x1a1030, 0.15);
   const glass = holo(0x9aefff, 0.16);
   const barrierMat = holo(0x67f0ff, 0.42);
   pulse.push(glass, barrierMat);
 
-  const chamber = new THREE.Mesh(new THREE.CircleGeometry(15.5, 48), floorMat);
+  const chamber = new THREE.Mesh(new THREE.CircleGeometry(15.5, 64), floorMat);
   chamber.rotation.x = -Math.PI / 2;
   chamber.position.y = 0.02;
   group.add(chamber);
 
-  const balcony = new THREE.Mesh(new THREE.RingGeometry(16.2, 23.2, 48), floorMat);
+  const undercroft = new THREE.Mesh(new THREE.RingGeometry(15.55, 26.4, 72), floorMat);
+  undercroft.rotation.x = -Math.PI / 2;
+  undercroft.position.y = 0.005;
+  group.add(undercroft);
+
+  // East arc stays on the ground, so the balcony does not float over the corridor.
+  const balcony = new THREE.Mesh(new THREE.RingGeometry(16.2, 23.2, 64, 1, 0.62, Math.PI * 2 - 1.24), floorMat);
   balcony.rotation.x = -Math.PI / 2;
   balcony.position.y = FLOOR + 0.02;
   group.add(balcony);
+  const chamberInlay = new THREE.Mesh(new THREE.TorusGeometry(8.4, 0.04, 6, 48), trimMat);
+  chamberInlay.rotation.x = Math.PI / 2;
+  chamberInlay.position.y = 0.05;
+  group.add(chamberInlay);
 
-  const corridor = new THREE.Mesh(new THREE.BoxGeometry(16, 0.08, 6.2), floorMat);
-  corridor.position.set(30, 0.02, 0);
+  const corridorMat = new THREE.MeshStandardMaterial({
+    color: 0xe7eef4,
+    metalness: 0.12,
+    roughness: 0.4,
+    emissive: 0xc5d5e2,
+    emissiveIntensity: 0.12,
+  });
+  const corridor = new THREE.Mesh(new THREE.BoxGeometry(30.2, 0.1, 7.4), corridorMat);
+  corridor.position.set(30.1, 0.05, 0);
   group.add(corridor);
 
   stairRun(group, trimMat, 'x', -1);
@@ -421,16 +627,45 @@ export function buildPadWorld(): World {
   core.position.y = 1.7;
   group.add(core);
 
-  for (let i = 0; i < 18; i += 1) {
-    const a = (i / 18) * Math.PI * 2;
-    const wallAng = Math.atan2(Math.sin(a), Math.cos(a));
-    if (Math.abs(wallAng) < 0.34) continue;
-    // West opening: the observation deck continues through the ring.
-    if (Math.abs(Math.abs(wallAng) - Math.PI) < 0.55) continue;
-    const x = Math.cos(a) * 26.2;
-    const z = Math.sin(a) * 26.2;
-    addBox(group, obstacles, occluders, wallMat, x, 2.6, z, 3.2, 5.2, 1.15, true, true);
-    addBox(group, obstacles, occluders, trimMat, x, 4.8, z, 3.2, 0.12, 1.2, false, false);
+  // Solid lab shell. Collision is a tight ring of circles so a rotated panel's
+  // axis-aligned box cannot bite the balcony. East and west stay open for the
+  // corridor and the deck; those rooms bring their own walls.
+  const shellMat = new THREE.MeshStandardMaterial({
+    color: 0xd7e1eb,
+    emissive: 0x143848,
+    emissiveIntensity: 0.28,
+    metalness: 0.18,
+    roughness: 0.48,
+  });
+  const shellR = 24.78;
+  const shellN = 110;
+  for (let i = 0; i < shellN; i += 1) {
+    const a = -Math.PI + ((i + 0.5) * Math.PI * 2) / shellN;
+    if (Math.abs(a) < 0.145) continue;
+    if (Math.abs(Math.abs(a) - Math.PI) < 0.42) continue;
+    obstacles.push({ kind: 'circle', x: Math.cos(a) * shellR, z: Math.sin(a) * shellR, r: 0.48 });
+  }
+  const panelN = 40;
+  const panelStep = (Math.PI * 2) / panelN;
+  for (let i = 0; i < panelN; i += 1) {
+    const a = -Math.PI + (i + 0.5) * panelStep;
+    if (Math.abs(a) < 0.145 + panelStep * 0.45) continue;
+    if (Math.abs(Math.abs(a) - Math.PI) < 0.42 + panelStep * 0.45) continue;
+    const length = panelStep * shellR + 0.16;
+    const panel = new THREE.Mesh(new THREE.BoxGeometry(0.72, 10.05, length), shellMat);
+    panel.position.set(Math.cos(a) * 24.72, 5.02, Math.sin(a) * 24.72);
+    panel.rotation.y = -a;
+    group.add(panel);
+    addOutline(panel, 0.04);
+    occluders.push(panel);
+    const cap = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.12, length), trimMat);
+    cap.position.set(panel.position.x, 9.95, panel.position.z);
+    cap.rotation.y = -a;
+    group.add(cap);
+    const seam = new THREE.Mesh(new THREE.BoxGeometry(0.08, 7.2, 0.06), trimMat);
+    seam.position.set(panel.position.x, 5.1, panel.position.z);
+    seam.rotation.y = -a;
+    group.add(seam);
   }
 
   const railMat = metal(0x41515c, 0x39e7ff, 0.25);
@@ -446,9 +681,25 @@ export function buildPadWorld(): World {
     addBox(group, obstacles, occluders, railMat, x, FLOOR + 0.55, z, 1.3, 1.05, 0.16, true, false);
   }
 
-  addBox(group, obstacles, occluders, darkMat, 38, 2.4, -7.2, 16, 4.8, 0.4, true, true);
-  addBox(group, obstacles, occluders, darkMat, 38, 2.4, 7.2, 16, 4.8, 0.4, true, true);
-  addBox(group, obstacles, occluders, darkMat, 46, 2.4, 0, 0.4, 4.8, 14, true, true);
+  const eastNorth = addBox(group, obstacles, occluders, corridorMat, 30.1, 2.75, 4.02, 30.6, 5.5, 0.58, true, true);
+  const eastSouth = addBox(group, obstacles, occluders, corridorMat, 30.1, 2.75, -4.02, 30.6, 5.5, 0.58, true, true);
+  const eastEnd = addBox(group, obstacles, occluders, corridorMat, 45.25, 2.75, 0, 0.48, 5.5, 8.7, true, true);
+  for (const wall of [eastNorth, eastSouth, eastEnd]) addOutline(wall, 0.035);
+  for (const z of [3.68, -3.68]) {
+    const strip = new THREE.Mesh(new THREE.BoxGeometry(28.4, 0.08, 0.08), trimMat);
+    strip.position.set(30.2, 5.15, z);
+    group.add(strip);
+  }
+  for (let i = 0; i < 6; i += 1) {
+    const light = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.05, 0.7), trimMat);
+    light.position.set(18.5 + i * 4.2, 5.28, 0);
+    group.add(light);
+  }
+  const eastLight = new THREE.PointLight(0xf4f8ff, 7, 18, 1.5);
+  eastLight.position.set(28, 3.4, 0);
+  const eastLightB = new THREE.PointLight(0xd7f4ff, 5, 14, 1.6);
+  eastLightB.position.set(40, 3.2, 0);
+  group.add(eastLight, eastLightB);
   const cage = new THREE.Mesh(new THREE.CylinderGeometry(1.4, 1.4, 3.2, 8, 1, true), holo(0xb388ff, 0.35));
   cage.position.set(38, 1.7, 0);
   group.add(cage);
@@ -468,7 +719,21 @@ export function buildPadWorld(): World {
     group.add(screen);
   }
 
-  const wing = buildObservationWing(group, obstacles, occluders, pulse);
+  // Cheek walls on the lower stairs. The inner face stays outside the ramp
+  // (|x| or |z| <= 2.15) and stops before the balcony, which is already a floor.
+  const cheekMat = shellMat;
+  for (const x of [2.88, -2.88]) {
+    const northCheek = addBox(group, obstacles, occluders, cheekMat, x, 2.7, 13.85, 0.4, 5.4, 3.3, true, true);
+    const southCheek = addBox(group, obstacles, occluders, cheekMat, x, 2.7, -13.85, 0.4, 5.4, 3.3, true, true);
+    addOutline(northCheek, 0.03);
+    addOutline(southCheek, 0.03);
+  }
+  for (const z of [2.88, -2.88]) {
+    const westCheek = addBox(group, obstacles, occluders, cheekMat, -13.9, 2.7, z, 3.3, 5.4, 0.4, true, true);
+    addOutline(westCheek, 0.03);
+  }
+
+  const wing = buildObservationWing(group, obstacles, occluders, pulse, textures);
 
   const barriers: Barrier[] = [];
   for (const spot of [
@@ -534,6 +799,7 @@ export function buildPadWorld(): World {
     alleys,
     alleyNodes: [],
     training: true,
+    bounds: 92,
     interactives: [{ kind: 'sim', x: 7.2, z: -4.6 }],
     toggleBarriers,
     heightAt: padHeight,
