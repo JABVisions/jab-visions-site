@@ -14,7 +14,8 @@ export type RyderId =
   | 'agent-nyx'
   | 'marilyn-monroe'
   | 'martin-luther-king'
-  | 'marywantis';
+  | 'marywantis'
+  | 'tj';
 
 export type AbilityId =
   | 'bladeFan'
@@ -49,7 +50,10 @@ export type AbilityId =
   | 'freeAtLast'
   | 'callMercy'
   | 'finKick'
-  | 'wavePool';
+  | 'wavePool'
+  | 'deathStrike'
+  | 'mindControl'
+  | 'riot';
 
 export type MoveKey = 'Q' | 'E' | 'R';
 
@@ -1031,6 +1035,95 @@ export const RYDERZ: Record<RyderId, RyderSpec> = {
       },
     ],
   },
+  tj: {
+    id: 'tj',
+    name: 'TJ',
+    title: 'The Ringmaster of Death',
+    flaw: 'Unrestrained',
+    role: 'Controller',
+    color: 0x228b22,
+    colorHex: '#228B22',
+    accent: 0x145214,
+    visual: {
+      primaryColor: 0x1a6b2c,
+      auraColor: 0x228b22,
+      electricityColor: 0x8ed36a,
+      depletedAuraIntensity: 0,
+      poweredAuraIntensity: 1.45,
+      auraStyle: 'sparkle',
+    },
+    weapon: 'Twin Guns',
+    portrait: '/assets/those-ryderz/icons/tj.webp?v=1',
+    icon: '/assets/those-ryderz/icons/tj.webp?v=1',
+    glb: '/assets/those-ryderz/models/tj.glb?v=1',
+    armHang: 1.45,
+    shoulderDrop: 0.5,
+    skelKeep: [
+      'hips',
+      'spine',
+      'chest',
+      'upperChest',
+      'neck',
+      'head',
+      'shoulderL',
+      'shoulderR',
+      'upperArmL',
+      'upperArmR',
+      'lowerArmL',
+      'lowerArmR',
+      'handL',
+      'handR',
+      'upperLegL',
+      'upperLegR',
+      'lowerLegL',
+      'lowerLegR',
+      'footL',
+      'footR',
+      'toesL',
+      'toesR',
+    ],
+    maxHp: 115,
+    speed: 6.6,
+    fireRate: 4.5,
+    damage: 8,
+    projectileSpeed: 42,
+    projectileCount: 2,
+    spread: 0.08,
+    shotCost: 2,
+    maxAura: 120,
+    auraRegen: 5.4,
+    meleeDamage: 18,
+    meleeRate: 1.8,
+    moves: [
+      {
+        id: 'deathStrike',
+        name: 'Death Strike',
+        key: 'Q',
+        description:
+          'Both guns fire down the aim for 3 seconds. The barrage staggers everyone in the cone, then two finishing shots shove them. No cooldown. Powers cut out at random.',
+        auraCost: 16,
+        drain: 0,
+      },
+      {
+        id: 'mindControl',
+        name: 'Mind-Control Madness',
+        key: 'E',
+        description:
+          'Green rings grab up to 8 civilians within 15 metres. For 15 seconds they attack each other instead of TJ. A second cast refreshes the hold. Bosses resist. No cooldown. Powers cut out at random.',
+        auraCost: 22,
+        drain: 0,
+      },
+      {
+        id: 'riot',
+        name: 'RIOT!',
+        key: 'R',
+        description:
+          'TJ spins and rakes a 25 metre bullet storm, then up to 20 survivors frenzy on each other for 10 seconds. A death in the riot makes the others nearby swing faster. No cooldown. Powers cut out at random.',
+        auraCost: 36,
+        drain: 0,
+      },
+    ],
+  },
 };
 
 export const RYDER_ORDER: RyderId[] = [
@@ -1045,6 +1138,7 @@ export const RYDER_ORDER: RyderId[] = [
   'marilyn-monroe',
   'martin-luther-king',
   'marywantis',
+  'tj',
 ];
 
 export type EnemyKind = 'walker' | 'sprinter' | 'heavy' | 'thrower' | 'adept' | 'broadcaster';

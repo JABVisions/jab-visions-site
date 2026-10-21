@@ -147,6 +147,15 @@ const RYDER_COMBAT: Record<RyderId, CombatProfile> = {
     punchCycle: ['punch', 'slap', 'chop'],
     kickCycle: ['kick', 'spinKick', 'kick'],
   },
+  tj: {
+    punch: { damageMul: 0.42, recovery: 0.18 },
+    kick: { damageMul: 0.74, knockback: 6.2 },
+    melee: { label: 'Pistol whip', damageMul: 1.04, reaction: 'stagger', range: 2.15, recovery: 0.4, style: 'chop' },
+    combos: SHARED_COMBOS,
+    powerLink: { id: 'death-link', abilityId: 'deathStrike', label: 'Death Strike', preReaction: 'stagger', followUps: 1, trap: 0 },
+    punchCycle: ['punch', 'chop', 'punchR'],
+    kickCycle: ['kick', 'spinKick'],
+  },
 };
 
 export function combatProfileFor(id: RyderId | null | undefined): CombatProfile {

@@ -114,6 +114,14 @@ import {
   type StrikerHit,
 } from './fighter';
 import { CIVILIAN_PROFILES, civilianOrder, profileForKind, type CivilianProfileId } from './civilians/profiles';
+import {
+  boostNearbyRiot,
+  influenceRank,
+  isProvoked,
+  pickRival,
+  provoke,
+  swayOf,
+} from './ryderz/tj-influence';
 import { DOWN_SECONDS, REVIVE_RANGE, downOpacity, reviveVitals, squadStillStanding } from './raid/downed';
 import {
   MVP_HOLD,
@@ -530,6 +538,8 @@ export class RaidEngine {
   /** Seats whose body has already faded, so the bar stays up and untappable. */
   private closedSeats = new Set<number>();
   private allowAllyDamage = false;
+  /** A swayed civilian is hitting another civilian. That punch is not TJ's gun. */
+  private infighting = false;
   /** Seat credited for the enemy hit currently being resolved. -1 is nobody. */
   private creditSeat = -1;
   private statLines = new Map<number, SquadStatLine>();
@@ -4536,7 +4546,7 @@ export class RaidEngine {
       if (other === host) break;
       if (!other.duelist && other.hp > 0) slot += 1;
     }
-    const aim = this.squadAim(host);
+    const aim = this.hostAim(host);
     const pdx = aim.x - host.pos.x;
     const pdz = aim.z - host.pos.z;
     const playerDist = Math.hypot(pdx, pdz) || 0.0001;
@@ -4544,7 +4554,7 @@ export class RaidEngine {
     const propDist = prop ? Math.hypot(prop.pos.x - host.pos.x, prop.pos.z - host.pos.z) : null;
     host.powerCd = Math.max(0, (host.powerCd ?? 0) - dt);
     host.guard = Math.max(0, (host.guard ?? 0) - dt);
-    const order = civilianOrder(profile, {
+    let order = civilianOrder(profile, {
       dist: playerDist,
       hpRatio: host.maxHp > 0 ? host.hp / host.maxHp : 1,
       holding: Boolean(host.heldItem),
@@ -4557,6 +4567,11 @@ export class RaidEngine {
       tier: host.tier ?? 1,
       tactics: this.tactics,
     });
+    const swayed = swayOf(host, this.simTime);
+    const turned = Boolean(swayed) && isProvoked(host);
+    const rival = swayed && !turned ? pickRival(host, this.hosts) : null;
+    const nowhereToTurn = Boolean(swayed) && !turned && !rival && influenceRank(host) !== 'elite';
+    if (nowhereToTurn) order = { state: 'guard', move: 0, strafe: 0, attack: null };
     host.aiState = order.state;
     host.aiDist = playerDist;
     host.aiAttack = order.attack;
@@ -4571,6 +4586,7 @@ export class RaidEngine {
             : 'clear';
     if (order.state === 'guard') host.guard = 0.32;
     if (
+      !swayed &&
       host.supernatural &&
       this.tactics.powers &&
       host.kind !== 'broadcaster' &&
@@ -4605,8 +4621,9 @@ export class RaidEngine {
         host.winding = false;
         const item = host.heldItem;
         const flight = Math.min(0.65, playerDist / Math.max(6, item.stats.throwForce));
-        const aim = new THREE.Vector3(this.squadAim(host).x, 1.05, this.squadAim(host).z);
-        const lead = this.squadAim(host);
+        const thrownAt = this.hostAim(host);
+        const aim = new THREE.Vector3(thrownAt.x, 1.05, thrownAt.z);
+        const lead = thrownAt;
         aim.x += lead.vx * flight * 0.55;
         aim.z += lead.vz * flight * 0.55;
         const spread = 2.4 + (1 - profile.throwBias) * 3.2;
@@ -4625,7 +4642,8 @@ export class RaidEngine {
       !this.hazardPush(host.pos.x, host.pos.z)
     ) {
       striker.queue(order.attack);
-      host.cooldown = 0.48 + Math.random() * 0.4;
+      const pace = swayed?.mode === 'riot' ? 0.2 + swayed.haste * 0.05 : 0.48;
+      host.cooldown = pace + Math.random() * (swayed?.mode === 'riot' ? 0.1 : 0.4);
       if (order.attack === 'punch' && Math.random() < (profile.id === 'brawler' || profile.id === 'aggressive' ? 0.55 : 0.28)) {
         host.follow = Math.random() < 0.6 ? 'punch' : 'kick';
       } else if (order.attack === 'kick' && Math.random() < 0.34) {
@@ -4638,7 +4656,7 @@ export class RaidEngine {
       host.cooldown = 0.4 + Math.random() * 0.2;
     }
 
-    const chase = this.squadAim(host);
+    const chase = this.hostAim(host);
     let gx = chase.x;
     let gz = chase.z;
     if ((order.state === 'search' || order.state === 'pickup') && prop && (propDist ?? 99) < 14) {
@@ -4739,7 +4757,7 @@ export class RaidEngine {
       host.pos.z += (oz / od) * (gap - od) * 0.5;
     }
 
-    const faceAt = this.squadAim(host);
+    const faceAt = this.hostAim(host);
     const faceX = order.state === 'search' && prop ? prop.pos.x - host.pos.x : faceAt.x - host.pos.x;
     const faceZ = order.state === 'search' && prop ? prop.pos.z - host.pos.z : faceAt.z - host.pos.z;
     const facing = Math.atan2(faceX, faceZ);
@@ -4762,7 +4780,8 @@ export class RaidEngine {
       }
     }
 
-    const haste = Math.min(1, Math.max(0.4, host.attackScale ?? 1));
+    const frenzy = swayed?.mode === 'riot' ? 1 + swayed.haste : 1;
+    const haste = Math.min(1.85, Math.max(0.4, (host.attackScale ?? 1) * frenzy));
     const frame = striker.tick(dt * haste, {
       time: this.simTime,
       stunned: host.stagger > 0.05 || host.stun > 0,
@@ -4771,7 +4790,7 @@ export class RaidEngine {
       x: host.pos.x,
       z: host.pos.z,
       meleeDamage: host.damage,
-      targets: phased ? [] : this.civilianTargets(),
+      targets: phased ? [] : this.civilianTargets(host),
     });
     if (frame.lunge) {
       host.pos.x += Math.sin(facing) * frame.lunge * 0.65;
@@ -4786,6 +4805,10 @@ export class RaidEngine {
     }
     const moving = Math.min(1, Math.hypot(travelX, travelZ) / Math.max(0.01, host.speed));
     this.animateHost(host, dt, moving, time, pose ? 1 - pose.p : 0, pose?.style, host.winding);
+    if (swayed && host.hit <= 0.02) {
+      host.hit = 0.14;
+      host.hitColor = 0x228b22;
+    }
     if (host.hit > 0) flashEmissive(host.fighter.humanoid, host.hitColor, host.hit * 2.4);
     else flashEmissive(host.fighter.humanoid, 0x000000, 0);
 
@@ -4798,10 +4821,14 @@ export class RaidEngine {
     for (const hit of frame.hits) {
       _tmp.set(Math.sin(facing), 0, Math.cos(facing));
       if (hit.target.ref !== this.playerBody) {
-        const ally = hit.target.ref as Host;
-        if (ally.ally && ally.hp > 0) {
+        const other = hit.target.ref as Host;
+        if (swayed && other.hp > 0 && other !== host && !other.ally) {
+          this.infighting = true;
+          this.hurtHost(other, hit.damage, _tmp, hit.reaction, hit.strength);
+          this.infighting = false;
+        } else if (other.ally && other.hp > 0 && !swayed) {
           this.allowAllyDamage = true;
-          this.hurtHost(ally, hit.damage, _tmp, hit.reaction, hit.strength);
+          this.hurtHost(other, hit.damage, _tmp, hit.reaction, hit.strength);
           this.allowAllyDamage = false;
         }
         continue;
@@ -4815,6 +4842,17 @@ export class RaidEngine {
         knockback: hit.knockback * 0.55,
       });
     }
+  }
+
+  /** Where this civilian is trying to get. A sway sends them at each other until TJ hurts them. */
+  private hostAim(host: Host) {
+    const mark = swayOf(host, this.simTime);
+    if (mark && !isProvoked(host)) {
+      const rival = pickRival(host, this.hosts);
+      if (rival) return { x: rival.pos.x, z: rival.pos.z, vx: 0, vz: 0 };
+      if (influenceRank(host) !== 'elite') return { x: host.pos.x, z: host.pos.z, vx: 0, vz: 0 };
+    }
+    return this.squadAim(host);
   }
 
   private squadAim(from: Host) {
@@ -4846,7 +4884,20 @@ export class RaidEngine {
     return pressTarget(from.pos.x, from.pos.z, choices, this.tactics.targetWeak);
   }
 
-  private civilianTargets() {
+  private civilianTargets(host?: Host) {
+    const mark = host ? swayOf(host, this.simTime) : null;
+    if (mark && host) {
+      const targets: { ref: object; x: number; z: number; radius: number; airborne: boolean }[] = [];
+      for (const other of this.hosts) {
+        if (other === host || other.hp <= 0 || other.ally) continue;
+        targets.push({ ref: other, x: other.pos.x, z: other.pos.z, radius: other.radius, airborne: other.airY > 0.3 });
+      }
+      const fightsPlayer = influenceRank(host) === 'elite' || isProvoked(host);
+      if (fightsPlayer && this.hp > 0) {
+        targets.push({ ref: this.playerBody, x: this.pos.x, z: this.pos.z, radius: PLAYER_RADIUS, airborne: this.airY > 0.3 });
+      }
+      return targets;
+    }
     const targets: { ref: object; x: number; z: number; radius: number; airborne: boolean }[] = [];
     if (this.hp > 0) {
       targets.push({ ref: this.playerBody, x: this.pos.x, z: this.pos.z, radius: PLAYER_RADIUS, airborne: this.airY > 0.3 });
@@ -4962,6 +5013,7 @@ export class RaidEngine {
   private hurtHost(host: Host, amount: number, dir: THREE.Vector3, reaction?: HitReaction, strength = 1) {
     if (host.hp <= 0) return;
     if (host.ally && !this.allowAllyDamage) return;
+    if (!host.ally && !this.infighting && this.spec.id === 'tj') provoke(host);
     if (host.ally && host.cpu) amount *= host.cpu.incomingScale;
     if (host.ally && host.cpu && (host.cpu.iframes > 0 || host.cpu.intangible)) return;
     if (host.duelist && !host.ally && !host.controlled && this.pvpCpu && (this.pvpCpu.iframes > 0 || this.pvpCpu.intangible)) return;
@@ -5002,6 +5054,7 @@ export class RaidEngine {
    * body for a moment instead of vanishing on the spot.
    */
   private killHost(host: Host, flungBy: THREE.Vector3 | null = null, strength = 1) {
+    if (swayOf(host, this.simTime)?.mode === 'riot') boostNearbyRiot(host, this.hosts, this.simTime);
     // Kits may still hold a reference; make sure it reads as dead.
     host.hp = Math.min(host.hp, 0);
     host.held = 0;

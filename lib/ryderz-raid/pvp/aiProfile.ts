@@ -74,6 +74,14 @@ export const RYDER_AI_PROFILES: Record<RyderId, AiProfile> = {
     comboPreference: 0.46,
     punish: 0.44,
   },
+  tj: {
+    aggression: 0.7,
+    evasiveness: 0.46,
+    preferredRange: 'mid',
+    abilityFrequency: 0.9,
+    comboPreference: 0.36,
+    punish: 0.4,
+  },
   marywantis: {
     aggression: 0.64,
     evasiveness: 0.5,

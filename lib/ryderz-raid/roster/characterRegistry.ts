@@ -48,7 +48,6 @@ export interface RaidCharacter {
 
 const FUTURE_CHARACTERS: RaidCharacter[] = [
   stub('baxter', 'Baxter Banks', 'ryder', true, '#f4f6fb'),
-  stub('tj', 'TJ', 'villain', false, '#9aa0a8'),
   stub('ester', 'Ester Maxin', 'support', false, '#9b5cff'),
 ];
 
@@ -77,12 +76,14 @@ function stub(id: string, name: string, category: CharacterCategory, solo: boole
 
 const BOOMER_IDS = new Set<RyderId>(['marilyn-monroe', 'martin-luther-king']);
 const JAB_VISIONS_IDS = new Set<RyderId>(['marywantis']);
+const VILLAIN_IDS = new Set<RyderId>(['tj']);
 
 function rosterHome(id: RyderId): { universe: string; category: CharacterCategory } {
   if (BOOMER_IDS.has(id)) return { universe: 'Those Boomers', category: 'boomer' };
   const pad = padCharacterMeta(id);
   if (pad) return pad;
   if (JAB_VISIONS_IDS.has(id)) return { universe: 'JAB Visions Universe', category: 'jab-visions' };
+  if (VILLAIN_IDS.has(id)) return { universe: 'Those Ryderz', category: 'villain' };
   return { universe: 'Those Ryderz', category: 'ryder' };
 }
 

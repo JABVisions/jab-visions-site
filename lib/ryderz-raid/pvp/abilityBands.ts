@@ -37,6 +37,9 @@ export const ABILITY_BANDS: Record<AbilityId, AbilityBand> = {
   callMercy: 'defensive',
   finKick: 'movement',
   wavePool: 'mid',
+  deathStrike: 'long',
+  mindControl: 'mid',
+  riot: 'mid',
 };
 
 /**

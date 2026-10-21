@@ -13,6 +13,7 @@ export const RYDER_THEME: Record<RyderId, { label: string; aura: string; soft: s
   'marilyn-monroe': { label: 'Charity', aura: '#168BFF', soft: 'rgba(22, 139, 255, 0.34)' },
   'martin-luther-king': { label: 'Justice', aura: '#B22242', soft: 'rgba(128, 0, 32, 0.36)' },
   marywantis: { label: 'Tide', aura: '#00e5ff', soft: 'rgba(10, 132, 255, 0.34)' },
+  tj: { label: 'Forest', aura: '#228B22', soft: 'rgba(34, 139, 34, 0.36)' },
 };
 
 export const NEUTRAL_THEME = { label: 'Signal', aura: '#31ff96', soft: 'rgba(49,255,150,0.3)' };
