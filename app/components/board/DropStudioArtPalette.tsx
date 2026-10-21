@@ -67,6 +67,7 @@ export default function DropStudioArtPalette({
   const dprRef = useRef(1);
   const initialPaintedRef = useRef(false);
   const [portalReady, setPortalReady] = useState(false);
+  const [layerRoot, setLayerRoot] = useState<HTMLElement | null>(null);
   const [color, setColor] = useState("#FF4FD8");
   const [size, setSize] = useState(8);
   const [light, setLight] = useState(65);
@@ -97,7 +98,14 @@ export default function DropStudioArtPalette({
     if (underCtx && overCtx) artLayers.paintLayerChrome(underCtx, overCtx);
   }
 
-  useEffect(() => setPortalReady(true), []);
+  useEffect(() => {
+    setPortalReady(true);
+    const monitor = hostRef.current
+      ?.closest("[data-drop-chip-host]")
+      ?.querySelector("[data-art-layer-anchor]");
+    const next = monitor instanceof HTMLElement ? monitor : layerHostRef?.current ?? null;
+    setLayerRoot(next);
+  }, [hostRef, layerHostRef]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -481,8 +489,8 @@ export default function DropStudioArtPalette({
   );
 
   const layerDock =
-    active && portalReady && layerHostRef?.current
-      ? createPortal(<div className={styles.artLayerDock}>{layerStrip}</div>, layerHostRef.current)
+    portalReady && layerRoot
+      ? createPortal(<div className={styles.artLayerDock}>{layerStrip}</div>, layerRoot)
       : null;
 
   return (
@@ -491,7 +499,7 @@ export default function DropStudioArtPalette({
       {layerDock}
       {active ? (
       <div className={styles.inlineArtPalette}>
-        {layerHostRef ? null : layerStrip}
+        {layerRoot ? null : layerStrip}
         <div className={styles.inlineArtHeadingRow}>
           <div className={styles.inlineArtHeading}>Art Palette</div>
         </div>

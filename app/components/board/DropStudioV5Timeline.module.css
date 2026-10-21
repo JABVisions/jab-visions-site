@@ -9,7 +9,7 @@
   gap: 8px;
   width: 100%;
   max-height: none;
-  padding: 8px 10px 10px;
+  padding: 8px 10px max(10px, env(safe-area-inset-bottom));
   border-top: 1px solid rgba(167, 244, 232, 0.16);
   box-shadow: 0 -16px 36px rgba(0, 0, 0, 0.35);
   background:

@@ -69,7 +69,6 @@
   min-height: 0;
   aspect-ratio: var(--drop-chip-aspect, 4 / 5);
   --drop-chip-aspect: 4 / 5;
-  contain: layout style;
 }
 
 .workbench .chipFrame {
@@ -93,6 +92,36 @@
 .workbench .dropChipMonitor {
   border-radius: 0;
   border: 0;
+}
+
+/* Yellow art layers sit on the monitor, above the Palette, at its top left. */
+.monitorLayerAnchor {
+  position: absolute;
+  z-index: 30;
+  top: 10px;
+  left: 10px;
+  width: max-content;
+  max-width: calc(100% - 20px);
+  pointer-events: none;
+}
+
+.monitorLayerAnchor:empty {
+  display: none;
+}
+
+.monitorLayerAnchor > * {
+  pointer-events: auto;
+}
+
+.paletteOpen:not(.paletteFull) .monitorLayerAnchor {
+  left: calc(var(--palette-half) + 10px);
+  max-width: calc(50% - 20px);
+}
+
+.paletteFull .monitorLayerAnchor {
+  top: 48px;
+  left: 10px;
+  max-width: calc(100% - 20px);
 }
 
 .chipFrame[data-frame="landscape"] {

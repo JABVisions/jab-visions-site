@@ -690,12 +690,9 @@
   z-index: 8;
   top: 8px;
   left: 8px;
-  right: 8px;
+  width: max-content;
+  max-width: calc(100% - 72px);
   pointer-events: none;
-}
-
-.artLayerHost[data-active="0"] {
-  visibility: hidden;
 }
 
 .artLayerDock {
@@ -848,7 +845,7 @@
   z-index: 13;
   left: 0;
   right: 0;
-  bottom: calc(max(84px, calc(18px + env(safe-area-inset-bottom) + 64px)) + 48px);
+  bottom: calc(max(12px, env(safe-area-inset-bottom)) + 44px);
   display: flex;
   justify-content: center;
   pointer-events: none;
@@ -864,7 +861,7 @@
   z-index: 12;
   left: 0;
   right: 0;
-  bottom: max(84px, calc(18px + env(safe-area-inset-bottom) + 64px));
+  bottom: 0;
   display: flex;
   flex-direction: column;
   align-items: stretch;
@@ -901,7 +898,7 @@
   position: absolute;
   z-index: 13;
   left: 50%;
-  bottom: calc(max(84px, calc(18px + env(safe-area-inset-bottom) + 64px)) + 10px);
+  bottom: max(12px, env(safe-area-inset-bottom));
   transform: translateX(-50%);
 }
 

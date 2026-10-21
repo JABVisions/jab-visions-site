@@ -636,7 +636,6 @@ function DropStudio({
         <div
           ref={layerHostRef}
           className={styles.artLayerHost}
-          data-active={tool === "art" ? "1" : "0"}
         />
       ) : null}
       <DropStudioOverlay

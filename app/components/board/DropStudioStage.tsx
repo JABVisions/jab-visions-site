@@ -3132,6 +3132,29 @@ export default function DropStudioStage({
                 Retake
               </button>
             ) : null}
+            {phase === "edit" && studioV5 && mode === "video" ? (
+              <button
+                type="button"
+                className="studioGhost"
+                onClick={done}
+                disabled={processingVocal}
+                aria-busy={processingVocal}
+                aria-label={
+                  processingVocal
+                    ? "Saving Drop"
+                    : isDropbookMode
+                      ? "Add Video to Dropbook"
+                      : destinationPublishLabel || "Add Video to Drop"
+                }
+                title={
+                  isDropbookMode
+                    ? "Add Video to Dropbook"
+                    : destinationPublishLabel || "Add Video to Drop"
+                }
+              >
+                {processingVocal ? "Saving…" : "Add Video"}
+              </button>
+            ) : null}
             <button
               type="button"
               className="studioGhost"
@@ -4129,6 +4152,7 @@ export default function DropStudioStage({
                       ) : saveNote ? (
                         <span className="saveNote capStudioSaveNote">{saveNote}</span>
                       ) : null}
+                      {studioV5 && mode === "video" ? null : (
                       <button
                         type="button"
                         className="studioDoneCheck"
@@ -4161,6 +4185,7 @@ export default function DropStudioStage({
                           />
                         </svg>
                       </button>
+                      )}
                     </div>
                   )}
                 </div>

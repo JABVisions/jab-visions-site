@@ -182,6 +182,7 @@ export default function DropChipWorkbench({
                 : undefined
             }
           >
+            <div className={styles.monitorLayerAnchor} data-art-layer-anchor />
             <DropChipMonitor
               overlay={
                 showDock ? (

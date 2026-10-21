@@ -744,6 +744,12 @@
   pointer-events: auto;
 }
 
+.layerDockPortal {
+  width: max-content;
+  max-width: 100%;
+  pointer-events: auto;
+}
+
 .layerStrip {
   display: flex;
   align-items: center;

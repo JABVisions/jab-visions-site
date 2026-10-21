@@ -10,6 +10,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import ArtPaletteTools, { type ArtBrushMode } from "./ArtPaletteTools";
 import ArtLayerStrip from "./ArtLayerStrip";
 import { useArtLayerCanvases } from "./useArtLayerCanvases";
@@ -78,6 +79,8 @@ export default function BoardArtCanvas({
   const dprRef = useRef(1);
   const recoveredUrlRef = useRef("");
   const [recovered, setRecovered] = useState(false);
+  const operatingRef = useRef<HTMLDivElement>(null);
+  const [layerAnchor, setLayerAnchor] = useState<HTMLElement | null>(null);
   const lastPtRef = useRef<{ x: number; y: number } | null>(null);
   const wheelRef = useRef<HTMLDivElement | null>(null);
   const wheelDraggingRef = useRef(false);
@@ -191,6 +194,15 @@ export default function BoardArtCanvas({
     redoRef.current = [];
     refreshArtChrome();
   }
+
+  useEffect(() => {
+    if (!operatingTable) {
+      setLayerAnchor(null);
+      return;
+    }
+    const anchor = operatingRef.current?.querySelector("[data-art-layer-anchor]");
+    setLayerAnchor(anchor instanceof HTMLElement ? anchor : null);
+  }, [operatingTable]);
 
   useEffect(() => {
     syncCanvas();
@@ -676,7 +688,7 @@ export default function BoardArtCanvas({
           crossOrigin="anonymous"
         />
       ) : null}
-      <div className={styles.stageLayerDock}>{layerStrip}</div>
+      {operatingTable ? null : <div className={styles.stageLayerDock}>{layerStrip}</div>}
       <canvas ref={underRef} className={styles.canvasUnder} aria-hidden />
       <canvas
         ref={canvasRef}
@@ -775,8 +787,11 @@ export default function BoardArtCanvas({
 
   if (operatingTable) {
     return (
-      <div className={styles.operatingHost} data-art-operating-host>
+      <div ref={operatingRef} className={styles.operatingHost} data-art-operating-host>
         <DropChipWorkbench chip={stageEl} deck={deckPanelEl} />
+        {layerAnchor
+          ? createPortal(<div className={styles.layerDockPortal}>{layerStrip}</div>, layerAnchor)
+          : null}
       </div>
     );
   }
