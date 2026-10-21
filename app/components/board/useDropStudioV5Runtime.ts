@@ -29,7 +29,9 @@ import {
   previewVideoAtPlayhead,
   pushV5History,
   redoV5,
+  moveTimedClip,
   reorderClip,
+  reorderClipToIndex,
   resolveTrimOutMs,
   saveDropStudioV5Project,
   scaleArtPlacement,
@@ -41,6 +43,7 @@ import {
   setMediaDuration,
   setPlayhead,
   setSessionAspect,
+  setTrackMute,
   splitClipAtPlayhead,
   trimClip,
   undoV5,
@@ -57,6 +60,7 @@ import {
 } from "@/lib/board/dropStudioV5Media";
 import { fetchDropStudioV5Cloud, queueDropStudioV5CloudSync } from "@/lib/board/dropStudioV5Cloud";
 import { gradeToFilter, presetGrade, type DropStudioV5Grade, type DropStudioV5Motion } from "@/lib/board/dropStudioV5Grade";
+import { stepPlayheadMs } from "@/lib/board/dropStudioV5Timeline";
 
 function persistArtOverlay(draftId: string, mediaKey: string, dataUrl: string) {
   void fetch(dataUrl)
@@ -578,21 +582,37 @@ export function useDropStudioV5Runtime({
     applyDuration,
     scrub,
     syncPlayheadFromVideo,
-    split: () => commit(splitClipAtPlayhead(session, selected?.id)),
+    split: () => commit(splitClipAtPlayhead(sessionRef.current, selected?.id)),
     reorder: (direction: -1 | 1) => {
-      if (!selected) return;
-      commit(reorderClip(session, selected.id, direction));
+      const id = selected?.id;
+      if (!id) return;
+      commit(reorderClip(sessionRef.current, id, direction));
+    },
+    reorderTo: (clipId: string, index: number) => {
+      commit(reorderClipToIndex(sessionRef.current, clipId, index));
+    },
+    moveBy: (clipId: string, deltaMs: number) => {
+      commit(moveTimedClip(sessionRef.current, clipId, deltaMs));
+    },
+    muteTrack: (trackId: string, muted: boolean) => {
+      commit(setTrackMute(sessionRef.current, trackId, muted));
+    },
+    step: (direction: -1 | 1) => {
+      scrub(stepPlayheadMs(sessionRef.current.playheadMs, direction, sessionDurationMs(sessionRef.current)));
     },
     remove: () => {
       if (!selected || selected.mediaKey === "primary") return;
       applyArtEdit(deleteClip(sessionRef.current, selected.id));
     },
-    trim: (edge: "in" | "out", deltaMs: number) => {
-      if (!selected) return;
-      const nextIn = selected.trimInMs + (edge === "in" ? deltaMs : 0);
-      const currentOut = selected.trimOutMs || selected.sourceDurationMs;
+    trim: (edge: "in" | "out", deltaMs: number, clipId?: string) => {
+      const current = sessionRef.current;
+      const id = clipId || selected?.id;
+      const clip = current.tracks.flatMap((track) => track.clips).find((item) => item.id === id);
+      if (!clip) return;
+      const nextIn = clip.trimInMs + (edge === "in" ? deltaMs : 0);
+      const currentOut = clip.trimOutMs || clip.sourceDurationMs;
       const nextOut = currentOut + (edge === "out" ? deltaMs : 0);
-      commit(trimClip(session, selected.id, nextIn, nextOut));
+      commit(trimClip(current, clip.id, nextIn, nextOut));
     },
     undo: () => {
       const next = undoV5(history, session);

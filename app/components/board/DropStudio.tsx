@@ -18,6 +18,7 @@ import DropStudioArtPalette from "./DropStudioArtPalette";
 import DropStudioOverlay from "./DropStudioOverlay";
 import DropStudioPaletteDeck, { type ObjectTool } from "./DropStudioPaletteDeck";
 import { EMPTY_ART_PNG, studioObjectTools } from "@/lib/board/artBrush";
+import { clampTimelineFraction, TABLET_TIMELINE_FRACTION } from "@/lib/board/dropStudioV5Timeline";
 import DropStudioV5Timeline from "./DropStudioV5Timeline";
 import BoardPlayableVideo from "./BoardPlayableVideo";
 import { useDropStudioV5Runtime } from "./useDropStudioV5Runtime";
@@ -26,6 +27,7 @@ import {
   aspectToMediaFrame,
   DROP_STUDIO_V5_ASPECTS,
   monitorAspectRatio,
+  sessionDurationMs,
   type DropStudioV5MediaBag,
   type DropStudioV5Session,
 } from "@/lib/board/dropStudioV5";
@@ -92,6 +94,12 @@ function toolLabel(item: Tool) {
     default:
       return item;
   }
+}
+
+function formatStudioClock(ms: number) {
+  const safe = Math.max(0, Math.round(ms));
+  const totalSeconds = Math.floor(safe / 1000);
+  return `${Math.floor(totalSeconds / 60)}:${String(totalSeconds % 60).padStart(2, "0")}`;
 }
 
 function makeId(prefix: string) {
@@ -305,6 +313,10 @@ function DropStudio({
   const layerHostRef = useRef<HTMLDivElement | null>(null);
   const [studioLayout, setStudioLayout] = useState<DropStudioV5Layout>("phone");
   const [timelineOpen, setTimelineOpen] = useState(false);
+  const [timelineFraction, setTimelineFraction] = useState(TABLET_TIMELINE_FRACTION);
+  const [deckToken, setDeckToken] = useState(0);
+  const workbenchHostRef = useRef<HTMLDivElement | null>(null);
+  const timelineResizeRef = useRef<{ y: number; fraction: number } | null>(null);
   const [tool, setTool] = useState<Tool>(preferArt && enableArtTools ? "art" : "text");
   const [text, setText] = useState("");
   const [dragging, setDragging] = useState<{
@@ -346,7 +358,7 @@ function DropStudio({
   }, [timelineOn]);
 
   useEffect(() => {
-    if (!timelineOn || studioLayout === "phone") return;
+    if (!timelineOn) return;
     const onKey = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
       if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) return;
@@ -358,6 +370,12 @@ function DropStudio({
         v5.split();
       } else if (event.key === "Delete" || event.key === "Backspace") {
         v5.remove();
+      } else if (event.key === "ArrowLeft") {
+        event.preventDefault();
+        v5.step(-1);
+      } else if (event.key === "ArrowRight") {
+        event.preventDefault();
+        v5.step(1);
       }
     };
     window.addEventListener("keydown", onKey);
@@ -386,6 +404,11 @@ function DropStudio({
       }
     }
   }, [timelineOn, v5.audioPreviewTimeSeconds, v5.audioPreviewUrl, v5.audioSpeed, v5.audioVolume, v5.scrubbing]);
+
+  function focusStudioTool(next: "art" | "text" | "stickers") {
+    selectTool(next);
+    setDeckToken((token) => token + 1);
+  }
 
   function selectTool(next: Tool) {
     setTool(next);
@@ -894,12 +917,28 @@ function DropStudio({
         }}
         monitorAspect={timelineOn ? DROP_STUDIO_V5_ASPECTS[v5.session.aspect].css : undefined}
         monitorRatio={timelineOn ? monitorAspectRatio(v5.session.aspect) : undefined}
+        openDeckToken={deckToken}
       />
     );
     if (!timelineOn) return workbench;
     return (
-      <div className={styles.v5Workbench} data-layout={studioLayout} data-studio-v5="1">
+      <div
+        ref={workbenchHostRef}
+        className={styles.v5Workbench}
+        data-layout={studioLayout}
+        data-studio-v5="1"
+        style={
+          studioLayout === "phone"
+            ? undefined
+            : ({ "--v5-timeline": `${Math.round(timelineFraction * 1000) / 10}%` } as React.CSSProperties)
+        }
+      >
         <div className={styles.v5MonitorSlot}>{workbench}</div>
+        {studioLayout === "phone" && !timelineOpen ? (
+          <div className={styles.phoneTransport}>
+            {formatStudioClock(v5.session.playheadMs)} / {formatStudioClock(sessionDurationMs(v5.session))}
+          </div>
+        ) : null}
         {studioLayout === "phone" && !timelineOpen ? (
           <button
             type="button"
@@ -915,6 +954,30 @@ function DropStudio({
           data-open={studioLayout === "phone" && !timelineOpen ? "0" : "1"}
           aria-hidden={studioLayout === "phone" && !timelineOpen ? true : undefined}
         >
+        {studioLayout !== "phone" ? (
+          <button
+            type="button"
+            className={styles.timelineResize}
+            aria-label="Resize timeline"
+            onPointerDown={(event) => {
+              event.currentTarget.setPointerCapture(event.pointerId);
+              timelineResizeRef.current = { y: event.clientY, fraction: timelineFraction };
+            }}
+            onPointerMove={(event) => {
+              const drag = timelineResizeRef.current;
+              const host = workbenchHostRef.current;
+              if (!drag || !host || !event.currentTarget.hasPointerCapture(event.pointerId)) return;
+              const height = host.getBoundingClientRect().height || 1;
+              setTimelineFraction(clampTimelineFraction(drag.fraction + (drag.y - event.clientY) / height));
+            }}
+            onPointerUp={() => {
+              timelineResizeRef.current = null;
+            }}
+            onPointerCancel={() => {
+              timelineResizeRef.current = null;
+            }}
+          />
+        ) : null}
         {studioLayout === "phone" && timelineOpen ? (
           <button
             type="button"
@@ -933,7 +996,10 @@ function DropStudio({
           extraClipCount={v5.extraClipCount}
           onSelectClip={v5.selectClip}
           onScrub={v5.scrub}
-          onImportAudio={(file) => void v5.importAudio(file)}
+          onImportAudio={(file) => {
+            if (file.type.startsWith("video/")) void v5.importVideo(file);
+            else void v5.importAudio(file);
+          }}
           onSplit={v5.split}
           onReorder={v5.reorder}
           onDelete={v5.remove}
@@ -958,6 +1024,12 @@ function DropStudio({
           onVolume={v5.setVolume}
           onRecordVoice={() => void v5.recordVoice()}
           voiceState={v5.voiceState}
+          layout={studioLayout}
+          onReorderTo={v5.reorderTo}
+          onMoveBy={v5.moveBy}
+          onMuteTrack={v5.muteTrack}
+          onFocusStudioTool={focusStudioTool}
+          onStep={v5.step}
         />
         </div>
         <audio

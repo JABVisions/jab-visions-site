@@ -801,6 +801,64 @@
   box-sizing: border-box;
 }
 
+.v5Workbench[data-layout="tablet"],
+.v5Workbench[data-layout="desktop"] {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) var(--v5-timeline, 30%);
+}
+
+.v5Workbench[data-layout="tablet"] .v5MonitorSlot,
+.v5Workbench[data-layout="desktop"] .v5MonitorSlot {
+  position: relative;
+  inset: auto;
+  min-height: 0;
+}
+
+.v5Workbench[data-layout="tablet"] .timelineShell,
+.v5Workbench[data-layout="desktop"] .timelineShell {
+  position: relative;
+  left: auto;
+  right: auto;
+  bottom: auto;
+  height: 100%;
+  max-height: none;
+  transform: none;
+  visibility: visible;
+  overflow: hidden;
+}
+
+.v5Workbench[data-layout="tablet"] .timelineShell > section,
+.v5Workbench[data-layout="desktop"] .timelineShell > section {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.timelineResize {
+  flex: 0 0 14px;
+  margin: 0;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(127, 245, 231, 0.18);
+  cursor: ns-resize;
+  touch-action: none;
+}
+
+.phoneTransport {
+  position: absolute;
+  z-index: 13;
+  left: 0;
+  right: 0;
+  bottom: calc(max(84px, calc(18px + env(safe-area-inset-bottom) + 64px)) + 48px);
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+  color: #e8fff8;
+  font-size: 0.78rem;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.65);
+}
+
 .timelineShell {
   position: absolute;
   z-index: 12;
