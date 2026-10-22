@@ -3132,29 +3132,6 @@ export default function DropStudioStage({
                 Retake
               </button>
             ) : null}
-            {phase === "edit" && studioV5 && mode === "video" ? (
-              <button
-                type="button"
-                className="studioGhost"
-                onClick={done}
-                disabled={processingVocal}
-                aria-busy={processingVocal}
-                aria-label={
-                  processingVocal
-                    ? "Saving Drop"
-                    : isDropbookMode
-                      ? "Add Video to Dropbook"
-                      : destinationPublishLabel || "Add Video to Drop"
-                }
-                title={
-                  isDropbookMode
-                    ? "Add Video to Dropbook"
-                    : destinationPublishLabel || "Add Video to Drop"
-                }
-              >
-                {processingVocal ? "Saving…" : "Add Video"}
-              </button>
-            ) : null}
             <button
               type="button"
               className="studioGhost"
@@ -4141,6 +4118,13 @@ export default function DropStudioStage({
                         studioDraftId={studioDraftId}
                         onV5Change={rememberV5}
                         onMediaError={handleMediaPreviewError}
+                        onAddDrop={studioV5 && mode === "video" ? done : undefined}
+                        addDropBusy={processingVocal}
+                        addDropLabel={
+                          isDropbookMode
+                            ? "Add Video to Dropbook"
+                            : destinationPublishLabel || "Add Video to Drop"
+                        }
                       />
                       {liveUploadProgress && mediaKind === "video" ? (
                         <div className="capStudioSaveNote">

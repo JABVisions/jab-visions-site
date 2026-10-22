@@ -71,6 +71,9 @@ export default function DropStudioV5Timeline({
   onMuteTrack,
   onFocusStudioTool,
   onStep,
+  onAddDrop,
+  addDropLabel,
+  addDropBusy = false,
 }: {
   session: DropStudioV5Session;
   selectedClipId: string | null;
@@ -108,6 +111,10 @@ export default function DropStudioV5Timeline({
   onMuteTrack?: (trackId: string, muted: boolean) => void;
   onFocusStudioTool?: (tool: "art" | "text" | "stickers") => void;
   onStep?: (direction: -1 | 1) => void;
+  /** Publishes the video drop. Rendered inside the timeline deck. */
+  onAddDrop?: () => void;
+  addDropLabel?: string;
+  addDropBusy?: boolean;
 }) {
   const presetRef = useRef("cinematic");
   const audioInputRef = useRef<HTMLInputElement | null>(null);
@@ -659,6 +666,30 @@ export default function DropStudioV5Timeline({
         </div>
       ) : null}
       </aside>
+      {onAddDrop ? (
+        <div className={styles.addDropRow}>
+          <button
+            type="button"
+            className={styles.addDropCheck}
+            onClick={onAddDrop}
+            disabled={addDropBusy}
+            aria-busy={addDropBusy}
+            aria-label={addDropBusy ? "Saving Drop" : addDropLabel || "Add Video to Drop"}
+            title={addDropBusy ? "Saving Drop" : addDropLabel || "Add Video to Drop"}
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path
+                d="M5.2 12.4 9.4 16.8 18.8 6.8"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.6"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </button>
+        </div>
+      ) : null}
       {menu ? (
         <div className={styles.menu} style={{ left: menu.x, top: menu.y }} role="menu">
           <button type="button" onClick={() => { onSplit(); setMenu(null); }}>Split</button>

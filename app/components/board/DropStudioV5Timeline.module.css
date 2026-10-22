@@ -4,8 +4,9 @@
   grid-template-areas:
     "rail"
     "stage"
-    "inspector";
-  grid-template-rows: auto minmax(0, 1fr) auto;
+    "inspector"
+    "commit";
+  grid-template-rows: auto minmax(0, 1fr) auto auto;
   gap: 8px;
   width: 100%;
   max-height: none;
@@ -22,8 +23,10 @@
 .timeline[data-layout="tablet"],
 .timeline[data-layout="desktop"] {
   grid-template-columns: 132px minmax(0, 1fr) minmax(168px, 240px);
-  grid-template-rows: minmax(0, 1fr);
-  grid-template-areas: "rail stage inspector";
+  grid-template-rows: minmax(0, 1fr) auto;
+  grid-template-areas:
+    "rail stage inspector"
+    "commit commit commit";
   height: 100%;
   min-height: 0;
 }
@@ -40,6 +43,11 @@
 .timeline[data-layout="phone"] .rail {
   flex-direction: row;
   touch-action: pan-x;
+}
+
+.timeline[data-layout="phone"] .stage {
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .timeline[data-layout="tablet"] .rail,
@@ -224,6 +232,41 @@
 .addClip:disabled {
   opacity: 0.45;
   cursor: default;
+}
+
+.addDropRow {
+  grid-area: commit;
+  display: flex;
+  justify-content: center;
+  padding: 4px 0 2px;
+}
+
+.addDropCheck {
+  width: 56px;
+  height: 56px;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  border: 3px solid rgba(255, 255, 255, 0.55);
+  background: radial-gradient(circle at 35% 30%, #fff, #7ee2ff);
+  box-shadow:
+    0 0 24px rgba(126, 226, 255, 0.5),
+    0 10px 28px rgba(0, 0, 0, 0.28);
+  color: #06121a;
+  cursor: pointer;
+}
+
+.addDropCheck svg {
+  width: 26px;
+  height: 26px;
+  display: block;
+}
+
+.addDropCheck:disabled {
+  cursor: wait;
+  opacity: 0.7;
 }
 
 .aspects,

@@ -285,6 +285,9 @@ function DropStudio({
   studioV5 = false,
   studioDraftId,
   onV5Change,
+  onAddDrop,
+  addDropLabel,
+  addDropBusy = false,
 }: {
   mediaUrl: string;
   mediaKind: "image" | "video";
@@ -307,6 +310,10 @@ function DropStudio({
   studioV5?: boolean;
   studioDraftId?: string;
   onV5Change?: (next: { session: DropStudioV5Session; mediaBag: DropStudioV5MediaBag }) => void;
+  /** Publishes the video drop from the check inside the timeline deck. */
+  onAddDrop?: () => void;
+  addDropLabel?: string;
+  addDropBusy?: boolean;
 }) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const previewRef = useRef<HTMLDivElement | null>(null);
@@ -316,7 +323,18 @@ function DropStudio({
   const [timelineFraction, setTimelineFraction] = useState(TABLET_TIMELINE_FRACTION);
   const [deckToken, setDeckToken] = useState(0);
   const workbenchHostRef = useRef<HTMLDivElement | null>(null);
+  const timelineShellRef = useRef<HTMLDivElement | null>(null);
   const timelineResizeRef = useRef<{ y: number; fraction: number } | null>(null);
+  const timelineDragRef = useRef<{
+    startY: number;
+    startShift: number;
+    max: number;
+    shift: number;
+    moved: boolean;
+  } | null>(null);
+  const suppressTimelineClickRef = useRef(false);
+  const [timelineShift, setTimelineShift] = useState<number | null>(null);
+  const [timelineDragging, setTimelineDragging] = useState(false);
   const [tool, setTool] = useState<Tool>(preferArt && enableArtTools ? "art" : "text");
   const [text, setText] = useState("");
   const [dragging, setDragging] = useState<{
@@ -356,6 +374,27 @@ function DropStudio({
       pointer.removeEventListener?.("change", measure);
     };
   }, [timelineOn]);
+
+  useEffect(() => {
+    if (timelineShift == null || timelineDragging) return;
+    const shell = timelineShellRef.current;
+    if (!shell) return;
+    let cleared = false;
+    const clear = () => {
+      if (cleared) return;
+      cleared = true;
+      setTimelineShift(null);
+    };
+    const onEnd = (event: TransitionEvent) => {
+      if (event.propertyName === "transform") clear();
+    };
+    shell.addEventListener("transitionend", onEnd);
+    const timer = window.setTimeout(clear, 320);
+    return () => {
+      shell.removeEventListener("transitionend", onEnd);
+      window.clearTimeout(timer);
+    };
+  }, [timelineShift, timelineDragging]);
 
   useEffect(() => {
     if (!timelineOn) return;
@@ -933,27 +972,93 @@ function DropStudio({
         }
       >
         <div className={styles.v5MonitorSlot}>{workbench}</div>
-        {studioLayout === "phone" && !timelineOpen ? (
+        {studioLayout === "phone" && !timelineOpen && !timelineDragging ? (
           <div className={styles.phoneTransport}>
             {formatStudioClock(v5.session.playheadMs)} / {formatStudioClock(sessionDurationMs(v5.session))}
           </div>
         ) : null}
-        {studioLayout === "phone" && !timelineOpen ? (
-          <button
-            type="button"
-            className={styles.timelineToggle}
-            data-placed="rest"
-            onClick={() => setTimelineOpen(true)}
-          >
-            Timeline
-          </button>
-        ) : null}
         <div
+          ref={timelineShellRef}
           className={styles.timelineShell}
           data-open={studioLayout === "phone" && !timelineOpen ? "0" : "1"}
-          aria-hidden={studioLayout === "phone" && !timelineOpen ? true : undefined}
+          data-dragging={timelineDragging ? "1" : undefined}
+          style={
+            timelineShift == null
+              ? undefined
+              : { transform: `translateY(${timelineShift}px)` }
+          }
         >
-        {studioLayout !== "phone" ? (
+        {studioLayout === "phone" ? (
+          <button
+            type="button"
+            className={styles.timelinePull}
+            aria-expanded={timelineOpen}
+            aria-controls="drop-studio-timeline"
+            aria-label={timelineOpen ? "Pull the timeline down" : "Pull the timeline up"}
+            onPointerDown={(event) => {
+              const shell = timelineShellRef.current;
+              if (!shell) return;
+              const handle = event.currentTarget.getBoundingClientRect().height;
+              const height = shell.getBoundingClientRect().height;
+              const max = Math.max(0, height - handle);
+              const startShift = timelineOpen && timelineShift == null ? 0 : timelineShift ?? max;
+              event.currentTarget.setPointerCapture(event.pointerId);
+              timelineDragRef.current = {
+                startY: event.clientY,
+                startShift,
+                max,
+                shift: startShift,
+                moved: false,
+              };
+              setTimelineDragging(true);
+              setTimelineShift(startShift);
+            }}
+            onPointerMove={(event) => {
+              const drag = timelineDragRef.current;
+              if (!drag || !event.currentTarget.hasPointerCapture(event.pointerId)) return;
+              const delta = event.clientY - drag.startY;
+              if (Math.abs(delta) > 8) drag.moved = true;
+              const next = Math.min(drag.max, Math.max(0, drag.startShift + delta));
+              drag.shift = next;
+              setTimelineShift(next);
+            }}
+            onPointerUp={(event) => {
+              if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+                event.currentTarget.releasePointerCapture(event.pointerId);
+              }
+              const drag = timelineDragRef.current;
+              timelineDragRef.current = null;
+              setTimelineDragging(false);
+              if (!drag) return;
+              if (!drag.moved) {
+                setTimelineShift(null);
+                return;
+              }
+              suppressTimelineClickRef.current = true;
+              const open = drag.shift < drag.max * 0.55;
+              setTimelineOpen(open);
+              setTimelineShift(open ? 0 : drag.max);
+            }}
+            onPointerCancel={() => {
+              const drag = timelineDragRef.current;
+              timelineDragRef.current = null;
+              setTimelineDragging(false);
+              if (!drag) return;
+              setTimelineShift(null);
+            }}
+            onClick={() => {
+              if (suppressTimelineClickRef.current) {
+                suppressTimelineClickRef.current = false;
+                return;
+              }
+              setTimelineOpen((open) => !open);
+              setTimelineShift(null);
+            }}
+          >
+            <span className={styles.timelinePullGrip} aria-hidden />
+            <span className={styles.timelinePullLabel}>Timeline</span>
+          </button>
+        ) : (
           <button
             type="button"
             className={styles.timelineResize}
@@ -976,17 +1081,12 @@ function DropStudio({
               timelineResizeRef.current = null;
             }}
           />
-        ) : null}
-        {studioLayout === "phone" && timelineOpen ? (
-          <button
-            type="button"
-            className={styles.timelineToggle}
-            data-placed="sheet"
-            onClick={() => setTimelineOpen(false)}
-          >
-            Hide timeline
-          </button>
-        ) : null}
+        )}
+        <div
+          id="drop-studio-timeline"
+          className={styles.timelineBody}
+          aria-hidden={studioLayout === "phone" && !timelineOpen ? true : undefined}
+        >
         <DropStudioV5Timeline
           session={v5.session}
           selectedClipId={v5.selectedClipId}
@@ -1031,7 +1131,11 @@ function DropStudio({
           onMuteTrack={v5.muteTrack}
           onFocusStudioTool={focusStudioTool}
           onStep={v5.step}
+          onAddDrop={onAddDrop}
+          addDropLabel={addDropLabel}
+          addDropBusy={addDropBusy}
         />
+        </div>
         </div>
         <audio
           ref={audioRef}
