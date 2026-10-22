@@ -17,6 +17,8 @@ import DropChipWorkbench from "./DropChipWorkbench";
 import DropStudioArtPalette from "./DropStudioArtPalette";
 import DropStudioOverlay from "./DropStudioOverlay";
 import DropStudioPaletteDeck, { type ObjectTool } from "./DropStudioPaletteDeck";
+import { EMPTY_ART_PNG, studioObjectTools } from "@/lib/board/artBrush";
+import { clampTimelineFraction, TABLET_TIMELINE_FRACTION } from "@/lib/board/dropStudioV5Timeline";
 import DropStudioV5Timeline from "./DropStudioV5Timeline";
 import BoardPlayableVideo from "./BoardPlayableVideo";
 import { useDropStudioV5Runtime } from "./useDropStudioV5Runtime";
@@ -25,6 +27,7 @@ import {
   aspectToMediaFrame,
   DROP_STUDIO_V5_ASPECTS,
   monitorAspectRatio,
+  sessionDurationMs,
   type DropStudioV5MediaBag,
   type DropStudioV5Session,
 } from "@/lib/board/dropStudioV5";
@@ -91,6 +94,12 @@ function toolLabel(item: Tool) {
     default:
       return item;
   }
+}
+
+function formatStudioClock(ms: number) {
+  const safe = Math.max(0, Math.round(ms));
+  const totalSeconds = Math.floor(safe / 1000);
+  return `${Math.floor(totalSeconds / 60)}:${String(totalSeconds % 60).padStart(2, "0")}`;
 }
 
 function makeId(prefix: string) {
@@ -271,10 +280,14 @@ function DropStudio({
   operatingTable = false,
   enableArtTools = false,
   artTools,
+  preferArt = false,
   onMediaError,
   studioV5 = false,
   studioDraftId,
   onV5Change,
+  onAddDrop,
+  addDropLabel,
+  addDropBusy = false,
 }: {
   mediaUrl: string;
   mediaKind: "image" | "video";
@@ -289,18 +302,40 @@ function DropStudio({
   enableArtTools?: boolean;
   /** Art brush tools — rendered below object tool panels in the Palette drawer. */
   artTools?: React.ReactNode;
+  /** Open on the Art tool. Used by standalone Art drops. */
+  preferArt?: boolean;
   /** Rebuild preview URL if a blob fails to paint (e.g. revoked object URL). */
   onMediaError?: () => void;
   /** Incremental V5 timeline. Off restores V4 layout and behavior. */
   studioV5?: boolean;
   studioDraftId?: string;
   onV5Change?: (next: { session: DropStudioV5Session; mediaBag: DropStudioV5MediaBag }) => void;
+  /** Publishes the video drop from the check inside the timeline deck. */
+  onAddDrop?: () => void;
+  addDropLabel?: string;
+  addDropBusy?: boolean;
 }) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const previewRef = useRef<HTMLDivElement | null>(null);
+  const layerHostRef = useRef<HTMLDivElement | null>(null);
   const [studioLayout, setStudioLayout] = useState<DropStudioV5Layout>("phone");
   const [timelineOpen, setTimelineOpen] = useState(false);
-  const [tool, setTool] = useState<Tool>("text");
+  const [timelineFraction, setTimelineFraction] = useState(TABLET_TIMELINE_FRACTION);
+  const [deckToken, setDeckToken] = useState(0);
+  const workbenchHostRef = useRef<HTMLDivElement | null>(null);
+  const timelineShellRef = useRef<HTMLDivElement | null>(null);
+  const timelineResizeRef = useRef<{ y: number; fraction: number } | null>(null);
+  const timelineDragRef = useRef<{
+    startY: number;
+    startShift: number;
+    max: number;
+    shift: number;
+    moved: boolean;
+  } | null>(null);
+  const suppressTimelineClickRef = useRef(false);
+  const [timelineShift, setTimelineShift] = useState<number | null>(null);
+  const [timelineDragging, setTimelineDragging] = useState(false);
+  const [tool, setTool] = useState<Tool>(preferArt && enableArtTools ? "art" : "text");
   const [text, setText] = useState("");
   const [dragging, setDragging] = useState<{
     kind: "text" | "sticker";
@@ -341,7 +376,28 @@ function DropStudio({
   }, [timelineOn]);
 
   useEffect(() => {
-    if (!timelineOn || studioLayout === "phone") return;
+    if (timelineShift == null || timelineDragging) return;
+    const shell = timelineShellRef.current;
+    if (!shell) return;
+    let cleared = false;
+    const clear = () => {
+      if (cleared) return;
+      cleared = true;
+      setTimelineShift(null);
+    };
+    const onEnd = (event: TransitionEvent) => {
+      if (event.propertyName === "transform") clear();
+    };
+    shell.addEventListener("transitionend", onEnd);
+    const timer = window.setTimeout(clear, 320);
+    return () => {
+      shell.removeEventListener("transitionend", onEnd);
+      window.clearTimeout(timer);
+    };
+  }, [timelineShift, timelineDragging]);
+
+  useEffect(() => {
+    if (!timelineOn) return;
     const onKey = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
       if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) return;
@@ -353,6 +409,12 @@ function DropStudio({
         v5.split();
       } else if (event.key === "Delete" || event.key === "Backspace") {
         v5.remove();
+      } else if (event.key === "ArrowLeft") {
+        event.preventDefault();
+        v5.step(-1);
+      } else if (event.key === "ArrowRight") {
+        event.preventDefault();
+        v5.step(1);
       }
     };
     window.addEventListener("keydown", onKey);
@@ -381,6 +443,17 @@ function DropStudio({
       }
     }
   }, [timelineOn, v5.audioPreviewTimeSeconds, v5.audioPreviewUrl, v5.audioSpeed, v5.audioVolume, v5.scrubbing]);
+
+  function focusStudioTool(next: "art" | "text" | "stickers") {
+    selectTool(next);
+    setDeckToken((token) => token + 1);
+  }
+
+  function selectTool(next: Tool) {
+    setTool(next);
+    if (next !== "art") return;
+    previewRef.current?.querySelectorAll("video").forEach((video) => video.pause());
+  }
 
   function update(next: DropCustomization) {
     onChange(compactDropCustomizations(next) ?? {});
@@ -598,6 +671,12 @@ function DropStudio({
             <div key={motion} className={styles[`motion_${motion}`] ?? styles.motion_glow} aria-hidden />
           ))
         : null}
+      {enableArtTools ? (
+        <div
+          ref={layerHostRef}
+          className={styles.artLayerHost}
+        />
+      ) : null}
       <DropStudioOverlay
         customizations={
           operatingTable && normalized.artOverlayUrl
@@ -616,7 +695,7 @@ function DropStudio({
 
   const hintEl = (
     <div className={styles.hint}>
-      Drag labels and emojis. Use the layer list to remove anything on mobile.
+      Drag labels and emojis. Double-click one to remove it.
     </div>
   );
 
@@ -662,18 +741,6 @@ function DropStudio({
                 Add Text
               </button>
             </div>
-            {(normalized.textLabels?.length ?? 0) > 0 ? (
-              <div className={styles.layerList} aria-label="Text labels on this drop">
-                {normalized.textLabels?.map((label) => (
-                  <div className={styles.layerRow} key={label.id}>
-                    <span>{label.text}</span>
-                    <button type="button" onClick={() => removeItem("text", label.id)}>
-                      Remove
-                    </button>
-                  </div>
-                ))}
-              </div>
-            ) : null}
           </div>
         ) : null}
 
@@ -702,18 +769,6 @@ function DropStudio({
                 </div>
               ))}
             </div>
-            {(normalized.stickers?.length ?? 0) > 0 ? (
-              <div className={styles.layerList} aria-label="Stickers on this drop">
-                {normalized.stickers?.map((sticker) => (
-                  <div className={styles.layerRow} key={sticker.id}>
-                    <span>{sticker.value ?? sticker.label}</span>
-                    <button type="button" onClick={() => removeItem("sticker", sticker.id)}>
-                      Remove
-                    </button>
-                  </div>
-                ))}
-              </div>
-            ) : null}
           </div>
         ) : null}
 
@@ -846,23 +901,32 @@ function DropStudio({
 
   const drawerEl = <div className={drawerClassName}>{drawerPanelsEl}</div>;
 
+  const artSurfaceStyle = {
+    ...mediaRotationStyle,
+    ...(timelineOn && v5.previewClipPath ? { clipPath: v5.previewClipPath } : null),
+  };
   const inlineArtTools =
     operatingTable && enableArtTools ? (
       <>
         <DropStudioArtPalette
           hostRef={previewRef}
+          layerHostRef={layerHostRef}
+          active={tool === "art"}
           initialOverlayUrl={timelineOn ? undefined : normalized.artOverlayUrl}
           restoreKey={timelineOn && v5.artRestoreNonce ? String(v5.artRestoreNonce) : ""}
           restoreUrl={timelineOn ? v5.editingArtUrl : undefined}
           clearToken={timelineOn ? v5.clearArtToken : 0}
           live={!timelineOn || v5.editingArtLive}
           placement={timelineOn && v5.editingArtLive ? v5.editingArtPlacement : undefined}
+          surfaceStyle={artSurfaceStyle}
+          rotationDeg={normalizeDropMediaRotation(normalized.effects?.rotation ?? 0)}
           onOverlayChange={(artOverlayUrl) => {
             if (timelineOn && artOverlayUrl) v5.rememberArt(artOverlayUrl);
+            else if (timelineOn && v5.editingArtId) v5.rememberArt(EMPTY_ART_PNG);
             update({ ...normalized, artOverlayUrl });
           }}
         />
-        {artTools}
+        {tool === "art" ? artTools : null}
       </>
     ) : enableArtTools ? (
       artTools
@@ -871,8 +935,9 @@ function DropStudio({
   const deckPanelEl = (
     <DropStudioPaletteDeck
       tool={tool}
-      onToolChange={setTool}
-      drawer={drawerPanelsEl}
+      tools={studioObjectTools(Boolean(enableArtTools))}
+      onToolChange={selectTool}
+      drawer={tool === "art" ? null : drawerPanelsEl}
       artTools={inlineArtTools}
     />
   );
@@ -890,37 +955,138 @@ function DropStudio({
         }}
         monitorAspect={timelineOn ? DROP_STUDIO_V5_ASPECTS[v5.session.aspect].css : undefined}
         monitorRatio={timelineOn ? monitorAspectRatio(v5.session.aspect) : undefined}
+        openDeckToken={deckToken}
       />
     );
     if (!timelineOn) return workbench;
     return (
-      <div className={styles.v5Workbench} data-layout={studioLayout} data-studio-v5="1">
+      <div
+        ref={workbenchHostRef}
+        className={styles.v5Workbench}
+        data-layout={studioLayout}
+        data-studio-v5="1"
+        style={
+          studioLayout === "phone"
+            ? undefined
+            : ({ "--v5-timeline": `${Math.round(timelineFraction * 1000) / 10}%` } as React.CSSProperties)
+        }
+      >
         <div className={styles.v5MonitorSlot}>{workbench}</div>
-        {studioLayout === "phone" && !timelineOpen ? (
-          <button
-            type="button"
-            className={styles.timelineToggle}
-            data-placed="rest"
-            onClick={() => setTimelineOpen(true)}
-          >
-            Timeline
-          </button>
+        {studioLayout === "phone" && !timelineOpen && !timelineDragging ? (
+          <div className={styles.phoneTransport}>
+            {formatStudioClock(v5.session.playheadMs)} / {formatStudioClock(sessionDurationMs(v5.session))}
+          </div>
         ) : null}
         <div
+          ref={timelineShellRef}
           className={styles.timelineShell}
           data-open={studioLayout === "phone" && !timelineOpen ? "0" : "1"}
-          aria-hidden={studioLayout === "phone" && !timelineOpen ? true : undefined}
+          data-dragging={timelineDragging ? "1" : undefined}
+          style={
+            timelineShift == null
+              ? undefined
+              : { transform: `translateY(${timelineShift}px)` }
+          }
         >
-        {studioLayout === "phone" && timelineOpen ? (
+        {studioLayout === "phone" ? (
           <button
             type="button"
-            className={styles.timelineToggle}
-            data-placed="sheet"
-            onClick={() => setTimelineOpen(false)}
+            className={styles.timelinePull}
+            aria-expanded={timelineOpen}
+            aria-controls="drop-studio-timeline"
+            aria-label={timelineOpen ? "Pull the timeline down" : "Pull the timeline up"}
+            onPointerDown={(event) => {
+              const shell = timelineShellRef.current;
+              if (!shell) return;
+              const handle = event.currentTarget.getBoundingClientRect().height;
+              const height = shell.getBoundingClientRect().height;
+              const max = Math.max(0, height - handle);
+              const startShift = timelineOpen && timelineShift == null ? 0 : timelineShift ?? max;
+              event.currentTarget.setPointerCapture(event.pointerId);
+              timelineDragRef.current = {
+                startY: event.clientY,
+                startShift,
+                max,
+                shift: startShift,
+                moved: false,
+              };
+              setTimelineDragging(true);
+              setTimelineShift(startShift);
+            }}
+            onPointerMove={(event) => {
+              const drag = timelineDragRef.current;
+              if (!drag || !event.currentTarget.hasPointerCapture(event.pointerId)) return;
+              const delta = event.clientY - drag.startY;
+              if (Math.abs(delta) > 8) drag.moved = true;
+              const next = Math.min(drag.max, Math.max(0, drag.startShift + delta));
+              drag.shift = next;
+              setTimelineShift(next);
+            }}
+            onPointerUp={(event) => {
+              if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+                event.currentTarget.releasePointerCapture(event.pointerId);
+              }
+              const drag = timelineDragRef.current;
+              timelineDragRef.current = null;
+              setTimelineDragging(false);
+              if (!drag) return;
+              if (!drag.moved) {
+                setTimelineShift(null);
+                return;
+              }
+              suppressTimelineClickRef.current = true;
+              const open = drag.shift < drag.max * 0.55;
+              setTimelineOpen(open);
+              setTimelineShift(open ? 0 : drag.max);
+            }}
+            onPointerCancel={() => {
+              const drag = timelineDragRef.current;
+              timelineDragRef.current = null;
+              setTimelineDragging(false);
+              if (!drag) return;
+              setTimelineShift(null);
+            }}
+            onClick={() => {
+              if (suppressTimelineClickRef.current) {
+                suppressTimelineClickRef.current = false;
+                return;
+              }
+              setTimelineOpen((open) => !open);
+              setTimelineShift(null);
+            }}
           >
-            Hide timeline
+            <span className={styles.timelinePullGrip} aria-hidden />
+            <span className={styles.timelinePullLabel}>Timeline</span>
           </button>
-        ) : null}
+        ) : (
+          <button
+            type="button"
+            className={styles.timelineResize}
+            aria-label="Resize timeline"
+            onPointerDown={(event) => {
+              event.currentTarget.setPointerCapture(event.pointerId);
+              timelineResizeRef.current = { y: event.clientY, fraction: timelineFraction };
+            }}
+            onPointerMove={(event) => {
+              const drag = timelineResizeRef.current;
+              const host = workbenchHostRef.current;
+              if (!drag || !host || !event.currentTarget.hasPointerCapture(event.pointerId)) return;
+              const height = host.getBoundingClientRect().height || 1;
+              setTimelineFraction(clampTimelineFraction(drag.fraction + (drag.y - event.clientY) / height));
+            }}
+            onPointerUp={() => {
+              timelineResizeRef.current = null;
+            }}
+            onPointerCancel={() => {
+              timelineResizeRef.current = null;
+            }}
+          />
+        )}
+        <div
+          id="drop-studio-timeline"
+          className={styles.timelineBody}
+          aria-hidden={studioLayout === "phone" && !timelineOpen ? true : undefined}
+        >
         <DropStudioV5Timeline
           session={v5.session}
           selectedClipId={v5.selectedClipId}
@@ -929,7 +1095,12 @@ function DropStudio({
           extraClipCount={v5.extraClipCount}
           onSelectClip={v5.selectClip}
           onScrub={v5.scrub}
-          onImportAudio={(file) => void v5.importAudio(file)}
+          onImportAudio={(file) => {
+            void v5.importAudio(file);
+          }}
+          onImportVideo={(files) => {
+            void v5.importVideos(files);
+          }}
           onSplit={v5.split}
           onReorder={v5.reorder}
           onDelete={v5.remove}
@@ -954,7 +1125,17 @@ function DropStudio({
           onVolume={v5.setVolume}
           onRecordVoice={() => void v5.recordVoice()}
           voiceState={v5.voiceState}
+          layout={studioLayout}
+          onReorderTo={v5.reorderTo}
+          onMoveBy={v5.moveBy}
+          onMuteTrack={v5.muteTrack}
+          onFocusStudioTool={focusStudioTool}
+          onStep={v5.step}
+          onAddDrop={onAddDrop}
+          addDropLabel={addDropLabel}
+          addDropBusy={addDropBusy}
         />
+        </div>
         </div>
         <audio
           ref={audioRef}

@@ -56,46 +56,72 @@ export default function DropStudioOverlay({
       ) : null}
 
       {value.textLabels?.map((label) => (
-        <button
-          key={label.id}
-          type="button"
-          className={`${styles.item} ${styles.textLabel} ${editable ? styles.editable : ""}`}
-          style={{ left: `${label.x}%`, top: `${label.y}%` }}
-          onPointerDown={editable ? (event) => onMove?.("text", label.id, event) : undefined}
-          onDoubleClick={editable ? () => onRemove?.("text", label.id) : undefined}
-          tabIndex={editable ? 0 : -1}
-          aria-label={editable ? `Move ${label.text}. Double click to remove.` : label.text}
-        >
-          {label.text}
-        </button>
+        <div key={label.id} className={styles.itemWrap} style={{ left: `${label.x}%`, top: `${label.y}%` }}>
+          <button
+            type="button"
+            className={`${styles.item} ${styles.textLabel} ${editable ? styles.editable : ""}`}
+            onPointerDown={editable ? (event) => onMove?.("text", label.id, event) : undefined}
+            onDoubleClick={editable ? () => onRemove?.("text", label.id) : undefined}
+            tabIndex={editable ? 0 : -1}
+            aria-label={editable ? `Move ${label.text}. Double click to remove.` : label.text}
+          >
+            {label.text}
+          </button>
+          {editable ? (
+            <button
+              type="button"
+              className={styles.removeItem}
+              aria-label={`Remove ${label.text}`}
+              onPointerDown={(event) => event.stopPropagation()}
+              onClick={() => onRemove?.("text", label.id)}
+            >
+              ×
+            </button>
+          ) : null}
+        </div>
       ))}
 
       {value.stickers?.map((sticker) => (
-        <button
+        <div
           key={sticker.id}
-          type="button"
-          className={`${styles.item} ${styles.sticker} ${editable ? styles.editable : ""}`}
+          className={styles.itemWrap}
           style={{ left: `${sticker.x}%`, top: `${sticker.y}%` }}
-          onPointerDown={editable ? (event) => onMove?.("sticker", sticker.id, event) : undefined}
-          onDoubleClick={editable ? () => onRemove?.("sticker", sticker.id) : undefined}
-          tabIndex={editable ? 0 : -1}
-          aria-label={
-            editable
-              ? `Move ${sticker.value ?? sticker.label}. Double click to remove.`
-              : sticker.value ?? sticker.label
-          }
         >
-          {sticker.src ? (
-            <img
-              src={sticker.src}
-              alt={sticker.label ?? ""}
-              className={styles.stickerImage}
-              draggable={false}
-            />
-          ) : (
-            sticker.value ?? sticker.label
-          )}
-        </button>
+          <button
+            type="button"
+            className={`${styles.item} ${styles.sticker} ${editable ? styles.editable : ""}`}
+            onPointerDown={editable ? (event) => onMove?.("sticker", sticker.id, event) : undefined}
+            onDoubleClick={editable ? () => onRemove?.("sticker", sticker.id) : undefined}
+            tabIndex={editable ? 0 : -1}
+            aria-label={
+              editable
+                ? `Move ${sticker.value ?? sticker.label}. Double click to remove.`
+                : sticker.value ?? sticker.label
+            }
+          >
+            {sticker.src ? (
+              <img
+                src={sticker.src}
+                alt={sticker.label ?? ""}
+                className={styles.stickerImage}
+                draggable={false}
+              />
+            ) : (
+              sticker.value ?? sticker.label
+            )}
+          </button>
+          {editable ? (
+            <button
+              type="button"
+              className={styles.removeItem}
+              aria-label={`Remove ${sticker.value ?? sticker.label}`}
+              onPointerDown={(event) => event.stopPropagation()}
+              onClick={() => onRemove?.("sticker", sticker.id)}
+            >
+              ×
+            </button>
+          ) : null}
+        </div>
       ))}
 
       {value.actionButton ? (

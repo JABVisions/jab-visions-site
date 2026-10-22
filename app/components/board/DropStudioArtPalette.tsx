@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useRef, useState, type RefObject } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import ArtPaletteTools, { type ArtBrushMode } from "./ArtPaletteTools";
 import ArtLayerStrip from "./ArtLayerStrip";
 import { useArtLayerCanvases } from "./useArtLayerCanvases";
 import { ART_BLEND_STRENGTH, grabArtSmudge, stampArtSmudge } from "@/lib/board/artSmudge";
+import { imageHasInk, pointerToArtSurface, strokeAlphaForMode, strokeCompositeForMode } from "@/lib/board/artBrush";
 import styles from "./DropStudio.module.css";
 
 function hslToHex(h: number, s: number, l: number) {
@@ -21,15 +22,21 @@ function hslToHex(h: number, s: number, l: number) {
 
 export default function DropStudioArtPalette({
   hostRef,
+  layerHostRef,
   initialOverlayUrl,
   onOverlayChange,
   restoreKey = "",
   restoreUrl,
   clearToken = 0,
   live = true,
+  active = false,
   placement,
+  surfaceStyle,
+  rotationDeg = 0,
 }: {
   hostRef: RefObject<HTMLDivElement | null>;
+  /** Yellow layer tiles sit on the portrait monitor, not inside text or stickers. */
+  layerHostRef?: RefObject<HTMLDivElement | null>;
   initialOverlayUrl?: string;
   onOverlayChange: (url?: string) => void;
   /** Changes when the user selects a different art clip to keep editing. */
@@ -38,7 +45,11 @@ export default function DropStudioArtPalette({
   clearToken?: number;
   /** False while the playhead is outside the overlay being edited. */
   live?: boolean;
+  /** True while the Art tool is selected. Drawing stays mounted either way. */
+  active?: boolean;
   placement?: { x: number; y: number; w: number; h: number };
+  surfaceStyle?: CSSProperties;
+  rotationDeg?: number;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const underRef = useRef<HTMLCanvasElement>(null);
@@ -56,6 +67,7 @@ export default function DropStudioArtPalette({
   const dprRef = useRef(1);
   const initialPaintedRef = useRef(false);
   const [portalReady, setPortalReady] = useState(false);
+  const [layerRoot, setLayerRoot] = useState<HTMLElement | null>(null);
   const [color, setColor] = useState("#FF4FD8");
   const [size, setSize] = useState(8);
   const [light, setLight] = useState(65);
@@ -64,7 +76,7 @@ export default function DropStudioArtPalette({
   const [brushMode, setBrushMode] = useState<ArtBrushMode>("paint");
   const [opacity, setOpacity] = useState(1);
   const artLayers = useArtLayerCanvases(canvasRef, contextRef);
-  const [drawArmed, setDrawArmed] = useState(false);
+  const drawArmed = active;
   const restoreUrlRef = useRef(restoreUrl);
   restoreUrlRef.current = restoreUrl;
 
@@ -86,7 +98,14 @@ export default function DropStudioArtPalette({
     if (underCtx && overCtx) artLayers.paintLayerChrome(underCtx, overCtx);
   }
 
-  useEffect(() => setPortalReady(true), []);
+  useEffect(() => {
+    setPortalReady(true);
+    const monitor = hostRef.current
+      ?.closest("[data-drop-chip-host]")
+      ?.querySelector("[data-art-layer-anchor]");
+    const next = monitor instanceof HTMLElement ? monitor : layerHostRef?.current ?? null;
+    setLayerRoot(next);
+  }, [hostRef, layerHostRef]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -177,18 +196,34 @@ export default function DropStudioArtPalette({
     if (!canvas || !context || !initialOverlayUrl || initialPaintedRef.current) return;
     const image = new Image();
     image.onload = () => {
+      if (initialPaintedRef.current) return;
+      initialPaintedRef.current = true;
       context.save();
       context.setTransform(1, 0, 0, 1, 0, 0);
+      context.globalCompositeOperation = "destination-over";
       context.drawImage(image, 0, 0, canvas.width, canvas.height);
       context.restore();
-      initialPaintedRef.current = true;
     };
     image.src = initialOverlayUrl;
   }, [initialOverlayUrl, portalReady]);
 
+  function pointFrom(clientX: number, clientY: number, canvas: HTMLCanvasElement) {
+    const rect = canvas.getBoundingClientRect();
+    return pointerToArtSurface({
+      clientX,
+      clientY,
+      centerX: rect.left + rect.width / 2,
+      centerY: rect.top + rect.height / 2,
+      layoutWidth: canvas.clientWidth,
+      layoutHeight: canvas.clientHeight,
+      boxWidth: rect.width,
+      boxHeight: rect.height,
+      rotationDeg,
+    });
+  }
+
   function point(event: React.PointerEvent<HTMLCanvasElement>) {
-    const rect = event.currentTarget.getBoundingClientRect();
-    return { x: event.clientX - rect.left, y: event.clientY - rect.top };
+    return pointFrom(event.clientX, event.clientY, event.currentTarget);
   }
 
   function snapshot() {
@@ -201,8 +236,8 @@ export default function DropStudioArtPalette({
   }
 
   function configureBrush(context: CanvasRenderingContext2D) {
-    context.globalCompositeOperation = brushMode === "erase" ? "destination-out" : "source-over";
-    context.globalAlpha = brushMode === "erase" ? 1 : opacity;
+    context.globalCompositeOperation = strokeCompositeForMode(brushMode);
+    context.globalAlpha = strokeAlphaForMode(brushMode, opacity);
     context.strokeStyle = color;
     context.fillStyle = color;
     context.lineWidth = size;
@@ -260,10 +295,11 @@ export default function DropStudioArtPalette({
   }
 
   function startDrawing(event: React.PointerEvent<HTMLCanvasElement>) {
-    if (!drawArmed) return;
+    if (!active || !drawArmed || !live) return;
     const context = contextRef.current;
     if (!context) return;
     event.preventDefault();
+    event.stopPropagation();
     event.currentTarget.setPointerCapture(event.pointerId);
     snapshot();
     drawingRef.current = true;
@@ -286,45 +322,57 @@ export default function DropStudioArtPalette({
 
   function moveDrawing(event: React.PointerEvent<HTMLCanvasElement>) {
     const context = contextRef.current;
-    if (!context || !drawingRef.current) return;
+    const canvas = canvasRef.current;
+    if (!context || !canvas || !drawingRef.current) return;
     event.preventDefault();
-    const next = point(event);
-    const previous = lastPointRef.current ?? next;
-    if (brushMode === "blend") {
-      const buffer = smudgeBufRef.current;
-      if (!buffer) return;
-      const rawPressure = event.pressure;
-      const pressure = rawPressure > 0 ? rawPressure : 0.5;
-      const strength = Math.max(0.55, Math.min(0.99, ART_BLEND_STRENGTH + (pressure - 0.5) * 0.5));
-      stampArtSmudge({
-        ctx: context,
-        buffer,
-        x0: previous.x,
-        y0: previous.y,
-        x1: next.x,
-        y1: next.y,
-        strength,
-        dpr: dprRef.current,
-        diameter: blendDiamRef.current,
-        grab: (cxDev, cyDev) => grabSmudge(cxDev, cyDev, blendDiamRef.current),
-      });
+    const native = event.nativeEvent;
+    const samples =
+      typeof native.getCoalescedEvents === "function" && native.getCoalescedEvents().length
+        ? native.getCoalescedEvents()
+        : [native];
+    for (const sample of samples) {
+      const next = pointFrom(sample.clientX, sample.clientY, canvas);
+      const previous = lastPointRef.current ?? next;
+      if (brushMode === "blend") {
+        const buffer = smudgeBufRef.current;
+        if (!buffer) return;
+        const rawPressure = sample.pressure;
+        const pressure = rawPressure > 0 ? rawPressure : 0.5;
+        const strength = Math.max(0.55, Math.min(0.99, ART_BLEND_STRENGTH + (pressure - 0.5) * 0.5));
+        stampArtSmudge({
+          ctx: context,
+          buffer,
+          x0: previous.x,
+          y0: previous.y,
+          x1: next.x,
+          y1: next.y,
+          strength,
+          dpr: dprRef.current,
+          diameter: blendDiamRef.current,
+          grab: (cxDev, cyDev) => grabSmudge(cxDev, cyDev, blendDiamRef.current),
+        });
+      } else {
+        context.quadraticCurveTo(previous.x, previous.y, (previous.x + next.x) / 2, (previous.y + next.y) / 2);
+        context.stroke();
+      }
       lastPointRef.current = next;
-      return;
     }
-    context.quadraticCurveTo(previous.x, previous.y, (previous.x + next.x) / 2, (previous.y + next.y) / 2);
-    context.stroke();
-    lastPointRef.current = next;
   }
 
   function applyArt() {
     const canvas = canvasRef.current;
-    if (!canvas) return;
+    if (!canvas || canvas.width < 1) return;
     const out = document.createElement("canvas");
     out.width = canvas.width;
     out.height = canvas.height;
     const ctx = out.getContext("2d");
     if (!ctx) return;
     artLayers.compositeOnto(ctx, out.width, out.height);
+    const pixels = ctx.getImageData(0, 0, out.width, out.height).data;
+    if (!imageHasInk(pixels)) {
+      onOverlayChange(undefined);
+      return;
+    }
     onOverlayChange(out.toDataURL("image/png"));
   }
 
@@ -355,7 +403,8 @@ export default function DropStudioArtPalette({
     const context = contextRef.current;
     if (!canvas || !context) return;
     snapshot();
-    context.clearRect(0, 0, canvas.width, canvas.height);
+    artLayers.clearAll();
+    refreshArtChrome();
     onOverlayChange(undefined);
   }
 
@@ -376,9 +425,11 @@ export default function DropStudioArtPalette({
 
   const canvas = (
     <div
-      className={`${styles.artCanvasStack} ${drawArmed && live ? styles.artCanvasStackArmed : ""}`}
-      style={
-        placement
+      className={`${styles.artCanvasStack} ${drawArmed && live && active ? styles.artCanvasStackArmed : ""}`}
+      data-art-surface={active ? "armed" : "idle"}
+      style={{
+        ...surfaceStyle,
+        ...(placement
           ? {
               top: `${placement.y * 100}%`,
               left: `${placement.x * 100}%`,
@@ -387,8 +438,8 @@ export default function DropStudioArtPalette({
               right: "auto",
               bottom: "auto",
             }
-          : undefined
-      }
+          : null),
+      }}
       hidden={!live}
     >
       <canvas ref={underRef} className={styles.artCanvasChrome} aria-hidden />
@@ -396,7 +447,7 @@ export default function DropStudioArtPalette({
         ref={canvasRef}
         className={styles.artCanvasDraw}
         aria-label="Draw on this Drop"
-        aria-hidden={!drawArmed || artLayers.layers.some((layer) => layer.id === artLayers.activeLayerId && layer.hidden)}
+        aria-hidden={!active || !drawArmed || artLayers.layers.some((layer) => layer.id === artLayers.activeLayerId && layer.hidden)}
         style={
           artLayers.layers.some((layer) => layer.id === artLayers.activeLayerId && layer.hidden)
             ? { visibility: "hidden" }
@@ -412,42 +463,45 @@ export default function DropStudioArtPalette({
     </div>
   );
 
+  const layerStrip = (
+    <ArtLayerStrip
+      layers={artLayers.layers}
+      activeId={artLayers.activeLayerId}
+      onSelect={artLayers.selectLayer}
+      onAdd={() => {
+        artLayers.addLayer();
+        applyArt();
+      }}
+      onDelete={(id) => {
+        artLayers.removeLayer(id);
+        applyArt();
+      }}
+      onHide={(id) => {
+        artLayers.hideLayer(id);
+        applyArt();
+      }}
+      onDrop={(action) => {
+        if (action.type === "merge") artLayers.mergeLayers(action.draggedId, action.targetId);
+        else artLayers.reorderLayer(action.draggedId, action.index);
+        applyArt();
+      }}
+    />
+  );
+
+  const layerDock =
+    portalReady && layerRoot
+      ? createPortal(<div className={styles.artLayerDock}>{layerStrip}</div>, layerRoot)
+      : null;
+
   return (
     <>
       {portalReady && hostRef.current ? createPortal(canvas, hostRef.current) : null}
+      {layerDock}
+      {active ? (
       <div className={styles.inlineArtPalette}>
-        <ArtLayerStrip
-          layers={artLayers.layers}
-          activeId={artLayers.activeLayerId}
-          onSelect={artLayers.selectLayer}
-          onAdd={() => {
-            artLayers.addLayer();
-            applyArt();
-          }}
-          onDelete={(id) => {
-            artLayers.removeLayer(id);
-            applyArt();
-          }}
-          onHide={(id) => {
-            artLayers.hideLayer(id);
-            applyArt();
-          }}
-          onDrop={(action) => {
-            if (action.type === "merge") artLayers.mergeLayers(action.draggedId, action.targetId);
-            else artLayers.reorderLayer(action.draggedId, action.index);
-            applyArt();
-          }}
-        />
+        {layerRoot ? null : layerStrip}
         <div className={styles.inlineArtHeadingRow}>
           <div className={styles.inlineArtHeading}>Art Palette</div>
-          <button
-            type="button"
-            className={styles.artDrawArm}
-            aria-pressed={drawArmed}
-            onClick={() => setDrawArmed((armed) => !armed)}
-          >
-            {drawArmed ? "Drawing on" : "Draw"}
-          </button>
         </div>
         <ArtPaletteTools
           wheelRef={wheelRef}
@@ -465,14 +519,11 @@ export default function DropStudioArtPalette({
           onWheelPointerMove={(x, y) => wheelDraggingRef.current && pickFromWheel(x, y)}
           onWheelDragStart={() => { wheelDraggingRef.current = true; }}
           onWheelDragEnd={() => { wheelDraggingRef.current = false; }}
-          onColorPick={(next) => { setBrushMode("paint"); setColor(next); setDrawArmed(true); }}
+          onColorPick={(next) => { setBrushMode("paint"); setColor(next); }}
           onLightChange={(next) => { setLight(next); setColor(hslToHex(wheelHue, wheelSat, next)); }}
           onSizeChange={setSize}
           onOpacityChange={setOpacity}
-          onBrushModeChange={(next) => {
-            setBrushMode(next);
-            setDrawArmed(true);
-          }}
+          onBrushModeChange={setBrushMode}
           onPaperToggle={() => {}}
           onUndo={() => restore(undoRef.current, redoRef.current)}
           onRedo={() => restore(redoRef.current, undoRef.current)}
@@ -480,6 +531,7 @@ export default function DropStudioArtPalette({
           onSave={applyArt}
         />
       </div>
+      ) : null}
     </>
   );
 }

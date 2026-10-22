@@ -456,6 +456,17 @@ export function splitClipAtPlayhead(session: DropStudioV5Session, clipId?: strin
   return replaceTrack(session, { ...target.track, clips });
 }
 
+function placeClip(session: DropStudioV5Session, clipId: string, index: number): DropStudioV5Session {
+  const found = findClip(session, clipId);
+  if (!found) return session;
+  const clips = found.track.clips.filter((clip) => clip.id !== clipId);
+  const clamped = Math.max(0, Math.min(clips.length, index));
+  clips.splice(clamped, 0, found.clip);
+  const keepTime = found.track.kind === "art" || found.track.kind === "effect";
+  const nextTrack = keepTime ? { ...found.track, clips } : packTrackClips({ ...found.track, clips });
+  return replaceTrack(session, nextTrack);
+}
+
 export function reorderClip(
   session: DropStudioV5Session,
   clipId: string,
@@ -463,14 +474,34 @@ export function reorderClip(
 ): DropStudioV5Session {
   const found = findClip(session, clipId);
   if (!found) return session;
-  const nextIndex = found.index + direction;
-  if (nextIndex < 0 || nextIndex >= found.track.clips.length) return session;
-  const clips = [...found.track.clips];
-  const [moved] = clips.splice(found.index, 1);
-  clips.splice(nextIndex, 0, moved);
-  const keepTime = found.track.kind === "art" || found.track.kind === "effect";
-  const nextTrack = keepTime ? { ...found.track, clips } : packTrackClips({ ...found.track, clips });
-  return replaceTrack(session, nextTrack);
+  return placeClip(session, clipId, found.index + direction);
+}
+
+export function reorderClipToIndex(
+  session: DropStudioV5Session,
+  clipId: string,
+  index: number
+): DropStudioV5Session {
+  return placeClip(session, clipId, index);
+}
+
+/** Slide an art, audio, or effect clip in time. Video stays packed and is reordered instead. */
+export function moveTimedClip(
+  session: DropStudioV5Session,
+  clipId: string,
+  deltaMs: number
+): DropStudioV5Session {
+  const found = findClip(session, clipId);
+  if (!found || found.track.kind === "video") return session;
+  const start = Math.max(0, found.clip.offsetMs + deltaMs);
+  if (found.track.kind === "art") {
+    const length = Math.max(200, clipPlayableMs(found.clip));
+    return setArtClipBounds(session, clipId, start, start + length);
+  }
+  const clips = found.track.clips.map((clip) =>
+    clip.id === clipId ? { ...clip, offsetMs: start } : clip
+  );
+  return replaceTrack(session, { ...found.track, clips });
 }
 
 export function deleteClip(session: DropStudioV5Session, clipId: string): DropStudioV5Session {
