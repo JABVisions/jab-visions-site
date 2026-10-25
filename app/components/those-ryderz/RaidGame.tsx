@@ -142,6 +142,7 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
       next.maxAura,
       next.burnout || next.tideOut,
       next.resonance,
+      next.powerClock,
     );
     vignette.current?.setHealth(next.hp, next.maxHp);
     comboHud.current?.setCombo(next.combo);

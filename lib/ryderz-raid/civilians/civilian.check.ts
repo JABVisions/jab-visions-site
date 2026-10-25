@@ -1,4 +1,5 @@
 import { CIVILIAN_PROFILES, civilianOrder, profileForKind } from './profiles';
+import { tacticsForRound } from '../rounds/director';
 
 function assert(cond: unknown, message: string) {
   if (!cond) throw new Error(message);
@@ -33,6 +34,7 @@ const thrower = civilianOrder(CIVILIAN_PROFILES.thrower, {
   hpRatio: 1,
   holding: false,
   throwableDist: 3,
+  throwableOnRoute: true,
   slot: 0,
   recovering: false,
   rng: 0.2,
@@ -59,7 +61,7 @@ const coward = civilianOrder(CIVILIAN_PROFILES.cowardly, {
   recovering: false,
   rng: 0.5,
 });
-assert(coward.state === 'flee' && coward.move < 0, 'a hurt coward runs');
+assert(coward.state === 'attack' && coward.attack != null, 'a hurt coward keeps fighting');
 
 const waiting = civilianOrder(CIVILIAN_PROFILES.aggressive, {
   dist: 2.2,
@@ -99,5 +101,21 @@ for (const profile of Object.values(CIVILIAN_PROFILES)) {
   }
 }
 assert(profileForKind('walker', 0) === 'brawler', 'walkers can come out as brawlers');
+
+for (const profile of Object.values(CIVILIAN_PROFILES)) {
+  for (const dist of [8, 60, 140]) {
+    const pursuit = civilianOrder(profile, {
+      dist, hpRatio: 0.05, holding: false, throwableDist: 1,
+      throwableOnRoute: false, slot: 3, recovering: false, rng: 0,
+      tier: 2, tactics: tacticsForRound(45),
+    });
+    assert(pursuit.state === 'approach' && pursuit.move > 0, `${profile.id} pursues from ${dist}m even when hurt`);
+  }
+}
+const farProp = civilianOrder(CIVILIAN_PROFILES.thrower, {
+  dist: 100, hpRatio: 1, holding: false, throwableDist: 1,
+  throwableOnRoute: true, slot: 0, recovering: false, rng: 0,
+});
+assert(farProp.state === 'approach', 'a distant player takes priority over prop hunting');
 
 console.log('civilian checks ok');

@@ -140,6 +140,7 @@ export interface HudState {
   aura: number;
   maxAura: number;
   burnout: boolean;
+  powerClock: Pick<PowerClock, 'live' | 'dry'>;
   moves: Array<{
     id: AbilityId;
     key: string;
@@ -356,7 +357,6 @@ interface Host {
   /** This raid teammate is already committed to a host and may chase a little farther. */
   pressing?: boolean;
   /** Frames skipped while this host is far enough to simulate cheaply. */
-  lodTick?: number;
 }
 
 /** A defeated host still flying from the blow that killed it. */
@@ -4445,30 +4445,8 @@ export class RaidEngine {
         continue;
       }
 
-      const farX = host.pos.x - this.pos.x;
-      const farZ = host.pos.z - this.pos.z;
-      if (
-        !host.ally &&
-        !host.duelist &&
-        host.stagger <= 0 &&
-        host.airY <= 0 &&
-        farX * farX + farZ * farZ > 46 * 46
-      ) {
-        host.lodTick = (host.lodTick ?? 0) + 1;
-        if (host.lodTick % 3 !== 0) {
-          const dist = Math.hypot(farX, farZ) || 1;
-          host.pos.x -= (farX / dist) * host.speed * 0.45 * dt;
-          host.pos.z -= (farZ / dist) * host.speed * 0.45 * dt;
-          host.pos.x = clamp(host.pos.x, -this.limit(), this.limit());
-          host.pos.z = clamp(host.pos.z, -this.limit(), this.limit());
-          resolveCircle(host.pos, host.radius, this.world.obstacles);
-          group.position.copy(host.pos);
-          group.position.y = this.bodyHeight(host.pos.x, host.pos.z, Boolean(host.swims));
-          group.rotation.y = Math.atan2(-farX, -farZ);
-          this.animateHost(host, dt, 0.45, time);
-          continue;
-        }
-      }
+      // Distant hosts use the same target selection and obstacle routing as
+      // nearby hosts. A straight-line LOD shortcut stranded them behind cover.
 
       // Physical hit reactions: staggered hosts stop and reel, launched hosts
       // arc through the air and tumble, and both still drift with the shove.
@@ -4599,6 +4577,7 @@ export class RaidEngine {
       hpRatio: host.maxHp > 0 ? host.hp / host.maxHp : 1,
       holding: Boolean(host.heldItem),
       throwableDist: propDist,
+      throwableOnRoute: Boolean(prop && (prop.pos.x - host.pos.x) * pdx + (prop.pos.z - host.pos.z) * pdz > 0 && (propDist ?? Infinity) < playerDist),
       slot,
       recovering: striker.busy,
       rng: Math.random(),
@@ -4714,13 +4693,6 @@ export class RaidEngine {
       const ring = (0.85 + Math.min(slot, 4) * 0.16) * Math.min(1, (playerDist - profile.attackRange - 0.6) / 2);
       gx += Math.cos(ang) * ring;
       gz += Math.sin(ang) * ring;
-      if (this.tactics.protectElite && (host.tier ?? 1) <= 2) {
-        const elite = this.hosts.find((other) => other !== host && !other.ally && other.hp > 0 && (other.tier ?? 1) >= 4);
-        if (elite) {
-          gx = (elite.pos.x * 2 + chase.x) / 3;
-          gz = (elite.pos.z * 2 + chase.z) / 3;
-        }
-      }
     }
     const hop = this.world.routeTo?.(host.pos.x, host.pos.z, gx, gz);
     if (hop && Math.hypot(hop.x - host.pos.x, hop.z - host.pos.z) > 1.15) {
@@ -5464,6 +5436,7 @@ export class RaidEngine {
       aura: this.aura,
       maxAura: this.maxAura,
       burnout: this.burnout,
+      powerClock: { live: this.powerOut.live, dry: this.powerOut.dry },
       moves: this.moves.map((move, i) => ({
         id: move.id,
         key: MOVE_KEYS[i],

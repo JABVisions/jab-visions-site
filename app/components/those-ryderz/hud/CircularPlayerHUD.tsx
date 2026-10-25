@@ -3,10 +3,11 @@
 import { forwardRef, useImperativeHandle, useRef } from 'react';
 import { RYDERZ, type RyderId } from '@/lib/ryderz-raid/config';
 import { RYDER_THEME } from '../menu/theme';
+import type { PowerClock } from '@/lib/ryderz-raid/power-outage';
 import styles from './CircularPlayerHUD.module.css';
 
 export type CircularHudApi = {
-  setVitals: (hp: number, maxHp: number, aura: number, maxAura: number, burnout: boolean, resonance?: number) => void;
+  setVitals: (hp: number, maxHp: number, aura: number, maxAura: number, burnout: boolean, resonance?: number, powerClock?: Pick<PowerClock, 'live' | 'dry'>) => void;
 };
 
 function clampPct(value: number, max: number) {
@@ -36,9 +37,12 @@ const CircularPlayerHUD = forwardRef<
   const hpLabel = useRef<HTMLElement>(null);
   const auraLabel = useRef<HTMLElement>(null);
   const resLabel = useRef<HTMLElement>(null);
+  const powerTimer = useRef<HTMLSpanElement>(null);
+  const powerLabel = useRef<HTMLElement>(null);
+  const powerSeconds = useRef<HTMLElement>(null);
 
   useImperativeHandle(ref, () => ({
-    setVitals(hp, maxHp, aura, maxAura, isBurnout, resonance = 0) {
+    setVitals(hp, maxHp, aura, maxAura, isBurnout, resonance = 0, powerClock) {
       const healthPct = clampPct(hp, maxHp);
       const auraPct = clampPct(aura, maxAura);
       paintArc(hpArc.current, healthPct);
@@ -52,6 +56,18 @@ const CircularPlayerHUD = forwardRef<
         resLabel.current.textContent = resonance >= 100 ? 'RES READY' : `RES ${Math.floor(resonance)}`;
       }
       const node = root.current;
+      if (powerTimer.current) {
+        powerTimer.current.hidden = !powerClock;
+        if (powerClock) {
+          const down = powerClock.dry > 0;
+          const seconds = Math.max(0, Math.ceil(down ? powerClock.dry : powerClock.live));
+          if (powerLabel.current) powerLabel.current.textContent = down ? 'Back in' : 'Power';
+          if (powerSeconds.current) powerSeconds.current.textContent = `${seconds}s`;
+          powerTimer.current.dataset.down = String(down);
+          powerTimer.current.dataset.urgent = String(!down && seconds <= 5);
+          powerTimer.current.setAttribute('aria-label', down ? `Powers return in ${seconds} seconds` : `Power time remaining: ${seconds} seconds`);
+        }
+      }
       if (!node) return;
       node.classList.toggle(styles.low, healthPct <= 28 && healthPct > 0);
       node.classList.toggle(styles.critical, healthPct > 0 && healthPct <= 12);
@@ -85,6 +101,10 @@ const CircularPlayerHUD = forwardRef<
         <img src={spec.icon} alt="" />
       </div>
       <div className={styles.bolt} aria-hidden="true" />
+      <span ref={powerTimer} className={styles.powerTimer} hidden>
+        <small ref={powerLabel}>Power</small>
+        <strong ref={powerSeconds}>—</strong>
+      </span>
       <div className={styles.caption}>
         {badge ? <small>{badge}</small> : null}
         <b className={spec.name.length > 16 ? styles.longName : undefined}>{spec.name}</b>

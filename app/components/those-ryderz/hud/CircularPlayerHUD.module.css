@@ -134,6 +134,53 @@
   letter-spacing: 0.12em;
 }
 
+/* Countdown sits directly over the right-hand aura arc. */
+.powerTimer {
+  position: absolute;
+  top: 48px;
+  left: 98px;
+  z-index: 1;
+  min-width: 48px;
+  padding: 5px 7px;
+  border: 1px solid var(--ryder);
+  border-radius: 8px;
+  background: rgba(4, 8, 10, 0.94);
+  color: var(--ryder);
+  text-align: center;
+  font-family: ui-monospace, monospace;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.4);
+}
+
+.powerTimer[hidden] {
+  display: none;
+}
+
+.powerTimer small {
+  display: block;
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.powerTimer strong {
+  display: block;
+  color: #fff;
+  font-size: 14px;
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+}
+
+.powerTimer[data-down='true'] {
+  border-color: #8a9199;
+  color: #b5bec8;
+}
+
+.powerTimer[data-urgent='true'] {
+  border-color: #ffca70;
+  color: #ffca70;
+}
+
 .low .portrait {
   animation: hpPulse 900ms ease-in-out infinite;
 }
@@ -198,6 +245,12 @@
 }
 
 @media (max-width: 900px) {
+  .powerTimer {
+    top: 37px;
+    left: 78px;
+    min-width: 44px;
+    padding: 4px 6px;
+  }
   .hud {
     width: 108px;
     height: 128px;
