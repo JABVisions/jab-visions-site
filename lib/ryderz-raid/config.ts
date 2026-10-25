@@ -342,8 +342,9 @@ export const RYDERZ: Record<RyderId, RyderSpec> = {
     weapon: 'Spiked knuckle bolts',
     portrait: '/assets/haylee-brown-headshot.jpeg',
     icon: '/assets/those-ryderz/icons/leo.webp',
-    glb: '/assets/those-ryderz/models/leo-montana.glb?v=3',
-    skelKeep: ['hips', 'spine', 'chest', 'upperChest', 'neck', 'head', 'shoulderL', 'shoulderR', 'upperArmL', 'upperArmR', 'lowerArmL', 'lowerArmR', 'handL', 'handR'],
+    // The replacement export has a hips-only skin and deforms badly when its
+    // folded leg is unfolded. Use the stable animated mesh for now.
+    glb: '/assets/those-ryderz/models/leo-montana.glb?v=4-stable',
     strikes: ['punch', 'punchR', 'spinKick', 'smash'],
     maxHp: 95,
     speed: 8.6,

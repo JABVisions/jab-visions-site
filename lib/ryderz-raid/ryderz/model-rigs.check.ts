@@ -2,9 +2,9 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import { rigLeoBody, LEO_REST_KEEP } from './leo-rig';
-import { rebaseNeutralSkin } from '../neutral-skin';
 import { ProceduralSkeleton, extractStrikes, poseSkeleton, type BoneKey } from '../skeletal';
+import { animateGltfFighter, buildRyder, preloadRyderGltf } from '../characters';
+import { RYDERZ } from '../config';
 
 // Read the actual production meshes without requiring DOM image decoders.
 async function loadBody(name: string) {
@@ -61,7 +61,6 @@ function verifyMotion(root: THREE.Object3D, keep: BoneKey[]) {
 
 async function main() {
   const leo = await loadBody('leo-montana');
-  assert.ok(rigLeoBody(leo.scene));
   const body = skin(leo.scene);
   const joints = new Map(body.skeleton.bones.map((bone) => [bone.name, bone]));
   for (const side of ['Left', 'Right']) {
@@ -69,11 +68,26 @@ async function main() {
     const ankle = joints.get(`${side}_Foot`)!;
     assert.ok(knee.getWorldPosition(new THREE.Vector3()).distanceTo(ankle.getWorldPosition(new THREE.Vector3())) > 0.2, 'each calf has a real knee-to-ankle span');
   }
-  assert.ok(rebaseNeutralSkin(leo.scene, [...LEO_REST_KEEP]));
-  verifyMotion(leo.scene, [...LEO_REST_KEEP]);
+  verifyMotion(leo.scene, []);
+  // Exercise the real load -> clone -> fit -> animate path, including a
+  // translated game actor. Isolated skeleton checks miss wrapper regressions.
+  const loadAsync = GLTFLoader.prototype.loadAsync;
+  GLTFLoader.prototype.loadAsync = async () => loadBody('leo-montana');
+  try { await preloadRyderGltf(RYDERZ.leo); }
+  finally { GLTFLoader.prototype.loadAsync = loadAsync; }
+  const fighter = buildRyder(RYDERZ.leo);
+  assert.ok(fighter.rig?.skeleton);
+  fighter.humanoid.group.position.set(70, 2, -30);
+  for (let frame = 0; frame < 60; frame += 1) {
+    animateGltfFighter(fighter, 1 / 60, frame * 0.2, 1, frame > 30, 0, false);
+    fighter.humanoid.group.updateMatrixWorld(true);
+    const actor = new THREE.Box3().setFromObject(fighter.humanoid.group);
+    assert.ok(actor.getSize(new THREE.Vector3()).y < 2.7, 'the in-game wrapper must not stretch Leo');
+    assert.ok(Math.abs(actor.getCenter(new THREE.Vector3()).x - 70) < 1, 'skin follows the actor in world space');
+  }
   const zoe = await loadBody('zoe-folie');
   assert.equal(extractStrikes(zoe.scene, zoe.animations).length, 0, 'the afraid emote is not a melee animation');
-  const keep: BoneKey[] = [...LEO_REST_KEEP, 'upperLegL', 'upperLegR', 'lowerLegL', 'lowerLegR', 'footL', 'footR'];
+  const keep: BoneKey[] = RYDERZ.zoe.skelKeep ?? [];
   verifyMotion(zoe.scene, keep);
   console.log('Leo and Zoe production rig checks passed (standing, walk and sprint)');
 }
