@@ -46,6 +46,10 @@ export interface CameraConfig {
   lookSensitivity: number;
   /** Right-stick look multiplier. Independent of the mouse. */
   stickSensitivity: number;
+  /** Radial right-stick dead zone. Input is remapped smoothly beyond this point. */
+  stickDeadzone: number;
+  /** Camera shake strength; 0 disables positional shake, roll, kick and FOV impulses. */
+  shakeIntensity: number;
   /** 1 flips vertical look. 0 keeps the default. */
   lookInvertY: number;
   /** Radius used by the pseudo-spherecast when resolving collisions. */
@@ -70,6 +74,8 @@ export const CAMERA_DEFAULTS: CameraConfig = {
   sprintPullback: 0.35,
   lookSensitivity: 1,
   stickSensitivity: 1,
+  stickDeadzone: 0.18,
+  shakeIntensity: 0.65,
   lookInvertY: 0,
   collisionRadius: 0.32,
   minDistance: 0.85,
@@ -293,6 +299,8 @@ export class ThirdPersonCamera {
     const keep = {
       lookSensitivity: this.config.lookSensitivity,
       stickSensitivity: this.config.stickSensitivity,
+      stickDeadzone: this.config.stickDeadzone,
+      shakeIntensity: this.config.shakeIntensity,
       lookInvertY: this.config.lookInvertY,
       collisionRadius: this.config.collisionRadius,
       minDistance: this.config.minDistance,
@@ -467,7 +475,8 @@ export class ThirdPersonCamera {
     _pivot.copy(_origin).addScaledVector(_right, f.shoulderX).addScaledVector(_up, f.shoulderY);
 
     // --- Collision: pseudo-spherecast from the chest to the desired position --
-    const wantDist = Math.max(cfg.minDistance, f.distance + this.kick);
+    const shake = THREE.MathUtils.clamp(cfg.shakeIntensity, 0, 1);
+    const wantDist = Math.max(cfg.minDistance, f.distance + this.kick * shake);
     _desired.copy(_pivot).addScaledVector(_back, wantDist).addScaledVector(_up, f.height);
     _dir.copy(_desired).sub(_origin);
     const fullLen = _dir.length();
@@ -506,7 +515,9 @@ export class ThirdPersonCamera {
     allowed = Math.max(0.12, Math.min(fullLen, allowed));
 
     // Snap in fast when blocked, ease back out when clear.
-    const tc = instant ? 0 : allowed < this.collisionDist ? 0.06 : 0.28;
+    // Obstructions are a hard safety bound. Easing inward leaves the lens
+    // inside a wall for several frames; only the return to open space eases.
+    const tc = instant || allowed < this.collisionDist ? 0 : 0.28;
     this.collisionDist = damp(this.collisionDist, allowed, tc, dt);
     this.collisionDist = Math.min(this.collisionDist, fullLen);
 
@@ -519,7 +530,7 @@ export class ThirdPersonCamera {
     // --- Shake (restrained) -------------------------------------------------
     if (this.trauma > 0) {
       this.trauma = Math.max(0, this.trauma - dt * 1.9);
-      const t = this.trauma * this.trauma;
+      const t = this.trauma * this.trauma * shake;
       const n1 = Math.sin(this.time * 41.3) * 0.5 + Math.sin(this.time * 23.7) * 0.5;
       const n2 = Math.sin(this.time * 37.1 + 1.7) * 0.5 + Math.sin(this.time * 19.3 + 0.4) * 0.5;
       this.camera.position.addScaledVector(camRight, n1 * t * 0.09).addScaledVector(camUp, n2 * t * 0.07);
@@ -529,13 +540,13 @@ export class ThirdPersonCamera {
     _look.copy(_pivot).addScaledVector(_back, -1.0);
     this.camera.lookAt(_look);
     if (this.trauma > 0) {
-      const t = this.trauma * this.trauma;
+      const t = this.trauma * this.trauma * shake;
       this.camera.rotateZ(Math.sin(this.time * 29) * t * 0.012);
     }
 
     // --- FOV (horizontal -> vertical) ---------------------------------------
     if (this.fovPunch > 0) this.fovPunch = Math.max(0, this.fovPunch - dt * 22);
-    this.applyFov(f.fov + this.fovPunch);
+    this.applyFov(f.fov + this.fovPunch * shake);
   }
 
   private applyFov(horizontalDeg: number) {

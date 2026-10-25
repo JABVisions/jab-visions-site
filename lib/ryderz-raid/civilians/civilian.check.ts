@@ -87,6 +87,17 @@ for (const slot of [0, 1, 2, 3, 4]) {
 }
 
 assert(profileForKind('thrower', 0.1) === 'thrower', 'thrower spawns stay throwers');
+
+for (const profile of Object.values(CIVILIAN_PROFILES)) {
+  for (const dist of [1, 1.5, 2]) {
+    const order = civilianOrder(profile, {
+      dist, hpRatio: 1, holding: false, throwableDist: null,
+      slot: 4, recovering: false, rng: 0.5,
+    });
+    assert(order.state === 'attack' && order.attack != null, `${profile.id} commits at ${dist}m`);
+    assert(order.strafe === 0, 'a striking host holds their attack line');
+  }
+}
 assert(profileForKind('walker', 0) === 'brawler', 'walkers can come out as brawlers');
 
 console.log('civilian checks ok');

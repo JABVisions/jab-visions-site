@@ -81,4 +81,33 @@ const slowLook = new THREE.Vector3();
 slowCam.getWorldDirection(slowLook);
 assert.ok(slowLook.x < 0.45, 'a yaw change eases in instead of snapping the rig');
 
+// A newly encountered obstruction must constrain the lens on this frame.
+const wall = new THREE.Mesh(new THREE.BoxGeometry(20, 20, 0.2), new THREE.MeshBasicMaterial());
+wall.position.set(0, 2, -2);
+wall.updateMatrixWorld(true);
+rig.snap(home, 0, 0.2);
+rig.setOccluders([wall]);
+rig.update(1 / 60, home, 0, 0.2, 'EXPLORATION');
+assert.ok(camera.position.z > -1.9, 'camera retracts immediately instead of clipping through a wall');
+rig.setOccluders([]);
+rig.update(1 / 60, home, 0, 0.2, 'EXPLORATION');
+assert.ok(camera.position.z > -2.5, 'camera returns gently when the wall clears');
+
+const quietCam = new THREE.PerspectiveCamera(60, 16 / 9, 0.1, 200);
+const quiet = new ThirdPersonCamera(quietCam, []);
+quiet.setConfig({ shakeIntensity: 0, stickDeadzone: 0.24 });
+quiet.setMode('combat');
+assert.equal(quiet.config.shakeIntensity, 0, 'rig changes preserve shake preference');
+assert.equal(quiet.config.stickDeadzone, 0.24, 'rig changes preserve dead zone preference');
+quiet.snap(home, 0, 0.2);
+const steady = quietCam.position.clone();
+const steadyFov = quietCam.fov;
+quiet.addShake(1);
+quiet.addKick(0.5);
+quiet.addFovPunch(12);
+quiet.update(1 / 60, home, 0, 0.2, 'EXPLORATION');
+assert.ok(quietCam.position.distanceTo(steady) < 1e-6, 'shake off keeps the camera steady on impact');
+assert.equal(quietCam.fov, steadyFov, 'shake off suppresses impact FOV pulses');
+wall.geometry.dispose();
+(wall.material as THREE.Material).dispose();
 console.log('camera follow ok');

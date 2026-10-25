@@ -39,6 +39,7 @@ import {
   type HitReaction,
 } from './combat';
 import { AfterimagePool } from './speed-vfx';
+import { analogStick } from './fighter/analog';
 import { createRyderKit, type KitContext, type KitTarget, type MeleeStep, type RyderKit } from './ryderz';
 import type { MeleeStyle, PoseOverride } from './skeletal';
 import {
@@ -902,7 +903,10 @@ export class RaidEngine {
     this.keys.add(lower);
     const dt = 1 / 60;
     const steps = Math.max(1, Math.round(Math.max(0, seconds) / dt));
-    for (let i = 0; i < steps; i += 1) this.update(dt, this.simTime);
+    for (let i = 0; i < steps; i += 1) {
+      this.update(dt, this.simTime);
+      this.updateCamera(dt);
+    }
     this.keys.delete(lower);
     return this.debugControlProbe();
   }
@@ -1167,6 +1171,7 @@ export class RaidEngine {
 
   setPaused(value: boolean) {
     this.paused = value;
+    this.clearInput();
     if (value) this.mapOpen = false;
     if (value && document.pointerLockElement === this.canvas) {
       document.exitPointerLock();
@@ -1531,6 +1536,8 @@ export class RaidEngine {
     window.addEventListener('mouseup', this.onMouseUp);
     document.addEventListener('pointerlockchange', this.onPointerLock);
     window.addEventListener('resize', this.onResize);
+    window.addEventListener('blur', this.onBlur);
+    document.addEventListener('visibilitychange', this.onVisibilityChange);
     this.canvas.addEventListener('contextmenu', this.prevent);
   }
 
@@ -1542,6 +1549,8 @@ export class RaidEngine {
     window.removeEventListener('mouseup', this.onMouseUp);
     document.removeEventListener('pointerlockchange', this.onPointerLock);
     window.removeEventListener('resize', this.onResize);
+    window.removeEventListener('blur', this.onBlur);
+    document.removeEventListener('visibilitychange', this.onVisibilityChange);
     this.canvas.removeEventListener('contextmenu', this.prevent);
   }
 
@@ -1549,8 +1558,36 @@ export class RaidEngine {
 
   private onResize = () => this.resize();
 
+  /** No held movement, queued strike, or pointer delta survives a focus change. */
+  private clearInput() {
+    this.keys.clear();
+    this.moveAxis = { x: 0, z: 0 };
+    this.lookAcc = { x: 0, y: 0 };
+    this.padMove = false;
+    this.fireHeld = this.fireEdge = this.suppressFire = false;
+    this.punchQueued = this.kickQueued = this.meleeQueued = false;
+    this.dodgeQueued = this.jumpQueued = this.interactQueued = false;
+    this.p2PunchQueued = this.p2KickQueued = this.p2MeleeQueued = false;
+    this.p2DodgeQueued = this.p2JumpQueued = false;
+    this.queuedMoves = [false, false, false];
+    this.releaseArmed = [true, true, true];
+    // Snapshot held buttons so resuming does not synthesize a new press.
+    this.padPrev = this.connectedPad()?.buttons.map((button) => button.pressed) ?? [];
+  }
+
+  private onBlur = () => {
+    this.clearInput();
+    if (!this.tuneMode && (this.phase === 'playing' || this.phase === 'intermission')) this.setPaused(true);
+  };
+
+  private onVisibilityChange = () => {
+    if (document.hidden) this.onBlur();
+  };
+
   private onPointerLock = () => {
     this.pointerLocked = document.pointerLockElement === this.canvas;
+    this.lookAcc = { x: 0, y: 0 };
+    if (!this.pointerLocked) this.clearInput();
   };
 
   private onKeyDown = (e: KeyboardEvent) => {
@@ -1560,6 +1597,7 @@ export class RaidEngine {
     if (tag === 'TEXTAREA' || tag === 'SELECT') return;
     if (tag === 'INPUT' && inputType !== 'range' && inputType !== 'checkbox') return;
     const code = e.code;
+    if (target?.isContentEditable) return;
     if (
       code === 'ArrowUp' ||
       code === 'ArrowDown' ||
@@ -1574,6 +1612,8 @@ export class RaidEngine {
       e.preventDefault();
     }
     this.keys.add(e.key.toLowerCase());
+    // Movement reads held keys; discrete actions and menu toggles use edges.
+    if (e.repeat) return;
     if (e.code === 'Backquote' && process.env.NODE_ENV !== 'production') {
       this.combatDebug = !this.combatDebug;
       this.ensureCombatDebug();
@@ -1631,7 +1671,7 @@ export class RaidEngine {
   }
 
   private onMouseMove = (e: MouseEvent) => {
-    if (!this.pointerLocked) return;
+    if (!this.pointerLocked || this.paused || this.mapOpen) return;
     this.lookAcc.x += e.movementX;
     this.lookAcc.y += e.movementY;
   };
@@ -1660,26 +1700,29 @@ export class RaidEngine {
   private loop() {
     if (this.disposed) return;
     this.raf = requestAnimationFrame(this.loop);
-    let dt = Math.min(0.05, this.clock.getDelta());
+    const realDt = Math.min(0.05, this.clock.getDelta());
+    let dt = realDt;
     const time = this.clock.elapsedTime;
     // Hit-stop: the world crawls for a few frames so a heavy impact has weight.
     if (this.hitStopT > 0) {
       this.hitStopT = Math.max(0, this.hitStopT - dt);
       dt *= 0.06;
     }
-    if (!this.paused && this.player && this.phase !== 'dead' && this.phase !== 'victory') this.update(dt, time);
-    else if (this.player) this.updateCamera(dt);
+    if (!this.paused && this.player && this.phase !== 'dead' && this.phase !== 'victory') this.update(dt, time, realDt);
+    // Impacts slow the fight, while look and camera follow remain responsive.
+    if (this.player) this.updateCamera(realDt);
     this.world.animate(time);
     this.particles.update(dt);
     this.renderer.render(this.scene, this.camera);
     this.emitHud();
   }
 
-  private update(dt: number, time: number) {
+  private update(dt: number, time: number, realDt = dt) {
     if (this.phase === 'report') {
       this.tickReport(dt);
       return;
     }
+    this.pollPad();
     const cam = this.rig.config;
     const sens = cam.lookSensitivity;
     const stickSens = cam.stickSensitivity;
@@ -1699,21 +1742,21 @@ export class RaidEngine {
       this.recenter = false;
       this.lockTarget = null;
     }
-    this.yaw -= this.lookAcc.x * 0.0031 * sens + stick.x * STICK_YAW_RATE * dt * stickSens;
-    this.yaw += keyboardYawDelta(keyLeft, keyRight, dt);
+    this.yaw -= this.lookAcc.x * 0.0031 * sens + stick.x * STICK_YAW_RATE * realDt * stickSens;
+    this.yaw += keyboardYawDelta(keyLeft, keyRight, realDt);
     this.pitch = clamp(
       this.pitch -
-        (this.lookAcc.y * 0.0024 * sens + stick.y * STICK_PITCH_RATE * dt * stickSens) * invert +
-        keyboardPitchDelta(keyUp, keyDown, dt, invert),
+        (this.lookAcc.y * 0.0024 * sens + stick.y * STICK_PITCH_RATE * realDt * stickSens) * invert +
+        keyboardPitchDelta(keyUp, keyDown, realDt, invert),
       cam.pitchMin,
       cam.pitchMax,
     );
     this.lookAcc.x = 0;
     this.lookAcc.y = 0;
-    this.stepLockOn(dt);
+    this.stepLockOn(realDt);
     if (this.recenter) {
       const home = 0.2;
-      this.pitch += (home - this.pitch) * (1 - Math.exp(-dt / 0.16));
+      this.pitch += (home - this.pitch) * (1 - Math.exp(-realDt / 0.16));
       if (Math.abs(this.pitch - home) < 0.012) this.recenter = false;
     }
     if (this.stormT > 0) {
@@ -1779,7 +1822,6 @@ export class RaidEngine {
         if (!locked && (!busy || this.moveT[i] > 0 || release)) this.tryMove(i);
       }
     }
-    this.pollPad();
     if (this.fireHeld && !this.fireEdge) {
       this.fireEdge = true;
       const near = this.nearestHost(this.pos);
@@ -1822,7 +1864,6 @@ export class RaidEngine {
     this.updateFallen(dt);
     this.updateBolts(dt);
     this.updateRound(dt);
-    this.updateCamera(dt);
     this.rings.update(dt);
     this.cracks.update(dt);
     this.afterimages.update(dt);
@@ -2284,7 +2325,7 @@ export class RaidEngine {
     if (this.dodgeT > 0) {
       _tmp.set(this.dodgeX, 0, this.dodgeZ);
       speed = 15;
-    } else if (_tmp.lengthSq() > 0) _tmp.normalize();
+    }
     this.pos.addScaledVector(_tmp, speed * dt);
     this.hitKnock.multiplyScalar(Math.max(0, 1 - dt * 5));
     this.pos.addScaledVector(this.hitKnock, dt);
@@ -2517,10 +2558,7 @@ export class RaidEngine {
     const pad = this.connectedPad();
     if (!pad) return { x: 0, y: 0 };
     if (pad.buttons[11]?.pressed) this.recenter = true;
-    const x = pad.axes[2] ?? 0;
-    const y = pad.axes[3] ?? 0;
-    if (Math.hypot(x, y) < 0.18) return { x: 0, y: 0 };
-    return { x, y };
+    return analogStick(pad.axes[2] ?? 0, pad.axes[3] ?? 0, this.rig.config.stickDeadzone, 1.5);
   }
 
   /** Stick and arrows move. WASD is the camera, so it never lands in this vector. Positive z is backward. */
@@ -2547,19 +2585,21 @@ export class RaidEngine {
 
   private pollPad() {
     const pad = this.connectedPad();
-    if (!pad) return;
+    if (!pad) {
+      if (this.padMove) this.setMoveAxis(0, 0);
+      this.padMove = false;
+      this.padPrev = [];
+      return;
+    }
     const commands = risingPadCommands(
       pad.buttons.map((button) => button.pressed),
       this.padPrev,
     );
     for (const command of commands) this.queueCommand(command, 1);
-    const lx = pad.axes[0] ?? 0;
-    const ly = pad.axes[1] ?? 0;
-    const mag = Math.hypot(lx, ly);
-    if (mag > 0.2) {
+    const move = analogStick(pad.axes[0] ?? 0, pad.axes[1] ?? 0, 0.2);
+    if (move.x || move.y) {
       this.padMove = true;
-      const scale = Math.min(1, (mag - 0.2) / 0.75);
-      this.setMoveAxis((lx / mag) * scale, (ly / mag) * scale);
+      this.setMoveAxis(move.x, move.y);
     } else if (this.padMove) {
       this.padMove = false;
       this.setMoveAxis(0, 0);
@@ -4650,8 +4690,12 @@ export class RaidEngine {
         host.follow = 'melee';
       }
     }
-    if (host.follow === 'melee' && !phased && !striker.busy && host.cooldown <= 0) {
-      striker.queue('melee');
+    if (host.follow && !striker.busy && host.cooldown <= 0) {
+      // A stun can interrupt the recovery window before chainInto consumes
+      // its follow-up. Resolve or discard it so it cannot block future attacks.
+      if (!phased && playerDist <= profile.attackRange && !this.hazardPush(host.pos.x, host.pos.z)) {
+        striker.queue(host.follow);
+      }
       host.follow = null;
       host.cooldown = 0.4 + Math.random() * 0.2;
     }
@@ -4662,10 +4706,12 @@ export class RaidEngine {
     if ((order.state === 'search' || order.state === 'pickup') && prop && (propDist ?? 99) < 14) {
       gx = prop.pos.x;
       gz = prop.pos.z;
-    } else if (!phased) {
+    } else if (!phased && playerDist > profile.attackRange + 0.6) {
       const spread = this.tactics.surround || this.tactics.flank;
       const ang = spread ? slot * 2.15 + (this.tactics.flank ? 0.7 : 0) : slot * 1.9;
-      const ring = 0.85 + Math.min(slot, 4) * 0.16;
+      // Formation offsets disappear before striking distance so hosts commit
+      // to the target instead of chasing a point around their feet.
+      const ring = (0.85 + Math.min(slot, 4) * 0.16) * Math.min(1, (playerDist - profile.attackRange - 0.6) / 2);
       gx += Math.cos(ang) * ring;
       gz += Math.sin(ang) * ring;
       if (this.tactics.protectElite && (host.tier ?? 1) <= 2) {
@@ -4717,8 +4763,8 @@ export class RaidEngine {
         host.nav,
         host.pos.x,
         host.pos.z,
-        (vx / mag) * speed,
-        (vz / mag) * speed,
+        (vx / mag) * speed * Math.min(1, mag),
+        (vz / mag) * speed * Math.min(1, mag),
         host.radius,
         (x, z, radius) => this.npcBlocked(x, z, radius),
         gx,

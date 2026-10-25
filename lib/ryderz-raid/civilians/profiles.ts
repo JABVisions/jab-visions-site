@@ -116,7 +116,7 @@ export interface CivilianSense {
   holding: boolean;
   /** Distance to the nearest free prop, or null when the street is empty. */
   throwableDist: number | null;
-  /** 0 and 1 may stand in and swing. Later arrivals hang back. */
+  /** Formation index used on approach. Every host in range may attack. */
   slot: number;
   recovering: boolean;
   /** 0–1, fresh each decision. */
@@ -194,11 +194,11 @@ export function civilianOrder(profile: CivilianProfile, sense: CivilianSense): C
   };
   if (sense.dist <= profile.attackRange) {
     // A cautious host steps back only when they are inside the player. Otherwise the swing starts now.
-    if (profile.retreat > 0.55 && sense.dist < profile.preferredDistance - 0.55) {
-      return { state: 'backOff', move: -0.45, strafe: flank, attack: null };
+    if (profile.retreat > 0.55 && sense.dist < 0.85) {
+      return { state: 'backOff', move: -0.45, strafe: 0, attack: null };
     }
     const closing = sense.dist > Math.min(profile.preferredDistance, profile.attackRange - 0.15) + 0.2;
-    return { state: 'attack', move: closing ? 0.55 : 0.05, strafe: flank, attack: swing() };
+    return { state: 'attack', move: closing ? 0.55 : 0, strafe: 0, attack: swing() };
   }
   return { state: 'approach', move: 1, strafe: flank * 0.5, attack: null };
 }
