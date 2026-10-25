@@ -342,7 +342,8 @@ export const RYDERZ: Record<RyderId, RyderSpec> = {
     weapon: 'Spiked knuckle bolts',
     portrait: '/assets/haylee-brown-headshot.jpeg',
     icon: '/assets/those-ryderz/icons/leo.webp',
-    glb: '/assets/those-ryderz/models/leo-montana.glb',
+    glb: '/assets/those-ryderz/models/leo-montana.glb?v=3',
+    skelKeep: ['hips', 'spine', 'chest', 'upperChest', 'neck', 'head', 'shoulderL', 'shoulderR', 'upperArmL', 'upperArmR', 'lowerArmL', 'lowerArmR', 'handL', 'handR'],
     strikes: ['punch', 'punchR', 'spinKick', 'smash'],
     maxHp: 95,
     speed: 8.6,
@@ -457,11 +458,11 @@ export const RYDERZ: Record<RyderId, RyderSpec> = {
     weapon: 'Blue energy projection',
     portrait: '/assets/aria-patterson-headshot.jpg',
     icon: '/assets/those-ryderz/icons/zoe.webp',
-    glb: '/assets/those-ryderz/models/zoe-folie.glb?v=2',
+    glb: '/assets/those-ryderz/models/zoe-folie.glb?v=3',
     strikes: ['slap', 'kick', 'blast'],
-    // Export bind is a pointing left fist and a hanging right arm. Unfolding
-    // those joints ~114° around a rib-placed elbow corkscrews the gloves.
-    skelKeep: ['shoulderL', 'shoulderR', 'upperArmL', 'upperArmR', 'lowerArmL', 'lowerArmR', 'handL', 'handR'],
+    // Preserve the new model's authored shape and joint rolls. Locomotion and
+    // combat still add their animated rotations on top of this bind pose.
+    skelKeep: ['hips', 'spine', 'chest', 'upperChest', 'neck', 'head', 'shoulderL', 'shoulderR', 'upperArmL', 'upperArmR', 'lowerArmL', 'lowerArmR', 'handL', 'handR', 'upperLegL', 'upperLegR', 'lowerLegL', 'lowerLegR', 'footL', 'footR'],
     maxHp: 105,
     speed: 7.2,
     fireRate: 3.4,

@@ -19,6 +19,8 @@ import { rigKevenBody } from './ryderz/keven-rig';
 import { rigLillyBody } from './ryderz/lilly-rig';
 import { createLillyFork, preloadLillyFork } from './ryderz/lilly-fork';
 import { rigRubiBody } from './ryderz/rubi-rig';
+import { rigLeoBody, LEO_REST_KEEP } from './ryderz/leo-rig';
+import { rebaseNeutralSkin } from './neutral-skin';
 import { HostGlitch } from './host-glitch';
 import { addOutline, buildHumanoid, glow, toon, type Humanoid } from './toon';
 import { PlasmaOrbits } from './plasma-orbs';
@@ -139,12 +141,17 @@ async function loadGltfTemplate(url: string, label: string, repair?: GlbRepair):
     skinned = rigLillyBody(gltf.scene);
     if (skinned) console.info('[raid] %s: fitted a skeleton and uncrossed her legs', label);
   }
+  const fittedLeo = label === 'leo' && rigLeoBody(gltf.scene);
+  if (fittedLeo) {
+    skinned = true;
+    rebaseNeutralSkin(gltf.scene, [...LEO_REST_KEEP]);
+  }
   if (skinned) {
     // A rig whose weights do not match its geometry would tear apart when
     // posed; freeze it in its export pose and animate it as a puppet instead.
     // A mesh welded entirely to one bone is the other failure: the skeleton is
     // real, but nothing outside that bone can move it. Paint a skin first.
-    const reskinned = reskinRigidSkeleton(gltf.scene);
+    const reskinned = fittedLeo || reskinRigidSkeleton(gltf.scene);
     if (reskinned) console.info('[raid] %s: rebuilt skin weights', label);
     const broken = assessSkinning(gltf.scene);
     if (broken.length && !reskinned) {

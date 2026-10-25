@@ -532,7 +532,7 @@ function smoothstep(t: number) {
  * blend only with the neighbouring joint. Straight-line weights glue a hand
  * that hangs against a thigh to that thigh, so the two limbs tear together.
  */
-function paintWeights(mesh: THREE.SkinnedMesh, bindWorld: THREE.Matrix4[]) {
+export function paintBodyWeights(mesh: THREE.SkinnedMesh, bindWorld: THREE.Matrix4[], preservePose = false) {
   const bones = mesh.skeleton.bones;
   const cloud = meshCloud(mesh);
   const { xyz, count } = cloud;
@@ -653,7 +653,28 @@ function paintWeights(mesh: THREE.SkinnedMesh, bindWorld: THREE.Matrix4[]) {
       } else if (d < second) second = d;
     }
     nearestBone[v] = bone;
-    if (best < height * 0.18 && second > best + height * 0.012) push(v, best, bone);
+    if (!preservePose && best < height * 0.18 && second > best + height * 0.012) push(v, best, bone);
+  }
+
+  if (preservePose) {
+    // Seed along each anatomical segment, then travel over the surface.
+    // Seeding every Euclidean-nearest vertex mislabels a folded calf as the
+    // thigh it touches and tears the two limbs together when straightened.
+    for (const segment of segments) {
+      for (const t of [0.25, 0.5, 0.75]) {
+        const x = segment.ax + (segment.bx - segment.ax) * t;
+        const y = segment.ay + (segment.by - segment.ay) * t;
+        const z = segment.az + (segment.bz - segment.az) * t;
+        let best = Infinity;
+        let seed = 0;
+        for (let v = 0; v < count; v += 1) {
+          const o = v * 3;
+          const d = Math.hypot(xyz[o] - x, xyz[o + 1] - y, xyz[o + 2] - z);
+          if (d < best) { best = d; seed = v; }
+        }
+        push(seed, best, segment.bone);
+      }
+    }
   }
 
   while (heap.length) {
@@ -755,8 +776,10 @@ function paintWeights(mesh: THREE.SkinnedMesh, bindWorld: THREE.Matrix4[]) {
       let bestD = Infinity;
       legSegs.forEach((segment) => {
         const boneSide = Math.sign(joints[segment.bone].getComponent(latAxis) - mid);
-        if (side !== 0 && boneSide !== 0 && boneSide !== side) return;
-        const d = segmentDistance(xyz[o], xyz[o + 1], xyz[o + 2], segment);
+        if (!preservePose && side !== 0 && boneSide !== 0 && boneSide !== side) return;
+        const name = bones[segment.bone].name;
+        const radius = /upperleg|thigh/i.test(name) ? 1.8 : /lowerleg|calf/i.test(name) ? 1 : 1.15;
+        const d = segmentDistance(xyz[o], xyz[o + 1], xyz[o + 2], segment) / (preservePose ? radius : 1);
         if (d < bestD) {
           bestD = d;
           best = segment.bone;
@@ -828,6 +851,34 @@ function paintWeights(mesh: THREE.SkinnedMesh, bindWorld: THREE.Matrix4[]) {
   mesh.geometry.setAttribute('skinIndex', new THREE.Uint16BufferAttribute(index, 4));
   mesh.geometry.setAttribute('skinWeight', new THREE.Float32BufferAttribute(weight, 4));
   mesh.normalizeSkinWeights();
+  if (preservePose) {
+    // Smooth the ownership seam on the connected surface. A hard change
+    // between a folded thigh and calf stretches a single triangle into a spike.
+    const nBones = bones.length;
+    let dense = new Float32Array(count * nBones);
+    for (let v = 0; v < count; v += 1) {
+      for (let k = 0; k < 4; k += 1) dense[v * nBones + index[v * 4 + k]] += weight[v * 4 + k];
+    }
+    for (let pass = 0; pass < 20; pass += 1) {
+      const next = new Float32Array(dense.length);
+      for (let v = 0; v < count; v += 1) {
+        const neighbors = adj[v];
+        for (let b = 0; b < nBones; b += 1) {
+          let sum = 0;
+          for (const other of neighbors) sum += dense[other * nBones + b];
+          next[v * nBones + b] = neighbors.length ? dense[v * nBones + b] * 0.5 + sum * 0.5 / neighbors.length : dense[v * nBones + b];
+        }
+      }
+      dense = next;
+    }
+    for (let v = 0; v < count; v += 1) {
+      const order = Array.from({ length: nBones }, (_, b) => b).sort((a, b) => dense[v * nBones + b] - dense[v * nBones + a]).slice(0, 4);
+      const sum = order.reduce((total, b) => total + dense[v * nBones + b], 0) || 1;
+      for (let k = 0; k < 4; k += 1) { index[v * 4 + k] = order[k]; weight[v * 4 + k] = dense[v * nBones + order[k]] / sum; }
+    }
+    mesh.geometry.setAttribute('skinIndex', new THREE.Uint16BufferAttribute(index, 4));
+    mesh.geometry.setAttribute('skinWeight', new THREE.Float32BufferAttribute(weight, 4));
+  }
 }
 
 /**
@@ -1019,7 +1070,7 @@ export function reskinRigidSkeleton(root: THREE.Object3D) {
     const bindWorld = placeBonesOnBind(mesh);
     if (!bindWorld) return;
     if (seatFloatingLimbs(mesh, bindWorld)) console.info('[raid] seated a floating rig onto the body');
-    paintWeights(mesh, bindWorld);
+    paintBodyWeights(mesh, bindWorld);
     let top: THREE.Object3D = mesh;
     while (top.parent) top = top.parent;
     top.updateMatrixWorld(true);
@@ -1031,7 +1082,7 @@ export function reskinRigidSkeleton(root: THREE.Object3D) {
     if (weldedBone(mesh) >= 0 || !anchoredToHips(mesh)) return;
     bakeRestPose(mesh);
     const bindWorld = mesh.skeleton.bones.map((bone) => bone.matrixWorld.clone());
-    paintWeights(mesh, bindWorld);
+    paintBodyWeights(mesh, bindWorld);
     let top: THREE.Object3D = mesh;
     while (top.parent) top = top.parent;
     top.updateMatrixWorld(true);
