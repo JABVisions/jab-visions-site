@@ -584,7 +584,7 @@ export default function DropStudioStage({
       mode === "art" ? "art-project" :
       mode === "descript" ? "document" :
       "image";
-    openDrafts(filter);
+    openDraftsAndSave(filter);
   };
   const rememberV5 = useCallback(
     (next: { session: DropStudioV5Session; mediaBag: DropStudioV5MediaBag }) => {
@@ -1427,6 +1427,11 @@ export default function DropStudioStage({
     },
     [flashSaveNote]
   );
+
+  const openDraftsAndSave = (filter: "all" | DropDraftKind | "document" | "art-project") => {
+    openDrafts(filter);
+    void saveToDrafts(true, true).catch(() => {});
+  };
 
   persistVoiceProjectRef.current = () => {
     const session = audioSessionRef.current;
@@ -3802,7 +3807,7 @@ export default function DropStudioStage({
                     >
                       ⬇ Save
                     </button>
-                    <button type="button" className="studioGhost" onClick={() => openDrafts("audio")}>
+                    <button type="button" className="studioGhost" onClick={() => openDraftsAndSave("audio")}>
                       🗂 Drafts
                     </button>
                     <button
@@ -4038,7 +4043,7 @@ export default function DropStudioStage({
                         >
                           ⬇ Save
                         </button>
-                        <button type="button" className="studioGhost" onClick={() => openDrafts("audio")}>
+                        <button type="button" className="studioGhost" onClick={() => openDraftsAndSave("audio")}>
                           🗂 Drafts
                         </button>
                         <button
