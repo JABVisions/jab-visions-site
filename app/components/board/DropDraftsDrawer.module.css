@@ -8,8 +8,10 @@
             backdrop-filter: blur(8px);
           }
           .draftsScope :global(.draftsDrawer) {
+            box-sizing: border-box;
             width: min(420px, 100vw);
             height: 100%;
+            min-height: 0;
             display: flex;
             flex-direction: column;
             padding: max(14px, env(safe-area-inset-top)) 16px max(14px, env(safe-area-inset-bottom));
@@ -84,9 +86,12 @@
             opacity: 0.8;
           }
           .draftsScope :global(.draftsList) {
-            flex: 1 1 auto;
+            flex: 1 1 0;
             min-height: 0;
             overflow-y: auto;
+            overscroll-behavior: contain;
+            -webkit-overflow-scrolling: touch;
+            scrollbar-gutter: stable;
             display: grid;
             gap: 12px;
             padding-right: 2px;
@@ -121,7 +126,7 @@
             display: grid;
             place-items: center;
           }
-          .draftsScope :global(.draftPreview) img, .draftsScope 
+          .draftsScope :global(.draftPreview) img,
           .draftsScope :global(.draftPreview) video {
             display: block;
             width: 100%;
@@ -131,6 +136,80 @@
           .draftsScope :global(.draftPreview) audio {
             width: 100%;
             padding: 14px;
+          }
+          .draftsScope :global(.voiceProjectPreview) {
+            display: grid;
+            gap: 10px;
+            padding: 12px;
+            background:
+              radial-gradient(circle at 14% 8%, rgba(105, 239, 226, 0.2), transparent 42%),
+              linear-gradient(135deg, #071a22, #0a0c19 78%);
+          }
+          .draftsScope :global(.voiceProjectArt) {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            min-height: 72px;
+            padding: 12px;
+            border: 1px solid rgba(126, 246, 230, 0.18);
+            border-radius: 14px;
+            background: linear-gradient(120deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.015));
+          }
+          .draftsScope :global(.voiceProjectGlyph) {
+            display: grid;
+            flex: 0 0 44px;
+            width: 44px;
+            height: 44px;
+            place-items: center;
+            border-radius: 12px;
+            background: rgba(126, 246, 230, 0.13);
+            font-size: 23px;
+          }
+          .draftsScope :global(.voiceProjectWave) {
+            display: flex;
+            flex: 1;
+            align-items: center;
+            justify-content: space-between;
+            height: 36px;
+            gap: 2px;
+            overflow: hidden;
+          }
+          .draftsScope :global(.voiceProjectWave) i {
+            flex: 1 1 2px;
+            min-width: 2px;
+            max-width: 5px;
+            border-radius: 999px;
+            background: linear-gradient(180deg, #8ffff0, #4bc6dc);
+            opacity: 0.85;
+          }
+          .draftsScope :global(.voiceProjectSummary) {
+            display: grid;
+            gap: 3px;
+            min-width: 0;
+          }
+          .draftsScope :global(.voiceProjectEyebrow) {
+            color: #7ff5e7;
+            font-size: 9px;
+            font-weight: 950;
+            letter-spacing: 0.14em;
+            text-transform: uppercase;
+          }
+          .draftsScope :global(.voiceProjectSummary) strong {
+            overflow: hidden;
+            color: #f2fffc;
+            font-size: 13px;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+          }
+          .draftsScope :global(.voiceProjectSummary) > span:last-child {
+            color: rgba(220, 255, 248, 0.58);
+            font-size: 10px;
+          }
+          .draftsScope :global(.voiceProjectPlayer) {
+            display: block;
+            width: 100%;
+            min-height: 36px;
+            color-scheme: dark;
           }
           .draftsScope :global(.draftMeta) {
             display: flex;

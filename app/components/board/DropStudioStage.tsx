@@ -1402,7 +1402,7 @@ export default function DropStudioStage({
         projectSaved = await saveVoiceStudioProject(draftIdRef.current, session);
       }
       if (projectSaved || (saved && !sessionHasClips(session))) {
-        ensureVoiceStudioDraftCard(draftIdRef.current);
+        ensureVoiceStudioDraftCard(draftIdRef.current, file?.name);
         rememberActiveVoiceStudioDraft(draftIdRef.current);
         lastSavedVoiceSignatureRef.current = voiceStudioEditSignature(session);
         setVoiceAutoSaveAt(Date.now());

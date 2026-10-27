@@ -73,6 +73,15 @@ export default function DropDraftsDrawer({
   const [artDraft, setArtDraft] = useState<ArtDraftMeta | null>(null);
   const [filter, setFilter] = useState<FilterKey>(initialFilter);
 
+  const uniqueDrafts = useMemo(() => {
+    const byId = new Map<string, DropDraft>();
+    for (const draft of drafts) {
+      const prior = byId.get(draft.id);
+      if (!prior || draft.createdAt >= prior.createdAt) byId.set(draft.id, draft);
+    }
+    return [...byId.values()].sort((a, b) => b.createdAt - a.createdAt);
+  }, [drafts]);
+
   useEffect(() => setMounted(true), []);
 
   useEffect(() => {
@@ -111,7 +120,7 @@ export default function DropDraftsDrawer({
 
   const counts = useMemo(() => {
     const base: Record<FilterKey, number> = {
-      all: drafts.length + documents.length,
+      all: uniqueDrafts.length + documents.length,
       image: 0,
       video: 0,
       audio: 0,
@@ -119,12 +128,12 @@ export default function DropDraftsDrawer({
       "art-project": artDraft ? 1 : 0,
     };
     base.all += artDraft ? 1 : 0;
-    for (const d of drafts) base[d.kind] += 1;
+    for (const d of uniqueDrafts) base[d.kind] += 1;
     return base;
-  }, [drafts, documents, artDraft]);
+  }, [uniqueDrafts, documents, artDraft]);
 
   const entries = useMemo(() => {
-    const mediaEntries = (filter === "document" || filter === "art-project" ? [] : filter === "all" ? drafts : drafts.filter((d) => d.kind === filter))
+    const mediaEntries = (filter === "document" || filter === "art-project" ? [] : filter === "all" ? uniqueDrafts : uniqueDrafts.filter((d) => d.kind === filter))
       .map((draft) => ({ type: "media" as const, updatedAt: draft.createdAt, draft }));
     const documentEntries = (filter === "all" || filter === "document" ? documents : [])
       .map((doc) => ({ type: "document" as const, updatedAt: doc.updatedAt, doc }));
@@ -132,7 +141,7 @@ export default function DropDraftsDrawer({
       ? [{ type: "art" as const, updatedAt: artDraft.updatedAt, artDraft }]
       : [];
     return [...mediaEntries, ...documentEntries, ...artEntries].sort((a, b) => b.updatedAt - a.updatedAt);
-  }, [artDraft, documents, drafts, filter]);
+  }, [artDraft, documents, uniqueDrafts, filter]);
 
   if (!mounted || !open) return null;
 
@@ -220,7 +229,27 @@ export default function DropDraftsDrawer({
               </article>
               }
               const draft = entry.draft;
-              return <article className="draftCard" key={draft.id}>
+              const isAudioDraft = draft.kind === "audio";
+              const hasAudioPreview = draft.kind === "audio" && draft.dataUrl.length > 160;
+              return <article className={`draftCard ${isAudioDraft ? "voiceProjectCard" : ""}`} key={draft.id}>
+                {isAudioDraft ? (
+                  <div className="voiceProjectPreview">
+                    <div className="voiceProjectArt" aria-hidden="true">
+                      <span className="voiceProjectGlyph">🎙️</span>
+                      <div className="voiceProjectWave">
+                        {Array.from({ length: 32 }, (_, index) => (
+                          <i key={index} style={{ height: `${18 + ((index * 17 + draft.id.length * 13) % 68)}%` }} />
+                        ))}
+                      </div>
+                    </div>
+                    <div className="voiceProjectSummary">
+                      <span className="voiceProjectEyebrow">Voice Studio project</span>
+                      <strong>{draft.fileName === "Voice Studio project" ? `Voice project ${draft.id.slice(-6)}` : draft.fileName}</strong>
+                      <span>{hasAudioPreview ? "Preview ready" : "Auto-saved project"} · Edited {formatWhen(draft.createdAt)}</span>
+                    </div>
+                    {hasAudioPreview ? <audio className="voiceProjectPlayer" src={draft.dataUrl} controls preload="metadata" aria-label={`Preview ${draft.fileName}`} /> : null}
+                  </div>
+                ) : (
                 <div className="draftPreview">
                   {draft.kind === "audio" ? (
                     <audio src={draft.dataUrl} controls preload="metadata" />
@@ -231,8 +260,9 @@ export default function DropDraftsDrawer({
                     <img src={draft.dataUrl} alt={draft.fileName} />
                   )}
                 </div>
+                )}
                 <div className="draftMeta">
-                  <span className="draftKind">{kindLabel(draft.kind)}</span>
+                  <span className="draftKind">{isAudioDraft ? "Voice Project" : kindLabel(draft.kind)}</span>
                   <span className="draftFileName">{draft.fileName || "Untitled capture"}</span>
                   {draft.count && draft.count > 1 ? (
                     <span className="draftCount" title="Times this draft was saved">
@@ -247,11 +277,11 @@ export default function DropDraftsDrawer({
                     className="draftBtn open"
                     onClick={() => onOpenDraft?.(draft)}
                   >
-                    Open
+                    {isAudioDraft ? "Resume project" : "Open"}
                   </button>
-                  <a className="draftBtn" href={draft.dataUrl} download={draft.fileName}>
-                    Save
-                  </a>
+                  {!isAudioDraft || hasAudioPreview ? (
+                    <a className="draftBtn" href={draft.dataUrl} download={draft.fileName}>Save</a>
+                  ) : null}
                   <button
                     type="button"
                     className="draftBtn danger"
@@ -264,6 +294,7 @@ export default function DropDraftsDrawer({
             })
           )}
         </div>
+
       </aside>
     </div>,
     document.body
