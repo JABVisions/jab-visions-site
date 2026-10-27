@@ -61,7 +61,7 @@ import {
 import type { BoardUploadProgress, BoardUploadProgressHandler } from "@/lib/board/uploadProgress";
 import { preparingUploadProgress, studioVisibleUploadProgress } from "@/lib/board/uploadProgress";
 import { guessUploadBytes, isBoardStorageLimitMessage } from "@/lib/board/boardMediaUpload";
-import { saveDropDraft, draftToFile, ensureVoiceStudioDraftCard, type DropDraft } from "@/lib/board/dropDrafts";
+import { saveDropDraft, draftToFile, ensureVoiceStudioDraftCard, type DropDraft, type DropDraftKind } from "@/lib/board/dropDrafts";
 import { readDropStudioV5Flag, type DropStudioV5MediaBag, type DropStudioV5Session } from "@/lib/board/dropStudioV5";
 import { exportDropStudioV5, exportNeedsFlatten } from "@/lib/board/dropStudioV5Export";
 import DropDraftsDrawer from "./DropDraftsDrawer";
@@ -567,11 +567,25 @@ export default function DropStudioStage({
   const [saveNote, setSaveNote] = useState("");
   const saveNoteTimerRef = useRef<number | null>(null);
   const [draftsOpen, setDraftsOpen] = useState(false);
+  const [draftsFilter, setDraftsFilter] = useState<"all" | DropDraftKind | "document" | "art-project">("all");
   const [studioV5, setStudioV5] = useState(true);
   const [studioDraftId, setStudioDraftId] = useState("");
   const v5HandleRef = useRef<{ session: DropStudioV5Session; mediaBag: DropStudioV5MediaBag } | null>(
     null
   );
+  const openDrafts = (filter: "all" | DropDraftKind | "document" | "art-project") => {
+    setDraftsFilter(filter);
+    setDraftsOpen(true);
+  };
+  const openDraftsForCurrentMode = () => {
+    const filter =
+      mode === "audio" ? "audio" :
+      mode === "video" ? "video" :
+      mode === "art" ? "art-project" :
+      mode === "descript" ? "document" :
+      "image";
+    openDrafts(filter);
+  };
   const rememberV5 = useCallback(
     (next: { session: DropStudioV5Session; mediaBag: DropStudioV5MediaBag }) => {
       v5HandleRef.current = next;
@@ -3124,7 +3138,7 @@ export default function DropStudioStage({
             <button
               type="button"
               className="studioGhost"
-              onClick={() => setDraftsOpen(true)}
+              onClick={openDraftsForCurrentMode}
               aria-label="Open drafts"
             >
               🗂 Drafts
@@ -3788,7 +3802,7 @@ export default function DropStudioStage({
                     >
                       ⬇ Save
                     </button>
-                    <button type="button" className="studioGhost" onClick={() => void saveToDrafts(false)}>
+                    <button type="button" className="studioGhost" onClick={() => openDrafts("audio")}>
                       🗂 Drafts
                     </button>
                     <button
@@ -4024,7 +4038,7 @@ export default function DropStudioStage({
                         >
                           ⬇ Save
                         </button>
-                        <button type="button" className="studioGhost" onClick={() => void saveToDrafts(false)}>
+                        <button type="button" className="studioGhost" onClick={() => openDrafts("audio")}>
                           🗂 Drafts
                         </button>
                         <button
@@ -4184,6 +4198,7 @@ export default function DropStudioStage({
 
       <DropDraftsDrawer
         open={draftsOpen}
+        initialFilter={draftsFilter}
         onClose={() => setDraftsOpen(false)}
         onOpenDraft={openDraft}
         onOpenDescriptDoc={(doc) => {

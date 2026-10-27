@@ -53,12 +53,14 @@ function kindLabel(kind: DropDraftKind) {
 
 export default function DropDraftsDrawer({
   open,
+  initialFilter = "all",
   onClose,
   onOpenDraft,
   onOpenDescriptDoc,
   onOpenArtDraft,
 }: {
   open: boolean;
+  initialFilter?: FilterKey;
   onClose: () => void;
   onOpenDraft?: (draft: DropDraft) => void;
   onOpenDescriptDoc?: (doc: DescriptDoc) => void;
@@ -68,9 +70,13 @@ export default function DropDraftsDrawer({
   const [drafts, setDrafts] = useState<DropDraft[]>([]);
   const [documents, setDocuments] = useState<DescriptDoc[]>([]);
   const [artDraft, setArtDraft] = useState<ArtDraftMeta | null>(null);
-  const [filter, setFilter] = useState<FilterKey>("all");
+  const [filter, setFilter] = useState<FilterKey>(initialFilter);
 
   useEffect(() => setMounted(true), []);
+
+  useEffect(() => {
+    if (open) setFilter(initialFilter);
+  }, [initialFilter, open]);
 
   useEffect(() => {
     if (!open) return;
