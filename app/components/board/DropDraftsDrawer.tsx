@@ -230,11 +230,22 @@ export default function DropDraftsDrawer({
               }
               const draft = entry.draft;
               const isAudioDraft = draft.kind === "audio";
-              const hasAudioPreview = draft.kind === "audio" && draft.dataUrl.length > 160;
-              return <article className={`draftCard ${isAudioDraft ? "voiceProjectCard" : ""}`} key={draft.id}>
+              const hasAudioPreview = isAudioDraft && draft.dataUrl.length > 160;
+              return <article
+                className={`draftCard ${isAudioDraft ? "voiceProjectCard" : ""}`}
+                key={draft.id}
+                style={isAudioDraft ? {
+                  display: "block",
+                  minHeight: 170,
+                  padding: 12,
+                  border: "1px solid rgba(126, 246, 230, .42)",
+                  borderRadius: 18,
+                  background: "linear-gradient(145deg, rgba(17, 51, 60, .96), rgba(7, 17, 29, .98))",
+                } : undefined}
+              >
                 {isAudioDraft ? (
-                  <div className="voiceProjectPreview">
-                    <div className="voiceProjectArt" aria-hidden="true">
+                  <div className="voiceProjectPreview" style={{ display: "grid", gap: 10, padding: 0, background: "transparent" }}>
+                    <div className="voiceProjectArt" aria-hidden="true" style={{ minHeight: 92 }}>
                       <span className="voiceProjectGlyph">🎙️</span>
                       <div className="voiceProjectWave">
                         {Array.from({ length: 32 }, (_, index) => (
@@ -243,7 +254,7 @@ export default function DropDraftsDrawer({
                       </div>
                     </div>
                     <div className="voiceProjectSummary">
-                      <span className="voiceProjectEyebrow">Voice Studio project</span>
+                      <span className="voiceProjectEyebrow">SAVED VOICE PROJECT</span>
                       <strong>{draft.fileName === "Voice Studio project" ? `Voice project ${draft.id.slice(-6)}` : draft.fileName}</strong>
                       <span>{hasAudioPreview ? "Preview ready" : "Auto-saved project"} · Edited {formatWhen(draft.createdAt)}</span>
                     </div>
