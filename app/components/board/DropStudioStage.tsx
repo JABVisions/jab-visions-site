@@ -563,6 +563,7 @@ export default function DropStudioStage({
   const [dropbookEditingDescriptDoc, setDropbookEditingDescriptDoc] = useState<DescriptDoc | null>(
     null
   );
+  const [draftDescriptDoc, setDraftDescriptDoc] = useState<DescriptDoc | null>(null);
   const [saveNote, setSaveNote] = useState("");
   const saveNoteTimerRef = useRef<number | null>(null);
   const [draftsOpen, setDraftsOpen] = useState(false);
@@ -1702,6 +1703,7 @@ export default function DropStudioStage({
         ? initialMode
         : allowedModes[0] ?? "photo";
     setMode(safeMode);
+    setDraftDescriptDoc(null);
     if (initialFile) {
       const playable = fileWithResolvedContentType(initialFile);
       fileRef.current = playable;
@@ -3489,13 +3491,13 @@ export default function DropStudioStage({
                   key={
                     isDropbookMode
                       ? `dropbook-descript-${dropbookEditingDescriptDoc?.id ?? "new"}`
-                      : `descript-${initialDescriptDoc?.id ?? "new"}`
+                      : `descript-${(draftDescriptDoc ?? initialDescriptDoc)?.id ?? "new"}`
                   }
-                  initialDoc={isDropbookMode ? dropbookEditingDescriptDoc : initialDescriptDoc}
+                  initialDoc={isDropbookMode ? dropbookEditingDescriptDoc : draftDescriptDoc ?? initialDescriptDoc}
                   startInEditor={
                     isDropbookMode
                       ? dropbookEditingDescriptDoc !== null
-                      : initialDescriptDoc !== null
+                      : draftDescriptDoc !== null || initialDescriptDoc !== null
                   }
                   returnOnBack={!isDropbookMode && descriptReturnOnBack}
                   onReturn={descriptOnReturn}
@@ -4184,6 +4186,17 @@ export default function DropStudioStage({
         open={draftsOpen}
         onClose={() => setDraftsOpen(false)}
         onOpenDraft={openDraft}
+        onOpenDescriptDoc={(doc) => {
+          setDraftDescriptDoc(doc);
+          setMode("descript");
+          setPhase("edit");
+          setDraftsOpen(false);
+        }}
+        onOpenArtDraft={() => {
+          setMode("art");
+          setPhase("edit");
+          setDraftsOpen(false);
+        }}
       />
 
     </div>,
