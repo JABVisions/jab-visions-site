@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
+import styles from "./DropDraftsDrawer.module.css";
 import {
   DROP_DRAFTS_UPDATED_EVENT,
   readDropDrafts,
@@ -137,7 +138,7 @@ export default function DropDraftsDrawer({
 
   return createPortal(
     <div
-      className="draftsOverlay"
+      className={`${styles.draftsScope} draftsOverlay`}
       role="presentation"
       onMouseDown={(e) => e.target === e.currentTarget && onClose()}
     >
@@ -263,193 +264,6 @@ export default function DropDraftsDrawer({
             })
           )}
         </div>
-
-        <style jsx>{`
-          .draftsOverlay {
-            position: fixed;
-            inset: 0;
-            z-index: 100060;
-            display: flex;
-            justify-content: flex-end;
-            background: rgba(4, 8, 14, 0.6);
-            backdrop-filter: blur(8px);
-          }
-          .draftsDrawer {
-            width: min(420px, 100vw);
-            height: 100%;
-            display: flex;
-            flex-direction: column;
-            padding: max(14px, env(safe-area-inset-top)) 16px max(14px, env(safe-area-inset-bottom));
-            background:
-              radial-gradient(circle at 18% 0%, rgba(82, 240, 213, 0.14), transparent 40%),
-              linear-gradient(180deg, rgba(8, 26, 33, 0.96), rgba(6, 10, 22, 0.98));
-            border-left: 1px solid rgba(132, 244, 231, 0.3);
-            box-shadow: -18px 0 50px rgba(0, 0, 0, 0.5);
-            color: #e8fff8;
-          }
-          .draftsHead {
-            display: flex;
-            align-items: flex-start;
-            justify-content: space-between;
-            gap: 12px;
-          }
-          .draftsEyebrow {
-            margin: 0;
-            font-size: 10px;
-            font-weight: 950;
-            letter-spacing: 0.22em;
-            text-transform: uppercase;
-            color: #7ff5e7;
-          }
-          .draftsTitle {
-            margin: 4px 0 0;
-            font-size: 1.3rem;
-            font-weight: 900;
-          }
-          .draftsSubtitle {
-            margin: 4px 0 0;
-            color: rgba(220, 255, 248, 0.58);
-            font-size: 12px;
-          }
-          .draftsClose {
-            border-radius: 999px;
-            border: 1px solid rgba(255, 255, 255, 0.2);
-            background: rgba(255, 255, 255, 0.08);
-            color: #e8fff8;
-            width: 34px;
-            height: 34px;
-            cursor: pointer;
-          }
-          .draftsFilters {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 7px;
-            margin: 14px 0 10px;
-          }
-          .draftsChip {
-            display: inline-flex;
-            align-items: center;
-            gap: 7px;
-            border-radius: 999px;
-            padding: 7px 12px;
-            font-size: 11px;
-            font-weight: 900;
-            letter-spacing: 0.06em;
-            text-transform: uppercase;
-            color: rgba(232, 255, 248, 0.74);
-            background: rgba(255, 255, 255, 0.06);
-            border: 1px solid rgba(167, 244, 232, 0.18);
-            cursor: pointer;
-          }
-          .draftsChip.on {
-            color: #06121a;
-            background: radial-gradient(circle at 30% 20%, #fff, #7ee2ff);
-            border-color: rgba(255, 255, 255, 0.5);
-          }
-          .draftsChipCount {
-            font-size: 10px;
-            opacity: 0.8;
-          }
-          .draftsList {
-            flex: 1 1 auto;
-            min-height: 0;
-            overflow-y: auto;
-            display: grid;
-            gap: 12px;
-            padding-right: 2px;
-            align-content: start;
-          }
-          .draftsEmpty {
-            margin-top: 24px;
-            text-align: center;
-            font-size: 13px;
-            color: rgba(220, 255, 248, 0.55);
-          }
-          .draftCard {
-            border-radius: 18px;
-            border: 1px solid rgba(167, 244, 232, 0.16);
-            background: rgba(255, 255, 255, 0.04);
-            overflow: hidden;
-          }
-          .documentCard { display: grid; grid-template-columns: 66px minmax(0, 1fr); }
-          .documentPreview {
-            display: grid;
-            place-items: center;
-            min-height: 100%;
-            background: linear-gradient(145deg, rgba(82, 240, 213, 0.16), rgba(126, 226, 255, 0.08));
-            font-size: 24px;
-          }
-          .documentInfo { min-width: 0; padding: 10px 10px 0 0; }
-          .documentTitle { margin: 8px 12px 0; overflow: hidden; color: #f2fffc; font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }
-          .documentExcerpt { margin: 5px 12px 0; color: rgba(220, 255, 248, 0.56); font-size: 11px; line-height: 1.45; }
-          .draftFileName { flex: 1 1 auto; overflow: hidden; color: rgba(232,255,248,.72); text-overflow: ellipsis; white-space: nowrap; }
-          .draftPreview {
-            background: #02070a;
-            display: grid;
-            place-items: center;
-          }
-          .draftPreview img,
-          .draftPreview video {
-            display: block;
-            width: 100%;
-            max-height: 220px;
-            object-fit: contain;
-          }
-          .draftPreview audio {
-            width: 100%;
-            padding: 14px;
-          }
-          .draftMeta {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            gap: 8px;
-            padding: 9px 12px 0;
-            font-size: 11px;
-          }
-          .draftKind {
-            font-weight: 900;
-            letter-spacing: 0.1em;
-            text-transform: uppercase;
-            color: rgba(126, 246, 230, 0.9);
-          }
-          .draftCount {
-            font-weight: 900;
-            color: rgba(126, 246, 230, 0.9);
-          }
-          .draftWhen {
-            color: rgba(220, 255, 248, 0.5);
-          }
-          .draftActions {
-            display: flex;
-            gap: 8px;
-            padding: 10px 12px 12px;
-          }
-          .draftBtn {
-            flex: 1 1 auto;
-            text-align: center;
-            border-radius: 12px;
-            padding: 8px 10px;
-            font-size: 11px;
-            font-weight: 900;
-            letter-spacing: 0.06em;
-            text-transform: uppercase;
-            color: #e8fff8;
-            background: rgba(255, 255, 255, 0.07);
-            border: 1px solid rgba(167, 244, 232, 0.2);
-            cursor: pointer;
-            text-decoration: none;
-          }
-          .draftBtn.open {
-            color: #06121a;
-            background: radial-gradient(circle at 30% 20%, #fff, #7ee2ff);
-            border-color: rgba(255, 255, 255, 0.5);
-          }
-          .draftBtn.danger {
-            color: #ffc4dc;
-            border-color: rgba(255, 146, 190, 0.4);
-          }
-        `}</style>
       </aside>
     </div>,
     document.body
