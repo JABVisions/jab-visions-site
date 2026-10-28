@@ -67,6 +67,7 @@ import { exportDropStudioV5, exportNeedsFlatten } from "@/lib/board/dropStudioV5
 import DropDraftsDrawer from "./DropDraftsDrawer";
 import BoardClientErrorBoundary from "./BoardClientErrorBoundary";
 import VocalVisualizer from "./VocalVisualizer";
+import AudioWaveform from "./AudioWaveform";
 import VoicePresets from "./VoicePresets";
 const VoiceStudioSession = lazy(() => import("./VoiceStudioSession"));
 import {
@@ -4069,9 +4070,7 @@ export default function DropStudioStage({
                             <span className="studioDot" aria-hidden />
                             VOCAL THOUGHT READY
                           </div>
-                          <div className="reviewViz">
-                            <VocalVisualizer state={audioPlaying ? "playback" : "saved"} />
-                          </div>
+                          <AudioWaveform file={fileRef.current} className="reviewViz" height={48} />
                           <VoicePresets
                             src={mediaUrl}
                             onPlayingChange={setAudioPlaying}
