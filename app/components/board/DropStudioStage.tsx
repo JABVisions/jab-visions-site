@@ -574,13 +574,13 @@ export default function DropStudioStage({
   const [saveNote, setSaveNote] = useState("");
   const saveNoteTimerRef = useRef<number | null>(null);
   const [draftsOpen, setDraftsOpen] = useState(false);
-  const [draftsFilter, setDraftsFilter] = useState<"all" | DropDraftKind | "document" | "art-project">("all");
+  const [draftsFilter, setDraftsFilter] = useState<"all" | DropDraftKind | "document" | "art-project" | "dropbook">("all");
   const [studioV5, setStudioV5] = useState(true);
   const [studioDraftId, setStudioDraftId] = useState("");
   const v5HandleRef = useRef<{ session: DropStudioV5Session; mediaBag: DropStudioV5MediaBag } | null>(
     null
   );
-  const openDrafts = (filter: "all" | DropDraftKind | "document" | "art-project") => {
+  const openDrafts = (filter: "all" | DropDraftKind | "document" | "art-project" | "dropbook") => {
     setDraftsFilter(filter);
     setDraftsOpen(true);
   };
@@ -2350,6 +2350,7 @@ export default function DropStudioStage({
     if (coverFile) dropbookCoverFileRef.current = coverFile;
     else if (cover.sourceChipId) dropbookCoverFileRef.current = dropbookPageFilesRef.current.get(cover.sourceChipId) || null;
     cover.previewUrl = urls.get("cover") || (cover.sourceChipId ? urls.get(`page:${cover.sourceChipId}`) : undefined) || undefined;
+    dropbookPageSeqRef.current = restoredPages.length;
     setDropbookCover(cover);
     setDropbookPages(restoredPages);
     setIsDropbookMode(true);
@@ -4341,6 +4342,7 @@ export default function DropStudioStage({
           setPhase("edit");
           setDraftsOpen(false);
         }}
+        onOpenDropbookDraft={restoreDropbookDraft}
       />
 
     </div>,
