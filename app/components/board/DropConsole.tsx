@@ -2153,6 +2153,7 @@ function BoardDropConsoleFields({
     <>
       <LazyDropStudioStage
         open={studioOpen}
+        dropbookTitle={title}
         initialFile={null}
         initialMode={dropFlavor === "thought" || dropFlavor === "music" ? "audio" : "photo"}
         allowedModes={
