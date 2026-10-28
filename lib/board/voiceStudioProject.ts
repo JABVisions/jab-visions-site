@@ -285,6 +285,55 @@ export async function loadVoiceStudioProject(draftId: string): Promise<AudioSess
   }
 }
 
+/** Lightweight index used to rebuild missing Drafts cards from saved sessions. */
+export async function listVoiceStudioProjectCards(): Promise<Array<{ draftId: string; updatedAt: number; fileName: string }>> {
+  try {
+    const db = await openDb();
+    const rows = await new Promise<Array<{ draftId: string; updatedAt: number; fileName: string }>>((resolve, reject) => {
+      const result: Array<{ draftId: string; updatedAt: number; fileName: string }> = [];
+      const tx = db.transaction(STORE, "readonly");
+      const request = tx.objectStore(STORE).openCursor();
+      request.onsuccess = () => {
+        const cursor = request.result;
+        if (!cursor) {
+          resolve(result);
+          return;
+        }
+        const blob = cursor.value as VoiceStudioProjectBlob;
+        if (blob?.draftId) {
+          result.push({
+            draftId: blob.draftId,
+            updatedAt: Number(blob.updatedAt) || Date.now(),
+            fileName: blob.files?.find((file) => file?.name)?.name || "Voice Booth project",
+          });
+        }
+        cursor.continue();
+      };
+      request.onerror = () => reject(request.error ?? new Error("project index read failed"));
+    });
+    db.close();
+    return rows.sort((a, b) => b.updatedAt - a.updatedAt);
+  } catch {
+    return [];
+  }
+}
+
+export async function deleteVoiceStudioProject(draftId: string): Promise<void> {
+  if (!draftId) return;
+  try {
+    const db = await openDb();
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE, "readwrite");
+      tx.objectStore(STORE).delete(draftId);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error ?? new Error("project delete failed"));
+    });
+    db.close();
+  } catch {
+    // The local draft card can still be removed if project storage is unavailable.
+  }
+}
+
 /** Resume the song that was last auto-saved in Voice Studio. */
 export async function loadLatestVoiceStudioProject(): Promise<{
   draftId: string;

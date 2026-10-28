@@ -3,10 +3,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import styles from "./DropDraftsDrawer.module.css";
+import { deleteVoiceStudioProject, listVoiceStudioProjectCards } from "@/lib/board/voiceStudioProject";
 import {
   DROP_DRAFTS_UPDATED_EVENT,
   readDropDrafts,
   removeDropDraft,
+  restoreVoiceStudioDraftCards,
   type DropDraft,
   type DropDraftKind,
 } from "@/lib/board/dropDrafts";
@@ -90,6 +92,7 @@ export default function DropDraftsDrawer({
 
   useEffect(() => {
     if (!open) return;
+    let cancelled = false;
     const sync = () => {
       setDrafts(readDropDrafts());
       setDocuments(readDescriptDocs());
@@ -97,11 +100,17 @@ export default function DropDraftsDrawer({
     };
     sync();
     void loadArtDraft().then(() => setArtDraft(peekArtDraftMeta()));
+    void listVoiceStudioProjectCards().then((projects) => {
+      if (cancelled || !projects.length) return;
+      const restored = restoreVoiceStudioDraftCards(projects);
+      if (!cancelled) setDrafts(restored);
+    });
     window.addEventListener(DROP_DRAFTS_UPDATED_EVENT, sync as EventListener);
     window.addEventListener("storage", sync as EventListener);
     window.addEventListener(DESCRIPT_DOCS_UPDATED_EVENT, sync as EventListener);
     window.addEventListener(ART_DRAFT_UPDATED_EVENT, sync as EventListener);
     return () => {
+      cancelled = true;
       window.removeEventListener(DROP_DRAFTS_UPDATED_EVENT, sync as EventListener);
       window.removeEventListener("storage", sync as EventListener);
       window.removeEventListener(DESCRIPT_DOCS_UPDATED_EVENT, sync as EventListener);
@@ -296,7 +305,10 @@ export default function DropDraftsDrawer({
                   <button
                     type="button"
                     className="draftBtn danger"
-                    onClick={() => removeDropDraft(draft.id)}
+                    onClick={() => {
+                      removeDropDraft(draft.id);
+                      if (isAudioDraft) void deleteVoiceStudioProject(draft.id);
+                    }}
                   >
                     Delete
                   </button>

@@ -136,6 +136,32 @@ export function ensureVoiceStudioDraftCard(id: string, projectFileName?: string)
   return draft;
 }
 
+/** Rebuild missing voice cards from IndexedDB without replacing saved sessions. */
+export function restoreVoiceStudioDraftCards(
+  projects: Array<{ draftId: string; updatedAt: number; fileName?: string }>
+): DropDraft[] {
+  if (!projects.length || !canUseStorage()) return readDropDrafts();
+  const current = readDropDrafts();
+  const existingIds = new Set(current.map((draft) => draft.id));
+  const recovered: DropDraft[] = [];
+  for (const project of projects) {
+    if (!project.draftId || existingIds.has(project.draftId)) continue;
+    existingIds.add(project.draftId);
+    recovered.push({
+      id: project.draftId,
+      kind: "audio",
+      dataUrl: VOICE_STUDIO_CARD_WAV,
+      fileName: project.fileName || "Voice Booth project",
+      mimeType: "audio/wav",
+      createdAt: project.updatedAt || Date.now(),
+      count: 1,
+    });
+  }
+  if (!recovered.length) return current;
+  writeDropDrafts([...recovered, ...current]);
+  return readDropDrafts();
+}
+
 /** Revision count for a draft id (how many times it's been saved). */
 export function getDropDraftCount(id: string): number {
   if (!id) return 0;
