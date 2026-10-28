@@ -126,6 +126,7 @@ import {
   loadVoiceStudioProject,
   rememberActiveVoiceStudioDraft,
   saveVoiceStudioProject,
+  stableVoiceStudioDraftId,
   sessionHasClips,
   voiceStudioEditSignature,
 } from "@/lib/board/voiceStudioProject";
@@ -1389,9 +1390,9 @@ export default function DropStudioStage({
         fileRef.current ??
         session?.tracks.flatMap((track) => track.clips).find((clip) => clip.file)?.file;
       if (!file && !sessionHasClips(session)) return false;
-      if (!draftIdRef.current) {
-        draftIdRef.current = `draft_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
-      }
+      draftIdRef.current = sessionHasClips(session) && session
+        ? stableVoiceStudioDraftId(session.id, draftIdRef.current)
+        : draftIdRef.current || `draft_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
       setStudioDraftId(draftIdRef.current);
       if (!quiet) setVoiceAutoSaving(true);
       else if (auto) setVoiceAutoSaving(true);
