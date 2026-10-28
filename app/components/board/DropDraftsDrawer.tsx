@@ -18,6 +18,8 @@ import {
   descriptPlainText,
   readDescriptDocs,
   removeDescriptDoc,
+  sanitizeDescriptHtml,
+  syncLocalDescriptDocsToCloud,
   type DescriptDoc,
 } from "@/lib/board/descriptDocs";
 import {
@@ -189,6 +191,7 @@ export default function DropDraftsDrawer({
         const body = await response.json();
         if (!cancelled && body?.ok) {
           setDrafts(mergeDrafts(readDropDrafts(), draftsFromCloud(body.drafts)));
+          setDocuments(mergeDocuments(readDescriptDocs(), documentsFromCloud(body.drafts)));
         }
       } catch {
         // Local drafts remain available if the account sync cannot be reached.
@@ -196,7 +199,7 @@ export default function DropDraftsDrawer({
     };
     sync();
     void loadCloudDrafts();
-    void Promise.all([syncLocalDropDraftsToCloud(), syncVoiceStudioProjectsToCloud()])
+    void Promise.all([syncLocalDropDraftsToCloud(), syncVoiceStudioProjectsToCloud(), syncLocalDescriptDocsToCloud()])
       .then(() => loadCloudDrafts());
     void loadArtDraft().then(() => setArtDraft(peekArtDraftMeta()));
     void listVoiceStudioProjectCards().then((projects) => {
