@@ -1823,6 +1823,7 @@ function ActivityCard({
                           metaString(meta?.storagePath, preview?.storagePath) || undefined,
                         fileName: metaString(meta?.fileName, preview?.fileName) || undefined,
                         mime: metaString(meta?.mime, preview?.mime) || undefined,
+                        fromDropbook: isDropbookSlide,
                         customizations: dropCustomizations,
                         editSource: item?.kind === "announcement" ? "announcement" : "board_drop",
                       },
