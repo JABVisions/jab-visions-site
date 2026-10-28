@@ -108,6 +108,7 @@ export async function loadArtDraft(): Promise<ArtDraftRecord | null> {
         dirty: record.dirty,
         createdAt: record.createdAt,
         updatedAt: record.updatedAt,
+        title: record.title,
         paper: record.paper,
         recovered: true,
         cloudId: record.cloudId,
@@ -324,6 +325,7 @@ export async function restoreArtDraftFromCloud(options: {
   cloudId: string;
   updatedAt: number;
   paper?: boolean;
+  title?: string;
 }) {
   const response = await fetch(options.signedUrl, { cache: "no-store" });
   if (!response.ok) throw new Error("Could not load saved Art Studio draft.");
@@ -337,6 +339,7 @@ export async function restoreArtDraftFromCloud(options: {
     paper: Boolean(options.paper),
     createdAt: memoryMeta?.createdAt || now,
     updatedAt: now,
+    title: options.title || memoryMeta?.title,
     lastCloudSave: now,
     recovered: true,
     cloudId: options.cloudId,
