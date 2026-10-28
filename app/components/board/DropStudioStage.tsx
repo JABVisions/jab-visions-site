@@ -133,6 +133,8 @@ import {
 } from "@/lib/board/voiceStudioProject";
 import {
   DROPBOOK_MIME,
+  parseDropbookManifest,
+  isDropbookSlideFile,
   type DropbookManifest,
   type DropbookSlide,
 } from "@/lib/board/dropbookSlides";
@@ -562,6 +564,7 @@ export default function DropStudioStage({
   const wasStudioOpenRef = useRef(false);
   const dropbookPageSeqRef = useRef(0);
   const dropbookDraftIdRef = useRef("");
+  const handledDropbookFileRef = useRef<File | null>(null);
   const dropbookCoverFileRef = useRef<File | null>(null);
   const dropbookSaveTimerRef = useRef<number | null>(null);
   const dropbookPageFilesRef = useRef<Map<string, File>>(new Map());
@@ -1798,6 +1801,96 @@ export default function DropStudioStage({
     // allowedModes is intentionally tracked via the stable allowedModesKey.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, initialFile, stopCamera, allowedModesKey, initialMode, syncMediaPreview]);
+
+  // A published Dropbook is stored as its manifest file. Opening it from the
+  // drop editor should restore the shelf and page files instead of treating the
+  // manifest JSON as a single photo/video upload.
+  useEffect(() => {
+    if (!open) {
+      handledDropbookFileRef.current = null;
+      return;
+    }
+    if (!initialFile || !isDropbookSlideFile({ name: initialFile.name, type: initialFile.type }) ||
+        handledDropbookFileRef.current === initialFile) return;
+    handledDropbookFileRef.current = initialFile;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const parsed = parseDropbookManifest(JSON.parse(await initialFile.text()));
+        if (!parsed || cancelled) return;
+        const coverSlide = parsed.slides.find((slide) => slide.kind === "cover");
+        const coverFile = coverSlide?.src
+          ? await coverDataUrlToFile(coverSlide.src)
+          : null;
+        const pageSlides = parsed.slides.filter((slide) => slide.kind !== "cover").slice(0, DROPBOOK_MAX_PAGES);
+        const pages = await Promise.all(pageSlides.map(async (slide, index) => {
+          const isDescript = slide.kind === "descript";
+          const isLink = slide.kind === "youtube" || slide.kind === "music" || slide.kind === "link";
+          const mode: CaptureMode = isDescript ? "descript" : slide.kind === "video" ? "video" : slide.kind === "audio" ? "audio" : "photo";
+          const id = slide.id || `dropbook-page-${index + 1}`;
+          if (!isDescript && !isLink && slide.src) {
+            const response = await fetch(slide.src);
+            const blob = await response.blob();
+            dropbookPageFilesRef.current.set(id, new File([blob], slide.title || `dropbook-page-${index + 1}`, {
+              type: blob.type || (slide.kind === "video" ? "video/mp4" : slide.kind === "audio" ? "audio/mpeg" : "image/jpeg"),
+            }));
+          }
+          const plainText = slide.text || "";
+          if (isDescript) {
+            const html = plainText.replace(/[&<>"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[char] || char)).replace(/\n/g, "<br>");
+            dropbookPageDocsRef.current.set(id, {
+              id: `dropbook-doc-${id}`,
+              title: slide.title || "Untitled page",
+              html: html ? `<p>${html}</p>` : "",
+              plainText,
+              createdAt: parsed.createdAt,
+              updatedAt: Date.now(),
+            });
+          }
+          const linkKind: DropbookLinkKind | undefined = slide.kind === "youtube" ? "youtube" : slide.kind === "music" ? "music" : isLink ? "link" : undefined;
+          return {
+            id,
+            mode,
+            previewUrl: slide.src,
+            label: slide.title,
+            descriptDocId: isDescript ? `dropbook-doc-${id}` : undefined,
+            descriptTitle: isDescript ? slide.title : undefined,
+            descriptPreview: isDescript ? plainText : undefined,
+            linkKind,
+            linkUrl: isLink ? slide.url : undefined,
+            linkEmbedUrl: isLink ? slide.embedUrl : undefined,
+            linkProvider: isLink ? slide.provider : undefined,
+            linkDescription: isLink ? plainText : undefined,
+          } satisfies DropbookChip;
+        }));
+        if (cancelled) return;
+        dropbookPageSeqRef.current = pages.length;
+        dropbookPageFilesRef.current = new Map(dropbookPageFilesRef.current);
+        dropbookCoverFileRef.current = coverFile;
+        dropbookDraftIdRef.current = `dropbook_edit_${Date.now()}_${Math.random().toString(16).slice(2, 7)}`;
+        setDropbookCover({
+          id: coverSlide?.id || `dropbook-cover-${Date.now()}`,
+          previewUrl: coverSlide?.src,
+          bookColor: parsed.bookColor,
+          bookColorSet: true,
+          complete: true,
+          coverSource: "blank",
+        });
+        setDropbookPages(pages);
+        setDropbookCoverBlankColor(parsed.bookColor);
+        setIsDropbookMode(true);
+        setDropbookCreating(false);
+        setDropbookEditingCover(false);
+        setDropbookIntroPhase("workspace");
+        setMode(pages[0]?.mode || "photo");
+        setPhase("choose");
+      } catch (error) {
+        console.error("[DropStudioStage] couldn't restore Dropbook manifest", error);
+        flashSaveNote("Couldn't open this Dropbook for editing.");
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [open, initialFile, flashSaveNote]);
 
   // Run the live camera only while in capture phase for camera modes.
   useEffect(() => {
