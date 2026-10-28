@@ -82,7 +82,11 @@ export async function GET(request: NextRequest) {
     }
     return json({ ok: false, drafts: [], message: error.message }, 500);
   }
-  const drafts = await Promise.all((data ?? []).map(async (draft) => ({
+  const visibleDrafts = (data ?? []).filter((draft) => {
+    const state = draft.editor_state as Record<string, unknown> | null;
+    return state?.type !== "deleted";
+  });
+  const drafts = await Promise.all(visibleDrafts.map(async (draft) => ({
     ...draft,
     editor_state: await signedEditorState(supabase, draft.editor_state),
   })));
@@ -162,7 +166,13 @@ export async function DELETE(request: NextRequest) {
     .maybeSingle();
   if (readError) return json({ ok: false, message: readError.message }, 500);
 
-  const { error } = await supabase.from(TABLE).delete().eq("user_id", userId).eq("id", id);
+  // The Drafts table grants users update access but may not have DELETE enabled.
+  // A tombstone keeps deletion reliable without requiring a schema/policy change.
+  const { error } = await supabase
+    .from(TABLE)
+    .update({ editor_state: { type: "deleted" }, updated_at: new Date().toISOString() })
+    .eq("user_id", userId)
+    .eq("id", id);
   if (error) return json({ ok: false, message: error.message }, 500);
 
   const state = draft?.editor_state as Record<string, unknown> | undefined;
