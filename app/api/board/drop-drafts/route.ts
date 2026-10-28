@@ -39,6 +39,15 @@ function isCloudDraftState(value: unknown): value is Record<string, unknown> {
         typeof (file as Record<string, unknown>).storagePath === "string"
       );
   }
+  if (state.type === "dropbook-draft") {
+    return Array.isArray(state.pages) && state.pages.length <= 3 &&
+      Array.isArray(state.files) && state.files.length <= 4 &&
+      state.files.every((file) =>
+        file && typeof file === "object" &&
+        typeof (file as Record<string, unknown>).key === "string" &&
+        typeof (file as Record<string, unknown>).storagePath === "string"
+      );
+  }
   if (state.type === "document") {
     return typeof state.title === "string" &&
       typeof state.html === "string" &&
@@ -135,7 +144,7 @@ export async function POST(request: NextRequest) {
 
   const dropType =
     body?.dropType === "image" || body?.dropType === "video" ||
-    body?.dropType === "audio" || body?.dropType === "document" || body?.dropType === "art"
+    body?.dropType === "audio" || body?.dropType === "document" || body?.dropType === "art" || body?.dropType === "dropbook"
       ? body.dropType
       : "video";
   // Voice Booth autosaves also write the selected audio file as a media draft.
@@ -232,7 +241,7 @@ export async function DELETE(request: NextRequest) {
   const state = draft?.editor_state as Record<string, unknown> | undefined;
   const paths = (state?.type === "media" || state?.type === "art-project") && typeof state.storagePath === "string"
     ? [state.storagePath]
-    : state?.type === "voice-project" && Array.isArray(state.files)
+    : (state?.type === "voice-project" || state?.type === "dropbook-draft") && Array.isArray(state.files)
       ? state.files
           .map((file) => file && typeof file === "object" ? (file as Record<string, unknown>).storagePath : null)
           .filter((path): path is string => typeof path === "string" && path.startsWith(`${userId}/`))
