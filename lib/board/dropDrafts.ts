@@ -7,6 +7,8 @@
 export const DROP_DRAFTS_STORAGE_KEY = "jab_drop_drafts_v1";
 export const DROP_DRAFTS_UPDATED_EVENT = "board:drop-drafts:updated";
 
+import { uploadBoardMediaFile } from "@/lib/board/boardMediaUpload";
+
 // Skip persisting anything whose data URL is larger than this (~6MB) so a single
 // big capture can't evict everything else / throw.
 const MAX_DRAFT_DATAURL_BYTES = 6_000_000;
