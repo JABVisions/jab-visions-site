@@ -120,7 +120,8 @@ export async function loadArtDraft(): Promise<ArtDraftRecord | null> {
   return null;
 }
 
-export async function discardArtDraft(cloudId?: string) {\n  const deleteId = cloudId || memoryMeta?.cloudId;
+export async function discardArtDraft(cloudId?: string) {
+  const deleteId = cloudId || memoryMeta?.cloudId;
   memoryMeta = null;
   if (persistTimer) {
     window.clearTimeout(persistTimer);
@@ -130,8 +131,7 @@ export async function discardArtDraft(cloudId?: string) {\n  const deleteId = cl
     window.clearTimeout(cloudTimer);
     cloudTimer = null;
   }
-  if (!canUseIdb()) return;
-  try {
+  if (canUseIdb()) try {
     const db = await openDb();
     await new Promise<void>((resolve, reject) => {
       const tx = db.transaction(ART_DRAFT_STORE, "readwrite");
@@ -251,11 +251,12 @@ async function syncArtDraftToCloud(overlay: Blob) {
     } = await sb.auth.getUser();
     if (!user) return;
     const path = `${user.id}/art-drafts/current.webp`;
-    await sb.storage.from("board-media").upload(path, overlay, {
+    const { error: uploadError } = await sb.storage.from("board-media").upload(path, overlay, {
       upsert: true,
       contentType: "image/webp",
       cacheControl: "30",
     });
+    if (uploadError) return;
     const cloudId = `art_${user.id}`;
     const savedAt = Date.now();
     await fetch("/api/board/drop-drafts", {
