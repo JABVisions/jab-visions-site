@@ -3,12 +3,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import styles from "./DropDraftsDrawer.module.css";
-import { deleteVoiceStudioProject, listVoiceStudioProjectCards } from "@/lib/board/voiceStudioProject";
+import { deleteVoiceStudioProject, listVoiceStudioProjectCards, syncVoiceStudioProjectsToCloud } from "@/lib/board/voiceStudioProject";
 import {
   DROP_DRAFTS_UPDATED_EVENT,
   readDropDrafts,
   removeDropDraft,
-  restoreVoiceStudioDraftCards,
+  restoreVoiceStudioDraftCards,\n  syncLocalDropDraftsToCloud,
   type DropDraft,
   type DropDraftKind,
 } from "@/lib/board/dropDrafts";
@@ -148,19 +148,29 @@ export default function DropDraftsDrawer({
       setDocuments(readDescriptDocs());
       setArtDraft(peekArtDraftMeta());
     };
+    const loadCloudDrafts = async () => {
+      try {
+        const response = await fetch("/api/board/drop-drafts", { cache: "no-store", credentials: "include" });
+        if (!response.ok) return;
+        const body = await response.json();
+        if (!cancelled && body?.ok) {
+          setDrafts(mergeDrafts(readDropDrafts(), draftsFromCloud(body.drafts)));
+        }
+      } catch {
+        // Local drafts remain available if the account sync cannot be reached.
+      }
+    };
     sync();
-    void fetch("/api/board/drop-drafts", { cache: "no-store", credentials: "include" })
-      .then((response) => response.ok ? response.json() : null)
-      .then((body) => {
-        if (cancelled || !body?.ok) return;
-        setDrafts(mergeDrafts(readDropDrafts(), draftsFromCloud(body.drafts)));
-      })
-      .catch(() => undefined);
+    void loadCloudDrafts();
+    void Promise.all([syncLocalDropDraftsToCloud(), syncVoiceStudioProjectsToCloud()])
+      .then(() => loadCloudDrafts());
     void loadArtDraft().then(() => setArtDraft(peekArtDraftMeta()));
     void listVoiceStudioProjectCards().then((projects) => {
       if (cancelled || !projects.length) return;
       const restored = restoreVoiceStudioDraftCards(projects);
-      if (!cancelled) setDrafts(restored);
+      if (!cancelled) {
+        setDrafts((current) => mergeDrafts(restored, current.filter((draft) => draft.remoteUrl || draft.remoteProject)));
+      }
     });
     window.addEventListener(DROP_DRAFTS_UPDATED_EVENT, sync as EventListener);
     window.addEventListener("storage", sync as EventListener);
