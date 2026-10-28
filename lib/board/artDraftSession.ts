@@ -21,6 +21,8 @@ export type ArtDraftMeta = {
   updatedAt: number;
   paper: boolean;
   recovered: boolean;
+  cloudId?: string;
+  remoteUrl?: string;
 };
 
 type ArtDraftRecord = ArtDraftMeta & {
@@ -107,6 +109,8 @@ export async function loadArtDraft(): Promise<ArtDraftRecord | null> {
         updatedAt: record.updatedAt,
         paper: record.paper,
         recovered: true,
+        cloudId: record.cloudId,
+        remoteUrl: record.remoteUrl,
       };
       return record;
     }
@@ -116,7 +120,7 @@ export async function loadArtDraft(): Promise<ArtDraftRecord | null> {
   return null;
 }
 
-export async function discardArtDraft() {
+export async function discardArtDraft(cloudId?: string) {\n  const deleteId = cloudId || memoryMeta?.cloudId;
   memoryMeta = null;
   if (persistTimer) {
     window.clearTimeout(persistTimer);
@@ -137,6 +141,12 @@ export async function discardArtDraft() {
     });
   } catch {
     // ignore
+  }
+  if (deleteId) {
+    void fetch(`/api/board/drop-drafts?id=${encodeURIComponent(deleteId)}`, {
+      method: "DELETE",
+      credentials: "include",
+    }).catch(() => undefined);
   }
   emitUpdated();
 }
@@ -246,14 +256,65 @@ async function syncArtDraftToCloud(overlay: Blob) {
       contentType: "image/webp",
       cacheControl: "30",
     });
+    const cloudId = `art_${user.id}`;
+    const savedAt = Date.now();
+    await fetch("/api/board/drop-drafts", {
+      method: "POST",
+      credentials: "include",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        id: cloudId,
+        dropType: "art",
+        editorState: {
+          type: "art-project",
+          storagePath: path,
+          bucket: "board-media",
+          paper: memoryMeta?.paper || false,
+          updatedAt: savedAt,
+        },
+      }),
+    });
     if (memoryMeta) {
-      memoryMeta = { ...memoryMeta, lastCloudSave: Date.now() };
+      memoryMeta = { ...memoryMeta, lastCloudSave: savedAt, cloudId };
     }
   } catch {
     // Local recovery still holds.
   } finally {
     cloudBusy = false;
   }
+}
+
+export async function syncCurrentArtDraftToCloud() {
+  const record = await loadArtDraft();
+  if (record?.overlay) await syncArtDraftToCloud(record.overlay);
+}
+
+export async function restoreArtDraftFromCloud(options: {
+  signedUrl: string;
+  cloudId: string;
+  updatedAt: number;
+  paper?: boolean;
+}) {
+  const response = await fetch(options.signedUrl, { cache: "no-store" });
+  if (!response.ok) throw new Error("Could not load saved Art Studio draft.");
+  const overlay = await response.blob();
+  const now = options.updatedAt || Date.now();
+  const meta: ArtDraftMeta = {
+    ...(memoryMeta || blankMeta(now)),
+    draftId: ART_DRAFT_ID,
+    dropType: "art",
+    dirty: false,
+    paper: Boolean(options.paper),
+    createdAt: memoryMeta?.createdAt || now,
+    updatedAt: now,
+    lastCloudSave: now,
+    recovered: true,
+    cloudId: options.cloudId,
+    remoteUrl: options.signedUrl,
+  };
+  memoryMeta = meta;
+  await writeArtDraft({ ...meta, overlay, thumbnail: overlay });
+  emitUpdated();
 }
 
 export function artDraftObjectUrl(blob: Blob | undefined | null) {
