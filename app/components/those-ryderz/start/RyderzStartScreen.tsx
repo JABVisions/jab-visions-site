@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { GAME_MODES, GameMode } from '@/lib/ryderz-raid/game-mode';
 import type { SaveSlot } from '@/lib/ryderz-raid/saves/saveManager';
 import { useMenuKeys, wrap } from '../menu/useMenuKeys';
+import LeaderboardPanel from './LeaderboardPanel';
 import GlitchButton from './GlitchButton';
 import styles from './RyderzStartScreen.module.css';
 
@@ -62,6 +63,7 @@ export default function RyderzStartScreen({
   const current = slots[activeSlot];
   const canContinue = Boolean(current && !current.empty);
   const [modeFocus, setModeFocus] = useState(Math.max(0, GAME_MODES.findIndex((mode) => mode.id === lastMode)));
+  const [leaderboardOpen, setLeaderboardOpen] = useState(false);
 
   useMenuKeys((key) => {
     if (key === 'left' || key === 'up') setModeFocus((i) => wrap(i - 1, GAME_MODES.length));
@@ -121,6 +123,14 @@ export default function RyderzStartScreen({
             />
           ))}
         </div>
+
+        <button
+          className={styles.leaderboardButton}
+          type="button"
+          onClick={() => setLeaderboardOpen(true)}
+        >
+          <span aria-hidden="true">◉</span> Global raid leaderboard
+        </button>
       </div>
 
       <footer className={styles.foot}>
@@ -129,6 +139,8 @@ export default function RyderzStartScreen({
         <span>Q E R later</span>
         <span className={styles.footRight}>Save data · Slot {activeSlot + 1}</span>
       </footer>
+
+      {leaderboardOpen ? <LeaderboardPanel onClose={() => setLeaderboardOpen(false)} /> : null}
     </div>
   );
 }

@@ -1,0 +1,233 @@
+.shade {
+  position: fixed;
+  inset: 0;
+  z-index: 5;
+  display: grid;
+  place-items: center;
+  padding: clamp(12px, 3vw, 34px);
+  background: rgba(0, 3, 2, 0.82);
+  backdrop-filter: blur(9px);
+}
+
+.panel {
+  width: min(920px, 100%);
+  max-height: min(86vh, 760px);
+  overflow: hidden;
+  display: grid;
+  grid-template-rows: auto auto auto minmax(0, 1fr) auto;
+  border: 1px solid rgba(57, 255, 106, 0.54);
+  background: linear-gradient(145deg, rgba(5, 20, 13, 0.98), rgba(3, 7, 8, 0.98));
+  color: #e3ffec;
+  box-shadow: 0 0 50px rgba(57, 255, 106, 0.16), inset 0 0 30px rgba(57, 255, 106, 0.035);
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 22px 24px 16px;
+  border-bottom: 1px solid rgba(57, 255, 106, 0.16);
+}
+
+.header small,
+.footer,
+.nameField span {
+  color: rgba(180, 255, 210, 0.63);
+  font: 700 0.64rem/1.4 ui-monospace, monospace;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.header h2 {
+  margin: 4px 0 0;
+  color: #d5ff00;
+  font: 900 clamp(1.2rem, 4vw, 1.9rem)/1 ui-monospace, monospace;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  text-shadow: 0 0 18px rgba(213, 255, 0, 0.25);
+}
+
+.close {
+  width: 40px;
+  height: 40px;
+  border: 1px solid rgba(180, 255, 210, 0.3);
+  background: rgba(180, 255, 210, 0.06);
+  color: #d8ffe6;
+  font-size: 1.5rem;
+  cursor: pointer;
+}
+
+.nameField {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 24px;
+}
+
+.nameField input {
+  width: min(260px, 50vw);
+  padding: 8px 10px;
+  border: 1px solid rgba(57, 255, 106, 0.35);
+  outline: none;
+  background: rgba(0, 0, 0, 0.42);
+  color: #e3ffec;
+  font: 700 0.78rem/1.2 ui-monospace, monospace;
+}
+
+.nameField input:focus {
+  border-color: #39ff6a;
+  box-shadow: 0 0 14px rgba(57, 255, 106, 0.18);
+}
+
+.filters {
+  display: flex;
+  gap: 6px;
+  padding: 0 24px 14px;
+  overflow-x: auto;
+}
+
+.filters button {
+  padding: 7px 11px;
+  border: 1px solid rgba(57, 255, 106, 0.23);
+  background: rgba(0, 0, 0, 0.3);
+  color: rgba(180, 255, 210, 0.64);
+  font: 700 0.62rem/1 ui-monospace, monospace;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.filters button[aria-pressed='true'] {
+  border-color: #39ff6a;
+  background: rgba(57, 255, 106, 0.12);
+  color: #caffd6;
+  box-shadow: 0 0 13px rgba(57, 255, 106, 0.14);
+}
+
+.tableWrap {
+  overflow: auto;
+  min-height: 150px;
+}
+
+.tableWrap table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+  font: 700 0.76rem/1.25 ui-monospace, monospace;
+}
+
+.tableWrap th {
+  position: sticky;
+  top: 0;
+  padding: 9px 12px;
+  background: #07130c;
+  color: rgba(180, 255, 210, 0.54);
+  font-size: 0.58rem;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.tableWrap td {
+  padding: 10px 12px;
+  border-top: 1px solid rgba(180, 255, 210, 0.08);
+  white-space: nowrap;
+}
+
+.rank,
+.score {
+  color: #d5ff00;
+}
+
+.raider {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.raider img {
+  width: 32px;
+  height: 32px;
+  border: 1px solid rgba(57, 255, 106, 0.3);
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.raider b,
+.raider small {
+  display: block;
+}
+
+.raider small {
+  margin-top: 3px;
+  color: rgba(180, 255, 210, 0.52);
+  font-size: 0.56rem;
+}
+
+.difficulty {
+  color: #9bffc1;
+  text-transform: uppercase;
+}
+
+.difficulty[data-difficulty='nightmare'] {
+  color: #ff8a9b;
+}
+
+.difficulty[data-difficulty='hard'] {
+  color: #ffcb72;
+}
+
+.result {
+  color: #9bffc1;
+  text-transform: uppercase;
+}
+
+.result[data-result='defeat'] {
+  color: rgba(180, 255, 210, 0.6);
+}
+
+.message {
+  height: 160px;
+  color: rgba(180, 255, 210, 0.65);
+  text-align: center;
+  white-space: normal !important;
+}
+
+.footer {
+  padding: 12px 24px 16px;
+  border-top: 1px solid rgba(57, 255, 106, 0.15);
+  font-size: 0.56rem;
+}
+
+@media (max-width: 600px) {
+  .header,
+  .nameField,
+  .footer {
+    padding-left: 15px;
+    padding-right: 15px;
+  }
+
+  .nameField {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .nameField input {
+    width: 100%;
+  }
+
+  .filters {
+    padding-left: 15px;
+    padding-right: 15px;
+  }
+
+  .tableWrap table {
+    font-size: 0.68rem;
+  }
+
+  .tableWrap th,
+  .tableWrap td {
+    padding: 9px 8px;
+  }
+}

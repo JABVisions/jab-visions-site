@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import {
   INTERACT_LABEL,
+  RYDERZ,
   UPGRADE_ORDER,
   UPGRADES,
   upgradeCost,
@@ -30,17 +31,20 @@ import RaidLobby from './modes/RaidLobby';
 import RaidWatch from './modes/RaidWatch';
 import { launchFromSquad, type RaidSquad } from '@/lib/ryderz-raid/raid/squad';
 import { subscribeRaidLive } from '@/lib/ryderz-raid/raid/liveRoom';
+import { leaderboardScore, readLeaderboardName } from '@/lib/ryderz-raid/raid/leaderboard';
 import PvpFlow, { type PvpLineup } from './modes/PvpFlow';
 import SoloCharacterSelect from './modes/SoloCharacterSelect';
 import PremiereCharacterSelect from './premiere/PremiereCharacterSelect';
 import { NEUTRAL_THEME, RYDER_THEME as AURA } from './menu/theme';
 import RyderzStartScreen from './start/RyderzStartScreen';
+import LeaderboardPreview from './start/LeaderboardPreview';
 import styles from './RaidGame.module.css';
 
 export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'page' }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const engineRef = useRef<RaidEngine | null>(null);
   const hudRef = useRef<HudState | null>(null);
+  const leaderboardSubmissionRef = useRef<string | null>(null);
   const circularHud = useRef<CircularHudApi>(null);
   const foeHud = useRef<CircularHudApi>(null);
   const vignette = useRef<LowHealthVignetteApi>(null);
@@ -85,6 +89,7 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
   const [hudMoves, setHudMoves] = useState<HudState['moves']>([]);
   const [round, setRound] = useState(0);
   const [phase, setPhase] = useState<HudState['phase'] | 'select'>('select');
+  const [leaderboardNotice, setLeaderboardNotice] = useState('');
   const [paused, setPaused] = useState(false);
   const [mapOpen, setMapOpen] = useState(false);
   const [burnout, setBurnout] = useState(false);
@@ -135,6 +140,44 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
   const syncHud = useCallback((next: HudState) => {
     const prev = hudRef.current;
     hudRef.current = next;
+    const terminal = next.phase === 'dead' || next.phase === 'victory';
+    const justEnded = terminal && (!prev || (prev.phase !== 'dead' && prev.phase !== 'victory'));
+    const connection = netRef.current;
+    if (
+      justEnded &&
+      next.raid &&
+      manager.getState().gameMode === GameMode.RAID &&
+      !leaderboardSubmissionRef.current &&
+      (!connection || connection.authority)
+    ) {
+      const submissionId = window.crypto.randomUUID();
+      leaderboardSubmissionRef.current = submissionId;
+      const difficulty = next.difficulty.toLowerCase();
+      const ryder = RYDERZ[next.ryderId];
+      setLeaderboardNotice('Sending run to the global board…');
+      void fetch('/api/raid/leaderboard', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          submissionId,
+          displayName: readLeaderboardName(ryder?.name ?? 'Ryder Guest'),
+          ryderId: next.ryderId,
+          difficulty,
+          result: next.phase === 'victory' ? 'victory' : 'defeat',
+          waveReached: next.raid.wave,
+          kills: next.raid.defeated,
+          damage: next.raid.dealt,
+        }),
+      })
+        .then(async (response) => {
+          const body = await response.json();
+          if (!response.ok) throw new Error(body.error || 'Could not post this run.');
+          setLeaderboardNotice(`Run posted · ${leaderboardScore(next.raid!.wave, next.raid!.defeated, next.raid!.dealt, difficulty).toLocaleString('en-US')} points`);
+        })
+        .catch((error: unknown) => {
+          setLeaderboardNotice(error instanceof Error ? error.message : 'Could not post this run.');
+        });
+    }
     circularHud.current?.setVitals(
       next.hp,
       next.maxHp,
@@ -416,6 +459,8 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
     pvpRef.current = null;
     raidPlanRef.current = launchFromSquad(squad, ryder);
     netRef.current = net;
+    leaderboardSubmissionRef.current = null;
+    setLeaderboardNotice('');
     setPvpOpponent(null);
     setPvpTwo(false);
     manager.setArena(squad.arenaId);
@@ -507,6 +552,10 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
   const replay = () => {
     const engine = engineRef.current;
     if (!engine) return;
+    if (manager.getState().gameMode === GameMode.RAID) {
+      leaderboardSubmissionRef.current = null;
+      setLeaderboardNotice('');
+    }
     if (engine.matchLive()) void engine.restartMatch();
     else if (selected) void engine.start(activeRyder, manager.loadoutSpecs(activeRyder));
     engine.setPaused(false);
@@ -891,6 +940,8 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
                 ? `The squad is down. Enemies defeated ${hudRef.current?.raid?.defeated ?? 0}. Damage dealt ${hudRef.current?.raid?.dealt ?? 0}. Damage taken ${hudRef.current?.raid?.taken ?? 0}.`
                 : 'The mind-controlled block overran you. Come back with more aura discipline — powers drain, and fists are all that is left when the signal runs dry.'}
             </p>
+            {partyState.mode === GameMode.RAID ? <p className={styles.leaderboardNotice} aria-live="polite">{leaderboardNotice}</p> : null}
+            <LeaderboardPreview refreshKey={leaderboardNotice} />
             <div className={styles.actions}>
               <button type="button" onClick={replay}>
                 Drop in again
@@ -922,6 +973,8 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
                 ))}
               </ul>
             ) : null}
+            {partyState.mode === GameMode.RAID ? <p className={styles.leaderboardNotice} aria-live="polite">{leaderboardNotice}</p> : null}
+            <LeaderboardPreview refreshKey={leaderboardNotice} />
             <div className={styles.actions}>
               <button type="button" onClick={replay}>
                 Rematch

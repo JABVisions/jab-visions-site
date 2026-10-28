@@ -69,6 +69,33 @@
   background: linear-gradient(180deg, rgba(0, 0, 0, 0.08), rgba(0, 4, 2, 0.55));
 }
 
+.leaderboardButton {
+  justify-self: center;
+  min-height: 42px;
+  padding: 0 18px;
+  border: 1px solid rgba(213, 255, 0, 0.62);
+  background: rgba(3, 12, 7, 0.78);
+  color: #d5ff00;
+  font: 800 0.68rem/1 ui-monospace, monospace;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  text-shadow: 0 0 12px rgba(213, 255, 0, 0.5);
+  cursor: pointer;
+  transition: background 140ms ease, box-shadow 140ms ease, transform 140ms ease;
+}
+
+.leaderboardButton:hover,
+.leaderboardButton:focus-visible {
+  background: rgba(213, 255, 0, 0.13);
+  box-shadow: 0 0 22px rgba(213, 255, 0, 0.22);
+  transform: translateY(-1px);
+}
+
+.leaderboardButton span {
+  margin-right: 8px;
+  color: #39ff6a;
+}
+
 .kicker {
   margin: 0;
   color: rgba(180, 255, 210, 0.7);
