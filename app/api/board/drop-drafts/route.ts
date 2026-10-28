@@ -39,17 +39,26 @@ function isCloudDraftState(value: unknown): value is Record<string, unknown> {
         typeof (file as Record<string, unknown>).storagePath === "string"
       );
   }
+  if (state.type === "document") {
+    return typeof state.title === "string" &&
+      typeof state.html === "string" &&
+      typeof state.plainText === "string";
+  }
+  if (state.type === "art-project") {
+    return typeof state.storagePath === "string";
+  }
   return false;
 }
 
 async function signedEditorState(supabase: ReturnType<typeof supabaseServer>, raw: unknown) {
   if (!isCloudDraftState(raw)) return raw;
   const state = { ...raw };
-  if (state.type === "media") {
+  if (state.type === "media" || state.type === "art-project") {
     const path = String(state.storagePath);
     const { data } = await supabase.storage.from(MEDIA_BUCKET).createSignedUrl(path, 60 * 60 * 24);
     return { ...state, signedUrl: data?.signedUrl || "" };
   }
+  if (state.type === "document") return state;
   const files = await Promise.all(
     (state.files as Array<Record<string, unknown>>).map(async (file) => {
       const { data } = await supabase.storage
@@ -111,7 +120,8 @@ export async function POST(request: NextRequest) {
   if (!id || !editorState) return json({ ok: false, message: "Draft state is incomplete." }, 400);
 
   const dropType =
-    body?.dropType === "image" || body?.dropType === "video" || body?.dropType === "audio"
+    body?.dropType === "image" || body?.dropType === "video" ||
+    body?.dropType === "audio" || body?.dropType === "document" || body?.dropType === "art"
       ? body.dropType
       : "video";
   // Voice Booth autosaves also write the selected audio file as a media draft.
@@ -176,7 +186,7 @@ export async function DELETE(request: NextRequest) {
   if (error) return json({ ok: false, message: error.message }, 500);
 
   const state = draft?.editor_state as Record<string, unknown> | undefined;
-  const paths = state?.type === "media" && typeof state.storagePath === "string"
+  const paths = (state?.type === "media" || state?.type === "art-project") && typeof state.storagePath === "string"
     ? [state.storagePath]
     : state?.type === "voice-project" && Array.isArray(state.files)
       ? state.files
