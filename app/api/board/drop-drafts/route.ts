@@ -6,6 +6,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const TABLE = "board_drop_drafts";
+const MEDIA_BUCKET = "board-media";
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -17,6 +18,47 @@ function json(body: unknown, status = 200) {
 function missingTable(error: { code?: string; message?: string } | null) {
   const message = String(error?.message || "").toLowerCase();
   return error?.code === "PGRST205" || error?.code === "42P01" || message.includes(TABLE);
+}
+
+function isCloudDraftState(value: unknown): value is Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const state = value as Record<string, unknown>;
+  if (state.type === "media") {
+    return typeof state.fileName === "string" &&
+      typeof state.mimeType === "string" &&
+      typeof state.storagePath === "string" &&
+      (!state.bucket || state.bucket === MEDIA_BUCKET);
+  }
+  if (state.type === "voice-project") {
+    return Boolean(state.snapshot && typeof state.snapshot === "object") &&
+      Array.isArray(state.files) &&
+      state.files.length <= 100 &&
+      state.files.every((file) =>
+        file && typeof file === "object" &&
+        typeof (file as Record<string, unknown>).key === "string" &&
+        typeof (file as Record<string, unknown>).storagePath === "string"
+      );
+  }
+  return false;
+}
+
+async function signedEditorState(supabase: ReturnType<typeof supabaseServer>, raw: unknown) {
+  if (!isCloudDraftState(raw)) return raw;
+  const state = { ...raw };
+  if (state.type === "media") {
+    const path = String(state.storagePath);
+    const { data } = await supabase.storage.from(MEDIA_BUCKET).createSignedUrl(path, 60 * 60 * 24);
+    return { ...state, signedUrl: data?.signedUrl || "" };
+  }
+  const files = await Promise.all(
+    (state.files as Array<Record<string, unknown>>).map(async (file) => {
+      const { data } = await supabase.storage
+        .from(MEDIA_BUCKET)
+        .createSignedUrl(String(file.storagePath), 60 * 60 * 24);
+      return { ...file, signedUrl: data?.signedUrl || "" };
+    })
+  );
+  return { ...state, files };
 }
 
 export async function GET(request: NextRequest) {
@@ -40,7 +82,11 @@ export async function GET(request: NextRequest) {
     }
     return json({ ok: false, drafts: [], message: error.message }, 500);
   }
-  return json({ ok: true, drafts: data ?? [] });
+  const drafts = await Promise.all((data ?? []).map(async (draft) => ({
+    ...draft,
+    editor_state: await signedEditorState(supabase, draft.editor_state),
+  })));
+  return json({ ok: true, drafts });
 }
 
 export async function POST(request: NextRequest) {
@@ -55,14 +101,20 @@ export async function POST(request: NextRequest) {
     editorState?: unknown;
   } | null;
   const id = typeof body?.id === "string" ? body.id.trim().slice(0, 120) : "";
-  const editorState = parseDropStudioV5Snapshot(body?.editorState);
+  const v5State = parseDropStudioV5Snapshot(body?.editorState);
+  const cloudState = isCloudDraftState(body?.editorState) ? body?.editorState : null;
+  const editorState = v5State || cloudState;
   if (!id || !editorState) return json({ ok: false, message: "Draft state is incomplete." }, 400);
 
+  const dropType =
+    body?.dropType === "image" || body?.dropType === "video" || body?.dropType === "audio"
+      ? body.dropType
+      : "video";
   const { error } = await supabase.from(TABLE).upsert(
     {
       id,
       user_id: userId,
-      drop_type: body?.dropType === "image" ? "image" : "video",
+      drop_type: dropType,
       editor_state: editorState,
       updated_at: new Date().toISOString(),
     },
@@ -77,6 +129,39 @@ export async function POST(request: NextRequest) {
       });
     }
     return json({ ok: false, message: error.message }, 500);
+  }
+  return json({ ok: true, id });
+}
+
+export async function DELETE(request: NextRequest) {
+  const supabase = supabaseServer();
+  const { data: auth } = await supabase.auth.getUser();
+  const userId = auth.user?.id;
+  if (!userId) return json({ ok: false, message: "Sign in to delete this draft." }, 401);
+
+  const id = request.nextUrl.searchParams.get("id")?.trim() || "";
+  if (!id) return json({ ok: false, message: "Draft id is required." }, 400);
+  const { data: draft, error: readError } = await supabase
+    .from(TABLE)
+    .select("editor_state")
+    .eq("user_id", userId)
+    .eq("id", id)
+    .maybeSingle();
+  if (readError) return json({ ok: false, message: readError.message }, 500);
+
+  const { error } = await supabase.from(TABLE).delete().eq("user_id", userId).eq("id", id);
+  if (error) return json({ ok: false, message: error.message }, 500);
+
+  const state = draft?.editor_state as Record<string, unknown> | undefined;
+  const paths = state?.type === "media" && typeof state.storagePath === "string"
+    ? [state.storagePath]
+    : state?.type === "voice-project" && Array.isArray(state.files)
+      ? state.files
+          .map((file) => file && typeof file === "object" ? (file as Record<string, unknown>).storagePath : null)
+          .filter((path): path is string => typeof path === "string" && path.startsWith(`${userId}/`))
+      : [];
+  if (paths.length) {
+    await supabase.storage.from(MEDIA_BUCKET).remove(paths).catch(() => undefined);
   }
   return json({ ok: true, id });
 }
