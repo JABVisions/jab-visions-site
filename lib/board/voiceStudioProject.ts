@@ -394,17 +394,7 @@ export async function loadVoiceStudioProject(draftId: string): Promise<AudioSess
       }),
     };
     const session = await sessionFromVoiceStudioProject(remote);
-    if (session) {
-      const db = await openDb();
-      await new Promise<void>((resolve, reject) => {
-        const tx = db.transaction(STORE, "readwrite");
-        tx.objectStore(STORE).put(remote);
-        tx.oncomplete = () => resolve();
-        tx.onerror = () => reject(tx.error ?? new Error("project cache failed"));
-      });
-      db.close();
-      rememberActiveVoiceStudioDraft(draftId);
-    }
+    if (session) rememberActiveVoiceStudioDraft(draftId);
     return session;
   } catch {
     return null;
