@@ -27,6 +27,7 @@ export type DropbookSlide = {
 
 export type DropbookManifest = {
   format: "jab-dropbook";
+  title?: string;
   version: 1;
   createdAt: number;
   bookColor: string;
@@ -91,6 +92,7 @@ export function parseDropbookManifest(value: unknown): DropbookManifest | null {
   return {
     format: "jab-dropbook",
     version: 1,
+    title: typeof input.title === "string" ? input.title.trim().slice(0, 100) : undefined,
     createdAt: typeof input.createdAt === "number" ? input.createdAt : Date.now(),
     bookColor: typeof input.bookColor === "string" ? input.bookColor : "#2563EB",
     slides,
