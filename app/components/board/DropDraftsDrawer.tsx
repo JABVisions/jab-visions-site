@@ -8,7 +8,8 @@ import {
   DROP_DRAFTS_UPDATED_EVENT,
   readDropDrafts,
   removeDropDraft,
-  restoreVoiceStudioDraftCards,\n  syncLocalDropDraftsToCloud,
+  restoreVoiceStudioDraftCards,
+  syncLocalDropDraftsToCloud,
   type DropDraft,
   type DropDraftKind,
 } from "@/lib/board/dropDrafts";
