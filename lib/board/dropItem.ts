@@ -535,6 +535,7 @@ export function normalizeDropItems(input: unknown, userId: string | null): DropI
           : undefined,
       thoughtText: typeof x.thoughtText === "string" ? x.thoughtText : undefined,
       fromDescript: x.fromDescript === true ? true : undefined,
+      fromDropbook: x.fromDropbook === true || /\\.dropbook\\.json$/i.test(String(x.fileName || "")) || x.mime === "application/vnd.jab.dropbook+json" ? true : undefined,
     };
       const coords = storageCoordsFromDrop(base);
       if (coords) {
