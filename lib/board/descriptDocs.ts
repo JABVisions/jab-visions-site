@@ -168,11 +168,63 @@ export function saveDescriptDoc(input: {
 
   const next = [doc, ...readDescriptDocs().filter((d) => d.id !== doc.id)];
   writeDescriptDocs(next);
+  queueDescriptDocCloudSync(doc);
   return doc;
+}
+
+const descriptSyncTimers = new Map<string, number>();
+
+function queueDescriptDocCloudSync(doc: DescriptDoc) {
+  if (typeof window === "undefined") return;
+  const existing = descriptSyncTimers.get(doc.id);
+  if (existing) window.clearTimeout(existing);
+  const timer = window.setTimeout(() => {
+    descriptSyncTimers.delete(doc.id);
+    void postDescriptDocCloud(doc);
+  }, 1500);
+  descriptSyncTimers.set(doc.id, timer);
+}
+
+async function postDescriptDocCloud(doc: DescriptDoc) {
+  try {
+    const response = await fetch("/api/board/drop-drafts", {
+      method: "POST",
+      credentials: "include",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        id: doc.id,
+        dropType: "document",
+        editorState: {
+          type: "document",
+          title: doc.title,
+          html: doc.html,
+          plainText: doc.plainText,
+          description: doc.description,
+          createdAt: doc.createdAt,
+          updatedAt: doc.updatedAt,
+          sourceKind: doc.sourceKind,
+          templateKey: doc.templateKey,
+          destination: doc.destination,
+          workDropId: doc.workDropId,
+        },
+      }),
+    });
+    if (!response.ok) console.warn("[Descript] cloud draft sync failed", response.status);
+  } catch {
+    // Local document drafts remain available offline.
+  }
+}
+
+export async function syncLocalDescriptDocsToCloud() {
+  for (const doc of readDescriptDocs()) await postDescriptDocCloud(doc);
 }
 
 export function removeDescriptDoc(id: string) {
   writeDescriptDocs(readDescriptDocs().filter((d) => d.id !== id));
+  void fetch(`/api/board/drop-drafts?id=${encodeURIComponent(id)}`, {
+    method: "DELETE",
+    credentials: "include",
+  }).catch(() => undefined);
 }
 
 /** Best-effort current user id (for stamping owner). Never throws. */
