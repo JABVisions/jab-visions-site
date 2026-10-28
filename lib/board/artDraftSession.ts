@@ -19,6 +19,7 @@ export type ArtDraftMeta = {
   dirty: boolean;
   createdAt: number;
   updatedAt: number;
+  title?: string;
   paper: boolean;
   recovered: boolean;
   cloudId?: string;
@@ -183,6 +184,33 @@ async function writeArtDraft(record: ArtDraftRecord) {
   });
 }
 
+export async function renameArtDraft(title: string): Promise<boolean> {
+  const nextTitle = title.trim().slice(0, 100);
+  if (!nextTitle) return false;
+  const record = await loadArtDraft();
+  const now = Date.now();
+  memoryMeta = {
+    ...(memoryMeta || blankMeta(now)),
+    title: nextTitle,
+    updatedAt: now,
+  };
+  if (record?.overlay) {
+    await writeArtDraft({ ...record, ...memoryMeta, title: nextTitle, updatedAt: now });
+  }
+  if (memoryMeta.cloudId) {
+    void fetch("/api/board/drop-drafts", {
+      method: "PATCH",
+      credentials: "include",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id: memoryMeta.cloudId, title: nextTitle }),
+    }).catch(() => undefined);
+  } else if (record?.overlay) {
+    await syncArtDraftToCloud(record.overlay);
+  }
+  emitUpdated();
+  return true;
+}
+
 export function markArtDraftDirty(paper = false) {
   const now = Date.now();
   memoryMeta = {
@@ -272,6 +300,7 @@ async function syncArtDraftToCloud(overlay: Blob) {
           bucket: "board-media",
           paper: memoryMeta?.paper || false,
           updatedAt: savedAt,
+          title: memoryMeta?.title,
         },
       }),
     });
