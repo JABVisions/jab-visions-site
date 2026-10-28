@@ -326,8 +326,15 @@ export async function saveVoiceStudioProject(
 ): Promise<boolean> {
   if (!draftId || !sessionHasClips(session)) return false;
   try {
-    const files = await serializeVoiceStudioClipFiles(session);
-    if (!files.length) return false;
+    const serializedFiles = await serializeVoiceStudioClipFiles(session);
+    if (!serializedFiles.length) return false;
+    const previous = await readProjectBlob(draftId);
+    const files = serializedFiles.map((file) => {
+      const stored = previous?.files.find((item) => item.key === file.key && item.storagePath);
+      return stored?.storagePath
+        ? { ...file, storageBucket: stored.storageBucket || "board-media", storagePath: stored.storagePath }
+        : file;
+    });
 
     const blob: VoiceStudioProjectBlob = {
       draftId,
