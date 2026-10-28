@@ -2,12 +2,14 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
+import AudioWaveform from "./AudioWaveform";
 import styles from "./DropDraftsDrawer.module.css";
 import { deleteVoiceStudioProject, listVoiceStudioProjectCards, syncVoiceStudioProjectsToCloud } from "@/lib/board/voiceStudioProject";
 import {
   DROP_DRAFTS_UPDATED_EVENT,
   readDropDrafts,
   removeDropDraft,
+  renameDropDraft,
   restoreVoiceStudioDraftCards,
   syncLocalDropDraftsToCloud,
   type DropDraft,
@@ -53,6 +55,7 @@ function draftsFromCloud(rows: unknown): DropDraft[] {
         kind,
         dataUrl: "",
         fileName: String(state.fileName || "Untitled capture"),
+        title: String(state.title || state.fileName || "Untitled capture"),
         mimeType: String(state.mimeType || "application/octet-stream"),
         createdAt: Number(state.createdAt) || createdAt,
         storageBucket: String(state.bucket || "board-media"),
@@ -66,6 +69,7 @@ function draftsFromCloud(rows: unknown): DropDraft[] {
         kind: "audio",
         dataUrl: VOICE_CARD_PLACEHOLDER,
         fileName: String(files.find((file) => file.name)?.name || "Voice Booth project"),
+        title: String(state.title || files.find((file) => file.name)?.name || `Voice Booth project ${row.id.slice(-6)}`),
         mimeType: "audio/wav",
         createdAt,
         remoteProject: true,
@@ -188,6 +192,8 @@ export default function DropDraftsDrawer({
   const [artDraft, setArtDraft] = useState<ArtDraftMeta | null>(null);
   const [cloudSyncing, setCloudSyncing] = useState(false);
   const [filter, setFilter] = useState<FilterKey>(initialFilter);
+  const [renamingDraftId, setRenamingDraftId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState("");
 
   const uniqueDrafts = useMemo(() => {
     const byId = new Map<string, DropDraft>();
@@ -197,6 +203,40 @@ export default function DropDraftsDrawer({
     }
     return [...byId.values()].sort((a, b) => b.createdAt - a.createdAt);
   }, [drafts]);
+
+  const beginDraftRename = (draft: DropDraft) => {
+    setRenamingDraftId(draft.id);
+    setRenameValue(draft.title || draft.fileName || "Untitled draft");
+  };
+
+  const saveDraftRename = async (draft: DropDraft) => {
+    const title = renameValue.trim().slice(0, 100);
+    if (!title) return;
+    const updated = { ...draft, title, createdAt: Date.now() };
+    renameDropDraft(draft.id, title);
+    setDrafts((current) => current.map((item) => item.id === draft.id ? updated : item));
+    setRenamingDraftId(null);
+    try {
+      await fetch("/api/board/drop-drafts", {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ id: draft.id, title }),
+      });
+    } catch {
+      // Keep the title locally; autosave will sync it when the network returns.
+    }
+  };
+
+  const deleteDraft = (draft: DropDraft) => {
+    removeDropDraft(draft.id);
+    setDrafts((current) => current.filter((item) => item.id !== draft.id));
+    if (draft.kind === "audio") void deleteVoiceStudioProject(draft.id);
+    void fetch(`/api/board/drop-drafts?id=${encodeURIComponent(draft.id)}`, {
+      method: "DELETE",
+      credentials: "include",
+    }).catch(() => undefined);
+  };
 
   useEffect(() => setMounted(true), []);
 
@@ -418,77 +458,65 @@ export default function DropDraftsDrawer({
               >
                 {isAudioDraft ? (
                   <div className="voiceProjectPreview" style={{ display: "grid", gap: 10, padding: 0, background: "transparent" }}>
-                    <div className="voiceProjectArt" aria-hidden="true" style={{ minHeight: 92 }}>
-                      <span className="voiceProjectGlyph">🎙️</span>
-                      <div className="voiceProjectWave">
-                        {Array.from({ length: 32 }, (_, index) => (
-                          <i key={index} style={{ height: `${18 + ((index * 17 + draft.id.length * 13) % 68)}%` }} />
-                        ))}
+                    <div style={{ display: "flex", alignItems: "flex-start", gap: 10, width: "100%" }}>
+                      <div style={{ flex: "1 1 auto", minWidth: 0 }}>
+                        {renamingDraftId === draft.id ? (
+                          <div style={{ display: "flex", gap: 6 }}>
+                            <input
+                              autoFocus
+                              aria-label="Draft title"
+                              value={renameValue}
+                              maxLength={100}
+                              onChange={(event) => setRenameValue(event.target.value)}
+                              onKeyDown={(event) => {
+                                if (event.key === "Enter") void saveDraftRename(draft);
+                                if (event.key === "Escape") setRenamingDraftId(null);
+                              }}
+                              style={{ minWidth: 0, flex: 1, height: 40, borderRadius: 9, padding: "0 10px", color: "#f2fffc", background: "#0b2028", border: "1px solid rgba(126,246,230,.45)", fontSize: 14 }}
+                            />
+                            <button type="button" onClick={() => void saveDraftRename(draft)} style={{ border: 0, borderRadius: 9, padding: "0 10px", background: "#7ee2ff", color: "#06121a", fontWeight: 900 }}>Save</button>
+                          </div>
+                        ) : (
+                          <>
+                            <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+                              <strong style={{ minWidth: 0, overflow: "hidden", color: "#f2fffc", fontSize: 16, lineHeight: 1.25, textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                {draft.title || ((draft.fileName === "Voice Studio project" || draft.fileName === "Voice Booth project") ? `Voice Booth project ${draft.id.slice(-6)}` : draft.fileName)}
+                              </strong>
+                              <button
+                                type="button"
+                                aria-label="Rename voice draft"
+                                title="Rename draft"
+                                onClick={() => beginDraftRename(draft)}
+                                style={{ flex: "0 0 34px", width: 34, height: 34, borderRadius: 9, border: "1px solid rgba(167,244,232,.3)", background: "rgba(255,255,255,.07)", color: "#bffcf4", fontSize: 17, cursor: "pointer" }}
+                              >✎</button>
+                            </div>
+                            <span style={{ display: "block", marginTop: 4, color: "rgba(220,255,248,.56)", fontSize: 11 }}>
+                              Voice project · Edited {formatWhen(draft.createdAt)}
+                            </span>
+                          </>
+                        )}
                       </div>
-                    </div>
-                    <div style={{ display: "flex", gap: 8, width: "100%" }}>
                       <button
                         type="button"
-                        onClick={() => { void onOpenDraft?.(draft); }}
-                        style={{
-                          appearance: "none",
-                          display: "inline-flex",
-                          flex: "1 1 0",
-                          minWidth: 0,
-                          minHeight: 46,
-                          alignItems: "center",
-                          justifyContent: "center",
-                          borderRadius: 12,
-                          border: "1px solid rgba(255,255,255,.75)",
-                          background: "linear-gradient(120deg, #fff, #7ee2ff)",
-                          color: "#06121a",
-                          fontSize: 12,
-                          fontWeight: 900,
-                          letterSpacing: ".04em",
-                          cursor: "pointer",
-                          WebkitAppearance: "none",
-                        }}
-                      >
-                        Resume project
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          removeDropDraft(draft.id);
-                          setDrafts((current) => current.filter((item) => item.id !== draft.id));
-                          void deleteVoiceStudioProject(draft.id);
-                          void fetch(`/api/board/drop-drafts?id=${encodeURIComponent(draft.id)}`, {
-                            method: "DELETE",
-                            credentials: "include",
-                          }).catch(() => undefined);
-                        }}
-                        style={{
-                          appearance: "none",
-                          display: "inline-flex",
-                          flex: "0 0 92px",
-                          minHeight: 46,
-                          alignItems: "center",
-                          justifyContent: "center",
-                          borderRadius: 12,
-                          border: "1px solid rgba(255,146,190,.75)",
-                          background: "rgba(75,18,40,.78)",
-                          color: "#ffc4dc",
-                          fontSize: 12,
-                          fontWeight: 900,
-                          letterSpacing: ".04em",
-                          cursor: "pointer",
-                          WebkitAppearance: "none",
-                        }}
-                      >
-                        Delete
-                      </button>
+                        aria-label={`Delete ${draft.title || draft.fileName || "voice draft"}`}
+                        title="Delete draft"
+                        onClick={() => deleteDraft(draft)}
+                        style={{ appearance: "none", flex: "0 0 42px", width: 42, height: 42, display: "inline-flex", alignItems: "center", justifyContent: "center", borderRadius: 999, border: "1px solid rgba(255,90,116,.85)", background: "rgba(112,22,38,.88)", color: "#fff", fontSize: 25, lineHeight: 1, fontWeight: 700, cursor: "pointer", WebkitAppearance: "none" }}
+                      >×</button>
                     </div>
-                    <div className="voiceProjectSummary">
-                      <span className="voiceProjectEyebrow">SAVED VOICE PROJECT</span>
-                      <strong>{(draft.fileName === "Voice Studio project" || draft.fileName === "Voice Booth project") ? `Voice Booth project ${draft.id.slice(-6)}` : draft.fileName}</strong>
-                      <span>{hasAudioPreview ? "Preview ready" : "Auto-saved project"} · Edited {formatWhen(draft.createdAt)}</span>
-                    </div>
-                    {hasAudioPreview ? <audio className="voiceProjectPlayer" src={draft.remoteUrl || draft.dataUrl} controls preload="metadata" aria-label={`Preview ${draft.fileName}`} /> : null}
+                    <AudioWaveform
+                      src={hasAudioPreview ? (draft.remoteUrl || draft.dataUrl) : null}
+                      draftId={hasAudioPreview ? undefined : draft.id}
+                      height={58}
+                    />
+                    {hasAudioPreview ? <audio className="voiceProjectPlayer" src={draft.remoteUrl || draft.dataUrl} controls preload="metadata" aria-label={`Preview ${draft.title || draft.fileName}`} /> : null}
+                    <button
+                      type="button"
+                      onClick={() => { void onOpenDraft?.(draft); }}
+                      style={{ appearance: "none", display: "inline-flex", width: "100%", minHeight: 46, alignItems: "center", justifyContent: "center", borderRadius: 12, border: "1px solid rgba(255,255,255,.75)", background: "linear-gradient(120deg, #fff, #7ee2ff)", color: "#06121a", fontSize: 12, fontWeight: 900, letterSpacing: ".04em", cursor: "pointer", WebkitAppearance: "none" }}
+                    >
+                      Resume project
+                    </button>
                   </div>
                 ) : (
                 <div className="draftPreview">
@@ -502,65 +530,43 @@ export default function DropDraftsDrawer({
                   )}
                 </div>
                 )}
-                <div className="draftMeta">
-                  <span className="draftKind">{isAudioDraft ? "Voice Project" : kindLabel(draft.kind)}</span>
-                  <span className="draftFileName">{isAudioDraft && (draft.fileName === "Voice Studio project" || draft.fileName === "Voice Booth project") ? `Voice Booth project ${draft.id.slice(-6)}` : draft.fileName || "Untitled capture"}</span>
-                  {draft.count && draft.count > 1 ? (
-                    <span className="draftCount" title="Times this draft was saved">
-                      🗂 {draft.count}×
-                    </span>
-                  ) : null}
-                  <span className="draftWhen">Edited {formatWhen(draft.createdAt)}</span>
-                </div>
-                <div
-                  className="draftActions"
-                  style={isAudioDraft ? { display: "none" } : undefined}
-                >
-                  <button
-                    type="button"
-                    className="draftBtn open"
-                    style={isAudioDraft ? {
-                      display: "inline-flex",
-                      minHeight: 44,
-                      alignItems: "center",
-                      justifyContent: "center",
-                      visibility: "visible",
-                      opacity: 1,
-                    } : undefined}
-                    onClick={() => onOpenDraft?.(draft)}
-                  >
-                    {isAudioDraft ? "Resume project" : "Open"}
-                  </button>
-                  {!isAudioDraft || hasAudioPreview ? (
+                {!isAudioDraft ? (
+                  <div className="draftMeta">
+                    <span className="draftKind">{kindLabel(draft.kind)}</span>
+                    {renamingDraftId === draft.id ? (
+                      <>
+                        <input
+                          aria-label="Draft title"
+                          value={renameValue}
+                          maxLength={100}
+                          onChange={(event) => setRenameValue(event.target.value)}
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter") void saveDraftRename(draft);
+                            if (event.key === "Escape") setRenamingDraftId(null);
+                          }}
+                          style={{ minWidth: 0, flex: 1, height: 36, borderRadius: 8, padding: "0 8px" }}
+                        />
+                        <button type="button" className="draftBtn open" onClick={() => void saveDraftRename(draft)}>Save</button>
+                      </>
+                    ) : (
+                      <>
+                        <span className="draftFileName">{draft.title || draft.fileName || "Untitled capture"}</span>
+                        <button type="button" className="draftBtn" aria-label="Rename draft" onClick={() => beginDraftRename(draft)}>Rename</button>
+                      </>
+                    )}
+                    {draft.count && draft.count > 1 ? (
+                      <span className="draftCount" title="Times this draft was saved">🗂 {draft.count}×</span>
+                    ) : null}
+                    <span className="draftWhen">Edited {formatWhen(draft.createdAt)}</span>
+                  </div>
+                ) : null}
+                {!isAudioDraft ? (
+                  <div className="draftActions">
+                    <button type="button" className="draftBtn open" onClick={() => onOpenDraft?.(draft)}>Open</button>
                     <a className="draftBtn" href={draft.remoteUrl || draft.dataUrl} download={draft.fileName}>Save</a>
-                  ) : null}
-                  <button
-                    type="button"
-                    className="draftBtn danger"
-                    style={isAudioDraft ? {
-                      display: "inline-flex",
-                      minHeight: 44,
-                      alignItems: "center",
-                      justifyContent: "center",
-                      visibility: "visible",
-                      opacity: 1,
-                      color: "#ffc4dc",
-                      background: "rgba(75, 18, 40, .55)",
-                      border: "1px solid rgba(255, 146, 190, .65)",
-                    } : undefined}
-                    onClick={() => {
-                      removeDropDraft(draft.id);
-                      setDrafts((current) => current.filter((item) => item.id !== draft.id));
-                      if (isAudioDraft) void deleteVoiceStudioProject(draft.id);
-                      void fetch(`/api/board/drop-drafts?id=${encodeURIComponent(draft.id)}`, {
-                        method: "DELETE",
-                        credentials: "include",
-                      }).catch(() => undefined);
-                    }}
-                  >
-                    Delete
-                  </button>
-                </div>
+                    <button type="button" className="draftBtn danger" onClick={() => deleteDraft(draft)}>Delete</button>
+                  </div>
+                ) : null}
               </article>
             })
           )}
