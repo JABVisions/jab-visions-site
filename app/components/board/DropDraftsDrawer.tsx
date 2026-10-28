@@ -79,6 +79,38 @@ function mergeDrafts(local: DropDraft[], cloud: DropDraft[]): DropDraft[] {
   return [...byId.values()];
 }
 
+function documentsFromCloud(rows: unknown): DescriptDoc[] {
+  if (!Array.isArray(rows)) return [];
+  return rows.flatMap((value) => {
+    if (!value || typeof value !== "object") return [];
+    const row = value as Record<string, unknown>;
+    const state = row.editor_state as Record<string, unknown> | null;
+    if (typeof row.id !== "string" || state?.type !== "document") return [];
+    return [{
+      id: row.id,
+      title: String(state.title || ""),
+      html: sanitizeDescriptHtml(state.html),
+      plainText: String(state.plainText || ""),
+      description: typeof state.description === "string" ? state.description : undefined,
+      createdAt: Number(state.createdAt) || Date.now(),
+      updatedAt: Number(state.updatedAt) || (row.updated_at ? Date.parse(String(row.updated_at)) : Date.now()),
+      sourceKind: state.sourceKind as DescriptDoc["sourceKind"],
+      templateKey: typeof state.templateKey === "string" ? state.templateKey : undefined,
+      destination: state.destination as DescriptDoc["destination"],
+      workDropId: typeof state.workDropId === "string" ? state.workDropId : undefined,
+    }];
+  });
+}
+
+function mergeDocuments(local: DescriptDoc[], cloud: DescriptDoc[]): DescriptDoc[] {
+  const byId = new Map(cloud.map((doc) => [doc.id, doc]));
+  for (const doc of local) {
+    const remote = byId.get(doc.id);
+    byId.set(doc.id, !remote || doc.updatedAt >= remote.updatedAt ? doc : remote);
+  }
+  return [...byId.values()].sort((a, b) => b.updatedAt - a.updatedAt);
+}
+
 const FILTERS: { key: FilterKey; label: string }[] = [
   { key: "all", label: "All" },
   { key: "image", label: "Photos / Art" },
