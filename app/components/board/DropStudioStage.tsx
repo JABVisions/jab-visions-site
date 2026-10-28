@@ -4070,7 +4070,7 @@ export default function DropStudioStage({
                             <span className="studioDot" aria-hidden />
                             VOCAL THOUGHT READY
                           </div>
-                          <AudioWaveform file={fileRef.current} className="reviewViz" height={48} />
+                          <AudioWaveform file={fileRef.current} src={fileRef.current ? null : mediaUrl} className="reviewViz" height={48} />
                           <VoicePresets
                             src={mediaUrl}
                             onPlayingChange={setAudioPlaying}
