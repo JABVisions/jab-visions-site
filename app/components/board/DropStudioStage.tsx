@@ -61,7 +61,7 @@ import {
 import type { BoardUploadProgress, BoardUploadProgressHandler } from "@/lib/board/uploadProgress";
 import { preparingUploadProgress, studioVisibleUploadProgress } from "@/lib/board/uploadProgress";
 import { guessUploadBytes, isBoardStorageLimitMessage } from "@/lib/board/boardMediaUpload";
-import { saveDropDraft, draftToFile, ensureVoiceStudioDraftCard, type DropDraft, type DropDraftKind } from "@/lib/board/dropDrafts";
+import { saveDropDraft, draftToFileAsync, ensureVoiceStudioDraftCard, type DropDraft, type DropDraftKind } from "@/lib/board/dropDrafts";
 import { readDropStudioV5Flag, type DropStudioV5MediaBag, type DropStudioV5Session } from "@/lib/board/dropStudioV5";
 import { exportDropStudioV5, exportNeedsFlatten } from "@/lib/board/dropStudioV5Export";
 import DropDraftsDrawer from "./DropDraftsDrawer";
@@ -1560,8 +1560,8 @@ export default function DropStudioStage({
 
   // Reopen a saved draft straight into the editor.
   const openDraft = useCallback(
-    (draft: DropDraft) => {
-      const file = draftToFile(draft);
+    async (draft: DropDraft) => {
+      const file = await draftToFileAsync(draft);
       if (!file) {
         flashSaveNote("Couldn't open this draft.");
         return;
