@@ -478,7 +478,7 @@ export default function DropDraftsDrawer({
               }
               const draft = entry.draft;
               const isAudioDraft = draft.kind === "audio";
-              const hasAudioPreview = isAudioDraft && draft.dataUrl.length > 160;
+              const hasAudioPreview = isAudioDraft && Boolean(draft.remoteUrl || draft.dataUrl.length > 160);
               return <article
                 className={`draftCard ${isAudioDraft ? "voiceProjectCard" : ""}`}
                 key={draft.id}
