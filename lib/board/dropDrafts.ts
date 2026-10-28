@@ -90,12 +90,16 @@ function kindForMime(type: string): DropDraftKind {
 export async function saveDropDraft(file: File, id?: string): Promise<DropDraft | null> {
   if (!canUseStorage()) return null;
   let dataUrl = "";
-  try {
-    dataUrl = await fileToDataUrl(file);
-  } catch {
-    return null;
+  // Keep small media locally for an immediate preview. Larger media goes straight
+  // to Board Storage and is represented by its cloud draft card.
+  if (file.size <= Math.floor(MAX_DRAFT_DATAURL_BYTES * 0.7)) {
+    try {
+      dataUrl = await fileToDataUrl(file);
+    } catch {
+      return null;
+    }
+    if (!dataUrl || dataUrl.length > MAX_DRAFT_DATAURL_BYTES) return null;
   }
-  if (!dataUrl || dataUrl.length > MAX_DRAFT_DATAURL_BYTES) return null;
 
   const draftId = id || `draft_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
   const prior = readDropDrafts().find((d) => d.id === draftId);
@@ -121,7 +125,43 @@ export async function saveDropDraft(file: File, id?: string): Promise<DropDraft 
 
   const next = [draft, ...readDropDrafts().filter((d) => d.id !== draft.id)];
   writeDropDrafts(next);
+  void syncDropDraftMediaToCloud(draft, file);
   return draft;
+}
+
+async function syncDropDraftMediaToCloud(draft: DropDraft, file: File) {
+  try {
+    let bucket = draft.storageBucket || "board-media";
+    let storagePath = draft.storagePath;
+    if (!storagePath) {
+      const uploaded = await uploadBoardMediaFile(file, { folder: `drafts/media/${draft.id}` });
+      bucket = uploaded.bucket;
+      storagePath = uploaded.storagePath;
+    }
+    const cloudDraft = { ...draft, storageBucket: bucket, storagePath };
+    writeDropDrafts([cloudDraft, ...readDropDrafts().filter((item) => item.id !== draft.id)]);
+    const response = await fetch("/api/board/drop-drafts", {
+      method: "POST",
+      credentials: "include",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        id: draft.id,
+        dropType: draft.kind,
+        editorState: {
+          type: "media",
+          kind: draft.kind,
+          fileName: draft.fileName,
+          mimeType: draft.mimeType,
+          createdAt: draft.createdAt,
+          bucket,
+          storagePath,
+        },
+      }),
+    });
+    if (!response.ok) console.warn("[Drafts] cloud media sync failed", response.status);
+  } catch (error) {
+    console.warn("[Drafts] cloud media sync unavailable", error);
+  }
 }
 
 export function removeDropDraft(id: string) {
