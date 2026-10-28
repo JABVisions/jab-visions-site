@@ -748,6 +748,7 @@ export default function BoardDropEditModal() {
           into a different drop. So we lock the studio to the current media's mode. */}
       <LazyDropStudioStage
         open={studioMode !== null}
+        dropbookTitle={richToPlain(titleRich)}
         initialFile={studioInitialFile}
         initialMode={
           studioMode ?? (drop?.type === "Doc" ? "descript" : "photo")
