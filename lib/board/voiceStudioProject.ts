@@ -5,6 +5,7 @@ import {
   type AudioSession,
   type SessionEditSnapshot,
 } from "@/lib/board/audioSession";
+import { uploadBoardMediaFile } from "@/lib/board/boardMediaUpload";
 import {
   clipFileKey,
   placeholderClipFile,
@@ -32,6 +33,9 @@ export type VoiceStudioClipFile = {
   blob?: Blob;
   /** Preferred: raw clip bytes. Survives Safari IndexedDB blob detach. */
   bytes?: ArrayBuffer;
+  storageBucket?: string;
+  storagePath?: string;
+  signedUrl?: string;
 };
 
 export type VoiceStudioProjectBlob = {
@@ -93,6 +97,17 @@ export async function clipFileFromStored(
         type: media.type || media.blob.type || "audio/wav",
         lastModified,
       });
+    }
+  }
+  if (media.signedUrl) {
+    try {
+      const response = await fetch(media.signedUrl, { cache: "no-store" });
+      if (response.ok) {
+        const bytes = await response.arrayBuffer();
+        if (bytes.byteLength) return new File([bytes], media.name, { type, lastModified });
+      }
+    } catch {
+      // Continue to legacy local representations below.
     }
   }
   if (media.dataUrl) {
@@ -236,6 +251,75 @@ export async function sessionFromVoiceStudioProject(
 }
 
 /** Persist a multi-lane Voice Studio project alongside a Drop draft id. */
+async function readProjectBlob(draftId: string): Promise<VoiceStudioProjectBlob | undefined> {
+  try {
+    const db = await openDb();
+    const blob = await new Promise<VoiceStudioProjectBlob | undefined>((resolve, reject) => {
+      const tx = db.transaction(STORE, "readonly");
+      const request = tx.objectStore(STORE).get(draftId);
+      request.onsuccess = () => resolve(request.result as VoiceStudioProjectBlob | undefined);
+      request.onerror = () => reject(request.error ?? new Error("project load failed"));
+    });
+    db.close();
+    return blob;
+  } catch {
+    return undefined;
+  }
+}
+
+async function syncVoiceStudioProjectToCloud(blob: VoiceStudioProjectBlob) {
+  try {
+    const prior = await readProjectBlob(blob.draftId);
+    const files = await Promise.all(blob.files.map(async (file) => {
+      const existing = prior?.files.find((item) => item.key === file.key && item.storagePath);
+      if (existing?.storagePath) {
+        return { ...file, storageBucket: existing.storageBucket || "board-media", storagePath: existing.storagePath };
+      }
+      if (!file.bytes?.byteLength) return file;
+      const uploadFile = new File([file.bytes.slice(0)], file.name, {
+        type: file.type || "audio/wav",
+        lastModified: file.lastModified || blob.updatedAt,
+      });
+      const uploaded = await uploadBoardMediaFile(uploadFile, {
+        folder: `drafts/voice/${blob.draftId}`,
+      });
+      return { ...file, storageBucket: uploaded.bucket, storagePath: uploaded.storagePath };
+    }));
+    const cloudFiles = files.filter((file) => file.storagePath);
+    if (!cloudFiles.length) return;
+    const response = await fetch("/api/board/drop-drafts", {
+      method: "POST",
+      credentials: "include",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        id: blob.draftId,
+        dropType: "audio",
+        editorState: {
+          type: "voice-project",
+          snapshot: blob.snapshot,
+          files: cloudFiles.map(({ key, name, type, lastModified, storageBucket, storagePath }) => ({
+            key, name, type, lastModified, bucket: storageBucket || "board-media", storagePath,
+          })),
+        },
+      }),
+    });
+    if (!response.ok) console.warn("[VoiceStudio] cloud project sync failed", response.status);
+    if (response.ok) {
+      const db = await openDb();
+      await new Promise<void>((resolve, reject) => {
+        const tx = db.transaction(STORE, "readwrite");
+        tx.objectStore(STORE).put({ ...blob, files });
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error ?? new Error("cloud refs save failed"));
+      });
+      db.close();
+    }
+  } catch (error) {
+    // Keep the complete local session even when cloud storage is unavailable.
+    console.warn("[VoiceStudio] cloud project sync unavailable", error);
+  }
+}
+
 export async function saveVoiceStudioProject(
   draftId: string,
   session: AudioSession
@@ -260,6 +344,7 @@ export async function saveVoiceStudioProject(
     });
     db.close();
     rememberActiveVoiceStudioDraft(draftId);
+    void syncVoiceStudioProjectToCloud(blob);
     return true;
   } catch (error) {
     console.error("[VoiceStudio] auto-save failed", error);
@@ -270,16 +355,50 @@ export async function saveVoiceStudioProject(
 /** Rebuild an AudioSession from a saved project (non-destructive edit graph). */
 export async function loadVoiceStudioProject(draftId: string): Promise<AudioSession | null> {
   if (!draftId) return null;
+  const local = await readProjectBlob(draftId);
+  if (local) return sessionFromVoiceStudioProject(local);
   try {
-    const db = await openDb();
-    const blob = await new Promise<VoiceStudioProjectBlob | undefined>((resolve, reject) => {
-      const tx = db.transaction(STORE, "readonly");
-      const request = tx.objectStore(STORE).get(draftId);
-      request.onsuccess = () => resolve(request.result as VoiceStudioProjectBlob | undefined);
-      request.onerror = () => reject(request.error ?? new Error("project load failed"));
+    const response = await fetch(`/api/board/drop-drafts?id=${encodeURIComponent(draftId)}`, {
+      cache: "no-store",
+      credentials: "include",
     });
-    db.close();
-    return blob ? sessionFromVoiceStudioProject(blob) : null;
+    if (!response.ok) return null;
+    const body = await response.json() as {
+      drafts?: Array<{ id: string; updated_at?: string; editor_state?: Record<string, unknown> }>;
+    };
+    const row = body.drafts?.find((draft) => draft.id === draftId);
+    const state = row?.editor_state;
+    if (state?.type !== "voice-project" || !state.snapshot || !Array.isArray(state.files)) return null;
+    const remote: VoiceStudioProjectBlob = {
+      draftId,
+      updatedAt: row?.updated_at ? Date.parse(row.updated_at) || Date.now() : Date.now(),
+      snapshot: state.snapshot as SessionEditSnapshot,
+      files: state.files.map((file) => {
+        const item = file as Record<string, unknown>;
+        return {
+          key: String(item.key || ""),
+          name: String(item.name || "voice-clip.wav"),
+          type: String(item.type || "audio/wav"),
+          lastModified: Number(item.lastModified) || undefined,
+          storageBucket: String(item.bucket || "board-media"),
+          storagePath: String(item.storagePath || ""),
+          signedUrl: String(item.signedUrl || ""),
+        };
+      }),
+    };
+    const session = await sessionFromVoiceStudioProject(remote);
+    if (session) {
+      const db = await openDb();
+      await new Promise<void>((resolve, reject) => {
+        const tx = db.transaction(STORE, "readwrite");
+        tx.objectStore(STORE).put(remote);
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error ?? new Error("project cache failed"));
+      });
+      db.close();
+      rememberActiveVoiceStudioDraft(draftId);
+    }
+    return session;
   } catch {
     return null;
   }
