@@ -414,10 +414,10 @@ export default function DropDraftsDrawer({
                 const coverKey = cover?.sourceChipId ? `page:${String(cover.sourceChipId)}` : "cover";
                 const preview = assets.find((asset) => asset.key === coverKey)?.signedUrl ||
                   assets.find((asset) => asset.signedUrl)?.signedUrl;
-                const title = String(draft.state.title || "Dropbook project");
-                return <article className="draftCard documentCard" key={draft.id}>
-                  <div className="documentPreview" aria-label="Dropbook preview" style={{ overflow: "hidden", background: String(draft.state.bookColor || "#0c2630") }}>
-                    {preview ? <img src={preview} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : "📚"}
+                const title = String(draft.state.title || "Dropbook");
+                return <article className="draftCard documentCard dropbookDraftCard" key={draft.id}>
+                  <div className="documentPreview" aria-label={`Cover preview for ${title}`} style={{ overflow: "hidden", minHeight: 136, background: String(draft.state.bookColor || "#0c2630") }}>
+                    {preview ? <img src={preview} alt={`${title} cover`} style={{ width: "100%", height: "100%", objectFit: "contain" }} /> : "📚"}
                   </div>
                   <div className="documentInfo">
                     <div className="draftMeta">
