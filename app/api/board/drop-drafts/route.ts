@@ -116,8 +116,22 @@ export async function POST(request: NextRequest) {
   const id = typeof body?.id === "string" ? body.id.trim().slice(0, 120) : "";
   const v5State = parseDropStudioV5Snapshot(body?.editorState);
   const cloudState = isCloudDraftState(body?.editorState) ? body?.editorState : null;
-  const editorState = v5State || cloudState;
+  let editorState = v5State || cloudState;
   if (!id || !editorState) return json({ ok: false, message: "Draft state is incomplete." }, 400);
+
+  // Keep a user's custom name when autosave refreshes the editable project state.
+  if (cloudState && !("title" in cloudState)) {
+    const { data: prior } = await supabase
+      .from(TABLE)
+      .select("editor_state")
+      .eq("user_id", userId)
+      .eq("id", id)
+      .maybeSingle();
+    const priorState = prior?.editor_state as Record<string, unknown> | undefined;
+    if (typeof priorState?.title === "string") {
+      editorState = { ...cloudState, title: priorState.title };
+    }
+  }
 
   const dropType =
     body?.dropType === "image" || body?.dropType === "video" ||
@@ -158,6 +172,36 @@ export async function POST(request: NextRequest) {
     return json({ ok: false, message: error.message }, 500);
   }
   return json({ ok: true, id });
+}
+
+export async function PATCH(request: NextRequest) {
+  const supabase = supabaseServer();
+  const { data: auth } = await supabase.auth.getUser();
+  const userId = auth.user?.id;
+  if (!userId) return json({ ok: false, message: "Sign in to rename this draft." }, 401);
+
+  const body = (await request.json().catch(() => null)) as { id?: string; title?: string } | null;
+  const id = typeof body?.id === "string" ? body.id.trim().slice(0, 120) : "";
+  const title = typeof body?.title === "string" ? body.title.trim().slice(0, 100) : "";
+  if (!id || !title) return json({ ok: false, message: "Draft id and title are required." }, 400);
+
+  const { data: draft, error: readError } = await supabase
+    .from(TABLE)
+    .select("editor_state")
+    .eq("user_id", userId)
+    .eq("id", id)
+    .maybeSingle();
+  if (readError) return json({ ok: false, message: readError.message }, 500);
+  const state = draft?.editor_state as Record<string, unknown> | undefined;
+  if (!state || state.type === "deleted") return json({ ok: false, message: "Draft was not found." }, 404);
+
+  const { error } = await supabase
+    .from(TABLE)
+    .update({ editor_state: { ...state, title }, updated_at: new Date().toISOString() })
+    .eq("user_id", userId)
+    .eq("id", id);
+  if (error) return json({ ok: false, message: error.message }, 500);
+  return json({ ok: true, id, title });
 }
 
 export async function DELETE(request: NextRequest) {
