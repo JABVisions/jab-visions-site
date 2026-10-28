@@ -1596,7 +1596,7 @@ export default function DropStudioStage({
 
       void (async () => {
         try {
-          if (previousDraftId && sessionHasClips(previousSession)) {
+          if (previousDraftId && previousSession && sessionHasClips(previousSession)) {
             await saveVoiceStudioProject(previousDraftId, previousSession);
           }
 
