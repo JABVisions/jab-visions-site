@@ -434,6 +434,25 @@ export async function listVoiceStudioProjectCards(): Promise<Array<{ draftId: st
   }
 }
 
+/** Upload Voice Booth projects that were saved before account sync existed. */
+export async function syncVoiceStudioProjectsToCloud() {
+  try {
+    const db = await openDb();
+    const rows = await new Promise<VoiceStudioProjectBlob[]>((resolve, reject) => {
+      const tx = db.transaction(STORE, "readonly");
+      const request = tx.objectStore(STORE).getAll();
+      request.onsuccess = () => resolve((request.result ?? []) as VoiceStudioProjectBlob[]);
+      request.onerror = () => reject(request.error ?? new Error("project list failed"));
+    });
+    db.close();
+    for (const project of rows.sort((a, b) => (a.updatedAt || 0) - (b.updatedAt || 0))) {
+      await syncVoiceStudioProjectToCloud(project);
+    }
+  } catch (error) {
+    console.warn("[VoiceStudio] existing project sync unavailable", error);
+  }
+}
+
 export async function deleteVoiceStudioProject(draftId: string): Promise<void> {
   if (!draftId) return;
   try {
