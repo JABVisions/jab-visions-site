@@ -123,7 +123,7 @@ export default function DropDraftsDrawer({
   const [mounted, setMounted] = useState(false);
   const [drafts, setDrafts] = useState<DropDraft[]>([]);
   const [documents, setDocuments] = useState<DescriptDoc[]>([]);
-  const [artDraft, setArtDraft] = useState<ArtDraftMeta | null>(null);
+  const [artDraft, setArtDraft] = useState<ArtDraftMeta | null>(null);\n  const [cloudSyncing, setCloudSyncing] = useState(false);
   const [filter, setFilter] = useState<FilterKey>(initialFilter);
 
   const uniqueDrafts = useMemo(() => {
