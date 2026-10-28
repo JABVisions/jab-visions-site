@@ -508,6 +508,7 @@ export default function DropStudioStage({
   descriptReturnOnBack = false,
   descriptOnReturn,
   destination,
+  dropbookTitle = "",
 }: {
   open: boolean;
   initialFile: File | null;
@@ -535,6 +536,8 @@ export default function DropStudioStage({
   descriptOnReturn?: () => void;
   /** Contextual publish destination. One editor — Feed, Profile, Room, or Conversation. */
   destination?: DropDestination;
+  /** Title used by the host drop and its Dropbook draft. */
+  dropbookTitle?: string;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -564,6 +567,7 @@ export default function DropStudioStage({
   const wasStudioOpenRef = useRef(false);
   const dropbookPageSeqRef = useRef(0);
   const dropbookDraftIdRef = useRef("");
+  const dropbookTitleRef = useRef("");
   const handledDropbookFileRef = useRef<File | null>(null);
   const dropbookCoverFileRef = useRef<File | null>(null);
   const dropbookSaveTimerRef = useRef<number | null>(null);
@@ -1685,6 +1689,12 @@ export default function DropStudioStage({
   // `allowedModes` array literal — e.g. while editing stickers/text.
   const allowedModesKey = allowedModes.join("|");
 
+  useEffect(() => {
+    const nextTitle = dropbookTitle.trim().slice(0, 100);
+    if (nextTitle) dropbookTitleRef.current = nextTitle;
+    else if (!dropbookTitleRef.current) dropbookTitleRef.current = "Dropbook";
+  }, [dropbookTitle]);
+
   // Open/close lifecycle: lock scroll, choose starting phase.
   // Dropbook state resets only on a fresh open — not when the parent re-renders
   // while a Dropbook build session is already in progress.
@@ -1868,6 +1878,7 @@ export default function DropStudioStage({
         dropbookPageFilesRef.current = new Map(dropbookPageFilesRef.current);
         dropbookCoverFileRef.current = coverFile;
         dropbookDraftIdRef.current = `dropbook_edit_${Date.now()}_${Math.random().toString(16).slice(2, 7)}`;
+        dropbookTitleRef.current = dropbookTitle.trim().slice(0, 100) || parsed.title || "Dropbook";
         setDropbookCover({
           id: coverSlide?.id || `dropbook-cover-${Date.now()}`,
           previewUrl: coverSlide?.src,
@@ -1890,7 +1901,7 @@ export default function DropStudioStage({
       }
     })();
     return () => { cancelled = true; };
-  }, [open, initialFile, flashSaveNote]);
+  }, [open, initialFile, flashSaveNote, dropbookTitle]);
 
   // Run the live camera only while in capture phase for camera modes.
   useEffect(() => {
@@ -2405,6 +2416,7 @@ export default function DropStudioStage({
       const documents = Object.fromEntries(dropbookPageDocsRef.current.entries());
       const cover = { ...dropbookCover, previewUrl: undefined };
       void saveDropbookDraft(dropbookDraftIdRef.current, {
+        title: dropbookTitleRef.current || "Dropbook",
         bookColor: dropbookCover.bookColor,
         cover,
         pages,
@@ -2428,6 +2440,7 @@ export default function DropStudioStage({
       return new File([blob], asset?.fileName || key, { type: asset?.mimeType || blob.type });
     };
     dropbookDraftIdRef.current = draft.id;
+    dropbookTitleRef.current = draft.title?.trim().slice(0, 100) || dropbookTitleRef.current || "Dropbook";
     dropbookPageFilesRef.current.clear();
     dropbookPageDocsRef.current.clear();
     const restoredPages = await Promise.all((draft.pages || []).map(async (raw) => {
@@ -2525,6 +2538,7 @@ export default function DropStudioStage({
         format: "jab-dropbook",
         version: 1,
         createdAt: Date.now(),
+        title: dropbookTitleRef.current || "Dropbook",
         bookColor: dropbookCover.bookColor,
         slides,
       };
@@ -2566,6 +2580,7 @@ export default function DropStudioStage({
   }, [dropbookShelfFull, resetCreationSurface, flashSaveNote]);
 
   const beginDropbookSession = useCallback(() => {
+    dropbookTitleRef.current = dropbookTitle.trim().slice(0, 100) || "Dropbook";
     dropbookDraftIdRef.current = `dropbook_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
     dropbookCoverFileRef.current = null;
     setDropbookCreating(false);
@@ -2583,7 +2598,7 @@ export default function DropStudioStage({
     clearDropbookCoverPhoto();
     setDropbookLinkBusy(false);
     setIsDropbookMode(true);
-  }, [clearDropbookCoverPhoto]);
+  }, [clearDropbookCoverPhoto, dropbookTitle]);
 
   const addDropbookLinkPage = useCallback(async () => {
     if (isDropbookMode && dropbookShelfFull) {
