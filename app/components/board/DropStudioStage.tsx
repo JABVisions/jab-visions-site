@@ -136,6 +136,7 @@ import {
   type DropbookManifest,
   type DropbookSlide,
 } from "@/lib/board/dropbookSlides";
+import { saveDropbookDraft, deleteDropbookDraft, type DropbookDraftState } from "@/lib/board/dropbookDrafts";
 import {
   dropbookSlideKindFor,
   resolveDropbookLink,
@@ -560,6 +561,9 @@ export default function DropStudioStage({
   const previewErrorRetriesRef = useRef(0);
   const wasStudioOpenRef = useRef(false);
   const dropbookPageSeqRef = useRef(0);
+  const dropbookDraftIdRef = useRef("");
+  const dropbookCoverFileRef = useRef<File | null>(null);
+  const dropbookSaveTimerRef = useRef<number | null>(null);
   const dropbookPageFilesRef = useRef<Map<string, File>>(new Map());
   const dropbookPageDocsRef = useRef<Map<string, DescriptDoc>>(new Map());
   const editingDropbookPageIdRef = useRef<string | null>(null);
@@ -1753,6 +1757,8 @@ export default function DropStudioStage({
     setDropbookEditingCover(false);
     setDropbookCoverMode("choose");
     setFinishingDropbook(false);
+    dropbookDraftIdRef.current = "";
+    dropbookCoverFileRef.current = null;
     dropbookPageSeqRef.current = 0;
     dropbookPageFilesRef.current.clear();
     dropbookPageDocsRef.current.clear();
@@ -2055,6 +2061,7 @@ export default function DropStudioStage({
     (chipId: string) => {
       const chip = dropbookPages.find((page) => page.id === chipId);
       if (!chip || !dropbookCover) return;
+      dropbookCoverFileRef.current = dropbookPageFilesRef.current.get(chipId) ?? null;
       setDropbookCover((prev) => {
         if (!prev) return prev;
         if (prev.previewUrl?.startsWith("blob:") && prev.previewUrl !== chip.previewUrl) {
@@ -2078,6 +2085,7 @@ export default function DropStudioStage({
 
   const commitCoverBlank = useCallback(
     (file: File) => {
+      dropbookCoverFileRef.current = file;
       const previewUrl = URL.createObjectURL(file);
       setDropbookCover((prev) => {
         if (!prev) return prev;
@@ -2290,6 +2298,69 @@ export default function DropStudioStage({
     [flashSaveNote, onClose, onDescriptComplete]
   );
 
+  useEffect(() => {
+    if (!open || !isDropbookMode || !dropbookDraftIdRef.current || !dropbookCover) return;
+    if (dropbookSaveTimerRef.current) window.clearTimeout(dropbookSaveTimerRef.current);
+    dropbookSaveTimerRef.current = window.setTimeout(() => {
+      const assets = new Map<string, File>();
+      if (dropbookCoverFileRef.current) assets.set("cover", dropbookCoverFileRef.current);
+      const pages = dropbookPages.map((page) => {
+        const file = dropbookPageFilesRef.current.get(page.id);
+        if (file) assets.set(`page:${page.id}`, file);
+        return { ...page, previewUrl: undefined };
+      });
+      const documents = Object.fromEntries(dropbookPageDocsRef.current.entries());
+      const cover = { ...dropbookCover, previewUrl: undefined };
+      void saveDropbookDraft(dropbookDraftIdRef.current, {
+        bookColor: dropbookCover.bookColor,
+        cover,
+        pages,
+        documents,
+      }, assets).catch((error) => console.warn("[Dropbook Drafts] autosave failed", error));
+    }, 1200);
+    return () => {
+      if (dropbookSaveTimerRef.current) window.clearTimeout(dropbookSaveTimerRef.current);
+    };
+  }, [open, isDropbookMode, dropbookCover, dropbookPages]);
+
+  const restoreDropbookDraft = useCallback(async (draft: DropbookDraftState & { id: string }) => {
+    const urls = new Map((draft.files || []).map((asset) => [asset.key, asset.signedUrl || ""]));
+    const readAsset = async (key: string) => {
+      const url = urls.get(key);
+      if (!url) return null;
+      const response = await fetch(url);
+      if (!response.ok) return null;
+      const blob = await response.blob();
+      const asset = draft.files.find((item) => item.key === key);
+      return new File([blob], asset?.fileName || key, { type: asset?.mimeType || blob.type });
+    };
+    dropbookDraftIdRef.current = draft.id;
+    dropbookPageFilesRef.current.clear();
+    dropbookPageDocsRef.current.clear();
+    const restoredPages = await Promise.all((draft.pages || []).map(async (raw) => {
+      const page = raw as unknown as DropbookChip;
+      const file = await readAsset(`page:${page.id}`);
+      if (file) dropbookPageFilesRef.current.set(page.id, file);
+      const doc = (draft.documents?.[page.id] || null) as DescriptDoc | null;
+      if (doc) dropbookPageDocsRef.current.set(page.id, doc);
+      return { ...page, previewUrl: urls.get(`page:${page.id}`) || undefined };
+    }));
+    const cover = draft.cover ? { ...(draft.cover as unknown as DropbookCover) } : createEmptyDropbookCover();
+    const coverFile = await readAsset("cover");
+    if (coverFile) dropbookCoverFileRef.current = coverFile;
+    else if (cover.sourceChipId) dropbookCoverFileRef.current = dropbookPageFilesRef.current.get(cover.sourceChipId) || null;
+    cover.previewUrl = urls.get("cover") || (cover.sourceChipId ? urls.get(`page:${cover.sourceChipId}`) : undefined) || undefined;
+    setDropbookCover(cover);
+    setDropbookPages(restoredPages);
+    setIsDropbookMode(true);
+    setDropbookIntroPhase("workspace");
+    setDropbookCreating(false);
+    setDropbookEditingCover(false);
+    setDropbookCoverBlankColor(cover.bookColor || draft.bookColor || "#000000");
+    setDraftsOpen(false);
+    flashSaveNote("Dropbook draft resumed");
+  }, [flashSaveNote]);
+
   const finishDropbook = useCallback(async () => {
     if (!dropbookCover?.complete) {
       flashSaveNote("Set your Dropbook cover first");
@@ -2369,6 +2440,8 @@ export default function DropStudioStage({
         { type: DROPBOOK_MIME }
       );
       await onComplete(file, "capture", setUploadProgress);
+      await deleteDropbookDraft(dropbookDraftIdRef.current);
+      dropbookDraftIdRef.current = "";
       onClose();
     } catch (error) {
       console.error("[DropStudioStage] Dropbook completion failed", error);
@@ -2399,6 +2472,8 @@ export default function DropStudioStage({
   }, [dropbookShelfFull, resetCreationSurface, flashSaveNote]);
 
   const beginDropbookSession = useCallback(() => {
+    dropbookDraftIdRef.current = `dropbook_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
+    dropbookCoverFileRef.current = null;
     setDropbookCreating(false);
     setDropbookCover(createEmptyDropbookCover());
     setDropbookPages([]);
