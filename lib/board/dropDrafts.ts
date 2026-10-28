@@ -99,6 +99,11 @@ export async function saveDropDraft(file: File, id?: string): Promise<DropDraft 
 
   const draftId = id || `draft_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
   const prior = readDropDrafts().find((d) => d.id === draftId);
+  const sameSource = Boolean(
+    prior?.storagePath &&
+    prior.fileSize === file.size &&
+    prior.lastModified === file.lastModified
+  );
   const draft: DropDraft = {
     id: draftId,
     kind: kindForMime(file.type),
@@ -108,6 +113,10 @@ export async function saveDropDraft(file: File, id?: string): Promise<DropDraft 
     createdAt: Date.now(),
     // Re-saving the same draft bumps its revision count.
     count: (prior?.count ?? 0) + 1,
+    storageBucket: sameSource ? prior?.storageBucket : undefined,
+    storagePath: sameSource ? prior?.storagePath : undefined,
+    fileSize: file.size,
+    lastModified: file.lastModified,
   };
 
   const next = [draft, ...readDropDrafts().filter((d) => d.id !== draft.id)];
