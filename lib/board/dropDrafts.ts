@@ -30,6 +30,7 @@ export type DropDraft = {
   fileSize?: number;
   lastModified?: number;
   remoteUrl?: string;
+  remoteProject?: boolean;
 };
 
 function canUseStorage() {
@@ -199,4 +200,20 @@ export function draftToFile(draft: DropDraft): File | null {
   } catch {
     return null;
   }
+}
+
+export async function draftToFileAsync(draft: DropDraft): Promise<File | null> {
+  if (draft.remoteUrl) {
+    try {
+      const response = await fetch(draft.remoteUrl, { cache: "no-store" });
+      if (!response.ok) return null;
+      const blob = await response.blob();
+      return new File([blob], draft.fileName || "drop-draft", {
+        type: draft.mimeType || blob.type || "application/octet-stream",
+      });
+    } catch {
+      return null;
+    }
+  }
+  return draftToFile(draft);
 }
