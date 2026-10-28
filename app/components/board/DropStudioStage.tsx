@@ -554,6 +554,7 @@ export default function DropStudioStage({
   const [drawOpen, setDrawOpen] = useState(false);
   // Save feature: device download, Drafts, and auto-save on capture.
   const draftIdRef = useRef<string>("");
+  const restoringVoiceDraftRef = useRef(false);
   const previewErrorRetriesRef = useRef(0);
   const wasStudioOpenRef = useRef(false);
   const dropbookPageSeqRef = useRef(0);
@@ -1382,6 +1383,7 @@ export default function DropStudioStage({
 
   const saveToDrafts = useCallback(
     async (auto = false, quiet = false) => {
+      if (restoringVoiceDraftRef.current) return false;
       const session = audioSessionRef.current;
       const file =
         fileRef.current ??
@@ -1434,6 +1436,7 @@ export default function DropStudioStage({
   };
 
   persistVoiceProjectRef.current = () => {
+    if (restoringVoiceDraftRef.current) return;
     const session = audioSessionRef.current;
     if (!sessionHasClips(session)) return;
     if (voiceStudioEditSignature(session) === lastSavedVoiceSignatureRef.current) return;
@@ -1442,6 +1445,7 @@ export default function DropStudioStage({
 
   useEffect(() => {
     const persistVoiceProject = () => {
+      if (restoringVoiceDraftRef.current) return;
       const session = audioSessionRef.current;
       if (!sessionHasClips(session)) return;
       if (voiceStudioEditSignature(session) === lastSavedVoiceSignatureRef.current) return;
@@ -1475,7 +1479,7 @@ export default function DropStudioStage({
   const voiceHasClips = sessionHasClips(audioSession);
 
   useEffect(() => {
-    if (!voiceHasClips) return;
+    if (restoringVoiceDraftRef.current || !voiceHasClips) return;
     if (studioPlaying || recording || adlibRecording) return;
     if (voiceProjectSignature === lastSavedVoiceSignatureRef.current) return;
     const timer = window.setTimeout(() => {
@@ -1558,23 +1562,46 @@ export default function DropStudioStage({
   const openDraft = useCallback(
     (draft: DropDraft) => {
       const file = draftToFile(draft);
-      if (!file) return;
+      if (!file) {
+        flashSaveNote("Couldn't open this draft.");
+        return;
+      }
       const playable = fileWithResolvedContentType(file);
       fileRef.current = playable;
       setMediaKind(draft.kind === "audio" || draft.kind === "video" ? draft.kind : studioMediaKindForFile(playable));
       setMediaContentType(resolveUploadContentType(playable));
       setSource("upload");
-      draftIdRef.current = draft.id; // re-saving updates this same draft
       stopCamera();
       setPhase("edit");
       setDraftsOpen(false);
+
+      if (draft.kind !== "audio") {
+        draftIdRef.current = draft.id;
+        setVoiceStudioOpen(false);
+        syncMediaPreview();
+        return;
+      }
+
+      // Do not let a stale open session or its autosave timer overwrite the
+      // project being restored while IndexedDB is loading it.
+      const previousDraftId = draftIdRef.current;
+      const previousSession = audioSessionRef.current;
+      restoringVoiceDraftRef.current = true;
+      setVoiceStudioOpen(false);
+      setAudioSession(null);
+      audioSessionRef.current = null;
+      setMode("audio");
       syncMediaPreview();
-      if (draft.kind === "audio") {
-        setMode("audio");
-        setStudioDraftId(draft.id);
-        setVoiceStudioOpen(true);
-        void (async () => {
+      flashSaveNote("Opening Voice Booth…");
+
+      void (async () => {
+        try {
+          if (previousDraftId && sessionHasClips(previousSession)) {
+            await saveVoiceStudioProject(previousDraftId, previousSession);
+          }
+
           const project = await loadVoiceStudioProject(draft.id);
+          let session: AudioSession;
           if (project) {
             const projectFile = project.tracks.flatMap((track) => track.clips).find((clip) => clip.file)?.file;
             if (projectFile) {
@@ -1582,27 +1609,38 @@ export default function DropStudioStage({
               fileRef.current = restoredFile;
               setMediaKind("audio");
               setMediaContentType(resolveUploadContentType(restoredFile));
+              syncMediaPreview();
             }
-            setAudioSession(project);
-            setSessionHistory(createSessionHistory());
-            const vocal = project.tracks.find((track) => track.kind === "vocal");
-            const preset = vocal?.mix.preset;
-            if (preset && preset !== "none") setVoicePreset(preset);
-            flashSaveNote("Voice Booth project restored");
-            rememberActiveVoiceStudioDraft(draft.id);
-            lastSavedVoiceSignatureRef.current = voiceStudioEditSignature(project);
-            setVoiceAutoSaveAt(Date.now());
-            return;
+            session = project;
+          } else {
+            session = upsertLaneFromFile(createAudioSession(), "vocal", playable, {
+              mix: { preset: voicePreset },
+            });
           }
-          const session = upsertLaneFromFile(createAudioSession(), "vocal", file, {
-            mix: { preset: voicePreset },
-          });
+
+          draftIdRef.current = draft.id;
+          setStudioDraftId(draft.id);
+          audioSessionRef.current = session;
           setAudioSession(session);
-          setSessionHistory(createSessionHistory());
-        })();
-      } else {
-        setVoiceStudioOpen(false);
-      }
+          const history = createSessionHistory();
+          sessionHistoryRef.current = history;
+          setSessionHistory(history);
+          lastSavedVoiceSignatureRef.current = voiceStudioEditSignature(session);
+          rememberActiveVoiceStudioDraft(draft.id);
+          setVoiceAutoSaveAt(Date.now());
+          setVoiceStudioOpen(true);
+          flashSaveNote(
+            project
+              ? "Voice Booth project restored"
+              : "Audio draft opened in Voice Booth; its saved project session wasn't available."
+          );
+        } catch (error) {
+          console.error("[DropStudioStage] failed to restore audio draft", error);
+          flashSaveNote("Couldn't open this Voice Booth project. It remains saved in Drafts.");
+        } finally {
+          restoringVoiceDraftRef.current = false;
+        }
+      })();
     },
     [flashSaveNote, stopCamera, syncMediaPreview, voicePreset]
   );
