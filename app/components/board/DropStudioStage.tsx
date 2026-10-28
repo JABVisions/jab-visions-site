@@ -1837,7 +1837,7 @@ export default function DropStudioStage({
           }
           const plainText = slide.text || "";
           if (isDescript) {
-            const html = plainText.replace(/[&<>"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[char] || char)).replace(/\n/g, "<br>");
+            const html = plainText.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/\n/g, "<br>");
             dropbookPageDocsRef.current.set(id, {
               id: `dropbook-doc-${id}`,
               title: slide.title || "Untitled page",
