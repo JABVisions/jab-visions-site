@@ -455,10 +455,28 @@ export default function DropDraftsDrawer({
                   ) : null}
                   <span className="draftWhen">Edited {formatWhen(draft.createdAt)}</span>
                 </div>
-                <div className="draftActions">
+                <div
+                  className="draftActions"
+                  style={isAudioDraft ? {
+                    display: "grid",
+                    gridTemplateColumns: "repeat(auto-fit, minmax(112px, 1fr))",
+                    gap: 8,
+                    padding: "12px 0 0",
+                    visibility: "visible",
+                    opacity: 1,
+                  } : undefined}
+                >
                   <button
                     type="button"
                     className="draftBtn open"
+                    style={isAudioDraft ? {
+                      display: "inline-flex",
+                      minHeight: 44,
+                      alignItems: "center",
+                      justifyContent: "center",
+                      visibility: "visible",
+                      opacity: 1,
+                    } : undefined}
                     onClick={() => onOpenDraft?.(draft)}
                   >
                     {isAudioDraft ? "Resume project" : "Open"}
@@ -469,6 +487,17 @@ export default function DropDraftsDrawer({
                   <button
                     type="button"
                     className="draftBtn danger"
+                    style={isAudioDraft ? {
+                      display: "inline-flex",
+                      minHeight: 44,
+                      alignItems: "center",
+                      justifyContent: "center",
+                      visibility: "visible",
+                      opacity: 1,
+                      color: "#ffc4dc",
+                      background: "rgba(75, 18, 40, .55)",
+                      border: "1px solid rgba(255, 146, 190, .65)",
+                    } : undefined}
                     onClick={() => {
                       removeDropDraft(draft.id);
                       setDrafts((current) => current.filter((item) => item.id !== draft.id));
