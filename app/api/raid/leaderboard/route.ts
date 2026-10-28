@@ -75,7 +75,7 @@ export async function POST(request: NextRequest) {
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(submissionId)) {
     return NextResponse.json({ error: 'Invalid run ID.' }, { status: 400 });
   }
-  if (!displayName || !ryderId || !difficulty || !result || waveReached === null || kills === null || damage === null) {
+  if (displayName.length < 2 || !ryderId || !difficulty || !result || waveReached === null || kills === null || damage === null) {
     return NextResponse.json({ error: 'Run details are incomplete.' }, { status: 400 });
   }
 

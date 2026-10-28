@@ -1,7 +1,7 @@
 create table if not exists public.ryderz_raid_leaderboard (
   id uuid primary key default gen_random_uuid(),
   submission_id uuid not null unique,
-  display_name text not null check (char_length(display_name) between 1 and 16),
+  display_name text not null check (char_length(display_name) between 2 and 16),
   ryder_id text not null check (ryder_id in ('rubi', 'leo', 'aaron', 'zoe', 'keven', 'lilly', 'kid-paranormal', 'agent-nyx')),
   difficulty text not null check (difficulty in ('easy', 'normal', 'hard', 'nightmare')),
   result text not null check (result in ('victory', 'defeat')),

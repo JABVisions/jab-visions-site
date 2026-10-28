@@ -1,10 +1,14 @@
 export const LEADERBOARD_NAME_KEY = 'ryderz-raid:leaderboard-name';
 
+export function sanitizeLeaderboardName(value: string) {
+  return value.replace(/[<>\u0000-\u001f\u007f]/g, '').trim().replace(/\s+/g, ' ').slice(0, 16);
+}
+
 export function readLeaderboardName(fallback = 'Ryder Guest') {
   if (typeof window === 'undefined') return fallback;
   try {
-    const saved = window.localStorage.getItem(LEADERBOARD_NAME_KEY)?.trim().replace(/\s+/g, ' ');
-    return saved ? saved.slice(0, 16) : fallback;
+    const saved = sanitizeLeaderboardName(window.localStorage.getItem(LEADERBOARD_NAME_KEY) ?? '');
+    return saved.length >= 2 ? saved : fallback;
   } catch {
     return fallback;
   }

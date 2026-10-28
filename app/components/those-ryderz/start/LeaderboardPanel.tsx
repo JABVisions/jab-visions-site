@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { RYDERZ } from '@/lib/ryderz-raid/config';
-import { LEADERBOARD_NAME_KEY } from '@/lib/ryderz-raid/raid/leaderboard';
+import { LEADERBOARD_NAME_KEY, sanitizeLeaderboardName } from '@/lib/ryderz-raid/raid/leaderboard';
 import styles from './LeaderboardPanel.module.css';
 
 type Difficulty = 'all' | 'easy' | 'normal' | 'hard' | 'nightmare';
@@ -70,10 +70,11 @@ export default function LeaderboardPanel({ onClose }: { onClose: () => void }) {
   }, [difficulty]);
 
   const saveName = (value: string) => {
-    const safe = value.replace(/[<>\u0000-\u001f]/g, '').slice(0, 16);
+    const safe = sanitizeLeaderboardName(value);
     setName(safe);
     try {
-      window.localStorage.setItem(LEADERBOARD_NAME_KEY, safe.trim().replace(/\s+/g, ' '));
+      if (safe.length >= 2) window.localStorage.setItem(LEADERBOARD_NAME_KEY, safe);
+      else window.localStorage.removeItem(LEADERBOARD_NAME_KEY);
     } catch {
       // The score can still be submitted with the default guest name.
     }
@@ -92,7 +93,7 @@ export default function LeaderboardPanel({ onClose }: { onClose: () => void }) {
 
         <label className={styles.nameField}>
           <span>Your public callsign</span>
-          <input value={name} maxLength={16} onChange={(event) => saveName(event.target.value)} placeholder="Ryder Guest" />
+          <input value={name} minLength={2} maxLength={16} onChange={(event) => saveName(event.target.value)} placeholder="Ryder Guest" />
         </label>
 
         <div className={styles.filters} role="group" aria-label="Filter leaderboard by difficulty">
