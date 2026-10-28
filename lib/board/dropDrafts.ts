@@ -1,13 +1,13 @@
 "use client";
 
+import { uploadBoardMediaFile } from "@/lib/board/boardMediaUpload";
+
 // Drop Studio drafts — captured/edited media saved locally so a drop can be
 // finished later. Stored as data URLs (base64) with a size guard so large videos
 // never blow the localStorage quota.
 
 export const DROP_DRAFTS_STORAGE_KEY = "jab_drop_drafts_v1";
 export const DROP_DRAFTS_UPDATED_EVENT = "board:drop-drafts:updated";
-
-import { uploadBoardMediaFile } from "@/lib/board/boardMediaUpload";
 
 // Skip persisting anything whose data URL is larger than this (~6MB) so a single
 // big capture can't evict everything else / throw.
@@ -25,6 +25,11 @@ export type DropDraft = {
   createdAt: number;
   /** How many times this draft has been saved (revision count). */
   count?: number;
+  storageBucket?: string;
+  storagePath?: string;
+  fileSize?: number;
+  lastModified?: number;
+  remoteUrl?: string;
 };
 
 function canUseStorage() {
