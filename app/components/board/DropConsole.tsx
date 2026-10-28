@@ -1527,6 +1527,7 @@ export default function DropConsole({
 
           {mode === "board_drop" ? (
             <BoardDropConsoleFields
+              title={title}
               setTitle={setTitle}
               dropFlavor={dropFlavor}
               setDropFlavor={setDropFlavor}
@@ -2069,6 +2070,7 @@ export default function DropConsole({
 }
 
 function BoardDropConsoleFields({
+  title,
   setTitle,
   dropFlavor,
   setDropFlavor,
@@ -2101,6 +2103,7 @@ function BoardDropConsoleFields({
   setDropVisibility,
   onLinkComplete,
 }: {
+  title: string;
   setTitle: React.Dispatch<React.SetStateAction<string>>;
   dropFlavor: DropFlavor;
   setDropFlavor: (value: DropFlavor) => void;
