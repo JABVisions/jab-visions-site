@@ -129,7 +129,11 @@ export async function saveDropDraft(file: File, id?: string): Promise<DropDraft 
   return draft;
 }
 
+const mediaDraftSyncing = new Set<string>();
+
 async function syncDropDraftMediaToCloud(draft: DropDraft, file: File) {
+  if (mediaDraftSyncing.has(draft.id)) return;
+  mediaDraftSyncing.add(draft.id);
   try {
     let bucket = draft.storageBucket || "board-media";
     let storagePath = draft.storagePath;
@@ -161,6 +165,16 @@ async function syncDropDraftMediaToCloud(draft: DropDraft, file: File) {
     if (!response.ok) console.warn("[Drafts] cloud media sync failed", response.status);
   } catch (error) {
     console.warn("[Drafts] cloud media sync unavailable", error);
+  } finally {
+    mediaDraftSyncing.delete(draft.id);
+  }
+}
+
+/** Upload drafts already present in this browser so they become available elsewhere. */
+export async function syncLocalDropDraftsToCloud() {
+  for (const draft of readDropDrafts()) {
+    const file = draftToFile(draft);
+    if (file) await syncDropDraftMediaToCloud(draft, file);
   }
 }
 
