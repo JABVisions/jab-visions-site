@@ -21,7 +21,6 @@ import {
   readDescriptDocs,
   removeDescriptDoc,
   sanitizeDescriptHtml,
-  saveDescriptDoc,
   syncLocalDescriptDocsToCloud,
   type DescriptDoc,
 } from "@/lib/board/descriptDocs";
@@ -249,14 +248,6 @@ export default function DropDraftsDrawer({
     setRenamingDraftId(null);
   };
 
-  const saveDocumentRename = (doc: DescriptDoc) => {
-    const title = renameValue.trim().slice(0, 100);
-    if (!title) return;
-    const updated = saveDescriptDoc({ ...doc, title });
-    if (updated) setDocuments((current) => current.map((item) => item.id === doc.id ? updated : item));
-    setRenamingDraftId(null);
-  };
-
   useEffect(() => setMounted(true), []);
 
   useEffect(() => {
@@ -475,33 +466,7 @@ export default function DropDraftsDrawer({
                     <span className="draftKind">Writing</span>
                     <span className="draftWhen">Edited {formatWhen(doc.updatedAt)}</span>
                   </div>
-                  {renamingDraftId === doc.id ? (
-                    <div style={{ display: "flex", gap: 6, margin: "8px 12px 0" }}>
-                      <input
-                        autoFocus
-                        aria-label="Draft title"
-                        value={renameValue}
-                        maxLength={100}
-                        onChange={(event) => setRenameValue(event.target.value)}
-                        onKeyDown={(event) => {
-                          if (event.key === "Enter") saveDocumentRename(doc);
-                          if (event.key === "Escape") setRenamingDraftId(null);
-                        }}
-                        style={{ minWidth: 0, flex: 1, height: 36, borderRadius: 8, padding: "0 8px" }}
-                      />
-                      <button type="button" className="draftBtn open" onClick={() => saveDocumentRename(doc)}>Save</button>
-                    </div>
-                  ) : (
-                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                      <h3 className="documentTitle" style={{ flex: 1 }}>{doc.title.trim() || "Untitled draft"}</h3>
-                      <button
-                        type="button"
-                        className="draftBtn"
-                        aria-label="Rename writing draft"
-                        onClick={() => { setRenamingDraftId(doc.id); setRenameValue(doc.title); }}
-                      >Rename</button>
-                    </div>
-                  )}
+                  <h3 className="documentTitle">{doc.title.trim() || "Untitled draft"}</h3>
                   <p className="documentExcerpt">
                     {descriptPlainText(doc.html).trim().slice(0, 150) || "An unfinished Descript document"}
                   </p>
