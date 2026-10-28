@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
+import type { DropbookDraftState } from "@/lib/board/dropbookDrafts";
 import AudioWaveform from "./AudioWaveform";
 import styles from "./DropDraftsDrawer.module.css";
 import { deleteVoiceStudioProject, listVoiceStudioProjectCards, syncVoiceStudioProjectsToCloud } from "@/lib/board/voiceStudioProject";
@@ -35,7 +36,19 @@ import {
   type ArtDraftMeta,
 } from "@/lib/board/artDraftSession";
 
-type FilterKey = "all" | DropDraftKind | "document" | "art-project";
+type FilterKey = "all" | DropDraftKind | "document" | "art-project" | "dropbook";
+type DropbookDraftEntry = { id: string; state: DropbookDraftState; updatedAt: number };
+
+function dropbooksFromCloud(rows: unknown): DropbookDraftEntry[] {
+  if (!Array.isArray(rows)) return [];
+  return rows.flatMap((value) => {
+    if (!value || typeof value !== "object") return [];
+    const row = value as Record<string, unknown>;
+    const state = row.editor_state as DropbookDraftState | null;
+    if (typeof row.id !== "string" || state?.type !== "dropbook-draft") return [];
+    return [{ id: row.id, state, updatedAt: row.updated_at ? Date.parse(String(row.updated_at)) || Date.now() : Date.now() }];
+  });
+}
 
 const VOICE_CARD_PLACEHOLDER =
   "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAESsAACJWAAACABAAZGF0YQAAAAA=";
@@ -154,6 +167,7 @@ const FILTERS: { key: FilterKey; label: string }[] = [
   { key: "video", label: "Videos" },
   { key: "audio", label: "Voice" },
   { key: "document", label: "Writing" },
+  { key: "dropbook", label: "Dropbooks" },
 ];
 
 function formatWhen(ts: number) {
@@ -180,6 +194,7 @@ export default function DropDraftsDrawer({
   onOpenDraft,
   onOpenDescriptDoc,
   onOpenArtDraft,
+  onOpenDropbookDraft,
 }: {
   open: boolean;
   initialFilter?: FilterKey;
@@ -187,10 +202,12 @@ export default function DropDraftsDrawer({
   onOpenDraft?: (draft: DropDraft) => void;
   onOpenDescriptDoc?: (doc: DescriptDoc) => void;
   onOpenArtDraft?: () => void;
+  onOpenDropbookDraft?: (draft: DropbookDraftState & { id: string }) => void;
 }) {
   const [mounted, setMounted] = useState(false);
   const [drafts, setDrafts] = useState<DropDraft[]>([]);
   const [documents, setDocuments] = useState<DescriptDoc[]>([]);
+  const [dropbooks, setDropbooks] = useState<DropbookDraftEntry[]>([]);
   const [artDraft, setArtDraft] = useState<ArtDraftMeta | null>(null);
   const [cloudSyncing, setCloudSyncing] = useState(false);
   const [filter, setFilter] = useState<FilterKey>(initialFilter);
@@ -270,6 +287,7 @@ export default function DropDraftsDrawer({
         if (!cancelled && body?.ok) {
           setDrafts(mergeDrafts(readDropDrafts(), draftsFromCloud(body.drafts)));
           setDocuments(mergeDocuments(readDescriptDocs(), documentsFromCloud(body.drafts)));
+          setDropbooks(dropbooksFromCloud(body.drafts));
           const cloudArt = artDraftFromCloud(body.drafts);
           const localArt = peekArtDraftMeta();
           setArtDraft(localArt ? { ...cloudArt, ...localArt, cloudId: cloudArt?.cloudId, remoteUrl: cloudArt?.remoteUrl } : cloudArt);
@@ -317,17 +335,18 @@ export default function DropDraftsDrawer({
 
   const counts = useMemo(() => {
     const base: Record<FilterKey, number> = {
-      all: uniqueDrafts.length + documents.length,
+      all: uniqueDrafts.length + documents.length + dropbooks.length,
       image: 0,
       video: 0,
       audio: 0,
       document: documents.length,
       "art-project": artDraft ? 1 : 0,
+      dropbook: dropbooks.length,
     };
     base.all += artDraft ? 1 : 0;
     for (const d of uniqueDrafts) base[d.kind] += 1;
     return base;
-  }, [uniqueDrafts, documents, artDraft]);
+  }, [uniqueDrafts, documents, artDraft, dropbooks]);
 
   const entries = useMemo(() => {
     const mediaEntries = (filter === "document" || filter === "art-project" ? [] : filter === "all" ? uniqueDrafts : uniqueDrafts.filter((d) => d.kind === filter))
@@ -337,8 +356,11 @@ export default function DropDraftsDrawer({
     const artEntries = artDraft && (filter === "all" || filter === "art-project")
       ? [{ type: "art" as const, updatedAt: artDraft.updatedAt, artDraft }]
       : [];
-    return [...mediaEntries, ...documentEntries, ...artEntries].sort((a, b) => b.updatedAt - a.updatedAt);
-  }, [artDraft, documents, uniqueDrafts, filter]);
+    const dropbookEntries = filter === "all" || filter === "dropbook"
+      ? dropbooks.map((draft) => ({ type: "dropbook" as const, updatedAt: draft.updatedAt, draft }))
+      : [];
+    return [...mediaEntries, ...documentEntries, ...artEntries, ...dropbookEntries].sort((a, b) => b.updatedAt - a.updatedAt);
+  }, [artDraft, documents, uniqueDrafts, filter, dropbooks]);
 
   if (!mounted || !open) return null;
 
@@ -379,12 +401,72 @@ export default function DropDraftsDrawer({
         <div className="draftsList">
           {entries.length === 0 ? (
             <div className="draftsEmpty">
-              {drafts.length === 0 && documents.length === 0 && !artDraft
-                ? "Your unfinished captures and writing will show up here."
+              {drafts.length === 0 && documents.length === 0 && !artDraft && dropbooks.length === 0
+                ? "Your unfinished captures, writing, and Dropbooks will show up here."
                 : "No drafts of this type."}
             </div>
           ) : (
             entries.map((entry) => {
+              if (entry.type === "dropbook") {
+                const { draft } = entry;
+                const assets = draft.state.files || [];
+                const cover = draft.state.cover as Record<string, unknown> | null;
+                const coverKey = cover?.sourceChipId ? `page:${String(cover.sourceChipId)}` : "cover";
+                const preview = assets.find((asset) => asset.key === coverKey)?.signedUrl ||
+                  assets.find((asset) => asset.signedUrl)?.signedUrl;
+                const title = String(draft.state.title || "Dropbook project");
+                return <article className="draftCard documentCard" key={draft.id}>
+                  <div className="documentPreview" aria-label="Dropbook preview" style={{ overflow: "hidden", background: String(draft.state.bookColor || "#0c2630") }}>
+                    {preview ? <img src={preview} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : "📚"}
+                  </div>
+                  <div className="documentInfo">
+                    <div className="draftMeta">
+                      <span className="draftKind">Dropbook</span>
+                      <span className="draftWhen">Edited {formatWhen(draft.updatedAt)}</span>
+                    </div>
+                    {renamingDraftId === draft.id ? (
+                      <div style={{ display: "flex", gap: 6, margin: "8px 12px 0" }}>
+                        <input autoFocus aria-label="Dropbook draft title" value={renameValue} maxLength={100}
+                          onChange={(event) => setRenameValue(event.target.value)}
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter") {
+                              const title = renameValue.trim().slice(0, 100);
+                              if (!title) return;
+                              void fetch("/api/board/drop-drafts", { method: "PATCH", credentials: "include", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: draft.id, title }) });
+                              setDropbooks((current) => current.map((item) => item.id === draft.id ? { ...item, state: { ...item.state, title } } : item));
+                              setRenamingDraftId(null);
+                            }
+                            if (event.key === "Escape") setRenamingDraftId(null);
+                          }}
+                          style={{ minWidth: 0, flex: 1, height: 36, borderRadius: 8, padding: "0 8px" }} />
+                        <button type="button" className="draftBtn open" onClick={() => {
+                          const title = renameValue.trim().slice(0, 100);
+                          if (!title) return;
+                          void fetch("/api/board/drop-drafts", { method: "PATCH", credentials: "include", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: draft.id, title }) });
+                          setDropbooks((current) => current.map((item) => item.id === draft.id ? { ...item, state: { ...item.state, title } } : item));
+                          setRenamingDraftId(null);
+                        }}>Save</button>
+                      </div>
+                    ) : (
+                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        <h3 className="documentTitle" style={{ flex: 1 }}>{title}</h3>
+                        <button type="button" className="draftBtn" aria-label="Rename Dropbook draft" onClick={() => {
+                          setRenamingDraftId(draft.id);
+                          setRenameValue(title);
+                        }}>Rename</button>
+                      </div>
+                    )}
+                    <p className="documentExcerpt">{(draft.state.pages || []).length} page{(draft.state.pages || []).length === 1 ? "" : "s"} · Pick up where you left off.</p>
+                    <div className="draftActions">
+                      <button type="button" className="draftBtn open" onClick={() => onOpenDropbookDraft?.({ ...draft.state, id: draft.id })}>Resume Dropbook</button>
+                      <button type="button" className="draftBtn danger" onClick={() => {
+                        void fetch(`/api/board/drop-drafts?id=${encodeURIComponent(draft.id)}`, { method: "DELETE", credentials: "include" });
+                        setDropbooks((current) => current.filter((item) => item.id !== draft.id));
+                      }}>Delete</button>
+                    </div>
+                  </div>
+                </article>;
+              }
               if (entry.type === "art") {
                 return <article className="draftCard documentCard" key={entry.artDraft.draftId}>
                   <div className="documentPreview" aria-hidden="true">🎨</div>
