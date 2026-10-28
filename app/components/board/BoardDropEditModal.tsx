@@ -12,6 +12,7 @@ import {
   compactDropCustomizations,
 } from "@/lib/board/dropCustomizations";
 import { upsertPayDrop } from "@/lib/board/paydrops";
+import { DROPBOOK_MIME } from "@/lib/board/dropbookSlides";
 import {
   findLocalDropById,
   getCurrentUserId,
@@ -63,6 +64,9 @@ function studioModesForDropType(type: DropItem["type"]): CaptureMode[] {
  */
 function lockedStudioModes(drop: DropItem | null): CaptureMode[] {
   if (!drop) return ["photo"];
+  if (drop.fromDropbook || drop.mime === DROPBOOK_MIME || /\\.dropbook\\.json$/i.test(drop.fileName || "")) {
+    return ["photo", "video", "audio", "art", "descript"];
+  }
   const base = studioModesForDropType(drop.type);
   switch (drop.mediaKind) {
     case "audio":
@@ -255,6 +259,7 @@ export default function BoardDropEditModal() {
             mediaKind: target.mediaKind ?? provided.mediaKind,
             fileName: target.fileName ?? provided.fileName,
             mime: target.mime ?? provided.mime,
+            fromDropbook: target.fromDropbook ?? provided.fromDropbook,
             fileSize: target.fileSize ?? provided.fileSize,
           };
         }
