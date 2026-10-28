@@ -21,6 +21,7 @@ export type DropDraft = {
   kind: DropDraftKind;
   dataUrl: string;
   fileName: string;
+  title?: string;
   mimeType: string;
   createdAt: number;
   /** How many times this draft has been saved (revision count). */
@@ -113,6 +114,7 @@ export async function saveDropDraft(file: File, id?: string): Promise<DropDraft 
     kind: kindForMime(file.type),
     dataUrl,
     fileName: file.name || "drop-draft",
+    title: prior?.title || file.name || "Untitled draft",
     mimeType: file.type || "application/octet-stream",
     createdAt: Date.now(),
     // Re-saving the same draft bumps its revision count.
@@ -155,6 +157,7 @@ async function syncDropDraftMediaToCloud(draft: DropDraft, file: File) {
           type: "media",
           kind: draft.kind,
           fileName: draft.fileName,
+          title: draft.title || draft.fileName,
           mimeType: draft.mimeType,
           createdAt: draft.createdAt,
           bucket,
@@ -182,6 +185,17 @@ export function removeDropDraft(id: string) {
   writeDropDrafts(readDropDrafts().filter((d) => d.id !== id));
 }
 
+export function renameDropDraft(id: string, title: string): DropDraft | null {
+  const nextTitle = title.trim().slice(0, 100);
+  if (!id || !nextTitle) return null;
+  const drafts = readDropDrafts();
+  const current = drafts.find((draft) => draft.id === id);
+  if (!current) return null;
+  const renamed = { ...current, title: nextTitle, createdAt: Date.now() };
+  writeDropDrafts(drafts.map((draft) => draft.id === id ? renamed : draft));
+  return renamed;
+}
+
 /** Tiny listing card so a Voice Booth song still appears in Drafts when the take is too large for localStorage. */
 const VOICE_STUDIO_CARD_WAV =
   "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAESsAACJWAAACABAAZGF0YQAAAAA=";
@@ -199,6 +213,7 @@ export function ensureVoiceStudioDraftCard(id: string, projectFileName?: string)
     kind: "audio",
     dataUrl: keepPreview ? prior.dataUrl : VOICE_STUDIO_CARD_WAV,
     fileName: projectFileName || prior?.fileName || "Voice Booth project",
+    title: prior?.title || projectFileName || prior?.fileName || "Voice Booth project",
     mimeType: "audio/wav",
     createdAt: Date.now(),
     count: (prior?.count ?? 0) + 1,
@@ -223,6 +238,7 @@ export function restoreVoiceStudioDraftCards(
       kind: "audio",
       dataUrl: VOICE_STUDIO_CARD_WAV,
       fileName: project.fileName || "Voice Booth project",
+      title: project.fileName || "Voice Booth project",
       mimeType: "audio/wav",
       createdAt: project.updatedAt || Date.now(),
       count: 1,
