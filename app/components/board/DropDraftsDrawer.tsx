@@ -28,6 +28,56 @@ import {
 
 type FilterKey = "all" | DropDraftKind | "document" | "art-project";
 
+const VOICE_CARD_PLACEHOLDER =
+  "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAESsAACJWAAACABAAZGF0YQAAAAA=";
+
+function draftsFromCloud(rows: unknown): DropDraft[] {
+  if (!Array.isArray(rows)) return [];
+  const drafts: DropDraft[] = [];
+  for (const value of rows) {
+    if (!value || typeof value !== "object") continue;
+    const row = value as Record<string, unknown>;
+    if (typeof row.id !== "string") continue;
+    const state = row.editor_state as Record<string, unknown> | null;
+    const createdAt = row.updated_at ? Date.parse(String(row.updated_at)) || Date.now() : Date.now();
+    if (state?.type === "media") {
+      const kind = state.kind === "audio" || state.kind === "video" ? state.kind : "image";
+      drafts.push({
+        id: row.id,
+        kind,
+        dataUrl: "",
+        fileName: String(state.fileName || "Untitled capture"),
+        mimeType: String(state.mimeType || "application/octet-stream"),
+        createdAt: Number(state.createdAt) || createdAt,
+        storageBucket: String(state.bucket || "board-media"),
+        storagePath: String(state.storagePath || ""),
+        remoteUrl: String(state.signedUrl || ""),
+      });
+    } else if (state?.type === "voice-project") {
+      const files = Array.isArray(state.files) ? state.files as Array<Record<string, unknown>> : [];
+      drafts.push({
+        id: row.id,
+        kind: "audio",
+        dataUrl: VOICE_CARD_PLACEHOLDER,
+        fileName: String(files.find((file) => file.name)?.name || "Voice Booth project"),
+        mimeType: "audio/wav",
+        createdAt,
+        remoteProject: true,
+      });
+    }
+  }
+  return drafts;
+}
+
+function mergeDrafts(local: DropDraft[], cloud: DropDraft[]): DropDraft[] {
+  const byId = new Map(cloud.map((draft) => [draft.id, draft]));
+  for (const draft of local) {
+    const remote = byId.get(draft.id);
+    byId.set(draft.id, remote ? { ...remote, ...draft, remoteUrl: remote.remoteUrl, remoteProject: remote.remoteProject } : draft);
+  }
+  return [...byId.values()];
+}
+
 const FILTERS: { key: FilterKey; label: string }[] = [
   { key: "all", label: "All" },
   { key: "image", label: "Photos / Art" },
@@ -94,11 +144,18 @@ export default function DropDraftsDrawer({
     if (!open) return;
     let cancelled = false;
     const sync = () => {
-      setDrafts(readDropDrafts());
+      setDrafts((current) => mergeDrafts(readDropDrafts(), current.filter((draft) => draft.remoteUrl || draft.remoteProject)));
       setDocuments(readDescriptDocs());
       setArtDraft(peekArtDraftMeta());
     };
     sync();
+    void fetch("/api/board/drop-drafts", { cache: "no-store", credentials: "include" })
+      .then((response) => response.ok ? response.json() : null)
+      .then((body) => {
+        if (cancelled || !body?.ok) return;
+        setDrafts(mergeDrafts(readDropDrafts(), draftsFromCloud(body.drafts)));
+      })
+      .catch(() => undefined);
     void loadArtDraft().then(() => setArtDraft(peekArtDraftMeta()));
     void listVoiceStudioProjectCards().then((projects) => {
       if (cancelled || !projects.length) return;
@@ -267,17 +324,17 @@ export default function DropDraftsDrawer({
                       <strong>{(draft.fileName === "Voice Studio project" || draft.fileName === "Voice Booth project") ? `Voice Booth project ${draft.id.slice(-6)}` : draft.fileName}</strong>
                       <span>{hasAudioPreview ? "Preview ready" : "Auto-saved project"} · Edited {formatWhen(draft.createdAt)}</span>
                     </div>
-                    {hasAudioPreview ? <audio className="voiceProjectPlayer" src={draft.dataUrl} controls preload="metadata" aria-label={`Preview ${draft.fileName}`} /> : null}
+                    {hasAudioPreview ? <audio className="voiceProjectPlayer" src={draft.remoteUrl || draft.dataUrl} controls preload="metadata" aria-label={`Preview ${draft.fileName}`} /> : null}
                   </div>
                 ) : (
                 <div className="draftPreview">
                   {draft.kind === "audio" ? (
-                    <audio src={draft.dataUrl} controls preload="metadata" />
+                    <audio src={draft.remoteUrl || draft.dataUrl} controls preload="metadata" />
                   ) : draft.kind === "video" ? (
-                    <video src={draft.dataUrl} controls playsInline preload="metadata" />
+                    <video src={draft.remoteUrl || draft.dataUrl} controls playsInline preload="metadata" />
                   ) : (
                     // eslint-disable-next-line @next/next/no-img-element
-                    <img src={draft.dataUrl} alt={draft.fileName} />
+                    <img src={draft.remoteUrl || draft.dataUrl} alt={draft.fileName} />
                   )}
                 </div>
                 )}
@@ -300,14 +357,19 @@ export default function DropDraftsDrawer({
                     {isAudioDraft ? "Resume project" : "Open"}
                   </button>
                   {!isAudioDraft || hasAudioPreview ? (
-                    <a className="draftBtn" href={draft.dataUrl} download={draft.fileName}>Save</a>
+                    <a className="draftBtn" href={draft.remoteUrl || draft.dataUrl} download={draft.fileName}>Save</a>
                   ) : null}
                   <button
                     type="button"
                     className="draftBtn danger"
                     onClick={() => {
                       removeDropDraft(draft.id);
+                      setDrafts((current) => current.filter((item) => item.id !== draft.id));
                       if (isAudioDraft) void deleteVoiceStudioProject(draft.id);
+                      void fetch(`/api/board/drop-drafts?id=${encodeURIComponent(draft.id)}`, {
+                        method: "DELETE",
+                        credentials: "include",
+                      }).catch(() => undefined);
                     }}
                   >
                     Delete
