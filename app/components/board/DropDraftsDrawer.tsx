@@ -31,6 +31,7 @@ import {
   loadArtDraft,
   peekArtDraftMeta,
   restoreArtDraftFromCloud,
+  renameArtDraft,
   syncCurrentArtDraftToCloud,
   type ArtDraftMeta,
 } from "@/lib/board/artDraftSession";
@@ -107,6 +108,7 @@ function artDraftFromCloud(rows: unknown): ArtDraftMeta | null {
     dirty: false,
     createdAt: updatedAt,
     updatedAt,
+    title: String(state.title || "Canvas in progress"),
     paper: Boolean(state.paper),
     recovered: true,
     cloudId: row.id,
@@ -237,6 +239,14 @@ export default function DropDraftsDrawer({
       method: "DELETE",
       credentials: "include",
     }).catch(() => undefined);
+  };
+
+  const saveArtDraftRename = async () => {
+    const title = renameValue.trim().slice(0, 100);
+    if (!title) return;
+    await renameArtDraft(title);
+    setArtDraft((current) => current ? { ...current, title, updatedAt: Date.now() } : current);
+    setRenamingDraftId(null);
   };
 
   const saveDocumentRename = (doc: DescriptDoc) => {
@@ -392,7 +402,36 @@ export default function DropDraftsDrawer({
                       <span className="draftKind">Art Studio</span>
                       <span className="draftWhen">Edited {formatWhen(entry.artDraft.updatedAt)}</span>
                     </div>
-                    <h3 className="documentTitle">Canvas in progress</h3>
+                    {renamingDraftId === entry.artDraft.draftId ? (
+                      <div style={{ display: "flex", gap: 6, margin: "8px 12px 0" }}>
+                        <input
+                          autoFocus
+                          aria-label="Art draft title"
+                          value={renameValue}
+                          maxLength={100}
+                          onChange={(event) => setRenameValue(event.target.value)}
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter") void saveArtDraftRename();
+                            if (event.key === "Escape") setRenamingDraftId(null);
+                          }}
+                          style={{ minWidth: 0, flex: 1, height: 36, borderRadius: 8, padding: "0 8px" }}
+                        />
+                        <button type="button" className="draftBtn open" onClick={() => void saveArtDraftRename()}>Save</button>
+                      </div>
+                    ) : (
+                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        <h3 className="documentTitle" style={{ flex: 1 }}>{entry.artDraft.title || "Canvas in progress"}</h3>
+                        <button
+                          type="button"
+                          className="draftBtn"
+                          aria-label="Rename Art Studio draft"
+                          onClick={() => {
+                            setRenamingDraftId(entry.artDraft.draftId);
+                            setRenameValue(entry.artDraft.title || "Canvas in progress");
+                          }}
+                        >Rename</button>
+                      </div>
+                    )}
                     <p className="documentExcerpt">Pick up where you left off in Art Studio.</p>
                     <div className="draftActions">
                       <button
@@ -406,6 +445,7 @@ export default function DropDraftsDrawer({
                               cloudId: entry.artDraft.cloudId,
                               updatedAt: entry.artDraft.updatedAt,
                               paper: entry.artDraft.paper,
+                              title: entry.artDraft.title,
                             });
                           } catch {
                             return;
