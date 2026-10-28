@@ -426,6 +426,63 @@ export default function DropDraftsDrawer({
                         ))}
                       </div>
                     </div>
+                    <div style={{ display: "flex", gap: 8, width: "100%" }}>
+                      <button
+                        type="button"
+                        onClick={() => { void onOpenDraft?.(draft); }}
+                        style={{
+                          appearance: "none",
+                          display: "inline-flex",
+                          flex: "1 1 0",
+                          minWidth: 0,
+                          minHeight: 46,
+                          alignItems: "center",
+                          justifyContent: "center",
+                          borderRadius: 12,
+                          border: "1px solid rgba(255,255,255,.75)",
+                          background: "linear-gradient(120deg, #fff, #7ee2ff)",
+                          color: "#06121a",
+                          fontSize: 12,
+                          fontWeight: 900,
+                          letterSpacing: ".04em",
+                          cursor: "pointer",
+                          WebkitAppearance: "none",
+                        }}
+                      >
+                        Resume project
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          removeDropDraft(draft.id);
+                          setDrafts((current) => current.filter((item) => item.id !== draft.id));
+                          void deleteVoiceStudioProject(draft.id);
+                          void fetch(`/api/board/drop-drafts?id=${encodeURIComponent(draft.id)}`, {
+                            method: "DELETE",
+                            credentials: "include",
+                          }).catch(() => undefined);
+                        }}
+                        style={{
+                          appearance: "none",
+                          display: "inline-flex",
+                          flex: "0 0 92px",
+                          minHeight: 46,
+                          alignItems: "center",
+                          justifyContent: "center",
+                          borderRadius: 12,
+                          border: "1px solid rgba(255,146,190,.75)",
+                          background: "rgba(75,18,40,.78)",
+                          color: "#ffc4dc",
+                          fontSize: 12,
+                          fontWeight: 900,
+                          letterSpacing: ".04em",
+                          cursor: "pointer",
+                          WebkitAppearance: "none",
+                        }}
+                      >
+                        Delete
+                      </button>
+                    </div>
                     <div className="voiceProjectSummary">
                       <span className="voiceProjectEyebrow">SAVED VOICE PROJECT</span>
                       <strong>{(draft.fileName === "Voice Studio project" || draft.fileName === "Voice Booth project") ? `Voice Booth project ${draft.id.slice(-6)}` : draft.fileName}</strong>
@@ -457,14 +514,7 @@ export default function DropDraftsDrawer({
                 </div>
                 <div
                   className="draftActions"
-                  style={isAudioDraft ? {
-                    display: "grid",
-                    gridTemplateColumns: "repeat(auto-fit, minmax(112px, 1fr))",
-                    gap: 8,
-                    padding: "12px 0 0",
-                    visibility: "visible",
-                    opacity: 1,
-                  } : undefined}
+                  style={isAudioDraft ? { display: "none" } : undefined}
                 >
                   <button
                     type="button"
