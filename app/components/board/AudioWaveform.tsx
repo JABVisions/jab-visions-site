@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { loadVoiceStudioProject } from "@/lib/board/voiceStudioProject";
 
 type AudioWaveformProps = {
@@ -48,8 +48,32 @@ export default function AudioWaveform({
   height = 54,
 }: AudioWaveformProps) {
   const [path, setPath] = useState("");
+  const [inView, setInView] = useState(false);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const gradientId = useId().replace(/:/g, "");
 
   useEffect(() => {
+    const root = rootRef.current;
+    if (!root) return;
+    if (typeof IntersectionObserver === "undefined") {
+      setInView(true);
+      return;
+    }
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          setInView(true);
+          observer.disconnect();
+        }
+      },
+      { rootMargin: "140px" }
+    );
+    observer.observe(root);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    if (!inView) return;
     let cancelled = false;
     let context: AudioContext | null = null;
 
@@ -91,19 +115,19 @@ export default function AudioWaveform({
       cancelled = true;
       if (context && context.state !== "closed") void context.close().catch(() => {});
     };
-  }, [file, src, draftId]);
+  }, [file, src, draftId, inView]);
 
   return (
-    <div className={className} style={{ width: "100%", height, minHeight: height }} aria-label="Audio waveform">
+    <div ref={rootRef} className={className} style={{ width: "100%", height, minHeight: height }} aria-label="Audio waveform">
       <svg viewBox="0 0 320 64" width="100%" height="100%" preserveAspectRatio="none" role="img" aria-hidden="true">
         <defs>
-          <linearGradient id="draft-audio-wave" x1="0" x2="1" y1="0" y2="0">
+          <linearGradient id={gradientId} x1="0" x2="1" y1="0" y2="0">
             <stop offset="0%" stopColor="#62e6dc" />
             <stop offset="52%" stopColor="#a7f8ee" />
             <stop offset="100%" stopColor="#65d9f2" />
           </linearGradient>
         </defs>
-        {path ? <path d={path} fill="url(#draft-audio-wave)" opacity=".9" /> : <path d="M0 32 H320" stroke="#62e6dc" strokeWidth="1.5" opacity=".55" />}
+        {path ? <path d={path} fill={`url(#${gradientId})`} opacity=".9" /> : <path d="M0 32 H320" stroke="#62e6dc" strokeWidth="1.5" opacity=".55" />}
       </svg>
     </div>
   );
