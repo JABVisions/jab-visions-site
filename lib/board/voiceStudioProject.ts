@@ -38,7 +38,11 @@ export function stableVoiceStudioDraftId(sessionId: string, preferredId = ""): s
   const ids = readSessionDraftIds();
   const priorId = ids[sessionId];
   if (priorId) return priorId;
-  const draftId = preferredId || `draft_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
+  const preferredBelongsToAnotherSession = preferredId && Object.entries(ids)
+    .some(([key, value]) => key !== sessionId && value === preferredId);
+  const draftId = !preferredBelongsToAnotherSession && preferredId
+    ? preferredId
+    : `draft_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
   if (sessionId && typeof window !== "undefined") {
     const next = { ...ids, [sessionId]: draftId };
     const entries = Object.entries(next).slice(-100);
