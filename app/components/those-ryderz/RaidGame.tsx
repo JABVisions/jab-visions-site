@@ -1,1060 +1,44 @@
-'use client';
-
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
-import {
-  INTERACT_LABEL,
-  RYDERZ,
-  UPGRADE_ORDER,
-  UPGRADES,
-  upgradeCost,
-  type RyderId,
-  type UpgradeId,
-} from '@/lib/ryderz-raid/config';
-import { arenaSpec } from '@/lib/ryderz-raid/arenas';
-import { CAMERA_MODE_LABEL, type CameraMode, type CameraState } from '@/lib/ryderz-raid/camera';
-import type { HudState, RaidEngine } from '@/lib/ryderz-raid/engine';
-import { GameMode } from '@/lib/ryderz-raid/game-mode';
-import { PlayerStore } from '@/lib/ryderz-raid/multiplayer';
-import { RyderManager } from '@/lib/ryderz-raid/ryder-manager';
-import { SaveManager } from '@/lib/ryderz-raid/saves/saveManager';
-import CameraTuningPanel, { loadStoredCameraConfig } from './CameraTuningPanel';
-import CircularPlayerHUD, { type CircularHudApi } from './hud/CircularPlayerHUD';
-import PlayerPartyHUD, { type PartyHudApi } from './hud/PlayerPartyHUD';
-import PvpVersusHUD from './hud/PvpVersusHUD';
-import LowHealthVignette, { type LowHealthVignetteApi } from './hud/LowHealthVignette';
-import ComboIndicator, { type ComboHudApi } from './hud/ComboIndicator';
-import RaidRadar, { type RadarApi } from './hud/RaidRadar';
-import RaidMap from './hud/RaidMap';
-import StatBoard from './hud/StatBoard';
-import PauseMenu from './menu/PauseMenu';
-import RaidLobby from './modes/RaidLobby';
-import RaidWatch from './modes/RaidWatch';
-import { launchFromSquad, type RaidSquad } from '@/lib/ryderz-raid/raid/squad';
-import { subscribeRaidLive } from '@/lib/ryderz-raid/raid/liveRoom';
-import { leaderboardScore, readLeaderboardName } from '@/lib/ryderz-raid/raid/leaderboard';
-import PvpFlow, { type PvpLineup } from './modes/PvpFlow';
-import SoloCharacterSelect from './modes/SoloCharacterSelect';
-import PremiereCharacterSelect from './premiere/PremiereCharacterSelect';
-import { NEUTRAL_THEME, RYDER_THEME as AURA } from './menu/theme';
-import RyderzStartScreen from './start/RyderzStartScreen';
-import LeaderboardPreview from './start/LeaderboardPreview';
-import styles from './RaidGame.module.css';
-
-export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'page' }) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const engineRef = useRef<RaidEngine | null>(null);
-  const hudRef = useRef<HudState | null>(null);
-  const leaderboardSubmissionRef = useRef<string | null>(null);
-  const circularHud = useRef<CircularHudApi>(null);
-  const foeHud = useRef<CircularHudApi>(null);
-  const vignette = useRef<LowHealthVignetteApi>(null);
-  const comboHud = useRef<ComboHudApi>(null);
-  const radarHud = useRef<RadarApi>(null);
-  const mapHud = useRef<RadarApi>(null);
-  const moveRow = useRef<HTMLDivElement>(null);
-  const partyHud = useRef<PartyHudApi | null>(null);
-  const pvpRef = useRef<PvpLineup | null>(null);
-  const pointsRef = useRef<HTMLElement>(null);
-  const remainingRef = useRef<HTMLElement>(null);
-  const roundRef = useRef<HTMLElement>(null);
-  const moveStatus = useRef<Array<HTMLSpanElement | null>>([null, null, null]);
-  const nubRef = useRef<HTMLDivElement>(null);
-  const lookLast = useRef<{ x: number; y: number; id: number } | null>(null);
-
-  // `selected` is the Ryder the raid booted with (it owns the engine's lifetime);
-  // the Ryder currently in play lives in the RyderManager and can change mid-raid.
-  const [selected, setSelected] = useState<RyderId | null>(null);
-  const [screen, setScreen] = useState<'start' | 'solo-select' | 'pvp' | 'raid-select' | 'raid-lobby' | 'raid-watch' | 'game'>('start');
-  const [raidHost, setRaidHost] = useState<RyderId>('rubi');
-  const raidPlanRef = useRef<ReturnType<typeof launchFromSquad> | null>(null);
-  const netRef = useRef<{ code: string; guestId: string; authority: boolean } | null>(null);
-  const netAt = useRef(0);
-  const [watchNet, setWatchNet] = useState<{ code: string; guestId: string } | null>(null);
-  const [pvpOpponent, setPvpOpponent] = useState<RyderId | null>(null);
-  const [pvpLabel, setPvpLabel] = useState('CPU');
-  const [pvpTwo, setPvpTwo] = useState(false);
-  const manager = useMemo(() => new RyderManager(), []);
-  const playerStore = useMemo(() => new PlayerStore(), []);
-  const saves = useMemo(() => new SaveManager(), []);
-  const subscribe = useCallback((listener: () => void) => manager.subscribe(listener), [manager]);
-  const getSnapshot = useCallback(() => manager.getState(), [manager]);
-  const managerState = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
-  const subscribeSaves = useCallback((listener: () => void) => saves.subscribe(listener), [saves]);
-  const getSaves = useCallback(() => saves.getState(), [saves]);
-  const saveState = useSyncExternalStore(subscribeSaves, getSaves, getSaves);
-  const subscribePlayers = useCallback((listener: () => void) => playerStore.subscribe(listener), [playerStore]);
-  const getPlayers = useCallback(() => playerStore.getState(), [playerStore]);
-  const partyState = useSyncExternalStore(subscribePlayers, getPlayers, getPlayers);
-  const activeRyder = managerState.activeRyder;
-  const [hudMoves, setHudMoves] = useState<HudState['moves']>([]);
-  const [round, setRound] = useState(0);
-  const [phase, setPhase] = useState<HudState['phase'] | 'select'>('select');
-  const [leaderboardNotice, setLeaderboardNotice] = useState('');
-  const [paused, setPaused] = useState(false);
-  const [mapOpen, setMapOpen] = useState(false);
-  const [burnout, setBurnout] = useState(false);
-  const [tideOut, setTideOut] = useState(false);
-  const [banner, setBanner] = useState<HudState['banner']>(null);
-  const [survival, setSurvival] = useState<HudState['survival']>(null);
-  const [reviveName, setReviveName] = useState<string | null>(null);
-  const [downed, setDowned] = useState(false);
-  const [fadedOut, setFadedOut] = useState(false);
-  const reviveLeft = useRef<HTMLElement>(null);
-  const downLeftEl = useRef<HTMLElement>(null);
-  const [statBoard, setStatBoard] = useState<HudState['statBoard']>(null);
-  const [water, setWater] = useState<HudState['water']>(null);
-  const oxygenFill = useRef<HTMLElement>(null);
-  const waterKey = useRef('');
-  const audioRef = useRef<{
-    setIsland(on: boolean): void;
-    setSubmerged(on: boolean): void;
-  } | null>(null);
-  const boardSeconds = useRef<HTMLElement>(null);
-  const boardKey = useRef('');
-  const [nearShop, setNearShop] = useState(false);
-  const [beacon, setBeacon] = useState<HudState['beacon']>(null);
-  const [recovering, setRecovering] = useState(false);
-  const beaconCooldown = useRef<HTMLSpanElement>(null);
-  const beaconTrack = useRef<HTMLElement>(null);
-  const [locked, setLocked] = useState(false);
-  const [moveReady, setMoveReady] = useState([false, false, false]);
-  const [points, setPoints] = useState(0);
-  const [upgrades, setUpgrades] = useState<HudState['upgrades']>({
-    capacity: 0,
-    signal: 0,
-    fists: 0,
-    vitality: 0,
-    siphon: 0,
-  });
-  const [intermissionLeft, setIntermissionLeft] = useState(0);
-  const [coarse, setCoarse] = useState(false);
-  const [camPanel, setCamPanel] = useState(false);
-  const [cameraState, setCameraState] = useState<CameraState>('EXPLORATION');
-  const [cameraMode, setCameraMode] = useState<CameraMode>('standard');
-  const [lockOn, setLockOn] = useState(false);
-  const [difficulty, setDifficulty] = useState('NORMAL');
-  const [heldWeapon, setHeldWeapon] = useState('');
-  const [warzone, setWarzone] = useState('');
-  const [engineReady, setEngineReady] = useState<RaidEngine | null>(null);
-
-  const syncHud = useCallback((next: HudState) => {
-    const prev = hudRef.current;
-    hudRef.current = next;
-    const terminal = next.phase === 'dead' || next.phase === 'victory';
-    const justEnded = terminal && (!prev || (prev.phase !== 'dead' && prev.phase !== 'victory'));
-    const connection = netRef.current;
-    if (
-      justEnded &&
-      next.raid &&
-      manager.getState().gameMode === GameMode.RAID &&
-      !leaderboardSubmissionRef.current &&
-      (!connection || connection.authority)
-    ) {
-      const submissionId = window.crypto.randomUUID();
-      leaderboardSubmissionRef.current = submissionId;
-      const difficulty = next.difficulty.toLowerCase();
-      const ryder = RYDERZ[next.ryderId];
-      setLeaderboardNotice('Sending run to the global boardâ€¦');
-      void fetch('/api/raid/leaderboard', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          submissionId,
-          displayName: readLeaderboardName(ryder?.name ?? 'Ryder Guest'),
-          ryderId: next.ryderId,
-          difficulty,
-          result: next.phase === 'victory' ? 'victory' : 'defeat',
-          waveReached: next.raid.wave,
-          kills: next.raid.defeated,
-          damage: next.raid.dealt,
-        }),
-      })
-        .then(async (response) => {
-          const body = await response.json();
-          if (!response.ok) throw new Error(body.error || 'Could not post this run.');
-          setLeaderboardNotice(`Run posted Â· ${leaderboardScore(next.raid!.wave, next.raid!.defeated, next.raid!.dealt, difficulty).toLocaleString('en-US')} points`);
-        })
-        .catch((error: unknown) => {
-          setLeaderboardNotice(error instanceof Error ? error.message : 'Could not post this run.');
-        });
-    }
-    circularHud.current?.setVitals(
-      next.hp,
-      next.maxHp,
-      next.aura,
-      next.maxAura,
-      next.burnout || next.tideOut,
-      next.resonance,
-      next.powerClock,
-    );
-    vignette.current?.setHealth(next.hp, next.maxHp);
-    comboHud.current?.setCombo(next.combo);
-    radarHud.current?.draw(next.radar);
-    mapHud.current?.draw(next.radar);
-    moveRow.current?.setAttribute('data-link', next.combo.power ? 'true' : 'false');
-    if (next.opponent) {
-      foeHud.current?.setVitals(next.opponent.hp, next.opponent.maxHp, next.opponent.aura, next.opponent.maxAura, next.opponent.aura <= 1);
-    }
-    if (next.party) {
-      for (const member of next.party) {
-        partyHud.current?.setSlot(member.index, member.hp, member.maxHp, member.aura, member.maxAura, member.alive, member.bleed, {
-          yours: member.yours,
-          playable: member.playable,
-        });
-      }
-    } else {
-      partyHud.current?.setSlot(0, next.hp, next.maxHp, next.aura, next.maxAura, next.hp > 0, 1);
-    }
-    if (!prev || prev.ryderId !== next.ryderId) {
-      if (manager.activeRyder !== next.ryderId) manager.setActiveRyder(next.ryderId);
-    }
-    if (reviveLeft.current && next.revive) reviveLeft.current.textContent = `${Math.ceil(next.revive.left)}s`;
-    if (downLeftEl.current && next.down && !next.down.faded) downLeftEl.current.textContent = `${Math.ceil(next.down.left)}s`;
-    if (boardSeconds.current && next.statBoard) boardSeconds.current.textContent = String(Math.ceil(next.statBoard.left));
-    const nextBoardKey = next.statBoard
-      ? `${next.statBoard.round}|${next.statBoard.mvp ? 1 : 0}|${next.statBoard.lines
-          .map(
-            (line) =>
-              `${line.seat}:${line.control}:${line.round.kills}:${line.round.downs}:${Math.round(line.round.damage)}:${line.raid.kills}:${line.raid.downs}:${Math.round(line.raid.damage)}`,
-          )
-          .join(',')}`
-      : '';
-    if (boardKey.current !== nextBoardKey) {
-      boardKey.current = nextBoardKey;
-      setStatBoard(next.statBoard);
-    }
-    if (oxygenFill.current && next.water) oxygenFill.current.style.width = `${Math.round(next.water.oxygen * 100)}%`;
-    const nextWaterKey = next.water ? `${next.water.mode}|${next.water.submerged ? 1 : 0}|${next.water.oxygen < 0.35 ? 1 : 0}` : '';
-    if (waterKey.current !== nextWaterKey) {
-      waterKey.current = nextWaterKey;
-      setWater(next.water);
-    }
-    audioRef.current?.setIsland(Boolean(next.water));
-    audioRef.current?.setSubmerged(Boolean(next.water?.submerged));
-    playerStore.syncLocalVitals({
-      health: next.hp,
-      maxHealth: next.maxHp,
-      aura: next.aura,
-      maxAura: next.maxAura,
-      isAlive: next.hp > 0 && !next.down,
-    });
-    const net = netRef.current;
-    if (net?.authority && engineRef.current && Date.now() - netAt.current > 350) {
-      netAt.current = Date.now();
-      const snapshot = engineRef.current.raidReport();
-      void fetch('/api/raid/room', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ action: 'snapshot', code: net.code, guestId: net.guestId, snapshot }),
-      });
-      void fetch(`/api/raid/room?code=${net.code}&guest=${net.guestId}`)
-        .then((response) => response.json())
-        .then((room) => {
-          const inputs = room.inputs ?? {};
-          for (const playerId of Object.keys(inputs)) {
-            const input = inputs[playerId];
-            if (playerId !== net.guestId) engineRef.current?.setAllyInput(playerId, input.x, input.z);
-          }
-        })
-        .catch(() => {});
-    }
-    if (pointsRef.current) pointsRef.current.textContent = String(next.points);
-    if (next.beacon && beaconCooldown.current) {
-      beaconCooldown.current.textContent = `${Math.ceil(next.beacon.cooldownLeft)}s`;
-    }
-    if (next.beacon && beaconTrack.current) {
-      const frac = next.beacon.cooldownDuration > 0 ? 1 - next.beacon.cooldownLeft / next.beacon.cooldownDuration : 1;
-      beaconTrack.current.style.width = `${Math.round(frac * 100)}%`;
-    }
-    if (remainingRef.current) remainingRef.current.textContent = String(next.remaining);
-    if (roundRef.current) roundRef.current.textContent = String(next.round);
-    next.moves.forEach((move, i) => {
-      const el = moveStatus.current[i];
-      if (!el) return;
-      el.textContent = next.burnout
-        ? 'NO AURA'
-        : next.tideOut
-          ? 'OUT'
-          : move.duration > 0
-            ? 'ON'
-            : move.ready
-              ? `${move.key}  READY`
-              : 'LOW';
-    });
-    if (
-      !prev ||
-      prev.phase !== next.phase ||
-      prev.paused !== next.paused ||
-      prev.mapOpen !== next.mapOpen ||
-      prev.burnout !== next.burnout ||
-      prev.tideOut !== next.tideOut ||
-      prev.nearShop !== next.nearShop ||
-      prev.recovering !== next.recovering ||
-      (prev.beacon?.near ?? false) !== (next.beacon?.near ?? false) ||
-      (prev.beacon?.ready ?? false) !== (next.beacon?.ready ?? false) ||
-      (prev.beacon?.recharging ?? false) !== (next.beacon?.recharging ?? false) ||
-      prev.pointerLocked !== next.pointerLocked ||
-      prev.banner?.title !== next.banner?.title ||
-      prev.moves.length !== next.moves.length ||
-      prev.moves.some((m, i) => m.ready !== next.moves[i]?.ready || m.id !== next.moves[i]?.id)
-    ) {
-      setPhase(next.phase);
-      setHudMoves(next.moves);
-      setPaused(next.paused);
-      setMapOpen(next.mapOpen);
-      setBurnout(next.burnout);
-      setTideOut(next.tideOut);
-      setNearShop(next.nearShop);
-      setBeacon(next.beacon);
-      setRecovering(next.recovering);
-      setLocked(next.pointerLocked);
-      setMoveReady(next.moves.map((m) => m.ready));
-      setBanner(next.banner);
-      setUpgrades(next.upgrades);
-    }
-    if (!prev || prev.cameraState !== next.cameraState) setCameraState(next.cameraState);
-    if (!prev || prev.cameraMode !== next.cameraMode) setCameraMode(next.cameraMode);
-    if (!prev || prev.lockOn !== next.lockOn) setLockOn(next.lockOn);
-    if (!prev || prev.difficulty !== next.difficulty) setDifficulty(next.difficulty);
-    if (!prev || prev.heldWeapon !== next.heldWeapon) setHeldWeapon(next.heldWeapon);
-    if (!prev || prev.warzone !== next.warzone) setWarzone(next.warzone);
-    const upgradeKey = UPGRADE_ORDER.map((id) => next.upgrades[id]).join(',');
-    const prevUpgradeKey = prev ? UPGRADE_ORDER.map((id) => prev.upgrades[id]).join(',') : '';
-    if (upgradeKey !== prevUpgradeKey) setUpgrades(next.upgrades);
-    if (!prev || Math.abs(prev.points - next.points) > 0.5) setPoints(next.points);
-    if (!prev || prev.round !== next.round) setRound(next.round);
-    if (!prev || prev.survival?.round !== next.survival?.round || prev.survival?.phase !== next.survival?.phase || prev.survival?.cap !== next.survival?.cap) {
-      setSurvival(next.survival);
-    }
-    const nextRevive = next.revive?.name ?? null;
-    const nextDown = Boolean(next.down);
-    const nextFaded = Boolean(next.down?.faded);
-    if (!prev || (prev.revive?.name ?? null) !== nextRevive || Boolean(prev.down) !== nextDown || Boolean(prev.down?.faded) !== nextFaded) {
-      setReviveName(nextRevive);
-      setDowned(nextDown);
-      setFadedOut(nextFaded);
-    }
-    if (!prev || Math.abs(prev.intermissionLeft - next.intermissionLeft) > 0.2) {
-      setIntermissionLeft(next.intermissionLeft);
-    }
-  }, [playerStore, manager]);
-
-  useEffect(() => {
-    const mq = window.matchMedia('(pointer: coarse)');
-    const apply = () => setCoarse(mq.matches);
-    apply();
-    mq.addEventListener('change', apply);
-    return () => mq.removeEventListener('change', apply);
-  }, []);
-
-  useEffect(() => {
-    if (!selected || !canvasRef.current) return;
-    let engine: RaidEngine | null = null;
-    let cancelled = false;
-    let audio: {
-      play(id: string): void;
-      resume(): Promise<void>;
-      startCity(): void;
-      setIsland(on: boolean): void;
-      setSubmerged(on: boolean): void;
-      dispose(): void;
-    } | null = null;
-    const canvas = canvasRef.current;
-    const unlockAudio = () => {
-      void audio?.resume();
-    };
-    window.addEventListener('pointerdown', unlockAudio);
-    window.addEventListener('keydown', unlockAudio);
-    (async () => {
-      const [{ RaidEngine }, { createRaidAudio }] = await Promise.all([
-        import('@/lib/ryderz-raid/engine'),
-        import('@/lib/ryderz-raid/raid-audio'),
-      ]);
-      if (cancelled || !canvas) return;
-      engine = new RaidEngine(canvas, syncHud);
-      audio = createRaidAudio();
-      audioRef.current = audio;
-      engine.setSoundHook((id) => audio?.play(id));
-      audio.startCity();
-      void audio.resume();
-      engineRef.current = engine;
-      if (process.env.NODE_ENV !== 'production') {
-        (window as unknown as { __raid?: RaidEngine }).__raid = engine;
-      }
-      manager.attach(engine);
-      engine.setRaidPlan(raidPlanRef.current);
-      engine.setPvpSetup(
-        pvpRef.current
-          ? { opponentId: pvpRef.current.opponent, localTwoPlayer: pvpRef.current.type === 'localTwoPlayer' }
-          : null,
-      );
-      const stored = loadStoredCameraConfig();
-      if (stored) engine.setCameraConfig(stored);
-      setEngineReady(engine);
-      await engine.start(selected, manager.loadoutSpecs(selected));
-      if (cancelled) {
-        engine.dispose();
-        if (engineRef.current === engine) engineRef.current = null;
-      }
-    })();
-    const onResize = () => engineRef.current?.resize();
-    window.addEventListener('resize', onResize);
-    return () => {
-      cancelled = true;
-      window.removeEventListener('resize', onResize);
-      window.removeEventListener('pointerdown', unlockAudio);
-      window.removeEventListener('keydown', unlockAudio);
-      audioRef.current = null;
-      audio?.dispose();
-      if (engine) manager.detach(engine);
-      engine?.dispose();
-      engineRef.current = null;
-      setEngineReady(null);
-    };
-  }, [selected, syncHud, manager]);
-
-  useEffect(() => {
-    const engine = engineRef.current;
-    if (!engine) return;
-    engine.setTuneMode(camPanel);
-    if (camPanel && document.pointerLockElement) document.exitPointerLock();
-    if (!camPanel) engine.setCameraPreviewState(null);
-  }, [camPanel, engineReady]);
-
-  const boot = (id: RyderId) => {
-    manager.setActiveRyder(id);
-    saves.saveGame(manager);
-    setSelected(id);
-    setScreen('game');
-    setPhase('playing');
-    setPaused(false);
-  };
-
-  const playSolo = (id: RyderId) => {
-    pvpRef.current = null;
-    raidPlanRef.current = null;
-    netRef.current = null;
-    setPvpOpponent(null);
-    setPvpTwo(false);
-    manager.setGameMode(GameMode.SOLO);
-    playerStore.configure({ mode: GameMode.SOLO, localRyder: id });
-    boot(id);
-  };
-
-  const playPvp = (lineup: PvpLineup) => {
-    pvpRef.current = lineup;
-    raidPlanRef.current = null;
-    netRef.current = null;
-    setPvpOpponent(lineup.opponent);
-    setPvpLabel(lineup.type === 'localTwoPlayer' ? 'P2' : 'CPU');
-    setPvpTwo(lineup.type === 'localTwoPlayer');
-    manager.setGameMode(GameMode.PVP);
-    playerStore.configure({ mode: GameMode.PVP, localRyder: lineup.player });
-    boot(lineup.player);
-  };
-
-  const playRaid = (squad: RaidSquad, net: { code: string; guestId: string; authority: boolean } | null) => {
-    const ryder = squad.slots[0]?.ryderId;
-    if (!ryder) return;
-    pvpRef.current = null;
-    raidPlanRef.current = launchFromSquad(squad, ryder);
-    netRef.current = net;
-    leaderboardSubmissionRef.current = null;
-    setLeaderboardNotice('');
-    setPvpOpponent(null);
-    setPvpTwo(false);
-    manager.setArena(squad.arenaId);
-    manager.setGameMode(GameMode.RAID);
-    playerStore.configure({
-      mode: GameMode.RAID,
-      localRyder: ryder,
-      seats: squad.slots
-        .filter((slot) => slot.ryderId)
-        .map((slot) => ({
-          index: slot.index,
-          displayName: slot.displayName,
-          ryderId: slot.ryderId,
-          isLocal: slot.index === 0,
-        })),
-    });
-    boot(ryder);
-  };
-
-  const spectateRaid = (net: { code: string; guestId: string }) => {
-    setWatchNet(net);
-    setScreen('raid-watch');
-  };
-
-  useEffect(() => {
-    if (screen !== 'game') return;
-    const net = netRef.current;
-    if (!net?.authority) return;
-    return subscribeRaidLive(net.code, {
-      onIntent: (intent) => {
-        if (intent.intent !== 'input' || intent.guestId === net.guestId) return;
-        engineRef.current?.setAllyInput(intent.guestId, intent.x, intent.z);
-      },
-    });
-  }, [screen, selected]);
-
-  useEffect(() => {
-    if (screen !== 'game') return;
-    const isScrollKey = (e: KeyboardEvent) =>
-      e.code === 'ArrowUp' ||
-      e.code === 'ArrowDown' ||
-      e.code === 'ArrowLeft' ||
-      e.code === 'ArrowRight' ||
-      e.code === 'Space' ||
-      e.code === 'PageUp' ||
-      e.code === 'PageDown' ||
-      e.code === 'Home' ||
-      e.code === 'End';
-    const onKey = (e: KeyboardEvent) => {
-      const tag = (e.target as HTMLElement | null)?.tagName;
-      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
-      if (e.code === 'Backquote') {
-        e.preventDefault();
-        setCamPanel((open) => !open);
-        return;
-      }
-      if (isScrollKey(e)) e.preventDefault();
-    };
-    window.addEventListener('keydown', onKey, { capture: true });
-    return () => window.removeEventListener('keydown', onKey, { capture: true });
-  }, [screen]);
-
-  const changeRyder = () => {
-    engineRef.current?.dispose();
-    engineRef.current = null;
-    setCamPanel(false);
-    setSelected(null);
-    const mode = manager.getState().gameMode;
-    if (mode === GameMode.RAID) setRaidHost(manager.activeRyder);
-    setScreen(mode === GameMode.PVP ? 'pvp' : mode === GameMode.RAID ? 'raid-select' : 'solo-select');
-    setPhase('select');
-    setPaused(false);
-    setBanner(null);
-    setNearShop(false);
-    setBeacon(null);
-    setRecovering(false);
-  };
-
-  const exitToStart = () => {
-    changeRyder();
-    setScreen('start');
-  };
-
-  const resume = () => {
-    engineRef.current?.setPaused(false);
-    engineRef.current?.requestPointerLock();
-  };
-
-  const replay = () => {
-    const engine = engineRef.current;
-    if (!engine) return;
-    if (manager.getState().gameMode === GameMode.RAID) {
-      leaderboardSubmissionRef.current = null;
-      setLeaderboardNotice('');
-    }
-    if (engine.matchLive()) void engine.restartMatch();
-    else if (selected) void engine.start(activeRyder, manager.loadoutSpecs(activeRyder));
-    engine.setPaused(false);
-  };
-
-  const buy = (id: UpgradeId) => {
-    engineRef.current?.buyUpgrade(id);
-  };
-
-  const onStick = (clientX: number, clientY: number, target: HTMLElement) => {
-    const rect = target.getBoundingClientRect();
-    const nx = (clientX - (rect.left + rect.width / 2)) / (rect.width / 2);
-    const ny = (clientY - (rect.top + rect.height / 2)) / (rect.height / 2);
-    const x = Math.max(-1, Math.min(1, nx));
-    const z = Math.max(-1, Math.min(1, ny));
-    engineRef.current?.setMoveAxis(x, z);
-    if (nubRef.current) {
-      nubRef.current.style.transform = `translate(calc(-50% + ${x * 28}px), calc(-50% + ${z * 28}px))`;
-    }
-  };
-
-  const aura = selected ? AURA[activeRyder] : NEUTRAL_THEME;
-  const playing = screen === 'game' && Boolean(selected);
-
-  return (
-    <div
-      className={`${styles.shell} ${layout === 'page' ? styles.page : styles.embed}`}
-      style={{ ['--aura' as string]: aura.aura, ['--aura-soft' as string]: aura.soft }}
-    >
-      <canvas
-        ref={canvasRef}
-        className={`${styles.canvas} ${!playing || paused || phase === 'dead' || phase === 'victory' ? styles.paused : ''}`}
-        onClick={() => {
-          if (playing && phase === 'playing' && !paused) engineRef.current?.requestPointerLock();
-        }}
-      />
-
-      {playing && statBoard && phase === 'report' && (
-        <StatBoard board={statBoard} secondsRef={boardSeconds} onContinue={() => engineRef.current?.continueReport()} />
-      )}
-
-      {playing && partyState.mode === GameMode.RAID && phase !== 'dead' && phase !== 'victory' && phase !== 'report' && (
-        <div className={styles.partyDock}>
-          <PlayerPartyHUD
-            slots={partyState.slots}
-            mode={partyState.mode}
-            apiRef={partyHud}
-            onPlay={(index) => {
-              const engine = engineRef.current;
-              if (!engine) return;
-              const seat = partyState.slots.find((slot) => slot.index === index);
-              const ryder = seat?.player?.selectedRyder;
-              const tookOver = engine.assumeAlly(index, ryder ? manager.loadoutSpecs(ryder) : undefined);
-              if (tookOver) engine.setPaused(false);
-            }}
-          />
-        </div>
-      )}
-
-      {playing && phase !== 'dead' && phase !== 'victory' && phase !== 'report' && (
-        <div className={styles.overlay} aria-hidden="true" data-revive={reviveName ?? ''} data-down={downed ? '1' : '0'}>
-          <LowHealthVignette ref={vignette} />
-          <ComboIndicator ref={comboHud} />
-          <RaidRadar ref={radarHud} onOpen={() => engineRef.current?.toggleMap()} />
-          <div className={styles.topHud}>
-            <div className={`${styles.chips} ${partyState.mode === GameMode.RAID ? styles.chipsBelowParty : ''}`}>
-              {partyState.mode !== GameMode.PVP ? (
-                <>
-                  <div className={styles.chip}>
-                    Round <strong ref={roundRef}>0</strong>
-                  </div>
-                  <div className={styles.chip}>
-                    Hosts <strong ref={remainingRef}>0</strong>
-                  </div>
-                  <div className={styles.chip}>
-                    Signal pts <strong ref={pointsRef}>0</strong>
-                  </div>
-                  <div className={styles.chip}>
-                    Difficulty <strong>{difficulty}</strong>
-                  </div>
-                </>
-              ) : null}
-              <div className={styles.chip}>
-                Mode <strong>{partyState.mode}</strong>
-              </div>
-              <div className={styles.chip}>
-                Arena <strong>{arenaSpec(managerState.arenaId)?.name ?? 'The Block'}</strong>
-              </div>
-              <button
-                type="button"
-                className={`${styles.chip} ${styles.chipBtn} ${camPanel ? styles.chipOn : ''}`}
-                onClick={() => setCamPanel((open) => !open)}
-                title={`Camera tuning Â· ${cameraState}${lockOn ? ' Â· locked' : ''}`}
-              >
-                Cam <strong>{CAMERA_MODE_LABEL[cameraMode]}</strong>
-              </button>
-              {heldWeapon ? (
-                <div className={styles.chip}>
-                  Weapon <strong>{heldWeapon}</strong>
-                </div>
-              ) : null}
-              {warzone ? (
-                <div className={styles.chip}>
-                  Warzone <strong>{warzone}</strong>
-                </div>
-              ) : null}
-            </div>
-          </div>
-
-          {partyState.mode === GameMode.PVP && pvpOpponent ? (
-            <PvpVersusHUD
-              playerId={activeRyder}
-              opponentId={pvpOpponent}
-              opponentLabel={pvpLabel}
-              playerRef={circularHud}
-              opponentRef={foeHud}
-              burnout={burnout}
-            />
-          ) : (
-            <div className={styles.vitalDock}>
-              <CircularPlayerHUD ref={circularHud} ryderId={activeRyder} burnout={burnout} />
-            </div>
-          )}
-
-          {water && water.mode !== 'land' && (
-            <div className={styles.oxygen} data-low={water.oxygen < 0.35 ? '1' : '0'} aria-label="Oxygen">
-              <span>Oxygen</span>
-              <b>
-                <i ref={oxygenFill} style={{ width: `${Math.round(water.oxygen * 100)}%` }} />
-              </b>
-              <em>{water.mode === 'under' ? 'Space to surface' : water.mode === 'wade' ? 'Wading' : 'Ctrl to dive'}</em>
-            </div>
-          )}
-
-          <div className={styles.crosshair} />
-
-          {banner && (
-            <div className={styles.banner}>
-              <span>{banner.sub}</span>
-              <strong>{banner.title}</strong>
-            </div>
-          )}
-
-          {survival && partyState.mode !== GameMode.PVP && phase === 'playing' ? (
-            <aside className={styles.survival} aria-label="Survival round">
-              <small>Survival round</small>
-              <strong>{survival.round}</strong>
-              <em>{survival.phase}</em>
-              <ul>
-                <li>
-                  Maximum enemy tier <b>{survival.maxTier}</b>
-                </li>
-                <li>
-                  Health multiplier <b>{survival.hp.toFixed(2)}Ã—</b>
-                </li>
-                <li>
-                  Damage multiplier <b>{survival.damage.toFixed(2)}Ã—</b>
-                </li>
-                <li>
-                  Active enemy cap <b>{survival.cap}</b>
-                </li>
-              </ul>
-            </aside>
-          ) : null}
-
-          {downed && (
-            <div className={styles.downed}>
-              <strong>{fadedOut ? 'You faded out' : 'You are down'}</strong>
-              {fadedOut ? (
-                <span>The squad is still fighting</span>
-              ) : (
-                <span>
-                  A teammate can pick you up Â· <b ref={downLeftEl} />
-                </span>
-              )}
-            </div>
-          )}
-
-          {burnout && !tideOut && !recovering && !downed && (
-            <div className={styles.burnout}>Aura empty Â· melee only Â· weaker blows</div>
-          )}
-          {tideOut && !downed && <div className={styles.burnout}>Powers out Â· melee only Â· get clear of the hosts</div>}
-
-          {recovering && <div className={styles.recovering} />}
-
-          {reviveName && !downed && (
-            <div className={styles.beacon}>
-              <strong>Pick up {reviveName}</strong>
-              <span>
-                {INTERACT_LABEL} Â· <b ref={reviveLeft} />
-              </span>
-            </div>
-          )}
-
-          {beacon?.near && !recovering && !reviveName && (
-            <div className={`${styles.beacon} ${beacon.ready ? '' : styles.beaconCooling}`}>
-              <strong>Ryder Beacon</strong>
-              <span>Restore Health</span>
-              <span>Restore Power</span>
-              {beacon.ready ? (
-                <em>{INTERACT_LABEL} Â· Activate</em>
-              ) : (
-                <>
-                  <em>
-                    Recharging Â· <span ref={beaconCooldown}>{Math.ceil(beacon.cooldownLeft)}s</span>
-                  </em>
-                  <div className={styles.beaconTrack}>
-                    <i ref={beaconTrack} />
-                  </div>
-                </>
-              )}
-            </div>
-          )}
-
-          <div className={styles.bottomHud}>
-            <p className={styles.hint}>
-              WASD turns and tilts the camera Â· Arrows move with the view Â· Mouse and the right stick look Â· G or middle mouse locks on Â· H cycles targets Â· K cycles Standard, Combat Focus, and Cinematic Â· Shift sprint Â· Space jump Â· X recenters pitch Â· B swaps shoulder Â· Click punches up close Â· Zoe blasts at range Â· Keven throws darts Â· C punch Â· V kick Â· F / RMB melee, F again throws Â· Z dodge Â· Q E R powers Â· {INTERACT_LABEL} uses a rack, chest, secret, beacon, or downed teammate Â· Tap a teammate's bar to play them Â· {pvpTwo ? 'Tab opens the map' : 'Tab or M opens the map'} Â· Esc pause
-              {phase === 'intermission' ? ' Â· Hold the spire to buy strength' : ''}
-              {pvpTwo ? ' Â· P2 IJKL move Â· U punch Â· O kick Â· P melee Â· N dodge Â· M jump' : ''}
-            </p>
-            <div ref={moveRow} className={styles.moveRow}>
-              {hudMoves.map((move, i) => (
-                <div
-                  key={`${move.key}-${move.id}`}
-                  className={`${styles.ability} ${moveReady[i] ? styles.ready : ''}`}
-                >
-                  <span
-                    ref={(node) => {
-                      moveStatus.current[i] = node;
-                    }}
-                  >
-                    {move.key}
-                  </span>
-                  <b>{move.name}</b>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
-
-      <div className={`${styles.touch} ${styles.hiddenTouch}`}>
-        {playing && phase === 'playing' && !paused && (
-          <>
-            <div
-              className={styles.stick}
-              onPointerDown={(e) => {
-                (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-                onStick(e.clientX, e.clientY, e.currentTarget);
-              }}
-              onPointerMove={(e) => {
-                if (e.currentTarget.hasPointerCapture(e.pointerId)) {
-                  onStick(e.clientX, e.clientY, e.currentTarget);
-                }
-              }}
-              onPointerUp={(e) => {
-                engineRef.current?.setMoveAxis(0, 0);
-                if (nubRef.current) nubRef.current.style.transform = 'translate(-50%, -50%)';
-                e.currentTarget.releasePointerCapture(e.pointerId);
-              }}
-            >
-              <div ref={nubRef} className={styles.nub} />
-            </div>
-            <div
-              className={styles.look}
-              onPointerDown={(e) => {
-                (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-                lookLast.current = { x: e.clientX, y: e.clientY, id: e.pointerId };
-              }}
-              onPointerMove={(e) => {
-                const last = lookLast.current;
-                if (!last || last.id !== e.pointerId) return;
-                engineRef.current?.setLookDelta(e.clientX - last.x, e.clientY - last.y);
-                lookLast.current = { x: e.clientX, y: e.clientY, id: e.pointerId };
-              }}
-              onPointerUp={() => {
-                lookLast.current = null;
-              }}
-            />
-            <div className={styles.touchBtns}>
-              <button type="button" onPointerDown={() => engineRef.current?.setFireHeld(true)} onPointerUp={() => engineRef.current?.setFireHeld(false)}>
-                FIRE
-              </button>
-              <button type="button" onClick={() => engineRef.current?.queuePunch()}>
-                PUNCH
-              </button>
-              <button type="button" onClick={() => engineRef.current?.queueKick()}>
-                KICK
-              </button>
-              <button type="button" onClick={() => engineRef.current?.queueMelee()}>
-                MELEE
-              </button>
-              <button type="button" onClick={() => engineRef.current?.queueDodge()}>
-                DODGE
-              </button>
-              <button type="button" onClick={() => engineRef.current?.queueJump()}>
-                JUMP
-              </button>
-              <button type="button" onClick={() => engineRef.current?.queueAbility(0)}>
-                Q
-              </button>
-              <button type="button" onClick={() => engineRef.current?.queueAbility(1)}>
-                E
-              </button>
-              <button type="button" onClick={() => engineRef.current?.queueAbility(2)}>
-                R
-              </button>
-              {(reviveName || (beacon?.near && beacon.ready)) && (
-                <button type="button" onClick={() => engineRef.current?.queueInteract()}>
-                  {reviveName ? 'PICK UP' : 'USE'}
-                </button>
-              )}
-            </div>
-          </>
-        )}
-      </div>
-
-      {playing && partyState.mode !== GameMode.PVP && (nearShop || phase === 'report') && (
-        <aside className={`${styles.shop} ${phase === 'report' ? styles.shopOver : ''}`}>
-          <h3>{phase === 'report' ? 'Raid upgrades' : `Spire Shop Â· ${Math.ceil(intermissionLeft)}s`}</h3>
-          <ul>
-            {UPGRADE_ORDER.map((id) => {
-              const spec = UPGRADES[id];
-              const level = upgrades[id];
-              const cost = upgradeCost(id, level);
-              const maxed = level >= spec.maxLevel;
-              return (
-                <li key={id}>
-                  <button type="button" disabled={maxed || points < cost} onClick={() => buy(id)}>
-                    {spec.name} {maxed ? 'MAX' : `Lv ${level} Â· ${cost}`}
-                    <em>{spec.description}</em>
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
-        </aside>
-      )}
-
-      {playing && camPanel && phase !== 'dead' && (
-        <CameraTuningPanel
-          engine={engineReady}
-          liveState={cameraState}
-          onClose={() => setCamPanel(false)}
-        />
-      )}
-
-      {playing && phase === 'playing' && !paused && !locked && !coarse && !camPanel && !mapOpen && (
-        <div className={styles.lock}>
-          <button type="button" onClick={() => engineRef.current?.requestPointerLock()}>
-            Click to look
-          </button>
-          <p>WASD turns the camera. Arrows move. G locks on. K changes the camera. Esc pauses.</p>
-        </div>
-      )}
-
-      {playing && paused && phase !== 'dead' && phase !== 'victory' && !camPanel && (
-        <PauseMenu
-          manager={manager}
-          engine={engineReady}
-          activeRyder={activeRyder}
-          gameMode={managerState.gameMode}
-          arenaId={managerState.arenaId}
-          round={round}
-          points={points}
-          upgrades={upgrades}
-          layout={layout}
-          onResume={resume}
-          onExit={exitToStart}
-          onOpenMap={() => engineRef.current?.toggleMap()}
-          onOpenCameraTuning={() => setCamPanel(true)}
-        />
-      )}
-
-      {playing && phase === 'dead' && (
-        <div className={styles.modal}>
-          <div className={styles.modalCard}>
-            <p>Those Ryderz: Raid</p>
-            <h3>{partyState.mode === GameMode.RAID ? 'Raid defeat' : 'Signal lost'}</h3>
-            <p>
-              {partyState.mode === GameMode.RAID
-                ? `The squad is down. Enemies defeated ${hudRef.current?.raid?.defeated ?? 0}. Damage dealt ${hudRef.current?.raid?.dealt ?? 0}. Damage taken ${hudRef.current?.raid?.taken ?? 0}.`
-                : 'The mind-controlled block overran you. Come back with more aura discipline â€” powers drain, and fists are all that is left when the signal runs dry.'}
-            </p>
-            {partyState.mode === GameMode.RAID ? <p className={styles.leaderboardNotice} aria-live="polite">{leaderboardNotice}</p> : null}
-            <LeaderboardPreview refreshKey={leaderboardNotice} />
-            <div className={styles.actions}>
-              <button type="button" onClick={replay}>
-                Drop in again
-              </button>
-              <button type="button" onClick={changeRyder}>
-                Change Ryder
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {playing && phase === 'victory' && (
-        <div className={styles.modal}>
-          <div className={styles.modalCard}>
-            <p>{partyState.mode === GameMode.RAID ? 'Those Ryderz Â· Raid' : 'Those Ryderz Â· PvP'}</p>
-            <h3>{partyState.mode === GameMode.RAID ? 'Raid victory' : 'You win'}</h3>
-            <p>
-              {partyState.mode === GameMode.RAID
-                ? `All waves are down. Enemies defeated ${hudRef.current?.raid?.defeated ?? 0}. Damage dealt ${hudRef.current?.raid?.dealt ?? 0}. Damage taken ${hudRef.current?.raid?.taken ?? 0}.`
-                : 'The other Ryder is down. Rematch keeps the same lineup.'}
-            </p>
-            {partyState.mode === GameMode.RAID ? (
-              <ul>
-                {(hudRef.current?.raid?.contributions ?? []).map((row) => (
-                  <li key={row.name}>
-                    {row.name}: {row.dealt}
-                  </li>
-                ))}
-              </ul>
-            ) : null}
-            {partyState.mode === GameMode.RAID ? <p className={styles.leaderboardNotice} aria-live="polite">{leaderboardNotice}</p> : null}
-            <LeaderboardPreview refreshKey={leaderboardNotice} />
-            <div className={styles.actions}>
-              <button type="button" onClick={replay}>
-                Rematch
-              </button>
-              <button type="button" onClick={changeRyder}>
-                Change Ryderz
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {playing && mapOpen && phase !== 'dead' && phase !== 'victory' && phase !== 'report' && (
-        <RaidMap
-          ref={mapHud}
-          place={arenaSpec(managerState.arenaId)?.name ?? 'Raid'}
-          localTwo={pvpTwo}
-          onClose={() => engineRef.current?.toggleMap()}
-        />
-      )}
-
-      {screen === 'start' && (
-        <RyderzStartScreen
-          slots={saveState.slots}
-          activeSlot={saveState.activeSlot}
-          lastMode={managerState.gameMode}
-          onSelectSlot={(index) => saves.selectSlot(index)}
-          onContinue={() => {
-            if (!saves.loadGame(saveState.activeSlot, manager)) return;
-            const loaded = manager.getState();
-            if (loaded.gameMode === GameMode.RAID) setRaidHost(loaded.activeRyder);
-            setScreen(loaded.gameMode === GameMode.PVP ? 'pvp' : loaded.gameMode === GameMode.RAID ? 'raid-lobby' : 'solo-select');
-          }}
-          onNewGame={() => {
-            const empty = saveState.slots.find((slot) => slot.empty);
-            const index = empty?.slotIndex ?? saveState.activeSlot;
-            saves.deleteSave(index);
-            saves.selectSlot(index);
-            manager.resetSession();
-            playerStore.configure({ mode: GameMode.SOLO, localRyder: null });
-          }}
-          onPickMode={(mode) => {
-            manager.setGameMode(mode);
-            setScreen(mode === GameMode.PVP ? 'pvp' : mode === GameMode.RAID ? 'raid-select' : 'solo-select');
-          }}
-        />
-      )}
-
-      {screen === 'solo-select' && (
-        <SoloCharacterSelect initialId={activeRyder} onBack={() => setScreen('start')} onPlay={playSolo} />
-      )}
-
-      {screen === 'pvp' && <PvpFlow onBack={() => setScreen('start')} onFight={playPvp} />}
-
-      {screen === 'raid-select' && (
-        <PremiereCharacterSelect
-          mode="raid"
-          initialId={raidHost}
-          onBack={() => setScreen('start')}
-          onConfirm={(character) => {
-            if (!character.ryderId) return;
-            setRaidHost(character.ryderId);
-            setScreen('raid-lobby');
-          }}
-        />
-      )}
-
-      {screen === 'raid-lobby' && (
-        <RaidLobby key={raidHost} hostId={raidHost} onBack={() => setScreen('raid-select')} onStart={playRaid} onSpectate={spectateRaid} />
-      )}
-      {screen === 'raid-watch' && watchNet && (
-        <RaidWatch
-          code={watchNet.code}
-          guestId={watchNet.guestId}
-          onLeave={() => {
-            setWatchNet(null);
-            setScreen('raid-lobby');
-          }}
-        />
-      )}
-    </div>
-  );
-}
+YªçŠx-®éÜj×¢ëiºÚ+Š§j[h‘éÜ¢éí×tÙ:-jZ.¶›­–)Ş³RwW6R6Æ–VçBs° ¦–×÷'B²W6T6ÆÆ&6²ÂW6TVffV7BÂW6TÖVÖòÂW6U&VbÂW6U7FFRÂW6U7–æ4W‡FW&æÅ7F÷&RÒg&öÒw&V7Bs°¦–×÷'B°¢”åDU$5EôÄ$TÂÀ¢%”DU%¢À¢Uu$DUôõ$DU"À¢Uu$DU2À¢Ww&FT6÷7BÀ¢G—R'–FW$–BÀ¢G—RWw&FT–BÀ§Òg&öÒtöÆ–"÷'–FW'¢×&–Bö6öæf–rs°¦–×÷'B²&Væ7V2Òg&öÒtöÆ–"÷'–FW'¢×&–Bö&Væ2s°¦–×÷'B²4ÔU$ôÔôDUôÄ$TÂÂG—R6ÖW&ÖöFRÂG—R6ÖW&7FFRÒg&öÒtöÆ–"÷'–FW'¢×&–Bö6ÖW&s°¦–×÷'BG—R²‡VE7FFRÂ&–DVæv–æRÒg&öÒtöÆ–"÷'–FW'¢×&–BöVæv–æRs°¦–×÷'B²vÖTÖöFRÒg&öÒtöÆ–"÷'–FW'¢×&–BövÖRÖÖöFRs°¦–×÷'B²Æ–W%7F÷&RÒg&öÒtöÆ–"÷'–FW'¢×&–Bö×VÇF—Æ–W"s°¦–×÷'B²'–FW$ÖævW"Òg&öÒtöÆ–"÷'–FW'¢×&–B÷'–FW"ÖÖævW"s°¦–×÷'B²6fTÖævW"Òg&öÒtöÆ–"÷'–FW'¢×&–B÷6fW2÷6fTÖævW"s°¦–×÷'B6ÖW&GVæ–æuæVÂÂ²ÆöE7F÷&VD6ÖW&6öæf–rÒg&öÒrâô6ÖW&GVæ–æuæVÂs°¦–×÷'B6—&7VÆ%Æ–W$…TBÂ²G—R6—&7VÆ$‡VD’Òg&öÒrâö‡VBô6—&7VÆ%Æ–W$…TBs°¦–×÷'BÆ–W%'G”…TBÂ²G—R'G”‡VD’Òg&öÒrâö‡VBõÆ–W%'G”…TBs°¦–×÷'BgfW'7W4…TBg&öÒrâö‡VBõgfW'7W4…TBs°¦–×÷'BÆ÷t†VÇF…f–væWGFRÂ²G—RÆ÷t†VÇF…f–væWGFT’Òg&öÒrâö‡VBôÆ÷t†VÇF…f–væWGFRs°¦–×÷'B6öÖ&ô–æF–6F÷"Â²G—R6öÖ&ô‡VD’Òg&öÒrâö‡VBô6öÖ&ô–æF–6F÷"s°¦–×÷'B&–E&F"Â²G—R&F$’Òg&öÒrâö‡VBõ&–E&F"s°¦–×÷'B&–DÖg&öÒrâö‡VBõ&–DÖs°¦–×÷'B7FD&ö&Bg&öÒrâö‡VBõ7FD&ö&Bs°¦–×÷'BW6TÖVçRg&öÒrâöÖVçRõW6TÖVçRs°¦–×÷'B&–DÆö&'’g&öÒrâöÖöFW2õ&–DÆö&'’s°¦–×÷'B&–EvF6‚g&öÒrâöÖöFW2õ&–EvF6‚s°¦–×÷'B²ÆVæ6„g&öÕ7VBÂG—R&–E7VBÒg&öÒtöÆ–"÷'–FW'¢×&–B÷&–B÷7VBs°¦–×÷'B²7V'67&–&U&–DÆ—fRÒg&öÒtöÆ–"÷'–FW'¢×&–B÷&–BöÆ—fU&ööÒs°¦–×÷'B²ÆVFW&&ö&E66÷&RÂ&VDÆVFW&&ö&DæÖRÒg&öÒtöÆ–"÷'–FW'¢×&–B÷&–BöÆVFW&&ö&Bs°¦–×÷'BgfÆ÷rÂ²G—RgÆ–æWWÒg&öÒrâöÖöFW2õgfÆ÷rs°¦–×÷'B6öÆô6†&7FW%6VÆV7Bg&öÒrâöÖöFW2õ6öÆô6†&7FW%6VÆV7Bs°¦–×÷'B&VÖ–W&T6†&7FW%6VÆV7Bg&öÒrâ÷&VÖ–W&Rõ&VÖ–W&T6†&7FW%6VÆV7Bs°¦–×÷'B²äUUE$ÅõD„TÔRÂ%”DU%õD„TÔR2U$Òg&öÒrâöÖVçR÷F†VÖRs°¦–×÷'B'–FW'¥7F'E67&VVâg&öÒrâ÷7F'Bõ'–FW'¥7F'E67&VVâs°¦–×÷'BÆVFW&&ö&E&Wf–Wrg&öÒrâ÷7F'BôÆVFW&&ö&E&Wf–Wrs°¦–×÷'B7G–ÆW2g&öÒrâõ&–DvÖRæÖöGVÆRæ772s° ¦W‡÷'BFVfVÇBgVæ7F–öâ&–DvÖR‡²Æ–÷WBÒvVÖ&VBrÓ¢²Æ–÷WCó¢vVÖ&VBrÂwvRrÒ’°¢6öç7B6çf5&VbÒW6U&VcÄ…DÔÄ6çf4VÆVÖVçCâ†çVÆÂ“°¢6öç7BVæv–æU&VbÒW6U&VcÅ&–DVæv–æRÂçVÆÃâ†çVÆÂ“°¢6öç7B‡VE&VbÒW6U&VcÄ‡VE7FFRÂçVÆÃâ†çVÆÂ“°¢6öç7BÆVFW&&ö&E7V&Ö—76–öå&VbÒW6U&VcÇ7G&–ærÂçVÆÃâ†çVÆÂ“°¢6öç7B6—&7VÆ$‡VBÒW6U&VcÄ6—&7VÆ$‡VD“â†çVÆÂ“°¢6öç7BföT‡VBÒW6U&VcÄ6—&7VÆ$‡VD“â†çVÆÂ“°¢6öç7Bf–væWGFRÒW6U&VcÄÆ÷t†VÇF…f–væWGFT“â†çVÆÂ“°¢6öç7B6öÖ&ô‡VBÒW6U&VcÄ6öÖ&ô‡VD“â†çVÆÂ“°¢6öç7B&F$‡VBÒW6U&VcÅ&F$“â†çVÆÂ“°¢6öç7BÖ‡VBÒW6U&VcÅ&F$“â†çVÆÂ“°¢6öç7BÖ÷fU&÷rÒW6U&VcÄ…DÔÄF—dVÆVÖVçCâ†çVÆÂ“°¢6öç7B'G”‡VBÒW6U&VcÅ'G”‡VD’ÂçVÆÃâ†çVÆÂ“°¢6öç7Bg&VbÒW6U&VcÅgÆ–æWWÂçVÆÃâ†çVÆÂ“°¢6öç7Bö–çG5&VbÒW6U&VcÄ…DÔÄVÆVÖVçCâ†çVÆÂ“°¢6öç7B&VÖ–æ–æu&VbÒW6U&VcÄ…DÔÄVÆVÖVçCâ†çVÆÂ“°¢6öç7B&÷VæE&VbÒW6U&VcÄ…DÔÄVÆVÖVçCâ†çVÆÂ“°¢6öç7BÖ÷fU7FGW2ÒW6U&VcÄ'&“Ä…DÔÅ7äVÆVÖVçBÂçVÆÃãâ…¶çVÆÂÂçVÆÂÂçVÆÅÒ“°¢6öç7BçV%&VbÒW6U&VcÄ…DÔÄF—dVÆVÖVçCâ†çVÆÂ“°¢6öç7BÆöö´Æ7BÒW6U&VcÇ²ƒ¢çVÖ&W#²“¢çVÖ&W#²–C¢çVÖ&W"ÒÂçVÆÃâ†çVÆÂ“° ¢òò6VÆV7FVF—2F†R'–FW"F†R&–B&ö÷FVBv—F‚†—B÷vç2F†RVæv–æRw2Æ–fWF–ÖR“°¢òòF†R'–FW"7W'&VçFÇ’–âÆ’Æ—fW2–âF†R'–FW$ÖævW"æB6â6†ævRÖ–B×&–Bà¢6öç7B·6VÆV7FVBÂ6WE6VÆV7FVEÒÒW6U7FFSÅ'–FW$–BÂçVÆÃâ†çVÆÂ“°¢6öç7B·67&VVâÂ6WE67&VVåÒÒW6U7FFSÂw7F'BrÂw6öÆò×6VÆV7BrÂwgrÂw&–B×6VÆV7BrÂw&–BÖÆö&'’rÂw&–B×vF6‚rÂvvÖRsâ‚w7F'Br“°¢6öç7B·&–D†÷7BÂ6WE&–D†÷7EÒÒW6U7FFSÅ'–FW$–Câ‚w'V&’r“°¢6öç7B&–EÆå&VbÒW6U&VcÅ&WGW&åG—SÇG—VöbÆVæ6„g&öÕ7VCâÂçVÆÃâ†çVÆÂ“°¢6öç7BæWE&VbÒW6U&VcÇ²6öFS¢7G&–æs²wVW7D–C¢7G&–æs²WF†÷&—G“¢&ööÆVâÒÂçVÆÃâ†çVÆÂ“°¢6öç7BæWDBÒW6U&Vbƒ“°¢6öç7B·vF6„æWBÂ6WEvF6„æWEÒÒW6U7FFSÇ²6öFS¢7G&–æs²wVW7D–C¢7G&–ærÒÂçVÆÃâ†çVÆÂ“°¢6öç7B·g÷öæVçBÂ6WEg÷öæVçEÒÒW6U7FFSÅ'–FW$–BÂçVÆÃâ†çVÆÂ“°¢6öç7B·gÆ&VÂÂ6WEgÆ&VÅÒÒW6U7FFR‚t5Rr“°¢6öç7B·gGvòÂ6WEgGvõÒÒW6U7FFR†fÇ6R“°¢6öç7BÖævW"ÒW6TÖVÖò‚‚’ÓâæWr'–FW$ÖævW"‚’ÂµÒ“°¢6öç7BÆ–W%7F÷&RÒW6TÖVÖò‚‚’ÓâæWrÆ–W%7F÷&R‚’ÂµÒ“°¢6öç7B6fW2ÒW6TÖVÖò‚‚’ÓâæWr6fTÖævW"‚’ÂµÒ“°¢6öç7B7V'67&–&RÒW6T6ÆÆ&6²‚†Æ—7FVæW#¢‚’Óâfö–B’ÓâÖævW"ç7V'67&–&R†Æ—7FVæW"’Â¶ÖævW%Ò“°¢6öç7BvWE6æ6†÷BÒW6T6ÆÆ&6²‚‚’ÓâÖævW"ævWE7FFR‚’Â¶ÖævW%Ò“°¢6öç7BÖævW%7FFRÒW6U7–æ4W‡FW&æÅ7F÷&R‡7V'67&–&RÂvWE6æ6†÷BÂvWE6æ6†÷B“°¢6öç7B7V'67&–&U6fW2ÒW6T6ÆÆ&6²‚†Æ—7FVæW#¢‚’Óâfö–B’Óâ6fW2ç7V'67&–&R†Æ—7FVæW"’Â·6fW5Ò“°¢6öç7BvWE6fW2ÒW6T6ÆÆ&6²‚‚’Óâ6fW2ævWE7FFR‚’Â·6fW5Ò“°¢6öç7B6fU7FFRÒW6U7–æ4W‡FW&æÅ7F÷&R‡7V'67&–&U6fW2ÂvWE6fW2ÂvWE6fW2“°¢6öç7B7V'67&–&UÆ–W'2ÒW6T6ÆÆ&6²‚†Æ—7FVæW#¢‚’Óâfö–B’ÓâÆ–W%7F÷&Rç7V'67&–&R†Æ—7FVæW"’Â·Æ–W%7F÷&UÒ“°¢6öç7BvWEÆ–W'2ÒW6T6ÆÆ&6²‚‚’ÓâÆ–W%7F÷&RævWE7FFR‚’Â·Æ–W%7F÷&UÒ“°¢6öç7B'G•7FFRÒW6U7–æ4W‡FW&æÅ7F÷&R‡7V'67&–&UÆ–W'2ÂvWEÆ–W'2ÂvWEÆ–W'2“°¢6öç7B7F—fU'–FW"ÒÖævW%7FFRæ7F—fU'–FW#°¢6öç7B¶‡VDÖ÷fW2Â6WD‡VDÖ÷fW5ÒÒW6U7FFSÄ‡VE7FFU²vÖ÷fW2uÓâ…µÒ“°¢6öç7B·&÷VæBÂ6WE&÷VæEÒÒW6U7FFRƒ“°¢6öç7B·†6RÂ6WE†6UÒÒW6U7FFSÄ‡VE7FFU²w†6RuÒÂw6VÆV7Bsâ‚w6VÆV7Br“°¢6öç7B¶ÆVFW&&ö&Dæ÷F–6RÂ6WDÆVFW&&ö&Dæ÷F–6UÒÒW6U7FFR‚rr“°¢6öç7B·W6VBÂ6WEW6VEÒÒW6U7FFR†fÇ6R“°¢6öç7B¶Ö÷VâÂ6WDÖ÷VåÒÒW6U7FFR†fÇ6R“°¢6öç7B¶'W&æ÷WBÂ6WD'W&æ÷WEÒÒW6U7FFR†fÇ6R“°¢6öç7B·F–FT÷WBÂ6WEF–FT÷WEÒÒW6U7FFR†fÇ6R“°¢6öç7B¶&ææW"Â6WD&ææW%ÒÒW6U7FFSÄ‡VE7FFU²v&ææW"uÓâ†çVÆÂ“°¢6öç7B·7W'f—fÂÂ6WE7W'f—fÅÒÒW6U7FFSÄ‡VE7FFU²w7W'f—fÂuÓâ†çVÆÂ“°¢6öç7B·&Wf—fTæÖRÂ6WE&Wf—fTæÖUÒÒW6U7FFSÇ7G&–ærÂçVÆÃâ†çVÆÂ“°¢6öç7B¶F÷væVBÂ6WDF÷væVEÒÒW6U7FFR†fÇ6R“°¢6öç7B¶fFVD÷WBÂ6WDfFVD÷WEÒÒW6U7FFR†fÇ6R“°¢6öç7B&Wf—fTÆVgBÒW6U&VcÄ…DÔÄVÆVÖVçCâ†çVÆÂ“°¢6öç7BF÷väÆVgDVÂÒW6U&VcÄ…DÔÄVÆVÖVçCâ†çVÆÂ“°¢6öç7B·7FD&ö&BÂ6WE7FD&ö&EÒÒW6U7FFSÄ‡VE7FFU²w7FD&ö&BuÓâ†çVÆÂ“°¢6öç7B·vFW"Â6WEvFW%ÒÒW6U7FFSÄ‡VE7FFU²wvFW"uÓâ†çVÆÂ“°¢6öç7B÷‡–vVäf–ÆÂÒW6U&VcÄ…DÔÄVÆVÖVçCâ†çVÆÂ“°¢6öç7BvFW$¶W’ÒW6U&Vb‚rr“°¢6öç7BVF–õ&VbÒW6U&VcÇ°¢6WD—6ÆæB†öã¢&ööÆVâ“¢fö–C°¢6WE7V&ÖW&vVB†öã¢&ööÆVâ“¢fö–C°¢ÒÂçVÆÃâ†çVÆÂ“°¢6öç7B&ö&E6V6öæG2ÒW6U&VcÄ…DÔÄVÆVÖVçCâ†çVÆÂ“°¢6öç7B&ö&D¶W’ÒW6U&Vb‚rr“°¢6öç7B¶æV%6†÷Â6WDæV%6†÷ÒÒW6U7FFR†fÇ6R“°¢6öç7B¶&V6öâÂ6WD&V6öåÒÒW6U7FFSÄ‡VE7FFU²v&V6öâuÓâ†çVÆÂ“°¢6öç7B·&V6÷fW&–ærÂ6WE&V6÷fW&–æuÒÒW6U7FFR†fÇ6R“°¢6öç7B&V6öä6ööÆF÷vâÒW6U&VcÄ…DÔÅ7äVÆVÖVçCâ†çVÆÂ“°¢6öç7B&V6öåG&6²ÒW6U&VcÄ…DÔÄVÆVÖVçCâ†çVÆÂ“°¢6öç7B¶Æö6¶VBÂ6WDÆö6¶VEÒÒW6U7FFR†fÇ6R“°¢6öç7B·6†÷t6ÖW&–ç7G'V7F–öç2Â6WE6†÷t6ÖW&–ç7G'V7F–öç5ÒÒW6U7FFR‡G'VR“°¢6öç7B6ÖW&–ç7G'V7F–öç57F'FVDBÒW6U&VcÆçVÖ&W"ÂçVÆÃâ†çVÆÂ“°¢6öç7B¶Ö÷fU&VG’Â6WDÖ÷fU&VG•ÒÒW6U7FFR…¶fÇ6RÂfÇ6RÂfÇ6UÒ“°¢6öç7B·ö–çG2Â6WEö–çG5ÒÒW6U7FFRƒ“°¢6öç7B·Ww&FW2Â6WEWw&FW5ÒÒW6U7FFSÄ‡VE7FFU²wWw&FW2uÓâ‡°¢66—G“¢À¢6–væÃ¢À¢f—7G3¢À¢f—FÆ—G“¢À¢6—†öã¢À¢Ò“°¢6öç7B¶–çFW&Ö—76–öäÆVgBÂ6WD–çFW&Ö—76–öäÆVgEÒÒW6U7FFRƒ“°¢6öç7B¶6ö'6RÂ6WD6ö'6UÒÒW6U7FFR†fÇ6R“°¢6öç7B¶6ÕæVÂÂ6WD6ÕæVÅÒÒW6U7FFR†fÇ6R“°¢6öç7B¶6ÖW&7FFRÂ6WD6ÖW&7FFUÒÒW6U7FFSÄ6ÖW&7FFSâ‚tU…Äõ$D”ôâr“°¢6öç7B¶6ÖW&ÖöFRÂ6WD6ÖW&ÖöFUÒÒW6U7FFSÄ6ÖW&ÖöFSâ‚w7FæF&Br“°¢6öç7B¶Æö6´öâÂ6WDÆö6´öåÒÒW6U7FFR†fÇ6R“°¢6öç7B¶F–ff–7VÇG’Â6WDF–ff–7VÇG•ÒÒW6U7FFR‚täõ$ÔÂr“°¢6öç7B¶†VÆEvVöâÂ6WD†VÆEvVöåÒÒW6U7FFR‚rr“°¢6öç7B·v'¦öæRÂ6WEv'¦öæUÒÒW6U7FFR‚rr“°¢6öç7B¶Væv–æU&VG’Â6WDVæv–æU&VG•ÒÒW6U7FFSÅ&–DVæv–æRÂçVÆÃâ†çVÆÂ“° ¢6öç7B7–æ4‡VBÒW6T6ÆÆ&6²‚†æW‡C¢‡VE7FFR’Óâ°¢6öç7B&WbÒ‡VE&Vbæ7W'&VçC°¢‡VE&Vbæ7W'&VçBÒæW‡C°¢6öç7BFW&Ö–æÂÒæW‡Bç†6RÓÓÒvFVBrÇÂæW‡Bç†6RÓÓÒwf–7F÷'’s°¢6öç7B§W7DVæFVBÒFW&Ö–æÂbb‚&WbÇÂ‡&Wbç†6RÓÒvFVBrbb&Wbç†6RÓÒwf–7F÷'’r’“°¢6öç7B6öææV7F–öâÒæWE&Vbæ7W'&VçC°¢–b€¢§W7DVæFVBb`¢æW‡Bç&–Bb`¢ÖævW"ævWE7FFR‚’ævÖTÖöFRÓÓÒvÖTÖöFRå$”Bb`¢ÆVFW&&ö&E7V&Ö—76–öå&Vbæ7W'&VçBb`¢‚6öææV7F–öâÇÂ6öææV7F–öâæWF†÷&—G’¢’°¢6öç7B7V&Ö—76–öä–BÒv–æF÷ræ7'—Fòç&æFöÕUT”B‚“°¢ÆVFW&&ö&E7V&Ö—76–öå&Vbæ7W'&VçBÒ7V&Ö—76–öä–C°¢6öç7BF–ff–7VÇG’ÒæW‡BæF–ff–7VÇG’çFôÆ÷vW$66R‚“°¢6öç7B'–FW"Ò%”DU%¥¶æW‡Bç'–FW$–EÓ°¢6WDÆVFW&&ö&Dæ÷F–6R‚u6VæF–ær'VâFòF†RvÆö&Â&ö&N(
+br“°¢fö–BfWF6‚‚rö’÷&–BöÆVFW&&ö&BrÂ°¢ÖWF†öC¢uõ5BrÀ¢†VFW'3¢²v6öçFVçB×G—Rs¢vÆ–6F–öâö§6öârÒÀ¢&öG“¢¥4ôâç7G&–æv–g’‡°¢7V&Ö—76–öä–BÀ¢F—7Æ”æÖS¢&VDÆVFW&&ö&DæÖR‡'–FW#òææÖRóòu'–FW"wVW7Br’À¢'–FW$–C¢æW‡Bç'–FW$–BÀ¢F–ff–7VÇG’À¢&W7VÇC¢æW‡Bç†6RÓÓÒwf–7F÷'’ròwf–7F÷'’r¢vFVfVBrÀ¢vfU&V6†VC¢æW‡Bç&–BçvfRÀ¢¶–ÆÇ3¢æW‡Bç&–BæFVfVFVBÀ¢FÖvS¢æW‡Bç&–BæFVÇBÀ¢Ò’À¢Ò¢çF†Vâ†7–æ2‡&W7öç6R’Óâ°¢6öç7B&öG’Òv—B&W7öç6Ræ§6öâ‚“°¢–b‚&W7öç6Ræö²’F‡&÷ræWrW'&÷"†&öG’æW'&÷"ÇÂt6÷VÆBæ÷B÷7BF†—2'Vââr“°¢6WDÆVFW&&ö&Dæ÷F–6R†'Vâ÷7FVB+rG¶ÆVFW&&ö&E66÷&R†æW‡Bç&–BçvfRÂæW‡Bç&–BæFVfVFVBÂæW‡Bç&–BæFVÇBÂF–ff–7VÇG’’çFôÆö6ÆU7G&–ær‚vVâÕU2r—Òö–çG6“°¢Ò¢æ6F6‚‚†W'&÷#¢Væ¶æ÷vâ’Óâ°¢6WDÆVFW&&ö&Dæ÷F–6R†W'&÷"–ç7Fæ6VöbW'&÷"òW'&÷"æÖW76vR¢t6÷VÆBæ÷B÷7BF†—2'Vââr“°¢Ò“°¢Ğ¢6—&7VÆ$‡VBæ7W'&VçCòç6WEf—FÇ2€¢æW‡Bæ‡À¢æW‡BæÖ„‡À¢æW‡BæW&À¢æW‡BæÖ„W&À¢æW‡Bæ'W&æ÷WBÇÂæW‡BçF–FT÷WBÀ¢æW‡Bç&W6öææ6RÀ¢æW‡Bç÷vW$6Æö6²À¢“°¢f–væWGFRæ7W'&VçCòç6WD†VÇF‚†æW‡Bæ‡ÂæW‡BæÖ„‡“°¢6öÖ&ô‡VBæ7W'&VçCòç6WD6öÖ&ò†æW‡Bæ6öÖ&ò“°¢&F$‡VBæ7W'&VçCòæG&r†æW‡Bç&F"“°¢Ö‡VBæ7W'&VçCòæG&r†æW‡Bç&F"“°¢Ö÷fU&÷ræ7W'&VçCòç6WDGG&–'WFR‚vFFÖÆ–æ²rÂæW‡Bæ6öÖ&òç÷vW"òwG'VRr¢vfÇ6Rr“°¢–b†æW‡Bæ÷öæVçB’°¢föT‡VBæ7W'&VçCòç6WEf—FÇ2†æW‡Bæ÷öæVçBæ‡ÂæW‡Bæ÷öæVçBæÖ„‡ÂæW‡Bæ÷öæVçBæW&ÂæW‡Bæ÷öæVçBæÖ„W&ÂæW‡Bæ÷öæVçBæW&ÃÒ“°¢Ğ¢–b†æW‡Bç'G’’°¢f÷"†6öç7BÖVÖ&W"öbæW‡Bç'G’’°¢'G”‡VBæ7W'&VçCòç6WE6Æ÷B†ÖVÖ&W"æ–æFW‚ÂÖVÖ&W"æ‡ÂÖVÖ&W"æÖ„‡ÂÖVÖ&W"æW&ÂÖVÖ&W"æÖ„W&ÂÖVÖ&W"æÆ—fRÂÖVÖ&W"æ&ÆVVBÂ°¢–÷W'3¢ÖVÖ&W"ç–÷W'2À¢Æ–&ÆS¢ÖVÖ&W"çÆ–&ÆRÀ¢Ò“°¢Ğ¢ÒVÇ6R°¢'G”‡VBæ7W'&VçCòç6WE6Æ÷BƒÂæW‡Bæ‡ÂæW‡BæÖ„‡ÂæW‡BæW&ÂæW‡BæÖ„W&ÂæW‡Bæ‡âÂ“°¢Ğ¢–b‚&WbÇÂ&Wbç'–FW$–BÓÒæW‡Bç'–FW$–B’°¢–b†ÖævW"æ7F—fU'–FW"ÓÒæW‡Bç'–FW$–B’ÖævW"ç6WD7F—fU'–FW"†æW‡Bç'–FW$–B“°¢Ğ¢–b‡&Wf—fTÆVgBæ7W'&VçBbbæW‡Bç&Wf—fR’&Wf—fTÆVgBæ7W'&VçBçFW‡D6öçFVçBÒG´ÖF‚æ6V–Â†æW‡Bç&Wf—fRæÆVgB—×6°¢–b†F÷väÆVgDVÂæ7W'&VçBbbæW‡BæF÷vâbbæW‡BæF÷vâæfFVB’F÷väÆVgDVÂæ7W'&VçBçFW‡D6öçFVçBÒG´ÖF‚æ6V–Â†æW‡BæF÷vâæÆVgB—×6°¢–b†&ö&E6V6öæG2æ7W'&VçBbbæW‡Bç7FD&ö&B’&ö&E6V6öæG2æ7W'&VçBçFW‡D6öçFVçBÒ7G&–ær„ÖF‚æ6V–Â†æW‡Bç7FD&ö&BæÆVgB’“°¢6öç7BæW‡D&ö&D¶W’ÒæW‡Bç7FD&ö&@¢òG¶æW‡Bç7FD&ö&Bç&÷VæG×ÂG¶æW‡Bç7FD&ö&Bæ×gò¢×ÂG¶æW‡Bç7FD&ö&BæÆ–æW0¢æÖ€¢†Æ–æR’Óà¢G¶Æ–æRç6VGÓ¢G¶Æ–æRæ6öçG&öÇÓ¢G¶Æ–æRç&÷VæBæ¶–ÆÇ7Ó¢G¶Æ–æRç&÷VæBæF÷vç7Ó¢G´ÖF‚ç&÷VæB†Æ–æRç&÷VæBæFÖvR—Ó¢G¶Æ–æRç&–Bæ¶–ÆÇ7Ó¢G¶Æ–æRç&–BæF÷vç7Ó¢G´ÖF‚ç&÷VæB†Æ–æRç&–BæFÖvR—ÖÀ¢¢æ¦ö–â‚rÂr—Ö ¢¢rs°¢–b†&ö&D¶W’æ7W'&VçBÓÒæW‡D&ö&D¶W’’°¢&ö&D¶W’æ7W'&VçBÒæW‡D&ö&D¶W“°¢6WE7FD&ö&B†æW‡Bç7FD&ö&B“°¢Ğ¢–b†÷‡–vVäf–ÆÂæ7W'&VçBbbæW‡BçvFW"’÷‡–vVäf–ÆÂæ7W'&VçBç7G–ÆRçv–GF‚ÒG´ÖF‚ç&÷VæB†æW‡BçvFW"æ÷‡–vVâ¢—ÒV°¢6öç7BæW‡EvFW$¶W’ÒæW‡BçvFW"òG¶æW‡BçvFW"æÖöFW×ÂG¶æW‡BçvFW"ç7V&ÖW&vVBò¢×ÂG¶æW‡BçvFW"æ÷‡–vVâÂã3Rò¢Ö¢rs°¢–b‡vFW$¶W’æ7W'&VçBÓÒæW‡EvFW$¶W’’°¢vFW$¶W’æ7W'&VçBÒæW‡EvFW$¶W“°¢6WEvFW"†æW‡BçvFW"“°¢Ğ¢VF–õ&Vbæ7W'&VçCòç6WD—6ÆæB„&ööÆVâ†æW‡BçvFW"’“°¢VF–õ&Vbæ7W'&VçCòç6WE7V&ÖW&vVB„&ööÆVâ†æW‡BçvFW#òç7V&ÖW&vVB’“°¢Æ–W%7F÷&Rç7–æ4Æö6Åf—FÇ2‡°¢†VÇFƒ¢æW‡Bæ‡À¢Ö„†VÇFƒ¢æW‡BæÖ„‡À¢W&¢æW‡BæW&À¢Ö„W&¢æW‡BæÖ„W&À¢—4Æ—fS¢æW‡Bæ‡âbbæW‡BæF÷vâÀ¢Ò“°¢6öç7BæWBÒæWE&Vbæ7W'&VçC°¢–b†æWCòæWF†÷&—G’bbVæv–æU&Vbæ7W'&VçBbbFFRææ÷r‚’ÒæWDBæ7W'&VçBâ3S’°¢æWDBæ7W'&VçBÒFFRææ÷r‚“°¢6öç7B6æ6†÷BÒVæv–æU&Vbæ7W'&VçBç&–E&W÷'B‚“°¢fö–BfWF6‚‚rö’÷&–B÷&ööÒrÂ°¢ÖWF†öC¢uõ5BrÀ¢†VFW'3¢²v6öçFVçB×G—Rs¢vÆ–6F–öâö§6öârÒÀ¢&öG“¢¥4ôâç7G&–æv–g’‡²7F–öã¢w6æ6†÷BrÂ6öFS¢æWBæ6öFRÂwVW7D–C¢æWBæwVW7D–BÂ6æ6†÷BÒ’À¢Ò“°¢fö–BfWF6‚†ö’÷&–B÷&ööÓö6öFSÒG¶æWBæ6öFWÒfwVW7CÒG¶æWBæwVW7D–GÖ¢çF†Vâ‚‡&W7öç6R’Óâ&W7öç6Ræ§6öâ‚’¢çF†Vâ‚‡&ööÒ’Óâ°¢6öç7B–çWG2Ò&ööÒæ–çWG2óò·Ó°¢f÷"†6öç7BÆ–W$–Böbö&¦V7Bæ¶W—2†–çWG2’’°¢6öç7B–çWBÒ–çWG5·Æ–W$–EÓ°¢–b‡Æ–W$–BÓÒæWBæwVW7D–B’Væv–æU&Vbæ7W'&VçCòç6WDÆÇ”–çWB‡Æ–W$–BÂ–çWBç‚Â–çWBç¢“°¢Ğ¢Ò¢æ6F6‚‚‚’Óâ·Ò“°¢Ğ¢–b‡ö–çG5&Vbæ7W'&VçB’ö–çG5&Vbæ7W'&VçBçFW‡D6öçFVçBÒ7G&–ær†æW‡Bçö–çG2“°¢–b†æW‡Bæ&V6öâbb&V6öä6ööÆF÷vâæ7W'&VçB’°¢&V6öä6ööÆF÷vâæ7W'&VçBçFW‡D6öçFVçBÒG´ÖF‚æ6V–Â†æW‡Bæ&V6öâæ6ööÆF÷väÆVgB—×6°¢Ğ¢–b†æW‡Bæ&V6öâbb&V6öåG&6²æ7W'&VçB’°¢6öç7Bg&2ÒæW‡Bæ&V6öâæ6ööÆF÷väGW&F–öââòÒæW‡Bæ&V6öâæ6ööÆF÷väÆVgBòæW‡Bæ&V6öâæ6ööÆF÷väGW&F–öâ¢°¢&V6öåG&6²æ7W'&VçBç7G–ÆRçv–GF‚ÒG´ÖF‚ç&÷VæB†g&2¢—ÒV°¢Ğ¢–b‡&VÖ–æ–æu&Vbæ7W'&VçB’&VÖ–æ–æu&Vbæ7W'&VçBçFW‡D6öçFVçBÒ7G&–ær†æW‡Bç&VÖ–æ–ær“°¢–b‡&÷VæE&Vbæ7W'&VçB’&÷VæE&Vbæ7W'&VçBçFW‡D6öçFVçBÒ7G&–ær†æW‡Bç&÷VæB“°¢æW‡BæÖ÷fW2æf÷$V6‚‚†Ö÷fRÂ’’Óâ°¢6öç7BVÂÒÖ÷fU7FGW2æ7W'&VçE¶•Ó°¢–b‚VÂ’&WGW&ã°¢VÂçFW‡D6öçFVçBÒæW‡Bæ'W&æ÷W@¢òtäòU$p¢¢æW‡BçF–FT÷W@¢òtõUBp¢¢Ö÷fRæGW&F–öââ ¢òtôâp¢¢Ö÷fRç&VG¢òG¶Ö÷fRæ¶W—Ò$TE– ¢¢tÄõrs°¢Ò“°¢–b€¢&WbÇÀ¢&Wbç†6RÓÒæW‡Bç†6RÇÀ¢&WbçW6VBÓÒæW‡BçW6VBÇÀ¢&WbæÖ÷VâÓÒæW‡BæÖ÷VâÇÀ¢&Wbæ'W&æ÷WBÓÒæW‡Bæ'W&æ÷WBÇÀ¢&WbçF–FT÷WBÓÒæW‡BçF–FT÷WBÇÀ¢&WbææV%6†÷ÓÒæW‡BææV%6†÷ÇÀ¢&Wbç&V6÷fW&–ærÓÒæW‡Bç&V6÷fW&–ærÇÀ¢‡&Wbæ&V6öãòææV"óòfÇ6R’ÓÒ†æW‡Bæ&V6öãòææV"óòfÇ6R’ÇÀ¢‡&Wbæ&V6öãòç&VG’óòfÇ6R’ÓÒ†æW‡Bæ&V6öãòç&VG’óòfÇ6R’ÇÀ¢‡&Wbæ&V6öãòç&V6†&v–æróòfÇ6R’ÓÒ†æW‡Bæ&V6öãòç&V6†&v–æróòfÇ6R’ÇÀ¢&Wbçö–çFW$Æö6¶VBÓÒæW‡Bçö–çFW$Æö6¶VBÇÀ¢&Wbæ&ææW#òçF—FÆRÓÒæW‡Bæ&ææW#òçF—FÆRÇÀ¢&WbæÖ÷fW2æÆVæwF‚ÓÒæW‡BæÖ÷fW2æÆVæwF‚ÇÀ¢&WbæÖ÷fW2ç6öÖR‚†ÒÂ’’ÓâÒç&VG’ÓÒæW‡BæÖ÷fW5¶•Óòç&VG’ÇÂÒæ–BÓÒæW‡BæÖ÷fW5¶•Óòæ–B¢’°¢6WE†6R†æW‡Bç†6R“°¢6WD‡VDÖ÷fW2†æW‡BæÖ÷fW2“°¢6WEW6VB†æW‡BçW6VB“°¢6WDÖ÷Vâ†æW‡BæÖ÷Vâ“°¢6WD'W&æ÷WB†æW‡Bæ'W&æ÷WB“°¢6WEF–FT÷WB†æW‡BçF–FT÷WB“°¢6WDæV%6†÷†æW‡BææV%6†÷“°¢6WD&V6öâ†æW‡Bæ&V6öâ“°¢6WE&V6÷fW&–ær†æW‡Bç&V6÷fW&–ær“°¢6WDÆö6¶VB†æW‡Bçö–çFW$Æö6¶VB“°¢6WDÖ÷fU&VG’†æW‡BæÖ÷fW2æÖ‚†Ò’ÓâÒç&VG’’“°¢6WD&ææW"†æW‡Bæ&ææW"“°¢6WEWw&FW2†æW‡BçWw&FW2“°¢Ğ¢–b‚&WbÇÂ&Wbæ6ÖW&7FFRÓÒæW‡Bæ6ÖW&7FFR’6WD6ÖW&7FFR†æW‡Bæ6ÖW&7FFR“°¢–b‚&WbÇÂ&Wbæ6ÖW&ÖöFRÓÒæW‡Bæ6ÖW&ÖöFR’6WD6ÖW&ÖöFR†æW‡Bæ6ÖW&ÖöFR“°¢–b‚&WbÇÂ&WbæÆö6´öâÓÒæW‡BæÆö6´öâ’6WDÆö6´öâ†æW‡BæÆö6´öâ“°¢–b‚&WbÇÂ&WbæF–ff–7VÇG’ÓÒæW‡BæF–ff–7VÇG’’6WDF–ff–7VÇG’†æW‡BæF–ff–7VÇG’“°¢–b‚&WbÇÂ&Wbæ†VÆEvVöâÓÒæW‡Bæ†VÆEvVöâ’6WD†VÆEvVöâ†æW‡Bæ†VÆEvVöâ“°¢–b‚&WbÇÂ&Wbçv'¦öæRÓÒæW‡Bçv'¦öæR’6WEv'¦öæR†æW‡Bçv'¦öæR“°¢6öç7BWw&FT¶W’ÒUu$DUôõ$DU"æÖ‚†–B’ÓâæW‡BçWw&FW5¶–EÒ’æ¦ö–â‚rÂr“°¢6öç7B&WeWw&FT¶W’Ò&WbòUu$DUôõ$DU"æÖ‚†–B’Óâ&WbçWw&FW5¶–EÒ’æ¦ö–â‚rÂr’¢rs°¢–b‡Ww&FT¶W’ÓÒ&WeWw&FT¶W’’6WEWw&FW2†æW‡BçWw&FW2“°¢–b‚&WbÇÂÖF‚æ'2‡&Wbçö–çG2ÒæW‡Bçö–çG2’âãR’6WEö–çG2†æW‡Bçö–çG2“°¢–b‚&WbÇÂ&Wbç&÷VæBÓÒæW‡Bç&÷VæB’6WE&÷VæB†æW‡Bç&÷VæB“°¢–b‚&WbÇÂ&Wbç7W'f—fÃòç&÷VæBÓÒæW‡Bç7W'f—fÃòç&÷VæBÇÂ&Wbç7W'f—fÃòç†6RÓÒæW‡Bç7W'f—fÃòç†6RÇÂ&Wbç7W'f—fÃòæ6ÓÒæW‡Bç7W'f—fÃòæ6’°¢6WE7W'f—fÂ†æW‡Bç7W'f—fÂ“°¢Ğ¢6öç7BæW‡E&Wf—fRÒæW‡Bç&Wf—fSòææÖRóòçVÆÃ°¢6öç7BæW‡DF÷vâÒ&ööÆVâ†æW‡BæF÷vâ“°¢6öç7BæW‡DfFVBÒ&ööÆVâ†æW‡BæF÷vãòæfFVB“°¢–b‚&WbÇÂ‡&Wbç&Wf—fSòææÖRóòçVÆÂ’ÓÒæW‡E&Wf—fRÇÂ&ööÆVâ‡&WbæF÷vâ’ÓÒæW‡DF÷vâÇÂ&ööÆVâ‡&WbæF÷vãòæfFVB’ÓÒæW‡DfFVB’°¢6WE&Wf—fTæÖR†æW‡E&Wf—fR“°¢6WDF÷væVB†æW‡DF÷vâ“°¢6WDfFVD÷WB†æW‡DfFVB“°¢Ğ¢–b‚&WbÇÂÖF‚æ'2‡&Wbæ–çFW&Ö—76–öäÆVgBÒæW‡Bæ–çFW&Ö—76–öäÆVgB’âã"’°¢6WD–çFW&Ö—76–öäÆVgB†æW‡Bæ–çFW&Ö—76–öäÆVgB“°¢Ğ¢ÒÂ·Æ–W%7F÷&RÂÖævW%Ò“° ¢W6TVffV7B‚‚’Óâ°¢6öç7B×Òv–æF÷ræÖF6„ÖVF–‚r‡ö–çFW#¢6ö'6R’r“°¢6öç7BÇ’Ò‚’Óâ6WD6ö'6R†×æÖF6†W2“°¢Ç’‚“°¢×æFDWfVçDÆ—7FVæW"‚v6†ævRrÂÇ’“°¢&WGW&â‚’Óâ×ç&VÖ÷fTWfVçDÆ—7FVæW"‚v6†ævRrÂÇ’“°¢ÒÂµÒ“° ¢W6TVffV7B‚‚’Óâ°¢–b‡67&VVâÓÒvvÖRrÇÂ6VÆV7FVBÇÂ†6RÓÒwÆ––ærrÇÂÆö6¶VBÇÂ6ö'6RÇÂ6ÕæVÂÇÂÖ÷VâÇÂ6†÷t6ÖW&–ç7G'V7F–öç2’&WGW&ã°¢–b†6ÖW&–ç7G'V7F–öç57F'FVDBæ7W'&VçBÓÓÒçVÆÂ’6ÖW&–ç7G'V7F–öç57F'FVDBæ7W'&VçBÒFFRææ÷r‚“°¢6öç7B&VÖ–æ–ærÒÖF‚æÖ‚ƒÂ3Ò„FFRææ÷r‚’Ò6ÖW&–ç7G'V7F–öç57F'FVDBæ7W'&VçB’“°¢6öç7BF–ÖV÷WBÒv–æF÷rç6WEF–ÖV÷WB‚‚’Óâ6WE6†÷t6ÖW&–ç7G'V7F–öç2†fÇ6R’Â&VÖ–æ–ær“°¢&WGW&â‚’Óâv–æF÷ræ6ÆV%F–ÖV÷WB‡F–ÖV÷WB“°¢ÒÂ·67&VVâÂ6VÆV7FVBÂ†6RÂÆö6¶VBÂ6ö'6RÂ6ÕæVÂÂÖ÷VâÂ6†÷t6ÖW&–ç7G'V7F–öç5Ò“° ¢W6TVffV7B‚‚’Óâ°¢–b‚6VÆV7FVBÇÂ6çf5&Vbæ7W'&VçB’&WGW&ã°¢ÆWBVæv–æS¢&–DVæv–æRÂçVÆÂÒçVÆÃ°¢ÆWB6æ6VÆÆVBÒfÇ6S°¢ÆWBVF–ó¢°¢Æ’†–C¢7G&–ær“¢fö–C°¢&W7VÖR‚“¢&öÖ—6SÇfö–Cã°¢7F'D6—G’‚“¢fö–C°¢6WD—6ÆõÓkh‘éì¶»§q«^tñ‘¥Ø±…ÍÍ9…µ”õíÍÑå±•Ì¹Ñ½Á!Õ‘ôø(€€€€€€€€€€€€ñ‘¥Ø±…ÍÍ9…µ”õí€‘íÍÑå±•Ì¹¡¥ÁÍô€‘íÁ…ÉÑåMÑ…Ñ”¹µ½‘”€ôôô…µ•5½‘”¹I%€üÍÑå±•Ì¹¡¥ÁÍ	•±½İA…ÉÑä€è€œõôø(€€€€€€€€€€€€€íÁ…ÉÑåMÑ…Ñ”¹µ½‘”€„ôô…µ•5½‘”¹AY@€ü€ (€€€€€€€€€€€€€€€€ğø(€€€€€€€€€€€€€€€€€€ñ‘¥Ø±…ÍÍ9…µ”õíÍÑå±•Ì¹¡¥Áôø(€€€€€€€€€€€€€€€€€€€I½Õ¹€ñÍÑÉ½¹œÉ•˜õíÉ½Õ¹‘I•™ôøÀğ½ÍÑÉ½¹œø(€€€€€€€€€€€€€€€€€€ğ½‘¥Øø(€€€€€€€€€€€€€€€€€€ñ‘¥Ø±…ÍÍ9…µ”õíÍÑå±•Ì¹¡¥Áôø(€€€€€€€€€€€€€€€€€€€!½ÍÑÌ€ñÍÑÉ½¹œÉ•˜õíÉ•µ…¥¹¥¹I•™ôøÀğ½ÍÑÉ½¹œø(€€€€€€€€€€€€€€€€€€ğ½‘¥Øø(€€€€€€€€€€€€€€€€€€ñ‘¥Ø±…ÍÍ9…µ”õíÍÑå±•Ì¹¡¥Áôø(€€€€€€€€€€€€€€€€€€€M¥¹…°ÁÑÌ€ñÍÑÉ½¹œÉ•˜õíÁ½¥¹ÑÍI•™ôøÀğ½ÍÑÉ½¹œø(€€€€€€€€€€€€€€€€€€ğ½‘¥Øø(€€€€€€€€€€€€€€€€€€ñ‘¥Ø±…ÍÍ9…µ”õíÍÑå±•Ì¹¡¥Áôø(€€€€€€€€€€€€€€€€€€€¥™™¥Õ±Ñä€ñÍÑÉ½¹œùí‘¥™™¥Õ±Ñåôğ½ÍÑÉ½¹œø(€€€€€€€€€€€€€€€€€€ğ½‘¥Øø(€€€€€€€€€€€€€€€€ğ¼ø(€€€€€€€€€€€€€€¤€è¹Õ±±ô(€€€€€€€€€€€€€€ñ‘¥Ø±…ÍÍ9…µ”õíÍÑå±•Ì¹¡¥Áôø(€€€€€€€€€€€€€€€5½‘”€ñÍÑÉ½¹œùíÁ…ÉÑåMÑ…Ñ”¹µ½‘•ôğ½ÍÑÉ½¹œø(€€€€€€€€€€€€€€ğ½‘¥Øø(€€€€€€€€€€€€€€ñ‘¥Ø±…ÍÍ9…µ”õíÍÑå±•Ì¹¡¥Áôø(€€€€€€€€€€€€€€€É•¹„€ñÍÑÉ½¹œùí…É•¹…MÁ•Œ¡µ…¹…•ÉMÑ…Ñ”¹…É•¹…%¤ü¹¹…µ”€üü€Q¡”	±½¬ôğ½ÍÑÉ½¹œø(€€€€€€€€€€€€€€ğ½‘¥Øø(€€€€€€€€€€€€€€ñ‰ÕÑÑ½¸(€€€€€€€€€€€€€€€ÑåÁ”ô‰‰ÕÑÑ½¸ˆ(€€€€€€€€€€€€€€€±…ÍÍ9…µ”õí€‘íÍÑå±•Ì¹¡¥Áô€‘íÍÑå±•Ì¹¡¥Á	Ñ¹ô€‘í…µA…¹•°€üÍÑå±•Ì¹¡¥Á=¸€è€œõô(€€€€€€€€€€€€€€€½¹±¥¬õì ¤€ôøÍ•Ñ…µA…¹•° ¡½Á•¸¤€ôø€…½Á•¸¥ô(€€€€€€€€€€€€€€€Ñ¥Ñ±”õí…µ•É„ÑÕ¹¥¹œƒ
+Ü€‘í…µ•É…MÑ…Ñ•ô‘í±½­=¸€ü€œƒ
+Ü±½­•œ€è€œõô(€€€€€€€€€€€€€€ø(€€€€€€€€€€€€€€€…´€ñÍÑÉ½¹œùí5I}5=}1	1m…µ•É…5½‘•uôğ½ÍÑÉ½¹œø(€€€€€€€€€€€€€€ğ½‰ÕÑÑ½¸ø(€€€€€€€€€€€€€í¡•±‘]•…Á½¸€ü€ (€€€€€€€€€€€€€€€€ñ‘¥Ø±…ÍÍ9…µ”õíÍÑå±•Ì¹¡¥Áôø(€€€€€€€€€€€€€€€€€]•…Á½¸€ñÍÑÉ½¹œùí¡•±‘]•…Á½¹ôğ½ÍÑÉ½¹œø(€€€€€€€€€€€€€€€€ğ½‘¥Øø(€€€€€€€€€€€€€€¤€è¹Õ±±ô(€€€€€€€€€€€€€íİ…Éé½¹”€ü€ (€€€€€€€€€€€€€€€€ñ‘¥Ø±…ÍÍ9…µ”õíÍÑå±•Ì¹¡¥Áôø(€€€€€€€€€€€€€€€€€]…Éé½¹”€ñÍÑÉ½¹œùíİ…Éé½¹•ôğ½ÍÑÉ½¹œø(€€€€€€€€€€€€€€€€ğ½‘¥Øø(€€€€€€€€€€€€€€¤€è¹Õ±±ô(€€€€€€€€€€€€ğ½‘¥Øø(€€€€€€€€€€ğ½‘¥Øø((€€€€€€€€€íÁ…ÉÑåMÑ…Ñ”¹µ½‘”€ôôô…µ•5½‘”¹AY@€˜˜ÁÙÁ=ÁÁ½¹•¹Ğ€ü€ (€€€€€€€€€€€€ñAÙÁY•ÉÍÕÍ!U(€€€€€€€€€€€€€Á±…å•É%õí…Ñ¥Ù•Iå‘•Éô(€€€€€€€€€€€€€½ÁÁ½¹•¹Ñ%õíÁÙÁ=ÁÁ½¹•¹Ñô(€€€€€€€€€€€€€½ÁÁ½¹•¹Ñ1…‰•°õíÁÙÁ1…‰•±ô(€€€€€€€€€€€€€Á±…å•ÉI•˜õí¥ÉÕ±…É!Õ‘ô(€€€€€€€€€€€€€½ÁÁ½¹•¹ÑI•˜õí™½•!Õ‘ô(€€€€€€€€€€€€€‰ÕÉ¹½ÕĞõí‰ÕÉ¹½ÕÑô(€€€€€€€€€€€€¼ø(€€€€€€€€€€¤€è€ (€€€€€€€€€€€€ñ‘¥Ø±…ÍÍ9…µ”õíÍÑå±•Ì¹Ù¥Ñ…±½­ôø(€€€€€€€€€€€€€€ñ¥ÉÕ±…ÉA±…å•É!UÉ•˜õí¥ÉÕ±…É!Õ‘ôÉå‘•É%õí…Ñ¥Ù•Iå‘•Éô‰ÕÉ¹½ÕĞõí‰ÕÉ¹½ÕÑô€¼ø(€€€€€€€€€€€€ğ½‘¥Øø(€€€€€€€€€€¥ô((€€€€€€€€€íİ…Ñ•È€˜˜İ…Ñ•È¹µ½‘”€„ôô€±…¹œ€˜˜€ (€€€€€€€€€€€€ñ‘¥Ø±…ÍÍ9…µ”õíÍÑå±•Ì¹½áå•¹ô‘…Ñ„µ±½Üõíİ…Ñ•È¹½áå•¸€ğ€À¸ÌÔ€ü€œÄœ€è€œÀô…É¥„µ±…‰•°ô‰=áå•¸ˆø(€€€€€€€€€€€€€€ñÍÁ…¸ù=áå•¸ğ½ÍÁ…¸ø(€€€€€€€€€€€€€€ñˆø(€€€€€€€€€€€€€€€€ñ¤É•˜õí½áå•¹¥±±ôÍÑå±”õíìİ¥‘Ñ è€‘í5…Ñ ¹É½Õ¹¡İ…Ñ•È¹½áå•¸€¨€ÄÀÀ¥ô•€õô€¼ø(€€€€€€€€€€€€€€ğ½ˆø(€€€€€€€€€€€€€€ñ•´ùíİ…Ñ•È¹µ½‘”€ôôô€Õ¹‘•Èœ€ü€MÁ…”Ñ¼ÍÕÉ™…”œ€èİ…Ñ•È¹µ½‘”€ôôô€İ…‘”œ€ü€]…‘¥¹œœ€è€ÑÉ°Ñ¼‘¥Ù”ôğ½•´ø(€€€€€€€€€€€€ğ½‘¥Øø(€€€€€€€€€€¥ô((€€€€€€€€€€ñ‘¥Ø±…ÍÍ9…µ”õíÍÑå±•Ì¹É½ÍÍ¡…¥Éô€¼ø((€€€€€€€€€í‰…¹¹•È€˜˜€ (€€€€€€€€€€€€ñ‘¥Ø±…ÍÍ9…µ”õíÍÑå±•Ì¹‰…¹¹•Éôø(€€€€€€€€€€€€€€ñÍÁ…¸ùí‰…¹¹•È¹ÍÕ‰ôğ½ÍÁ…¸ø(€€€€€€€€€€€€€€ñÍÑÉ½¹œùí‰…¹¹•È¹Ñ¥Ñ±•ôğ½ÍÑÉ½¹œø(€€€€€€€€€€€€ğ½‘¥Øø(€€€€€€€€€€¥ô((€€€€€€€€€íÍÕÉÙ¥Ù…°€˜˜Á…ÉÑåMÑ…Ñ”¹µ½‘”€„ôô…µ•5½‘”¹AY@€˜˜Á¡…Í”€ôôô€Á±…å¥¹œœ€ü€ (€€€€€€€€€€€€ñ…Í¥‘”±…ÍÍ9…µ”õíÍÑå±•Ì¹ÍÕÉÙ¥Ù…±ô…É¥„µ±…‰•°ô‰MÕÉÙ¥Ù…°É½Õ¹ˆø(€€€€€€€€€€€€€€ñÍµ…±°ùMÕÉÙ¥Ù…°É½Õ¹ğ½Íµ…±°ø(€€€€€€€€€€€€€€ñÍÑÉ½¹œùíÍÕÉÙ¥Ù…°¹É½Õ¹‘ôğ½ÍÑÉ½¹œø(€€€€€€€€€€€€€€ñ•´ùíÍÕÉÙ¥Ù…°¹Á¡…Í•ôğ½•´ø(€€€€€€€€€€€€€€ñÕ°ø(€€€€€€€€€€€€€€€€ñ±¤ø(€€€€€€€€€€€€€€€€€5…á¥µÕ´•¹•µäÑ¥•È€ñˆùíÍÕÉÙ¥Ù…°¹µ…áQ¥•Éôğ½ˆø(€€€€€€€€€€€€€€€€ğ½±¤ø(€€€€€€€€€€€€€€€€ñ±¤ø(€€€€€€€€€€€€€€€€€!•…±Ñ µÕ±Ñ¥Á±¥•È€ñˆùíÍÕÉÙ¥Ù…°¹¡À¹Ñ½¥á• È¥÷\ğ½ˆø(€€€€€€€€€€€€€€€€ğ½±¤ø(€€€€€€€€€€€€€€€€ñ±¤ø(€€€€€€€€€€€€€€€€€…µ…”µÕ±Ñ¥Á±¥•È€ñˆùíÍÕÉÙ¥Ù…°¹‘…µ…”¹Ñ½¥á• È¥÷\ğ½ˆø(€€€€€€€€€€€€€€€€ğ½±¤ø(€€€€€€€€€€€€€€€€ñ±¤ø(€€€€€€€€€€€€€€€€€Ñ¥Ù”•¹•µä…À€ñˆùíÍÕÉÙ¥Ù…°¹…Áôğ½ˆø(€€€€€€€€€€€€€€€€ğ½±¤ø(€€€€€€€€€€€€€€ğ½Õ°ø(€€€€€€€€€€€€ğ½…Í¥‘”ø(€€€€€€€€€€¤€è¹Õ±±ô((€€€€€€€€€í‘½İ¹•€˜˜€ (€€€€€€€€€€€€ñ‘¥Ø±…ÍÍ9…µ”õíÍÑå±•Ì¹‘½İ¹•‘ôø(€€€€€€€€€€€€€€ñÍÑÉ½¹œùí™…‘•‘=ÕĞ€ü€e½Ô™…‘•½ÕĞœ€è€e½Ô…É”‘½İ¸ôğ½ÍÑÉ½¹œø(€€€€€€€€€€€€€í™…‘•‘=ÕĞ€ü€ (€€€€€€€€€€€€€€€€ñÍÁ…¸ùQ¡”ÍÅÕ…¥ÌÍÑ¥±°™¥¡Ñ¥¹œğ½ÍÁ…¸ø(€€€€€€€€€€€€€€¤€è€ (€€€€€€€€€€€€€€€€ñÍÁ…¸ø(€€€€€€€€€€€€€€€€€Ñ•…µµ…Ñ”…¸Á¥¬å½ÔÕÀƒ
+Ü€ñˆÉ•˜õí‘½İ¹1•™Ñ±ô€¼ø(€€€€€€€€€€€€€€€€ğ½ÍÁ…¸ø(€€€€€€€€€€€€€€¥ô(€€€€€€€€€€€€ğ½‘¥Øø(€€€€€€€€€€¥ô((€€€€€€€€€í‰ÕÉ¹½ÕĞ€˜˜€…Ñ¥‘•=ÕĞ€˜˜€…É•½Ù•É¥¹œ€˜˜€…‘½İ¹•€˜˜€ (€€€€€€€€€€€€ñ‘¥Ø±…ÍÍ9…µ”õíÍÑå±•Ì¹‰ÕÉ¹½ÕÑôùÕÉ„•µÁÑäƒ
+Üµ•±•”½¹±äƒ
+Üİ•…­•È‰±½İÌğ½‘¥Øø(€€€€€€€€€€¥ô(€€€€€€€€€íÑ¥‘•=ÕĞ€˜˜€…‘½İ¹•€˜˜€ñ‘¥Ø±…ÍÍ9…µ”õíÍÑå±•Ì¹‰ÕÉ¹½ÕÑôùA½İ•ÉÌ½ÕĞƒ
+Üµ•±•”½¹±äƒ
+Ü•Ğ±•…È½˜Ñ¡”¡½ÍÑÌğ½‘¥Øùô((€€€€€€€€€íÉ•½Ù•É¥¹œ€˜˜€ñ‘¥Ø±…ÍÍ9…µ”õíÍÑå±•Ì¹É•½Ù•É¥¹ô€¼ùô((€€€€€€€€€íÉ•Ù¥Ù•9…µ”€˜˜€…‘½İ¹•€˜˜€ (€€€€€€€€€€€€ñ‘¥Ø±…ÍÍ9…µ”õíÍÑå±•Ì¹‰•…½¹ôø(€€€€€€€€€€€€€€ñÍÑÉ½¹œùA¥¬ÕÀíÉ•Ù¥Ù•9…µ•ôğ½ÍÑÉ½¹œø(€€€€€€€€€€€€€€ñÍÁ…¸ø(€€€€€€€€€€€€€€€í%9QIQ}1	1ôƒ
+Ü€ñˆÉ•˜õíÉ•Ù¥Ù•1•™Ñô€¼ø(€€€€€€€€€€€€€€ğ½ÍÁ…¸ø(€€€€€€€€€€€€ğ½‘¥Øø(€€€€€€€€€€¥ô((€€€€€€€€€í‰•…½¸ü¹¹•…È€˜˜€…É•½Ù•É¥¹œ€˜˜€…É•Ù¥Ù•9…µ”€˜˜€ (€€€€€€€€€€€€ñ‘¥Ø±…ÍÍ9…µ”õí€‘íÍÑå±•Ì¹‰•…½¹ô€‘í‰•…½¸¹É•…‘ä€ü€œœ€èÍÑå±•Ì¹‰•…½¹½½±¥¹õôø(€€€€€€€€€€€€€€ñÍÑÉ½¹œùIå‘•È	•…½¸ğ½ÍÑÉ½¹œø(€€€€€€€€€€€€€€ñÍÁ…¸ùI•ÍÑ½É”!•…±Ñ ğ½ÍÁ…¸ø(€€€€€€€€€€€€€€ñÍÁ…¸ùI•ÍÑ½É”A½İ•Èğ½ÍÁ…¸ø(€€€€€€€€€€€€€í‰•…½¸¹É•…‘ä€ü€ (€€€€€€€€€€€€€€€€ñ•´ùí%9QIQ}1	1ôƒ
+ÜÑ¥Ù…Ñ”ğ½•´ø(€€€€€€€€€€€€€€¤€è€ (€€€€€€€€€€€€€€€€ğø(€€€€€€€€€€€€€€€€€€ñ•´ø(€€€€€€€€€€€€€€€€€€€I•¡…É¥¹œƒ
+Ü€ñÍÁ…¸É•˜õí‰•…½¹½½±‘½İ¹ôùí5…Ñ ¹•¥°¡‰•…½¸¹½½±‘½İ¹1•™Ğ¥õÌğ½ÍÁ…¸ø(€€€€€€€€€€€€€€€€€€ğ½•´ø(€€€€€€€€€€€€€€€€€€ñ‘¥Ø±…ÍÍ9…µ”õíÍÑå±•Ì¹‰•…½¹QÉ…­ôø(€€€€€€€€€€€€€€€€€€€€ñ¤É•˜õí‰•…½¹QÉ…­ô€¼ø(€€€€€€€€€€€€€€€€€€ğ½‘¥Øø(€€€€€€€€€€€€€€€€ğ¼ø(€€€€€€€€€€€€€€¥ô(€€€€€€€€€€€€ğ½‘¥Øø(€€€€€€€€€€¥ô((€€€€€€€€€€ñ‘¥Ø±…ÍÍ9…µ”õíÍÑå±•Ì¹‰½ÑÑ½µ!Õ‘ôø(€€€€€€€€€€€€ñÀ±…ÍÍ9…µ”õíÍÑå±•Ì¹¡¥¹Ñôø(€€€€€€€€€€€€€]MÑÕÉ¹Ì…¹Ñ¥±ÑÌÑ¡”…µ•É„ƒ
+ÜÉÉ½İÌµ½Ù”İ¥Ñ Ñ¡”Ù¥•Üƒ
+Ü5½ÕÍ”…¹Ñ¡”É¥¡ĞÍÑ¥¬±½½¬ƒ
+Ü½Èµ¥‘‘±”µ½ÕÍ”±½­Ì½¸ƒ
+Ü å±•ÌÑ…É•ÑÌƒ
+Ü,å±•ÌMÑ…¹‘…É°½µ‰…Ğ½ÕÌ°…¹¥¹•µ…Ñ¥Œƒ
+ÜM¡¥™ĞÍÁÉ¥¹Ğƒ
+ÜMÁ…”©ÕµÀƒ
+Ü`É••¹Ñ•ÉÌÁ¥Ñ ƒ
+ÜÍİ…ÁÌÍ¡½Õ±‘•Èƒ
+Ü±¥¬ÁÕ¹¡•ÌÕÀ±½Í”ƒ
+Üi½”‰±…ÍÑÌ…ĞÉ…¹”ƒ
+Ü-•Ù•¸Ñ¡É½İÌ‘…ÉÑÌƒ
+ÜÁÕ¹ ƒ
+ÜX­¥¬ƒ
+Ü€¼I5µ•±•”°……¥¸Ñ¡É½İÌƒ
+Üh‘½‘”ƒ
+ÜDHÁ½İ•ÉÌƒ
+Üí%9QIQ}1	1ôÕÍ•Ì„É…¬°¡•ÍĞ°Í•É•Ğ°‰•…½¸°½È‘½İ¹•Ñ•…µµ…Ñ”ƒ
+ÜQ…À„Ñ•…µµ…Ñ”Ì‰…ÈÑ¼Á±…äÑ¡•´ƒ
+ÜíÁÙÁQİ¼€ü€Q…ˆ½Á•¹ÌÑ¡”µ…Àœ€è€Q…ˆ½È4½Á•¹ÌÑ¡”µ…Àôƒ
+ÜÍŒÁ…ÕÍ”(€€€€€€€€€€€€€íÁ¡…Í”€ôôô€¥¹Ñ•Éµ¥ÍÍ¥½¸œ€ü€œƒ
+Ü!½±Ñ¡”ÍÁ¥É”Ñ¼‰ÕäÍÑÉ•¹Ñ œ€è€œô(€€€€€€€€€€€€€íÁÙÁQİ¼€ü€œƒ
+Ü@È%)-0µ½Ù”ƒ
+ÜTÁÕ¹ ƒ
+Ü<­¥¬ƒ
+Ü@µ•±•”ƒ
+Ü8‘½‘”ƒ
+Ü4©ÕµÀœ€è€œô(€€€€€€€€€€€€ğ½Àø(€€€€€€€€€€€€ñ‘¥ØÉ•˜õíµ½Ù•I½İô±…ÍÍ9…µ”õíÍÑå±•Ì¹µ½Ù•I½İôø(€€€€€€€€€€€€€í¡Õ‘5½Ù•Ì¹µ…À ¡µ½Ù”°¤¤€ôø€ (€€€€€€€€€€€€€€€€ñ‘¥Ø(€€€€€€€€€€€€€€€€€­•äõí€‘íµ½Ù”¹­•åô´‘íµ½Ù”¹¥‘õô(€€€€€€€€€€€€€€€€€±…ÍÍ9…µ”õí€‘íÍÑå±•Ì¹…‰¥±¥Ñåô€‘íµ½Ù•I•…‘åm¥t€üÍÑå±•Ì¹É•…‘ä€è€œõô(€€€€€€€€€€€€€€€€ø(€€€€€€€€€€€€€€€€€€ñÍÁ…¸(€€€€€€€€€€€€€€€€€€€É•˜õì¡¹½‘”¤€ôøì(€€€€€€€€€€€€€€€€€€€€€µ½Ù•MÑ…ÑÕÌ¹ÕÉÉ•¹Ñm¥t€ô¹½‘”ì(€€€€€€€€€€€€€€€€€€€õô(€€€€€€€€€€€€€€€€€€ø(€€€€€€€€€€€€€€€€€€€íµ½Ù”¹­•åô(€€€€€€€€€€€€€€€€€€ğ½ÍÁ…¸ø(€€€€€€€€€€€€€€€€€€ñˆùíµ½Ù”¹¹…µ•ôğ½ˆø(€€€€€€€€€€€€€€€€ğ½‘¥Øø(€€€€€€€€€€€€€€¤¥ô(€€€€€€€€€€€€ğ½‘¥Øø(€€€€€€€€€€ğ½‘¥Øø(€€€€€€€€ğ½‘¥Øø(€€€€€€¥ô((€€€€€€ñ‘¥Ø±…ÍÍ9…µ”õí€‘íÍÑå±•Ì¹Ñ½Õ¡ô€‘íÍÑå±•Ì¹¡¥‘‘•¹Q½Õ¡õôø(€€€€€€€íÁ±…å¥¹œ€˜˜Á¡…Í”€ôôô€Á±…å¥¹œœ€˜˜€…Á…ÕÍ•€˜˜€ (€€€€€€€€€€ğø(€€€€€€€€€€€€ñ‘¥Ø(€€€€€€€€€€€€€±…ÍÍ9…µ”õíÍÑå±•Ì¹ÍÑ¥­ô(€€€€€€€€€€€€€½¹A½¥¹Ñ•É½İ¸õì¡”¤€ôøì(€€€€€€€€€€€€€€€€¡”¹ÕÉÉ•¹ÑQ…É•Ğ…Ì!Q51±•µ•¹Ğ¤¹Í•ÑA½¥¹Ñ•É…ÁÑÕÉ”¡”¹Á½¥¹Ñ•É%¤ì(€€€€€€€€€€€€€€€½¹MÑ¥¬¡”¹±¥•¹Ñ`°”¹±¥•¹Ñd°”¹ÕÉÉ•¹ÑQ…É•Ğ¤ì(€€€€€€€€€€€€€õô(€€€€€€€€€€€€€½¹A½¥¹Ñ•É5½Ù”õì¡”¤€ôøì(€€€€€€€€€€€€€€€¥˜€¡”¹ÕÉÉ•¹ÑQ…É•Ğ¹¡…ÍA½¥¹Ñ•É…ÁÑÕÉ”¡”¹Á½¥¹Ñ•É%¤¤ì(€€€€€€€€€€€€€€€€€½¹MÑ¥¬¡”¹±¥•¹Ñ`°”¹±¥•¹Ñd°”¹ÕÉÉ•¹ÑQ…É•Ğ¤ì(€€€€€€€€€€€€€€€ô(€€€€€€€€€€€€€õô(€€€€€€€€€€€€€½¹A½¥¹Ñ•ÉUÀõì¡”¤€ôøì(€€€€€€€€€€€€€€€•¹¥¹•I•˜¹ÕÉÉ•¹Ğü¹Í•Ñ5½Ù•á¥Ì À°€À¤ì(€€€€€€€€€€€€€€€¥˜€¡¹Õ‰I•˜¹ÕÉÉ•¹Ğ¤¹Õ‰I•˜¹ÕÉÉ•¹Ğ¹ÍÑå±”¹ÑÉ…¹Í™½É´€ô€ÑÉ…¹Í±…Ñ” ´ÔÀ”°€´ÔÀ”¤œì(€€€€€€€€€€€€€€€”¹ÕÉÉ•¹ÑQ…É•Ğ¹É•±•…Í•A½¥¹Ñ•É…ÁÑÕÉ”¡”¹Á½¥¹Ñ•É%¤ì(€€€€€€€€€€€€€õô(€€€€€€€€€€€€ø(€€€€€€€€€€€€€€ñ‘¥ØÉ•˜õí¹Õ‰I•™ô±…ÍÍ9…µ”õíÍÑå±•Ì¹¹Õ‰ô€¼ø(€€€€€€€€€€€€ğ½‘¥Øø(€€€€€€€€€€€€ñ‘¥Ø(€€€€€€€€€€€€€±…ÍÍ9…µ”õíÍÑå±•Ì¹±½½­ô(€€€€€€€€€€€€€½¹A½¥¹Ñ•É½İ¸õì¡”¤€ôøì(€€€€€€€€€€€€€€€€¡”¹ÕÉÉ•¹ÑQ…É•Ğ…Ì!Q51±•µ•¹Ğ¤¹Í•ÑA½¥¹Ñ•É…ÁÑÕÉ”¡”¹Á½¥¹Ñ•É%¤ì(€€€€€€€€€€€€€€€±½½­1…ÍĞ¹ÕÉÉ•¹Ğ€ôìàè”¹±¥•¹Ñ`°äè”¹±¥•¹Ñd°¥è”¹Á½¥¹Ñ•É%ôì(€€€€€€€€€€€€€õô(€€€€€€€€€€€€€½¹A½¥¹Ñ•É5½Ù”õì¡”¤€ôøì(€€€€€€€€€€€€€€€½¹ÍĞ±…ÍĞ€ô±½½­1…ÍĞ¹ÕÉÉ•¹Ğì(€€€€€€€€€€€€€€€¥˜€ …±…ÍĞñğ±…ÍĞ¹¥€„ôô”¹Á½¥¹Ñ•É%¤É•ÑÕÉ¸ì(€€€€€€€€€€€€€€€•¹¥¹•I•˜¹ÕÉÉ•¹Ğü¹Í•Ñ1½½­•±Ñ„¡”¹±¥•¹Ñ`€´±…ÍĞ¹à°”¹±¥•¹Ñd€´±…ÍĞ¹ä¤ì(€€€€€€€€€€€€€€€±½½­1…ÍĞ¹ÕÉÉ•¹Ğ€ôìàè”¹±¥•¹Ñ`°äè”¹±¥•¹Ñd°¥è”¹Á½¥¹Ñ•É%ôì(€€€€€€€€€€€€€õô(€€€€€€€€€€€€€½¹A½¥¹Ñ•ÉUÀõì ¤€ôøì(€€€€€€€€€€€€€€€±½½­1…ÍĞ¹ÕÉÉ•¹Ğ€ô¹Õ±°ì(€€€€€€€€€€€€€õô(€€€€€€€€€€€€¼ø(€€€€€€€€€€€€ñ‘¥Ø±…ÍÍ9…µ”õíÍÑå±•Ì¹Ñ½Õ¡	Ñ¹Íôø(€€€€€€€€€€€€€€ñ‰ÕÑÑ½¸ÑåÁ”ô‰‰ÕÑÑ½¸ˆ½¹A½¥¹Ñ•É½İ¸õì ¤€ôø•¹¥¹•I•˜¹ÕÉÉ•¹Ğü¹Í•Ñ¥É•!•±¡ÑÉÕ”¥ô½¹A½¥¹Ñ•ÉUÀõì ¤€ôø•¹¥¹•I•˜¹ÕÉÉ•¹Ğü¹Í•Ñ¥É•!•±¡™…±Í”¥ôø(€€€€€€€€€€€€€€€%I(€€€€€€€€€€€€€€ğ½‰ÕÑÑ½¸ø(€€€€€€€€€€€€€€ñ‰ÕÑÑ½¸ÑåÁ”ô‰‰ÕÑÑ½¸ˆ½¹±¥¬õì ¤€ôø•¹¥¹•I•˜¹ÕÉÉ•¹Ğü¹ÅÕ•Õ•AÕ¹  ¥ôø(€€€€€€€€€€€€€€€AU9 (€€€€€€€€€€€€€€ğ½‰ÕÑÑ½¸ø(€€€€€€€€€€€€€€ñ‰ÕÑÑ½¸ÑåÁ”ô‰‰ÕÑÑ½¸ˆ½¹±¥¬õì ¤€ôø•¹¥¹•I•˜¹ÕÉÉ•¹Ğü¹ÅÕ•Õ•-¥¬ ¥ôø(€€€€€€€€€€€€€€€-%,(€€€€€€€€€€€€€€ğ½‰ÕÑÑ½¸ø(€€€€€€€€€€€€€€ñ‰ÕÑÑ½¸ÑåÁ”ô‰‰ÕÑÑ½¸ˆ½¹±¥¬õì ¤€ôø•¹¥¹•I•˜¹ÕÉÉ•¹Ğü¹ÅÕ•Õ•5•±•” ¥ôø(€€€€€€€€€€€€€€€51(€€€€€€€€€€€€€€ğ½‰ÕÑÑ½¸ø(€€€€€€€€€€€€€€ñ‰ÕÑÑ½¸ÑåÁ”ô‰‰ÕÑÑ½¸ˆ½¹±¥¬õì ¤€ôø•¹¥¹•I•˜¹ÕÉÉ•¹Ğü¹ÅÕ•Õ•½‘” ¥ôø(€€€€€€€€€€€€€€€=(€€€€€€€€€€€€€€ğ½‰ÕÑÑ½¸ø(€€€€€€€€€€€€€€ñ‰ÕÑÑ½¸ÑåÁ”ô‰‰ÕÑÑ½¸ˆ½¹±¥¬õì ¤€ôø•¹¥¹•I•˜¹ÕÉÉ•¹Ğü¹ÅÕ•Õ•)ÕµÀ ¥ôø(€€€€€€€€€€€€€€€)U5@(€€€€€€€€€€€€€€ğ½‰ÕÑÑ½¸ø(€€€€€€€€€€€€€€ñ‰ÕÑÑ½¸ÑåÁ”ô‰‰ÕÑÑ½¸ˆ½¹±¥¬õì ¤€ôø•¹¥¹•I•˜¹ÕÉÉ•¹Ğü¹ÅÕ•Õ•‰¥±¥Ñä À¥ôø(€€€€€€€€€€€€€€€D(€€€€€€€€€€€€€€ğ½‰ÕÑÑ½¸ø(€€€€€€€€€€€€€€ñ‰ÕÑÑ½¸ÑåÁ”ô‰‰ÕÑÑ½¸ˆ½¹±¥¬õì ¤€ôø•¹¥¹•I•˜¹ÕÉÉ•¹Ğü¹ÅÕ•Õ•‰¥±¥Ñä Ä¥ôø(€€€€€€€€€€€€€€€(€€€€€€€€€€€€€€ğ½‰ÕÑÑ½¸ø(€€€€€€€€€€€€€€ñ‰ÕÑÑ½¸ÑåÁ”ô‰‰ÕÑÑ½¸ˆ½¹±¥¬õì ¤€ôø•¹¥¹•I•˜¹ÕÉÉ•¹Ğü¹ÅÕ•Õ•‰¥±¥Ñä È¥ôø(€€€€€€€€€€€€€€€H(€€€€€€€€€€€€€€ğ½‰ÕÑÑ½¸ø(€€€€€€€€€€€€€ì¡É•Ù¥Ù•9…µ”ñğ€¡‰•…½¸ü¹¹•…È€˜˜‰•…½¸¹É•…‘ä¤¤€˜˜€ (€€€€€€€€€€€€€€€€ñ‰ÕÑÑ½¸ÑåÁ”ô‰‰ÕÑÑ½¸ˆ½¹±¥¬õì ¤€ôø•¹¥¹•I•˜¹ÕÉÉ•¹Ğü¹ÅÕ•Õ•%¹Ñ•É…Ğ ¥ôø(€€€€€€€€€€€€€€€€€íÉ•Ù¥Ù•9…µ”€ü€A%,U@œ€è€UMô(€€€€€€€€€€€€€€€€ğ½‰ÕÑÑ½¸ø(€€€€€€€€€€€€€€¥ô(€€€€€€€€€€€€ğ½‘¥Øø(€€€€€€€€€€ğ¼ø(€€€€€€€€¥ô(€€€€€€ğ½‘¥Øø((€€€€€íÁ±…å¥¹œ€˜˜Á…ÉÑåMÑ…Ñ”¹µ½‘”€„ôô…µ•5½‘”¹AY@€˜˜€¡¹•…ÉM¡½ÀñğÁ¡…Í”€ôôô€É•Á½ÉĞœ¤€˜˜€ (€€€€€€€€ñ…Í¥‘”±…ÍÍ9…µ”õí€‘íÍÑå±•Ì¹Í¡½Áô€‘íÁ¡…Í”€ôôô€É•Á½ÉĞœ€üÍÑå±•Ì¹Í¡½Á=Ù•È€è€œõôø(€€€€€€€€€€ñ ÌùíÁ¡…Í”€ôôô€É•Á½ÉĞœ€ü€I…¥ÕÁÉ…‘•Ìœ€èMÁ¥É”M¡½Àƒ
+Ü€‘í5…Ñ ¹•¥°¡¥¹Ñ•Éµ¥ÍÍ¥½¹1•™Ğ¥õÍôğ½ Ìø(€€€€€€€€€€ñÕ°ø(€€€€€€€€€€€íUAI}=IH¹µ…À ¡¥¤€ôøì(€€€€€€€€€€€€€½¹ÍĞÍÁ•Œ€ôUAIMm¥‘tì(€€€€€€€€€€€€€½¹ÍĞ±•Ù•°€ôÕÁÉ…‘•Ím¥‘tì(€€€€€€€€€€€€€½¹ÍĞ½ÍĞ€ôÕÁÉ…‘•½ÍĞ¡¥°±•Ù•°¤ì(€€€€€€€€€€€€€½¹ÍĞµ…á•€ô±•Ù•°€øôÍÁ•Œ¹µ…á1•Ù•°ì(€€€€€€€€€€€€€É•ÑÕÉ¸€ (€€€€€€€€€€€€€€€€ñ±¤­•äõí¥‘ôø(€€€€€€€€€€€€€€€€€€ñ‰ÕÑÑ½¸ÑåÁ”ô‰‰ÕÑÑ½¸ˆ‘¥Í…‰±•õíµ…á•ñğÁ½¥¹ÑÌ€ğ½ÍÑô½¹±¥¬õì ¤€ôø‰Õä¡¥¥ôø(€€€€€€€€€€€€€€€€€€€íÍÁ•Œ¹¹…µ•ôíµ…á•€ü€5`œ€è1Ø€‘í±•Ù•±ôƒ
+Ü€‘í½ÍÑõô(€€€€€€€€€€€€€€€€€€€€ñ•´ùíÍÁ•Œ¹‘•ÍÉ¥ÁÑ¥½¹ôğ½•´ø(€€€€€€€€€€€€€€€€€€ğ½‰ÕÑÑ½¸ø(€€€€€€€€€€€€€€€€ğ½±¤ø(€€€€€€€€€€€€€€¤ì(€€€€€€€€€€€ô¥ô(€€€€€€€€€€ğ½Õ°ø(€€€€€€€€ğ½…Í¥‘”ø(€€€€€€¥ô((€€€€€íÁ±…å¥¹œ€˜˜…µA…¹•°€˜˜Á¡…Í”€„ôô€‘•…œ€˜˜€ (€€€€€€€€ñ…µ•É…QÕ¹¥¹A…¹•°(€€€€€€€€€•¹¥¹”õí•¹¥¹•I•…‘åô(€€€€€€€€€±¥Ù•MÑ…Ñ”õí…µ•É…MÑ…Ñ•ô(€€€€€€€€€½¹±½Í”õì ¤€ôøÍ•Ñ…µA…¹•°¡™…±Í”¥ô(€€€€€€€€¼ø(€€€€€€¥ô((€€€€€íÁ±…å¥¹œ€˜˜Á¡…Í”€ôôô€Á±…å¥¹œœ€˜˜€…Á…ÕÍ•€˜˜€…±½­•€˜˜€…½…ÉÍ”€˜˜€……µA…¹•°€˜˜€…µ…Á=Á•¸€˜˜€ (€€€€€€€€ñ‘¥Ø±…ÍÍ9…µ”õíÍÑå±•Ì¹±½­ôø(€€€€€€€€€€ñ‰ÕÑÑ½¸ÑåÁ”ô‰‰ÕÑÑ½¸ˆ½¹±¥¬õì ¤€ôø•¹¥¹•I•˜¹ÕÉÉ•¹Ğü¹É•ÅÕ•ÍÑA½¥¹Ñ•É1½¬ ¥ôø(€€€€€€€€€€€±¥¬Ñ¼±½½¬(€€€€€€€€€€ğ½‰ÕÑÑ½¸ø(€€€€€€€€€íÍ¡½İ…µ•É…%¹ÍÑÉÕÑ¥½¹Ì€ü€ñÀù]MÑÕÉ¹ÌÑ¡”…µ•É„¸ÉÉ½İÌµ½Ù”¸±½­Ì½¸¸,¡…¹•ÌÑ¡”…µ•É„¸ÍŒÁ…ÕÍ•Ì¸ğ½Àø€è¹Õ±±ô(€€€€€€€€ğ½‘¥Øø(€€€€€€¥ô((€€€€€íÁ±…å¥¹œ€˜˜Á…ÕÍ•€˜˜Á¡…Í”€„ôô€‘•…œ€˜˜Á¡…Í”€„ôô€Ù¥Ñ½Éäœ€˜˜€……µA…¹•°€˜˜€ (€€€€€€€€ñA…ÕÍ•5•¹Ô(€€€€€€€€€µ…¹…•Èõíµ…¹…•Éô(€€€€€€€€€•¹¥¹”õí•¹¥¹•I•…‘åô(€€€€€€€€€…Ñ¥Ù•Iå‘•Èõí…Ñ¥Ù•Iå‘•Éô(€€€€€€€€€…µ•5½‘”õíµ…¹…•ÉMÑ…Ñ”¹…µ•5½‘•ô(€€€€€€€€€…É•¹…%õíµ…¹…•ÉMÑ…Ñ”¹…É•¹…%‘ô(€€€€€€€€€É½Õ¹õíÉ½Õ¹‘ô(€€€€€€€€€Á½¥¹ÑÌõíÁ½¥¹ÑÍô(€€€€€€€€€ÕÁÉ…‘•ÌõíÕÁÉ…‘•Íô(€€€€€€€€€±…å½ÕĞõí±…å½ÕÑô(€€€€€€€€€½¹I•ÍÕµ”õíÉ•ÍÕµ•ô(€€€€€€€€€½¹á¥Ğõí•á¥ÑQ½MÑ…ÉÑô(€€€€€€€€€½¹=Á•¹5…Àõì ¤€ôø•¹¥¹•I•˜¹ÕÉÉ•¹Ğü¹Ñ½±•5…À ¥ô(€€€€€€€€€½¹=Á•¹…µ•É…QÕ¹¥¹œõì ¤€ôøÍ•Ñ…µA…¹•°¡ÑÉÕ”¥ô(€€€€€€€€¼ø(€€€€€€¥ô((€€€€€íÁ±…å¥¹œ€˜˜Á¡…Í”€ôôô€‘•…œ€˜˜€ (€€€€€€€€ñ‘¥Ø±…ÍÍ9…µ”õíÍÑå±•Ì¹µ½‘…±ôø(€€€€€€€€€€ñ‘¥Ø±…ÍÍ9…µ”õíÍÑå±•Ì¹µ½‘…±…É‘ôø(€€€€€€€€€€€€ñÀùQ¡½Í”Iå‘•ÉèèI…¥ğ½Àø(€€€€€€€€€€€€ñ ÌùíÁ…ÉÑåMÑ…Ñ”¹µ½‘”€ôôô…µ•5½‘”¹I%€ü€I…¥‘•™•…Ğœ€è€M¥¹…°±½ÍĞôğ½ Ìø(€€€€€€€€€€€€ñÀø(€€€€€€€€€€€€€íÁ…ÉÑåMÑ…Ñ”¹µ½‘”€ôôô…µ•5½‘”¹I%(€€€€€€€€€€€€€€€€üQ¡”ÍÅÕ…¥Ì‘½İ¸¸¹•µ¥•Ì‘•™•…Ñ•€‘í¡Õ‘I•˜¹ÕÉÉ•¹Ğü¹É…¥ü¹‘•™•…Ñ•€üü€Áô¸…µ…”‘•…±Ğ€‘í¡Õ‘I•˜¹ÕÉÉ•¹Ğü¹É…¥ü¹‘•…±Ğ€üü€Áô¸…µ…”Ñ…­•¸€‘í¡Õ‘I•˜¹ÕÉÉ•¹Ğü¹É…¥ü¹Ñ…­•¸€üü€Áô¹€(€€€€€€€€€€€€€€€€è€Q¡”µ¥¹µ½¹ÑÉ½±±•‰±½¬½Ù•ÉÉ…¸å½Ô¸½µ”‰…¬İ¥Ñ µ½É”…ÕÉ„‘¥Í¥Á±¥¹”ƒŠPÁ½İ•ÉÌ‘É…¥¸°…¹™¥ÍÑÌ…É”…±°Ñ¡…Ğ¥Ì±•™Ğİ¡•¸Ñ¡”Í¥¹…°ÉÕ¹Ì‘Éä¸ô(€€€€€€€€€€€€ğ½Àø(€€€€€€€€€€€íÁ…ÉÑåMÑ…Ñ”¹µ½‘”€ôôô…µ•5½‘”¹I%€ü€ñÀ±…ÍÍ9…µ”õíÍÑå±•Ì¹±•…‘•É‰½…É‘9½Ñ¥•ô…É¥„µ±¥Ù”ô‰Á½±¥Ñ”ˆùí±•…‘•É‰½…É‘9½Ñ¥•ôğ½Àø€è¹Õ±±ô(€€€€€€€€€€€€ñ1•…‘•É‰½…É‘AÉ•Ù¥•ÜÉ•™É•Í¡-•äõí±•…‘•É‰½…É‘9½Ñ¥•ô€¼ø(€€€€€€€€€€€€ñ‘¥Ø±…ÍÍ9…µ”õíÍÑå±•Ì¹…Ñ¥½¹Íôø(€€€€€€€€€€€€€€ñ‰ÕÑÑ½¸ÑåÁ”ô‰‰ÕÑÑ½¸ˆ½¹±¥¬õíÉ•Á±…åôø(€€€€€€€€€€€€€€€É½À¥¸……¥¸(€€€€€€€€€€€€€€ğ½‰ÕÑÑ½¸ø(€€€€€€€€€€€€€€ñ‰ÕÑÑ½¸ÑåÁ”ô‰‰ÕÑÑ½¸ˆ½¹±¥¬õí¡…¹•Iå‘•Éôø(€€€€€€€€€€€€€€€¡…¹”Iå‘•È(€€€€€€€€€€€€€€ğ½‰ÕÑÑ½¸ø(€€€€€€€€€€€€ğ½‘¥Øø(€€€€€€€€€€ğ½‘¥Øø(€€€€€€€€ğ½‘¥Øø(€€€€€€¥ô((€€€€€íÁ±…å¥¹œ€˜˜Á¡…Í”€ôôô€Ù¥Ñ½Éäœ€˜˜€ (€€€€€€€€ñ‘¥Ø±…ÍÍ9…µ”õíÍÑå±•Ì¹µ½‘…±ôø(€€€€€€€€€€ñ‘¥Ø±…ÍÍ9…µ”õíÍÑå±•Ì¹µ½‘…±…É‘ôø(€€€€€€€€€€€€ñÀùíÁ…ÉÑåMÑ…Ñ”¹µ½‘”€ôôô…µ•5½‘”¹I%€ü€Q¡½Í”Iå‘•Éèƒ
+ÜI…¥œ€è€Q¡½Í”Iå‘•Éèƒ
+ÜAÙ@ôğ½Àø(€€€€€€€€€€€€ñ ÌùíÁ…ÉÑåMÑ…Ñ”¹µ½‘”€ôôô…µ•5½‘”¹I%€ü€I…¥Ù¥Ñ½Éäœ€è€e½Ôİ¥¸ôğ½ Ìø(€€€€€€€€€€€€ñÀø(€€€€€€€€€€€€€íÁ…ÉÑåMÑ…Ñ”¹µ½‘”€ôôô…µ•5½‘”¹I%(€€€€€€€€€€€€€€€€ü±°İ…Ù•Ì…É”‘½İ¸¸¹•µ¥•Ì‘•™•…Ñ•€‘í¡Õ‘I•˜¹ÕÉÉ•¹Ğü¹É…¥ü¹‘•™•…Ñ•€üü€Áô¸…µ…”‘•…±Ğ€‘í¡Õ‘I•˜¹ÕÉÉ•¹Ğü¹É…¥ü¹‘•…±Ğ€üü€Áô¸…µ…”Ñ…­•¸€‘í¡Õ‘I•˜¹ÕÉÉ•¹Ğü¹É…¥ü¹Ñ…­•¸€üü€Áô¹€(€€€€€€€€€€€€€€€€è€Q¡”½Ñ¡•ÈIå‘•È¥Ì‘½İ¸¸I•µ…Ñ ­••ÁÌÑ¡”Í…µ”±¥¹•ÕÀ¸ô(€€€€€€€€€€€€ğ½Àø(€€€€€€€€€€€íÁ…ÉÑåMÑ…Ñ”¹µ½‘”€ôôô…µ•5½‘”¹I%€ü€ (€€€€€€€€€€€€€€ñÕ°ø(€€€€€€€€€€€€€€€ì¡¡Õ‘I•˜¹ÕÉÉ•¹Ğü¹É…¥ü¹½¹ÑÉ¥‰ÕÑ¥½¹Ì€üümt¤¹µ…À ¡É½Ü¤€ôø€ (€€€€€€€€€€€€€€€€€€ñ±¤­•äõíÉ½Ü¹¹…µ•ôø(€€€€€€€€€€€€€€€€€€€íÉ½Ü¹¹…µ•ôèíÉ½Ü¹‘•…±Ñô(€€€€€€€€€€€€€€€€€€ğ½±¤ø(€€€€€€€€€€€€€€€€¤¥ô(€€€€€€€€€€€€€€ğ½Õ°ø(€€€€€€€€€€€€¤€è¹Õ±±ô(€€€€€€€€€€€íÁ…ÉÑåMÑ…Ñ”¹µ½‘”€ôôô…µ•5½‘”¹I%€ü€ñÀ±…ÍÍ9…µ”õíÍÑå±•Ì¹±•…‘•É‰½…É‘9½Ñ¥•ô…É¥„µ±¥Ù”ô‰Á½±¥Ñ”ˆùí±•…‘•É‰½…É‘9½Ñ¥•ôğ½Àø€è¹Õ±±ô(€€€€€€€€€€€€ñ1•…‘•É‰½…É‘AÉ•Ù¥•ÜÉ•™É•Í¡-•äõí±•…‘•É‰½…É‘9½Ñ¥•ô€¼ø(€€€€€€€€€€€€ñ‘¥Ø±…ÍÍ9…µ”õíÍÑå±•Ì¹…Ñ¥½¹Íôø(€€€€€€€€€€€€€€ñ‰ÕÑÑ½¸ÑåÁ”ô‰‰ÕÑÑ½¸ˆ½¹±¥¬õíÉ•Á±…åôø(€€€€€€€€€€€€€€€I•µ…Ñ (€€€€€€€€€€€€€€ğ½‰ÕÑÑ½¸ø(€€€€€€€€€€€€€€ñ‰ÕÑÑ½¸ÑåÁ”ô‰‰ÕÑÑ½¸ˆ½¹±¥¬õí¡…¹•Iå‘•Éôø(€€€€€€€€€€€€€€€¡…¹”Iå‘•Éè(€€€€€€€€€€€€€€ğ½‰ÕÑÑ½¸ø(€€€€€€€€€€€€ğ½‘¥Øø(€€€€€€€€€€ğ½‘¥Øø(€€€€€€€€ğ½‘¥Øø(€€€€€€¥ô((€€€€€íÁ±…å¥¹œ€˜˜µ…Á=Á•¸€˜˜Á¡…Í”€„ôô€‘•…œ€˜˜Á¡…Í”€„ôô€Ù¥Ñ½Éäœ€˜˜Á¡…Í”€„ôô€É•Á½ÉĞœ€˜˜€ (€€€€€€€€ñI…¥‘5…À(€€€€€€€€€É•˜õíµ…Á!Õ‘ô(€€€€€€€€€Á±…”õí…É•¹…MÁ•Œ¡µ…¹…•ÉMÑ…Ñ”¹…É•¹…%¤ü¹¹…µ”€üü€I…¥ô(€€€€€€€€€±½…±Qİ¼õíÁÙÁQİ½ô(€€€€€€€€€½¹±½Í”õì ¤€ôø•¹¥¹•I•˜¹ÕÉÉ•¹Ğü¹Ñ½±•5…À ¥ô(€€€€€€€€¼ø(€€€€€€¥ô((€€€€€íÍÉ••¸€ôôô€ÍÑ…ÉĞœ€˜˜€ (€€€€€€€€ñIå‘•ÉéMÑ…ÉÑMÉ••¸(€€€€€€€€€Í±½ÑÌõíÍ…Ù•MÑ…Ñ”¹Í±½ÑÍô(€€€€€€€€€…Ñ¥Ù•M±½ĞõíÍ…Ù•MÑ…Ñ”¹…Ñ¥Ù•M±½Ñô(€€€€€€€€€±…ÍÑ5½‘”õíµ…¹…•ÉMÑ…Ñ”¹…µ•5½‘•ô(€€€€€€€€€½¹M•±•ÑM±½Ğõì¡¥¹‘•à¤€ôøÍ…Ù•Ì¹Í•±•ÑM±½Ğ¡¥¹‘•à¥ô(€€€€€€€€€½¹½¹Ñ¥¹Õ”õì ¤€ôøì(€€€€€€€€€€€¥˜€ …Í…Ù•Ì¹±½…‘…µ”¡Í…Ù•MÑ…Ñ”¹…Ñ¥Ù•M±½Ğ°µ…¹…•È¤¤É•ÑÕÉ¸ì(€€€€€€€€€€€½¹ÍĞ±½…‘•€ôµ…¹…•È¹•ÑMÑ…Ñ” ¤ì(€€€€€€€€€€€¥˜€¡±½…‘•¹…µ•5½‘”€ôôô…µ•5½‘”¹I%¤Í•ÑI…¥‘!½ÍĞ¡±½…‘•¹…Ñ¥Ù•Iå‘•È¤ì(€€€€€€€€€€€Í•ÑMÉ••¸¡±½…‘•¹…µ•5½‘”€ôôô…µ•5½‘”¹AY@€ü€ÁÙÀœ€è±½…‘•¹…µ•5½‘”€ôôô…µ•5½‘”¹I%€ü€É…¥µ±½‰‰äœ€è€Í½±¼µÍ•±•Ğœ¤ì(€€€€€€€€€õô(€€€€€€€€€½¹9•İ…µ”õì ¤€ôøì(€€€€€€€€€€€½¹ÍĞ•µÁÑä€ôÍ…Ù•MÑ…Ñ”¹Í±½ÑÌ¹™¥¹ ¡Í±½Ğ¤€ôøÍ±½Ğ¹•µÁÑä¤ì(€€€€€€€€€€€½¹ÍĞ¥¹‘•à€ô•µÁÑäü¹Í±½Ñ%¹‘•à€üüÍ…Ù•MÑ…Ñ”¹…Ñ¥Ù•M±½Ğì(€€€€€€€€€€€Í…Ù•Ì¹‘•±•Ñ•M…Ù”¡¥¹‘•à¤ì(€€€€€€€€€€€Í…Ù•Ì¹Í•±•ÑM±½Ğ¡¥¹‘•à¤ì(€€€€€€€€€€€µ…¹…•È¹É•Í•ÑM•ÍÍ¥½¸ ¤ì(€€€€€€€€€€€Á±…å•ÉMÑ½É”¹½¹™¥ÕÉ”¡ìµ½‘”è…µ•5½‘”¹M=1<°±½…±Iå‘•Èè¹Õ±°ô¤ì(€€€€€€€€€õô(€€€€€€€€€½¹A¥­5½‘”õì¡µ½‘”¤€ôøì(€€€€€€€€€€€µ…¹…•È¹Í•Ñ…µ•5½‘”¡µ½‘”¤ì(€€€€€€€€€€€Í•ÑMÉ••¸¡µ½‘”€ôôô…µ•5½‘”¹AY@€ü€ÁÙÀœ€èµ½‘”€ôôô…µ•5½‘”¹I%€ü€É…¥µÍ•±•Ğœ€è€Í½±¼µÍ•±•Ğœ¤ì(€€€€€€€€€õô(€€€€€€€€¼ø(€€€€€€¥ô((€€€€€íÍÉ••¸€ôôô€Í½±¼µÍ•±•Ğœ€˜˜€ (€€€€€€€€ñM½±½¡…É…Ñ•ÉM•±•Ğ¥¹¥Ñ¥…±%õí…Ñ¥Ù•Iå‘•Éô½¹	…¬õì ¤€ôøÍ•ÑMÉ••¸ ÍÑ…ÉĞœ¥ô½¹A±…äõíÁ±…åM½±½ô€¼ø(€€€€€€¥ô((€€€€€íÍÉ••¸€ôôô€ÁÙÀœ€˜˜€ñAÙÁ±½Ü½¹	…¬õì ¤€ôøÍ•ÑMÉ••¸ ÍÑ…ÉĞœ¥ô½¹¥¡ĞõíÁ±…åAÙÁô€¼ùô((€€€€€íÍÉ••¸€ôôô€É…¥µÍ•±•Ğœ€˜˜€ (€€€€€€€€ñAÉ•µ¥•É•¡…É…Ñ•ÉM•±•Ğ(€€€€€€€€€µ½‘”ô‰É…¥ˆ(€€€€€€€€€¥¹¥Ñ¥…±%õíÉ…¥‘!½ÍÑô(€€€€€€€€€½¹	…¬õì ¤€ôøÍ•ÑMÉ••¸ ÍÑ…ÉĞœ¥ô(€€€€€€€€€½¹½¹™¥É´õì¡¡…É…Ñ•È¤€ôøì(€€€€€€€€€€€¥˜€ …¡…É…Ñ•È¹Éå‘•É%¤É•ÑÕÉ¸ì(€€€€€€€€€€€Í•ÑI…¥‘!½ÍĞ¡¡…É…Ñ•È¹Éå‘•É%¤ì(€€€€€€€€€€€Í•ÑMÉ••¸ É…¥µ±½‰‰äœ¤ì(€€€€€€€€€õô(€€€€€€€€¼ø(€€€€€€¥ô((€€€€€íÍÉ••¸€ôôô€É…¥µ±½‰‰äœ€˜˜€ (€€€€€€€€ñI…¥‘1½‰‰ä­•äõíÉ…¥‘!½ÍÑô¡½ÍÑ%õíÉ…¥‘!½ÍÑô½¹	…¬õì ¤€ôøÍ•ÑMÉ••¸ É…¥µÍ•±•Ğœ¥ô½¹MÑ…ÉĞõíÁ±…åI…¥‘ô½¹MÁ•Ñ…Ñ”õíÍÁ•Ñ…Ñ•I…¥‘ô€¼ø(€€€€€€¥ô(€€€€€íÍÉ••¸€ôôô€É…¥µİ…Ñ œ€˜˜İ…Ñ¡9•Ğ€˜˜€ (€€€€€€€€ñI…¥‘]…Ñ (€€€€€€€€€½‘”õíİ…Ñ¡9•Ğ¹½‘•ô(€€€€€€€€€Õ•ÍÑ%õíİ…Ñ¡9•Ğ¹Õ•ÍÑ%‘ô(€€€€€€€€€½¹1•…Ù”õì ¤€ôøì(€€€€€€€€€€€Í•Ñ]…Ñ¡9•Ğ¡¹Õ±°¤ì(€€€€€€€€€€€Í•ÑMÉ••¸ É…¥µ±½‰‰äœ¤ì(€€€€€€€€€õô(€€€€€€€€¼ø(€€€€€€¥ô(€€€€ğ½‘¥Øø(€€¤ì)ô(
