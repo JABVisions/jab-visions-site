@@ -255,7 +255,7 @@ export default function DropDraftsDrawer({
                     </div>
                     <div className="voiceProjectSummary">
                       <span className="voiceProjectEyebrow">SAVED VOICE PROJECT</span>
-                      <strong>{draft.fileName === "Voice Studio project" ? `Voice project ${draft.id.slice(-6)}` : draft.fileName}</strong>
+                      <strong>{(draft.fileName === "Voice Studio project" || draft.fileName === "Voice Booth project") ? `Voice Booth project ${draft.id.slice(-6)}` : draft.fileName}</strong>
                       <span>{hasAudioPreview ? "Preview ready" : "Auto-saved project"} · Edited {formatWhen(draft.createdAt)}</span>
                     </div>
                     {hasAudioPreview ? <audio className="voiceProjectPlayer" src={draft.dataUrl} controls preload="metadata" aria-label={`Preview ${draft.fileName}`} /> : null}
@@ -274,7 +274,7 @@ export default function DropDraftsDrawer({
                 )}
                 <div className="draftMeta">
                   <span className="draftKind">{isAudioDraft ? "Voice Project" : kindLabel(draft.kind)}</span>
-                  <span className="draftFileName">{draft.fileName || "Untitled capture"}</span>
+                  <span className="draftFileName">{isAudioDraft && (draft.fileName === "Voice Studio project" || draft.fileName === "Voice Booth project") ? `Voice Booth project ${draft.id.slice(-6)}` : draft.fileName || "Untitled capture"}</span>
                   {draft.count && draft.count > 1 ? (
                     <span className="draftCount" title="Times this draft was saved">
                       🗂 {draft.count}×

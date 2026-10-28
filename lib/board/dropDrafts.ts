@@ -111,7 +111,7 @@ export function removeDropDraft(id: string) {
   writeDropDrafts(readDropDrafts().filter((d) => d.id !== id));
 }
 
-/** Tiny listing card so a Voice Studio song still appears in Drafts when the take is too large for localStorage. */
+/** Tiny listing card so a Voice Booth song still appears in Drafts when the take is too large for localStorage. */
 const VOICE_STUDIO_CARD_WAV =
   "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAESsAACJWAAACABAAZGF0YQAAAAA=";
 
@@ -127,7 +127,7 @@ export function ensureVoiceStudioDraftCard(id: string, projectFileName?: string)
     id,
     kind: "audio",
     dataUrl: keepPreview ? prior.dataUrl : VOICE_STUDIO_CARD_WAV,
-    fileName: projectFileName || prior?.fileName || "Voice Studio project",
+    fileName: projectFileName || prior?.fileName || "Voice Booth project",
     mimeType: "audio/wav",
     createdAt: Date.now(),
     count: (prior?.count ?? 0) + 1,

@@ -911,7 +911,7 @@ export default function DropStudioStage({
       if (!didRestore) return;
       lastSavedVoiceSignatureRef.current = voiceStudioEditSignature(restored.session);
       setVoiceAutoSaveAt(Date.now());
-      flashSaveNote("Voice Studio project restored");
+      flashSaveNote("Voice Booth project restored");
     })();
   }, [flashSaveNote, voicePreset]);
 
@@ -1570,27 +1570,38 @@ export default function DropStudioStage({
       setDraftsOpen(false);
       syncMediaPreview();
       if (draft.kind === "audio") {
+        setMode("audio");
+        setStudioDraftId(draft.id);
+        setVoiceStudioOpen(true);
         void (async () => {
           const project = await loadVoiceStudioProject(draft.id);
           if (project) {
+            const projectFile = project.tracks.flatMap((track) => track.clips).find((clip) => clip.file)?.file;
+            if (projectFile) {
+              const restoredFile = fileWithResolvedContentType(projectFile);
+              fileRef.current = restoredFile;
+              setMediaKind("audio");
+              setMediaContentType(resolveUploadContentType(restoredFile));
+            }
             setAudioSession(project);
             setSessionHistory(createSessionHistory());
-            setVoiceStudioOpen(true);
             const vocal = project.tracks.find((track) => track.kind === "vocal");
             const preset = vocal?.mix.preset;
             if (preset && preset !== "none") setVoicePreset(preset);
-            flashSaveNote("Voice Studio project restored");
+            flashSaveNote("Voice Booth project restored");
             rememberActiveVoiceStudioDraft(draft.id);
             lastSavedVoiceSignatureRef.current = voiceStudioEditSignature(project);
             setVoiceAutoSaveAt(Date.now());
             return;
           }
-          setAudioSession(
-            upsertLaneFromFile(createAudioSession(), "vocal", file, {
-              mix: { preset: voicePreset },
-            })
-          );
+          const session = upsertLaneFromFile(createAudioSession(), "vocal", file, {
+            mix: { preset: voicePreset },
+          });
+          setAudioSession(session);
+          setSessionHistory(createSessionHistory());
         })();
+      } else {
+        setVoiceStudioOpen(false);
       }
     },
     [flashSaveNote, stopCamera, syncMediaPreview, voicePreset]
@@ -1678,7 +1689,7 @@ export default function DropStudioStage({
         setPhase("edit");
         rememberActiveVoiceStudioDraft(draftIdRef.current);
         lastSavedVoiceSignatureRef.current = voiceStudioEditSignature(live.session);
-        flashSaveNote("Voice Studio is still live");
+        flashSaveNote("Voice Booth is still live");
       }
       return;
     }
@@ -2630,7 +2641,7 @@ export default function DropStudioStage({
 
   function retake() {
     if (voiceSessionActive) {
-      flashSaveNote("Finish this song in Voice Studio first.");
+      flashSaveNote("Finish this song in Voice Booth first.");
       return;
     }
     fileRef.current = null;
@@ -2738,7 +2749,7 @@ export default function DropStudioStage({
           (sessionHasLane(audioSession, "instrumental") ||
             sessionHasLane(audioSession, "adlib") ||
             sessionHasLane(audioSession, "fx"))
-          ? "Mixing Voice Studio session…"
+          ? "Mixing Voice Booth session…"
           : "Applying vocal enhancement…"
       );
       await new Promise<void>((resolve) => {
@@ -3191,7 +3202,7 @@ export default function DropStudioStage({
                       onClick={() => {
                         if (!enabled) return;
                         if (voiceSessionActive && m !== mode) {
-                          flashSaveNote("Finish this song in Voice Studio first.");
+                          flashSaveNote("Finish this song in Voice Booth first.");
                           return;
                         }
                         if (isDropbookMode) {
@@ -3549,15 +3560,15 @@ export default function DropStudioStage({
                   <div className="capEditScroll">
                     <BoardClientErrorBoundary
                       name="voice-studio"
-                      resetLabel="Try Voice Studio again"
+                      resetLabel="Try Voice Booth again"
                       resetKey={audioSession.id}
                       fallback={
                         <div className="studioVoiceError">
-                          Voice Studio hit a snag. Your song is still in this Drop Studio — try Play or Record again.
+                          Voice Booth hit a snag. Your song is still in this Drop Studio — try Play or Record again.
                         </div>
                       }
                     >
-                    <Suspense fallback={<div className="studioVoiceError">Opening Voice Studio…</div>}>
+                    <Suspense fallback={<div className="studioVoiceError">Opening Voice Booth…</div>}>
                     <VoiceStudioSession
                       session={audioSession}
                       autoSaveLabel={
@@ -4029,7 +4040,7 @@ export default function DropStudioStage({
                           />
                           <p>The selected vocal enhancement will be baked into your Voice Drop.</p>
                           <button type="button" className="studioGhost" onClick={openVoiceStudio}>
-                            Studio — add an instrumental
+                            Voice Booth — add an instrumental
                           </button>
                         </div>
                       </div>
