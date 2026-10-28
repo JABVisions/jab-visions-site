@@ -56,7 +56,7 @@ export const BOARD_ROOM_CATALOG: Room[] = [
     name: "Music",
     icon: "🎧",
     description:
-      "Songs, demos, instrumentals, vocals, beats, WIPs, audio Drops, and collabs. The social counterpart to Voice Studio.",
+      "Songs, demos, instrumentals, vocals, beats, WIPs, audio Drops, and collabs. The social counterpart to Voice Booth.",
     chips: ["Songs", "Beats", "Vocals", "WIPs", "Collabs"],
     kind: "official",
     isOfficial: true,

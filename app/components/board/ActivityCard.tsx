@@ -2058,7 +2058,7 @@ function ActivityCard({
         />
       ) : !showEmbed && !isDescriptDrop && !isDropbookSlide && isAudioFileDrop ? (
         <div className="mediaMissing" role="status">
-          This Voice Studio mix did not upload to Board. Open Drop Studio and Mix to Drop again from drafts.
+          This Voice Booth mix did not upload to Board. Open Drop Studio and Mix to Drop again from drafts.
         </div>
       ) : null}
 

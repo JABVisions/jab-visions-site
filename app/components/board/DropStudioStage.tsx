@@ -3978,7 +3978,7 @@ export default function DropStudioStage({
                                   onClick={openVoiceStudio}
                                   disabled={recording}
                                 >
-                                  Studio
+                                  Voice Booth
                                 </button>
                               </>
                             ) : (

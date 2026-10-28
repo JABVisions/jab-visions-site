@@ -648,7 +648,7 @@ export default function DropConsole({
           mediaSource ?? "capture"
         );
         if (!durableAttach) {
-          throw new Error("The Voice Studio mix is still uploading. Wait for Media attached ✓, then drop.");
+          throw new Error("The Voice Booth mix is still uploading. Wait for Media attached ✓, then drop.");
         }
       }
       const cleanAttach =

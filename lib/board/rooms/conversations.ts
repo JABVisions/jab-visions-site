@@ -130,7 +130,7 @@ const DEFAULT_SEED: RoomConversation[] = [
     id: "mus1",
     roomId: "music",
     title: "Drop your theme song",
-    body: "If someone watched your week like a 2000s movie, what track plays? Voice Studio mixes, beats, vocals, and WIPs all belong here.",
+    body: "If someone watched your week like a 2000s movie, what track plays? Voice Booth mixes, beats, vocals, and WIPs all belong here.",
     authorName: "Music",
     createdAt: isoFromOffset(1000 * 60 * 60 * 14),
     replies: [
