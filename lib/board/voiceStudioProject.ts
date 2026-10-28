@@ -363,7 +363,11 @@ export async function saveVoiceStudioProject(
 export async function loadVoiceStudioProject(draftId: string): Promise<AudioSession | null> {
   if (!draftId) return null;
   const local = await readProjectBlob(draftId);
-  if (local) return sessionFromVoiceStudioProject(local);
+  const localMediaAvailable = Boolean(
+    local?.files?.length &&
+    local.files.every((file) => file.bytes?.byteLength || file.blob || file.dataUrl)
+  );
+  if (local && localMediaAvailable) return sessionFromVoiceStudioProject(local);
   try {
     const response = await fetch(`/api/board/drop-drafts?id=${encodeURIComponent(draftId)}`, {
       cache: "no-store",
@@ -394,10 +398,20 @@ export async function loadVoiceStudioProject(draftId: string): Promise<AudioSess
       }),
     };
     const session = await sessionFromVoiceStudioProject(remote);
-    if (session) rememberActiveVoiceStudioDraft(draftId);
+    if (session) {
+      const db = await openDb();
+      await new Promise<void>((resolve, reject) => {
+        const tx = db.transaction(STORE, "readwrite");
+        tx.objectStore(STORE).put(remote);
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error ?? new Error("project cache failed"));
+      });
+      db.close();
+      rememberActiveVoiceStudioDraft(draftId);
+    }
     return session;
   } catch {
-    return null;
+    return local ? sessionFromVoiceStudioProject(local) : null;
   }
 }
 
