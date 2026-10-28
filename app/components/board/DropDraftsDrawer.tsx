@@ -24,8 +24,11 @@ import {
 } from "@/lib/board/descriptDocs";
 import {
   ART_DRAFT_UPDATED_EVENT,
+  discardArtDraft,
   loadArtDraft,
   peekArtDraftMeta,
+  restoreArtDraftFromCloud,
+  syncCurrentArtDraftToCloud,
   type ArtDraftMeta,
 } from "@/lib/board/artDraftSession";
 
@@ -79,6 +82,31 @@ function mergeDrafts(local: DropDraft[], cloud: DropDraft[]): DropDraft[] {
     byId.set(draft.id, remote ? { ...remote, ...draft, remoteUrl: remote.remoteUrl, remoteProject: remote.remoteProject } : draft);
   }
   return [...byId.values()];
+}
+
+function artDraftFromCloud(rows: unknown): ArtDraftMeta | null {
+  if (!Array.isArray(rows)) return null;
+  const row = rows.find((value) => {
+    if (!value || typeof value !== "object") return false;
+    return (value as Record<string, unknown>).editor_state &&
+      ((value as Record<string, unknown>).editor_state as Record<string, unknown>).type === "art-project";
+  }) as Record<string, unknown> | undefined;
+  if (!row || typeof row.id !== "string") return null;
+  const state = row.editor_state as Record<string, unknown>;
+  const updatedAt = Number(state.updatedAt) || (row.updated_at ? Date.parse(String(row.updated_at)) : Date.now());
+  return {
+    draftId: "active-art",
+    dropType: "art",
+    lastLocalSave: 0,
+    lastCloudSave: updatedAt,
+    dirty: false,
+    createdAt: updatedAt,
+    updatedAt,
+    paper: Boolean(state.paper),
+    recovered: true,
+    cloudId: row.id,
+    remoteUrl: String(state.signedUrl || ""),
+  };
 }
 
 function documentsFromCloud(rows: unknown): DescriptDoc[] {
@@ -192,6 +220,9 @@ export default function DropDraftsDrawer({
         if (!cancelled && body?.ok) {
           setDrafts(mergeDrafts(readDropDrafts(), draftsFromCloud(body.drafts)));
           setDocuments(mergeDocuments(readDescriptDocs(), documentsFromCloud(body.drafts)));
+          const cloudArt = artDraftFromCloud(body.drafts);
+          const localArt = peekArtDraftMeta();
+          setArtDraft(localArt ? { ...cloudArt, ...localArt, cloudId: cloudArt?.cloudId, remoteUrl: cloudArt?.remoteUrl } : cloudArt);
         }
       } catch {
         // Local drafts remain available if the account sync cannot be reached.
@@ -199,9 +230,12 @@ export default function DropDraftsDrawer({
     };
     sync();
     void loadCloudDrafts();
-    void Promise.all([syncLocalDropDraftsToCloud(), syncVoiceStudioProjectsToCloud(), syncLocalDescriptDocsToCloud()])
+    void Promise.all([syncLocalDropDraftsToCloud(), syncVoiceStudioProjectsToCloud(), syncLocalDescriptDocsToCloud(), syncCurrentArtDraftToCloud()])
       .then(() => loadCloudDrafts());
-    void loadArtDraft().then(() => setArtDraft(peekArtDraftMeta()));
+    void loadArtDraft().then(() => {
+      const localArt = peekArtDraftMeta();
+      if (localArt) setArtDraft((current) => current ? { ...current, ...localArt, cloudId: current.cloudId || localArt.cloudId, remoteUrl: current.remoteUrl || localArt.remoteUrl } : localArt);
+    });
     void listVoiceStudioProjectCards().then((projects) => {
       if (cancelled || !projects.length) return;
       const restored = restoreVoiceStudioDraftCards(projects);
@@ -312,7 +346,33 @@ export default function DropDraftsDrawer({
                     <h3 className="documentTitle">Canvas in progress</h3>
                     <p className="documentExcerpt">Pick up where you left off in Art Studio.</p>
                     <div className="draftActions">
-                      <button type="button" className="draftBtn open" onClick={onOpenArtDraft}>Resume art</button>
+                      <button
+                      type="button"
+                      className="draftBtn open"
+                      onClick={async () => {
+                        if (entry.artDraft.remoteUrl && entry.artDraft.cloudId) {
+                          try {
+                            await restoreArtDraftFromCloud({
+                              signedUrl: entry.artDraft.remoteUrl,
+                              cloudId: entry.artDraft.cloudId,
+                              updatedAt: entry.artDraft.updatedAt,
+                              paper: entry.artDraft.paper,
+                            });
+                          } catch {
+                            return;
+                          }
+                        }
+                        onOpenArtDraft?.();
+                      }}
+                    >Resume art</button>
+                    <button
+                      type="button"
+                      className="draftBtn danger"
+                      onClick={() => {
+                        void discardArtDraft(entry.artDraft.cloudId);
+                        setArtDraft(null);
+                      }}
+                    >Delete</button>
                     </div>
                   </div>
                 </article>;
