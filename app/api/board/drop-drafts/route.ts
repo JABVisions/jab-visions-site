@@ -110,6 +110,19 @@ export async function POST(request: NextRequest) {
     body?.dropType === "image" || body?.dropType === "video" || body?.dropType === "audio"
       ? body.dropType
       : "video";
+  // Voice Booth autosaves also write the selected audio file as a media draft.
+  // Keep the richer editable session if those two asynchronous saves race.
+  if (dropType === "audio" && cloudState?.type === "media") {
+    const { data: existing } = await supabase
+      .from(TABLE)
+      .select("editor_state")
+      .eq("user_id", userId)
+      .eq("id", id)
+      .maybeSingle();
+    const existingState = existing?.editor_state as Record<string, unknown> | undefined;
+    if (existingState?.type === "voice-project") return json({ ok: true, id });
+  }
+
   const { error } = await supabase.from(TABLE).upsert(
     {
       id,
