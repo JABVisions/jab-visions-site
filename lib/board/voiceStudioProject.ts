@@ -17,6 +17,39 @@ const DB_NAME = "jab_voice_studio_projects_v1";
 const STORE = "projects";
 const DB_VERSION = 1;
 const ACTIVE_DRAFT_KEY = "jab_voice_studio_active_draft_v1";
+const SESSION_DRAFT_IDS_KEY = "jab_voice_studio_session_drafts_v1";
+
+function readSessionDraftIds(): Record<string, string> {
+  if (typeof window === "undefined") return {};
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(SESSION_DRAFT_IDS_KEY) || "{}");
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Record<string, string> : {};
+  } catch {
+    return {};
+  }
+}
+
+/** Keep repeated saves of one live/restored Voice Booth session attached to one Drafts card. */
+export function stableVoiceStudioDraftId(sessionId: string, preferredId = ""): string {
+  const restoredPrefix = "session-restore-";
+  if (sessionId.startsWith(restoredPrefix)) {
+    return sessionId.slice(restoredPrefix.length);
+  }
+  const ids = readSessionDraftIds();
+  const priorId = ids[sessionId];
+  if (priorId) return priorId;
+  const draftId = preferredId || `draft_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
+  if (sessionId && typeof window !== "undefined") {
+    const next = { ...ids, [sessionId]: draftId };
+    const entries = Object.entries(next).slice(-100);
+    try {
+      window.localStorage.setItem(SESSION_DRAFT_IDS_KEY, JSON.stringify(Object.fromEntries(entries)));
+    } catch {
+      /* storage unavailable */
+    }
+  }
+  return draftId;
+}
 const MAX_CACHED_CLIP_BYTES = 24;
 
 /** Reuse clip ArrayBuffers across autosaves so Play doesn't fight IDB for RAM. */
