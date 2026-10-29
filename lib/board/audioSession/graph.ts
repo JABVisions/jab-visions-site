@@ -26,7 +26,7 @@ export function connectScheduledClip(
   ctx: BaseAudioContext,
   scheduled: ScheduledClip,
   destination: AudioNode,
-  options?: { timeOrigin?: number }
+  options?: { timeOrigin?: number; window?: { start: number; end: number } }
 ): TrackOutput | null {
   const buffer = scheduled.clip.decoded;
   if (!buffer) return null;
@@ -52,25 +52,33 @@ export function connectScheduledClip(
 
   const mix = scheduled.track.mix;
   const origin = Math.max(0, options?.timeOrigin ?? 0);
-  const start = origin + scheduled.whenSeconds;
-  const end = start + scheduled.durationSeconds;
+  const windowStart = options?.window?.start ?? 0;
+  const windowEnd = options?.window?.end ?? Infinity;
+  const clipStart = scheduled.whenSeconds;
+  const clipEnd = clipStart + scheduled.durationSeconds;
+  const playStart = Math.max(clipStart, windowStart);
+  const playEnd = Math.min(clipEnd, windowEnd);
+  if (playEnd <= playStart) return null;
+  const start = origin + playStart - windowStart;
+  const end = origin + playEnd - windowStart;
   const fadeIn = Math.max(0, scheduled.clip.fadeInMs ?? mix.fadeInMs) / 1000;
   const fadeOut = Math.max(0, scheduled.clip.fadeOutMs ?? mix.fadeOutMs) / 1000;
 
-  fade.gain.setValueAtTime(fadeIn > 0 ? 0 : 1, start);
-  if (fadeIn > 0) {
-    fade.gain.linearRampToValueAtTime(1, start + Math.min(fadeIn, scheduled.durationSeconds));
-  }
-  if (fadeOut > 0 && fadeOut < scheduled.durationSeconds) {
-    const fadeOutAt = Math.max(start, end - fadeOut);
-    fade.gain.setValueAtTime(1, fadeOutAt);
-    fade.gain.linearRampToValueAtTime(0, end);
+  const envelope = (at: number) => Math.min(
+    1,
+    fadeIn > 0 ? (at - clipStart) / fadeIn : 1,
+    fadeOut > 0 ? (clipEnd - at) / fadeOut : 1
+  );
+  fade.gain.setValueAtTime(Math.max(0, envelope(playStart)), start);
+  const breakpoints = [clipStart + fadeIn, clipEnd - fadeOut].filter((at) => at > playStart && at < playEnd).sort((a, b) => a - b);
+  for (const at of [...breakpoints, playEnd]) {
+    fade.gain.linearRampToValueAtTime(Math.max(0, envelope(at)), origin + at - windowStart);
   }
 
   if (isVoicePreset(mix.preset)) {
     const nodes = createVoicePresetNodes(ctx);
     connectVoicePresetGraph(source, nodes, { toDestination: false });
-    applyVoicePreset(nodes, mix.preset, false);
+    applyVoicePreset(nodes, mix.preset, false, mix.alteration);
     nodes.master.connect(fade);
   } else {
     source.connect(fade);
@@ -84,6 +92,6 @@ export function connectScheduledClip(
     volume.connect(destination);
   }
 
-  source.start(start, scheduled.bufferOffsetSeconds, scheduled.durationSeconds);
+  source.start(start, scheduled.bufferOffsetSeconds + playStart - clipStart, playEnd - playStart);
   return { output: panner ?? volume, source };
 }

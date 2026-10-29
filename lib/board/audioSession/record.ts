@@ -49,29 +49,14 @@ export function cloneStreamForMeter(stream: MediaStream) {
   return new MediaStream(tracks);
 }
 
-function normalizeTake(samples: Float32Array, peak: number): Float32Array {
-  if (!samples.length || peak < 0.0008) return samples;
-  if (peak >= STUDIO_TAKE_TARGET_PEAK) return samples;
-  const gain = Math.min(STUDIO_TAKE_MAX_NORMALIZE, STUDIO_TAKE_TARGET_PEAK / peak);
-  if (gain <= 1.05) return samples;
-  const out = new Float32Array(samples.length);
-  for (let i = 0; i < samples.length; i += 1) {
-    const sample = (samples[i] ?? 0) * gain;
-    if (sample > 1) out[i] = 1;
-    else if (sample < -1) out[i] = -1;
-    else out[i] = sample;
-  }
-  return out;
-}
-
-function floatToWavBlob(samples: Float32Array, sampleRate: number): Blob {
-  const frames = samples.length;
+export function capturedChunksToWav(chunks: Float32Array[], sampleRate: number, peak: number): Blob {
+  const frames = chunks.reduce((total, chunk) => total + chunk.length, 0);
   if (!frames) return new Blob([], { type: "audio/wav" });
 
   const channels = 1;
   const bytesPerSample = 2;
   const dataLength = frames * channels * bytesPerSample;
-  const output = new ArrayBuffer(44 + dataLength);
+  const output = new ArrayBuffer(44);
   const view = new DataView(output);
   const write = (offset: number, value: string) => {
     for (let index = 0; index < value.length; index += 1) {
@@ -92,13 +77,19 @@ function floatToWavBlob(samples: Float32Array, sampleRate: number): Blob {
   write(36, "data");
   view.setUint32(40, dataLength, true);
 
-  let offset = 44;
-  for (let i = 0; i < frames; i += 1) {
-    const sample = Math.max(-1, Math.min(1, samples[i] ?? 0));
-    view.setInt16(offset, sample < 0 ? sample * 0x8000 : sample * 0x7fff, true);
-    offset += bytesPerSample;
+  const gain = peak >= 0.0008 && peak < STUDIO_TAKE_TARGET_PEAK
+    ? Math.min(STUDIO_TAKE_MAX_NORMALIZE, STUDIO_TAKE_TARGET_PEAK / peak) : 1;
+  const parts: BlobPart[] = [output];
+  for (const samples of chunks) {
+    const pcm = new ArrayBuffer(samples.length * 2);
+    const pcmView = new DataView(pcm);
+    for (let i = 0; i < samples.length; i++) {
+      const sample = Math.max(-1, Math.min(1, samples[i] * gain));
+      pcmView.setInt16(i * 2, sample < 0 ? sample * 0x8000 : sample * 0x7fff, true);
+    }
+    parts.push(new Blob([pcm]));
   }
-  return new Blob([output], { type: "audio/wav" });
+  return new Blob(parts, { type: "audio/wav" });
 }
 
 /**
@@ -137,8 +128,7 @@ export function createStudioTakeCapture(
   const mute = ctx.createGain();
   mute.gain.value = 0;
 
-  let captured = new Float32Array(Math.max(1, Math.floor(ctx.sampleRate * 8)));
-  let capturedLength = 0;
+  let captured: Float32Array[] = [];
   let armed = false;
   let disposed = false;
   let peak = 0;
@@ -146,14 +136,9 @@ export function createStudioTakeCapture(
   processor.onaudioprocess = (event) => {
     if (!armed || disposed) return;
     const input = event.inputBuffer.getChannelData(0);
-    const nextLen = capturedLength + input.length;
-    if (nextLen > captured.length) {
-      const grown = new Float32Array(Math.max(nextLen, captured.length * 2));
-      grown.set(captured.subarray(0, capturedLength));
-      captured = grown;
-    }
-    captured.set(input, capturedLength);
-    capturedLength = nextLen;
+    // Keep fixed-size chunks; doubling a contiguous 30-minute buffer briefly
+    // needs both old and new allocations and can kill an iPad tab.
+    captured.push(new Float32Array(input));
     for (let i = 0; i < input.length; i += 1) {
       const v = Math.abs(input[i] ?? 0);
       if (v > peak) peak = v;
@@ -174,7 +159,7 @@ export function createStudioTakeCapture(
       if (disposed) return;
       armed = true;
       peak = 0;
-      capturedLength = 0;
+      captured = [];
     },
     isRecording() {
       return armed && !disposed;
@@ -184,17 +169,16 @@ export function createStudioTakeCapture(
     },
     stop() {
       armed = false;
-      const samples = capturedLength
-        ? captured.subarray(0, capturedLength)
-        : new Float32Array(0);
-      const normalized = normalizeTake(samples, peak);
-      return floatToWavBlob(normalized, ctx.sampleRate);
+      const blob = capturedChunksToWav(captured, ctx.sampleRate, peak);
+      captured = [];
+      return blob;
     },
     dispose() {
       if (disposed) return;
       disposed = true;
       armed = false;
       processor.onaudioprocess = null;
+      captured = [];
       try {
         source.disconnect();
       } catch {

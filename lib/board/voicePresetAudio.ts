@@ -1,3 +1,4 @@
+import type { AlterationParams } from "./audioSession/types";
 import { audioBufferToWav } from "@/lib/board/audioSession/wav";
 
 export type VoicePresetKey =
@@ -225,8 +226,11 @@ export function makeVoiceImpulse(ctx: BaseAudioContext, seconds: number, decay: 
   const buffer = ctx.createBuffer(2, length, ctx.sampleRate);
   for (let channel = 0; channel < 2; channel += 1) {
     const data = buffer.getChannelData(channel);
+    // Stable impulses keep preview and independently rendered blocks identical.
+    let seed = 12345 + channel;
     for (let index = 0; index < length; index += 1) {
-      data[index] = (Math.random() * 2 - 1) * Math.pow(1 - index / length, decay);
+      seed = (Math.imul(seed, 1664525) + 1013904223) | 0;
+      data[index] = ((seed >>> 0) / 0x100000000 * 2 - 1) * Math.pow(1 - index / length, decay);
     }
   }
   return buffer;
@@ -243,8 +247,20 @@ function saturationCurve(drive: number) {
   return curve;
 }
 
-export function applyVoicePreset(nodes: VoicePresetNodes, preset: VoicePresetKey, smooth = true) {
-  const settings = VOICE_PRESET_SETTINGS[preset];
+export function applyVoicePreset(nodes: VoicePresetNodes, preset: VoicePresetKey, smooth = true, alteration?: AlterationParams) {
+  const base = VOICE_PRESET_SETTINGS[preset];
+  const knob = (value: number | undefined) => Math.max(0, Math.min(1, value ?? 0.5)) * 2;
+  const intensity = alteration ? Math.max(0, Math.min(1, alteration.intensity)) : 1;
+  const settings = {
+    ...base,
+    lowGain: base.lowGain * intensity,
+    highGain: base.highGain * intensity,
+    peakGain: base.peakGain * intensity,
+    drive: 1 + (base.drive - 1) * knob(alteration?.distortion) * intensity,
+    wet: base.wet * knob(alteration?.reverb) * intensity,
+    echo: base.echo * knob(alteration?.echo) * intensity,
+    ratio: 1 + (base.ratio - 1) * knob(alteration?.correction) * intensity,
+  };
   const time = nodes.ctx.currentTime;
   const set = (param: AudioParam, value: number) => {
     if (smooth) param.setTargetAtTime(value, time, 0.025);

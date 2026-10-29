@@ -268,7 +268,9 @@ export default function VoiceStudioSession({
   const hasVocal = sessionHasLane(session, "vocal");
   const countingIn = countIn != null;
   const canAddInstrumental = !recording && !countingIn;
-  const vocalPreset: StudioPresetKey = vocal?.mix.preset ?? "clean";
+  const effectTrack = hasVocal ? vocal : instrumental;
+  const instrumentalOnly = hasBeat && !hasVocal;
+  const vocalPreset: StudioPresetKey = effectTrack?.mix.preset ?? "clean";
 
   useEffect(() => {
     if (!recording) return;
@@ -447,7 +449,8 @@ export default function VoiceStudioSession({
       <VoiceStudioAlterationPanel
         open={voicePanelOpen}
         preset={vocalPreset}
-        alteration={vocal?.mix.alteration}
+        alteration={effectTrack?.mix.alteration}
+        label={instrumentalOnly ? "Instrumental effects" : "Voice"}
         onClose={() => {
           setVoicePanelOpen(false);
           onStopPresetPreview?.();
@@ -517,9 +520,9 @@ export default function VoiceStudioSession({
             if (!next) onStopPresetPreview?.();
           }}
           disabled={recording || countingIn}
-          title="Vocal alteration presets"
+          title={instrumentalOnly ? "Instrumental effects" : "Vocal alteration presets"}
         >
-          Voice
+          {instrumentalOnly ? "Effects" : "Voice"}
         </button>
         <button
           type="button"
