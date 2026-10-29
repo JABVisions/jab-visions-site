@@ -40,11 +40,23 @@ import RyderzStartScreen from './start/RyderzStartScreen';
 import LeaderboardPreview from './start/LeaderboardPreview';
 import styles from './RaidGame.module.css';
 
+type RaidLeaderboardSubmission = {
+  submissionId: string;
+  displayName: string;
+  ryderId: RyderId;
+  difficulty: string;
+  result: 'victory' | 'defeat';
+  waveReached: number;
+  kills: number;
+  damage: number;
+};
+
 export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'page' }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const engineRef = useRef<RaidEngine | null>(null);
   const hudRef = useRef<HudState | null>(null);
   const leaderboardSubmissionRef = useRef<string | null>(null);
+  const pendingLeaderboardSubmissionRef = useRef<RaidLeaderboardSubmission | null>(null);
   const circularHud = useRef<CircularHudApi>(null);
   const foeHud = useRef<CircularHudApi>(null);
   const vignette = useRef<LowHealthVignetteApi>(null);
@@ -90,6 +102,7 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
   const [round, setRound] = useState(0);
   const [phase, setPhase] = useState<HudState['phase'] | 'select'>('select');
   const [leaderboardNotice, setLeaderboardNotice] = useState('');
+  const [leaderboardRetryAvailable, setLeaderboardRetryAvailable] = useState(false);
   const [paused, setPaused] = useState(false);
   const [mapOpen, setMapOpen] = useState(false);
   const [burnout, setBurnout] = useState(false);
@@ -139,6 +152,31 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
   const [warzone, setWarzone] = useState('');
   const [engineReady, setEngineReady] = useState<RaidEngine | null>(null);
 
+  const postLeaderboardSubmission = useCallback(async (submission: RaidLeaderboardSubmission) => {
+    setLeaderboardNotice('Sending run to the global board…');
+    setLeaderboardRetryAvailable(false);
+    try {
+      const response = await fetch('/api/raid/leaderboard', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(submission),
+      });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error || 'Could not post this run.');
+      pendingLeaderboardSubmissionRef.current = null;
+      setLeaderboardRetryAvailable(false);
+      setLeaderboardNotice(`Run posted · ${leaderboardScore(submission.waveReached, submission.kills, submission.damage, submission.difficulty).toLocaleString('en-US')} points`);
+    } catch (error: unknown) {
+      setLeaderboardRetryAvailable(true);
+      setLeaderboardNotice(error instanceof Error ? error.message : 'Could not post this run.');
+    }
+  }, []);
+
+  const retryLeaderboardSubmission = useCallback(() => {
+    const submission = pendingLeaderboardSubmissionRef.current;
+    if (submission) void postLeaderboardSubmission(submission);
+  }, [postLeaderboardSubmission]);
+
   const syncHud = useCallback((next: HudState) => {
     const prev = hudRef.current;
     hudRef.current = next;
@@ -156,29 +194,18 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
       leaderboardSubmissionRef.current = submissionId;
       const difficulty = next.difficulty.toLowerCase();
       const ryder = RYDERZ[next.ryderId];
-      setLeaderboardNotice('Sending run to the global board…');
-      void fetch('/api/raid/leaderboard', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          submissionId,
-          displayName: readLeaderboardName(ryder?.name ?? 'Ryder Guest'),
-          ryderId: next.ryderId,
-          difficulty,
-          result: next.phase === 'victory' ? 'victory' : 'defeat',
-          waveReached: next.raid.wave,
-          kills: next.raid.defeated,
-          damage: next.raid.dealt,
-        }),
-      })
-        .then(async (response) => {
-          const body = await response.json();
-          if (!response.ok) throw new Error(body.error || 'Could not post this run.');
-          setLeaderboardNotice(`Run posted · ${leaderboardScore(next.raid!.wave, next.raid!.defeated, next.raid!.dealt, difficulty).toLocaleString('en-US')} points`);
-        })
-        .catch((error: unknown) => {
-          setLeaderboardNotice(error instanceof Error ? error.message : 'Could not post this run.');
-        });
+      const submission: RaidLeaderboardSubmission = {
+        submissionId,
+        displayName: readLeaderboardName(ryder?.name ?? 'Ryder Guest'),
+        ryderId: next.ryderId,
+        difficulty,
+        result: next.phase === 'victory' ? 'victory' : 'defeat',
+        waveReached: next.raid.wave,
+        kills: next.raid.defeated,
+        damage: next.raid.dealt,
+      };
+      pendingLeaderboardSubmissionRef.current = submission;
+      void postLeaderboardSubmission(submission);
     }
     circularHud.current?.setVitals(
       next.hp,
@@ -472,7 +499,9 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
     raidPlanRef.current = launchFromSquad(squad, ryder);
     netRef.current = net;
     leaderboardSubmissionRef.current = null;
+    pendingLeaderboardSubmissionRef.current = null;
     setLeaderboardNotice('');
+    setLeaderboardRetryAvailable(false);
     setPvpOpponent(null);
     setPvpTwo(false);
     manager.setArena(squad.arenaId);
@@ -566,7 +595,9 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
     if (!engine) return;
     if (manager.getState().gameMode === GameMode.RAID) {
       leaderboardSubmissionRef.current = null;
+      pendingLeaderboardSubmissionRef.current = null;
       setLeaderboardNotice('');
+      setLeaderboardRetryAvailable(false);
     }
     if (engine.matchLive()) void engine.restartMatch();
     else if (selected) void engine.start(activeRyder, manager.loadoutSpecs(activeRyder));
@@ -959,6 +990,7 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
             {partyState.mode === GameMode.RAID ? <p className={styles.leaderboardNotice} aria-live="polite">{leaderboardNotice}</p> : null}
             <LeaderboardPreview refreshKey={leaderboardNotice} />
             <div className={styles.actions}>
+              {leaderboardRetryAvailable ? <button type="button" onClick={retryLeaderboardSubmission}>Retry leaderboard</button> : null}
               <button type="button" onClick={replay}>
                 Drop in again
               </button>
@@ -992,6 +1024,7 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
             {partyState.mode === GameMode.RAID ? <p className={styles.leaderboardNotice} aria-live="polite">{leaderboardNotice}</p> : null}
             <LeaderboardPreview refreshKey={leaderboardNotice} />
             <div className={styles.actions}>
+              {leaderboardRetryAvailable ? <button type="button" onClick={retryLeaderboardSubmission}>Retry leaderboard</button> : null}
               <button type="button" onClick={replay}>
                 Rematch
               </button>

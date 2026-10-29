@@ -95,6 +95,13 @@ export async function POST(request: NextRequest) {
     .single();
 
   if (error?.code === '23505') return NextResponse.json({ ok: true, duplicate: true });
-  if (error) return NextResponse.json({ error: 'Could not save this run.' }, { status: 500 });
+  if (error?.code === '23514') {
+    console.error('[raid-leaderboard] database rejected the Ryder roster', { code: error.code, message: error.message });
+    return NextResponse.json({ error: 'Leaderboard roster needs a database update before this Ryder can be posted.' }, { status: 503 });
+  }
+  if (error) {
+    console.error('[raid-leaderboard] run submission failed', { code: error.code, message: error.message });
+    return NextResponse.json({ error: 'Could not save this run. Your score is still available to retry from this screen.' }, { status: 500 });
+  }
   return NextResponse.json({ ok: true, score: data.score });
 }
