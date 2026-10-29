@@ -3,6 +3,7 @@ import {
   boardAuthErrorMessage,
   createSupabaseRouteClient,
 } from "@/lib/supabase/routeClient";
+import { boardPublicOrigin } from "@/lib/supabase/boardPublicOrigin";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -55,7 +56,7 @@ export async function POST(request: NextRequest) {
     // and then forwards the user to the new-password form.
     const callback = new URL(
       "/board/reset-password/confirm",
-      request.nextUrl.origin
+      boardPublicOrigin(request.nextUrl.origin)
     );
 
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
