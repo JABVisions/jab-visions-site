@@ -10,7 +10,7 @@ export function boardPublicOrigin(requestOrigin: string) {
   if (configuredOrigin) {
     try {
       const parsed = new URL(configuredOrigin);
-      if (parsed.protocol === "https:" || parsed.hostname === "localhost") {
+      if (parsed.protocol === "https:") {
         return parsed.origin;
       }
     } catch {
