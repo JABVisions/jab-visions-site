@@ -589,7 +589,11 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
     }
   };
 
-  const aura = selected ? AURA[activeRyder] : NEUTRAL_THEME;
+  const aura = selected
+    ? AURA[activeRyder]
+    : screen === 'raid-select'
+      ? AURA[raidHost]
+      : NEUTRAL_THEME;
   const playing = screen === 'game' && Boolean(selected);
 
   return (
@@ -1045,6 +1049,9 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
         <PremiereCharacterSelect
           mode="raid"
           initialId={raidHost}
+          onHighlight={(character) => {
+            if (character.ryderId) setRaidHost(character.ryderId);
+          }}
           onBack={() => setScreen('start')}
           onConfirm={(character) => {
             if (!character.ryderId) return;

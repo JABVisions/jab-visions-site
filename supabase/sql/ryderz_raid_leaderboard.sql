@@ -2,7 +2,7 @@ create table if not exists public.ryderz_raid_leaderboard (
   id uuid primary key default gen_random_uuid(),
   submission_id uuid not null unique,
   display_name text not null check (char_length(display_name) between 2 and 16),
-  ryder_id text not null check (ryder_id in ('rubi', 'leo', 'aaron', 'zoe', 'keven', 'lilly', 'kid-paranormal', 'agent-nyx')),
+  ryder_id text not null,
   difficulty text not null check (difficulty in ('easy', 'normal', 'hard', 'nightmare')),
   result text not null check (result in ('victory', 'defeat')),
   wave_reached integer not null check (wave_reached between 1 and 999),
@@ -23,6 +23,20 @@ create table if not exists public.ryderz_raid_leaderboard (
   ) stored,
   created_at timestamptz not null default now()
 );
+
+-- Keep existing installations in sync with the live playable roster. The
+-- original table constraint only listed the first eight Ryderz, so records
+-- submitted by newer fighters were rejected by Postgres.
+alter table public.ryderz_raid_leaderboard
+  drop constraint if exists ryderz_raid_leaderboard_ryder_id_check;
+
+alter table public.ryderz_raid_leaderboard
+  add constraint ryderz_raid_leaderboard_ryder_id_check
+  check (ryder_id in (
+    'rubi', 'leo', 'aaron', 'zoe', 'keven', 'lilly',
+    'kid-paranormal', 'agent-nyx', 'marilyn-monroe',
+    'martin-luther-king', 'marywantis', 'tj'
+  ));
 
 create index if not exists ryderz_raid_leaderboard_score_idx
   on public.ryderz_raid_leaderboard (score desc, created_at asc);
