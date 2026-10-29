@@ -93,9 +93,12 @@ export function pressTarget(fromX: number, fromZ: number, choices: TrackPoint[],
   let lx = best.vx * 0.34;
   let lz = best.vz * 0.34;
   const lead = Math.hypot(lx, lz);
-  if (lead > 2.4) {
-    lx *= 2.4 / lead;
-    lz *= 2.4 / lead;
+  // At contact, track the actual body. Predicting beyond a nearby player
+  // can make a host turn away or run past them as they change direction.
+  const leadLimit = Math.min(2.4, Math.max(0, Math.hypot(best.x - fromX, best.z - fromZ) - 2.5) * 0.35);
+  if (lead > leadLimit) {
+    lx *= leadLimit / lead;
+    lz *= leadLimit / lead;
   }
   return { x: best.x + lx, z: best.z + lz, vx: best.vx, vz: best.vz };
 }

@@ -876,6 +876,8 @@
 
 .modalCard {
   width: min(520px, 100%);
+  max-height: calc(100vh - 36px);
+  overflow-y: auto;
   padding: 22px;
   border: 1px solid rgba(166, 255, 0, 0.32);
   border-radius: 18px;
@@ -892,6 +894,14 @@
 .lock p {
   color: rgba(225, 241, 230, 0.72);
   line-height: 1.55;
+}
+
+.modalCard .leaderboardNotice {
+  min-height: 1.2em;
+  margin: 8px 0 0;
+  color: #b7ffcc;
+  font: 700 0.68rem/1.45 ui-monospace, monospace;
+  letter-spacing: 0.06em;
 }
 
 .actions {

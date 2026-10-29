@@ -1,4 +1,4 @@
-import type { EnemyKind } from '../config';
+import { MAX_ALIVE_HOSTS, type EnemyKind } from '../config';
 
 /**
  * Endless survival. Each round names a phase, a maximum tier, and a spawn
@@ -375,9 +375,7 @@ function pickArchetype(round: number, rng: () => number): EnemyArchetype {
   return pool[pool.length - 1];
 }
 
-/** The invisible director: who shows up, who waits in reserve, and how hard they think. */
-export function directRound(round: number, squadSize = 1, rng: () => number = Math.random, difficulty: RaidDifficultyName = 'normal'): DirectorPlan {
-  const scale = roundScale(round, squadSize, difficulty);
+function makeDirectorPlan(scale: RoundScale, rng: () => number): DirectorPlan {
   const opening: SpawnOrder[] = [];
   for (let i = 0; i < scale.population; i += 1) {
     const entry = pickArchetype(scale.round, rng);
@@ -391,6 +389,23 @@ export function directRound(round: number, squadSize = 1, rng: () => number = Ma
   const boss = bossRound(scale.round);
   if (boss) opening.unshift({ kind: 'broadcaster', archetypeId: 'broadcaster' });
   return { round: scale.round, scale, opening, reserve, boss, event: warzoneEvent(scale.round) };
+}
+
+/** The invisible director: who shows up, who waits in reserve, and how hard they think. */
+export function directRound(round: number, squadSize = 1, rng: () => number = Math.random, difficulty: RaidDifficultyName = 'normal'): DirectorPlan {
+  return makeDirectorPlan(roundScale(round, squadSize, difficulty), rng);
+}
+
+/** Raid waves bring eight more mind-controlled hosts every round. */
+export function directRaidRound(round: number, squadSize = 1, rng: () => number = Math.random, difficulty: RaidDifficultyName = 'normal'): DirectorPlan {
+  const scale = roundScale(round, squadSize, difficulty);
+  const n = scale.round;
+  const allies = Math.max(0, Math.floor(squadSize) - 1);
+  const difficultyCap = DIFFICULTY[difficulty]?.cap ?? DIFFICULTY.normal.cap;
+  scale.population = n * 8;
+  scale.cap = Math.min(MAX_ALIVE_HOSTS, Math.max(8, 8 + Math.floor((n - 1) * 0.42) + allies + difficultyCap));
+  scale.spawnInterval = Math.max(0.22, 0.85 - (n - 1) * 0.02);
+  return makeDirectorPlan(scale, rng);
 }
 
 export function roundTitle(round: number) {

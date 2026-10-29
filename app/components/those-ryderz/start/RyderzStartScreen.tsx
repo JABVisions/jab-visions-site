@@ -1,9 +1,11 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { GAME_MODES, GameMode } from '@/lib/ryderz-raid/game-mode';
 import type { SaveSlot } from '@/lib/ryderz-raid/saves/saveManager';
+import { LEADERBOARD_NAME_KEY, readLeaderboardName, sanitizeLeaderboardName } from '@/lib/ryderz-raid/raid/leaderboard';
 import { useMenuKeys, wrap } from '../menu/useMenuKeys';
+import LeaderboardPanel from './LeaderboardPanel';
 import GlitchButton from './GlitchButton';
 import styles from './RyderzStartScreen.module.css';
 
@@ -62,11 +64,71 @@ export default function RyderzStartScreen({
   const current = slots[activeSlot];
   const canContinue = Boolean(current && !current.empty);
   const [modeFocus, setModeFocus] = useState(Math.max(0, GAME_MODES.findIndex((mode) => mode.id === lastMode)));
+  const [leaderboardOpen, setLeaderboardOpen] = useState(false);
+  const [callsign, setCallsign] = useState('');
+  const [callsignOpen, setCallsignOpen] = useState(false);
+  const [callsignError, setCallsignError] = useState('');
+  const [pendingAction, setPendingAction] = useState<{ type: 'mode'; mode: GameMode } | { type: 'continue' } | null>(null);
+
+  useEffect(() => {
+    let saved = '';
+    try {
+      saved = sanitizeLeaderboardName(window.localStorage.getItem(LEADERBOARD_NAME_KEY) ?? '');
+    } catch {
+      // The required gate will request a callsign and explain if saving fails.
+    }
+    setCallsign(saved);
+    if (saved.length < 2) setCallsignOpen(true);
+  }, []);
+
+  const requestMode = (mode: GameMode) => {
+    const savedCallsign = readLeaderboardName('');
+    setCallsign(savedCallsign);
+    if (savedCallsign.length < 2) {
+      setPendingAction({ type: 'mode', mode });
+      setCallsignOpen(true);
+      return;
+    }
+    onPickMode(mode);
+  };
+
+  const requestContinue = () => {
+    const savedCallsign = readLeaderboardName('');
+    setCallsign(savedCallsign);
+    if (savedCallsign.length < 2) {
+      setPendingAction({ type: 'continue' });
+      setCallsignOpen(true);
+      return;
+    }
+    onContinue();
+  };
+
+  const saveCallsign = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const safe = sanitizeLeaderboardName(callsign);
+    if (safe.length < 2) {
+      setCallsignError('Use at least 2 characters for your public callsign.');
+      return;
+    }
+    try {
+      window.localStorage.setItem(LEADERBOARD_NAME_KEY, safe);
+    } catch {
+      setCallsignError('Your browser could not save the callsign. Allow site storage, then try again.');
+      return;
+    }
+    setCallsign(safe);
+    setCallsignError('');
+    setCallsignOpen(false);
+    const action = pendingAction;
+    setPendingAction(null);
+    if (action?.type === 'mode') onPickMode(action.mode);
+    else if (action?.type === 'continue') onContinue();
+  };
 
   useMenuKeys((key) => {
     if (key === 'left' || key === 'up') setModeFocus((i) => wrap(i - 1, GAME_MODES.length));
     else if (key === 'right' || key === 'down') setModeFocus((i) => wrap(i + 1, GAME_MODES.length));
-    else if (key === 'confirm') onPickMode(GAME_MODES[modeFocus].id);
+    else if (key === 'confirm') requestMode(GAME_MODES[modeFocus].id);
     else return false;
     return true;
   }, true);
@@ -102,7 +164,7 @@ export default function RyderzStartScreen({
             <GlitchButton
               label="Continue"
               hint={current?.displayName ?? 'Load save'}
-              onClick={onContinue}
+              onClick={requestContinue}
             />
             <GlitchButton label="New Save" hint="Fresh slot" dim onClick={onNewGame} />
           </div>
@@ -117,18 +179,54 @@ export default function RyderzStartScreen({
               icon={MODE_ICONS[mode.id]}
               selected={modeFocus === i}
               onMouseEnter={() => setModeFocus(i)}
-              onClick={() => onPickMode(mode.id)}
+              onClick={() => requestMode(mode.id)}
             />
           ))}
         </div>
+
+        <button
+          className={styles.leaderboardButton}
+          type="button"
+          onClick={() => setLeaderboardOpen(true)}
+        >
+          <span aria-hidden="true">◉</span> Global raid leaderboard
+        </button>
       </div>
 
       <footer className={styles.foot}>
         <span>Enter select</span>
         <span>Arrows move</span>
         <span>Q E R later</span>
-        <span className={styles.footRight}>Save data · Slot {activeSlot + 1}</span>
+        <span className={styles.footRight}>{callsign ? `${callsign} · ` : ''}Save data · Slot {activeSlot + 1}</span>
       </footer>
+
+      {leaderboardOpen ? <LeaderboardPanel onClose={() => setLeaderboardOpen(false)} /> : null}
+      {callsignOpen ? (
+        <div className={styles.callsignShade}>
+          <form className={styles.callsignCard} role="dialog" aria-modal="true" aria-labelledby="callsign-title" onSubmit={saveCallsign}>
+            <small>Player registration · global leaderboard</small>
+            <h2 id="callsign-title">Choose your callsign</h2>
+            <p>This public name will identify your runs on the global leaderboard.</p>
+            <label htmlFor="player-callsign">Username or public callsign</label>
+            <input
+              id="player-callsign"
+              autoFocus
+              autoComplete="nickname"
+              maxLength={16}
+              minLength={2}
+              required
+              value={callsign}
+              onChange={(event) => {
+                setCallsign(event.target.value);
+                setCallsignError('');
+              }}
+              placeholder="e.g. NeonRyder"
+            />
+            {callsignError ? <p className={styles.callsignError} role="alert">{callsignError}</p> : null}
+            <button type="submit" disabled={sanitizeLeaderboardName(callsign).length < 2}>Save callsign &amp; continue</button>
+          </form>
+        </div>
+      ) : null}
     </div>
   );
 }

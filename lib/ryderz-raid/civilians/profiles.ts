@@ -14,15 +14,11 @@ export interface CivilianProfile {
   /** Metres they try to stand from a Ryder before swinging. */
   preferredDistance: number;
   attackRange: number;
-  /** How hard they back out after getting too close. 0 stays in. */
-  retreat: number;
   punch: number;
   kick: number;
   melee: number;
   /** Above 0.5 they hunt props before they commit to a fistfight. */
   throwBias: number;
-  /** Flee when health falls under this fraction. 0 never flees. */
-  fleeHp: number;
   /** 0 stands still in range, 1 orbits. */
   circle: number;
   speed: number;
@@ -33,12 +29,10 @@ export const CIVILIAN_PROFILES: Record<CivilianProfileId, CivilianProfile> = {
     id: 'aggressive',
     preferredDistance: 1.65,
     attackRange: 2.25,
-    retreat: 0.04,
     punch: 0.48,
     kick: 0.34,
     melee: 0.12,
     throwBias: 0.08,
-    fleeHp: 0,
     circle: 0.08,
     speed: 1.12,
   },
@@ -46,12 +40,10 @@ export const CIVILIAN_PROFILES: Record<CivilianProfileId, CivilianProfile> = {
     id: 'cautious',
     preferredDistance: 2.55,
     attackRange: 2.2,
-    retreat: 0.62,
     punch: 0.34,
     kick: 0.22,
     melee: 0.08,
     throwBias: 0.2,
-    fleeHp: 0.22,
     circle: 0.75,
     speed: 0.92,
   },
@@ -59,12 +51,10 @@ export const CIVILIAN_PROFILES: Record<CivilianProfileId, CivilianProfile> = {
     id: 'thrower',
     preferredDistance: 5.4,
     attackRange: 2.15,
-    retreat: 0.4,
     punch: 0.16,
     kick: 0.1,
     melee: 0.04,
     throwBias: 0.92,
-    fleeHp: 0.18,
     circle: 0.25,
     speed: 1,
   },
@@ -72,12 +62,10 @@ export const CIVILIAN_PROFILES: Record<CivilianProfileId, CivilianProfile> = {
     id: 'brawler',
     preferredDistance: 1.45,
     attackRange: 2.15,
-    retreat: 0.06,
     punch: 0.36,
     kick: 0.22,
     melee: 0.34,
     throwBias: 0.1,
-    fleeHp: 0,
     circle: 0.12,
     speed: 1,
   },
@@ -85,12 +73,10 @@ export const CIVILIAN_PROFILES: Record<CivilianProfileId, CivilianProfile> = {
     id: 'cowardly',
     preferredDistance: 3.3,
     attackRange: 2.15,
-    retreat: 0.78,
     punch: 0.42,
     kick: 0.18,
     melee: 0.05,
     throwBias: 0.28,
-    fleeHp: 0.48,
     circle: 0.45,
     speed: 1.05,
   },
@@ -116,7 +102,9 @@ export interface CivilianSense {
   holding: boolean;
   /** Distance to the nearest free prop, or null when the street is empty. */
   throwableDist: number | null;
-  /** 0 and 1 may stand in and swing. Later arrivals hang back. */
+  /** A nearby prop lies ahead toward the target, so collection does not abandon pursuit. */
+  throwableOnRoute?: boolean;
+  /** Formation index used on approach. Every host in range may attack. */
   slot: number;
   recovering: boolean;
   /** 0–1, fresh each decision. */
@@ -152,14 +140,9 @@ export function civilianOrder(profile: CivilianProfile, sense: CivilianSense): C
   const tactics = sense.tactics;
   const tier = sense.tier ?? 1;
   if (sense.recovering) return { state: 'recover', move: 0, strafe: 0, attack: null };
-  if (profile.fleeHp > 0 && sense.hpRatio <= profile.fleeHp) {
-    return { state: 'flee', move: -1, strafe: 0.35, attack: null };
-  }
-  if (tactics?.retreat && tier <= 2 && sense.hpRatio < 0.42) {
-    return { state: 'flee', move: -1, strafe: 0.45, attack: null };
-  }
+  // Hostile combatants keep pursuing at low health, including late rounds.
   if (tactics?.block && tier >= 2 && sense.playerAttacking && sense.dist < profile.attackRange + 0.45) {
-    return { state: 'guard', move: -0.25, strafe: 0.15, attack: null };
+    return { state: 'guard', move: 0, strafe: 0, attack: null };
   }
   if (tactics?.interrupt && tier >= 3 && sense.playerChanneling) {
     return {
@@ -170,14 +153,16 @@ export function civilianOrder(profile: CivilianProfile, sense: CivilianSense): C
     };
   }
   if (sense.holding) {
-    if (sense.dist < 11) return { state: 'throw', move: sense.dist < 2.4 ? -0.6 : 0, strafe: 0, attack: 'throwObject' };
+    if (sense.dist < 11) return { state: 'throw', move: 0, strafe: 0, attack: 'throwObject' };
     return { state: 'approach', move: 1, strafe: 0, attack: null };
   }
   const wantsProp =
     profile.throwBias > 0.45 &&
     sense.throwableDist != null &&
-    sense.throwableDist < 12 &&
-    (sense.dist > profile.preferredDistance || sense.rng < profile.throwBias);
+    sense.throwableDist <= 3 &&
+    sense.throwableOnRoute === true &&
+    sense.dist > profile.attackRange + 0.6 &&
+    sense.dist <= 12;
   if (wantsProp && sense.throwableDist != null) {
     if (sense.throwableDist < 0.85) return { state: 'pickup', move: 0, strafe: 0, attack: null };
     return { state: 'search', move: 1, strafe: 0, attack: null };
@@ -193,12 +178,9 @@ export function civilianOrder(profile: CivilianProfile, sense: CivilianSense): C
     return 'punch';
   };
   if (sense.dist <= profile.attackRange) {
-    // A cautious host steps back only when they are inside the player. Otherwise the swing starts now.
-    if (profile.retreat > 0.55 && sense.dist < profile.preferredDistance - 0.55) {
-      return { state: 'backOff', move: -0.45, strafe: flank, attack: null };
-    }
+    // Body separation resolves overlaps; close contact never triggers retreat.
     const closing = sense.dist > Math.min(profile.preferredDistance, profile.attackRange - 0.15) + 0.2;
-    return { state: 'attack', move: closing ? 0.55 : 0.05, strafe: flank, attack: swing() };
+    return { state: 'attack', move: closing ? 0.55 : 0, strafe: 0, attack: swing() };
   }
   return { state: 'approach', move: 1, strafe: flank * 0.5, attack: null };
 }

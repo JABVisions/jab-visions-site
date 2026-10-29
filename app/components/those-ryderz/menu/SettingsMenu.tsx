@@ -19,6 +19,8 @@ interface Setting {
 const SETTINGS: Setting[] = [
   { key: 'lookSensitivity', label: 'Mouse sensitivity', min: 0.3, max: 2.5, step: 0.05, format: (v) => `${v.toFixed(2)}×` },
   { key: 'stickSensitivity', label: 'Controller sensitivity', min: 0.3, max: 2.5, step: 0.05, format: (v) => `${v.toFixed(2)}×` },
+  { key: 'stickDeadzone', label: 'Look stick dead zone', min: 0.05, max: 0.35, step: 0.01, format: (v) => `${Math.round(v * 100)}%` },
+  { key: 'shakeIntensity', label: 'Camera shake', min: 0, max: 1, step: 0.05, format: (v) => v === 0 ? 'Off' : `${Math.round(v * 100)}%` },
   { key: 'lookInvertY', label: 'Invert look', min: 0, max: 1, step: 1, format: (v) => (v >= 0.5 ? 'On' : 'Off') },
   { key: 'fov', label: 'Field of view', min: 55, max: 110, step: 1, format: (v) => `${v.toFixed(0)}°` },
   { key: 'distance', label: 'Camera distance', min: 1.5, max: 9, step: 0.05, format: (v) => `${v.toFixed(2)} m` },

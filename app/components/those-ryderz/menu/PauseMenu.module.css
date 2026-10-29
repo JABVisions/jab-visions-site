@@ -762,14 +762,56 @@
 @media (max-width: 960px) {
   .menu {
     grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: 220px minmax(0, 1fr) auto auto;
+    grid-template-rows: auto minmax(0, 1fr) auto;
     gap: 14px;
-    overflow: auto;
+    overflow: hidden;
   }
 
   .showcase {
-    order: -1;
-    grid-template-rows: minmax(0, 1fr);
+    display: none;
+  }
+
+  .side {
+    grid-row: 1;
+    gap: 14px;
+    min-width: 0;
+  }
+
+  .nav {
+    flex-direction: row;
+    overflow-x: auto;
+    padding: 0 0 6px;
+    scrollbar-width: thin;
+  }
+
+  .navItem {
+    flex: 0 0 auto;
+    padding: 10px 12px;
+  }
+
+  .navItem strong {
+    font-size: 0.78rem;
+    white-space: nowrap;
+  }
+
+  .navItem small,
+  .marker {
+    display: none;
+  }
+
+  .navActive {
+    transform: none;
+  }
+
+  .panel {
+    grid-row: 2;
+    min-width: 0;
+  }
+
+  .hints {
+    grid-row: 3;
+    flex-wrap: wrap;
+    gap: 8px;
   }
 
   .caption,

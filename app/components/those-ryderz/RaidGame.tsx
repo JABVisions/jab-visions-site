@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import {
   INTERACT_LABEL,
+  RYDERZ,
   UPGRADE_ORDER,
   UPGRADES,
   upgradeCost,
@@ -30,17 +31,32 @@ import RaidLobby from './modes/RaidLobby';
 import RaidWatch from './modes/RaidWatch';
 import { launchFromSquad, type RaidSquad } from '@/lib/ryderz-raid/raid/squad';
 import { subscribeRaidLive } from '@/lib/ryderz-raid/raid/liveRoom';
+import { leaderboardScore, readLeaderboardName } from '@/lib/ryderz-raid/raid/leaderboard';
 import PvpFlow, { type PvpLineup } from './modes/PvpFlow';
 import SoloCharacterSelect from './modes/SoloCharacterSelect';
 import PremiereCharacterSelect from './premiere/PremiereCharacterSelect';
 import { NEUTRAL_THEME, RYDER_THEME as AURA } from './menu/theme';
 import RyderzStartScreen from './start/RyderzStartScreen';
+import LeaderboardPreview from './start/LeaderboardPreview';
 import styles from './RaidGame.module.css';
+
+type RaidLeaderboardSubmission = {
+  submissionId: string;
+  displayName: string;
+  ryderId: RyderId;
+  difficulty: string;
+  result: 'victory' | 'defeat';
+  waveReached: number;
+  kills: number;
+  damage: number;
+};
 
 export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'page' }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const engineRef = useRef<RaidEngine | null>(null);
   const hudRef = useRef<HudState | null>(null);
+  const leaderboardSubmissionRef = useRef<string | null>(null);
+  const pendingLeaderboardSubmissionRef = useRef<RaidLeaderboardSubmission | null>(null);
   const circularHud = useRef<CircularHudApi>(null);
   const foeHud = useRef<CircularHudApi>(null);
   const vignette = useRef<LowHealthVignetteApi>(null);
@@ -85,6 +101,8 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
   const [hudMoves, setHudMoves] = useState<HudState['moves']>([]);
   const [round, setRound] = useState(0);
   const [phase, setPhase] = useState<HudState['phase'] | 'select'>('select');
+  const [leaderboardNotice, setLeaderboardNotice] = useState('');
+  const [leaderboardRetryAvailable, setLeaderboardRetryAvailable] = useState(false);
   const [paused, setPaused] = useState(false);
   const [mapOpen, setMapOpen] = useState(false);
   const [burnout, setBurnout] = useState(false);
@@ -112,6 +130,8 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
   const beaconCooldown = useRef<HTMLSpanElement>(null);
   const beaconTrack = useRef<HTMLElement>(null);
   const [locked, setLocked] = useState(false);
+  const [showCameraInstructions, setShowCameraInstructions] = useState(true);
+  const cameraInstructionsStartedAt = useRef<number | null>(null);
   const [moveReady, setMoveReady] = useState([false, false, false]);
   const [points, setPoints] = useState(0);
   const [upgrades, setUpgrades] = useState<HudState['upgrades']>({
@@ -132,9 +152,61 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
   const [warzone, setWarzone] = useState('');
   const [engineReady, setEngineReady] = useState<RaidEngine | null>(null);
 
+  const postLeaderboardSubmission = useCallback(async (submission: RaidLeaderboardSubmission) => {
+    setLeaderboardNotice('Sending run to the global board…');
+    setLeaderboardRetryAvailable(false);
+    try {
+      const response = await fetch('/api/raid/leaderboard', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(submission),
+      });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error || 'Could not post this run.');
+      pendingLeaderboardSubmissionRef.current = null;
+      setLeaderboardRetryAvailable(false);
+      setLeaderboardNotice(`Run posted · ${leaderboardScore(submission.waveReached, submission.kills, submission.damage, submission.difficulty).toLocaleString('en-US')} points`);
+    } catch (error: unknown) {
+      setLeaderboardRetryAvailable(true);
+      setLeaderboardNotice(error instanceof Error ? error.message : 'Could not post this run.');
+    }
+  }, []);
+
+  const retryLeaderboardSubmission = useCallback(() => {
+    const submission = pendingLeaderboardSubmissionRef.current;
+    if (submission) void postLeaderboardSubmission(submission);
+  }, [postLeaderboardSubmission]);
+
   const syncHud = useCallback((next: HudState) => {
     const prev = hudRef.current;
     hudRef.current = next;
+    const terminal = next.phase === 'dead' || next.phase === 'victory';
+    const justEnded = terminal && (!prev || (prev.phase !== 'dead' && prev.phase !== 'victory'));
+    const connection = netRef.current;
+    if (
+      justEnded &&
+      next.raid &&
+      manager.getState().gameMode === GameMode.RAID &&
+      !leaderboardSubmissionRef.current &&
+      (!connection || connection.authority)
+    ) {
+      const submissionId = window.crypto.randomUUID();
+      leaderboardSubmissionRef.current = submissionId;
+      const difficulty = next.difficulty.toLowerCase();
+      const ryder = RYDERZ[next.ryderId];
+      const submission: RaidLeaderboardSubmission = {
+        submissionId,
+        displayName: readLeaderboardName(ryder?.name ?? 'Ryder Guest'),
+        ryderId: next.ryderId,
+        difficulty,
+        result: next.phase === 'victory' ? 'victory' : 'defeat',
+        waveReached: next.raid.wave,
+        kills: next.raid.defeated,
+        damage: next.raid.dealt,
+      };
+      pendingLeaderboardSubmissionRef.current = submission;
+      void postLeaderboardSubmission(submission);
+    }
     circularHud.current?.setVitals(
       next.hp,
       next.maxHp,
@@ -142,6 +214,7 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
       next.maxAura,
       next.burnout || next.tideOut,
       next.resonance,
+      next.powerClock,
     );
     vignette.current?.setHealth(next.hp, next.maxHp);
     comboHud.current?.setCombo(next.combo);
@@ -304,6 +377,14 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
   }, []);
 
   useEffect(() => {
+    if (screen !== 'game' || !selected || phase !== 'playing' || locked || coarse || camPanel || mapOpen || !showCameraInstructions) return;
+    if (cameraInstructionsStartedAt.current === null) cameraInstructionsStartedAt.current = Date.now();
+    const remaining = Math.max(0, 3000 - (Date.now() - cameraInstructionsStartedAt.current));
+    const timeout = window.setTimeout(() => setShowCameraInstructions(false), remaining);
+    return () => window.clearTimeout(timeout);
+  }, [screen, selected, phase, locked, coarse, camPanel, mapOpen, showCameraInstructions]);
+
+  useEffect(() => {
     if (!selected || !canvasRef.current) return;
     let engine: RaidEngine | null = null;
     let cancelled = false;
@@ -380,6 +461,8 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
   const boot = (id: RyderId) => {
     manager.setActiveRyder(id);
     saves.saveGame(manager);
+    cameraInstructionsStartedAt.current = null;
+    setShowCameraInstructions(true);
     setSelected(id);
     setScreen('game');
     setPhase('playing');
@@ -415,6 +498,10 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
     pvpRef.current = null;
     raidPlanRef.current = launchFromSquad(squad, ryder);
     netRef.current = net;
+    leaderboardSubmissionRef.current = null;
+    pendingLeaderboardSubmissionRef.current = null;
+    setLeaderboardNotice('');
+    setLeaderboardRetryAvailable(false);
     setPvpOpponent(null);
     setPvpTwo(false);
     manager.setArena(squad.arenaId);
@@ -506,6 +593,12 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
   const replay = () => {
     const engine = engineRef.current;
     if (!engine) return;
+    if (manager.getState().gameMode === GameMode.RAID) {
+      leaderboardSubmissionRef.current = null;
+      pendingLeaderboardSubmissionRef.current = null;
+      setLeaderboardNotice('');
+      setLeaderboardRetryAvailable(false);
+    }
     if (engine.matchLive()) void engine.restartMatch();
     else if (selected) void engine.start(activeRyder, manager.loadoutSpecs(activeRyder));
     engine.setPaused(false);
@@ -527,7 +620,11 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
     }
   };
 
-  const aura = selected ? AURA[activeRyder] : NEUTRAL_THEME;
+  const aura = selected
+    ? AURA[activeRyder]
+    : screen === 'raid-select'
+      ? AURA[raidHost]
+      : NEUTRAL_THEME;
   const playing = screen === 'game' && Boolean(selected);
 
   return (
@@ -858,7 +955,7 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
           <button type="button" onClick={() => engineRef.current?.requestPointerLock()}>
             Click to look
           </button>
-          <p>WASD turns the camera. Arrows move. G locks on. K changes the camera. Esc pauses.</p>
+          {showCameraInstructions ? <p>WASD turns the camera. Arrows move. G locks on. K changes the camera. Esc pauses.</p> : null}
         </div>
       )}
 
@@ -890,7 +987,10 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
                 ? `The squad is down. Enemies defeated ${hudRef.current?.raid?.defeated ?? 0}. Damage dealt ${hudRef.current?.raid?.dealt ?? 0}. Damage taken ${hudRef.current?.raid?.taken ?? 0}.`
                 : 'The mind-controlled block overran you. Come back with more aura discipline — powers drain, and fists are all that is left when the signal runs dry.'}
             </p>
+            {partyState.mode === GameMode.RAID ? <p className={styles.leaderboardNotice} aria-live="polite">{leaderboardNotice}</p> : null}
+            <LeaderboardPreview refreshKey={leaderboardNotice} />
             <div className={styles.actions}>
+              {leaderboardRetryAvailable ? <button type="button" onClick={retryLeaderboardSubmission}>Retry leaderboard</button> : null}
               <button type="button" onClick={replay}>
                 Drop in again
               </button>
@@ -921,7 +1021,10 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
                 ))}
               </ul>
             ) : null}
+            {partyState.mode === GameMode.RAID ? <p className={styles.leaderboardNotice} aria-live="polite">{leaderboardNotice}</p> : null}
+            <LeaderboardPreview refreshKey={leaderboardNotice} />
             <div className={styles.actions}>
+              {leaderboardRetryAvailable ? <button type="button" onClick={retryLeaderboardSubmission}>Retry leaderboard</button> : null}
               <button type="button" onClick={replay}>
                 Rematch
               </button>
@@ -979,6 +1082,9 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
         <PremiereCharacterSelect
           mode="raid"
           initialId={raidHost}
+          onHighlight={(character) => {
+            if (character.ryderId) setRaidHost(character.ryderId);
+          }}
           onBack={() => setScreen('start')}
           onConfirm={(character) => {
             if (!character.ryderId) return;

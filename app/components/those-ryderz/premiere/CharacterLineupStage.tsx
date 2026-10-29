@@ -30,13 +30,12 @@ interface Actor {
 function readQuality() {
   const cores = typeof navigator === 'undefined' ? 8 : navigator.hardwareConcurrency || 8;
   const memory = (navigator as Navigator & { deviceMemory?: number }).deviceMemory ?? 8;
-  const narrow = typeof window !== 'undefined' && window.innerWidth < 800;
-  const low = narrow || cores <= 4 || memory <= 4;
+  const low = cores <= 4 || memory <= 4;
   return {
     pixelRatio: Math.min(window.devicePixelRatio || 1, low ? 1.15 : 1.6),
     shadowMap: low ? 512 : 1024,
     particles: low ? 16 : 36,
-    antialias: !low,
+    antialias: true,
   };
 }
 
@@ -257,7 +256,7 @@ export default function CharacterLineupStage({
           group.position.z += (targetZ - group.position.z) * step;
           group.rotation.y += (targetYaw - group.rotation.y) * step;
           const pose =
-            selected && actor.fighter.rig?.skeleton
+            selected && actor.id !== 'leo' && actor.fighter.rig?.skeleton
               ? { kind: 'finish' as const, t: 0.55 + Math.sin(time * 1.3) * 0.04, weight: actor.present * 0.42 }
               : null;
           if (actor.fighter.meshSource === 'gltf') {
@@ -274,7 +273,11 @@ export default function CharacterLineupStage({
         }
         if (chosen) {
           auraLight.color.setHex(RYDERZ[chosen.id as RyderId]?.color ?? 0xffffff);
-          auraLight.intensity += (1.65 - auraLight.intensity) * Math.min(1, dt * 4);
+          // Yellow washes out Leo's textured face and outfit much faster than
+          // the other aura colors. Keep enough rim light to identify her while
+          // letting the model's shape and shading remain visible.
+          const auraIntensity = chosen.id === 'leo' ? 0.62 : 1.65;
+          auraLight.intensity += (auraIntensity - auraLight.intensity) * Math.min(1, dt * 4);
           const spot = chosen.fighter.humanoid.group.position;
           auraLight.position.set(spot.x, 1.2, spot.z + 0.4);
         } else {

@@ -17,6 +17,10 @@ assert.equal(abilityLockout(0.35), 0.35, 'a tap guard can still debounce a toggl
 assert.equal(abilityLockout(Number.NaN), 0);
 
 const out = new PowerOutage(false, () => 0);
+assert.equal(POWER_LIVE_MIN, 30, 'Solo/Raid powers stay live for at least 30 seconds');
+assert.equal(POWER_LIVE_MAX, 45);
+assert.equal(POWER_LIVE_MIN_PVP, 20, 'PvP gets a longer power window too');
+assert.equal(POWER_LIVE_MAX_PVP, 30);
 assert.equal(out.live, POWER_LIVE_MIN);
 assert.equal(out.down, false);
 

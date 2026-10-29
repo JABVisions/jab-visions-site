@@ -5,12 +5,12 @@
  * The fight is to survive that gap.
  */
 
-export const POWER_LIVE_MIN = 8;
-export const POWER_LIVE_MAX = 15;
+export const POWER_LIVE_MIN = 30;
+export const POWER_LIVE_MAX = 45;
 export const POWER_DRY_MIN = 5;
 export const POWER_DRY_MAX = 10;
-export const POWER_LIVE_MIN_PVP = 6;
-export const POWER_LIVE_MAX_PVP = 11;
+export const POWER_LIVE_MIN_PVP = 20;
+export const POWER_LIVE_MAX_PVP = 30;
 export const POWER_DRY_MIN_PVP = 4;
 export const POWER_DRY_MAX_PVP = 7;
 

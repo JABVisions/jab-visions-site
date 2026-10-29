@@ -41,6 +41,10 @@ const aim = pressTarget(
   false,
 );
 assert.ok(aim.x > 10, 'the player is preferred and led');
+const close = pressTarget(0, 0, [{ x: 1, z: 0, vx: -10, vz: 0, hpRatio: 1, weight: 1 }], false);
+assert.equal(close.x, 1, 'close pursuit tracks the body instead of overshooting behind the host');
+const distant = pressTarget(0, 0, [{ x: 150, z: -90, vx: 5, vz: 0, hpRatio: 1, weight: 1 }], false);
+assert.ok(distant.x >= 150 && distant.z === -90, 'hostiles track a player across the map without a distance cutoff');
 const spot = formUp(0, 0, 1);
 assert.ok(Math.hypot(spot.x, spot.z) > 2, 'regrouping stands beside the player');
 

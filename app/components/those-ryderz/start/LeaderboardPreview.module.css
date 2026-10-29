@@ -1,0 +1,105 @@
+.preview {
+  margin: 16px auto 0;
+  padding: 12px 14px 10px;
+  border: 1px solid rgba(57, 255, 106, 0.24);
+  background: linear-gradient(120deg, rgba(2, 13, 7, 0.8), rgba(4, 8, 10, 0.88));
+  text-align: left;
+}
+
+.preview header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.preview header small,
+.preview .raider small,
+.stats small {
+  display: block;
+  color: rgba(180, 255, 210, 0.54);
+  font: 700 0.52rem/1.35 ui-monospace, monospace;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.preview header strong {
+  display: block;
+  margin-top: 2px;
+  color: #d5ff00;
+  font: 900 0.8rem/1.2 ui-monospace, monospace;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.preview header button {
+  padding: 6px 9px;
+  border: 1px solid rgba(57, 255, 106, 0.32);
+  background: rgba(57, 255, 106, 0.08);
+  color: #baffce;
+  font: 800 0.56rem/1 ui-monospace, monospace;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.preview ol {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.preview li {
+  display: grid;
+  grid-template-columns: 24px 28px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 5px 0;
+  border-top: 1px solid rgba(180, 255, 210, 0.08);
+  color: #e4ffeb;
+  font: 700 0.68rem/1.2 ui-monospace, monospace;
+}
+
+.preview li img {
+  width: 27px;
+  height: 27px;
+  border: 1px solid rgba(57, 255, 106, 0.28);
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.rank {
+  color: #d5ff00;
+}
+
+.raider {
+  overflow: hidden;
+}
+
+.raider strong {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stats {
+  color: #d5ff00;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.stats small {
+  margin-top: 3px;
+  font-size: 0.48rem;
+}
+
+.message {
+  margin: 10px 0 2px;
+  color: rgba(180, 255, 210, 0.6);
+  font: 700 0.62rem/1.45 ui-monospace, monospace;
+}
