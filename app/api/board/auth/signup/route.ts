@@ -68,7 +68,7 @@ export async function POST(request: NextRequest) {
 
     // Keep sending the real confirmation email, while allowing the user to
     // enter Board immediately. This privileged operation stays server-side.
-    if (!session && data.user && serviceRole) {
+    if (!session && data.user && serviceRoleKey) {
       const admin = createClient(supabaseUrl, serviceRoleKey, {
         auth: { autoRefreshToken: false, persistSession: false },
       });
@@ -103,6 +103,7 @@ export async function POST(request: NextRequest) {
               ),
             },
             { status: 401 }
+          )
         );
       }
       session = signedIn.session;
