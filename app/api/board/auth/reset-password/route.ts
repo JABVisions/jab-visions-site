@@ -3,6 +3,7 @@ import {
   boardAuthErrorMessage,
   createSupabaseRouteClient,
 } from "@/lib/supabase/routeClient";
+import { boardAuthUrl } from "@/lib/supabase/boardAuthUrl";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -53,10 +54,7 @@ export async function POST(request: NextRequest) {
     // Recovery emails land inside the reset-password flow. The confirmation
     // route exchanges Supabase's one-time code, stores the recovery session,
     // and then forwards the user to the new-password form.
-    const callback = new URL(
-      "/board/reset-password/confirm",
-      request.nextUrl.origin
-    );
+    const callback = boardAuthUrl("/board/reset-password/confirm");
 
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
       redirectTo: callback.toString(),
