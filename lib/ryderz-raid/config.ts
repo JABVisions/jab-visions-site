@@ -53,11 +53,58 @@ export type AbilityId =
   | 'wavePool'
   | 'deathStrike'
   | 'mindControl'
-  | 'riot';
+  | 'riot'
+  | DerivedAbilityId;
 
-export type MoveKey = 'Q' | 'E' | 'R';
+/**
+ * Powers earned on a Ryder's Power Tree. Each Ryder has a breaker (charged
+ * uppercut with a shockwave), a surge (a timed tempo buff), and an ultimate
+ * blitz. Their behaviour is generic and data-driven; see `progression/derived-powers.ts`.
+ */
+export type DerivedAbilityId =
+  | 'rushBreaker'
+  | 'velocitySurge'
+  | 'goldenFury'
+  | 'bladeBreaker'
+  | 'stormTempo'
+  | 'crimsonTempest'
+  | 'shadowBreaker'
+  | 'greedSurge'
+  | 'umbralOnslaught'
+  | 'plasmaBreaker'
+  | 'overcharge'
+  | 'singularity'
+  | 'dartBreaker'
+  | 'acrobatFlow'
+  | 'thousandNeedles'
+  | 'famineBreaker'
+  | 'hungerSurge'
+  | 'harvestOfRuin'
+  | 'phantomBreaker'
+  | 'ectoSurge'
+  | 'dimensionalRift'
+  | 'temporalBreaker'
+  | 'timeDilation'
+  | 'zeroPoint'
+  | 'spotlightBreaker'
+  | 'encore'
+  | 'finalCurtain'
+  | 'cadenceBreaker'
+  | 'resolve'
+  | 'mountaintop'
+  | 'tideBreaker'
+  | 'riptideFlow'
+  | 'maelstrom'
+  | 'riotBreaker'
+  | 'adrenaline'
+  | 'lastRound';
 
-export const MOVE_KEYS: MoveKey[] = ['Q', 'E', 'R'];
+/** Q / E / R are the canonical three. 4 and 5 open from the Power Tree. */
+export type MoveKey = 'Q' | 'E' | 'R' | '4' | '5';
+
+export const MOVE_KEYS: MoveKey[] = ['Q', 'E', 'R', '4', '5'];
+export const MAX_POWER_SLOTS = 5;
+export const BASE_POWER_SLOTS = 3;
 
 /** Keys (lower-case `KeyboardEvent.key`) that use the interactable the player is standing at. */
 export const INTERACT_KEYS = ['enter', 'x'];
@@ -254,7 +301,8 @@ export const ARENA_TREE = {
   height: 5.2,
 };
 
-export const MAX_ALIVE_HOSTS = 26;
+/** Hard ceiling on simulated hostiles. The crowd budget in `rounds/director.ts` tunes below this. */
+export const MAX_ALIVE_HOSTS = 48;
 /**
  * Rigged glTF binaries for the host mob. Each spawn picks one at random; when
  * the list is empty (or nothing loads) hosts fall back to block figures.

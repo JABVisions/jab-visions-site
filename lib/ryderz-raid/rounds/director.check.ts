@@ -1,15 +1,23 @@
 import assert from 'node:assert/strict';
 import { civilianOrder, CIVILIAN_PROFILES } from '../civilians/profiles';
 import {
+  CIVILIANS_PER_ROUND,
+  DEFAULT_CROWD_BUDGET,
+  activeBudgetForRound,
   archetypeById,
+  attackSlotsForRound,
   bossRound,
+  civilianCountForRound,
   directRound,
   eligibleArchetypes,
   phaseForRound,
   registerEnemyArchetype,
   resetArchetypesForTests,
+  resetCrowdBudgetForTests,
   populationForRound,
+  roundPressure,
   roundScale,
+  setCrowdBudget,
   warzoneEvent,
 } from './director';
 
@@ -29,20 +37,54 @@ const anchor = roundScale(15, 1, 'normal');
 assert.equal(anchor.maxTier, 4);
 assert.equal(anchor.hp.toFixed(2), '1.63');
 assert.equal(anchor.damage.toFixed(2), '1.25');
-assert.equal(anchor.cap, 11);
+assert.equal(anchor.cap, 13);
 assert.equal(anchor.tactics.powers, false);
 assert.equal(anchor.tactics.hazards, false);
 assert.equal(anchor.tactics.coordinate, true);
 assert.equal(anchor.tactics.interrupt, false);
-assert.equal(anchor.population, 40);
-assert.equal(populationForRound(1), 8);
-assert.equal(populationForRound(5), 15);
-assert.equal(populationForRound(10), 26);
-assert.equal(populationForRound(20), 56);
-assert.equal(populationForRound(25), 72);
-assert.equal(populationForRound(30), 90);
-assert.ok(populationForRound(31) > 90);
-assert.ok(populationForRound(50) <= 140);
+assert.equal(anchor.population, 120);
+assert.equal(anchor.attackSlots, 4);
+// The survival rule: exactly eight civilians per round.
+assert.equal(CIVILIANS_PER_ROUND, 8);
+for (const [round, count] of [
+  [1, 8],
+  [5, 40],
+  [10, 80],
+  [20, 160],
+  [30, 240],
+  [50, 400],
+] as const) {
+  assert.equal(civilianCountForRound(round), count, `round ${round} holds ${count} civilians`);
+  assert.equal(populationForRound(round), count);
+  const plan = directRound(round, 1, () => 0.3);
+  assert.equal(plan.civilians, count, `plan ${round} assigns ${count} civilians`);
+  const bodies = plan.opening.concat(plan.reserve);
+  assert.equal(bodies.filter((spawn) => spawn.kind !== 'broadcaster').length, count);
+  assert.equal(plan.total, count + (plan.boss ? 1 : 0));
+}
+assert.equal(civilianCountForRound(2) - civilianCountForRound(1), 8);
+assert.equal(civilianCountForRound(49) - civilianCountForRound(48), 8);
+// Difficulty never touches the count.
+assert.equal(roundScale(20, 1, 'easy').population, 160);
+assert.equal(roundScale(20, 1, 'nightmare').population, 160);
+assert.equal(roundScale(20, 4, 'hard').population, 160);
+// The active budget climbs but stays under the crowd ceiling.
+assert.equal(activeBudgetForRound(1), 6);
+assert.ok(activeBudgetForRound(50) <= DEFAULT_CROWD_BUDGET.maxAlive);
+assert.ok(activeBudgetForRound(50) > activeBudgetForRound(20));
+assert.ok(roundScale(50).spawnBatch > roundScale(1).spawnBatch);
+assert.ok(roundScale(50).spawnInterval < roundScale(1).spawnInterval);
+setCrowdBudget({ maxAlive: 12 });
+assert.equal(activeBudgetForRound(50), 12, 'a lower crowd budget caps the live count without changing the wave');
+assert.equal(roundScale(50).population, 400);
+resetCrowdBudgetForTests();
+assert.equal(attackSlotsForRound(1), 2);
+assert.equal(attackSlotsForRound(20), 5);
+assert.equal(attackSlotsForRound(20, 3), 7);
+assert.ok(attackSlotsForRound(60) <= 10);
+assert.equal(roundPressure(1), 'Light');
+assert.equal(roundPressure(10), 'Moderate');
+assert.equal(roundPressure(50), 'Catastrophic');
 
 const early = directRound(1, 1, () => 0.2);
 assert.equal(early.boss, false);
@@ -81,22 +123,26 @@ const late = roundScale(50, 1, 'normal');
 assert.equal(late.phase.id, 'apocalypse');
 assert.equal(late.tactics.hazards, true);
 assert.equal(late.tactics.protectElite, true);
-assert.ok(late.cap <= 16);
+assert.ok(late.cap <= DEFAULT_CROWD_BUDGET.maxAlive);
 assert.ok(late.hp > anchor.hp);
 assert.equal(directRound(50, 1, () => 0.2).boss, true);
 assert.equal(directRound(55, 1, () => 0.2).boss, false);
 
 const squad = roundScale(15, 5, 'normal');
-assert.equal(squad.cap, 15);
+assert.equal(squad.cap, 21);
 assert.ok(squad.hp > anchor.hp);
 assert.ok(squad.hp < anchor.hp * 1.4);
 const easy = roundScale(15, 1, 'easy');
 assert.ok(easy.hp < anchor.hp);
-assert.ok(easy.population < anchor.population);
+assert.equal(easy.population, anchor.population);
+assert.ok(easy.cap < anchor.cap);
+assert.ok(easy.attackSlots < anchor.attackSlots);
 const nightmare = roundScale(15, 1, 'nightmare');
 assert.ok(nightmare.hp > roundScale(15, 1, 'hard').hp);
-assert.ok(nightmare.population > anchor.population);
-assert.ok(nightmare.cap <= 16);
+assert.equal(nightmare.population, anchor.population);
+assert.ok(nightmare.cap > anchor.cap);
+assert.ok(nightmare.tactics.aggression > anchor.tactics.aggression);
+assert.ok(nightmare.cap <= DEFAULT_CROWD_BUDGET.maxAlive);
 assert.equal(directRound(1, 1, () => 0.2, 'nightmare').reserve.length, 0);
 
 assert.throws(() =>

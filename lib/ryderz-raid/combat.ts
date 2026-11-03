@@ -97,6 +97,57 @@ export function applyReaction(body: ReactiveBody, reaction: HitReaction, dir: TH
   }
 }
 
+/** Bodies that shrug off repeated crowd control. Elites and bosses carry this. */
+export interface ResistantBody {
+  /** Accumulated crowd-control exposure. Decays while the body is left alone. */
+  ccResist?: number;
+  ccResistAt?: number;
+  tier?: number;
+}
+
+/** Seconds of quiet before crowd-control exposure starts to fade. */
+export const CC_RESIST_WINDOW = 2.4;
+
+/**
+ * Diminishing returns on launches and knockdowns for tier 4+. Each heavy
+ * reaction inside the window weakens the next; after three the body only
+ * staggers until it has been left alone for a while. Returns the reaction and
+ * strength that should actually be applied.
+ */
+export function resistReaction(
+  body: ResistantBody,
+  reaction: HitReaction,
+  strength: number,
+  time: number,
+): { reaction: HitReaction; strength: number } {
+  const tier = body.tier ?? 1;
+  if (tier < 4 || reaction === 'stagger') return { reaction, strength };
+  const last = body.ccResistAt ?? -Infinity;
+  let exposure = body.ccResist ?? 0;
+  if (time - last > CC_RESIST_WINDOW) exposure = Math.max(0, exposure - Math.floor((time - last) / CC_RESIST_WINDOW));
+  const bossy = tier >= 6 ? 1 : 0;
+  const level = exposure + bossy;
+  body.ccResist = exposure + 1;
+  body.ccResistAt = time;
+  if (level >= 3) return { reaction: 'stagger', strength: Math.min(strength, 0.8) };
+  const scaled = strength / (1 + level * 0.45);
+  if (level >= 2 && (reaction === 'launch' || reaction === 'slam')) return { reaction: 'knockback', strength: scaled };
+  return { reaction, strength: scaled };
+}
+
+/**
+ * Keep an airborne body up for another hit. Light strikes give a small pop so
+ * a chain of jabs can hold a civilian in the air for a moment, the way a
+ * launcher-into-juggle string does in an action RPG.
+ */
+export function juggleBody(body: ReactiveBody, lift: number) {
+  if (lift <= 0 || body.airY <= 0.05) return;
+  const m = Math.max(0.4, body.mass);
+  body.airVel = Math.max(body.airVel, (lift * 3.6) / Math.sqrt(m));
+  body.stagger = Math.max(body.stagger, 0.5);
+  body.lean = 1;
+}
+
 /**
  * Integrate a body's reaction state for one frame. Returns true on the frame
  * it lands from the air so callers can kick dust.

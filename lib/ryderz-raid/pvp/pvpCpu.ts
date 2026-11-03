@@ -30,7 +30,7 @@ import type { PvpDamageKind } from './balance';
 import { choosePvpAction, type AbilityRead, type PvpIntent } from './decide';
 import { bandFit } from './abilityBands';
 import type { CombatRates } from '../fighter/memory';
-import type { PhysicalHit, StrikeKind } from '../fighter/actions';
+import type { PhysicalHit, StrikeInput, StrikeKind } from '../fighter/actions';
 import { FighterStriker } from '../fighter/striker';
 import { combatProfileFor, resolvePowerLink } from '../fighter/profiles';
 import { openingPlan } from '../fighter/planner';
@@ -133,8 +133,8 @@ export class PvpCpu {
   private rhythm = [0, 0, 0];
   private meleeCd = 0;
   private readonly striker = new FighterStriker();
-  private script: StrikeKind[] = [];
-  private pending: StrikeKind | null = null;
+  private script: StrikeInput[] = [];
+  private pending: StrikeInput | null = null;
   private chainDelay = 0;
   private chainLock = 0;
   private wantCast = false;
@@ -450,7 +450,7 @@ export class PvpCpu {
       this.intent === 'grab'
     ) {
       if (!this.strikeQueued && !this.striker.busy) {
-        const kind: StrikeKind = this.intent === 'attack' || this.intent === 'grab' ? 'melee' : this.intent;
+        const kind: StrikeInput = this.intent === 'attack' || this.intent === 'grab' ? 'melee' : this.intent;
         this.striker.queue(kind === 'melee' && this.intent === 'attack' ? 'punch' : kind);
         this.strikeQueued = true;
       }

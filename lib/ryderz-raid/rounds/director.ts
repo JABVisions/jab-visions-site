@@ -66,10 +66,51 @@ export interface RoundScale {
   damage: number;
   speed: number;
   spawnInterval: number;
+  /** Hosts released together each time the spawn timer fires. */
+  spawnBatch: number;
+  /** Active AI budget: how many hostile bodies are alive and thinking at once. */
   cap: number;
-  /** Total hosts this round. The live cap is how many think at once. */
+  /** Total civilians assigned to this round: exactly eight per round. */
   population: number;
+  /** How many hosts may be swinging at the squad at the same time. */
+  attackSlots: number;
   tactics: RoundTactics;
+}
+
+/**
+ * Hard ceilings for the crowd simulation. Rounds only ever raise their
+ * active budget up to `maxAlive`; the rest of the wave waits in the queue.
+ * Adaptive rendering lowers `maxAlive` on a slow device without touching the
+ * total civilian count.
+ */
+export interface CrowdBudget {
+  maxAlive: number;
+  /** Metres from the nearest Ryder beyond which a host runs cheap chase logic. */
+  thinkRadius: number;
+  /** Metres beyond which a host's skeleton animates at half rate. */
+  animRadius: number;
+}
+
+export const DEFAULT_CROWD_BUDGET: CrowdBudget = { maxAlive: 32, thinkRadius: 44, animRadius: 30 };
+
+let crowdBudget: CrowdBudget = { ...DEFAULT_CROWD_BUDGET };
+
+export function getCrowdBudget(): CrowdBudget {
+  return crowdBudget;
+}
+
+/** Tune the live crowd. The total wave size never changes; only how many bodies are simulated at once. */
+export function setCrowdBudget(patch: Partial<CrowdBudget>) {
+  crowdBudget = {
+    maxAlive: Math.max(8, Math.min(64, Math.round(patch.maxAlive ?? crowdBudget.maxAlive))),
+    thinkRadius: Math.max(12, patch.thinkRadius ?? crowdBudget.thinkRadius),
+    animRadius: Math.max(8, patch.animRadius ?? crowdBudget.animRadius),
+  };
+  return crowdBudget;
+}
+
+export function resetCrowdBudgetForTests() {
+  crowdBudget = { ...DEFAULT_CROWD_BUDGET };
 }
 
 export interface SpawnOrder {
@@ -84,6 +125,10 @@ export interface DirectorPlan {
   reserve: SpawnOrder[];
   boss: boolean;
   event: WarzoneEventId | null;
+  /** Civilians in this plan (boss excluded). Always `round * 8`. */
+  civilians: number;
+  /** Every body the round will spawn, boss included. */
+  total: number;
 }
 
 export const TIERS: Record<EnemyTier, { classification: string; intelligence: string }> = {
@@ -256,8 +301,9 @@ export function bossRound(round: number) {
   return n >= 10 && n % 10 === 0;
 }
 
-export function tacticsForRound(round: number): RoundTactics {
+export function tacticsForRound(round: number, difficulty: RaidDifficultyName = 'normal'): RoundTactics {
   const n = Math.max(1, Math.floor(round));
+  const tune = DIFFICULTY[difficulty] ?? DIFFICULTY.normal;
   return {
     dodgePowers: n >= 6,
     flank: n >= 6,
@@ -271,41 +317,71 @@ export function tacticsForRound(round: number): RoundTactics {
     protectElite: n >= 41,
     powers: n >= 21,
     hazards: n >= 16,
-    aggression: Math.min(1, 0.22 + (n - 1) * 0.016),
+    aggression: Math.min(1, Math.max(0, 0.22 + (n - 1) * 0.016 + tune.aggression)),
   };
 }
 
-const DIFFICULTY = {
-  easy: { hp: 0.85, damage: 0.82, cap: -1, pop: 0.8 },
-  normal: { hp: 1, damage: 1, cap: 0, pop: 1 },
-  hard: { hp: 1.12, damage: 1.08, cap: 1, pop: 1.12 },
-  nightmare: { hp: 1.3, damage: 1.22, cap: 2, pop: 1.3 },
-} as const;
+/**
+ * Difficulty never changes how many civilians a round holds. It changes how
+ * tough they are, how many think at once, how many swing at once, and how
+ * eager they are.
+ */
+export interface DifficultyProfile {
+  hp: number;
+  damage: number;
+  /** Added to the active AI budget. */
+  cap: number;
+  /** Added to the simultaneous attacker count. */
+  slots: number;
+  /** Added to the tactics aggression (0–1 scale). */
+  aggression: number;
+  /** Multiplier on the spawn interval. Below 1 is faster. */
+  pace: number;
+}
 
-/** Normal solo anchors. Later rounds keep climbing until the active-budget cap. */
-const POPULATION_ANCHORS: Array<[number, number]> = [
-  [1, 8],
-  [5, 15],
-  [10, 26],
-  [15, 40],
-  [20, 56],
-  [25, 72],
-  [30, 90],
-];
+export const DIFFICULTY: Record<RaidDifficultyName, DifficultyProfile> = {
+  easy: { hp: 0.85, damage: 0.8, cap: -2, slots: -1, aggression: -0.08, pace: 1.15 },
+  normal: { hp: 1, damage: 1, cap: 0, slots: 0, aggression: 0, pace: 1 },
+  hard: { hp: 1.14, damage: 1.1, cap: 2, slots: 1, aggression: 0.08, pace: 0.9 },
+  nightmare: { hp: 1.32, damage: 1.25, cap: 4, slots: 2, aggression: 0.16, pace: 0.8 },
+};
 
-export function populationForRound(round: number) {
+/** The survival rule: every round adds exactly this many mind-controlled civilians. */
+export const CIVILIANS_PER_ROUND = 8;
+
+/** Total civilians assigned to a round. Round 1 is 8, round 10 is 80, round 50 is 400. */
+export function civilianCountForRound(round: number) {
   const n = Math.max(1, Math.floor(round));
-  const last = POPULATION_ANCHORS[POPULATION_ANCHORS.length - 1];
-  if (n >= last[0]) return Math.min(140, Math.round(last[1] + (n - last[0]) * 3.6));
-  for (let i = 0; i < POPULATION_ANCHORS.length - 1; i += 1) {
-    const [a, av] = POPULATION_ANCHORS[i];
-    const [b, bv] = POPULATION_ANCHORS[i + 1];
-    if (n <= b) {
-      const t = (n - a) / (b - a);
-      return Math.round(av + (bv - av) * t);
-    }
-  }
-  return POPULATION_ANCHORS[0][1];
+  return n * CIVILIANS_PER_ROUND;
+}
+
+/** Kept for callers that read the old name. Same rule. */
+export function populationForRound(round: number) {
+  return civilianCountForRound(round);
+}
+
+/**
+ * How many hostiles are alive and thinking at once. Starts at six, climbs
+ * roughly one body every two rounds, and is clamped by the crowd budget.
+ */
+export function activeBudgetForRound(round: number, squadSize = 1, difficulty: RaidDifficultyName = 'normal') {
+  const n = Math.max(1, Math.floor(round));
+  const allies = Math.max(0, Math.floor(squadSize) - 1);
+  const tune = DIFFICULTY[difficulty] ?? DIFFICULTY.normal;
+  const raw = 6 + Math.floor((n - 1) * 0.55) + allies * 2 + tune.cap;
+  return Math.max(4, Math.min(crowdBudget.maxAlive, raw));
+}
+
+/**
+ * Simultaneous attackers. Round 1 lets two hosts swing at once; by round 20
+ * five press, by round 40 seven. Each squadmate opens one more slot so a
+ * raid team is actually attacked.
+ */
+export function attackSlotsForRound(round: number, squadSize = 1, difficulty: RaidDifficultyName = 'normal') {
+  const n = Math.max(1, Math.floor(round));
+  const allies = Math.max(0, Math.floor(squadSize) - 1);
+  const tune = DIFFICULTY[difficulty] ?? DIFFICULTY.normal;
+  return Math.max(1, Math.min(10, 2 + Math.floor((n - 1) / 6) + allies + tune.slots));
 }
 
 /**
@@ -332,8 +408,8 @@ export function warzoneLabel(event: WarzoneEventId | null) {
 
 /**
  * Normal solo round 15 is the balancing anchor: tier 4, 1.63× health,
- * 1.25× damage, 11 enemies alive. Extra squad members add a few bodies
- * and a small bump, not a second full raid.
+ * 1.25× damage, 120 civilians with 13 alive at once. Extra squad members
+ * raise the active budget and toughness a little, never the civilian count.
  */
 export function roundScale(round: number, squadSize = 1, difficulty: RaidDifficultyName = 'normal'): RoundScale {
   const n = Math.max(1, Math.floor(round));
@@ -342,8 +418,8 @@ export function roundScale(round: number, squadSize = 1, difficulty: RaidDifficu
   const tune = DIFFICULTY[difficulty] ?? DIFFICULTY.normal;
   const hp = (1 + (n - 1) * 0.045) * (1 + allies * 0.06) * tune.hp;
   const damage = (1 + (n - 1) * (0.25 / 14)) * (1 + allies * 0.03) * tune.damage;
-  const cap = Math.max(4, Math.min(16, 6 + Math.floor((n - 1) * (5 / 14)) + allies + tune.cap));
-  const population = Math.max(4, Math.round(populationForRound(n) * tune.pop * (1 + allies * 0.08)));
+  const cap = activeBudgetForRound(n, squadSize, difficulty);
+  const population = civilianCountForRound(n);
   return {
     round: n,
     phase,
@@ -351,10 +427,12 @@ export function roundScale(round: number, squadSize = 1, difficulty: RaidDifficu
     hp,
     damage,
     speed: 1 + Math.min((n - 1) * 0.012, 0.3),
-    spawnInterval: Math.max(0.34, 0.95 - (n - 1) * 0.012),
+    spawnInterval: Math.max(0.16, (0.9 - (n - 1) * 0.018) * tune.pace),
+    spawnBatch: 1 + Math.floor(n / 10),
     cap,
     population,
-    tactics: tacticsForRound(n),
+    attackSlots: attackSlotsForRound(n, squadSize, difficulty),
+    tactics: tacticsForRound(n, difficulty),
   };
 }
 
@@ -383,6 +461,7 @@ export function directRound(round: number, squadSize = 1, rng: () => number = Ma
     const entry = pickArchetype(scale.round, rng);
     opening.push({ kind: entry.kind, archetypeId: entry.id });
   }
+  const civilians = opening.length;
   let reserve: SpawnOrder[] = [];
   if (scale.round >= 6 && opening.length >= 4) {
     const hold = Math.max(1, Math.round(opening.length * 0.28));
@@ -390,7 +469,26 @@ export function directRound(round: number, squadSize = 1, rng: () => number = Ma
   }
   const boss = bossRound(scale.round);
   if (boss) opening.unshift({ kind: 'broadcaster', archetypeId: 'broadcaster' });
-  return { round: scale.round, scale, opening, reserve, boss, event: warzoneEvent(scale.round) };
+  return {
+    round: scale.round,
+    scale,
+    opening,
+    reserve,
+    boss,
+    event: warzoneEvent(scale.round),
+    civilians,
+    total: opening.length + reserve.length,
+  };
+}
+
+/** The round table the design doc shows: round, civilians, and a pressure word. */
+export function roundPressure(round: number): 'Light' | 'Moderate' | 'Heavy' | 'Overwhelming' | 'Catastrophic' {
+  const n = Math.max(1, Math.floor(round));
+  if (n < 5) return 'Light';
+  if (n < 15) return 'Moderate';
+  if (n < 25) return 'Heavy';
+  if (n < 40) return 'Overwhelming';
+  return 'Catastrophic';
 }
 
 export function roundTitle(round: number) {

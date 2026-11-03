@@ -44,7 +44,7 @@ export interface RaidSnapshot {
   dealt: number;
   taken: number;
   fighters: FighterSnap[];
-  contributions: { name: string; dealt: number }[];
+  contributions: { name: string; dealt: number; signal?: number }[];
   at: number;
 }
 
@@ -417,7 +417,8 @@ function acceptSnapshot(room: RaidRoom, body: RoomAct, now: number) {
     phase: snap.phase === 'victory' || snap.phase === 'dead' ? snap.phase : 'playing',
     wave: clampNum(snap.wave, 1, 999),
     waves: clampNum(snap.waves, 0, 999),
-    enemiesLeft: clampNum(snap.enemiesLeft, 0, 99),
+    // Round × 8 civilians: round 50 fields 400, so the cap must clear that.
+    enemiesLeft: clampNum(snap.enemiesLeft, 0, 9999),
     defeated: clampNum(snap.defeated, 0, 999),
     dealt: clampNum(snap.dealt, 0, 999999),
     taken: clampNum(snap.taken, 0, 999999),
@@ -425,6 +426,7 @@ function acceptSnapshot(room: RaidRoom, body: RoomAct, now: number) {
     contributions: (snap.contributions ?? []).slice(0, 8).map((row) => ({
       name: String(row.name).slice(0, 40),
       dealt: clampNum(row.dealt, 0, 999999),
+      signal: clampNum(row.signal ?? 0, 0, 999999),
     })),
     at: now,
   };

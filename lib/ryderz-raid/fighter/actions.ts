@@ -5,7 +5,15 @@ import type { MeleeStyle } from '../skeletal';
  * Physical attacks are data. Punch, kick, and melee differ in speed, reach,
  * and what they do to the person they land on. Abilities stay on the kits.
  */
-export type StrikeKind = 'punch' | 'kick' | 'melee' | 'grab' | 'throw';
+/**
+ * punch / kick / melee are the three buttons. heavy and launcher are the
+ * sprint-modified versions of punch and kick. aerial replaces any strike
+ * thrown while airborne, and finisher replaces melee over a downed body.
+ */
+export type StrikeKind = 'punch' | 'kick' | 'melee' | 'grab' | 'throw' | 'heavy' | 'launcher' | 'aerial' | 'finisher';
+
+/** Strikes a fighter can ask for directly. grab / throw / aerial / finisher are chosen by context. */
+export type StrikeInput = 'punch' | 'kick' | 'melee' | 'heavy' | 'launcher';
 
 export type CombatActionType = StrikeKind | 'ability' | 'dodge';
 
@@ -27,13 +35,22 @@ export interface CombatAction {
   strength: number;
   lunge: number;
   style: MeleeStyle;
+  /**
+   * Half-width of the swept volume between where the fighter stood and where
+   * the lunge put the fist. Unset strikes only test the arc at the end point.
+   */
+  sweepWidth?: number;
+  /** Once this strike connects, the next buffered strike may start as soon as the active frames end. */
+  cancelOnHit?: boolean;
+  /** Extra upward speed given to a target that was already in the air. */
+  juggle?: number;
 }
 
 export const PUNCH: CombatAction = {
   id: 'punch',
   type: 'punch',
   damageMul: 0.46,
-  startup: 0.12,
+  startup: 0.08,
   active: 0.1,
   recovery: 0.22,
   range: 2.2,
@@ -44,6 +61,8 @@ export const PUNCH: CombatAction = {
   strength: 0.7,
   lunge: 0.22,
   style: 'punch',
+  cancelOnHit: true,
+  juggle: 0.4,
 };
 
 export const KICK: CombatAction = {
@@ -61,6 +80,88 @@ export const KICK: CombatAction = {
   strength: 1,
   lunge: 0.42,
   style: 'kick',
+  cancelOnHit: true,
+  juggle: 0.6,
+};
+
+/** Sprint + punch. Slow, wide, and it puts a crowd on the ground. */
+export const HEAVY: CombatAction = {
+  id: 'heavy',
+  type: 'heavy',
+  damageMul: 1.4,
+  startup: 0.26,
+  active: 0.12,
+  recovery: 0.6,
+  range: 2.7,
+  halfArc: 1.35,
+  hitStun: 0.5,
+  knockback: 9,
+  reaction: 'heavy',
+  strength: 1.3,
+  lunge: 0.55,
+  style: 'smash',
+  sweepWidth: 1.15,
+  cancelOnHit: true,
+  juggle: 0.3,
+};
+
+/** Sprint + kick. A rising strike that pops the target into the air for a juggle. */
+export const LAUNCHER: CombatAction = {
+  id: 'launcher',
+  type: 'launcher',
+  damageMul: 0.9,
+  startup: 0.18,
+  active: 0.1,
+  recovery: 0.46,
+  range: 2.3,
+  halfArc: 0.85,
+  hitStun: 0.45,
+  knockback: 3,
+  reaction: 'launch',
+  strength: 1.3,
+  lunge: 0.34,
+  style: 'punchR',
+  cancelOnHit: true,
+  juggle: 1.2,
+};
+
+/** Any strike thrown while airborne. Comes down on everyone around the landing point. */
+export const AERIAL: CombatAction = {
+  id: 'aerial',
+  type: 'aerial',
+  damageMul: 1.2,
+  startup: 0.1,
+  active: 0.16,
+  recovery: 0.36,
+  range: 2.6,
+  halfArc: Math.PI,
+  hitStun: 0.42,
+  knockback: 7,
+  reaction: 'slam',
+  strength: 1.1,
+  lunge: 0.45,
+  style: 'smash',
+  sweepWidth: 1.2,
+  cancelOnHit: true,
+  juggle: 0.9,
+};
+
+/** Melee over a downed body. Slow start, big payoff. */
+export const FINISHER: CombatAction = {
+  id: 'finisher',
+  type: 'finisher',
+  damageMul: 2,
+  startup: 0.2,
+  active: 0.1,
+  recovery: 0.55,
+  range: 1.9,
+  halfArc: 0.9,
+  hitStun: 0.5,
+  knockback: 6,
+  reaction: 'heavy',
+  strength: 1.45,
+  lunge: 0.2,
+  style: 'smash',
 };
 
 /** Pitchfork reach. Damage multipliers stay on the Ryder profile; this only changes the swing. */
@@ -171,7 +272,26 @@ export const BASE_ACTIONS: Record<StrikeKind, CombatAction> = {
   melee: MELEE,
   grab: GRAB,
   throw: THROW,
+  heavy: HEAVY,
+  launcher: LAUNCHER,
+  aerial: AERIAL,
+  finisher: FINISHER,
 };
+
+/** Strikes that may be asked for by a button. */
+export const STRIKE_INPUTS: StrikeInput[] = ['punch', 'kick', 'melee', 'heavy', 'launcher'];
+
+/** Sprint turns a light strike into its heavy cousin. Melee already is one. */
+export function heavyVariant(kind: StrikeInput): StrikeInput {
+  if (kind === 'punch') return 'heavy';
+  if (kind === 'kick') return 'launcher';
+  return kind;
+}
+
+/** A body on the floor with its stagger still running is open to a finisher. */
+export function isKnockedDown(body: { airY?: number; stagger?: number; held?: number }): boolean {
+  return (body.held ?? 0) <= 0 && (body.airY ?? 0) <= 0.02 && (body.stagger ?? 0) > 0.45;
+}
 
 /** Hit 1 is full damage. Later hits step down so a long string cannot empty a duel bar. */
 export function comboDamageScale(hitIndex: number): number {

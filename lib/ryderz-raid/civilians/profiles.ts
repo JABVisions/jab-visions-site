@@ -98,16 +98,31 @@ export const CIVILIAN_PROFILES: Record<CivilianProfileId, CivilianProfile> = {
 
 export type CivilianAttack = Extract<StrikeKind, 'punch' | 'kick' | 'melee'> | 'throwObject';
 
+/**
+ * Behaviour states. patrol / detect / pursue cover the walk in, approach /
+ * reposition / attack / combo the fight, defend / dodge the reactions, and
+ * stagger / knockdown / recover the hit states the engine drives directly.
+ */
 export type CivilianState =
+  | 'patrol'
+  | 'detect'
+  | 'pursue'
   | 'approach'
+  | 'reposition'
   | 'circle'
   | 'attack'
+  | 'combo'
+  | 'defend'
+  | 'dodge'
   | 'backOff'
   | 'search'
   | 'pickup'
   | 'throw'
   | 'flee'
+  | 'retreat'
   | 'recover'
+  | 'stagger'
+  | 'knockdown'
   | 'guard';
 
 export interface CivilianSense {
@@ -116,17 +131,30 @@ export interface CivilianSense {
   holding: boolean;
   /** Distance to the nearest free prop, or null when the street is empty. */
   throwableDist: number | null;
-  /** 0 and 1 may stand in and swing. Later arrivals hang back. */
+  /** Position among the living crowd, for ring spacing. */
   slot: number;
   recovering: boolean;
   /** 0–1, fresh each decision. */
   rng: number;
   /** The Ryder is mid-swing. Blockers hold instead of eating the combo. */
   playerAttacking?: boolean;
+  /** The Ryder is winding up a slow strike. Dodgers step off the line. */
+  playerTelegraphing?: boolean;
   /** The Ryder is channeling a power. Enforcers and above try to interrupt. */
   playerChanneling?: boolean;
   tier?: number;
   tactics?: RoundTactics;
+  /**
+   * The engagement director let this host swing. Undefined keeps the legacy
+   * behaviour (everyone in range attacks). False holds the host at the ring.
+   */
+  token?: boolean;
+  /** This host landed a strike a moment ago and may follow it up. */
+  comboReady?: boolean;
+  /** Metres past attack range to hold at while waiting for a token. */
+  ringDistance?: number;
+  /** Seconds since the Ryder was last seen. Above a few seconds the host patrols. */
+  sinceSeen?: number;
 }
 
 export interface CivilianOrder {
@@ -158,8 +186,16 @@ export function civilianOrder(profile: CivilianProfile, sense: CivilianSense): C
   if (tactics?.retreat && tier <= 2 && sense.hpRatio < 0.42) {
     return { state: 'flee', move: -1, strafe: 0.45, attack: null };
   }
+  // Dodge: a street fighter reads a heavy windup and steps off the line.
+  if (tactics?.dodgePowers && tier >= 2 && sense.playerTelegraphing && sense.dist < profile.attackRange + 1.2 && sense.rng < 0.55) {
+    return { state: 'dodge', move: -0.35, strafe: sense.rng < 0.275 ? 1.7 : -1.7, attack: null };
+  }
   if (tactics?.block && tier >= 2 && sense.playerAttacking && sense.dist < profile.attackRange + 0.45) {
-    return { state: 'guard', move: -0.25, strafe: 0.15, attack: null };
+    return { state: sense.rng < 0.5 ? 'defend' : 'guard', move: -0.25, strafe: 0.15, attack: null };
+  }
+  // Far away and the Ryder has been out of sight: wander instead of beelining.
+  if ((sense.sinceSeen ?? 0) > 4 && sense.dist > 30) {
+    return { state: 'patrol', move: 0.4, strafe: sense.rng < 0.5 ? 0.6 : -0.6, attack: null };
   }
   if (tactics?.interrupt && tier >= 3 && sense.playerChanneling) {
     return {
@@ -192,7 +228,16 @@ export function civilianOrder(profile: CivilianProfile, sense: CivilianSense): C
     if (sense.rng < meleeAt) return 'melee';
     return 'punch';
   };
+  // No attack token: hold the ring just outside reach and keep moving so the crowd reads as alive.
+  if (sense.token === false) {
+    const ring = profile.attackRange + (sense.ringDistance ?? 1.4);
+    if (sense.dist < ring - 0.5) return { state: 'reposition', move: -0.5, strafe: flank * 3 + (sense.rng < 0.5 ? 0.5 : -0.5), attack: null };
+    if (sense.dist <= ring + 0.6) return { state: 'reposition', move: 0.05, strafe: flank * 3 + (sense.rng < 0.5 ? 0.6 : -0.6), attack: null };
+    return { state: sense.dist > 14 ? 'pursue' : 'approach', move: 1, strafe: flank * 0.5, attack: null };
+  }
   if (sense.dist <= profile.attackRange) {
+    // A landed hit is followed up before the target recovers.
+    if (sense.comboReady && tier >= 2) return { state: 'combo', move: 0.2, strafe: 0, attack: swing() };
     // A cautious host steps back only when they are inside the player. Otherwise the swing starts now.
     if (profile.retreat > 0.55 && sense.dist < profile.preferredDistance - 0.55) {
       return { state: 'backOff', move: -0.45, strafe: flank, attack: null };
@@ -200,5 +245,6 @@ export function civilianOrder(profile: CivilianProfile, sense: CivilianSense): C
     const closing = sense.dist > Math.min(profile.preferredDistance, profile.attackRange - 0.15) + 0.2;
     return { state: 'attack', move: closing ? 0.55 : 0.05, strafe: flank, attack: swing() };
   }
+  if (sense.dist > 14) return { state: 'pursue', move: 1, strafe: 0, attack: null };
   return { state: 'approach', move: 1, strafe: flank * 0.5, attack: null };
 }

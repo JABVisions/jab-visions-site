@@ -5,6 +5,8 @@ export interface CombatStat {
   kills: number;
   downs: number;
   damage: number;
+  /** Signal Points this fighter earned over the span. Absent on snapshots written before SP existed. */
+  signal?: number;
 }
 
 export interface SquadStatLine {
@@ -27,7 +29,7 @@ export const REPORT_HOLD = 6.4;
 export const MVP_HOLD = 10.5;
 
 export function emptyStat(): CombatStat {
-  return { kills: 0, downs: 0, damage: 0 };
+  return { kills: 0, downs: 0, damage: 0, signal: 0 };
 }
 
 const PLACES = ['MVP', '2ND', '3RD', '4TH', '5TH'];
@@ -73,6 +75,7 @@ export function sumStats(lines: SquadStatLine[], view: StatView): CombatStat {
       kills: sum.kills + line[view].kills,
       downs: sum.downs + line[view].downs,
       damage: sum.damage + line[view].damage,
+      signal: (sum.signal ?? 0) + (line[view].signal ?? 0),
     }),
     emptyStat(),
   );

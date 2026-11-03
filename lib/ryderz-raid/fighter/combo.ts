@@ -7,7 +7,7 @@ export const COMBO_WINDOW = 1.05;
 /** How long a finished chain leaves a special power available. */
 export const POWER_LINK_WINDOW = 3;
 
-export type ComboEffect = 'stagger' | 'heavyKnockback' | 'launcher' | 'grabOpportunity' | 'powerLink' | 'finisher';
+export type ComboEffect = 'stagger' | 'heavyKnockback' | 'launcher' | 'grabOpportunity' | 'powerLink' | 'finisher' | 'juggle' | 'slam';
 
 export type ComboTier = 'none' | 'chain' | 'combo' | 'power' | 'finisher';
 
@@ -31,6 +31,16 @@ export const SHARED_COMBOS: ComboRecipe[] = [
   { id: 'pressure', sequence: ['kick', 'kick'], effect: 'heavyKnockback' },
   { id: 'dump', sequence: ['kick', 'melee'], effect: 'grabOpportunity' },
   { id: 'signature', sequence: ['punch', 'punch', 'melee'], effect: 'finisher' },
+  // Crowd-brawler vocabulary: launch, chase, slam.
+  { id: 'skyward', sequence: ['punch', 'punch', 'launcher'], effect: 'launcher', label: 'SKYWARD' },
+  { id: 'air-rave', sequence: ['launcher', 'punch'], effect: 'juggle', label: 'AIR RAVE' },
+  { id: 'air-rave-2', sequence: ['launcher', 'punch', 'punch'], effect: 'juggle', label: 'AIR RAVE' },
+  { id: 'meteor', sequence: ['launcher', 'aerial'], effect: 'slam', label: 'METEOR' },
+  { id: 'meteor-chain', sequence: ['launcher', 'punch', 'aerial'], effect: 'slam', label: 'METEOR' },
+  { id: 'crusher', sequence: ['heavy', 'heavy'], effect: 'heavyKnockback', label: 'CRUSHER' },
+  { id: 'quake', sequence: ['kick', 'heavy'], effect: 'slam', label: 'QUAKE' },
+  { id: 'ground-zero', sequence: ['heavy', 'finisher'], effect: 'finisher', label: 'GROUND ZERO' },
+  { id: 'wall-breaker', sequence: ['punch', 'kick', 'heavy'], effect: 'powerLink', label: 'WALL BREAKER' },
 ];
 
 export interface ComboSnapshot {
@@ -84,12 +94,19 @@ export function reactionForEffect(
   if (effect === 'heavyKnockback') return { reaction: 'knockback', strength: strength * 1.35 };
   if (effect === 'launcher') return { reaction: 'launch', strength: strength * 1.15 };
   if (effect === 'finisher') return { reaction: 'heavy', strength: strength * 1.25 };
+  if (effect === 'slam') return { reaction: 'slam', strength: strength * 1.2 };
+  if (effect === 'juggle') return { reaction: 'launch', strength: strength * 0.8 };
   if (effect === 'stagger') return { reaction: 'stagger', strength };
   return { reaction: base, strength };
 }
 
 export function recipeOpensPower(effect: ComboEffect | null, tier: ComboTier): boolean {
-  return effect === 'powerLink' || effect === 'finisher' || tier === 'power' || tier === 'finisher';
+  return effect === 'powerLink' || effect === 'finisher' || effect === 'slam' || tier === 'power' || tier === 'finisher';
+}
+
+/** Recipes that end a chain with a payoff. These are the ones that pay Signal Points. */
+export function isFinisherEffect(effect: ComboEffect | null): boolean {
+  return effect === 'finisher' || effect === 'slam' || effect === 'heavyKnockback';
 }
 
 /**
@@ -105,9 +122,24 @@ export class ComboManager {
   private recipes: ComboRecipe[] = SHARED_COMBOS;
   private powerUntil = 0;
   private lastRecipe: ComboRecipe | null = null;
+  /** Progression can stretch the chain window. 1 is the base window. */
+  private windowScale = 1;
 
   setRecipes(recipes: ComboRecipe[]) {
     this.recipes = recipes;
+  }
+
+  /** Recipes in play: the character's plus whatever the Power Tree granted. */
+  get activeRecipes(): readonly ComboRecipe[] {
+    return this.recipes;
+  }
+
+  setWindowScale(scale: number) {
+    this.windowScale = Math.max(0.5, Math.min(2.5, scale || 1));
+  }
+
+  get window() {
+    return COMBO_WINDOW * this.windowScale;
   }
 
   reset() {
@@ -128,7 +160,7 @@ export class ComboManager {
   }
 
   expire(time: number) {
-    if (this.count > 0 && time - this.lastTime > COMBO_WINDOW) {
+    if (this.count > 0 && time - this.lastTime > this.window) {
       this.count = 0;
       this.sequence = [];
       this.target = null;
@@ -150,7 +182,7 @@ export class ComboManager {
    * Passing the same target keeps the chain; a different body starts over.
    */
   land(kind: StrikeKind, time: number, target: object): ComboSnapshot {
-    if (this.target !== target || time - this.lastTime > COMBO_WINDOW) {
+    if (this.target !== target || time - this.lastTime > this.window) {
       this.sequence = [];
       this.count = 0;
       this.target = target;
@@ -172,7 +204,7 @@ export class ComboManager {
   snapshot(time: number, recipeId: string | null, effect: ComboEffect | null): ComboSnapshot;
   snapshot(time: number, recipeId?: string | null, effect?: ComboEffect | null): ComboSnapshot {
     this.expire(time);
-    const alive = this.count > 0 && time - this.lastTime <= COMBO_WINDOW;
+    const alive = this.count > 0 && time - this.lastTime <= this.window;
     const count = alive ? this.count : 0;
     const tier = comboTier(count);
     const recipe = recipeId !== undefined ? recipeId : this.lastRecipe?.id ?? null;

@@ -2,9 +2,29 @@
  * Combat reads these actions. Keyboard and pad mappings live here so the
  * engine never grows a new `if (key === 'f')` for each move.
  */
-export type CombatCommand = 'punch' | 'kick' | 'melee' | 'dodge' | 'jump' | 'ability1' | 'ability2' | 'ability3';
+export type CombatCommand =
+  | 'punch'
+  | 'kick'
+  | 'melee'
+  | 'heavy'
+  | 'launcher'
+  | 'dodge'
+  | 'jump'
+  | 'ability1'
+  | 'ability2'
+  | 'ability3'
+  | 'ability4'
+  | 'ability5';
 
-export const P1_BINDINGS: Record<Exclude<CombatCommand, 'ability1' | 'ability2' | 'ability3'>, string[]> = {
+/** Sprint held while a light strike is pressed turns it heavy. */
+export function withSprintModifier(command: CombatCommand, sprinting: boolean): CombatCommand {
+  if (!sprinting) return command;
+  if (command === 'punch') return 'heavy';
+  if (command === 'kick') return 'launcher';
+  return command;
+}
+
+export const P1_BINDINGS: Record<'punch' | 'kick' | 'melee' | 'dodge' | 'jump', string[]> = {
   punch: ['c'],
   kick: ['v'],
   melee: ['f'],
@@ -22,7 +42,8 @@ export const P2_BINDINGS: Record<'punch' | 'kick' | 'melee' | 'dodge' | 'jump', 
 
 /**
  * Face buttons follow a standard pad: Cross/A punch, Circle/B kick, Square/X melee.
- * LB dodges. RB / LT / RT are Q / E / R.
+ * LB dodges. RB / LT / RT are Q / E / R. D-pad up is the launcher, D-pad
+ * down the heavy, D-pad left / right the fourth and fifth power.
  */
 export const PAD_BUTTON: Record<CombatCommand, number> = {
   punch: 0,
@@ -33,7 +54,18 @@ export const PAD_BUTTON: Record<CombatCommand, number> = {
   ability1: 5,
   ability2: 6,
   ability3: 7,
+  launcher: 12,
+  heavy: 13,
+  ability4: 14,
+  ability5: 15,
 };
+
+export const ABILITY_COMMANDS: CombatCommand[] = ['ability1', 'ability2', 'ability3', 'ability4', 'ability5'];
+
+/** Slot index for an ability command, or -1. */
+export function abilitySlotOf(command: CombatCommand | null): number {
+  return command ? ABILITY_COMMANDS.indexOf(command) : -1;
+}
 
 /** Tab opens the raid map. M does too, except in local versus where M is player 2's jump. */
 export function isMapKey(key: string, code: string, localTwoPlayer: boolean) {
@@ -53,6 +85,8 @@ export function commandForKey(key: string, code: string, player: 1 | 2): CombatC
     if (lower === 'q' || lower === '1') return 'ability1';
     if (lower === 'e' || lower === '2') return 'ability2';
     if (lower === 'r' || lower === '3') return 'ability3';
+    if (lower === '4') return 'ability4';
+    if (lower === '5') return 'ability5';
     return null;
   }
   if (P2_BINDINGS.punch.includes(lower)) return 'punch';
