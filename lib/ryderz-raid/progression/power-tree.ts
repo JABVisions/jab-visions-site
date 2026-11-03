@@ -155,8 +155,7 @@ export function buildTree(ryderId: RyderId): PowerTree {
     node('launcher', 'combat', 2, 'Launcher Mastery', 'Sprint + kick launches higher and keeps targets in the air longer.', 500, ['fists'], { kind: 'stat', stat: 'launchPower', value: 0.3 }),
     node('aerial', 'combat', 3, 'Air Rave', 'Aerial strikes deal 25% more and slam harder on landing.', 750, ['launcher'], { kind: 'stat', stat: 'aerialDamage', value: 0.25 }),
     node('chain', 'combat', 2, f.chain, f.chainBlurb, 1000, ['fists'], { kind: 'combo', recipe: chainRecipe }),
-    node('heavy', 'combat', 3, 'Crowd Breaker', 'Heavy attacks sweep wider and hit 20% harder.', 900, ['chain'], { kind: 'stat', stat: 'heavyDamage', value: 0.2 }),
-    node('finisher', 'combat', 4, f.finisher, 'Ground finishers deal 35% more and pay out as combo finishers.', 1400, ['heavy', 'launcher'], { kind: 'combo', recipe: finisherRecipe }),
+    node('finisher', 'combat', 4, f.finisher, 'Ground finishers deal 35% more and pay out as combo finishers.', 1400, ['chain', 'launcher'], { kind: 'combo', recipe: finisherRecipe }),
     // Powers
     node('q', 'powers', 1, q.name, q.description, 0, [], { kind: 'ability', abilityId: q.id }, true),
     node('e', 'powers', 1, e.name, e.description, 0, [], { kind: 'ability', abilityId: e.id }, true),
@@ -164,7 +163,6 @@ export function buildTree(ryderId: RyderId): PowerTree {
     node('focus', 'powers', 2, 'Signal Focus', 'Powers cost 12% less aura.', 400, ['q'], { kind: 'stat', stat: 'abilityCost', value: -0.12 }),
     ...(breaker ? [node('breaker', 'powers', 2, breaker.name, breaker.description, 750, ['focus'], { kind: 'ability', abilityId: breaker.id })] : []),
     ...(surge ? [node('surge', 'powers', 3, surge.name, surge.description, 1200, ['breaker'], { kind: 'ability', abilityId: surge.id })] : []),
-    node('link', 'powers', 3, 'Power Link Mastery', 'Combo windows stay open 30% longer, so powers slot into chains.', 800, ['focus'], { kind: 'stat', stat: 'comboWindow', value: 0.3 }),
     // Defense
     node('stance', 'defense', 1, f.stance, '+20 maximum health.', 300, [], { kind: 'stat', stat: 'maxHp', value: 20 }),
     node('footwork', 'defense', 2, f.footwork, 'Dodge recovers 30% faster.', 500, ['stance'], { kind: 'stat', stat: 'dodgeCooldown', value: -0.3 }),
