@@ -323,7 +323,8 @@ function wrapGltfAsHumanoid(
   figure.traverse((object) => {
     const mesh = object as THREE.Mesh;
     if (!mesh.isMesh) return;
-    mesh.castShadow = false;
+    mesh.castShadow = true;
+    mesh.receiveShadow = false;
     if (options.ownMaterials) {
       const own = (material: THREE.Material) => {
         let copy = owned.get(material);

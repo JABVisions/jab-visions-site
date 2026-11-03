@@ -174,7 +174,10 @@ export function buildHumanoid(look: HumanoidLook): Humanoid {
   handR.position.set(0, -0.7, 0);
   armR.add(handR);
 
-  [legL, legR, torso, head, armL, armR].forEach((m) => addOutline(m, outlineThickness));
+  [legL, legR, torso, head, armL, armR].forEach((m) => {
+    addOutline(m, outlineThickness);
+    m.castShadow = true;
+  });
   addOutline(hair, outlineThickness);
 
   group.add(shadow, legL, legR, torso, head, armL, armR);

@@ -132,6 +132,7 @@ import {
 } from './raid/statboard';
 import { CIVILIAN_REGISTRY, clipHintFor, definitionForProfile, type CivilianDefinition } from './civilians/registry';
 import { ThrowableField, type ThrowBody } from './throwables';
+import { RenderPipeline } from './render/pipeline';
 
 export interface HudState {
   hp: number;
@@ -438,6 +439,7 @@ export class RaidEngine {
   private hemi: THREE.HemisphereLight;
   private sun: THREE.DirectionalLight;
   private fill: THREE.DirectionalLight;
+  private pipeline: RenderPipeline;
   private camera: THREE.PerspectiveCamera;
   private rig: ThirdPersonCamera;
   private world: World;
@@ -457,10 +459,9 @@ export class RaidEngine {
   private camReady = false;
   private facilityAgents: { x: number; z: number }[] = [];
   private labFog = new THREE.Color();
-  private aboveFog = new THREE.Color(0x1a0c22);
-  private aboveDensity = 0.007;
+  private aboveFog = new THREE.Color(0x141226);
+  private aboveDensity = 0.0034;
   private waterTint = new THREE.Color();
-  private skyColor = new THREE.Color(0x8ec8ea);
   private swim: SwimState = emptySwim();
   private swimRise = 0;
   private fireHeld = false;
@@ -646,23 +647,28 @@ export class RaidEngine {
       alpha: false,
       powerPreference: 'high-performance',
     });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    // Bloom and soft shadows run at this ratio; above it the cost outweighs the sharpness.
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
-    this.renderer.toneMapping = THREE.NoToneMapping;
-    this.renderer.setClearColor(0x0a0614, 1);
+    this.renderer.setClearColor(0x141226, 1);
 
     this.scene = new THREE.Scene();
-    this.scene.fog = new THREE.FogExp2(0x1a0c22, 0.007);
+    this.scene.fog = new THREE.FogExp2(0x141226, 0.0034);
 
-    this.camera = new THREE.PerspectiveCamera(58, 1, 0.08, 480);
-    this.hemi = new THREE.HemisphereLight(0xffd4b8, 0x1a1430, 1.35);
+    this.camera = new THREE.PerspectiveCamera(58, 1, 0.08, 1100);
+    this.hemi = new THREE.HemisphereLight(0x4a4f86, 0x4a2c1e, 1.45);
     this.scene.add(this.hemi);
-    this.sun = new THREE.DirectionalLight(0xffe6c8, 1.55);
-    this.sun.position.set(-18, 42, 12);
+    this.sun = new THREE.DirectionalLight(0xc4d2ff, 1.35);
+    this.sun.position.set(-26, 48, 18);
     this.scene.add(this.sun);
-    this.fill = new THREE.DirectionalLight(0x66ffaa, 0.35);
-    this.fill.position.set(16, 10, -20);
+    this.fill = new THREE.DirectionalLight(0xff5f9e, 0.45);
+    this.fill.position.set(30, 12, -24);
     this.scene.add(this.fill);
+    this.pipeline = new RenderPipeline(this.renderer, this.scene, this.camera, {
+      sun: this.sun,
+      hemi: this.hemi,
+      fill: this.fill,
+    });
 
     this.world = buildWorld();
     this.worlds.set('block', this.world);
@@ -1495,6 +1501,7 @@ export class RaidEngine {
     const w = Math.max(1, this.canvas.clientWidth);
     const h = Math.max(1, this.canvas.clientHeight);
     this.renderer.setSize(w, h, false);
+    this.pipeline.setSize(w, h);
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
     this.particles.setViewportHeight(h);
@@ -1512,6 +1519,7 @@ export class RaidEngine {
     this.unloadBeacon();
     for (const world of this.worlds.values()) world.dispose();
     this.particles.dispose();
+    this.pipeline.dispose();
     this.renderer.dispose();
     this.scene.clear();
   }
@@ -1671,7 +1679,8 @@ export class RaidEngine {
     else if (this.player) this.updateCamera(dt);
     this.world.animate(time);
     this.particles.update(dt);
-    this.renderer.render(this.scene, this.camera);
+    this.pipeline.follow(this.player ? this.player.humanoid.group.position : this.pos);
+    this.pipeline.render();
     this.emitHud();
   }
 
@@ -1871,46 +1880,9 @@ export class RaidEngine {
         this.worlds.delete('island');
       }
     }
-    const fog = this.scene.fog as THREE.FogExp2 | null;
-    if (fog) {
-      if (key === 'pad') {
-        fog.color.setHex(0x07141c);
-        fog.density = 0.011;
-      } else if (key === 'island') {
-        fog.color.setHex(0xb7d4ea);
-        fog.density = 0.00085;
-      } else {
-        fog.color.setHex(0x1a0c22);
-        fog.density = 0.007;
-      }
-      this.aboveFog.copy(fog.color);
-      this.aboveDensity = fog.density;
-    }
-    this.camera.near = key === 'island' ? 0.3 : 0.08;
-    this.camera.far = key === 'island' ? 1800 : 480;
-    this.camera.updateProjectionMatrix();
-    if (key === 'island') {
-      this.skyColor.setHex(0x8ec8ea);
-      this.scene.background = this.skyColor;
-      this.renderer.setClearColor(0x8ec8ea, 1);
-      this.sun.color.setHex(0xffe0b0);
-      this.sun.intensity = 1.85;
-      this.hemi.color.setHex(0xfff1d6);
-      this.hemi.groundColor.setHex(0x3d6a48);
-      this.hemi.intensity = 1.55;
-      this.fill.color.setHex(0x88c4ff);
-      this.fill.intensity = 0.12;
-    } else {
-      this.scene.background = null;
-      this.renderer.setClearColor(0x0a0614, 1);
-      this.sun.color.setHex(0xffe6c8);
-      this.sun.intensity = 1.55;
-      this.hemi.color.setHex(0xffd4b8);
-      this.hemi.groundColor.setHex(0x1a1430);
-      this.hemi.intensity = 1.35;
-      this.fill.color.setHex(0x66ffaa);
-      this.fill.intensity = 0.35;
-    }
+    const atmosphere = this.pipeline.apply(key);
+    this.aboveFog.setHex(atmosphere.fog.color);
+    this.aboveDensity = atmosphere.fog.density;
     this.unloadBeacon();
     const point = def.ryderBeaconPoint;
     const position = new THREE.Vector3(point.x, this.world.heightAt(point.x, point.z), point.z);
@@ -5381,8 +5353,8 @@ export class RaidEngine {
     const fog = this.scene.fog as THREE.FogExp2 | null;
     if (!fog || this.arena.id !== 'training-pad') return;
     const inLab = this.pos.x < -41 && this.world.heightAt(this.pos.x, this.pos.z) > 3;
-    this.labFog.setHex(inLab ? 0xe7eef2 : 0x07141c);
-    const density = inLab ? 0.0045 : 0.011;
+    this.labFog.setHex(inLab ? 0xe7eef2 : this.aboveFog.getHex());
+    const density = inLab ? 0.003 : this.aboveDensity;
     const blend = 1 - Math.exp(-dt * 2.4);
     fog.color.lerp(this.labFog, blend);
     fog.density += (density - fog.density) * blend;
