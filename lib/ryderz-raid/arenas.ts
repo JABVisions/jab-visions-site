@@ -55,7 +55,7 @@ export function arenaSpec(id: ArenaId): ArenaDefinition | undefined {
   return registry.get(id);
 }
 
-export const DEFAULT_ARENA: ArenaId = 'block';
+export const DEFAULT_ARENA: ArenaId = 'training-pad';
 
 registerArena({
   id: DEFAULT_ARENA,
