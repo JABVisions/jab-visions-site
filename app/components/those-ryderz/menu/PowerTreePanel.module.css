@@ -51,14 +51,18 @@
 .body {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 240px;
+  grid-template-rows: minmax(0, 1fr);
   gap: 16px;
+  flex: 1 1 auto;
   min-height: 0;
 }
 
+/* Columns fit the panel: four across on a wide pause menu, two when the centre column is narrow. */
 .branches {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 10px;
+  align-content: start;
   min-height: 0;
   overflow: auto;
   padding-right: 4px;
@@ -214,6 +218,7 @@
   flex-direction: column;
   gap: 8px;
   min-height: 0;
+  overflow: auto;
   padding: 14px;
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 14px;
@@ -325,17 +330,27 @@
   margin-top: auto;
 }
 
+/* Stacked: the whole body scrolls as one column so neither pane can spill into the other. */
 @media (max-width: 1100px) {
   .body {
-    grid-template-columns: 1fr;
+    display: flex;
+    flex-direction: column;
+    overflow: auto;
+    padding-right: 4px;
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in srgb, var(--aura) 50%, transparent) transparent;
   }
 
   .branches {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    flex: none;
+    overflow: visible;
+    padding-right: 0;
   }
 
   .detail {
     order: -1;
+    flex: none;
+    overflow: visible;
   }
 
   .back {
@@ -352,9 +367,5 @@
     text-align: left;
     min-width: 0;
     width: 100%;
-  }
-
-  .branches {
-    grid-template-columns: 1fr;
   }
 }

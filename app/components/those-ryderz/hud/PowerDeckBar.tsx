@@ -87,7 +87,8 @@ const PowerDeckBar = forwardRef<
       node.dataset.link = state.linked ? 'true' : 'false';
       for (let i = 0; i < slotRefs.current.length; i += 1) {
         const slot = slotRefs.current[i];
-        if (!slot) continue;
+        // Locked slots keep their static "N SP" caption; the loop only drives open ones.
+        if (!slot || slot.dataset.locked === 'true') continue;
         const move = state.moves[i];
         const live = Boolean(move);
         const ready = live && !state.burnout && !state.powersOut && move.ready;
@@ -161,6 +162,7 @@ const PowerDeckBar = forwardRef<
             className={`${styles.slot} ${slot.open ? '' : styles.slotLocked} ${slot.id ? '' : styles.slotEmpty}`}
             data-ready="false"
             data-on="false"
+            data-locked={slot.open ? 'false' : 'true'}
             aria-disabled={!slot.open || !slot.id}
             onClick={() => (slot.open && slot.id ? onPress?.(i) : onOpenTree())}
             title={slot.open ? (slot.id ? `${slot.name} · ${slot.key}` : `Empty slot · bind a power in the deck`) : `Locked · open on the Power Tree${slot.unlockCost ? ` for ${slot.unlockCost} SP` : ''}`}
