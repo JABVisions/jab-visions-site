@@ -1,0 +1,360 @@
+.tree {
+  min-height: 0;
+}
+
+.head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 18px;
+}
+
+.wallet {
+  display: grid;
+  gap: 4px;
+  min-width: 200px;
+  padding: 10px 14px;
+  border: 1px solid color-mix(in srgb, var(--aura) 45%, transparent);
+  border-radius: 14px;
+  background: rgba(8, 6, 16, 0.6);
+  text-align: right;
+}
+
+.wallet strong {
+  color: var(--aura);
+  font: 800 1.3rem/1 monospace;
+  letter-spacing: 0.02em;
+}
+
+.wallet span {
+  color: rgba(229, 246, 234, 0.6);
+  font: 700 0.58rem/1.3 monospace;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.wallet i {
+  display: block;
+  height: 4px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+
+.wallet i b {
+  display: block;
+  height: 100%;
+  background: var(--aura);
+  transform-origin: left center;
+}
+
+.body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 240px;
+  gap: 16px;
+  min-height: 0;
+}
+
+.branches {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  min-height: 0;
+  overflow: auto;
+  padding-right: 4px;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--aura) 50%, transparent) transparent;
+}
+
+.branch {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 14px;
+  background: rgba(8, 6, 16, 0.45);
+  transition: border-color 0.18s ease;
+}
+
+.branchActive {
+  border-color: color-mix(in srgb, var(--aura) 55%, transparent);
+}
+
+.branch h3 {
+  margin: 0;
+  display: grid;
+  gap: 2px;
+  font: 800 0.74rem/1.2 monospace;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #fff;
+}
+
+.branch h3 small {
+  color: rgba(229, 246, 234, 0.5);
+  font-size: 0.56rem;
+  letter-spacing: 0.08em;
+  font-weight: 700;
+}
+
+.branch ol {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* A thin connector between tiers reads as a path without a full graph. */
+.branch li + li {
+  position: relative;
+  padding-top: 6px;
+}
+
+.branch li + li::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 22px;
+  width: 1px;
+  height: 6px;
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.node {
+  appearance: none;
+  position: relative;
+  display: grid;
+  grid-template-columns: 30px 1fr;
+  gap: 1px 8px;
+  align-items: center;
+  width: 100%;
+  padding: 7px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  background: rgba(8, 6, 16, 0.55);
+  color: #f5fff8;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color 0.18s ease,
+    background 0.18s ease,
+    transform 0.18s ease;
+}
+
+.node:hover,
+.nodeFocused {
+  border-color: rgba(255, 255, 255, 0.35);
+  background: rgba(14, 10, 26, 0.75);
+}
+
+.nodeFocused {
+  border-color: var(--aura);
+  transform: translateY(-1px);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--aura) 40%, transparent);
+}
+
+.node[data-state='owned'] {
+  background: linear-gradient(90deg, color-mix(in srgb, var(--aura) 20%, transparent), rgba(8, 6, 16, 0.55));
+}
+
+.node[data-state='owned'] .tier {
+  background: var(--aura);
+  color: #07040f;
+}
+
+.node[data-state='open'] .tier {
+  border-color: var(--aura);
+  color: var(--aura);
+}
+
+.node[data-state='locked'] {
+  opacity: 0.55;
+}
+
+.node[data-state='poor'] em {
+  color: #ffb3a7;
+}
+
+.tier {
+  grid-row: span 2;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 9px;
+  font: 800 0.62rem/1 monospace;
+  letter-spacing: 0.06em;
+}
+
+.node strong {
+  overflow: hidden;
+  font-size: 0.7rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.node em {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: rgba(229, 246, 234, 0.6);
+  font: 700 0.54rem/1.3 monospace;
+  font-style: normal;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.detail {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  padding: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 14px;
+  background: rgba(8, 6, 16, 0.6);
+}
+
+.detail h3 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.blurb {
+  margin: 0;
+  color: rgba(229, 246, 234, 0.7);
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+
+.effect {
+  margin: 0;
+  color: var(--aura);
+  font: 700 0.6rem/1.4 monospace;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.requires {
+  margin: 0;
+  color: rgba(229, 246, 234, 0.55);
+  font: 700 0.58rem/1.5 monospace;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.requires span[data-met='true'] {
+  color: #9effc4;
+}
+
+.requires span[data-met='false'] {
+  color: #ffb3a7;
+}
+
+.actions {
+  display: grid;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.buy:not(:disabled) {
+  border-color: var(--aura);
+  color: #fff;
+  background: color-mix(in srgb, var(--aura) 22%, transparent);
+}
+
+.owned {
+  color: #9effc4;
+  font: 800 0.64rem/1.3 monospace;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.picker {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.picker > span {
+  color: rgba(229, 246, 234, 0.6);
+  font: 700 0.58rem/1.3 monospace;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.pick {
+  appearance: none;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.04);
+  color: #fff;
+  font: 800 0.9rem/1 monospace;
+  cursor: pointer;
+}
+
+.pickFocused,
+.pick:hover {
+  border-color: var(--aura);
+  background: color-mix(in srgb, var(--aura) 22%, transparent);
+}
+
+.flash {
+  margin: 0;
+  color: #fff;
+  font: 700 0.6rem/1.4 monospace;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.back {
+  margin-top: auto;
+}
+
+@media (max-width: 1100px) {
+  .body {
+    grid-template-columns: 1fr;
+  }
+
+  .branches {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .detail {
+    order: -1;
+  }
+
+  .back {
+    margin-top: 0;
+  }
+}
+
+@media (max-width: 640px) {
+  .head {
+    flex-direction: column;
+  }
+
+  .wallet {
+    text-align: left;
+    min-width: 0;
+    width: 100%;
+  }
+
+  .branches {
+    grid-template-columns: 1fr;
+  }
+}

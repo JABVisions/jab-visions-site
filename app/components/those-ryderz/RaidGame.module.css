@@ -147,8 +147,7 @@
   padding: 16px 18px;
 }
 
-.chip,
-.ability {
+.chip {
   pointer-events: none;
   border: 1px solid rgba(166, 255, 0, 0.28);
   background: rgba(3, 10, 8, 0.72);
@@ -254,20 +253,6 @@
   box-shadow: none;
 }
 
-.ability {
-  min-width: 118px;
-  padding: 10px 12px;
-  border-radius: 14px;
-  text-align: left;
-}
-
-.moveRow {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 8px;
-}
-
 .moveList {
   display: grid;
   gap: 4px;
@@ -287,36 +272,6 @@
   color: color-mix(in srgb, var(--aura) 30%, #fff);
   font: 800 0.62rem/1 monospace;
   letter-spacing: 0.08em;
-}
-
-.ability b {
-  display: block;
-  color: #f7fff9;
-  font-size: 0.92rem;
-}
-
-.ability span {
-  color: #9effc4;
-  font: 700 0.58rem/1.4 monospace;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-}
-
-.ability.ready {
-  border-color: var(--aura, #31ff96);
-  box-shadow: 0 0 22px color-mix(in srgb, var(--aura, #31ff96) 40%, transparent);
-}
-
-.moveRow[data-link='true'] .ability.ready {
-  animation: linkPulse 0.9s ease-in-out infinite;
-  border-color: #ffd0d6;
-  box-shadow: 0 0 18px color-mix(in srgb, var(--aura, #ff4d6a) 65%, white);
-}
-
-@keyframes linkPulse {
-  50% {
-    transform: translateY(-1px);
-  }
 }
 
 .crosshair {
@@ -575,15 +530,23 @@
   }
 }
 
+/* Control legend. Sits bottom-right so the Power Deck owns the bottom centre. */
 .hint {
   position: absolute;
-  left: 150px;
+  right: 18px;
   bottom: 18px;
-  max-width: 360px;
+  max-width: min(300px, calc(50vw - 300px));
+  text-align: right;
   color: rgba(229, 246, 234, 0.58);
-  font: 700 0.62rem/1.55 monospace;
+  font: 700 0.58rem/1.5 monospace;
   letter-spacing: 0.08em;
   text-transform: uppercase;
+}
+
+@media (max-width: 1100px) {
+  .hint {
+    display: none;
+  }
 }
 
 .modal,
@@ -1012,23 +975,45 @@
   transform: translate(-50%, -50%);
 }
 
+/* Thumb cluster: three columns beside the look pad. Powers fire from the deck bar. */
 .touchBtns {
   position: absolute;
-  right: 150px;
-  bottom: 28px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+  right: 144px;
+  bottom: 22px;
+  display: grid;
+  grid-template-columns: repeat(3, 52px);
+  gap: 6px;
 }
 
 .touchBtns button {
-  width: 64px;
-  height: 64px;
+  width: 52px;
+  height: 52px;
   border: 1px solid rgba(49, 255, 150, 0.4);
   border-radius: 50%;
   background: rgba(4, 14, 10, 0.75);
-  font: 800 0.62rem/1 monospace;
-  letter-spacing: 0.08em;
+  font: 800 0.54rem/1 monospace;
+  letter-spacing: 0.06em;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.touchBtns button:active {
+  background: rgba(49, 255, 150, 0.3);
+}
+
+.touchHeavy {
+  border-color: rgba(255, 210, 122, 0.55) !important;
+}
+
+.touchGuard {
+  border-color: rgba(160, 210, 255, 0.6) !important;
+}
+
+.touchUse {
+  grid-column: 1 / -1;
+  width: 100% !important;
+  border-radius: 999px !important;
 }
 
 .hiddenTouch {

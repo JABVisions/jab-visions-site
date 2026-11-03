@@ -1,15 +1,16 @@
 'use client';
 
 import { Lock } from 'lucide-react';
-import { useState } from 'react';
+import { useCallback, useState, useSyncExternalStore } from 'react';
 import { RYDERZ, type RyderId } from '@/lib/ryderz-raid/config';
 import { INPUT_SLOTS, type InputSlot, type RyderAbility, type RyderManager } from '@/lib/ryderz-raid/ryder-manager';
 import { useMenuKeys, wrap } from './useMenuKeys';
 import styles from './PauseMenu.module.css';
 
 /**
- * Assign unlocked powers to Q / E / R for one Ryder. Up/Down picks a slot,
- * Right moves into the power list, Enter equips, Esc steps back out.
+ * Assign unlocked powers to Q / E / R and any slot the Power Tree has opened
+ * for one Ryder. Left/Right picks a slot, Down moves into the power list,
+ * Enter equips, Esc steps back out. Closed slots show their lock.
  */
 export default function PowerDeck({
   manager,
@@ -22,18 +23,30 @@ export default function PowerDeck({
   active: boolean;
   onBack: () => void;
 }) {
+  const subscribe = useCallback((listener: () => void) => manager.subscribe(listener), [manager]);
+  const getSnapshot = useCallback(() => manager.getState(), [manager]);
+  useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+
   const [slot, setSlot] = useState<InputSlot>('Q');
   const [column, setColumn] = useState<'slots' | 'pool'>('slots');
   const [poolIndex, setPoolIndex] = useState(0);
 
   const deck = manager.loadout(ryderId);
   const pool = manager.abilityPool(ryderId);
+  const open = manager.slotsFor(ryderId);
+  const tree = manager.tree(ryderId);
   const spec = RYDERZ[ryderId];
   const poolColumns = 3;
 
+  const slotNode = (key: InputSlot) => tree.nodes.find((node) => node.effect.kind === 'slot' && node.effect.slot === key);
+
   const equip = (ability: RyderAbility) => {
-    if (!ability.unlocked) return;
+    if (!ability.unlocked || !open.includes(slot)) return;
     manager.equip(ryderId, slot, ability.id);
+  };
+
+  const clear = (key: InputSlot) => {
+    if (key === '4' || key === '5') manager.unequip(ryderId, key);
   };
 
   useMenuKeys((key) => {
@@ -47,8 +60,8 @@ export default function PowerDeck({
     }
     if (column === 'slots') {
       if (key === 'left' || key === 'right') {
-        const i = INPUT_SLOTS.indexOf(slot);
-        setSlot(INPUT_SLOTS[wrap(i + (key === 'right' ? 1 : -1), INPUT_SLOTS.length)]);
+        const i = open.indexOf(slot);
+        setSlot(open[wrap(i + (key === 'right' ? 1 : -1), open.length)]);
         return true;
       }
       if (key === 'down' || key === 'confirm') {
@@ -84,33 +97,39 @@ export default function PowerDeck({
         <p className={styles.eyebrow}>Power Deck · {spec.name}</p>
         <h2>Loadout</h2>
         <p>
-          Bind powers to Q, E and R. {spec.name.split(' ')[0]} keeps this deck when you switch Ryderz and picks it
-          back up when you return.
+          Bind powers to Q, E and R{open.length > 3 ? `, plus slot${open.length > 4 ? 's' : ''} ${open.slice(3).join(' and ')}` : ''}.{' '}
+          {spec.name.split(' ')[0]} keeps this deck when you switch Ryderz and picks it back up when you return. Extra slots open on the Power Tree.
         </p>
       </header>
 
       <div className={styles.deck}>
-        <div className={styles.slots}>
+        <div className={styles.slots} style={{ gridTemplateColumns: `repeat(${INPUT_SLOTS.length}, minmax(0, 1fr))` }}>
           {INPUT_SLOTS.map((key) => {
             const ability = pool.find((p) => p.id === deck[key]);
+            const isOpen = open.includes(key);
+            const node = isOpen ? undefined : slotNode(key);
             return (
               <button
                 key={key}
                 type="button"
-                className={`${styles.slot} ${slot === key ? styles.slotActive : ''}`}
+                className={`${styles.slot} ${slot === key ? styles.slotActive : ''} ${isOpen ? '' : styles.powerLocked}`}
+                disabled={!isOpen}
                 onMouseEnter={() => {
+                  if (!isOpen) return;
                   setSlot(key);
                   setColumn('slots');
                 }}
                 onClick={() => {
+                  if (!isOpen) return;
                   setSlot(key);
                   setColumn('pool');
                 }}
                 aria-pressed={slot === key}
+                title={isOpen ? undefined : `Open on the Power Tree${node ? ` · ${node.name} · ${node.cost} SP` : ''}`}
               >
-                <span className={styles.slotKey}>{key}</span>
-                <strong>{ability?.name ?? 'Empty'}</strong>
-                <em>{ability?.description}</em>
+                <span className={styles.slotKey}>{isOpen ? key : <Lock size={16} />}</span>
+                <strong>{isOpen ? (ability?.name ?? 'Empty') : 'Locked'}</strong>
+                <em>{isOpen ? ability?.description : node ? `${node.name} · ${node.cost} SP on the tree` : 'Open on the Power Tree'}</em>
               </button>
             );
           })}
@@ -122,6 +141,11 @@ export default function PowerDeck({
             <p className={styles.eyebrow} style={{ color: 'rgba(229,246,234,0.45)' }}>
               {pool.filter((p) => p.unlocked).length} / {pool.length} unlocked
             </p>
+            {(slot === '4' || slot === '5') && deck[slot] ? (
+              <button type="button" className={styles.ghostBtn} onClick={() => clear(slot)}>
+                Clear slot {slot}
+              </button>
+            ) : null}
             <button type="button" className={styles.ghostBtn} onClick={() => manager.resetLoadout(ryderId)}>
               Reset deck
             </button>
@@ -152,9 +176,10 @@ export default function PowerDeck({
                 <span>
                   {ability.drain > 0 ? `${ability.drain}/s drain` : `${ability.auraCost} aura`}
                   {ability.owner !== ryderId && <>· {RYDERZ[ability.owner].name.split(' ')[0]}</>}
+                  {ability.derived && <>· Tree</>}
                 </span>
                 {ability.inputSlot && <span className={styles.tag}>{ability.inputSlot}</span>}
-                {!ability.unlocked && <span className={`${styles.tag} ${styles.tagMuted}`}>Locked</span>}
+                {!ability.unlocked && <span className={`${styles.tag} ${styles.tagMuted}`}>{ability.derived ? 'Tree' : 'Locked'}</span>}
               </button>
             ))}
           </div>
