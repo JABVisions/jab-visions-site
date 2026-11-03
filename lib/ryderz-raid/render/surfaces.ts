@@ -160,16 +160,16 @@ export function makeSurface(spec: SurfaceSpec): SurfaceMaps {
 /** Standard material wired to a painted surface. Repeat applies to every map. */
 export function surfaceMaterial(
   maps: SurfaceMaps,
-  params: THREE.MeshStandardMaterialParameters & { normalScale?: number } = {},
+  params: THREE.MeshStandardMaterialParameters & { normalAmount?: number } = {},
 ) {
-  const { normalScale, ...rest } = params;
+  const { normalAmount, ...rest } = params;
   const material = new THREE.MeshStandardMaterial({
     map: maps.map,
     normalMap: maps.normalMap,
     roughnessMap: maps.roughnessMap,
     ...rest,
   });
-  if (maps.normalMap) material.normalScale.setScalar(normalScale ?? 1);
+  if (maps.normalMap) material.normalScale.setScalar(normalAmount ?? 1);
   return material;
 }
 
