@@ -129,10 +129,10 @@ export default async function BoardResetPasswordPage({
                   type="text"
                   inputMode="numeric"
                   autoComplete="one-time-code"
-                  placeholder="6-digit code"
+                  placeholder="Enter the code from your email"
                   minLength={6}
-                  maxLength={6}
-                  pattern="[0-9]{6}"
+                  maxLength={10}
+                  pattern="[0-9]{6,10}"
                   required
                 />
               </div>
