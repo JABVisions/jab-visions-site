@@ -1,17 +1,25 @@
 export {
+  AERIAL,
   BASE_ACTIONS,
+  FINISHER,
   GRAB,
+  HEAVY,
   KICK,
+  LAUNCHER,
   MELEE,
   PUNCH,
+  STRIKE_INPUTS,
   THROW,
   comboDamageScale,
   comboStunScale,
+  heavyVariant,
+  isKnockedDown,
   stanceOf,
   type PhysicalHit,
   type BodyStance,
   type CombatAction,
   type CombatActionType,
+  type StrikeInput,
   type StrikeKind,
 } from './actions';
 export {
@@ -21,6 +29,7 @@ export {
   SHARED_COMBOS,
   comboLabel,
   comboTier,
+  isFinisherEffect,
   matchRecipe,
   meleeWantsGrab,
   reactionForEffect,
@@ -30,7 +39,19 @@ export {
   type ComboTier,
 } from './combo';
 export { hostStrikeDamage, nextHostStrike } from './hostStriker';
-export { commandForKey, isMapKey, risingPadCommands, PAD_BUTTON, P1_BINDINGS, P2_BINDINGS, type CombatCommand } from './input';
+export {
+  ABILITY_COMMANDS,
+  ABILITY_KEYS,
+  abilitySlotOf,
+  commandForKey,
+  isMapKey,
+  risingPadCommands,
+  withSprintModifier,
+  PAD_BUTTON,
+  P1_BINDINGS,
+  P2_BINDINGS,
+  type CombatCommand,
+} from './input';
 export { CombatMemory, type CombatRates, type MemoryKind } from './memory';
 export { openingPlan } from './planner';
 export {

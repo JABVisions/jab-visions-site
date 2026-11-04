@@ -53,11 +53,107 @@ export type AbilityId =
   | 'wavePool'
   | 'deathStrike'
   | 'mindControl'
-  | 'riot';
+  | 'riot'
+  | DerivedAbilityId;
 
-export type MoveKey = 'Q' | 'E' | 'R';
+/**
+ * Powers earned on a Ryder's Power Tree. Each Ryder has one of every kind:
+ * a breaker (strike), a volley (projectile), a nova (radial), a snare
+ * (control), a surge (boost) and an ultimate blitz (xtreme). Their behaviour
+ * is generic and data-driven; see `progression/derived-powers.ts`.
+ */
+export type DerivedAbilityId =
+  // Leo
+  | 'rushBreaker'
+  | 'prideBolts'
+  | 'sonicBoom'
+  | 'lockstep'
+  | 'velocitySurge'
+  | 'goldenFury'
+  // Rubi
+  | 'bladeBreaker'
+  | 'bladeVolley'
+  | 'crimsonBurst'
+  | 'envySnare'
+  | 'stormTempo'
+  | 'crimsonTempest'
+  // Aaron
+  | 'shadowBreaker'
+  | 'shadowShards'
+  | 'umbralPulse'
+  | 'covetousGrip'
+  | 'greedSurge'
+  | 'umbralOnslaught'
+  // Zoe
+  | 'plasmaBreaker'
+  | 'plasmaSalvo'
+  | 'ionNova'
+  | 'staticCage'
+  | 'overcharge'
+  | 'singularity'
+  // Keven
+  | 'dartBreaker'
+  | 'dartFan'
+  | 'needleBurst'
+  | 'snareTrap'
+  | 'acrobatFlow'
+  | 'thousandNeedles'
+  // Lilly
+  | 'famineBreaker'
+  | 'famineSpines'
+  | 'hungerWave'
+  | 'starvingRoots'
+  | 'hungerSurge'
+  | 'harvestOfRuin'
+  // Kid Paranormal
+  | 'phantomBreaker'
+  | 'ectoBolts'
+  | 'spectralPulse'
+  | 'poltergeistHold'
+  | 'ectoSurge'
+  | 'dimensionalRift'
+  // Agent Nyx
+  | 'temporalBreaker'
+  | 'chronoDarts'
+  | 'timeBurst'
+  | 'stasisField'
+  | 'timeDilation'
+  | 'zeroPoint'
+  // Marilyn Monroe
+  | 'spotlightBreaker'
+  | 'starShower'
+  | 'flashbulb'
+  | 'spellbound'
+  | 'encore'
+  | 'finalCurtain'
+  // Martin Luther King Jr.
+  | 'cadenceBreaker'
+  | 'clarionCall'
+  | 'rallyCry'
+  | 'heldGround'
+  | 'resolve'
+  | 'mountaintop'
+  // Marywantis
+  | 'tideBreaker'
+  | 'tideSpray'
+  | 'tidalBurst'
+  | 'riptideHold'
+  | 'riptideFlow'
+  | 'maelstrom'
+  // TJ
+  | 'riotBreaker'
+  | 'sprayAndPray'
+  | 'flashbang'
+  | 'lockdown'
+  | 'adrenaline'
+  | 'lastRound';
 
-export const MOVE_KEYS: MoveKey[] = ['Q', 'E', 'R'];
+/** Powers sit on the number row. 1 / 2 / 3 are the canonical three; 4, 5 and 6 open from the Power Tree. */
+export type MoveKey = '1' | '2' | '3' | '4' | '5' | '6';
+
+export const MOVE_KEYS: MoveKey[] = ['1', '2', '3', '4', '5', '6'];
+export const MAX_POWER_SLOTS = 6;
+export const BASE_POWER_SLOTS = 3;
 
 /** Keys (lower-case `KeyboardEvent.key`) that use the interactable the player is standing at. */
 export const INTERACT_KEYS = ['enter', 'x'];
@@ -254,7 +350,8 @@ export const ARENA_TREE = {
   height: 5.2,
 };
 
-export const MAX_ALIVE_HOSTS = 26;
+/** Hard ceiling on simulated hostiles. The crowd budget in `rounds/director.ts` tunes below this. */
+export const MAX_ALIVE_HOSTS = 48;
 /**
  * Rigged glTF binaries for the host mob. Each spawn picks one at random; when
  * the list is empty (or nothing loads) hosts fall back to block figures.
@@ -303,7 +400,7 @@ export const RYDERZ: Record<RyderId, RyderSpec> = {
       {
         id: 'bladeFan',
         name: 'Blade Storm',
-        key: 'Q',
+        key: '1',
         description:
           'Close on a host and carve them with a rapid four-hit red-energy sword combo. The last cut knocks them back.',
         auraCost: 9,
@@ -312,7 +409,7 @@ export const RYDERZ: Record<RyderId, RyderSpec> = {
       {
         id: 'duplicate',
         name: 'Duplication',
-        key: 'E',
+        key: '2',
         description:
           'Send echo-selves hunting on their own. They sprint, slash, and dissolve; waves keep coming while aura drains. Press again to dismiss them.',
         auraCost: 0,
@@ -321,7 +418,7 @@ export const RYDERZ: Record<RyderId, RyderSpec> = {
       {
         id: 'envyPulse',
         name: 'Double Trouble',
-        key: 'R',
+        key: '3',
         description:
           'A clone appears behind the nearest host as you lunge from the front. Both blades cut at once.',
         auraCost: 14,
@@ -360,7 +457,7 @@ export const RYDERZ: Record<RyderId, RyderSpec> = {
       {
         id: 'shockwave',
         name: 'Kinetic Crack',
-        key: 'Q',
+        key: '1',
         description:
           'Launch skyward, hang, then dive fist-first at the crosshair. The landing cracks the ground and launches everything nearby.',
         auraCost: 12,
@@ -369,7 +466,7 @@ export const RYDERZ: Record<RyderId, RyderSpec> = {
       {
         id: 'overdrive',
         name: 'Overdrive',
-        key: 'E',
+        key: '2',
         description:
           'Become a yellow streak and zigzag through every host in reach, striking each one in passing. The marks detonate when she stops.',
         auraCost: 18,
@@ -378,7 +475,7 @@ export const RYDERZ: Record<RyderId, RyderSpec> = {
       {
         id: 'prideDash',
         name: 'Pride Rush',
-        key: 'R',
+        key: '3',
         description:
           'Accelerate shoulder-first through the line, steering with the camera. Everything hit is thrown aside; the last one eats a spiked knuckle.',
         auraCost: 10,
@@ -418,7 +515,7 @@ export const RYDERZ: Record<RyderId, RyderSpec> = {
       {
         id: 'cleave',
         name: 'Boomerang Cleave',
-        key: 'Q',
+        key: '1',
         description:
           'Charge the axe and hurl it. It spins out in a wide loop around the block, launching every host it crosses, and curves back to his hand.',
         auraCost: 14,
@@ -427,7 +524,7 @@ export const RYDERZ: Record<RyderId, RyderSpec> = {
       {
         id: 'blink',
         name: 'Shadow Strike',
-        key: 'E',
+        key: '2',
         description:
           'Dissolve into shadow, reappear behind the nearest host and take its head with one flat cut. With nobody near, a short step through the dark toward your aim.',
         auraCost: 12,
@@ -436,7 +533,7 @@ export const RYDERZ: Record<RyderId, RyderSpec> = {
       {
         id: 'greedSiphon',
         name: 'Greed Swing',
-        key: 'R',
+        key: '3',
         description:
           'Hold the axe out flat and spin while you steer. The spin builds speed, every host it meets is thrown, each hit feeds aura back. Press again to finish with one last cleave.',
         auraCost: 0,
@@ -478,7 +575,7 @@ export const RYDERZ: Record<RyderId, RyderSpec> = {
       {
         id: 'lift',
         name: 'Levitate',
-        key: 'Q',
+        key: '1',
         description:
           'Rise into a plasma force field and steer it through hosts. Contact burns and shoves them aside while aura drains.',
         auraCost: 0,
@@ -487,7 +584,7 @@ export const RYDERZ: Record<RyderId, RyderSpec> = {
       {
         id: 'forcefield',
         name: 'Force Field',
-        key: 'E',
+        key: '2',
         description:
           'Thrust a concentrated plasma disc along the crosshair. It expands as it flies, damaging and knocking back everything it hits.',
         auraCost: 11,
@@ -496,7 +593,7 @@ export const RYDERZ: Record<RyderId, RyderSpec> = {
       {
         id: 'heartbreak',
         name: 'Heartbreak Blitz',
-        key: 'R',
+        key: '3',
         description:
           'Launch into a force-field sphere, strafe over nearby hosts, and rain plasma bombs before a finishing burst.',
         auraCost: 16,
@@ -560,7 +657,7 @@ export const RYDERZ: Record<RyderId, RyderSpec> = {
       {
         id: 'decoy',
         name: 'Afterimage',
-        key: 'Q',
+        key: '1',
         description:
           'Phase into the floor, hunt the nearest host from below, erupt under its feet, drag it under and hurl it back out.',
         auraCost: 16,
@@ -569,7 +666,7 @@ export const RYDERZ: Record<RyderId, RyderSpec> = {
       {
         id: 'phase',
         name: 'Phantom Phase',
-        key: 'E',
+        key: '2',
         description:
           'Go translucent and intangible while aura holds. Hosts lose you, and every host you walk through takes phase damage. Press again to solidify.',
         auraCost: 0,
@@ -578,7 +675,7 @@ export const RYDERZ: Record<RyderId, RyderSpec> = {
       {
         id: 'dartStorm',
         name: 'Dart Storm',
-        key: 'R',
+        key: '3',
         description: 'Backflip and loose a barrage of homing pink darts from the top of the arc. Land clean.',
         auraCost: 14,
         drain: 0,
@@ -639,7 +736,7 @@ export const RYDERZ: Record<RyderId, RyderSpec> = {
       {
         id: 'soulDrain',
         name: 'Soul Drain',
-        key: 'Q',
+        key: '1',
         description:
           'Raise both hands and spin an emerald vortex around you. Hosts inside take damage over time, and a share of that damage returns as health. Press again to close it.',
         auraCost: 0,
@@ -648,7 +745,7 @@ export const RYDERZ: Record<RyderId, RyderSpec> = {
       {
         id: 'giantStep',
         name: 'Giant Step',
-        key: 'E',
+        key: '2',
         description:
           'Grow to four times your height. Heavy footsteps crush hosts under the foot and shock the ground around each stomp, then you shrink back.',
         auraCost: 22,
@@ -657,7 +754,7 @@ export const RYDERZ: Record<RyderId, RyderSpec> = {
       {
         id: 'animalAllegiance',
         name: 'Animal Allegiance',
-        key: 'R',
+        key: '3',
         description:
           'Open a summoning circle. A registered animal answers and hunts your enemies. With none registered, the rite still completes.',
         auraCost: 16,
@@ -696,7 +793,7 @@ export const RYDERZ: Record<RyderId, RyderSpec> = {
       {
         id: 'phantomGrasp',
         name: 'Phantom Grasp',
-        key: 'Q',
+        key: '1',
         description:
           'Raise both arms. Dimensional cracks open and two spectral hands seize the nearest opponent, lift them, and slam them into a radial shockwave.',
         auraCost: 16,
@@ -705,7 +802,7 @@ export const RYDERZ: Record<RyderId, RyderSpec> = {
       {
         id: 'paranormalProjection',
         name: 'Paranormal Projection',
-        key: 'E',
+        key: '2',
         description:
           'Send two attacking illusion copies and one decoy. Press again to swap places with the nearest copy. The swap stops at a wall.',
         auraCost: 14,
@@ -714,7 +811,7 @@ export const RYDERZ: Record<RyderId, RyderSpec> = {
       {
         id: 'dimensionalCollapse',
         name: 'Fourth-Dimensional Collapse',
-        key: 'R',
+        key: '3',
         description:
           'Levitate and fold a geometric construct around nearby opponents. They hang inside it until it bursts.',
         auraCost: 22,
@@ -753,7 +850,7 @@ export const RYDERZ: Record<RyderId, RyderSpec> = {
       {
         id: 'temporalZap',
         name: 'Temporal Zap',
-        key: 'Q',
+        key: '1',
         description:
           'Raise the wrist guard, charge a cyan beam, and lock up to five enemies in front of her. Each one is cased in stasis, then released. A dodge out of the cone during the charge escapes it.',
         auraCost: 16,
@@ -762,7 +859,7 @@ export const RYDERZ: Record<RyderId, RyderSpec> = {
       {
         id: 'rewindProtocol',
         name: 'Rewind Protocol',
-        key: 'E',
+        key: '2',
         description:
           'Slide back along her own recent path to a safe spot and restore a capped share of the health she lost on the way. Leaves a decoy where she was. Does not rewind anyone else.',
         auraCost: 12,
@@ -771,7 +868,7 @@ export const RYDERZ: Record<RyderId, RyderSpec> = {
       {
         id: 'zeroHour',
         name: 'Zero Hour',
-        key: 'R',
+        key: '3',
         description:
           'Open a violet suppression field. Enemies inside move and attack slower, then take one impact when the field closes. She keeps fighting with her hands. It does not stop the world.',
         auraCost: 18,
@@ -849,7 +946,7 @@ export const RYDERZ: Record<RyderId, RyderSpec> = {
       {
         id: 'showtime',
         name: 'Showtime',
-        key: 'Q',
+        key: '1',
         description:
           'Three translucent blue projections cartwheel toward different enemies. Each one hits once for 18, stops at a wall, and fades at 18 metres.',
         auraCost: 20,
@@ -858,7 +955,7 @@ export const RYDERZ: Record<RyderId, RyderSpec> = {
       {
         id: 'letsBeBad',
         name: "Let's Be Bad",
-        key: 'E',
+        key: '2',
         description:
           'She spins with one leg kicked forward and a sapphire ribbon tornado overhead until E is pressed again. Hitting an opponent does not stop it. She keeps steering at 85% of her run speed. The kick hits for 9 every 0.45 seconds, and the ribbon hits for 5 every 0.75 seconds inside 2.5 metres.',
         auraCost: 30,
@@ -867,7 +964,7 @@ export const RYDERZ: Record<RyderId, RyderSpec> = {
       {
         id: 'abracadabra',
         name: 'Abracadabra',
-        key: 'R',
+        key: '3',
         description:
           'A blue wave expands to 12 metres and hits each enemy once for 55. Allies recover 15% of their maximum health. Only an enemy this wave kills bursts into blue dust.',
         auraCost: 45,
@@ -944,7 +1041,7 @@ export const RYDERZ: Record<RyderId, RyderSpec> = {
       {
         id: 'dreamVision',
         name: 'Dream Vision',
-        key: 'Q',
+        key: '1',
         description:
           'A burgundy wave washes out to 12 metres and pacifies enemies for 4 seconds. It deals no damage. Heavies resist. Their attacks stop, then they wake up.',
         auraCost: 25,
@@ -953,7 +1050,7 @@ export const RYDERZ: Record<RyderId, RyderSpec> = {
       {
         id: 'proclaimPeace',
         name: 'Proclaim Peace',
-        key: 'E',
+        key: '2',
         description:
           'Hold a bright beam down the aim line for 3 seconds, out to 16 metres. Bodies inside freeze and take 8 damage every half second. Leaving the beam releases them. Walls cut it short.',
         auraCost: 30,
@@ -962,7 +1059,7 @@ export const RYDERZ: Record<RyderId, RyderSpec> = {
       {
         id: 'freeAtLast',
         name: 'Free at Last',
-        key: 'R',
+        key: '3',
         description:
           'For 12 seconds his strength and speed double, and incoming damage is halved. The glow and the trail leave with the blessing. It does not stack.',
         auraCost: 50,
@@ -1009,7 +1106,7 @@ export const RYDERZ: Record<RyderId, RyderSpec> = {
       {
         id: 'callMercy',
         name: 'Call Mercy',
-        key: 'Q',
+        key: '1',
         description:
           'Summons Mercy, a water guardian, for 12 seconds. She imprisons up to three enemies. The prisons drown them over time, then burst. Bosses are shoved, not caged. No cooldown. The tide cuts out at random.',
         auraCost: 22,
@@ -1018,7 +1115,7 @@ export const RYDERZ: Record<RyderId, RyderSpec> = {
       {
         id: 'finKick',
         name: 'Fin Kick',
-        key: 'E',
+        key: '2',
         description:
           'A steerable cartwheel of four watery hits, then a crescent kick that knocks back. Steer with movement. No cooldown. The tide cuts out at random.',
         auraCost: 14,
@@ -1027,7 +1124,7 @@ export const RYDERZ: Record<RyderId, RyderSpec> = {
       {
         id: 'wavePool',
         name: 'Wave Pool',
-        key: 'R',
+        key: '3',
         description:
           'A whirlpool for 7 seconds. It pulls, lifts, and spins enemies caught inside, then bursts outward. Bosses stay on the ground. Nobody is thrown through walls or out of the arena. No cooldown. The tide cuts out at random.',
         auraCost: 34,
@@ -1098,7 +1195,7 @@ export const RYDERZ: Record<RyderId, RyderSpec> = {
       {
         id: 'deathStrike',
         name: 'Death Strike',
-        key: 'Q',
+        key: '1',
         description:
           'Both guns fire down the aim for 3 seconds. The barrage staggers everyone in the cone, then two finishing shots shove them. No cooldown. Powers cut out at random.',
         auraCost: 16,
@@ -1107,7 +1204,7 @@ export const RYDERZ: Record<RyderId, RyderSpec> = {
       {
         id: 'mindControl',
         name: 'Mind-Control Madness',
-        key: 'E',
+        key: '2',
         description:
           'Green rings grab up to 8 civilians within 15 metres. For 15 seconds they attack each other instead of TJ. A second cast refreshes the hold. Bosses resist. No cooldown. Powers cut out at random.',
         auraCost: 22,
@@ -1116,7 +1213,7 @@ export const RYDERZ: Record<RyderId, RyderSpec> = {
       {
         id: 'riot',
         name: 'RIOT!',
-        key: 'R',
+        key: '3',
         description:
           'TJ spins and rakes a 25 metre bullet storm, then up to 20 survivors frenzy on each other for 10 seconds. A death in the riot makes the others nearby swing faster. No cooldown. Powers cut out at random.',
         auraCost: 36,

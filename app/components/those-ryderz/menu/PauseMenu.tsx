@@ -7,10 +7,12 @@ import { RYDERZ, UPGRADE_ORDER, UPGRADES, fighterKind, fighterMark, upgradeCost,
 import type { RaidEngine } from '@/lib/ryderz-raid/engine';
 import { GameMode } from '@/lib/ryderz-raid/game-mode';
 import { INPUT_SLOTS, type RyderManager } from '@/lib/ryderz-raid/ryder-manager';
+import PowerIcon from '../icons/PowerIcon';
 import ArenaSelector from './ArenaSelector';
 import GameModeSelector from './GameModeSelector';
 import PauseMenuNavigation, { type NavItem } from './PauseMenuNavigation';
-import PowerDeck from './PowerDeck';
+import DatabasePanel from './DatabasePanel';
+import PowerTreePanel from './PowerTreePanel';
 import RyderSelector from './RyderSelector';
 import RyderShowcase from './RyderShowcase';
 import SettingsMenu from './SettingsMenu';
@@ -18,13 +20,15 @@ import { RYDER_THEME } from './theme';
 import { useMenuKeys, wrap } from './useMenuKeys';
 import styles from './PauseMenu.module.css';
 
-type View = 'root' | 'deck' | 'upgrades' | 'ryder' | 'arena' | 'mode' | 'settings';
+export type PauseView = 'root' | 'database' | 'tree' | 'upgrades' | 'ryder' | 'arena' | 'mode' | 'settings';
+type View = PauseView;
 type RootAction = View | 'resume' | 'exit' | 'map';
 
 const ROOT_ITEMS: NavItem<RootAction>[] = [
   { id: 'resume', label: 'Resume', hint: 'Back onto the block' },
   { id: 'map', label: 'Map', hint: 'Open the terrain chart' },
-  { id: 'deck', label: 'Power Deck', hint: 'Bind Q · E · R' },
+  { id: 'tree', label: 'Power Tree', hint: 'Spend SP · bind powers to 1–6' },
+  { id: 'database', label: 'Database', hint: 'Character files & field notes' },
   { id: 'ryder', label: 'Switch Ryder', hint: 'Change who is in play' },
   { id: 'arena', label: 'Arena', hint: 'Block, P.A.D., or Island Paradise' },
   { id: 'mode', label: 'Game Mode', hint: 'Solo · PvP · Raid' },
@@ -52,6 +56,7 @@ export default function PauseMenu({
   onOpenMap,
   onRyderSwitched,
   onOpenCameraTuning,
+  initialView = 'root',
 }: {
   manager: RyderManager;
   engine: RaidEngine | null;
@@ -67,8 +72,10 @@ export default function PauseMenu({
   onOpenMap?: () => void;
   onRyderSwitched?: (id: RyderId) => void;
   onOpenCameraTuning?: () => void;
+  /** Screen to open on. The deck's Power Tree button pauses straight into the tree. */
+  initialView?: PauseView;
 }) {
-  const [view, setView] = useState<View>('root');
+  const [view, setView] = useState<View>(initialView);
   const [index, setIndex] = useState(0);
   const [poseKey, setPoseKey] = useState(0);
   const [preview, setPreview] = useState<RyderId | null>(null);
@@ -86,6 +93,8 @@ export default function PauseMenu({
   const spec = RYDERZ[shown];
   const theme = RYDER_THEME[shown];
   const deck = manager.loadoutSpecs(shown);
+  const deckSlots = manager.slotsFor(shown);
+  const signal = manager.signalAvailable();
 
   // The figure shifts pose whenever focus or screen changes.
   useEffect(() => {
@@ -131,7 +140,7 @@ export default function PauseMenu({
 
   return (
     <div
-      className={styles.menu}
+      className={`${styles.menu} ${view === 'tree' ? styles.menuBackdrop : ''}`}
       role="dialog"
       aria-modal="true"
       aria-label="Raid paused"
@@ -143,7 +152,7 @@ export default function PauseMenu({
           <h1 className={styles.title}>
             {RYDERZ[activeRyder].name}
             <small>
-              {RYDERZ[activeRyder].title} · {points} signal
+              {RYDERZ[activeRyder].title} · {points} raid pts · {signal.toLocaleString('en-US')} SP
             </small>
           </h1>
         </div>
@@ -161,8 +170,8 @@ export default function PauseMenu({
             <p className={styles.eyebrow}>Signal held</p>
             <h2>Hosts freeze until you step back on</h2>
             <p>
-              Pick a command on the left. Decks are saved per Ryder, so a loadout you build here is waiting the next
-              time that Ryder drops in.
+              Pick a command on the left. Powers bind to the number row on the Power Tree and are saved per Ryder; the
+              Database keeps a file on everyone the signal has touched.
             </p>
           </header>
           <div className={styles.summaryCard}>
@@ -178,16 +187,25 @@ export default function PauseMenu({
               <span>Deck</span>
               <strong>{deck.map((m) => m.name).join(' / ')}</strong>
             </div>
+            <div className={styles.summaryRow}>
+              <span>Signal Points</span>
+              <strong>
+                {signal.toLocaleString('en-US')} SP · LV {manager.level()}
+              </strong>
+            </div>
           </div>
         </section>
       )}
-      {view === 'deck' && <PowerDeck manager={manager} ryderId={activeRyder} active onBack={back} />}
+      {view === 'database' && (
+        <DatabasePanel manager={manager} activeRyder={activeRyder} active onPreview={previewRyder} onBack={back} />
+      )}
+      {view === 'tree' && <PowerTreePanel manager={manager} ryderId={activeRyder} active onBack={back} />}
       {view === 'upgrades' && (
         <section className={styles.panel} aria-label="Raid upgrades">
           <header className={styles.panelHead}>
             <p className={styles.eyebrow}>Match upgrades</p>
-            <h2>{points} signal</h2>
-            <p>These last for this fight. Permanent mastery is separate.</p>
+            <h2>{points} raid pts</h2>
+            <p>These last for this fight. Signal Points and the Power Tree are permanent and separate.</p>
           </header>
           <div className={styles.scroll}>
             {UPGRADE_ORDER.map((id) => {
@@ -246,7 +264,8 @@ export default function PauseMenu({
           <div className={styles.equipped}>
             {deck.map((move, i) => (
               <span key={move.id}>
-                <b>{INPUT_SLOTS[i]}</b>
+                <b>{deckSlots[i] ?? INPUT_SLOTS[i]}</b>
+                <PowerIcon id={move.id} size={15} />
                 {move.name}
               </span>
             ))}

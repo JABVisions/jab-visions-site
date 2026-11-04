@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import {
   INTERACT_LABEL,
+  RYDERZ,
   UPGRADE_ORDER,
   UPGRADES,
   upgradeCost,
@@ -14,7 +15,7 @@ import { CAMERA_MODE_LABEL, type CameraMode, type CameraState } from '@/lib/ryde
 import type { HudState, RaidEngine } from '@/lib/ryderz-raid/engine';
 import { GameMode } from '@/lib/ryderz-raid/game-mode';
 import { PlayerStore } from '@/lib/ryderz-raid/multiplayer';
-import { RyderManager } from '@/lib/ryderz-raid/ryder-manager';
+import { ABILITIES, INPUT_SLOTS, RyderManager } from '@/lib/ryderz-raid/ryder-manager';
 import { SaveManager } from '@/lib/ryderz-raid/saves/saveManager';
 import CameraTuningPanel, { loadStoredCameraConfig } from './CameraTuningPanel';
 import CircularPlayerHUD, { type CircularHudApi } from './hud/CircularPlayerHUD';
@@ -22,10 +23,11 @@ import PlayerPartyHUD, { type PartyHudApi } from './hud/PlayerPartyHUD';
 import PvpVersusHUD from './hud/PvpVersusHUD';
 import LowHealthVignette, { type LowHealthVignetteApi } from './hud/LowHealthVignette';
 import ComboIndicator, { type ComboHudApi } from './hud/ComboIndicator';
+import PowerDeckBar, { type DeckBarApi, type DeckSlotView } from './hud/PowerDeckBar';
 import RaidRadar, { type RadarApi } from './hud/RaidRadar';
 import RaidMap from './hud/RaidMap';
 import StatBoard from './hud/StatBoard';
-import PauseMenu from './menu/PauseMenu';
+import PauseMenu, { type PauseView } from './menu/PauseMenu';
 import RaidLobby from './modes/RaidLobby';
 import RaidWatch from './modes/RaidWatch';
 import { launchFromSquad, type RaidSquad } from '@/lib/ryderz-raid/raid/squad';
@@ -47,13 +49,12 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
   const comboHud = useRef<ComboHudApi>(null);
   const radarHud = useRef<RadarApi>(null);
   const mapHud = useRef<RadarApi>(null);
-  const moveRow = useRef<HTMLDivElement>(null);
+  const deckHud = useRef<DeckBarApi>(null);
   const partyHud = useRef<PartyHudApi | null>(null);
   const pvpRef = useRef<PvpLineup | null>(null);
   const pointsRef = useRef<HTMLElement>(null);
   const remainingRef = useRef<HTMLElement>(null);
   const roundRef = useRef<HTMLElement>(null);
-  const moveStatus = useRef<Array<HTMLSpanElement | null>>([null, null, null]);
   const nubRef = useRef<HTMLDivElement>(null);
   const lookLast = useRef<{ x: number; y: number; id: number } | null>(null);
 
@@ -82,10 +83,10 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
   const getPlayers = useCallback(() => playerStore.getState(), [playerStore]);
   const partyState = useSyncExternalStore(subscribePlayers, getPlayers, getPlayers);
   const activeRyder = managerState.activeRyder;
-  const [hudMoves, setHudMoves] = useState<HudState['moves']>([]);
   const [round, setRound] = useState(0);
   const [phase, setPhase] = useState<HudState['phase'] | 'select'>('select');
   const [paused, setPaused] = useState(false);
+  const [pauseView, setPauseView] = useState<PauseView>('root');
   const [mapOpen, setMapOpen] = useState(false);
   const [burnout, setBurnout] = useState(false);
   const [tideOut, setTideOut] = useState(false);
@@ -112,7 +113,7 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
   const beaconCooldown = useRef<HTMLSpanElement>(null);
   const beaconTrack = useRef<HTMLElement>(null);
   const [locked, setLocked] = useState(false);
-  const [moveReady, setMoveReady] = useState([false, false, false]);
+  const [openSlots, setOpenSlots] = useState(3);
   const [points, setPoints] = useState(0);
   const [upgrades, setUpgrades] = useState<HudState['upgrades']>({
     capacity: 0,
@@ -147,7 +148,21 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
     comboHud.current?.setCombo(next.combo);
     radarHud.current?.draw(next.radar);
     mapHud.current?.draw(next.radar);
-    moveRow.current?.setAttribute('data-link', next.combo.power ? 'true' : 'false');
+    deckHud.current?.setLive({
+      hp: next.hp,
+      maxHp: next.maxHp,
+      aura: next.aura,
+      maxAura: next.maxAura,
+      burnout: next.burnout,
+      powersOut: next.tideOut,
+      guarding: next.guarding,
+      signalAvailable: next.signal.available,
+      signalRound: next.signal.round,
+      level: next.signal.level,
+      levelProgress: next.signal.progress,
+      moves: next.moves,
+      linked: next.combo.power,
+    });
     if (next.opponent) {
       foeHud.current?.setVitals(next.opponent.hp, next.opponent.maxHp, next.opponent.aura, next.opponent.maxAura, next.opponent.aura <= 1);
     }
@@ -224,19 +239,7 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
     }
     if (remainingRef.current) remainingRef.current.textContent = String(next.remaining);
     if (roundRef.current) roundRef.current.textContent = String(next.round);
-    next.moves.forEach((move, i) => {
-      const el = moveStatus.current[i];
-      if (!el) return;
-      el.textContent = next.burnout
-        ? 'NO AURA'
-        : next.tideOut
-          ? 'OUT'
-          : move.duration > 0
-            ? 'ON'
-            : move.ready
-              ? `${move.key}  READY`
-              : 'LOW';
-    });
+    if (!prev || prev.openSlots !== next.openSlots) setOpenSlots(next.openSlots);
     if (
       !prev ||
       prev.phase !== next.phase ||
@@ -252,11 +255,11 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
       prev.pointerLocked !== next.pointerLocked ||
       prev.banner?.title !== next.banner?.title ||
       prev.moves.length !== next.moves.length ||
-      prev.moves.some((m, i) => m.ready !== next.moves[i]?.ready || m.id !== next.moves[i]?.id)
+      prev.moves.some((m, i) => m.id !== next.moves[i]?.id)
     ) {
       setPhase(next.phase);
-      setHudMoves(next.moves);
       setPaused(next.paused);
+      if (!next.paused) setPauseView('root');
       setMapOpen(next.mapOpen);
       setBurnout(next.burnout);
       setTideOut(next.tideOut);
@@ -264,7 +267,6 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
       setBeacon(next.beacon);
       setRecovering(next.recovering);
       setLocked(next.pointerLocked);
-      setMoveReady(next.moves.map((m) => m.ready));
       setBanner(next.banner);
       setUpgrades(next.upgrades);
     }
@@ -471,11 +473,51 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
         setCamPanel((open) => !open);
         return;
       }
+      // T pauses straight into the Power Tree while the raid is live.
+      if (e.code === 'KeyT' && !e.repeat) {
+        const hud = hudRef.current;
+        const engine = engineRef.current;
+        if (engine && hud && !hud.paused && (hud.phase === 'playing' || hud.phase === 'intermission')) {
+          e.preventDefault();
+          setPauseView('tree');
+          engine.setPaused(true);
+          return;
+        }
+      }
       if (isScrollKey(e)) e.preventDefault();
     };
     window.addEventListener('keydown', onKey, { capture: true });
     return () => window.removeEventListener('keydown', onKey, { capture: true });
   }, [screen]);
+
+  const openTree = useCallback(() => {
+    const engine = engineRef.current;
+    if (!engine) return;
+    setPauseView('tree');
+    engine.setPaused(true);
+  }, []);
+
+  // The dock's six slots: 1 / 2 / 3 always, 4 / 5 / 6 once the tree opens them.
+  const deckSlots = useMemo<DeckSlotView[]>(() => {
+    const open = manager.slotsFor(activeRyder);
+    const deck = manager.loadout(activeRyder);
+    const tree = manager.tree(activeRyder);
+    return INPUT_SLOTS.map((key) => {
+      const isOpen = open.includes(key);
+      const id = isOpen ? deck[key] : null;
+      const spec = id ? ABILITIES[id] : null;
+      const gate = isOpen ? undefined : tree.nodes.find((node) => node.effect.kind === 'slot' && node.effect.slot === key);
+      return {
+        key,
+        id,
+        name: spec?.name ?? '',
+        open: isOpen,
+        unlockCost: gate?.cost,
+      };
+    });
+    // managerState is the store snapshot; a new one means the deck or tree changed.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [manager, managerState, activeRyder, openSlots]);
 
   const changeRyder = () => {
     engineRef.current?.dispose();
@@ -580,8 +622,8 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
                   <div className={styles.chip}>
                     Hosts <strong ref={remainingRef}>0</strong>
                   </div>
-                  <div className={styles.chip}>
-                    Signal pts <strong ref={pointsRef}>0</strong>
+                  <div className={styles.chip} title="Match currency for the Spire Shop. Signal Points for the Power Tree live on the deck below.">
+                    Raid pts <strong ref={pointsRef}>0</strong>
                   </div>
                   <div className={styles.chip}>
                     Difficulty <strong>{difficulty}</strong>
@@ -722,28 +764,19 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
 
           <div className={styles.bottomHud}>
             <p className={styles.hint}>
-              WASD turns and tilts the camera · Arrows move with the view · Mouse and the right stick look · G or middle mouse locks on · H cycles targets · K cycles Standard, Combat Focus, and Cinematic · Shift sprint · Space jump · X recenters pitch · B swaps shoulder · Click punches up close · Zoe blasts at range · Keven throws darts · C punch · V kick · F / RMB melee, F again throws · Z dodge · Q E R powers · {INTERACT_LABEL} uses a rack, chest, secret, beacon, or downed teammate · Tap a teammate's bar to play them · {pvpTwo ? 'Tab opens the map' : 'Tab or M opens the map'} · Esc pause
+              WASD turns the camera · Arrows move · Mouse / right stick look · G lock on · H cycle targets · K camera mode · Shift sprint · Space jump · C punch · V kick · Shift+C heavy · Shift+V launcher · strike in the air for an aerial · strike a downed host to finish · F / RMB melee, F again throws · Z dodge, hold Z still to guard · Click punches up close · 1–{openSlots} powers · T Power Tree · {INTERACT_LABEL} uses a rack, chest, beacon, or downed teammate · {pvpTwo ? 'Tab opens the map' : 'Tab or M opens the map'} · Esc pause
               {phase === 'intermission' ? ' · Hold the spire to buy strength' : ''}
               {pvpTwo ? ' · P2 IJKL move · U punch · O kick · P melee · N dodge · M jump' : ''}
             </p>
-            <div ref={moveRow} className={styles.moveRow}>
-              {hudMoves.map((move, i) => (
-                <div
-                  key={`${move.key}-${move.id}`}
-                  className={`${styles.ability} ${moveReady[i] ? styles.ready : ''}`}
-                >
-                  <span
-                    ref={(node) => {
-                      moveStatus.current[i] = node;
-                    }}
-                  >
-                    {move.key}
-                  </span>
-                  <b>{move.name}</b>
-                </div>
-              ))}
-            </div>
           </div>
+          <PowerDeckBar
+            ref={deckHud}
+            name={RYDERZ[activeRyder].name}
+            slots={deckSlots}
+            color={aura.aura}
+            onOpenTree={openTree}
+            onPress={(index) => engineRef.current?.queueAbility(index)}
+          />
         </div>
       )}
 
@@ -798,23 +831,33 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
               <button type="button" onClick={() => engineRef.current?.queueMelee()}>
                 MELEE
               </button>
+              <button type="button" className={styles.touchHeavy} onClick={() => engineRef.current?.queueHeavy()}>
+                HEAVY
+              </button>
+              <button type="button" className={styles.touchHeavy} onClick={() => engineRef.current?.queueLauncher()}>
+                LAUNCH
+              </button>
               <button type="button" onClick={() => engineRef.current?.queueDodge()}>
                 DODGE
               </button>
               <button type="button" onClick={() => engineRef.current?.queueJump()}>
                 JUMP
               </button>
-              <button type="button" onClick={() => engineRef.current?.queueAbility(0)}>
-                Q
-              </button>
-              <button type="button" onClick={() => engineRef.current?.queueAbility(1)}>
-                E
-              </button>
-              <button type="button" onClick={() => engineRef.current?.queueAbility(2)}>
-                R
+              <button
+                type="button"
+                className={styles.touchGuard}
+                onPointerDown={(e) => {
+                  e.currentTarget.setPointerCapture(e.pointerId);
+                  engineRef.current?.setGuard(true);
+                }}
+                onPointerUp={() => engineRef.current?.setGuard(false)}
+                onPointerCancel={() => engineRef.current?.setGuard(false)}
+                onContextMenu={(e) => e.preventDefault()}
+              >
+                GUARD
               </button>
               {(reviveName || (beacon?.near && beacon.ready)) && (
-                <button type="button" onClick={() => engineRef.current?.queueInteract()}>
+                <button type="button" className={styles.touchUse} onClick={() => engineRef.current?.queueInteract()}>
                   {reviveName ? 'PICK UP' : 'USE'}
                 </button>
               )}
@@ -873,6 +916,7 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
           points={points}
           upgrades={upgrades}
           layout={layout}
+          initialView={pauseView}
           onResume={resume}
           onExit={exitToStart}
           onOpenMap={() => engineRef.current?.toggleMap()}

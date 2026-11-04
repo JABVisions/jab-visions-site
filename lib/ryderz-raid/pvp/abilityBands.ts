@@ -1,9 +1,15 @@
-import type { AbilityId } from '../config';
+import type { AbilityId, DerivedAbilityId } from '../config';
+import { DERIVED_POWERS, DERIVED_POWER_IDS, type DerivedPowerKind } from '../progression/derived-powers';
 
 /** How an ability wants to be used. The CPU reads this; the kits do not. */
 export type AbilityBand = 'close' | 'mid' | 'long' | 'movement' | 'defensive';
 
+const DERIVED_BAND: Record<DerivedPowerKind, AbilityBand> = { breaker: 'close', volley: 'long', nova: 'close', snare: 'mid', surge: 'defensive', blitz: 'mid' };
+
+const DERIVED_BANDS = Object.fromEntries(DERIVED_POWER_IDS.map((id) => [id, DERIVED_BAND[DERIVED_POWERS[id].kind]])) as Record<DerivedAbilityId, AbilityBand>;
+
 export const ABILITY_BANDS: Record<AbilityId, AbilityBand> = {
+  ...DERIVED_BANDS,
   bladeFan: 'close',
   duplicate: 'mid',
   envyPulse: 'close',

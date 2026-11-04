@@ -1,11 +1,11 @@
 import type { AiProfile } from '../pvp/aiProfile';
-import type { StrikeKind } from './actions';
+import type { StrikeInput } from './actions';
 
 /**
  * A short script the CPU tries to land. It is a suggestion: range, whiffs,
  * and a low health bar throw it away. Personalities only change the weights.
  */
-export function openingPlan(profile: AiProfile, allowChain: boolean, rng: () => number = Math.random): StrikeKind[] | null {
+export function openingPlan(profile: AiProfile, allowChain: boolean, rng: () => number = Math.random): StrikeInput[] | null {
   if (!allowChain) return null;
   if (rng() > 0.28 + profile.comboPreference * 0.62) return null;
   const roll = rng();

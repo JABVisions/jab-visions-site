@@ -1,8 +1,8 @@
 import type { RyderId } from '../config';
 import type { HitReaction } from '../combat';
 import type { MeleeStyle } from '../skeletal';
-import { forkStrike, type CombatAction, type StrikeKind } from './actions';
-import { ComboManager, meleeWantsGrab, reactionForEffect, type ComboSnapshot } from './combo';
+import { forkStrike, type CombatAction, type StrikeInput, type StrikeKind } from './actions';
+import { ComboManager, meleeWantsGrab, reactionForEffect, type ComboRecipe, type ComboSnapshot } from './combo';
 import { actionFor, combatProfileFor, recipesFor } from './profiles';
 
 export interface StrikeTarget {
@@ -11,6 +11,8 @@ export interface StrikeTarget {
   z: number;
   radius: number;
   airborne: boolean;
+  /** On the floor and still reeling. Melee over this body becomes a finisher. */
+  downed?: boolean;
 }
 
 export interface StrikerHit {
@@ -24,6 +26,10 @@ export interface StrikerHit {
   combo: ComboSnapshot;
   /** Shock radius around a connected pitchfork slam. Set on the first hit only. */
   shockRange?: number;
+  /** Extra upward speed for a target that was already airborne. 0 when grounded. */
+  juggle: number;
+  /** True for the first (closest) body the strike reached. */
+  primary: boolean;
 }
 
 export interface StrikerFrame {
@@ -34,6 +40,8 @@ export interface StrikerFrame {
   grab: StrikeTarget | null;
   exposed: boolean;
   busy: boolean;
+  /** The strike that just began, so callers can play an aerial or finisher differently. */
+  kind: StrikeKind | null;
 }
 
 export interface StrikerContext {
@@ -45,6 +53,10 @@ export interface StrikerContext {
   z: number;
   meleeDamage: number;
   targets: readonly StrikeTarget[];
+  /** The fighter is off the ground. Strikes become aerials. */
+  airborne?: boolean;
+  /** Multiplier on every strike's damage from progression. */
+  damageScale?: number;
 }
 
 const empty = (): StrikerFrame => ({
@@ -55,6 +67,7 @@ const empty = (): StrikerFrame => ({
   grab: null,
   exposed: false,
   busy: false,
+  kind: null,
 });
 
 function angleDiff(from: number, to: number) {
@@ -64,19 +77,44 @@ function angleDiff(from: number, to: number) {
   return diff;
 }
 
-export function targetsInStrike(targets: readonly StrikeTarget[], x: number, z: number, yaw: number, action: CombatAction): StrikeTarget[] {
+/**
+ * Bodies a strike reaches. The arc is tested at the end of the lunge; a
+ * strike with `sweepWidth` also catches anyone the fist travelled through
+ * between `fromX/fromZ` and `x/z`, so a wide swing through a crowd lands on
+ * the crowd and not only on whoever stands at the tip.
+ */
+export function targetsInStrike(
+  targets: readonly StrikeTarget[],
+  x: number,
+  z: number,
+  yaw: number,
+  action: CombatAction,
+  fromX = x,
+  fromZ = z,
+): StrikeTarget[] {
   const hits: StrikeTarget[] = [];
+  const sx = x - fromX;
+  const sz = z - fromZ;
+  const len2 = sx * sx + sz * sz;
   for (const target of targets) {
     const dx = target.x - x;
     const dz = target.z - z;
     const dist = Math.hypot(dx, dz);
-    if (dist > action.range + target.radius) continue;
-    if (action.halfArc < Math.PI) {
+    let inArc = dist <= action.range + target.radius;
+    if (inArc && action.halfArc < Math.PI) {
       const facing = Math.atan2(dx, dz);
       const slack = Math.min(0.5, target.radius / Math.max(dist, 0.3));
-      if (Math.abs(angleDiff(yaw, facing)) > action.halfArc + slack) continue;
+      if (Math.abs(angleDiff(yaw, facing)) > action.halfArc + slack) inArc = false;
     }
-    hits.push(target);
+    let swept = false;
+    if (!inArc && action.sweepWidth && len2 > 1e-6) {
+      const u = Math.max(0, Math.min(1, ((target.x - fromX) * sx + (target.z - fromZ) * sz) / len2));
+      const px = fromX + sx * u;
+      const pz = fromZ + sz * u;
+      const r = action.sweepWidth + target.radius;
+      swept = (target.x - px) ** 2 + (target.z - pz) ** 2 <= r * r;
+    }
+    if (inArc || swept) hits.push(target);
   }
   hits.sort((a, b) => (a.x - x) ** 2 + (a.z - z) ** 2 - ((b.x - x) ** 2 + (b.z - z) ** 2));
   return hits;
@@ -85,8 +123,10 @@ export function targetsInStrike(targets: readonly StrikeTarget[], x: number, z: 
 type Phase = 'idle' | 'startup' | 'active' | 'recovery' | 'hold';
 
 /**
- * Startup, the hit, then recovery. Punch recovery can cancel into the next
- * strike. A missed kick or melee stays exposed until recovery ends.
+ * Startup, the hit, then recovery. Punch recovery always cancels into the
+ * next strike. Any strike that connected may cancel once its active frames
+ * end (hit confirm). A missed kick, heavy, or melee stays exposed until
+ * recovery ends.
  */
 export class FighterStriker {
   readonly combo = new ComboManager();
@@ -96,7 +136,7 @@ export class FighterStriker {
   private action: CombatAction | null = null;
   private elapsed = 0;
   private connected = false;
-  private buffer: StrikeKind | null = null;
+  private buffer: StrikeInput | null = null;
   private holdLeft = 0;
   private holdTarget: StrikeTarget | null = null;
   private throwNext = false;
@@ -107,10 +147,29 @@ export class FighterStriker {
   private startedFlag = false;
   private punchN = 0;
   private kickN = 0;
+  /** Where the fighter stood when the strike began, for the swept volume. */
+  private originX = 0;
+  private originZ = 0;
+  private extraRecipes: ComboRecipe[] = [];
 
   setRyder(id: RyderId | null) {
     this.ryderId = id;
-    this.combo.setRecipes(recipesFor(id));
+    this.applyRecipes();
+  }
+
+  /** Recipes the Power Tree granted on top of the character's own. */
+  setExtraRecipes(recipes: ComboRecipe[]) {
+    this.extraRecipes = recipes;
+    this.applyRecipes();
+  }
+
+  private applyRecipes() {
+    const base = recipesFor(this.ryderId);
+    // Tree recipes win when they repeat a sequence, so an upgrade can retune a shared chain.
+    const extra = this.extraRecipes.filter(
+      (recipe) => !base.some((own) => own.id === recipe.id),
+    );
+    this.combo.setRecipes(extra.length ? [...extra, ...base] : base);
   }
 
   /** Aura pitchfork. Other Ryderz leave this off, so their punch chains stay as they are. */
@@ -124,6 +183,21 @@ export class FighterStriker {
 
   get exposed() {
     return this.phase === 'recovery' && !this.connected;
+  }
+
+  /** The strike in flight, or null. */
+  get current(): StrikeKind | null {
+    return this.phase === 'idle' ? null : this.kind;
+  }
+
+  /** The hit has landed and the fighter is only recovering. Dodges and powers may cut this short. */
+  get cancelable() {
+    return this.phase === 'recovery';
+  }
+
+  /** Winding up a slow strike: the moment an enemy can read and dodge. */
+  get telegraphing() {
+    return this.phase === 'startup' && (this.action?.startup ?? 0) >= 0.16;
   }
 
   /** True on the tick an attack begins, so the body can start its swing once. */
@@ -151,7 +225,7 @@ export class FighterStriker {
     return { style: action.style, p: Math.max(0, Math.min(1, p)) };
   }
 
-  queue(kind: StrikeKind) {
+  queue(kind: StrikeInput) {
     if (this.phase === 'hold') {
       this.throwNext = true;
       return;
@@ -160,15 +234,28 @@ export class FighterStriker {
       this.buffer = kind;
       return;
     }
-    if ((this.kind === 'punch' || this.fork) && (this.phase === 'recovery' || this.phase === 'active')) {
-      this.buffer = kind;
+    if (this.phase === 'recovery' || this.phase === 'active') {
+      if (this.kind === 'punch' || this.fork || this.connected) this.buffer = kind;
     }
   }
 
   /** Buffer the next strike of a punch so a jab can become jab-cross or jab-kick. */
-  chainInto(kind: StrikeKind) {
+  chainInto(kind: StrikeInput) {
     if (this.kind !== 'punch' || this.phase === 'idle' || this.phase === 'hold') return false;
     this.buffer = kind;
+    return true;
+  }
+
+  /** Cut recovery short (a dodge or a power). Returns true when there was something to cancel. */
+  cancel() {
+    if (this.phase !== 'recovery') return false;
+    this.phase = 'idle';
+    this.kind = null;
+    this.inputKind = null;
+    this.action = null;
+    this.buffer = null;
+    this.connected = false;
+    this.elapsed = 0;
     return true;
   }
 
@@ -215,9 +302,12 @@ export class FighterStriker {
         frame.started = true;
         this.startedFlag = true;
         frame.swing = this.action?.style ?? null;
+        frame.kind = this.kind;
+        // The press counts from this frame, so a quick jab is not a frame late.
+      } else {
+        frame.busy = false;
+        return frame;
       }
-      frame.busy = this.phase !== 'idle';
-      return frame;
     }
 
     this.elapsed += dt;
@@ -243,14 +333,18 @@ export class FighterStriker {
     const total = activeEnd + action.recovery;
     if (this.phase === 'active' && this.elapsed >= activeEnd) this.phase = 'recovery';
     const next = this.buffer;
-    const chain =
-      next !== null && this.elapsed >= activeEnd && (this.kind === 'punch' || (this.fork && this.kind !== 'grab' && this.kind !== 'throw'));
+    const chainOpen =
+      this.kind === 'punch' ||
+      (this.fork && this.kind !== 'grab' && this.kind !== 'throw') ||
+      (this.connected && Boolean(action.cancelOnHit));
+    const chain = next !== null && this.elapsed >= activeEnd && chainOpen;
     if (this.phase === 'recovery' && chain && next) {
       this.begin(next, ctx);
       this.buffer = null;
       frame.started = true;
       this.startedFlag = true;
       frame.swing = this.action?.style ?? null;
+      frame.kind = this.kind;
     } else if (this.elapsed >= total) {
       this.phase = 'idle';
       this.kind = null;
@@ -263,12 +357,15 @@ export class FighterStriker {
     return frame;
   }
 
-  private begin(kind: StrikeKind, ctx: StrikerContext) {
+  private begin(kind: StrikeInput, ctx: StrikerContext) {
     let use: StrikeKind = kind;
-    if (kind === 'melee') {
-      const near = nearest(ctx);
-      const dist = near ? Math.hypot(near.x - ctx.x, near.z - ctx.z) : 99;
-      if (near && !near.airborne && meleeWantsGrab(this.combo.sequence, dist, ctx.time < this.grabWindowUntil)) {
+    const near = nearest(ctx);
+    const dist = near ? Math.hypot(near.x - ctx.x, near.z - ctx.z) : 99;
+    if (ctx.airborne && (kind === 'punch' || kind === 'kick' || kind === 'melee' || kind === 'heavy' || kind === 'launcher')) {
+      use = 'aerial';
+    } else if (kind === 'melee') {
+      if (near?.downed && dist < 2.2) use = 'finisher';
+      else if (near && !near.airborne && meleeWantsGrab(this.combo.sequence, dist, ctx.time < this.grabWindowUntil, this.combo.activeRecipes)) {
         use = 'grab';
       }
     }
@@ -290,6 +387,8 @@ export class FighterStriker {
     this.elapsed = 0;
     this.connected = false;
     this.didLunge = false;
+    this.originX = ctx.x;
+    this.originZ = ctx.z;
   }
 
   private connect(ctx: StrikerContext, frame: StrikerFrame) {
@@ -297,7 +396,7 @@ export class FighterStriker {
     if (!action || !this.kind) return;
     const reachX = ctx.x + Math.sin(ctx.facing) * action.lunge;
     const reachZ = ctx.z + Math.cos(ctx.facing) * action.lunge;
-    const hits = targetsInStrike(ctx.targets, reachX, reachZ, ctx.facing, action);
+    const hits = targetsInStrike(ctx.targets, reachX, reachZ, ctx.facing, action, this.originX, this.originZ);
     if (this.kind === 'grab') {
       const target = hits[0];
       if (!target) return;
@@ -312,14 +411,15 @@ export class FighterStriker {
     if (!hits.length) return;
     this.connected = true;
     const primary = hits[0];
-    const recorded = this.inputKind === 'melee' ? 'melee' : this.kind;
+    const recorded: StrikeKind = this.inputKind === 'melee' && this.kind === 'melee' ? 'melee' : this.kind;
     const snap = this.combo.land(recorded, ctx.time, primary.ref);
     if (snap.effect === 'grabOpportunity') this.grabWindowUntil = ctx.time + 1.15;
     const shaped = reactionForEffect(snap.effect, action.reaction, action.strength);
+    const scale = ctx.damageScale ?? 1;
     for (const target of hits) {
       frame.hits.push({
         target,
-        damage: ctx.meleeDamage * action.damageMul * snap.scale,
+        damage: ctx.meleeDamage * action.damageMul * snap.scale * scale,
         reaction: shaped.reaction,
         strength: shaped.strength,
         hitStun: action.hitStun * snap.stunScale,
@@ -327,6 +427,8 @@ export class FighterStriker {
         kind: this.kind,
         combo: snap,
         shockRange: action.style === 'forkSlam' && target === primary ? 4.4 : undefined,
+        juggle: target.airborne ? action.juggle ?? 0 : 0,
+        primary: target === primary,
       });
     }
   }
@@ -345,17 +447,20 @@ export class FighterStriker {
     const snap = this.combo.land('throw', ctx.time, target.ref);
     frame.hits.push({
       target,
-      damage: ctx.meleeDamage * action.damageMul * snap.scale,
+      damage: ctx.meleeDamage * action.damageMul * snap.scale * (ctx.damageScale ?? 1),
       reaction: 'knockback',
       strength: action.strength,
       hitStun: action.hitStun * snap.stunScale,
       knockback: action.knockback,
       kind: 'throw',
       combo: snap,
+      juggle: 0,
+      primary: true,
     });
     frame.swing = action.style;
     frame.started = true;
     this.startedFlag = true;
+    frame.kind = 'throw';
   }
 }
 

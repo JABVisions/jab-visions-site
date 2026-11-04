@@ -372,7 +372,7 @@ export default function ThoseRyderz() {
           <RaidGame layout="embed" />
           <p className="raid-footnote">
             <Link href="/those-ryderz/raid">Open fullscreen raid</Link>
-            <span>Arrows move · WASD camera · Shift sprint · mouse aim · click fire · F / RMB melee · Q E R moves</span>
+            <span>Arrows move · WASD camera · Shift sprint · mouse aim · click fire · F / RMB melee · 1–6 powers</span>
           </p>
         </section>
 

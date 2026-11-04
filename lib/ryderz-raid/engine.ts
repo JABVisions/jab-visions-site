@@ -9,6 +9,7 @@ import {
   INTERMISSION,
   KILL_AURA_SIPHON,
   MAX_ALIVE_HOSTS,
+  MAX_POWER_SLOTS,
   MELEE_ARC,
   MELEE_RANGE,
   MOVE_KEYS,
@@ -34,10 +35,27 @@ import {
   HitScheduler,
   ShockRingPool,
   applyReaction,
+  juggleBody,
+  resistReaction,
   stepReaction,
   targetsInArc,
   type HitReaction,
 } from './combat';
+import { SignalBank, availableSignal, levelProgress, type SignalEvent, type SignalLedger } from './progression/signal-points';
+import { emptyModifiers, type PowerModifiers } from './progression/power-tree';
+import { DERIVED_POWERS, derivedAtRank, isDerivedAbility, rankScaling, type DerivedPowerSpec } from './progression/derived-powers';
+import {
+  BLITZ_DASH_POSE,
+  BLITZ_FINISH,
+  RYDER_STYLE,
+  choreoFor,
+  resolvePose,
+  resolveStrike,
+  type ChoreoBeat,
+  type PowerChoreo,
+} from './progression/power-choreo';
+import { EngagementDirector, type EngagementCandidate } from './civilians/engagement';
+import { CrowdGrid } from './crowd/grid';
 import { AfterimagePool } from './speed-vfx';
 import { createRyderKit, type KitContext, type KitTarget, type MeleeStep, type RyderKit } from './ryderz';
 import type { MeleeStyle, PoseOverride } from './skeletal';
@@ -92,24 +110,34 @@ import { type RaidLaunch } from './raid/squad';
 import {
   archetypeById,
   directRound,
+  getCrowdBudget,
+  setCrowdBudget,
   warzoneLabel,
+  type CrowdBudget,
   type DirectorPlan,
   type RoundTactics,
   type SpawnOrder,
 } from './rounds/director';
 import {
+  ABILITY_KEYS,
   CombatMemory,
   FighterStriker,
+  abilitySlotOf,
   combatProfileFor,
   commandForKey,
+  isFinisherEffect,
+  isKnockedDown,
   isMapKey,
   meleeWantsGrab,
   reactionForEffect,
   recipesFor,
   resolvePowerLink,
   risingPadCommands,
+  withSprintModifier,
   type CombatCommand,
+  type ComboRecipe,
   type PhysicalHit,
+  type StrikeInput,
   type StrikeKind,
   type StrikerHit,
 } from './fighter';
@@ -148,6 +176,12 @@ export interface HudState {
     cooldown: number;
     duration: number;
   }>;
+  /** Power slots the current Ryder has opened on the tree. 1 / 2 / 3 are always open. */
+  openSlots: number;
+  /** Signal Points: the persistent progression wallet. `earned` is lifetime, `round` is this round so far. */
+  signal: { available: number; earned: number; round: number; level: number; progress: number };
+  /** Local player is holding guard. */
+  guarding: boolean;
   round: number;
   remaining: number;
   points: number;
@@ -222,7 +256,7 @@ export interface HudState {
     dealt: number;
     taken: number;
     allies: number;
-    contributions: { name: string; dealt: number }[];
+    contributions: { name: string; dealt: number; signal?: number }[];
   } | null;
   /** Endless survival card. Null in a versus match. */
   survival: {
@@ -233,6 +267,12 @@ export interface HudState {
     damage: number;
     cap: number;
     boss: boolean;
+    /** Civilians this round in total (round × 8), how many are still to be spawned or beaten, how many stand now. */
+    population: number;
+    remaining: number;
+    alive: number;
+    /** Hosts holding an attack token right now. */
+    attackers: number;
   } | null;
   /** Live squad bars. Null outside a raid. */
   party: Array<{
@@ -321,6 +361,8 @@ interface Host {
   pacified?: number;
   /** Proclaim Peace. Released as soon as the timer expires. */
   immobile?: number;
+  /** A snare left this host open: seconds it takes extra damage. */
+  exposed?: number;
   winding: boolean;
   /** Next physical strike after this one, for a short jab chain. */
   follow: StrikeKind | null;
@@ -357,6 +399,46 @@ interface Host {
   pressing?: boolean;
   /** Frames skipped while this host is far enough to simulate cheaply. */
   lodTick?: number;
+  /** Crowd-control resistance (see `combat.ts`): elites shrug off repeated launches. */
+  ccResist?: number;
+  ccResistAt?: number;
+  /** Sim seconds since this host last swung at the player. The engagement director reads it. */
+  sinceAttack: number;
+  /** This host currently holds an attack token from the engagement director. */
+  token: boolean;
+  /** Sim seconds since the host last saw its target in detect range. */
+  sinceSeen: number;
+  /** Set while the player's strike is in startup near this host, so it can dodge. */
+  canDodge: boolean;
+  /** The local player put this host into the air; a teammate's hit while it is up is a team combo. */
+  launchedBy?: number;
+  launchedAt?: number;
+  /** Last time this host fed a kill, so the same body never pays twice. */
+  paid?: boolean;
+  /** GLB the body was built from, so the pool can shelve it under the right key. */
+  modelPath?: string | null;
+  /** Animation LOD: skip this frame's pose. */
+  animSkip?: boolean;
+}
+
+/** A derived power's numbers at the rank it was cast. */
+type DerivedTune = ReturnType<typeof derivedAtRank>;
+
+/** A tree-earned power mid-animation: which beats have fired, which stance is held. */
+interface ActiveChoreo {
+  spec: DerivedPowerSpec;
+  tune: DerivedTune;
+  choreo: PowerChoreo;
+  /** Sim time the sequence started. */
+  started: number;
+  /** Index of the next beat to fire. */
+  next: number;
+  /** Stance currently held and the beat it started on. */
+  pose: { kind: PoseOverride['kind']; weight: number; lean: number; bank: number; since: number; until: number } | null;
+  /** Bolts thrown so far (volleys). */
+  shots: number;
+  /** Set when the sequence is the blitz finisher: the hit is the finisher, not a breaker. */
+  finisher: boolean;
 }
 
 /** A defeated host still flying from the blow that killed it. */
@@ -473,9 +555,47 @@ export class RaidEngine {
   /** Sim time of the last grounded hop, so a second press can mount. */
   private jumpAt = -10;
   private jumping = false;
-  private queuedMoves = [false, false, false];
+  private heavyQueued = false;
+  private launcherQueued = false;
+  /** Hold Z (or LB) with no direction to guard. Blocks eat most of a hit's damage and all of its stun. */
+  private guarding = false;
+  private guardT = 0;
+  private guardPad = false;
+  private guardTouch = false;
+  /** The hit being resolved came from a finisher, so the kill pays finisher SP. */
+  private pendingFinisher = false;
+  private queuedMoves = [false, false, false, false, false, false];
   /** True once the ability key has come up, so a held key cannot switch a power off. */
-  private releaseArmed = [true, true, true];
+  private releaseArmed = [true, true, true, true, true, true];
+  /** Power Tree output for the current Ryder. Reset to neutral on every switch until the manager pushes again. */
+  private modifiers: PowerModifiers = emptyModifiers();
+  private treeRecipes: ComboRecipe[] = [];
+  private openSlots = 3;
+  private signalLedger: SignalLedger = { earned: 0, spent: 0 };
+  private readonly signalBank = new SignalBank();
+  private signalHooks = new Set<(event: SignalEvent) => void>();
+  /** Surge buff seconds left and its damage multiplier. */
+  private surgeT = 0;
+  private surgeMul = 1;
+  /** Blitz dash chain: hits left, seconds to the next dash. */
+  private blitz: { left: number; next: number; spec: DerivedPowerSpec; tune: DerivedTune } | null = null;
+  /** The tree-earned power whose choreography the body is playing. */
+  private choreo: ActiveChoreo | null = null;
+  /** Power ranks from the tree (1 when unranked). */
+  private powerRanks: Partial<Record<AbilityId, number>> = {};
+  /** Damage multiplier the rank of the last power cast puts on kit and generic power damage. */
+  private castScale = 1;
+  /** Second Wind (tree passive) fired this life. */
+  private secondWindUsed = false;
+  private readonly engagement = new EngagementDirector();
+  private readonly grid = new CrowdGrid<Host>();
+  private attackersNow = 0;
+  private frameTick = 0;
+  private readonly tokenScratch: EngagementCandidate[] = [];
+  private readonly nearScratch: Host[] = [];
+  /** Retired host bodies kept for reuse so a 400-civilian round does not rebuild meshes. */
+  private hostPool = new Map<string, Fighter[]>();
+  private spawnedThisRound = 0;
   private readonly striker = new FighterStriker();
   private readonly playerBody = {};
   private throwables: ThrowableField | null = null;
@@ -509,7 +629,7 @@ export class RaidEngine {
   private pointerLocked = false;
 
   private spec: RyderSpec = RYDERZ.rubi;
-  /** Powers bound to Q / E / R. Defaults to the Ryder's signature moves; the Power Deck can rebind them. */
+  /** Powers bound to the number row. Defaults to the Ryder's signature moves; the Power Tree can rebind them. */
   private moves: AbilitySpec[] = RYDERZ.rubi.moves;
   private gameMode: GameMode = GameMode.SOLO;
   private pvpSetup: { opponentId: RyderId; localTwoPlayer: boolean } | null = null;
@@ -574,8 +694,8 @@ export class RaidEngine {
   private fireCd = 0;
   private meleeCd = 0;
   private meleeT = 0;
-  private moveCd = [0, 0, 0];
-  private moveT = [0, 0, 0];
+  private moveCd = [0, 0, 0, 0, 0, 0];
+  private moveT = [0, 0, 0, 0, 0, 0];
   private iframes = 0;
   private anim = 0;
   private points = 0;
@@ -683,6 +803,7 @@ export class RaidEngine {
 
     this.arena = arenaSpec(DEFAULT_ARENA)!;
     this.loadArena(this.arena.id);
+    this.signalBank.subscribe((event) => this.onSignal(event));
     // Dev-only handle for headless combat checks; stripped from production builds.
     if (process.env.NODE_ENV !== 'production') {
       (window as unknown as { __raidDebug?: RaidEngine }).__raidDebug = this;
@@ -699,7 +820,7 @@ export class RaidEngine {
     const token = ++this.startToken;
     this.clearCombat();
     this.spec = RYDERZ[id];
-    this.moves = moves?.length === 3 ? moves : this.spec.moves;
+    this.moves = moves && moves.length >= 3 ? moves.slice(0, MAX_POWER_SLOTS) : this.spec.moves;
     this.homeId = id;
     this.homeMoves = this.moves;
     this.controlledSeat = 0;
@@ -737,10 +858,24 @@ export class RaidEngine {
     this.jumping = false;
     this.p2JumpQueued = false;
     this.p2Jumping = false;
-    this.moveCd = [0, 0, 0];
-    this.moveT = [0, 0, 0];
-    this.queuedMoves = [false, false, false];
-    this.releaseArmed = [true, true, true];
+    this.moveCd = [0, 0, 0, 0, 0, 0];
+    this.moveT = [0, 0, 0, 0, 0, 0];
+    this.queuedMoves = [false, false, false, false, false, false];
+    this.releaseArmed = [true, true, true, true, true, true];
+    this.heavyQueued = false;
+    this.launcherQueued = false;
+    this.guarding = false;
+    this.guardT = 0;
+    this.surgeT = 0;
+    this.surgeMul = 1;
+    this.blitz = null;
+    this.choreo = null;
+    this.castScale = 1;
+    this.secondWindUsed = false;
+    this.signalBank.reset();
+    this.engagement.reset();
+    this.attackersNow = 0;
+    this.spawnedThisRound = 0;
     this.iframes = 0;
     this.recoveryT = 0;
     this.interactQueued = false;
@@ -1123,10 +1258,10 @@ export class RaidEngine {
 
   /** Authoritative raid picture for the room server. Clients do not invent this. */
   raidReport() {
-    const contributions = [{ name: this.spec?.name ?? 'You', dealt: Math.round(this.raidDealt) }];
+    const contributions = [{ name: this.spec?.name ?? 'You', dealt: Math.round(this.raidDealt), signal: this.signalBank.bySeat.get(this.controlledSeat) ?? 0 }];
     for (const host of this.hosts) {
       if (!host.ally || !host.ryderId) continue;
-      contributions.push({ name: RYDERZ[host.ryderId].name, dealt: Math.round(host.dealt ?? 0) });
+      contributions.push({ name: RYDERZ[host.ryderId].name, dealt: Math.round(host.dealt ?? 0), signal: this.signalBank.bySeat.get(host.seat ?? -1) ?? 0 });
     }
     return {
       phase: this.phase === 'victory' ? 'victory' : this.phase === 'dead' ? 'dead' : 'playing',
@@ -1186,16 +1321,102 @@ export class RaidEngine {
     if (this.mapOpen && document.pointerLockElement === this.canvas) document.exitPointerLock();
   }
 
-  /** Rebind Q / E / R. Sustained powers that leave the deck are switched off first. */
+  /** Rebind the deck (slots 1 / 2 / 3 plus any open extra slots). Sustained powers that leave the deck are switched off first. */
   setLoadout(moves: AbilitySpec[]) {
-    if (moves.length !== 3) return;
-    for (let i = 0; i < 3; i += 1) {
-      if (this.moves[i]?.id !== moves[i].id && this.moveT[i] > 0) this.endMove(i);
+    if (moves.length < 3 || moves.length > MAX_POWER_SLOTS) return;
+    for (let i = 0; i < MAX_POWER_SLOTS; i += 1) {
+      if (this.moveT[i] > 0 && this.moves[i]?.id !== moves[i]?.id) this.endMove(i);
     }
     this.moves = moves;
-    this.moveCd = [0, 0, 0];
-    this.queuedMoves = [false, false, false];
-    this.releaseArmed = [true, true, true];
+    this.moveCd = [0, 0, 0, 0, 0, 0];
+    this.queuedMoves = [false, false, false, false, false, false];
+    this.releaseArmed = [true, true, true, true, true, true];
+  }
+
+  /**
+   * Power Tree output for the Ryder in play. The manager pushes this on attach,
+   * after every unlock, and after every switch. Nothing here is persisted by
+   * the engine; the manager owns the save.
+   */
+  setProgression(progression: {
+    modifiers: PowerModifiers;
+    recipes: ComboRecipe[];
+    signal: SignalLedger;
+    slots?: number;
+    /** Rank of each power this Ryder owns; unlisted powers play at rank 1. */
+    ranks?: Partial<Record<AbilityId, number>>;
+  }) {
+    const wasMaxHp = this.modifiers.maxHp;
+    const wasMaxAura = this.modifiers.maxAura;
+    this.modifiers = progression.modifiers;
+    this.treeRecipes = progression.recipes;
+    this.signalLedger = progression.signal;
+    this.powerRanks = progression.ranks ?? {};
+    this.openSlots = clamp(progression.slots ?? 3, 3, MAX_POWER_SLOTS);
+    this.striker.setExtraRecipes(this.treeRecipes);
+    this.striker.combo.setWindowScale(1 + this.modifiers.comboWindow);
+    // Grow the bars in place so a fresh unlock is felt immediately, never a heal.
+    const hpDelta = this.modifiers.maxHp - wasMaxHp;
+    if (hpDelta !== 0) {
+      this.maxHp = Math.max(1, this.maxHp + hpDelta);
+      this.hp = clamp(this.hp + Math.max(0, hpDelta), 1, this.maxHp);
+    }
+    const auraDelta = this.modifiers.maxAura - wasMaxAura;
+    if (auraDelta !== 0) {
+      this.maxAura = Math.max(1, this.maxAura + auraDelta);
+      this.aura = clamp(this.aura, 0, this.maxAura);
+    }
+  }
+
+  /** Subscribe to Signal Point events. Returns the unsubscribe function. */
+  setSignalHook(hook: (event: SignalEvent) => void): () => void {
+    this.signalHooks.add(hook);
+    return () => {
+      this.signalHooks.delete(hook);
+    };
+  }
+
+  /**
+   * Every SP event the bank pays. The local seat's events go to the manager
+   * (which persists them); every seat's events land on the Stat Board lines.
+   */
+  private onSignal(event: SignalEvent) {
+    const line = this.statLines.get(event.seat);
+    if (line) {
+      line.round.signal = (line.round.signal ?? 0) + event.amount;
+      line.raid.signal = (line.raid.signal ?? 0) + event.amount;
+    }
+    if (event.seat !== this.controlledSeat) return;
+    // Mirror the manager's ledger locally so the HUD reads right before the next push.
+    this.signalLedger = { ...this.signalLedger, earned: this.signalLedger.earned + event.amount };
+    for (const hook of this.signalHooks) hook(event);
+  }
+
+  /** Signal Points earned since this round began, for tests and the stat board. */
+  signalThisRound() {
+    return this.signalBank.earnedRound;
+  }
+
+  /** Live crowd budget. Tests lower the cap; a settings panel could too. */
+  crowdBudget(): CrowdBudget {
+    return getCrowdBudget();
+  }
+
+  setCrowdBudget(budget: Partial<CrowdBudget>) {
+    setCrowdBudget(budget);
+  }
+
+  /** Population census for the current round: planned total, spawned so far, standing now. */
+  census() {
+    return {
+      round: this.round,
+      planned: this.survivalPlan.civilians,
+      total: this.survivalPlan.total,
+      spawned: this.spawnedThisRound,
+      queued: this.queue.length + this.reserve.length,
+      alive: this.livingEnemies(),
+      attackers: this.attackersNow,
+    };
   }
 
   getLoadout(): AbilitySpec[] {
@@ -1232,16 +1453,21 @@ export class RaidEngine {
     const carriedAura = this.powerOut.down ? this.powerOut.stashed : this.aura;
     const auraFrac = this.maxAura > 0 ? carriedAura / this.maxAura : 1;
     this.spec = spec;
-    this.moves = moves?.length === 3 ? moves : spec.moves;
+    this.moves = moves && moves.length >= 3 ? moves.slice(0, MAX_POWER_SLOTS) : spec.moves;
     this.maxHp = spec.maxHp + this.upgrades.vitality * 25;
     this.hp = Math.max(1, this.maxHp * hpFrac);
     this.maxAura = spec.maxAura + this.upgrades.capacity * 20;
     this.aura = this.maxAura * auraFrac;
     this.powerOut = new PowerOutage(this.gameMode === GameMode.PVP);
-    this.moveCd = [0, 0, 0];
-    this.moveT = [0, 0, 0];
-    this.queuedMoves = [false, false, false];
-    this.releaseArmed = [true, true, true];
+    this.moveCd = [0, 0, 0, 0, 0, 0];
+    this.moveT = [0, 0, 0, 0, 0, 0];
+    this.queuedMoves = [false, false, false, false, false, false];
+    this.releaseArmed = [true, true, true, true, true, true];
+    this.surgeT = 0;
+    this.surgeMul = 1;
+    this.blitz = null;
+    this.choreo = null;
+    this.castScale = 1;
     this.meleeT = 0;
     this.meleeCd = 0;
 
@@ -1332,7 +1558,7 @@ export class RaidEngine {
     this.hosts = this.hosts.filter((entry) => entry !== host);
 
     this.spec = spec;
-    this.moves = moves?.length === 3 ? moves : spec.moves;
+    this.moves = moves && moves.length >= 3 ? moves.slice(0, MAX_POWER_SLOTS) : spec.moves;
     this.player = incomingFighter;
     this.controlledSeat = seat;
     this.closedSeats.delete(seat);
@@ -1351,10 +1577,13 @@ export class RaidEngine {
     this.jumping = false;
     this.yaw = arrived.yaw;
     this.facing = arrived.yaw;
-    this.moveCd = [0, 0, 0];
-    this.moveT = [0, 0, 0];
-    this.queuedMoves = [false, false, false];
-    this.releaseArmed = [true, true, true];
+    this.moveCd = new Array(MAX_POWER_SLOTS).fill(0);
+    this.moveT = new Array(MAX_POWER_SLOTS).fill(0);
+    this.queuedMoves = new Array(MAX_POWER_SLOTS).fill(false);
+    this.releaseArmed = new Array(MAX_POWER_SLOTS).fill(true);
+    this.choreo = null;
+    this.blitz = null;
+    this.castScale = 1;
     this.meleeT = 0;
     this.meleeCd = 0;
     this.burnout = false;
@@ -1468,8 +1697,24 @@ export class RaidEngine {
   }
 
   queueAbility(slot = 1) {
-    const i = Math.max(0, Math.min(2, slot));
+    const i = Math.max(0, Math.min(MAX_POWER_SLOTS - 1, slot));
+    if (i >= this.moves.length) return;
     this.queuedMoves[i] = true;
+  }
+
+  /** Sprint + punch. Touch and pad reach it directly. */
+  queueHeavy() {
+    this.heavyQueued = true;
+  }
+
+  /** Sprint + kick. Touch and pad reach it directly. */
+  queueLauncher() {
+    this.launcherQueued = true;
+  }
+
+  /** Hold to block. Touch buttons call this on press and release. */
+  setGuard(on: boolean) {
+    this.guardTouch = on;
   }
 
   buyUpgrade(id: UpgradeId) {
@@ -1609,7 +1854,8 @@ export class RaidEngine {
     if (lower === 'h') this.cycleLock();
     const rival = this.pvpLocalTwo ? commandForKey(e.key, e.code, 2) : null;
     const command = rival ?? commandForKey(e.key, e.code, 1);
-    if (command) this.queueCommand(command, rival ? 2 : 1);
+    // Shift turns a light strike heavy: Shift+C is the heavy, Shift+V the launcher.
+    if (command) this.queueCommand(rival ? command : withSprintModifier(command, e.shiftKey || this.keys.has('shift')), rival ? 2 : 1);
     if (INTERACT_KEYS.includes(e.key.toLowerCase())) this.interactQueued = true;
     if (e.key === 'Escape') {
       if (this.mapOpen) {
@@ -1627,15 +1873,14 @@ export class RaidEngine {
   private onKeyUp = (e: KeyboardEvent) => {
     this.keys.delete(e.key.toLowerCase());
     const command = commandForKey(e.key, e.code, 1);
-    if (command === 'ability1') this.releaseArmed[0] = true;
-    if (command === 'ability2') this.releaseArmed[1] = true;
-    if (command === 'ability3') this.releaseArmed[2] = true;
+    const slot = abilitySlotOf(command);
+    if (slot >= 0) this.releaseArmed[slot] = true;
   };
 
-  /** Q/1, E/2, or R/3 is still down, so this press is the one that turned the power on. */
+  /** The slot's number key (1–6) is still down, so this press is the one that turned the power on. */
   private abilityHeld(slot: number) {
-    const keys = slot === 0 ? ['q', '1'] : slot === 1 ? ['e', '2'] : ['r', '3'];
-    return keys.some((key) => this.keys.has(key));
+    const key = ABILITY_KEYS[slot];
+    return key !== undefined && this.keys.has(key);
   }
 
   private onMouseMove = (e: MouseEvent) => {
@@ -1737,9 +1982,15 @@ export class RaidEngine {
     this.meleeCd = Math.max(0, this.meleeCd - dt);
     this.iframes = Math.max(0, this.iframes - dt);
     if (!this.striker.busy && this.meleeT > 0) this.meleeT = Math.max(0, this.meleeT - dt * 3.4);
-    for (let i = 0; i < 3; i += 1) {
+    for (let i = 0; i < MAX_POWER_SLOTS; i += 1) {
       this.moveCd[i] = Math.max(0, this.moveCd[i] - dt);
     }
+    if (this.surgeT > 0) {
+      this.surgeT = Math.max(0, this.surgeT - dt);
+      if (this.surgeT <= 0) this.surgeMul = 1;
+    }
+    this.stepChoreo();
+    this.stepBlitz(dt);
     if (this.bannerT > 0) {
       this.bannerT = Math.max(0, this.bannerT - dt);
       if (this.bannerT <= 0) this.banner = null;
@@ -1777,11 +2028,11 @@ export class RaidEngine {
     this.markExplored(this.pos.x, this.pos.z);
     this.kickSand(dt, footFloor);
     const recovering = this.recoveryT > 0;
-    const locked = recovering || (this.kit?.locked ?? false);
+    const locked = recovering || this.bodyLocked();
     // Busy hands (weapon thrown, spinning): only the power that is on may be
     // pressed, to switch it off.
     const busy = this.kit?.busy ?? false;
-    for (let i = 0; i < 3; i += 1) {
+    for (let i = 0; i < this.moves.length; i += 1) {
       if (this.queuedMoves[i]) {
         this.queuedMoves[i] = false;
         const release = this.moves[i]?.id === this.kit?.releaseId;
@@ -1791,10 +2042,13 @@ export class RaidEngine {
     this.pollPad();
     if (this.fireHeld && !this.fireEdge) {
       this.fireEdge = true;
+      // Click near a crowd and the Ryder swings instead of shooting. The reach
+      // matches the punch lunge so a crowd three metres out is still a fist fight.
       const near = this.nearestHost(this.pos);
-      const close = near ? Math.hypot(near.pos.x - this.pos.x, near.pos.z - this.pos.z) < 2.75 : false;
+      const close = near ? Math.hypot(near.pos.x - this.pos.x, near.pos.z - this.pos.z) < 3.4 : false;
       if (close) {
-        this.punchQueued = true;
+        if (this.sprinting) this.heavyQueued = true;
+        else this.punchQueued = true;
         this.suppressFire = true;
       }
     } else if (!this.fireHeld) {
@@ -1956,7 +2210,7 @@ export class RaidEngine {
   private tryInteract() {
     if (!this.player || this.phase === 'dead' || this.raidDown) return;
     if (this.pickupNearestAlly()) return;
-    if (this.recoveryT > 0 || this.kit?.locked) return;
+    if (this.recoveryT > 0 || this.bodyLocked()) return;
     const beacon = this.beacon;
     if (this.tryFieldStation()) return;
     if (!beacon || !beacon.isPlayerInRange(this.pos)) {
@@ -2049,7 +2303,7 @@ export class RaidEngine {
       }
     }
     let drain = 0;
-    for (let i = 0; i < 3; i += 1) {
+    for (let i = 0; i < this.moves.length; i += 1) {
       if (this.moveT[i] > 0) drain += this.moves[i].drain;
     }
     if (drain > 0) {
@@ -2057,7 +2311,7 @@ export class RaidEngine {
       if (this.burnout || this.aura <= 0) this.endAllMoves();
     } else if (!this.kit?.flying) {
       const regen =
-        this.spec.auraRegen +
+        this.spec.auraRegen * (1 + this.modifiers.auraRegen) +
         this.upgrades.capacity * 1.2 +
         (this.phase === 'intermission' ? 8 : 0);
       const using = this.fireHeld;
@@ -2229,7 +2483,7 @@ export class RaidEngine {
     if (!this.player) return;
     if (this.raidDown) return;
     const phased = this.isPhased();
-    const locked = this.kit?.locked ?? false;
+    const locked = this.bodyLocked();
 
     const wish = this.readMoveAxes();
     let x = wish.x;
@@ -2356,7 +2610,7 @@ export class RaidEngine {
       this.meleeT > 0 ||
       this.dodgeT > 0 ||
       (this.kit?.busy ?? false) ||
-      (this.kit?.locked ?? false);
+      this.bodyLocked();
     let target = this.facing;
     if (this.dodgeT > 0) target = Math.atan2(this.dodgeX, this.dodgeZ);
     else if (committed) target = this.yaw;
@@ -2389,7 +2643,7 @@ export class RaidEngine {
       const hinted = token !== this.clipTokenSeen && Boolean(this.kit?.clipHint);
       if (token !== this.clipTokenSeen) this.clipTokenSeen = token;
       animateGltfFighter(this.player, dt, this.anim, moving, this.sprinting, this.meleeT, this.meleeStarted || hinted, {
-        pose: this.kit?.pose ?? swimPose ?? this.jumpPose(),
+        pose: this.powerPose() ?? this.kit?.pose ?? swimPose ?? this.jumpPose(),
         style: this.strikeOverride ?? undefined,
         clipHint: hinted ? this.kit?.clipHint ?? undefined : undefined,
         clipSeconds: hinted ? this.kit?.clipSeconds : undefined,
@@ -2472,12 +2726,13 @@ export class RaidEngine {
     }
     if (command === 'punch') this.punchQueued = true;
     if (command === 'kick') this.kickQueued = true;
+    if (command === 'heavy') this.heavyQueued = true;
+    if (command === 'launcher') this.launcherQueued = true;
     if (command === 'melee') this.meleeQueued = true;
     if (command === 'dodge') this.dodgeQueued = true;
     if (command === 'jump') this.jumpQueued = true;
-    if (command === 'ability1') this.queuedMoves[0] = true;
-    if (command === 'ability2') this.queuedMoves[1] = true;
-    if (command === 'ability3') this.queuedMoves[2] = true;
+    const slot = abilitySlotOf(command);
+    if (slot >= 0 && slot < this.moves.length) this.queuedMoves[slot] = true;
   }
 
   private connectedPad() {
@@ -2524,7 +2779,10 @@ export class RaidEngine {
       pad.buttons.map((button) => button.pressed),
       this.padPrev,
     );
-    for (const command of commands) this.queueCommand(command, 1);
+    // Left trigger / L2 held: light strikes come out heavy, as Shift does on the keyboard.
+    const modifier = Boolean(pad.buttons[6]?.pressed) && !pad.buttons[6]?.touched;
+    for (const command of commands) this.queueCommand(withSprintModifier(command, modifier || this.sprinting), 1);
+    this.guardPad = Boolean(pad.buttons[4]?.pressed);
     const lx = pad.axes[0] ?? 0;
     const ly = pad.axes[1] ?? 0;
     const mag = Math.hypot(lx, ly);
@@ -2539,7 +2797,9 @@ export class RaidEngine {
   }
 
   private tryDodge() {
-    if (this.dodgeCd > 0 || this.hitStun > 0.18 || this.stasis > 0 || (this.kit?.locked ?? false)) return;
+    if (this.dodgeCd > 0 || this.hitStun > 0.18 || this.stasis > 0 || this.bodyLocked()) return;
+    // A dodge cuts the tail of a landed strike, so punish windows belong to whiffs only.
+    this.striker.cancel();
     const wish = this.readMoveAxes();
     const x = wish.x;
     const z = wish.z;
@@ -2557,11 +2817,30 @@ export class RaidEngine {
       this.dodgeZ /= mag;
     }
     this.dodgeT = 0.18;
-    this.dodgeCd = 0.88;
+    this.dodgeCd = 0.88 * Math.max(0.4, 1 + this.modifiers.dodgeCooldown);
     this.iframes = Math.max(this.iframes, 0.16);
     this.combatMemory.note('dodge', this.simTime);
     this.striker.interrupt();
     this.kit?.onDodge?.();
+  }
+
+  /**
+   * Guard: the dodge key held after the dodge itself is spent, standing still.
+   * Blocks eat most of a hit and all of its stun. Moving drops the guard, so a
+   * blocking Ryder is a planted Ryder.
+   */
+  private stepGuard(dt: number, canAct: boolean) {
+    const held = this.keys.has('z') || this.guardPad || this.guardTouch;
+    const still = this.readMoveAxes().len < 0.2;
+    const want = held && still && this.dodgeT <= 0 && !this.striker.busy && canAct && this.airY <= 0.02;
+    if (want) {
+      this.guardT += dt;
+      // The first beat of a hold is the dodge's own window; the guard raises right after it.
+      this.guarding = this.guardT >= 0.1;
+    } else {
+      this.guardT = 0;
+      this.guarding = false;
+    }
   }
 
   /** Grounded hop. A second press while that hop is still up can mount, for a kit that flies. */
@@ -2580,7 +2859,7 @@ export class RaidEngine {
       }
       return;
     }
-    if (this.hitStun > 0.12 || this.dodgeT > 0 || (this.kit?.locked ?? false)) return;
+    if (this.hitStun > 0.12 || this.dodgeT > 0 || this.bodyLocked()) return;
     if (this.pvpCpu?.grabsPlayer()) return;
     this.airVel = JUMP_SPEED;
     this.airY = 0.02;
@@ -2630,19 +2909,27 @@ export class RaidEngine {
       }
     }
     const canAct = !locked && !busy && this.hitStun < 0.12 && this.dodgeT <= 0 && this.stasis <= 0;
-    if ((this.punchQueued || this.kickQueued || this.meleeQueued) && canAct) this.faceNearest(3.4);
-    if (this.heldThrow && (this.punchQueued || this.kickQueued)) {
+    this.stepGuard(dt, canAct);
+    const anyStrike = this.punchQueued || this.kickQueued || this.meleeQueued || this.heavyQueued || this.launcherQueued;
+    // Targeting assist: a strike turns the body toward the closest body in a
+    // generous cone, so a crowd fight never whiffs because of two degrees.
+    if (anyStrike && canAct) this.faceNearest(3.8);
+    if (this.heldThrow && (this.punchQueued || this.kickQueued || this.heavyQueued || this.launcherQueued)) {
       this.releaseHeldThrow();
       this.punchQueued = false;
       this.kickQueued = false;
+      this.heavyQueued = false;
+      this.launcherQueued = false;
     }
     if (this.kit?.flying) {
-      if (this.punchQueued) {
+      if (this.punchQueued || this.heavyQueued) {
         this.punchQueued = false;
+        this.heavyQueued = false;
         this.kit.airStrike?.('punch');
       }
-      if (this.kickQueued) {
+      if (this.kickQueued || this.launcherQueued) {
         this.kickQueued = false;
+        this.launcherQueued = false;
         this.kit.airStrike?.('kick');
       }
       if (this.meleeQueued) {
@@ -2650,15 +2937,20 @@ export class RaidEngine {
         this.kit.airStrike?.('melee');
       }
     }
-    if (this.punchQueued) {
-      this.punchQueued = false;
-      if (canAct || this.striker.busy) this.striker.queue('punch');
-      this.combatMemory.note('punch', this.simTime);
-    }
-    if (this.kickQueued) {
-      this.kickQueued = false;
-      if (canAct || this.striker.busy) this.striker.queue('kick');
-      this.combatMemory.note('kick', this.simTime);
+    const strikeInputs: Array<[boolean, StrikeInput]> = [
+      [this.punchQueued, 'punch'],
+      [this.kickQueued, 'kick'],
+      [this.heavyQueued, 'heavy'],
+      [this.launcherQueued, 'launcher'],
+    ];
+    this.punchQueued = false;
+    this.kickQueued = false;
+    this.heavyQueued = false;
+    this.launcherQueued = false;
+    for (const [queued, input] of strikeInputs) {
+      if (!queued) continue;
+      if (canAct || this.striker.busy) this.striker.queue(input);
+      this.combatMemory.note(input === 'heavy' ? 'punch' : input === 'launcher' ? 'kick' : input, this.simTime);
     }
     if (this.meleeQueued) {
       this.meleeQueued = false;
@@ -2667,7 +2959,8 @@ export class RaidEngine {
         const near = this.nearestHost(this.pos);
         const dist = near ? Math.hypot(near.pos.x - this.pos.x, near.pos.z - this.pos.z) : 99;
         const sequence = this.striker.combo.snapshot(this.simTime).sequence;
-        if (near && meleeWantsGrab(sequence, dist, false, recipesFor(this.spec.id))) this.striker.queue('melee');
+        const finisher = Boolean(near && isKnockedDown(near) && dist < 2.2);
+        if (near && (finisher || meleeWantsGrab(sequence, dist, false, this.striker.combo.activeRecipes))) this.striker.queue('melee');
         else this.tryMelee();
         this.combatMemory.note('melee', this.simTime);
       }
@@ -2676,15 +2969,18 @@ export class RaidEngine {
       this.dodgeQueued = false;
       if (canAct) this.tryDodge();
     }
-    const tempo = Math.min(1.2, Math.max(0.4, (this.kit?.haste ?? 1) * this.suppress));
+    const tempo = Math.min(1.35, Math.max(0.4, (this.kit?.haste ?? 1) * this.suppress * (this.surgeT > 0 ? 1.18 : 1)));
+    const airborne = this.airY > 0.35 && !this.kit?.flying;
     const frame = this.striker.tick(dt * tempo, {
       time: this.simTime,
       stunned: this.hitStun > 0.12 || this.stasis > 0,
-      locked: locked || busy,
+      locked: locked || busy || this.guarding,
       facing: this.yaw,
       x: this.pos.x,
       z: this.pos.z,
       meleeDamage: this.meleeDamage(),
+      airborne,
+      damageScale: this.strikeScale(),
       targets: this.hosts
         .filter((host) => host.hp > 0 && !host.ally)
         .map((host) => ({
@@ -2693,6 +2989,7 @@ export class RaidEngine {
           z: host.pos.z,
           radius: host.radius,
           airborne: host.airY > 0.3,
+          downed: isKnockedDown(host),
         })),
     });
     if (frame.lunge) {
@@ -2701,6 +2998,28 @@ export class RaidEngine {
       this.pos.x = clamp(this.pos.x, -this.limit(), this.limit());
       this.pos.z = clamp(this.pos.z, -this.limit(), this.limit());
       resolveCircle(this.pos, PLAYER_RADIUS, this.world.obstacles);
+    }
+    // An aerial strike drops the Ryder onto the target: the slam is the landing.
+    if (frame.started && frame.kind === 'aerial' && this.airY > 0.3) {
+      this.airVel = Math.min(this.airVel, -9);
+    }
+    // Launcher lifts the Ryder a touch too, so the follow-up punch reads as a jump.
+    if (frame.started && frame.kind === 'launcher' && this.airY <= 0.02 && !this.kit?.flying) {
+      this.airVel = 3.2;
+      this.airY = 0.02;
+      this.jumping = true;
+      this.jumpAt = this.simTime;
+    }
+    // Hosts read a slow windup and may dodge. Flag the ones in front for this frame.
+    const telegraph = this.striker.telegraphing;
+    for (const host of this.hosts) {
+      if (!telegraph || host.ally || host.hp <= 0) {
+        host.canDodge = false;
+        continue;
+      }
+      const dx = host.pos.x - this.pos.x;
+      const dz = host.pos.z - this.pos.z;
+      host.canDodge = dx * dx + dz * dz < 3.6 * 3.6;
     }
     const pose = this.striker.pose();
     if (pose) {
@@ -2721,9 +3040,26 @@ export class RaidEngine {
       }
     }
     for (const hit of frame.hits) this.applyFighterHit(hit);
+    if (frame.hits.length) {
+      const kind = frame.hits[0].kind;
+      if (kind === 'heavy' || kind === 'finisher' || kind === 'aerial') {
+        this.hitStopT = Math.max(this.hitStopT, kind === 'finisher' ? 0.11 : 0.07);
+        this.rig.addShake(kind === 'finisher' ? 0.3 : 0.18);
+        if (kind !== 'heavy') {
+          _tmp2.set(this.pos.x + Math.sin(this.yaw) * 1.2, this.world.heightAt(this.pos.x, this.pos.z) + 0.02, this.pos.z + Math.cos(this.yaw) * 1.2);
+          this.cracks.spawn(_tmp2, 1.6, 2.2);
+          this.rings.spawn(_tmp2, this.spec.color, { radius: kind === 'finisher' ? 2.6 : 1.9, duration: 0.35 });
+        }
+      }
+    }
     const shock = frame.hits.find((hit) => hit.shockRange);
     if (shock?.shockRange) this.forkShock(shock.shockRange, frame.hits.map((hit) => hit.target.ref));
     this.cueStrike(frame);
+  }
+
+  /** Multiplier the tree and the surge put on every physical strike. */
+  private strikeScale() {
+    return (1 + this.modifiers.meleeDamage) * this.surgeMul;
   }
 
   private applyFighterHit(hit: StrikerHit) {
@@ -2734,7 +3070,29 @@ export class RaidEngine {
     _tmp.normalize();
     host.lastImpact = { x: _tmp.x, z: _tmp.z, speed: hit.knockback, kind: hit.kind };
     if (hit.kind === 'throw') host.held = 0;
-    this.hurtHost(host, hit.damage, _tmp, hit.reaction, hit.strength);
+    let damage = hit.damage;
+    let strength = hit.strength * (1 + this.modifiers.knockback);
+    if (hit.kind === 'heavy') damage *= 1 + this.modifiers.heavyDamage;
+    if (hit.kind === 'aerial') damage *= 1 + this.modifiers.aerialDamage;
+    if (hit.kind === 'finisher') damage *= 1 + this.modifiers.finisherDamage;
+    if (hit.kind === 'launcher' || hit.reaction === 'launch') strength *= 1 + this.modifiers.launchPower;
+    // Bodies already in the air stay there a beat longer per hit, so a launch
+    // becomes a juggle instead of a single bounce.
+    if (hit.juggle > 0 && host.airY > 0.05) {
+      juggleBody(host, hit.juggle * (1 + this.modifiers.launchPower));
+      // A juggled body drifts toward the puncher so the next hit stays in range.
+      host.pos.x -= _tmp.x * 0.12;
+      host.pos.z -= _tmp.z * 0.12;
+    }
+    const wasGrounded = host.airY <= 0.05;
+    const finisher = hit.kind === 'finisher' || isFinisherEffect(hit.combo.effect);
+    this.pendingFinisher = finisher;
+    this.hurtHost(host, damage, _tmp, hit.reaction, strength);
+    this.pendingFinisher = false;
+    if (wasGrounded && host.airY > 0.05 && host.hp > 0) {
+      host.launchedBy = this.controlledSeat;
+      host.launchedAt = this.simTime;
+    }
     this.kit?.noteHit?.();
     if (hit.combo.recipeId) this.kit?.noteCombo?.(hit.combo);
     this.combatT = COMBAT_LINGER;
@@ -2977,7 +3335,8 @@ export class RaidEngine {
       hurt: (target, damage, dir, reaction, strength) => {
         const host = target as Host;
         const before = host.hp;
-        this.hurtHost(host, damage, dir, reaction, strength);
+        // Kits deal power damage through here; the rank of the power last cast scales it.
+        this.hurtHost(host, damage * this.castScale, dir, reaction, strength);
         return Math.max(0, before - Math.max(0, host.hp));
       },
       flash: (target, color, seconds) => {
@@ -3091,7 +3450,37 @@ export class RaidEngine {
       return;
     }
     if (this.burnout) return;
+    // One choreographed power at a time; the blitz owns the body until its finisher lands.
+    if (this.choreo || this.blitz) return;
     this.moveCd[slot] = 0.16;
+    const rank = this.rankOf(move.id);
+    const costScale = Math.max(0.4, 1 + this.modifiers.abilityCost) * rankScaling(rank).cost;
+
+    // Tree-earned powers share six engine behaviours, each with its own
+    // choreography. They never go through the kit, so a Ryder's canonical
+    // 1 / 2 / 3 stays exactly as written.
+    if (isDerivedAbility(move.id)) {
+      const spec = DERIVED_POWERS[move.id];
+      const tune = derivedAtRank(spec, rank);
+      const cost = tune.auraCost * costScale;
+      if (this.aura < cost) return;
+      this.spendAura(cost);
+      this.armPvpHit(slot);
+      this.castScale = 1;
+      this.abilityT = Math.max(ABILITY_LINGER, 0.7);
+      this.combatT = COMBAT_LINGER;
+      // A power cancels the tail of a landed strike: power transitions in a combo.
+      this.striker.cancel();
+      if (spec.kind === 'blitz') this.beginBlitz(spec, tune);
+      else this.startChoreo(spec, tune, choreoFor(spec.kind, tune.count), false);
+      this.moveCd[slot] = spec.kind === 'blitz' ? 2.4 : spec.kind === 'surge' ? 1.2 : spec.kind === 'snare' || spec.kind === 'nova' ? 0.9 : 0.5;
+      this.combatMemory.note('ability', this.simTime);
+      this.releasePowerLink(move.id);
+      return;
+    }
+
+    // Canonical powers scale with rank through the cost above and the damage the kit deals.
+    this.castScale = rankScaling(rank).damage;
 
     if (move.drain > 0) {
       if (this.moveT[slot] > 0) {
@@ -3125,11 +3514,12 @@ export class RaidEngine {
       return;
     }
 
-    if (this.aura < move.auraCost) return;
+    if (this.aura < move.auraCost * costScale) return;
     this.armPvpHit(slot);
-    this.spendAura(move.auraCost);
+    this.spendAura(move.auraCost * costScale);
     this.abilityT = ABILITY_LINGER;
     this.combatT = COMBAT_LINGER;
+    this.striker.cancel();
     const id = move.id;
     // A Ryder kit that owns this power plays it out itself.
     if (this.kit?.tryAbility(id)) {
@@ -3173,7 +3563,334 @@ export class RaidEngine {
   }
 
   private endAllMoves() {
-    for (let i = 0; i < 3; i += 1) this.endMove(i);
+    for (let i = 0; i < MAX_POWER_SLOTS; i += 1) this.endMove(i);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Tree-earned powers: breaker, volley, nova, snare, surge, blitz
+  //
+  // Each kind plays a choreography (`progression/power-choreo.ts`): a timeline
+  // of stances, swings and events. The engine steps the timeline, holds the
+  // stance through the pose pipeline, locks the body for the committed part,
+  // and resolves the `hit` / `shot` events into the kind's damage. Numbers
+  // come from the power's rank through `derivedAtRank`.
+  // ---------------------------------------------------------------------------
+
+  private rankOf(id: AbilityId) {
+    return Math.max(1, this.powerRanks[id] ?? 1);
+  }
+
+  /** Walking, swinging, dodging and jumping are held while a kit sequence or a power choreography owns the body. */
+  private bodyLocked() {
+    if (this.kit?.locked) return true;
+    const active = this.choreo;
+    if (active && this.simTime - active.started < active.choreo.lock) return true;
+    return this.blitz !== null;
+  }
+
+  private startChoreo(spec: DerivedPowerSpec, tune: DerivedTune, choreo: PowerChoreo, finisher: boolean) {
+    this.choreo = { spec, tune, choreo, started: this.simTime, next: 0, pose: null, shots: 0, finisher };
+    if (spec.kind === 'breaker' || spec.kind === 'nova' || spec.kind === 'snare') this.faceNearest(Math.max(tune.radius, 4));
+    this.stepChoreo();
+  }
+
+  private stepChoreo() {
+    const active = this.choreo;
+    if (!active) return;
+    const elapsed = this.simTime - active.started;
+    const beats = active.choreo.beats;
+    while (active.next < beats.length && beats[active.next].at <= elapsed + 1e-6) {
+      this.fireBeat(active, beats[active.next]);
+      active.next += 1;
+    }
+    if (elapsed >= active.choreo.duration) this.choreo = null;
+  }
+
+  private fireBeat(active: ActiveChoreo, beat: ChoreoBeat) {
+    const style = RYDER_STYLE[this.spec.id];
+    const spec = active.spec;
+    const tune = active.tune;
+    if (beat.pose) {
+      const kind = resolvePose(beat.pose, style);
+      if (kind) {
+        // The stance runs until the next beat that names one, or the end.
+        const rest = active.choreo.beats.slice(active.next + 1).find((b) => b.pose);
+        active.pose = {
+          kind,
+          weight: beat.weight ?? 1,
+          lean: beat.lean ?? 0,
+          bank: beat.bank ?? 0,
+          since: active.started + beat.at,
+          until: active.started + (rest ? rest.at : active.choreo.duration),
+        };
+      }
+    } else if (beat.lean != null && active.pose) {
+      active.pose.lean = beat.lean;
+    }
+    const strike = resolveStrike(beat.strike, style);
+    if (strike) {
+      this.meleeT = 1;
+      this.meleeStarted = true;
+      this.strikeOverride = strike;
+    }
+    if (beat.kick) this.rig.addKick(beat.kick);
+    if (beat.shake) this.rig.addShake(beat.shake);
+    if (beat.sound) this.emitSound(beat.sound);
+    for (const event of beat.events ?? []) {
+      switch (event) {
+        case 'hit':
+          if (active.finisher) this.blitzFinisherHit(tune);
+          else if (spec.kind === 'breaker') this.breakerHit(tune);
+          else if (spec.kind === 'nova') this.novaHit(spec, tune);
+          else if (spec.kind === 'snare') this.snareHit(spec, tune);
+          else if (spec.kind === 'surge') this.surgeApply(spec, tune);
+          break;
+        case 'shot':
+          this.volleyShot(spec, tune, active.shots);
+          active.shots += 1;
+          break;
+        case 'ring':
+          _tmp2.set(this.pos.x, this.world.heightAt(this.pos.x, this.pos.z) + 0.03, this.pos.z);
+          this.rings.spawn(_tmp2, spec.color, { radius: Math.max(2.4, tune.radius || 3.2), duration: spec.kind === 'snare' ? 0.9 : 0.55 });
+          break;
+        case 'cracks':
+          _tmp2.set(this.pos.x, this.world.heightAt(this.pos.x, this.pos.z) + 0.03, this.pos.z);
+          this.cracks.spawn(_tmp2, Math.max(1.6, (tune.radius || 3) * 0.7), spec.kind === 'nova' ? 4 : 3);
+          break;
+        case 'burst':
+          this.particles.emit(this.pos.clone().setY(1.0), spec.color, spec.kind === 'nova' ? 56 : 36, { speed: spec.kind === 'nova' ? 12 : 9, size: 0.32, life: 0.5, up: 1.4 });
+          break;
+        case 'charge':
+          // Aura gathers on the Ryder before the release.
+          this.particles.emit(this.pos.clone().setY(1.2), spec.color, 18, { speed: 3, size: 0.24, life: 0.3, up: 1.6 });
+          this.powerVfx.surge(0.5);
+          break;
+        case 'afterimage':
+          this.afterimages.spawn(0.35, 0.25, spec.color);
+          break;
+        case 'hitstop':
+          this.hitStopT = Math.max(this.hitStopT, spec.kind === 'nova' || active.finisher ? 0.12 : 0.06);
+          break;
+        case 'iframes':
+          this.iframes = Math.max(this.iframes, 0.5);
+          break;
+        case 'banner':
+          this.banner = { title: spec.name.toUpperCase(), sub: spec.kind === 'surge' ? `${tune.duration.toFixed(0)}s TEMPO` : spec.name.toUpperCase() };
+          this.bannerT = 1.2;
+          break;
+      }
+    }
+  }
+
+  /** The stance the active choreography (or the blitz dash) holds this frame. */
+  private powerPose(): PoseOverride | null {
+    const active = this.choreo;
+    if (active?.pose) {
+      const p = active.pose;
+      const span = Math.max(0.05, p.until - p.since);
+      const t = clamp((this.simTime - p.since) / span, 0, 1);
+      // Ease in over the first few frames, release over the last stretch of the sequence.
+      const ramp = clamp((this.simTime - p.since) / 0.06, 0, 1);
+      const left = active.started + active.choreo.duration - this.simTime;
+      const release = clamp(left / 0.14, 0, 1);
+      const weight = p.weight * Math.min(ramp, release);
+      if (weight <= 0.01) return null;
+      return { kind: p.kind, t, weight, lean: p.lean, bank: p.bank };
+    }
+    if (this.blitz) return { kind: BLITZ_DASH_POSE, t: (this.simTime * 3) % 1, weight: 1 };
+    return null;
+  }
+
+  /** Breaker hit: the front line launches, the rest of the ring is knocked back. */
+  private breakerHit(tune: DerivedTune) {
+    const base = this.meleeDamage() * tune.damageMul * this.strikeScale();
+    const fx = Math.sin(this.yaw);
+    const fz = Math.cos(this.yaw);
+    for (const host of [...this.hosts]) {
+      if (host.ally || host.hp <= 0) continue;
+      const dx = host.pos.x - this.pos.x;
+      const dz = host.pos.z - this.pos.z;
+      const dist = Math.hypot(dx, dz);
+      if (dist > tune.radius + host.radius) continue;
+      _tmp.set(dx, 0, dz);
+      if (_tmp.lengthSq() < 1e-4) _tmp.set(fx, 0, fz);
+      _tmp.normalize();
+      const ahead = (dx * fx + dz * fz) / Math.max(dist, 0.01);
+      const front = ahead > 0.5 && dist < tune.radius * 0.6;
+      host.lastImpact = { x: _tmp.x, z: _tmp.z, speed: front ? 6 : 9, kind: 'ability' };
+      if (front) {
+        const wasGrounded = host.airY <= 0.05;
+        this.hurtHost(host, base, _tmp, 'launch', 1.35 * (1 + this.modifiers.launchPower));
+        if (wasGrounded && host.hp > 0) {
+          host.launchedBy = this.controlledSeat;
+          host.launchedAt = this.simTime;
+        }
+      } else {
+        this.hurtHost(host, base * 0.55, _tmp, 'knockback', 1.1);
+      }
+    }
+  }
+
+  /** One bolt of a volley, fanned around the look direction. */
+  private volleyShot(spec: DerivedPowerSpec, tune: DerivedTune, index: number) {
+    this.lookDir(_look);
+    _look.y *= 0.4;
+    if (_look.lengthSq() < 0.01) _look.set(Math.sin(this.yaw), 0, Math.cos(this.yaw));
+    _look.normalize();
+    _right.set(-Math.cos(this.yaw), 0, Math.sin(this.yaw));
+    const count = Math.max(1, tune.count);
+    // Alternate left and right of centre so the fan fills from the middle out.
+    const order = index === 0 ? 0 : (index % 2 === 1 ? 1 : -1) * Math.ceil(index / 2);
+    const spread = count > 1 ? order / Math.max(1, (count - 1) / 2) : 0;
+    const dir = _tmp.copy(_look).addScaledVector(_right, spread * 0.42).normalize();
+    const origin = this.muzzle();
+    origin.y = 1.3;
+    const damage = this.shotDamage() * tune.damageMul * this.strikeScale();
+    this.spawnBolt(origin, dir, damage, true, spec.color, Math.max(18, this.spec.projectileSpeed));
+    this.particles.emit(origin, spec.color, 6, { speed: 5, size: 0.22, life: 0.25, direction: dir });
+    this.emitSound('fight.punch.swing');
+  }
+
+  /** Nova hit: everything in the ring takes damage and flies outward, closer bodies harder. */
+  private novaHit(spec: DerivedPowerSpec, tune: DerivedTune) {
+    const base = this.meleeDamage() * tune.damageMul * this.strikeScale();
+    for (const host of [...this.hosts]) {
+      if (host.ally || host.hp <= 0) continue;
+      const dx = host.pos.x - this.pos.x;
+      const dz = host.pos.z - this.pos.z;
+      const dist = Math.hypot(dx, dz);
+      if (dist > tune.radius + host.radius) continue;
+      _tmp.set(dx, 0, dz);
+      if (_tmp.lengthSq() < 1e-4) _tmp.set(Math.sin(this.yaw), 0, Math.cos(this.yaw));
+      _tmp.normalize();
+      const falloff = 1 - (dist / (tune.radius + 1)) * 0.45;
+      host.lastImpact = { x: _tmp.x, z: _tmp.z, speed: 10, kind: 'ability' };
+      this.hurtHost(host, base * falloff, _tmp, dist < tune.radius * 0.45 ? 'heavy' : 'knockback', 1.3);
+      host.hitColor = spec.color;
+    }
+  }
+
+  /** Snare hit: the ring is held in place and left exposed; a light sting marks the hold. */
+  private snareHit(spec: DerivedPowerSpec, tune: DerivedTune) {
+    const sting = this.meleeDamage() * tune.damageMul * this.strikeScale();
+    const hold = this.pvpMode() ? tune.duration * 0.6 : tune.duration;
+    for (const host of [...this.hosts]) {
+      if (host.ally || host.hp <= 0) continue;
+      const dx = host.pos.x - this.pos.x;
+      const dz = host.pos.z - this.pos.z;
+      const dist = Math.hypot(dx, dz);
+      if (dist > tune.radius + host.radius) continue;
+      _tmp.set(dx, 0, dz);
+      if (_tmp.lengthSq() < 1e-4) _tmp.set(Math.sin(this.yaw), 0, Math.cos(this.yaw));
+      _tmp.normalize();
+      this.hurtHost(host, sting, _tmp, 'stagger', 0.4);
+      if (host.hp <= 0) continue;
+      host.immobile = Math.max(host.immobile ?? 0, hold);
+      host.exposed = Math.max(host.exposed ?? 0, hold + 1.2);
+      host.knock.multiplyScalar(0.2);
+      host.hit = Math.max(host.hit, hold);
+      host.hitColor = spec.color;
+      _tmp2.set(host.pos.x, this.world.heightAt(host.pos.x, host.pos.z) + 0.03, host.pos.z);
+      this.rings.spawn(_tmp2, spec.color, { radius: host.radius + 0.5, duration: hold });
+    }
+  }
+
+  private pvpMode() {
+    return this.gameMode === GameMode.PVP;
+  }
+
+  /** Tempo buff: faster strikes and heavier hits until the timer runs out. */
+  private surgeApply(spec: DerivedPowerSpec, tune: DerivedTune) {
+    this.surgeT = tune.duration;
+    this.surgeMul = tune.damageMul;
+    this.powerVfx.surge(1);
+    this.particles.emit(this.pos.clone().setY(1.1), spec.color, 28, { speed: 6, size: 0.3, life: 0.6, up: 1.8 });
+  }
+
+  /** Ultimate: a chain of dashes through the crowd, then a radial finisher where the Ryder stops. */
+  private beginBlitz(spec: DerivedPowerSpec, tune: DerivedTune) {
+    this.blitz = { left: 5, next: 0, spec, tune };
+    this.iframes = Math.max(this.iframes, 1.6);
+    this.rig.addShake(0.2);
+    this.banner = { title: spec.name.toUpperCase(), sub: 'ULTIMATE' };
+    this.bannerT = 1.6;
+  }
+
+  private stepBlitz(dt: number) {
+    const blitz = this.blitz;
+    if (!blitz) return;
+    blitz.next -= dt;
+    if (blitz.next > 0) return;
+    const spec = blitz.spec;
+    if (blitz.left <= 0) {
+      // The chain is done: the finisher plays as its own choreography and lands on the slam.
+      this.blitz = null;
+      this.startChoreo(spec, blitz.tune, BLITZ_FINISH, true);
+      return;
+    }
+    // Dash to the next body in the crowd and strike it on arrival.
+    const target = this.pickBlitzTarget();
+    if (target) {
+      const dx = target.pos.x - this.pos.x;
+      const dz = target.pos.z - this.pos.z;
+      const dist = Math.hypot(dx, dz) || 0.01;
+      this.afterimages.spawn(0.5, 0.3, spec.color);
+      const stop = Math.max(0, dist - 1.1);
+      this.pos.x += (dx / dist) * stop;
+      this.pos.z += (dz / dist) * stop;
+      this.pos.x = clamp(this.pos.x, -this.limit(), this.limit());
+      this.pos.z = clamp(this.pos.z, -this.limit(), this.limit());
+      resolveCircle(this.pos, PLAYER_RADIUS, this.world.obstacles);
+      this.yaw = Math.atan2(dx, dz);
+      this.facing = this.yaw;
+      _tmp.set(dx, 0, dz).normalize();
+      target.lastImpact = { x: _tmp.x, z: _tmp.z, speed: 7, kind: 'ability' };
+      // Every dash lands the Ryder's own swing.
+      this.meleeT = 1;
+      this.meleeStarted = true;
+      this.strikeOverride = RYDER_STYLE[this.spec.id].weapon;
+      this.hurtHost(target, this.meleeDamage() * 1.3 * this.strikeScale() * (blitz.tune.damageMul / spec.damageMul), _tmp, 'stagger', 0.9);
+      this.particles.emit(this.pos.clone().setY(1.0), spec.color, 14, { speed: 7, size: 0.26, life: 0.3, up: 0.6 });
+      this.emitSound('fight.punch.impact');
+    }
+    blitz.left -= 1;
+    blitz.next = target ? 0.18 : 0.08;
+    this.iframes = Math.max(this.iframes, 0.4);
+  }
+
+  /** Blitz finisher: everything near the Ryder goes down. */
+  private blitzFinisherHit(tune: DerivedTune) {
+    const base = this.meleeDamage() * tune.damageMul * this.strikeScale();
+    for (const host of [...this.hosts]) {
+      if (host.ally || host.hp <= 0) continue;
+      const dx = host.pos.x - this.pos.x;
+      const dz = host.pos.z - this.pos.z;
+      const dist = Math.hypot(dx, dz);
+      if (dist > tune.radius + host.radius) continue;
+      _tmp.set(dx, 0, dz);
+      if (_tmp.lengthSq() < 1e-4) _tmp.set(Math.sin(this.yaw), 0, Math.cos(this.yaw));
+      _tmp.normalize();
+      host.lastImpact = { x: _tmp.x, z: _tmp.z, speed: 11, kind: 'ability' };
+      this.pendingFinisher = true;
+      this.hurtHost(host, base * (1 - (dist / (tune.radius + 1)) * 0.4), _tmp, 'slam', 1.5);
+      this.pendingFinisher = false;
+    }
+  }
+
+  private pickBlitzTarget(): Host | null {
+    let best: Host | null = null;
+    let bestD = Infinity;
+    for (const host of this.hosts) {
+      if (host.ally || host.hp <= 0) continue;
+      const d = host.pos.distanceToSquared(this.pos);
+      // Prefer bodies not yet reeling so the chain spreads through the crowd.
+      const score = d * (host.stagger > 0.2 ? 2.2 : 1);
+      if (score < bestD && d < 14 * 14) {
+        bestD = score;
+        best = host;
+      }
+    }
+    return best;
   }
 
   private fireSpread(count: number, spread: number, damageMul: number) {
@@ -3181,7 +3898,7 @@ export class RaidEngine {
     this.lookDir(_look);
     _right.set(-Math.cos(this.yaw), 0, Math.sin(this.yaw));
     const origin = this.muzzle();
-    const dmg = this.shotDamage() * damageMul;
+    const dmg = this.shotDamage() * damageMul * this.castScale;
     for (let i = 0; i < count; i += 1) {
       const t = count === 1 ? 0 : i / (count - 1) - 0.5;
       const dir = _tmp.copy(_look).addScaledVector(_right, t * spread * 6).normalize();
@@ -3198,7 +3915,7 @@ export class RaidEngine {
       _tmp.set(dx, 0, dz);
       if (_tmp.lengthSq() < 0.0001) _tmp.set(Math.sin(this.yaw), 0, Math.cos(this.yaw));
       _tmp.normalize();
-      this.hurtHost(host, damage, knock < 0 ? _tmp.multiplyScalar(-1) : _tmp);
+      this.hurtHost(host, damage * this.castScale, knock < 0 ? _tmp.multiplyScalar(-1) : _tmp);
       host.knock.multiplyScalar(Math.abs(knock) / 8);
     }
   }
@@ -3219,7 +3936,7 @@ export class RaidEngine {
         const d = Math.hypot(host.pos.x - this.pos.x, host.pos.z - this.pos.z);
         if (d < host.radius + 1.35) {
           hit.add(host);
-          this.hurtHost(host, 26, _look);
+          this.hurtHost(host, 26 * this.castScale, _look);
         }
       }
     }
@@ -3230,7 +3947,7 @@ export class RaidEngine {
     this.meleeT = 1;
     this.meleeStarted = true;
     _fwd.set(Math.sin(this.yaw), 0, Math.cos(this.yaw));
-    const dmg = this.meleeDamage() * 1.45;
+    const dmg = this.meleeDamage() * 1.45 * this.castScale;
     for (const host of this.hosts) {
       const dx = host.pos.x - this.pos.x;
       const dz = host.pos.z - this.pos.z;
@@ -3251,7 +3968,7 @@ export class RaidEngine {
       const dist = Math.hypot(host.pos.x - this.pos.x, host.pos.z - this.pos.z);
       if (dist > 5.4 + host.radius) continue;
       _tmp.set(host.pos.x - this.pos.x, 0, host.pos.z - this.pos.z).normalize();
-      this.hurtHost(host, 18, _tmp);
+      this.hurtHost(host, 18 * this.castScale, _tmp);
       stolen += 9;
     }
     this.aura = Math.min(this.maxAura, this.aura + stolen);
@@ -3367,6 +4084,10 @@ export class RaidEngine {
     this.tactics = plan.scale.tactics;
     this.queue = plan.opening.slice();
     this.reserve = plan.reserve.slice();
+    this.spawnedThisRound = 0;
+    this.signalBank.beginRound();
+    this.engagement.reset();
+    this.secondWindUsed = false;
     this.signalHazard = null;
     this.hazardWait = 12;
     this.stormT = plan.event === 'storm' ? 16 : 0;
@@ -3391,17 +4112,35 @@ export class RaidEngine {
   private updateRaid(dt: number) {
     if (this.phase !== 'playing') return;
     this.tickHazard(dt);
-    const scale = this.survivalPlan.scale;
     this.spawnTimer -= dt;
     this.releaseReserve();
-    while (this.spawnTimer <= 0 && this.queue.length && this.livingEnemies() < Math.min(scale.cap, MAX_ALIVE_HOSTS)) {
-      const order = this.queue.shift();
-      if (order) this.spawnHost(order, scale);
-      this.spawnTimer += scale.spawnInterval;
-    }
+    this.stageSpawns();
     if (this.queue.length === 0 && this.reserve.length === 0 && this.livingEnemies() === 0 && this.raidWave > 0) {
       this.openStatBoard();
     }
+  }
+
+  /**
+   * Staged spawning. The round's population is fixed (round × 8); this only
+   * decides how many stand at once. Later rounds release small batches so the
+   * street refills as fast as it empties without ever exceeding the crowd budget.
+   */
+  private stageSpawns() {
+    const scale = this.survivalPlan.scale;
+    const budget = getCrowdBudget();
+    const cap = Math.min(scale.cap, budget.maxAlive, MAX_ALIVE_HOSTS);
+    let batch = Math.max(1, scale.spawnBatch);
+    while (this.spawnTimer <= 0 && this.queue.length && this.livingEnemies() < cap) {
+      const order = this.queue.shift();
+      if (order) this.spawnHost(order, scale);
+      batch -= 1;
+      if (batch <= 0) {
+        this.spawnTimer += scale.spawnInterval;
+        batch = Math.max(1, scale.spawnBatch);
+      }
+    }
+    // The crowd is full: hold the timer so the next opening fires at once.
+    if (this.spawnTimer < -scale.spawnInterval) this.spawnTimer = -scale.spawnInterval;
   }
 
   private failRaid() {
@@ -3478,6 +4217,10 @@ export class RaidEngine {
     this.reportLeft = mvpRound(round) ? MVP_HOLD : REPORT_HOLD;
     if (this.gameMode === GameMode.RAID && this.raidPlan) this.awardPoints(RAID_REWARDS.round);
     else this.awardPoints(round * 250);
+    // Round clear SP goes to every seat that is still in the fight. The bank
+    // keeps the round keyed, so a reopened board cannot pay twice.
+    const seats = this.gameMode === GameMode.RAID && this.raidPlan ? [...this.statLines.keys()] : [this.controlledSeat];
+    for (const seat of seats) this.signalBank.roundClear(round, seat);
     this.phase = 'report';
     this.mapOpen = false;
     if (document.pointerLockElement === this.canvas) document.exitPointerLock();
@@ -3642,6 +4385,10 @@ export class RaidEngine {
       seat,
       down: placed?.down ?? 0,
       swims: true,
+      sinceAttack: 0,
+      token: false,
+      sinceSeen: 0,
+      canDodge: false,
     };
     this.ensureStatLine(seat, id, remoteHuman ? 'human' : 'computer');
     let foe: Host | null = null;
@@ -3926,7 +4673,7 @@ export class RaidEngine {
     const dist = Math.hypot(dx, dz) || 0.0001;
     if (dist <= REVIVE_RANGE) {
       const by = host.ryderId ? RYDERZ[host.ryderId].name : 'A TEAMMATE';
-      this.revivePatient(patient, by);
+      this.revivePatient(patient, by, host.seat ?? -1);
       return true;
     }
     const step = Math.min(Math.max(0, dist - REVIVE_RANGE * 0.7), host.speed * dt);
@@ -3947,9 +4694,14 @@ export class RaidEngine {
     return true;
   }
 
-  private revivePatient(patient: { kind: 'local' } | { kind: 'ally'; host: Host }, by: string) {
+  private revivePatient(patient: { kind: 'local' } | { kind: 'ally'; host: Host }, by: string, bySeat: number) {
     if (patient.kind === 'local') this.reviveLocal(by);
     else this.reviveAlly(patient.host, by);
+    // Revive SP goes to the rescuer, once per patient per round, so trading downs pays nothing extra.
+    if (bySeat >= 0) {
+      const key = patient.kind === 'local' ? `seat:${this.controlledSeat}` : `seat:${patient.host.seat ?? -1}`;
+      this.signalBank.revive(key, this.currentRound(), bySeat);
+    }
   }
 
   private reviveLocal(by: string) {
@@ -4001,7 +4753,7 @@ export class RaidEngine {
   private pickupNearestAlly() {
     const host = this.nearestDownedAlly();
     if (!host) return false;
-    this.reviveAlly(host, 'You');
+    this.revivePatient({ kind: 'ally', host }, 'You', this.controlledSeat);
     return true;
   }
 
@@ -4094,7 +4846,8 @@ export class RaidEngine {
   }
 
   private releaseReserve() {
-    if (this.queue.length > 0 || this.reserve.length === 0 || this.livingEnemies() > 2) return;
+    const slack = Math.max(2, Math.floor(this.survivalPlan.scale.cap * 0.25));
+    if (this.queue.length > 0 || this.reserve.length === 0 || this.livingEnemies() > slack) return;
     this.queue = this.reserve;
     this.reserve = [];
     this.spawnTimer = 0.35;
@@ -4141,16 +4894,12 @@ export class RaidEngine {
       if (this.intermissionLeft <= 0) this.beginRound(this.round + 1);
       return;
     }
-    const scale = this.survivalPlan.scale;
     this.tickHazard(dt);
     this.spawnTimer -= dt;
     this.releaseReserve();
-    while (this.spawnTimer <= 0 && this.queue.length && this.livingEnemies() < Math.min(scale.cap, MAX_ALIVE_HOSTS)) {
-      const order = this.queue.shift();
-      if (order) this.spawnHost(order, scale);
-      this.spawnTimer += scale.spawnInterval;
-    }
-    if (this.queue.length === 0 && this.reserve.length === 0 && this.hosts.length === 0 && this.round > 0) {
+    this.stageSpawns();
+    // A swayed or mind-controlled host is on our side; it must not hold the round open.
+    if (this.queue.length === 0 && this.reserve.length === 0 && this.livingEnemies() === 0 && this.round > 0) {
       this.openStatBoard();
     }
   }
@@ -4182,7 +4931,7 @@ export class RaidEngine {
     pos.z += -alley.inward.x * lateral;
     const profileId = profileForKind(kind, Math.random());
     const civilian = definitionForProfile(profileId, Math.random());
-    const fighter = buildHost(kind, civilian.modelPath);
+    const fighter = this.acquireBody(kind, civilian.modelPath);
     const swims = Boolean(alley.aquatic);
     fighter.humanoid.group.position.copy(pos);
     fighter.humanoid.group.position.y = this.bodyHeight(pos.x, pos.z, swims);
@@ -4229,7 +4978,13 @@ export class RaidEngine {
       follow: null,
       guard: 0,
       powerCd: archetype?.supernatural ? 2.4 : 0,
+      sinceAttack: 1 + Math.random() * 2,
+      token: false,
+      sinceSeen: 0,
+      canDodge: false,
+      modelPath: civilian.modelPath ?? null,
     });
+    this.spawnedThisRound += 1;
     const spawned = this.hosts[this.hosts.length - 1];
     if (spawned && this.world.training) this.paintTraining(spawned, true);
   }
@@ -4279,32 +5034,22 @@ export class RaidEngine {
   private updateHosts(dt: number, time: number) {
     const phased = this.isPhased();
     const shielded = this.isActive('forcefield');
+    const budget = getCrowdBudget();
+    this.frameTick += 1;
 
-    for (let i = 0; i < this.hosts.length; i += 1) {
-      for (let j = i + 1; j < this.hosts.length; j += 1) {
-        const a = this.hosts[i];
-        const b = this.hosts[j];
-        const dx = b.pos.x - a.pos.x;
-        const dz = b.pos.z - a.pos.z;
-        const min = a.radius + b.radius;
-        const d2 = dx * dx + dz * dz;
-        if (d2 >= min * min || d2 < 1e-8) continue;
-        const d = Math.sqrt(d2);
-        const push = (min - d) / (a.mass + b.mass);
-        a.pos.x -= (dx / d) * push * b.mass;
-        a.pos.z -= (dz / d) * push * b.mass;
-        b.pos.x += (dx / d) * push * a.mass;
-        b.pos.z += (dz / d) * push * a.mass;
-      }
-    }
+    // Spatial hash: separation and neighbour counts stay near-linear in a 40-body crowd.
+    this.grid.rebuild(this.hosts);
+    this.grid.separate(this.hosts);
     for (const host of this.hosts) {
       if (host.held > 0) continue;
       resolveCircle(host.pos, host.radius, this.world.obstacles);
     }
+    this.assignAttackTokens();
 
     for (const host of this.hosts) {
       host.pacified = Math.max(0, (host.pacified ?? 0) - dt);
       host.immobile = Math.max(0, (host.immobile ?? 0) - dt);
+      host.exposed = Math.max(0, (host.exposed ?? 0) - dt);
       const crowd = (host.pacified ?? 0) > 0 || (host.immobile ?? 0) > 0;
       if (host.ally && host.cpu) {
         if ((host.down ?? 0) > 0) {
@@ -4379,12 +5124,15 @@ export class RaidEngine {
 
       const farX = host.pos.x - this.pos.x;
       const farZ = host.pos.z - this.pos.z;
+      const far2 = farX * farX + farZ * farZ;
+      // Animation LOD: bodies past the animation radius pose every other frame.
+      host.animSkip = far2 > budget.animRadius * budget.animRadius && (this.frameTick + (host.lodTick ?? 0)) % 2 === 1;
       if (
         !host.ally &&
         !host.duelist &&
         host.stagger <= 0 &&
         host.airY <= 0 &&
-        farX * farX + farZ * farZ > 46 * 46
+        far2 > budget.thinkRadius * budget.thinkRadius
       ) {
         host.lodTick = (host.lodTick ?? 0) + 1;
         if (host.lodTick % 3 !== 0) {
@@ -4445,6 +5193,38 @@ export class RaidEngine {
 
       this.driveCivilian(host, dt, time, phased, shielded);
     }
+  }
+
+  /**
+   * The engagement director: only token holders swing. The number of tokens
+   * grows with the round and the squad, so round 30 presses from every side
+   * while round 1 is a readable one-two.
+   */
+  private assignAttackTokens() {
+    if (this.gameMode === GameMode.PVP) return;
+    const list = this.tokenScratch;
+    list.length = 0;
+    for (const host of this.hosts) {
+      if (host.ally || host.duelist || host.hp <= 0) continue;
+      const aim = this.hostAim(host);
+      const dist = Math.hypot(aim.x - host.pos.x, aim.z - host.pos.z);
+      host.aiDist = dist;
+      list.push({
+        ref: host,
+        dist,
+        sinceAttack: host.sinceAttack,
+        tier: host.tier ?? 1,
+        disabled: host.stagger > 0.05 || host.airY > 0.05 || host.held > 0 || host.stun > 0 || (host.pacified ?? 0) > 0 || (host.immobile ?? 0) > 0,
+      });
+    }
+    const scale = this.survivalPlan.scale;
+    const holders = this.engagement.assign(
+      list,
+      { slots: scale.attackSlots, reach: 4.2, rotate: 3.2 - Math.min(1.2, scale.round * 0.03), starve: Math.max(1.8, 3.8 - scale.round * 0.05), overflow: 2 },
+      this.simTime,
+    );
+    this.attackersNow = holders.size;
+    for (const c of list) (c.ref as Host).token = holders.has(c.ref);
   }
 
   /** Pacified or frozen bodies stay on the ground. They do not rise the way a stun does. */
@@ -4526,6 +5306,12 @@ export class RaidEngine {
     const propDist = prop ? Math.hypot(prop.pos.x - host.pos.x, prop.pos.z - host.pos.z) : null;
     host.powerCd = Math.max(0, (host.powerCd ?? 0) - dt);
     host.guard = Math.max(0, (host.guard ?? 0) - dt);
+    host.sinceAttack += dt;
+    if (playerDist < 26) host.sinceSeen = 0;
+    else host.sinceSeen += dt;
+    const swayedEarly = swayOf(host, this.simTime);
+    // Swayed hosts fight each other and ignore the token economy.
+    const token = swayedEarly ? undefined : host.token;
     let order = civilianOrder(profile, {
       dist: playerDist,
       hpRatio: host.maxHp > 0 ? host.hp / host.maxHp : 1,
@@ -4535,9 +5321,14 @@ export class RaidEngine {
       recovering: striker.busy,
       rng: Math.random(),
       playerAttacking: this.striker.busy || this.meleeT > 0,
+      playerTelegraphing: host.canDodge,
       playerChanneling: this.moveT.some((left) => left > 0.05),
       tier: host.tier ?? 1,
       tactics: this.tactics,
+      token,
+      comboReady: host.sinceAttack < 0.9 && host.sinceAttack > 0.3,
+      ringDistance: 1.1 + Math.min(2.2, (slot % 4) * 0.45),
+      sinceSeen: host.sinceSeen,
     });
     const swayed = swayOf(host, this.simTime);
     const turned = Boolean(swayed) && isProvoked(host);
@@ -4556,7 +5347,12 @@ export class RaidEngine {
           : phased
             ? 'phased'
             : 'clear';
-    if (order.state === 'guard') host.guard = 0.32;
+    if (order.state === 'guard' || order.state === 'defend') host.guard = 0.32;
+    if (order.state === 'dodge' && host.cooldown <= 0.1) {
+      // The side-step costs a beat and shows a dust kick, so a dodge is readable.
+      host.cooldown = Math.max(host.cooldown, 0.35);
+      this.particles.emit(host.pos.clone().setY(0.2), 0x9a90a8, 6, { speed: 3, size: 0.2, life: 0.3, up: 0.5, gravity: 5 });
+    }
     if (
       !swayed &&
       host.supernatural &&
@@ -4614,6 +5410,10 @@ export class RaidEngine {
       !this.hazardPush(host.pos.x, host.pos.z)
     ) {
       striker.queue(order.attack);
+      host.sinceAttack = 0;
+      // Telegraph: a flash the moment the swing is committed, before the hit frame.
+      host.hit = Math.max(host.hit, 0.1);
+      host.hitColor = (host.tier ?? 1) >= 4 ? 0xff6a3a : 0xffd27a;
       const pace = swayed?.mode === 'riot' ? 0.2 + swayed.haste * 0.05 : 0.48;
       host.cooldown = pace + Math.random() * (swayed?.mode === 'riot' ? 0.1 : 0.4);
       if (order.attack === 'punch' && Math.random() < (profile.id === 'brawler' || profile.id === 'aggressive' ? 0.55 : 0.28)) {
@@ -4637,7 +5437,8 @@ export class RaidEngine {
     } else if (!phased) {
       const spread = this.tactics.surround || this.tactics.flank;
       const ang = spread ? slot * 2.15 + (this.tactics.flank ? 0.7 : 0) : slot * 1.9;
-      const ring = 0.85 + Math.min(slot, 4) * 0.16;
+      // Token holders stand close; the rest hold a wider ring so the crowd reads as a crowd.
+      const ring = (order.state === 'reposition' ? 2.4 : 0.85) + Math.min(slot, 4) * 0.16;
       gx += Math.cos(ang) * ring;
       gz += Math.sin(ang) * ring;
       if (this.tactics.protectElite && (host.tier ?? 1) <= 2) {
@@ -4718,7 +5519,7 @@ export class RaidEngine {
         host.pos.z += (sz / sd) * (min - sd);
       }
     }
-    for (const other of this.hosts) {
+    for (const other of this.grid.near(host.pos.x, host.pos.z, this.nearScratch)) {
       if (other === host || other.hp <= 0) continue;
       const ox = host.pos.x - other.pos.x;
       const oz = host.pos.z - other.pos.z;
@@ -4805,6 +5606,8 @@ export class RaidEngine {
         }
         continue;
       }
+      // A blocked hit still reaches here; the player side decides how much lands.
+      if (this.guarding) host.sinceAttack = Math.min(host.sinceAttack, 0.2);
       if (this.kit?.passthrough || this.hp <= 0) continue;
       this.raidTaken += hit.damage;
       this.hurtPlayer(hit.damage, _tmp, undefined, {
@@ -4894,6 +5697,7 @@ export class RaidEngine {
     throwing = false,
     pose: PoseOverride | null = null,
   ) {
+    if (host.animSkip && !host.swing && meleeT <= 0) return;
     const swimming = Boolean(host.swims) && this.waterDepth(host.pos.x, host.pos.z) > 1.05;
     const stance = pose ?? (swimming ? { kind: 'swim' as const, t: (time % 1.15) / 1.15, weight: 1 } : null);
     if (host.fighter.meshSource === 'gltf') {
@@ -4913,14 +5717,37 @@ export class RaidEngine {
     if (this.iframes > 0 || this.phase === 'dead' || this.kit?.intangible || this.raidDown) return;
     const scaled = kind ? calculatePvPDamage({ baseDamage: amount, kind }) : amount;
     // A braced Ryder (mid-spin) shrugs most of the blow off: less damage, no shove.
-    const braced = clamp(this.kit?.braced ?? 0, 0, 1);
+    let braced = clamp(this.kit?.braced ?? 0, 0, 1);
     const resist = this.kit?.incomingScale ?? 1;
-    this.hp = Math.max(0, this.hp - scaled * (1 - 0.4 * braced) * resist);
-    if (physical) {
+    // A raised guard eats most of the hit and all of its stun. The tree's guard node adds to the block.
+    const blocked = this.guarding && this.phase === 'playing';
+    if (blocked) {
+      braced = Math.max(braced, clamp(0.72 + this.modifiers.guard, 0, 0.95));
+      this.guardT = Math.max(this.guardT, 0.1);
+      this.particles.emit(this.pos.clone().setY(1.1), this.spec.color, 10, { speed: 5, size: 0.24, life: 0.3, up: 0.6 });
+      this.emitSound('fight.punch.swing');
+    }
+    let incoming = scaled * (1 - (blocked ? braced : 0.4 * braced)) * resist;
+    // Second Wind: once per round a lethal blow leaves one point of health.
+    if (incoming >= this.hp && this.modifiers.passives.includes('secondWind') && !this.secondWindUsed && this.gameMode !== GameMode.PVP) {
+      this.secondWindUsed = true;
+      incoming = Math.max(0, this.hp - 1);
+      this.iframes = Math.max(this.iframes, 1.2);
+      this.banner = { title: 'SECOND WIND', sub: 'STILL STANDING' };
+      this.bannerT = 1.6;
+      this.powerVfx.surge(1);
+    }
+    this.hp = Math.max(0, this.hp - incoming);
+    if (physical && blocked) {
+      // Chip, a small push, and no stun. Blocking a launcher still lifts a little.
+      this.hitKnock.copy(dir).multiplyScalar(physical.knockback * 0.35);
+      this.hitStun = Math.max(this.hitStun, 0.05 * (1 - this.modifiers.hitStunResist));
+      this.takenGap = 0;
+    } else if (physical) {
       if (this.takenGap > 0.5) this.takenChain = 0;
       this.takenChain += 1;
       this.takenGap = 0;
-      let stun = physical.hitStun * (1 - 0.65 * braced);
+      let stun = physical.hitStun * (1 - 0.65 * braced) * Math.max(0.3, 1 - this.modifiers.hitStunResist);
       if (this.takenChain >= 4) stun *= 0.5;
       if (this.takenChain >= 6) stun *= 0.45;
       this.hitStun = Math.max(this.hitStun, stun);
@@ -4993,6 +5820,24 @@ export class RaidEngine {
       amount = calculatePvPDamage({ baseDamage: amount, kind: this.outgoingPvpKind() });
     }
     if (!host.ally && (host.guard ?? 0) > 0) amount *= 0.45;
+    // Snared bodies are left open.
+    if (!host.ally && (host.exposed ?? 0) > 0) amount *= 1.35;
+    // Team combo: a teammate's hit on a body another seat just launched lands harder.
+    if (
+      !host.ally &&
+      !host.duelist &&
+      host.launchedBy != null &&
+      host.launchedBy !== this.actingSeat() &&
+      host.airY > 0.05 &&
+      this.simTime - (host.launchedAt ?? -10) < 1.8
+    ) {
+      amount *= 1.25;
+      host.launchedBy = undefined;
+      if (this.bannerT <= 0.2) {
+        this.banner = { title: 'TEAM COMBO', sub: 'SQUAD DAMAGE +25%' };
+        this.bannerT = 0.9;
+      }
+    }
     if (!host.ally) {
       if (!this.allowAllyDamage) this.raidDealt += amount;
       if (!host.duelist && this.gameMode !== GameMode.PVP) this.noteDamage(this.actingSeat(), amount);
@@ -5001,8 +5846,11 @@ export class RaidEngine {
     host.hit = 0.18;
     host.hitColor = 0xffffff;
     if (reaction) {
-      applyReaction(host, reaction, dir, strength);
-      if (reaction !== 'stagger') host.cooldown = Math.max(host.cooldown, 0.5);
+      // Elites build resistance to repeated launches so a crowd boss is not a yo-yo.
+      const shaped = host.ally || host.duelist ? { reaction, strength } : resistReaction(host, reaction, strength, this.simTime);
+      applyReaction(host, shaped.reaction, dir, shaped.strength);
+      if (shaped.reaction !== 'stagger') host.cooldown = Math.max(host.cooldown, 0.5);
+      if (shaped.reaction !== reaction) host.hitColor = 0xffc857;
     } else {
       host.knock.copy(dir).setY(0).multiplyScalar(8 / host.mass);
     }
@@ -5055,10 +5903,18 @@ export class RaidEngine {
       if (!host.ally) {
         const boss = host.kind === 'broadcaster' || (host.tier ?? 1) >= 6;
         this.awardPoints(killReward(host.tier ?? 1, boss));
-        if (flungBy) this.awardPoints(RAID_REWARDS.finisher);
+        const finisher = Boolean(flungBy) || this.pendingFinisher;
+        if (finisher) this.awardPoints(RAID_REWARDS.finisher);
+        // Signal Points: keyed by body, so a flung corpse or a replayed death never pays twice.
+        if (this.gameMode !== GameMode.PVP && !host.paid) {
+          host.paid = true;
+          this.signalBank.kill(host, host.tier ?? 1, boss, finisher, this.currentRound(), this.actingSeat());
+        }
       }
-      this.aura = Math.min(this.maxAura, this.aura + KILL_AURA_SIPHON + this.upgrades.siphon * 4);
+      const siphon = this.modifiers.passives.includes('auraOnKill') ? 6 : 0;
+      this.aura = Math.min(this.maxAura, this.aura + KILL_AURA_SIPHON + this.upgrades.siphon * 4 + siphon);
     }
+    this.engagement.release(host);
     this.burst(host.pos.clone().setY(1), host.kind === 'broadcaster' ? 0xb84dff : 0x7dff9a, host.kind === 'broadcaster' ? 40 : 16);
     this.hosts = this.hosts.filter((h) => h !== host);
     if (this.gameMode === GameMode.RAID && this.raidPlan && this.hp <= 0 && this.livingAllies() === 0 && this.phase === 'playing') {
@@ -5080,8 +5936,57 @@ export class RaidEngine {
       flashEmissive(host.fighter.humanoid, 0xffffff, 0.6);
       return;
     }
-    this.scene.remove(host.fighter.humanoid.group);
-    disposeObject(host.fighter.humanoid.group);
+    this.retireBody(host);
+  }
+
+  /** Round the fight is in, whichever mode is counting. */
+  private currentRound() {
+    return this.gameMode === GameMode.RAID && this.raidPlan ? this.raidWave : this.round;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Body pooling: a 400-civilian round reuses meshes instead of rebuilding them
+  // ---------------------------------------------------------------------------
+
+  private poolKey(kind: EnemyKind, modelPath: string | null | undefined) {
+    return `${kind}|${modelPath ?? ''}`;
+  }
+
+  private acquireBody(kind: EnemyKind, modelPath: string | null | undefined): Fighter {
+    const bucket = this.hostPool.get(this.poolKey(kind, modelPath));
+    const pooled = bucket?.pop();
+    if (pooled) {
+      const group = pooled.humanoid.group;
+      group.visible = true;
+      group.rotation.set(0, 0, 0);
+      group.scale.setScalar(1);
+      setHumanoidOpacity(pooled.humanoid, 1);
+      pooled.glitch?.setOpacity(0);
+      return pooled;
+    }
+    return buildHost(kind, modelPath);
+  }
+
+  /** Put a dead body back on the shelf, or free it when the shelf is full. */
+  private retireBody(host: Host) {
+    const group = host.fighter.humanoid.group;
+    this.scene.remove(group);
+    if (host.ally || host.duelist) {
+      disposeObject(group);
+      return;
+    }
+    if (this.world.training) this.paintTraining(host, false);
+    const key = this.poolKey(host.kind, host.modelPath);
+    const bucket = this.hostPool.get(key) ?? [];
+    let total = 0;
+    for (const list of this.hostPool.values()) total += list.length;
+    if (bucket.length >= 10 || total >= 40) {
+      disposeObject(group);
+      return;
+    }
+    group.visible = false;
+    bucket.push(host.fighter);
+    this.hostPool.set(key, bucket);
   }
 
   private updateFallen(dt: number) {
@@ -5217,6 +6122,7 @@ export class RaidEngine {
     return this.spec.damage * (1 + 0.15 * this.upgrades.signal) * (phased ? 1.4 : 1);
   }
 
+  /** Base fist damage before the striker's per-action multipliers. Tree and surge scaling ride on `strikeScale`. */
   private meleeDamage() {
     const fists = 1 + 0.25 * this.upgrades.fists;
     const burned = this.burnout ? (this.upgrades.fists >= 3 ? 0.85 : 0.45) : 1;
@@ -5278,7 +6184,7 @@ export class RaidEngine {
   private cameraState(): CameraState {
     if (this.phase === 'dead') return 'EXPLORATION';
     if (this.fireHeld && !this.burnout) return 'AIM';
-    if (this.abilityT > 0 || this.kit?.locked || this.kit?.busy || this.moveT.some((t) => t > 0)) return 'ABILITY';
+    if (this.abilityT > 0 || this.bodyLocked() || this.kit?.busy || this.moveT.some((t) => t > 0)) return 'ABILITY';
     if (this.lockTarget && this.lockTarget.hp > 0) return 'LOCK_ON';
     if (this.sprinting) return 'SPRINT';
     if (this.combatT > 0) return 'COMBAT';
@@ -5310,9 +6216,14 @@ export class RaidEngine {
       height: this.kit?.cameraExtra?.height ?? 0,
       targetHeight: this.kit?.cameraExtra?.targetHeight ?? 0,
     };
-    if (this.livingEnemies() > 6) {
-      extra.distance += 1.15;
-      extra.height += 0.22;
+    // Crowd framing: pull back as the ring around the Ryder fills, capped so the
+    // fight never turns into a top-down map. Only bodies close enough to matter count.
+    const near = this.grid.count(this.pos.x, this.pos.z, 9);
+    if (near > 3) {
+      const t = Math.min(1, (near - 3) / 14);
+      extra.distance += 0.6 + t * 2.1;
+      extra.height += 0.12 + t * 0.55;
+      extra.targetHeight += t * 0.18;
     }
     this.rig.setFramingExtra(extra.distance || extra.height || extra.targetHeight ? extra : null);
     const planar = Math.hypot(this.playerVel.x, this.playerVel.z);
@@ -5397,11 +6308,15 @@ export class RaidEngine {
         ready:
           !this.burnout &&
           !this.powersOut() &&
+          this.moveCd[i] <= 0.16 &&
           (this.moveT[i] > 0 ||
-            (move.drain > 0 ? this.aura > 1 : this.aura >= move.auraCost)),
-        cooldown: 0,
+            (move.drain > 0 ? this.aura > 1 : this.aura >= move.auraCost * Math.max(0.4, 1 + this.modifiers.abilityCost))),
+        cooldown: this.moveCd[i],
         duration: this.moveT[i],
       })),
+      openSlots: this.openSlots,
+      signal: this.signalHud(),
+      guarding: this.guarding,
       round: this.gameMode === GameMode.RAID && this.raidPlan ? this.raidWave : this.round,
       remaining:
         this.gameMode === GameMode.RAID && this.raidPlan
@@ -5476,6 +6391,10 @@ export class RaidEngine {
               damage: this.survivalPlan.scale.damage,
               cap: this.survivalPlan.scale.cap,
               boss: this.survivalPlan.boss,
+              population: this.survivalPlan.civilians,
+              remaining: this.livingEnemies() + this.queue.length + this.reserve.length,
+              alive: this.livingEnemies(),
+              attackers: this.attackersNow,
             },
       party: this.gameMode === GameMode.RAID && this.raidPlan ? this.partyRows() : null,
       revive: this.gameMode === GameMode.RAID && this.raidPlan ? this.revivePrompt() : null,
@@ -5488,6 +6407,18 @@ export class RaidEngine {
         ? { mode: this.swim.mode, oxygen: this.swim.oxygen, submerged: this.swim.mode === 'under' }
         : null,
     });
+  }
+
+  private signalHud(): HudState['signal'] {
+    const earned = this.signalLedger.earned;
+    const progress = levelProgress(earned);
+    return {
+      available: availableSignal(this.signalLedger),
+      earned,
+      round: this.signalBank.earnedRound,
+      level: progress.level,
+      progress: progress.progress,
+    };
   }
 
   private comboHud(): HudState['combo'] {
@@ -5574,6 +6505,10 @@ export class RaidEngine {
       ryderId: id,
       aura: spec.maxAura,
       maxAura: spec.maxAura,
+      sinceAttack: 0,
+      token: false,
+      sinceSeen: 0,
+      canDodge: false,
     };
     this.hosts.push(host);
     if (!controlled) this.attachCpu(host, spec);

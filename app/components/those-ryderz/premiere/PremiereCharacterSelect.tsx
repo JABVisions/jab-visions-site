@@ -13,6 +13,7 @@ import {
   premiereRoster,
   type PremiereCategory,
 } from '@/lib/ryderz-raid/roster/premiere';
+import PowerIcon from '../icons/PowerIcon';
 import { useMenuKeys, wrap } from '../menu/useMenuKeys';
 import CharacterLineupStage, { type ModelStatus } from './CharacterLineupStage';
 import styles from './premiere.module.css';
@@ -240,9 +241,12 @@ export default function PremiereCharacterSelect({
                 {spec ? (
                   <ul>
                     {spec.moves.map((move) => (
-                      <li key={move.id}>
+                      <li key={move.id} className={styles.move}>
                         <span>{move.key}</span>
-                        <strong>{move.name}</strong>
+                        <strong>
+                          <PowerIcon id={move.id} size={15} />
+                          {move.name}
+                        </strong>
                       </li>
                     ))}
                     <li>

@@ -286,6 +286,16 @@
   color: var(--aura, white);
 }
 
+.move strong {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.move svg {
+  flex: none;
+}
+
 .footer {
   display: flex;
   gap: 10px;
