@@ -1,14 +1,32 @@
 import Link from "next/link";
+import { supabaseServer } from "@/lib/supabase/server";
 
-export default function BoardResetPasswordPage({
+export const dynamic = "force-dynamic";
+
+export default async function BoardResetPasswordPage({
   searchParams,
 }: {
   searchParams?: Record<string, string | string[] | undefined>;
 }) {
   const email = typeof searchParams?.email === "string" ? searchParams.email : "";
+  const requestedStep =
+    typeof searchParams?.step === "string" ? searchParams.step : "";
+  const sent = typeof searchParams?.sent === "string" ? searchParams.sent : "";
   const updated =
     typeof searchParams?.updated === "string" ? searchParams.updated : "";
   const error = typeof searchParams?.error === "string" ? searchParams.error : "";
+  const {
+    data: { user },
+  } = await supabaseServer().auth.getUser();
+  const step =
+    requestedStep === "code" && !user
+      ? "code"
+      : requestedStep === "password" && user
+        ? "password"
+        : user
+          ? "password"
+          : "email";
+  const accountEmail = user?.email || email;
 
   return (
     <main className="min-h-screen">
@@ -32,8 +50,11 @@ export default function BoardResetPasswordPage({
         <div className="rounded-3xl border border-white/10 bg-black/30 p-8 shadow-[0_0_80px_rgba(0,200,255,0.08)]">
           <h1 className="text-3xl font-semibold tracking-tight">Reset password</h1>
           <p className="mt-2 text-sm opacity-80">
-            Verify your current password, then choose a new one. No email link is
-            needed.
+            {step === "email"
+              ? "Enter your Board email and we’ll send a verification code."
+              : step === "code"
+                ? `Enter the code sent to ${email}. Then you can choose a new password.`
+                : "Choose a new password for your Board account."}
           </p>
 
           {updated ? (
@@ -48,12 +69,13 @@ export default function BoardResetPasswordPage({
                 Return to login
               </Link>
             </div>
-          ) : (
+          ) : step === "email" ? (
             <form
               className="mt-6 grid gap-4"
-              action="/api/board/auth/reset-password-direct"
+              action="/api/board/auth/reset-password-code"
               method="post"
             >
+              <input type="hidden" name="action" value="send" />
               <div className="grid gap-2">
                 <label className="text-xs opacity-70" htmlFor="reset-email">
                   Board email
@@ -65,25 +87,83 @@ export default function BoardResetPasswordPage({
                   type="email"
                   defaultValue={email}
                   placeholder="you@example.com"
-                  autoComplete="username"
+                  autoComplete="email"
                   required
                 />
               </div>
 
+              {error ? (
+                <div className="rounded-2xl border border-red-200/20 bg-black/40 p-4 text-sm text-red-200" role="alert">
+                  {error}
+                </div>
+              ) : null}
+
+              <button
+                className="mt-2 rounded-2xl bg-white px-5 py-3 text-sm font-semibold text-black hover:opacity-95"
+                type="submit"
+              >
+                Send verification code
+              </button>
+            </form>
+          ) : step === "code" ? (
+            <form
+              className="mt-6 grid gap-4"
+              action="/api/board/auth/reset-password-code"
+              method="post"
+            >
+              <input type="hidden" name="action" value="verify" />
+              <input type="hidden" name="email" value={email} />
+              {sent ? (
+                <div className="rounded-2xl border border-green-200/20 bg-black/40 p-4 text-sm text-green-200">
+                  {sent}
+                </div>
+              ) : null}
               <div className="grid gap-2">
-                <label className="text-xs opacity-70" htmlFor="current-password">
-                  Current password
+                <label className="text-xs opacity-70" htmlFor="reset-code">
+                  Verification code
                 </label>
                 <input
-                  id="current-password"
-                  name="currentPassword"
-                  className="w-full rounded-2xl border border-white/10 bg-black/40 px-4 py-3 text-sm outline-none focus:border-white/20"
-                  type="password"
-                  autoComplete="current-password"
+                  id="reset-code"
+                  name="token"
+                  className="w-full rounded-2xl border border-white/10 bg-black/40 px-4 py-3 text-sm tracking-[0.3em] outline-none focus:border-white/20"
+                  type="text"
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  placeholder="6-digit code"
+                  minLength={6}
+                  maxLength={6}
+                  pattern="[0-9]{6}"
                   required
                 />
               </div>
 
+              {error ? (
+                <div className="rounded-2xl border border-red-200/20 bg-black/40 p-4 text-sm text-red-200" role="alert">
+                  {error}
+                </div>
+              ) : null}
+
+              <button
+                className="mt-2 rounded-2xl bg-white px-5 py-3 text-sm font-semibold text-black hover:opacity-95"
+                type="submit"
+              >
+                Verify code
+              </button>
+
+              <Link
+                className="text-center text-xs underline opacity-75"
+                href={`/board/reset-password?email=${encodeURIComponent(email)}`}
+              >
+                Use a different email
+              </Link>
+            </form>
+          ) : (
+            <form
+              className="mt-6 grid gap-4"
+              action="/api/board/auth/update-password"
+              method="post"
+            >
+              <input type="hidden" name="email" value={accountEmail} />
               <div className="grid gap-2">
                 <label className="text-xs opacity-70" htmlFor="new-password">
                   New password
@@ -128,11 +208,6 @@ export default function BoardResetPasswordPage({
               >
                 Update password
               </button>
-
-              <p className="text-center text-xs opacity-60">
-                You need your current password to verify this change. If you
-                can’t sign in, contact Board support for help.
-              </p>
             </form>
           )}
         </div>
