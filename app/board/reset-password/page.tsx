@@ -1,22 +1,14 @@
 import Link from "next/link";
-import { supabaseServer } from "@/lib/supabase/server";
-import RecoveryLinkHandler from "./RecoveryLinkHandler";
 
-export default async function BoardResetPasswordPage({
+export default function BoardResetPasswordPage({
   searchParams,
 }: {
   searchParams?: Record<string, string | string[] | undefined>;
 }) {
-  const success =
+  const email = typeof searchParams?.email === "string" ? searchParams.email : "";
+  const updated =
     typeof searchParams?.updated === "string" ? searchParams.updated : "";
-  const sent = typeof searchParams?.sent === "string" ? searchParams.sent : "";
   const error = typeof searchParams?.error === "string" ? searchParams.error : "";
-  const requestedEmail =
-    typeof searchParams?.email === "string" ? searchParams.email : "";
-  const {
-    data: { user },
-  } = await supabaseServer().auth.getUser();
-  const email = user?.email || requestedEmail;
 
   return (
     <main className="min-h-screen">
@@ -38,18 +30,16 @@ export default async function BoardResetPasswordPage({
 
       <section className="mx-auto max-w-xl px-6 pb-14 pt-4">
         <div className="rounded-3xl border border-white/10 bg-black/30 p-8 shadow-[0_0_80px_rgba(0,200,255,0.08)]">
-          <RecoveryLinkHandler />
           <h1 className="text-3xl font-semibold tracking-tight">Reset password</h1>
           <p className="mt-2 text-sm opacity-80">
-            {user
-              ? "Choose and confirm a new password for your Board account."
-              : "Enter your Board email to receive the secure link that unlocks password reset."}
+            Verify your current password, then choose a new one. No email link is
+            needed.
           </p>
 
-          {success ? (
+          {updated ? (
             <div className="mt-6 grid gap-4">
               <div className="rounded-2xl border border-green-200/20 bg-black/40 p-4 text-sm text-green-200">
-                {success}
+                {updated}
               </div>
               <Link
                 className="rounded-2xl bg-white px-5 py-3 text-center text-sm font-semibold text-black hover:opacity-95"
@@ -58,62 +48,15 @@ export default async function BoardResetPasswordPage({
                 Return to login
               </Link>
             </div>
-          ) : !user ? (
-            <form
-              className="mt-6 grid gap-4"
-              action="/api/board/auth/reset-password"
-              method="post"
-            >
-              <input type="hidden" name="returnTo" value="/board/reset-password" />
-              <div className="grid gap-2">
-                <label className="text-xs opacity-70" htmlFor="recovery-email">
-                  Email
-                </label>
-                <input
-                  id="recovery-email"
-                  name="email"
-                  className="w-full rounded-2xl border border-white/10 bg-black/40 px-4 py-3 text-sm outline-none focus:border-white/20"
-                  type="email"
-                  defaultValue={email}
-                  placeholder="you@example.com"
-                  autoComplete="email"
-                  required
-                />
-              </div>
-
-              {error ? (
-                <div className="rounded-2xl border border-red-200/20 bg-black/40 p-4 text-sm text-red-200">
-                  {error}
-                </div>
-              ) : null}
-
-              {sent ? (
-                <div className="rounded-2xl border border-green-200/20 bg-black/40 p-4 text-sm text-green-200">
-                  {sent}
-                </div>
-              ) : null}
-
-              <button
-                className="mt-2 rounded-2xl bg-white px-5 py-3 text-sm font-semibold text-black hover:opacity-95"
-                type="submit"
-              >
-                Send reset link
-              </button>
-
-              <p className="text-center text-xs opacity-60">
-                Open the link in the email on this browser, then this page will
-                let you choose the new password.
-              </p>
-            </form>
           ) : (
             <form
               className="mt-6 grid gap-4"
-              action="/api/board/auth/update-password"
+              action="/api/board/auth/reset-password-direct"
               method="post"
             >
               <div className="grid gap-2">
                 <label className="text-xs opacity-70" htmlFor="reset-email">
-                  Email
+                  Board email
                 </label>
                 <input
                   id="reset-email"
@@ -122,8 +65,21 @@ export default async function BoardResetPasswordPage({
                   type="email"
                   defaultValue={email}
                   placeholder="you@example.com"
-                  autoComplete="email"
-                  readOnly
+                  autoComplete="username"
+                  required
+                />
+              </div>
+
+              <div className="grid gap-2">
+                <label className="text-xs opacity-70" htmlFor="current-password">
+                  Current password
+                </label>
+                <input
+                  id="current-password"
+                  name="currentPassword"
+                  className="w-full rounded-2xl border border-white/10 bg-black/40 px-4 py-3 text-sm outline-none focus:border-white/20"
+                  type="password"
+                  autoComplete="current-password"
                   required
                 />
               </div>
@@ -161,7 +117,7 @@ export default async function BoardResetPasswordPage({
               </div>
 
               {error ? (
-                <div className="rounded-2xl border border-red-200/20 bg-black/40 p-4 text-sm text-red-200">
+                <div className="rounded-2xl border border-red-200/20 bg-black/40 p-4 text-sm text-red-200" role="alert">
                   {error}
                 </div>
               ) : null}
@@ -172,6 +128,11 @@ export default async function BoardResetPasswordPage({
               >
                 Update password
               </button>
+
+              <p className="text-center text-xs opacity-60">
+                You need your current password to verify this change. If you
+                can’t sign in, contact Board support for help.
+              </p>
             </form>
           )}
         </div>
