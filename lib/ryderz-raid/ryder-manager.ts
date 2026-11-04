@@ -36,8 +36,6 @@ export interface RyderAbility {
   id: AbilityId;
   name: string;
   description: string;
-  /** Short sigil used by the deck UI (no icon atlas yet). */
-  icon: string;
   /** Slot this power is equipped in for the Ryder being inspected, or null. */
   inputSlot: InputSlot | null;
   /** Seconds; instant powers are gated by aura rather than a timer today. */
@@ -77,54 +75,6 @@ export const ABILITIES: Record<AbilityId, AbilitySpec & { owner: RyderId }> = {
   >),
   ...DERIVED_POWERS,
 };
-
-const SIGILS: Partial<Record<AbilityId, string>> = {
-  bladeFan: 'BF',
-  duplicate: 'DU',
-  envyPulse: 'DT',
-  shockwave: 'SW',
-  overdrive: 'OD',
-  prideDash: 'PD',
-  cleave: 'CL',
-  blink: 'BL',
-  greedSiphon: 'GS',
-  lift: 'LV',
-  forcefield: 'FF',
-  heartbreak: 'HB',
-  decoy: 'DC',
-  phase: 'PH',
-  dartStorm: 'DS',
-  soulDrain: 'SD',
-  giantStep: 'GT',
-  animalAllegiance: 'AA',
-  phantomGrasp: 'PG',
-  paranormalProjection: 'PP',
-  dimensionalCollapse: '4C',
-  temporalZap: 'TZ',
-  rewindProtocol: 'RW',
-  zeroHour: 'ZH',
-  showtime: 'ST',
-  letsBeBad: 'LB',
-  abracadabra: 'AB',
-  dreamVision: 'DV',
-  proclaimPeace: 'PP',
-  freeAtLast: 'FL',
-  callMercy: 'CM',
-  finKick: 'FK',
-  wavePool: 'WP',
-  deathStrike: 'DK',
-  mindControl: 'MC',
-  riot: 'RT',
-};
-
-/** Two-letter sigil for any ability; derived powers take their initials. */
-export function sigilFor(id: AbilityId): string {
-  const fixed = SIGILS[id];
-  if (fixed) return fixed;
-  const words = ABILITIES[id]?.name.split(/\s+/).filter((word) => word && word.toLowerCase() !== 'the') ?? [];
-  if (words.length >= 2) return (words[0][0] + words[1][0]).toUpperCase();
-  return (ABILITIES[id]?.name ?? id).slice(0, 2).toUpperCase();
-}
 
 export function defaultLoadout(id: RyderId): PowerLoadout {
   const [one, two, three] = RYDERZ[id].moves;
@@ -458,7 +408,6 @@ export class RyderManager {
         id: ability,
         name: spec.name,
         description: spec.description,
-        icon: sigilFor(ability),
         inputSlot: slotOf(ability),
         cooldown: 0,
         unlocked: unlocked.includes(ability),

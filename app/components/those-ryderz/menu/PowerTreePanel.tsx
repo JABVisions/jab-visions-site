@@ -6,6 +6,7 @@ import { RYDERZ, type RyderId } from '@/lib/ryderz-raid/config';
 import { BRANCH_LABEL, POWER_BRANCHES, type NodeEffect, type PowerBranch, type StatKey } from '@/lib/ryderz-raid/progression/power-tree';
 import { levelProgress } from '@/lib/ryderz-raid/progression/signal-points';
 import { type InputSlot, type PowerNodeView, type RyderManager } from '@/lib/ryderz-raid/ryder-manager';
+import PowerIcon from '../icons/PowerIcon';
 import { useMenuKeys, wrap } from './useMenuKeys';
 import menu from './PauseMenu.module.css';
 import styles from './PowerTreePanel.module.css';
@@ -209,7 +210,9 @@ export default function PowerTreePanel({
                         }}
                         title={node.description}
                       >
-                        <span className={styles.tier}>T{node.tier}</span>
+                        <span className={styles.tier} data-power={node.effect.kind === 'ability' ? 'true' : undefined}>
+                          {node.effect.kind === 'ability' ? <PowerIcon id={node.effect.abilityId} size={19} /> : `T${node.tier}`}
+                        </span>
                         <strong>{node.name}</strong>
                         <em>
                           {node.owned ? (
@@ -239,7 +242,10 @@ export default function PowerTreePanel({
               <p className={menu.eyebrow}>
                 {BRANCH_LABEL[focused.branch]} · Tier {focused.tier}
               </p>
-              <h3>{focused.name}</h3>
+              <h3>
+                {focused.effect.kind === 'ability' ? <PowerIcon id={focused.effect.abilityId} size={26} /> : null}
+                {focused.name}
+              </h3>
               <p className={styles.blurb}>{focused.description}</p>
               <p className={styles.effect}>{describeEffect(focused.effect)}</p>
               {focused.requires.length > 0 && (

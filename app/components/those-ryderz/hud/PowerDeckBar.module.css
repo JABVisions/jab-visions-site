@@ -95,22 +95,27 @@
   border-style: dashed;
 }
 
+/* The power's symbol: an SVG drawn in currentColor, glowing in the deck colour. */
 .icon {
   display: grid;
   place-items: center;
-  font: 800 0.74rem/1 inherit;
-  letter-spacing: 0.04em;
+  font: 800 0.9rem/1 inherit;
   color: #fff;
-  text-shadow: 0 0 8px color-mix(in srgb, var(--deck) 60%, transparent);
+  filter: drop-shadow(0 0 5px color-mix(in srgb, var(--deck) 70%, transparent));
+  transition: opacity 0.15s ease;
+}
+
+.icon svg {
+  display: block;
 }
 
 .slotLocked .icon,
 .slotEmpty .icon {
   color: rgba(229, 246, 234, 0.55);
-  text-shadow: none;
+  filter: none;
 }
 
-/* Cooldown seconds sit over the sigil while the ring sweeps. */
+/* Cooldown seconds sit over the symbol while the ring sweeps. */
 .timer {
   position: absolute;
   inset: 0;
@@ -199,8 +204,9 @@
     padding: 6px 8px 6px 7px;
   }
 
-  .icon {
-    font-size: 0.66rem;
+  .icon svg {
+    width: 20px;
+    height: 20px;
   }
 }
 

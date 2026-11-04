@@ -7,6 +7,7 @@ import { RYDERZ, UPGRADE_ORDER, UPGRADES, fighterKind, fighterMark, upgradeCost,
 import type { RaidEngine } from '@/lib/ryderz-raid/engine';
 import { GameMode } from '@/lib/ryderz-raid/game-mode';
 import { INPUT_SLOTS, type RyderManager } from '@/lib/ryderz-raid/ryder-manager';
+import PowerIcon from '../icons/PowerIcon';
 import ArenaSelector from './ArenaSelector';
 import GameModeSelector from './GameModeSelector';
 import PauseMenuNavigation, { type NavItem } from './PauseMenuNavigation';
@@ -264,6 +265,7 @@ export default function PauseMenu({
             {deck.map((move, i) => (
               <span key={move.id}>
                 <b>{deckSlots[i] ?? INPUT_SLOTS[i]}</b>
+                <PowerIcon id={move.id} size={15} />
                 {move.name}
               </span>
             ))}

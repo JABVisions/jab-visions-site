@@ -3,6 +3,7 @@
 import { Lock } from 'lucide-react';
 import { forwardRef, useImperativeHandle, useRef } from 'react';
 import { MOVE_KEYS, type AbilityId } from '@/lib/ryderz-raid/config';
+import PowerIcon from '../icons/PowerIcon';
 import styles from './PowerDeckBar.module.css';
 
 /** Slot the dock draws. `id` is null for an open slot with nothing equipped. */
@@ -10,7 +11,6 @@ export interface DeckSlotView {
   key: string;
   id: AbilityId | null;
   name: string;
-  icon: string;
   /** Slot is opened on the tree. Closed slots show a lock and a cost. */
   open: boolean;
   /** SP cost of the node that opens this slot, for the lock tooltip. */
@@ -40,7 +40,7 @@ export type DeckBarApi = {
 
 /**
  * Bottom-centre power dock: six circles numbered 1–6, one per deck slot. Each
- * circle carries its power's sigil, a conic cooldown sweep and a ready glow;
+ * circle carries its power's symbol, a conic cooldown sweep and a ready glow;
  * locked slots show a padlock. The loop drives the rings through `setLive`;
  * React only rerenders when the loadout itself changes. Vitals live on the
  * circular HUD, so the dock stays small enough to sit under the action.
@@ -122,7 +122,7 @@ const PowerDeckBar = forwardRef<
             className={styles.ring}
             data-show="false"
           />
-          <span className={styles.icon}>{slot.open ? (slot.id ? slot.icon : '+') : <Lock size={13} />}</span>
+          <span className={styles.icon}>{slot.open ? slot.id ? <PowerIcon id={slot.id} size={24} /> : '+' : <Lock size={13} />}</span>
           <em
             ref={(node) => {
               timerRefs.current[i] = node;

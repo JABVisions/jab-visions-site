@@ -13,6 +13,7 @@ import {
   type DossierSection,
 } from '@/lib/ryderz-raid/database/dossiers';
 import { INPUT_SLOTS, type RyderManager } from '@/lib/ryderz-raid/ryder-manager';
+import PowerIcon from '../icons/PowerIcon';
 import { RYDER_THEME } from './theme';
 import { useMenuKeys, wrap } from './useMenuKeys';
 import menu from './PauseMenu.module.css';
@@ -264,6 +265,9 @@ export default function DatabasePanel({
                           return (
                             <li key={move.id}>
                               <b>{bound ?? INPUT_SLOTS[i]}</b>
+                              <i className={styles.glyph}>
+                                <PowerIcon id={move.id} size={22} title={`${move.name} symbol`} />
+                              </i>
                               <div>
                                 <strong>{move.name}</strong>
                                 <p>{move.description}</p>

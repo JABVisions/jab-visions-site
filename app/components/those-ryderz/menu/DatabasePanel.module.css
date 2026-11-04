@@ -502,7 +502,7 @@
 
 .kit li {
   display: grid;
-  grid-template-columns: 30px 1fr;
+  grid-template-columns: 30px 34px 1fr;
   gap: 10px;
   align-items: start;
   padding: 8px 10px;
@@ -520,6 +520,19 @@
   background: var(--file);
   color: #07040f;
   font: 800 0.74rem/1 monospace;
+}
+
+/* The power's symbol, drawn like a stamp in the file's colour. */
+.glyph {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border: 1px solid color-mix(in srgb, var(--file) 45%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--file) 10%, transparent);
+  color: var(--file);
+  font-style: normal;
 }
 
 .kit strong {

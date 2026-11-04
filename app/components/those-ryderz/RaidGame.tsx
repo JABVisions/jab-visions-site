@@ -15,7 +15,7 @@ import { CAMERA_MODE_LABEL, type CameraMode, type CameraState } from '@/lib/ryde
 import type { HudState, RaidEngine } from '@/lib/ryderz-raid/engine';
 import { GameMode } from '@/lib/ryderz-raid/game-mode';
 import { PlayerStore } from '@/lib/ryderz-raid/multiplayer';
-import { ABILITIES, INPUT_SLOTS, RyderManager, sigilFor } from '@/lib/ryderz-raid/ryder-manager';
+import { ABILITIES, INPUT_SLOTS, RyderManager } from '@/lib/ryderz-raid/ryder-manager';
 import { SaveManager } from '@/lib/ryderz-raid/saves/saveManager';
 import CameraTuningPanel, { loadStoredCameraConfig } from './CameraTuningPanel';
 import CircularPlayerHUD, { type CircularHudApi } from './hud/CircularPlayerHUD';
@@ -511,7 +511,6 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
         key,
         id,
         name: spec?.name ?? '',
-        icon: id ? sigilFor(id) : '',
         open: isOpen,
         unlockCost: gate?.cost,
       };

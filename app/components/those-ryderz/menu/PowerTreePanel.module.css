@@ -193,6 +193,15 @@
   letter-spacing: 0.06em;
 }
 
+/* Power nodes show the power's symbol in place of the tier mark. */
+.tier[data-power='true'] {
+  color: var(--aura);
+}
+
+.node[data-state='locked'] .tier[data-power='true'] {
+  color: rgba(229, 246, 234, 0.7);
+}
+
 .node strong {
   overflow: hidden;
   font-size: 0.7rem;
@@ -226,11 +235,20 @@
 }
 
 .detail h3 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   margin: 0;
   font-size: 1rem;
   font-weight: 800;
   text-transform: uppercase;
   letter-spacing: 0.04em;
+}
+
+.detail h3 svg {
+  flex: none;
+  color: var(--aura);
+  filter: drop-shadow(0 0 6px color-mix(in srgb, var(--aura) 60%, transparent));
 }
 
 .blurb {
