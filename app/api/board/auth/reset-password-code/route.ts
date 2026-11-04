@@ -68,8 +68,8 @@ export async function POST(request: NextRequest) {
     if (action !== "verify") return fail("Choose a valid reset step.", "email");
 
     const token = String(body?.token || "").trim();
-    if (!/^\d{6}$/.test(token)) {
-      return fail("Enter the 6-digit code from your email.");
+    if (!/^\d{6,10}$/.test(token)) {
+      return fail("Enter the verification code from your email (6–10 digits).");
     }
 
     const { data, error } = await supabase.auth.verifyOtp({
