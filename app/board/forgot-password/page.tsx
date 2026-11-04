@@ -17,8 +17,7 @@ export default function BoardForgotPasswordPage() {
         <div className="rounded-3xl border border-white/10 bg-black/30 p-8 shadow-[0_0_80px_rgba(0,200,255,0.08)]">
           <h1 className="text-3xl font-semibold tracking-tight">Password help</h1>
           <p className="mt-2 text-sm opacity-80">
-            Email reset links aren’t available right now. If you know your
-            current password, you can verify it and choose a new one here.
+            Verify your email with a one-time code, then choose a new password.
           </p>
 
           <div className="mt-6 grid gap-4">
@@ -29,8 +28,7 @@ export default function BoardForgotPasswordPage() {
               Reset password
             </Link>
             <p className="text-center text-xs opacity-60">
-              If you can’t sign in with your current password, contact Board
-              support for help.
+              If you can’t access your email, contact Board support for help.
             </p>
             <Link className="text-center text-xs underline opacity-75" href="/board/login">
               Back to login
