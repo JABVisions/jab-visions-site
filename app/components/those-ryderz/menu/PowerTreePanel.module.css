@@ -4,14 +4,19 @@
 
 .tree {
   min-height: 0;
-  gap: 12px;
+  gap: 10px;
+  overflow: hidden;
+  container-type: inline-size;
+  container-name: tree;
 }
 
 .head {
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
   align-items: flex-start;
-  gap: 18px;
+  gap: 10px 18px;
+  flex: none;
 }
 
 .wallet {
@@ -60,6 +65,7 @@
   align-items: stretch;
   gap: 6px;
   flex: none;
+  min-width: 0;
 }
 
 .tabKey {
@@ -77,17 +83,19 @@
 .tab {
   appearance: none;
   flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
   display: flex;
   align-items: baseline;
   justify-content: center;
-  gap: 8px;
-  padding: 8px 10px;
+  gap: 6px;
+  padding: 8px 4px;
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 10px;
   background: rgba(8, 6, 16, 0.45);
   color: rgba(229, 246, 234, 0.7);
-  font: 800 0.66rem/1 monospace;
-  letter-spacing: 0.16em;
+  font: 800 0.6rem/1 monospace;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
   cursor: pointer;
   transition:
@@ -122,19 +130,19 @@
 
 .body {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 256px;
+  grid-template-columns: minmax(0, 1fr) minmax(232px, 300px);
   grid-template-rows: minmax(0, 1fr);
   gap: 14px;
   flex: 1 1 auto;
   min-height: 0;
-  container-type: inline-size;
-  container-name: tree-body;
+  min-width: 0;
 }
 
 .stage {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  min-width: 0;
   min-height: 0;
   overflow: auto;
   padding: 10px 6px 10px 2px;
@@ -222,7 +230,7 @@
   display: grid;
   justify-items: center;
   gap: 3px;
-  width: 96px;
+  width: 88px;
   padding: 6px 4px 5px;
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 12px;
@@ -247,9 +255,8 @@
   z-index: 2;
   border-color: var(--aura);
   background: rgba(14, 10, 26, 0.92);
-  transform: translate(-50%, -50%) scale(1.06);
   box-shadow:
-    0 0 0 1px color-mix(in srgb, var(--aura) 45%, transparent),
+    0 0 0 1px color-mix(in srgb, var(--aura) 55%, transparent),
     0 10px 24px rgba(0, 0, 0, 0.45);
 }
 
@@ -385,15 +392,19 @@
 /* --- Detail ------------------------------------------------------------- */
 
 .detail {
+  position: relative;
+  z-index: 2;
   display: flex;
   flex-direction: column;
   gap: 8px;
+  min-width: 0;
   min-height: 0;
   overflow: auto;
   padding: 14px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.14);
   border-radius: 14px;
-  background: rgba(8, 6, 16, 0.6);
+  background: rgba(8, 6, 16, 0.94);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
   scrollbar-width: thin;
   scrollbar-color: color-mix(in srgb, var(--aura) 50%, transparent) transparent;
   transition: border-color 0.18s ease;
@@ -627,10 +638,10 @@
   margin-top: auto;
 }
 
-/* Narrow centre column: the tree takes the full width and the detail sits
-   under it as a two-column card (text left, numbers and actions right). The
-   whole body scrolls as one so neither pane can spill into the other. */
-@container tree-body (max-width: 640px) {
+/* Narrow panel: the detail drops under the tree as its own card instead of
+   squeezing into the diagram. The container is the panel, so this can see
+   the panel's width (a query cannot restyle its own element). */
+@container tree (max-width: 560px) {
   .body {
     display: flex;
     flex-direction: column;
@@ -642,28 +653,17 @@
 
   .stage {
     flex: none;
-    overflow: visible;
+    overflow: auto;
     padding-right: 0;
   }
 
   .detail {
     flex: none;
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    gap: 8px 16px;
     overflow: visible;
   }
 
   .back {
-    grid-column: 1 / -1;
-    justify-self: start;
     margin-top: 0;
-  }
-}
-
-@container tree-body (max-width: 420px) {
-  .detail {
-    grid-template-columns: minmax(0, 1fr);
   }
 }
 

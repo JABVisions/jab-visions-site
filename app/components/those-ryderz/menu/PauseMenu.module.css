@@ -46,7 +46,9 @@
   display: flex;
   flex-direction: column;
   min-height: 0;
-  gap: 26px;
+  gap: 18px;
+  overflow: auto;
+  scrollbar-width: thin;
 }
 
 .eyebrow {
@@ -764,6 +766,55 @@
   font: inherit;
 }
 
+/* Power Tree: the figure leaves the column and stands behind the screen,
+   so the tree and its detail pane can use the width. A lane on the right
+   stays clear of the panel so the Ryder is still on screen. */
+.menuBackdrop {
+  grid-template-columns: minmax(180px, 210px) minmax(0, 1fr);
+}
+
+.menuBackdrop .showcase {
+  position: absolute;
+  z-index: 0;
+  top: 0;
+  right: 0;
+  bottom: 42px;
+  width: min(46%, 520px);
+  pointer-events: none;
+  grid-template-rows: minmax(0, 1fr);
+}
+
+.menuBackdrop .showcase::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(90deg, #05030c 0%, rgba(5, 3, 12, 0.78) 36%, rgba(5, 3, 12, 0.2) 70%, transparent 100%);
+}
+
+.menuBackdrop .caption {
+  display: none;
+}
+
+.menuBackdrop .watermark {
+  opacity: 0.28;
+}
+
+.menuBackdrop .showcaseCanvas {
+  transform: translateX(8%);
+}
+
+.menuBackdrop .side,
+.menuBackdrop .panel,
+.menuBackdrop .hints {
+  position: relative;
+  z-index: 1;
+}
+
+.menuBackdrop .panel {
+  margin-right: clamp(150px, 22%, 260px);
+}
+
 @media (max-width: 960px) {
   .menu {
     grid-template-columns: minmax(0, 1fr);
@@ -788,5 +839,26 @@
 
   .roster {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .menuBackdrop {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) auto;
+  }
+
+  .menuBackdrop .side {
+    display: none;
+  }
+
+  .menuBackdrop .showcase {
+    order: 0;
+    width: min(78%, 460px);
+  }
+
+  .menuBackdrop .panel {
+    margin-right: 0;
+    padding: 8px 12px;
+    border-radius: 16px;
+    background: linear-gradient(90deg, rgba(5, 3, 12, 0.9) 0%, rgba(5, 3, 12, 0.82) 70%, rgba(5, 3, 12, 0.55) 100%);
   }
 }

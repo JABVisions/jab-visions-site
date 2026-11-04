@@ -140,7 +140,7 @@ export default function PauseMenu({
 
   return (
     <div
-      className={styles.menu}
+      className={`${styles.menu} ${view === 'tree' ? styles.menuBackdrop : ''}`}
       role="dialog"
       aria-modal="true"
       aria-label="Raid paused"

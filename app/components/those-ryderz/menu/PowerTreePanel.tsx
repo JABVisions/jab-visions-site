@@ -51,7 +51,7 @@ const STAT_ICON: Record<StatKey, ReactNode> = {
 /** Row height of the tree diagram, px. Nodes sit on row centres. */
 const ROW_H = 98;
 /** Card width, px; keep in step with `.node` in the stylesheet. */
-const NODE_W = 96;
+const NODE_W = 88;
 
 const SKILL_COLOR = 'rgba(229, 246, 234, 0.75)';
 
@@ -389,35 +389,34 @@ export default function PowerTreePanel({ manager, ryderId, active, onBack }: { m
         </div>
       </header>
 
-      <nav className={styles.tabs} aria-label="Tree pages">
-        <span className={styles.tabKey} aria-hidden="true">
-          Q
-        </span>
-        {pages.map((entry, i) => {
-          const owned = entry.layout.rows.flat().filter((p) => p.node.owned).length;
-          const total = entry.layout.rows.flat().length;
-          return (
-            <button
-              key={entry.branch}
-              type="button"
-              className={`${styles.tab} ${i === page ? styles.tabActive : ''}`}
-              aria-current={i === page ? 'page' : undefined}
-              onClick={() => focusNode(i, 0, 0)}
-            >
-              {BRANCH_LABEL[entry.branch]}
-              <small>
-                {owned}/{total}
-              </small>
-            </button>
-          );
-        })}
-        <span className={styles.tabKey} aria-hidden="true">
-          E
-        </span>
-      </nav>
-
       <div className={styles.body}>
         <div className={styles.stage}>
+          <nav className={styles.tabs} aria-label="Tree pages">
+            <span className={styles.tabKey} aria-hidden="true">
+              Q
+            </span>
+            {pages.map((entry, i) => {
+              const owned = entry.layout.rows.flat().filter((p) => p.node.owned).length;
+              const total = entry.layout.rows.flat().length;
+              return (
+                <button
+                  key={entry.branch}
+                  type="button"
+                  className={`${styles.tab} ${i === page ? styles.tabActive : ''}`}
+                  aria-current={i === page ? 'page' : undefined}
+                  onClick={() => focusNode(i, 0, 0)}
+                >
+                  {BRANCH_LABEL[entry.branch]}
+                  <small>
+                    {owned}/{total}
+                  </small>
+                </button>
+              );
+            })}
+            <span className={styles.tabKey} aria-hidden="true">
+              E
+            </span>
+          </nav>
           {current.branch === 'powers' && (
             <ul className={styles.legend} aria-label="Power types">
               {POWER_TYPES.map((type) => (
@@ -580,8 +579,9 @@ function TreeDiagram({
   onActivate: (node: PowerNodeView, row: number, col: number) => void;
 }) {
   const height = rows.length * ROW_H;
-  // Never let cards overlap: a row of n cards needs n card widths plus gutters; the stage scrolls sideways past that.
-  const minWidth = Math.max(1, ...rows.map((placed) => placed.length)) * (NODE_W + 12) + 24;
+  // Evenly spaced centres sit 1/(n+1) apart, so the row has to be (n+1) cards wide or neighbours overlap. The stage scrolls past that.
+  const widest = Math.max(1, ...rows.map((placed) => placed.length));
+  const minWidth = (widest + 1) * (NODE_W + 10);
   return (
     <div className={`${styles.diagram} ${dimmed ? styles.diagramDimmed : ''}`} style={{ height, minWidth }} role="grid" aria-label="Tree">
       <svg className={styles.wires} viewBox={`0 0 100 ${rows.length * 100}`} preserveAspectRatio="none" aria-hidden="true">
