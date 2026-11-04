@@ -7,17 +7,24 @@ import type { SaveSnapshot } from './saves/saveManager';
 import { DERIVED_POWERS, DERIVED_POWER_IDS } from './progression/derived-powers';
 import {
   abilitiesGranted,
+  abilityRanks,
   canUnlock,
+  canUpgrade,
   modifiersFor,
+  rankOfNode,
   recipesGranted,
+  sanitizeRanks,
   sanitizeUnlocked,
   slotsGranted,
+  spentOn,
   starterNodes,
   treeFor,
   type ExtraSlot,
+  type NodeRanks,
   type PowerModifiers,
   type PowerNode,
   type UnlockCheck,
+  type UpgradeCheck,
 } from './progression/power-tree';
 import { availableSignal, emptyLedger, levelForSignal, type SignalEvent, type SignalLedger } from './progression/signal-points';
 
@@ -59,6 +66,8 @@ export interface RyderManagerState {
   unlocked: Record<RyderId, AbilityId[]>;
   /** Power Tree nodes each Ryder owns. Starter nodes are always present. */
   nodes: Record<RyderId, string[]>;
+  /** Rank of each owned node. An owned node missing here is rank 1. */
+  ranks: Record<RyderId, NodeRanks>;
   /** Signal Points: lifetime earned and lifetime spent. The wallet is shared across Ryderz. */
   signal: SignalLedger;
   gameMode: GameMode;
@@ -98,6 +107,7 @@ function defaultState(): RyderManagerState {
       AbilityId[]
     >,
     nodes: Object.fromEntries(RYDER_ORDER.map((id) => [id, starterNodes(id)])) as Record<RyderId, string[]>,
+    ranks: Object.fromEntries(RYDER_ORDER.map((id) => [id, sanitizeRanks(treeFor(id), starterNodes(id), {})])) as Record<RyderId, NodeRanks>,
     signal: emptyLedger(),
     gameMode: GameMode.SOLO,
     arenaId: DEFAULT_ARENA,
@@ -131,6 +141,8 @@ export function hydrate(raw: unknown): RyderManagerState {
     const tree = treeFor(id);
     const rawNodes = data.nodes?.[id];
     state.nodes[id] = sanitizeUnlocked(tree, Array.isArray(rawNodes) ? rawNodes.filter((n): n is string => typeof n === 'string') : []);
+    // Saves from before ranks carry no `ranks`; every owned node comes back at rank 1.
+    state.ranks[id] = sanitizeRanks(tree, state.nodes[id], data.ranks?.[id]);
     const granted = abilitiesGranted(tree, state.nodes[id]);
     for (const ability of granted) if (!state.unlocked[id].includes(ability)) state.unlocked[id].push(ability);
     const extra = data.unlocked?.[id];
@@ -162,8 +174,10 @@ export function hydrate(raw: unknown): RyderManagerState {
       }
       compactExtras(state.loadouts[id]);
     }
-    // Spent can never exceed what the owned nodes cost; a tampered ledger is clamped.
   }
+  // The owned nodes and their ranks are the ledger of record: a save from an
+  // older price list, or a tampered one, settles to what the trees say was spent.
+  state.signal.spent = RYDER_ORDER.reduce((sum, id) => sum + spentOn(treeFor(id), state.nodes[id], state.ranks[id]), 0);
   if (state.signal.spent > state.signal.earned) state.signal.spent = state.signal.earned;
   return state;
 }
@@ -173,7 +187,12 @@ type Listener = () => void;
 /** A tree node annotated for the UI. */
 export interface PowerNodeView extends PowerNode {
   owned: boolean;
+  /** Current rank, 0 when unowned. */
+  rank: number;
+  /** Buying rank 1. */
   check: UnlockCheck;
+  /** Buying the next rank of an owned node. */
+  upgrade: UpgradeCheck;
   /** The granted ability's deck slot, when it is equipped. */
   equippedIn: InputSlot | null;
 }
@@ -261,11 +280,13 @@ export class RyderManager {
     if (!this.engine) return;
     const tree = treeFor(id);
     const owned = this.state.nodes[id];
+    const ranks = this.state.ranks[id];
     this.engine.setProgression({
-      modifiers: modifiersFor(tree, owned),
+      modifiers: modifiersFor(tree, owned, ranks),
       recipes: recipesGranted(tree, owned),
       signal: this.state.signal,
       slots: this.slotsFor(id).length,
+      ranks: abilityRanks(tree, owned, ranks),
     });
   }
 
@@ -326,8 +347,17 @@ export class RyderManager {
     return this.state.nodes[id];
   }
 
+  nodeRanks(id: RyderId): NodeRanks {
+    return this.state.ranks[id];
+  }
+
   modifiers(id: RyderId): PowerModifiers {
-    return modifiersFor(treeFor(id), this.state.nodes[id]);
+    return modifiersFor(treeFor(id), this.state.nodes[id], this.state.ranks[id]);
+  }
+
+  /** Rank the engine plays a power at for this Ryder: 1 when it is unranked or not from the tree. */
+  rankOfAbility(id: RyderId, ability: AbilityId) {
+    return abilityRanks(treeFor(id), this.state.nodes[id], this.state.ranks[id])[ability] ?? 1;
   }
 
   /** Slots this Ryder may equip into: 1 / 2 / 3 plus whatever the tree opened. */
@@ -338,42 +368,69 @@ export class RyderManager {
   treeView(id: RyderId): PowerNodeView[] {
     const tree = treeFor(id);
     const owned = this.state.nodes[id];
+    const ranks = this.state.ranks[id];
     const deck = this.state.loadouts[id];
     const available = this.signalAvailable();
+    const level = this.level();
     return tree.nodes.map((node) => ({
       ...node,
       owned: owned.includes(node.id),
-      check: canUnlock(tree, owned, node.id, available),
+      rank: rankOfNode(owned, ranks, node.id),
+      check: canUnlock(tree, owned, node.id, available, level),
+      upgrade: canUpgrade(tree, owned, ranks, node.id, available, level),
       equippedIn:
         node.effect.kind === 'ability' ? INPUT_SLOTS.find((slot) => deck[slot] === (node.effect as { abilityId: AbilityId }).abilityId) ?? null : null,
     }));
   }
 
   canUnlockNode(id: RyderId, nodeId: string): UnlockCheck {
-    return canUnlock(treeFor(id), this.state.nodes[id], nodeId, this.signalAvailable());
+    return canUnlock(treeFor(id), this.state.nodes[id], nodeId, this.signalAvailable(), this.level());
+  }
+
+  canUpgradeNode(id: RyderId, nodeId: string): UpgradeCheck {
+    return canUpgrade(treeFor(id), this.state.nodes[id], this.state.ranks[id], nodeId, this.signalAvailable(), this.level());
   }
 
   /**
-   * Spend SP on a node. Granted powers join the pool without touching the
-   * deck; the player equips them from the Power Deck.
+   * Spend SP on rank 1 of a node. Granted powers join the pool without
+   * touching the deck; the player binds them from the Power Tree or the deck.
    */
   unlockNode(id: RyderId, nodeId: string): boolean {
     const tree = treeFor(id);
-    const check = canUnlock(tree, this.state.nodes[id], nodeId, this.signalAvailable());
+    const check = canUnlock(tree, this.state.nodes[id], nodeId, this.signalAvailable(), this.level());
     if (!check.ok) return false;
     const node = tree.nodes.find((entry) => entry.id === nodeId)!;
     const nodes = { ...this.state.nodes, [id]: [...this.state.nodes[id], nodeId] };
+    const ranks = { ...this.state.ranks, [id]: { ...this.state.ranks[id], [nodeId]: 1 } };
     const unlocked = { ...this.state.unlocked };
     if (node.effect.kind === 'ability' && !unlocked[id].includes(node.effect.abilityId)) {
       unlocked[id] = [...unlocked[id], node.effect.abilityId];
     }
     this.commit({
       nodes,
+      ranks,
       unlocked,
       signal: { ...this.state.signal, spent: this.state.signal.spent + node.cost },
     });
     if (id === this.state.activeRyder) this.pushProgression(id);
     return true;
+  }
+
+  /** Spend SP on the next rank of an owned node. */
+  upgradeNode(id: RyderId, nodeId: string): boolean {
+    const check = canUpgrade(treeFor(id), this.state.nodes[id], this.state.ranks[id], nodeId, this.signalAvailable(), this.level());
+    if (!check.ok) return false;
+    this.commit({
+      ranks: { ...this.state.ranks, [id]: { ...this.state.ranks[id], [nodeId]: check.nextRank } },
+      signal: { ...this.state.signal, spent: this.state.signal.spent + check.cost },
+    });
+    if (id === this.state.activeRyder) this.pushProgression(id);
+    return true;
+  }
+
+  /** Unlock when unowned, otherwise rank up. The Power Tree's one button. */
+  buyNode(id: RyderId, nodeId: string): boolean {
+    return this.state.nodes[id].includes(nodeId) ? this.upgradeNode(id, nodeId) : this.unlockNode(id, nodeId);
   }
 
   // --- Power Deck --------------------------------------------------------------

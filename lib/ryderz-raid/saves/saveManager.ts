@@ -11,6 +11,8 @@ export interface SaveSnapshot {
   unlocked: RyderManagerState['unlocked'];
   /** Power Tree nodes per Ryder. Absent on saves written before the Power Tree; hydrate fills starters. */
   nodes?: RyderManagerState['nodes'];
+  /** Node ranks per Ryder. Absent on saves written before ranks; hydrate reads every owned node as rank 1. */
+  ranks?: RyderManagerState['ranks'];
   /** Signal Points ledger. Absent on older saves; hydrate starts at zero. */
   signal?: RyderManagerState['signal'];
   gameMode: GameMode;
@@ -190,6 +192,7 @@ export function captureManager(manager: RyderManager): SaveSnapshot {
     loadouts: state.loadouts,
     unlocked: state.unlocked,
     nodes: state.nodes,
+    ranks: state.ranks,
     signal: { ...state.signal },
     gameMode: coerceGameMode(state.gameMode),
     arenaId: state.arenaId,
