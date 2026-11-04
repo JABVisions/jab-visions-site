@@ -43,7 +43,17 @@ import {
 } from './combat';
 import { SignalBank, availableSignal, levelProgress, type SignalEvent, type SignalLedger } from './progression/signal-points';
 import { emptyModifiers, type PowerModifiers } from './progression/power-tree';
-import { DERIVED_POWERS, isDerivedAbility } from './progression/derived-powers';
+import { DERIVED_POWERS, derivedAtRank, isDerivedAbility, rankScaling, type DerivedPowerSpec } from './progression/derived-powers';
+import {
+  BLITZ_DASH_POSE,
+  BLITZ_FINISH,
+  RYDER_STYLE,
+  choreoFor,
+  resolvePose,
+  resolveStrike,
+  type ChoreoBeat,
+  type PowerChoreo,
+} from './progression/power-choreo';
 import { EngagementDirector, type EngagementCandidate } from './civilians/engagement';
 import { CrowdGrid } from './crowd/grid';
 import { AfterimagePool } from './speed-vfx';
@@ -351,6 +361,8 @@ interface Host {
   pacified?: number;
   /** Proclaim Peace. Released as soon as the timer expires. */
   immobile?: number;
+  /** A snare left this host open: seconds it takes extra damage. */
+  exposed?: number;
   winding: boolean;
   /** Next physical strike after this one, for a short jab chain. */
   follow: StrikeKind | null;
@@ -407,6 +419,26 @@ interface Host {
   modelPath?: string | null;
   /** Animation LOD: skip this frame's pose. */
   animSkip?: boolean;
+}
+
+/** A derived power's numbers at the rank it was cast. */
+type DerivedTune = ReturnType<typeof derivedAtRank>;
+
+/** A tree-earned power mid-animation: which beats have fired, which stance is held. */
+interface ActiveChoreo {
+  spec: DerivedPowerSpec;
+  tune: DerivedTune;
+  choreo: PowerChoreo;
+  /** Sim time the sequence started. */
+  started: number;
+  /** Index of the next beat to fire. */
+  next: number;
+  /** Stance currently held and the beat it started on. */
+  pose: { kind: PoseOverride['kind']; weight: number; lean: number; bank: number; since: number; until: number } | null;
+  /** Bolts thrown so far (volleys). */
+  shots: number;
+  /** Set when the sequence is the blitz finisher: the hit is the finisher, not a breaker. */
+  finisher: boolean;
 }
 
 /** A defeated host still flying from the blow that killed it. */
@@ -546,7 +578,13 @@ export class RaidEngine {
   private surgeT = 0;
   private surgeMul = 1;
   /** Blitz dash chain: hits left, seconds to the next dash. */
-  private blitz: { left: number; next: number; spec: (typeof DERIVED_POWERS)[keyof typeof DERIVED_POWERS] } | null = null;
+  private blitz: { left: number; next: number; spec: DerivedPowerSpec; tune: DerivedTune } | null = null;
+  /** The tree-earned power whose choreography the body is playing. */
+  private choreo: ActiveChoreo | null = null;
+  /** Power ranks from the tree (1 when unranked). */
+  private powerRanks: Partial<Record<AbilityId, number>> = {};
+  /** Damage multiplier the rank of the last power cast puts on kit and generic power damage. */
+  private castScale = 1;
   /** Second Wind (tree passive) fired this life. */
   private secondWindUsed = false;
   private readonly engagement = new EngagementDirector();
@@ -831,6 +869,8 @@ export class RaidEngine {
     this.surgeT = 0;
     this.surgeMul = 1;
     this.blitz = null;
+    this.choreo = null;
+    this.castScale = 1;
     this.secondWindUsed = false;
     this.signalBank.reset();
     this.engagement.reset();
@@ -1298,12 +1338,20 @@ export class RaidEngine {
    * after every unlock, and after every switch. Nothing here is persisted by
    * the engine; the manager owns the save.
    */
-  setProgression(progression: { modifiers: PowerModifiers; recipes: ComboRecipe[]; signal: SignalLedger; slots?: number }) {
+  setProgression(progression: {
+    modifiers: PowerModifiers;
+    recipes: ComboRecipe[];
+    signal: SignalLedger;
+    slots?: number;
+    /** Rank of each power this Ryder owns; unlisted powers play at rank 1. */
+    ranks?: Partial<Record<AbilityId, number>>;
+  }) {
     const wasMaxHp = this.modifiers.maxHp;
     const wasMaxAura = this.modifiers.maxAura;
     this.modifiers = progression.modifiers;
     this.treeRecipes = progression.recipes;
     this.signalLedger = progression.signal;
+    this.powerRanks = progression.ranks ?? {};
     this.openSlots = clamp(progression.slots ?? 3, 3, MAX_POWER_SLOTS);
     this.striker.setExtraRecipes(this.treeRecipes);
     this.striker.combo.setWindowScale(1 + this.modifiers.comboWindow);
@@ -1418,6 +1466,8 @@ export class RaidEngine {
     this.surgeT = 0;
     this.surgeMul = 1;
     this.blitz = null;
+    this.choreo = null;
+    this.castScale = 1;
     this.meleeT = 0;
     this.meleeCd = 0;
 
@@ -1527,10 +1577,13 @@ export class RaidEngine {
     this.jumping = false;
     this.yaw = arrived.yaw;
     this.facing = arrived.yaw;
-    this.moveCd = [0, 0, 0];
-    this.moveT = [0, 0, 0];
-    this.queuedMoves = [false, false, false];
-    this.releaseArmed = [true, true, true];
+    this.moveCd = new Array(MAX_POWER_SLOTS).fill(0);
+    this.moveT = new Array(MAX_POWER_SLOTS).fill(0);
+    this.queuedMoves = new Array(MAX_POWER_SLOTS).fill(false);
+    this.releaseArmed = new Array(MAX_POWER_SLOTS).fill(true);
+    this.choreo = null;
+    this.blitz = null;
+    this.castScale = 1;
     this.meleeT = 0;
     this.meleeCd = 0;
     this.burnout = false;
@@ -1936,6 +1989,7 @@ export class RaidEngine {
       this.surgeT = Math.max(0, this.surgeT - dt);
       if (this.surgeT <= 0) this.surgeMul = 1;
     }
+    this.stepChoreo();
     this.stepBlitz(dt);
     if (this.bannerT > 0) {
       this.bannerT = Math.max(0, this.bannerT - dt);
@@ -1974,7 +2028,7 @@ export class RaidEngine {
     this.markExplored(this.pos.x, this.pos.z);
     this.kickSand(dt, footFloor);
     const recovering = this.recoveryT > 0;
-    const locked = recovering || (this.kit?.locked ?? false);
+    const locked = recovering || this.bodyLocked();
     // Busy hands (weapon thrown, spinning): only the power that is on may be
     // pressed, to switch it off.
     const busy = this.kit?.busy ?? false;
@@ -2156,7 +2210,7 @@ export class RaidEngine {
   private tryInteract() {
     if (!this.player || this.phase === 'dead' || this.raidDown) return;
     if (this.pickupNearestAlly()) return;
-    if (this.recoveryT > 0 || this.kit?.locked) return;
+    if (this.recoveryT > 0 || this.bodyLocked()) return;
     const beacon = this.beacon;
     if (this.tryFieldStation()) return;
     if (!beacon || !beacon.isPlayerInRange(this.pos)) {
@@ -2429,7 +2483,7 @@ export class RaidEngine {
     if (!this.player) return;
     if (this.raidDown) return;
     const phased = this.isPhased();
-    const locked = this.kit?.locked ?? false;
+    const locked = this.bodyLocked();
 
     const wish = this.readMoveAxes();
     let x = wish.x;
@@ -2556,7 +2610,7 @@ export class RaidEngine {
       this.meleeT > 0 ||
       this.dodgeT > 0 ||
       (this.kit?.busy ?? false) ||
-      (this.kit?.locked ?? false);
+      this.bodyLocked();
     let target = this.facing;
     if (this.dodgeT > 0) target = Math.atan2(this.dodgeX, this.dodgeZ);
     else if (committed) target = this.yaw;
@@ -2589,7 +2643,7 @@ export class RaidEngine {
       const hinted = token !== this.clipTokenSeen && Boolean(this.kit?.clipHint);
       if (token !== this.clipTokenSeen) this.clipTokenSeen = token;
       animateGltfFighter(this.player, dt, this.anim, moving, this.sprinting, this.meleeT, this.meleeStarted || hinted, {
-        pose: this.kit?.pose ?? swimPose ?? this.jumpPose(),
+        pose: this.powerPose() ?? this.kit?.pose ?? swimPose ?? this.jumpPose(),
         style: this.strikeOverride ?? undefined,
         clipHint: hinted ? this.kit?.clipHint ?? undefined : undefined,
         clipSeconds: hinted ? this.kit?.clipSeconds : undefined,
@@ -2743,7 +2797,7 @@ export class RaidEngine {
   }
 
   private tryDodge() {
-    if (this.dodgeCd > 0 || this.hitStun > 0.18 || this.stasis > 0 || (this.kit?.locked ?? false)) return;
+    if (this.dodgeCd > 0 || this.hitStun > 0.18 || this.stasis > 0 || this.bodyLocked()) return;
     // A dodge cuts the tail of a landed strike, so punish windows belong to whiffs only.
     this.striker.cancel();
     const wish = this.readMoveAxes();
@@ -2805,7 +2859,7 @@ export class RaidEngine {
       }
       return;
     }
-    if (this.hitStun > 0.12 || this.dodgeT > 0 || (this.kit?.locked ?? false)) return;
+    if (this.hitStun > 0.12 || this.dodgeT > 0 || this.bodyLocked()) return;
     if (this.pvpCpu?.grabsPlayer()) return;
     this.airVel = JUMP_SPEED;
     this.airY = 0.02;
@@ -3281,7 +3335,8 @@ export class RaidEngine {
       hurt: (target, damage, dir, reaction, strength) => {
         const host = target as Host;
         const before = host.hp;
-        this.hurtHost(host, damage, dir, reaction, strength);
+        // Kits deal power damage through here; the rank of the power last cast scales it.
+        this.hurtHost(host, damage * this.castScale, dir, reaction, strength);
         return Math.max(0, before - Math.max(0, host.hp));
       },
       flash: (target, color, seconds) => {
@@ -3395,29 +3450,37 @@ export class RaidEngine {
       return;
     }
     if (this.burnout) return;
+    // One choreographed power at a time; the blitz owns the body until its finisher lands.
+    if (this.choreo || this.blitz) return;
     this.moveCd[slot] = 0.16;
-    const costScale = Math.max(0.4, 1 + this.modifiers.abilityCost);
+    const rank = this.rankOf(move.id);
+    const costScale = Math.max(0.4, 1 + this.modifiers.abilityCost) * rankScaling(rank).cost;
 
-    // Tree-earned powers share three engine behaviours. They never go through
-    // the kit, so a Ryder's canonical Q / E / R stays exactly as written.
+    // Tree-earned powers share six engine behaviours, each with its own
+    // choreography. They never go through the kit, so a Ryder's canonical
+    // 1 / 2 / 3 stays exactly as written.
     if (isDerivedAbility(move.id)) {
       const spec = DERIVED_POWERS[move.id];
-      const cost = spec.auraCost * costScale;
+      const tune = derivedAtRank(spec, rank);
+      const cost = tune.auraCost * costScale;
       if (this.aura < cost) return;
       this.spendAura(cost);
       this.armPvpHit(slot);
+      this.castScale = 1;
       this.abilityT = Math.max(ABILITY_LINGER, 0.7);
       this.combatT = COMBAT_LINGER;
       // A power cancels the tail of a landed strike: power transitions in a combo.
       this.striker.cancel();
-      if (spec.kind === 'breaker') this.breaker(spec);
-      else if (spec.kind === 'surge') this.surge(spec);
-      else this.beginBlitz(spec);
-      this.moveCd[slot] = spec.kind === 'blitz' ? 2.4 : spec.kind === 'surge' ? 1.2 : 0.5;
+      if (spec.kind === 'blitz') this.beginBlitz(spec, tune);
+      else this.startChoreo(spec, tune, choreoFor(spec.kind, tune.count), false);
+      this.moveCd[slot] = spec.kind === 'blitz' ? 2.4 : spec.kind === 'surge' ? 1.2 : spec.kind === 'snare' || spec.kind === 'nova' ? 0.9 : 0.5;
       this.combatMemory.note('ability', this.simTime);
       this.releasePowerLink(move.id);
       return;
     }
+
+    // Canonical powers scale with rank through the cost above and the damage the kit deals.
+    this.castScale = rankScaling(rank).damage;
 
     if (move.drain > 0) {
       if (this.moveT[slot] > 0) {
@@ -3504,16 +3567,143 @@ export class RaidEngine {
   }
 
   // ---------------------------------------------------------------------------
-  // Tree-earned powers: breaker, surge, blitz
+  // Tree-earned powers: breaker, volley, nova, snare, surge, blitz
+  //
+  // Each kind plays a choreography (`progression/power-choreo.ts`): a timeline
+  // of stances, swings and events. The engine steps the timeline, holds the
+  // stance through the pose pipeline, locks the body for the committed part,
+  // and resolves the `hit` / `shot` events into the kind's damage. Numbers
+  // come from the power's rank through `derivedAtRank`.
   // ---------------------------------------------------------------------------
 
-  /** Rising strike in front launches, and a shock ring knocks the rest of the circle back. */
-  private breaker(spec: (typeof DERIVED_POWERS)[keyof typeof DERIVED_POWERS]) {
-    this.faceNearest(spec.radius);
-    this.rig.addKick(0.4);
-    this.rig.addShake(0.26);
-    this.hitStopT = Math.max(this.hitStopT, 0.06);
-    const base = this.meleeDamage() * spec.damageMul * this.strikeScale();
+  private rankOf(id: AbilityId) {
+    return Math.max(1, this.powerRanks[id] ?? 1);
+  }
+
+  /** Walking, swinging, dodging and jumping are held while a kit sequence or a power choreography owns the body. */
+  private bodyLocked() {
+    if (this.kit?.locked) return true;
+    const active = this.choreo;
+    if (active && this.simTime - active.started < active.choreo.lock) return true;
+    return this.blitz !== null;
+  }
+
+  private startChoreo(spec: DerivedPowerSpec, tune: DerivedTune, choreo: PowerChoreo, finisher: boolean) {
+    this.choreo = { spec, tune, choreo, started: this.simTime, next: 0, pose: null, shots: 0, finisher };
+    if (spec.kind === 'breaker' || spec.kind === 'nova' || spec.kind === 'snare') this.faceNearest(Math.max(tune.radius, 4));
+    this.stepChoreo();
+  }
+
+  private stepChoreo() {
+    const active = this.choreo;
+    if (!active) return;
+    const elapsed = this.simTime - active.started;
+    const beats = active.choreo.beats;
+    while (active.next < beats.length && beats[active.next].at <= elapsed + 1e-6) {
+      this.fireBeat(active, beats[active.next]);
+      active.next += 1;
+    }
+    if (elapsed >= active.choreo.duration) this.choreo = null;
+  }
+
+  private fireBeat(active: ActiveChoreo, beat: ChoreoBeat) {
+    const style = RYDER_STYLE[this.spec.id];
+    const spec = active.spec;
+    const tune = active.tune;
+    if (beat.pose) {
+      const kind = resolvePose(beat.pose, style);
+      if (kind) {
+        // The stance runs until the next beat that names one, or the end.
+        const rest = active.choreo.beats.slice(active.next + 1).find((b) => b.pose);
+        active.pose = {
+          kind,
+          weight: beat.weight ?? 1,
+          lean: beat.lean ?? 0,
+          bank: beat.bank ?? 0,
+          since: active.started + beat.at,
+          until: active.started + (rest ? rest.at : active.choreo.duration),
+        };
+      }
+    } else if (beat.lean != null && active.pose) {
+      active.pose.lean = beat.lean;
+    }
+    const strike = resolveStrike(beat.strike, style);
+    if (strike) {
+      this.meleeT = 1;
+      this.meleeStarted = true;
+      this.strikeOverride = strike;
+    }
+    if (beat.kick) this.rig.addKick(beat.kick);
+    if (beat.shake) this.rig.addShake(beat.shake);
+    if (beat.sound) this.emitSound(beat.sound);
+    for (const event of beat.events ?? []) {
+      switch (event) {
+        case 'hit':
+          if (active.finisher) this.blitzFinisherHit(tune);
+          else if (spec.kind === 'breaker') this.breakerHit(tune);
+          else if (spec.kind === 'nova') this.novaHit(spec, tune);
+          else if (spec.kind === 'snare') this.snareHit(spec, tune);
+          else if (spec.kind === 'surge') this.surgeApply(spec, tune);
+          break;
+        case 'shot':
+          this.volleyShot(spec, tune, active.shots);
+          active.shots += 1;
+          break;
+        case 'ring':
+          _tmp2.set(this.pos.x, this.world.heightAt(this.pos.x, this.pos.z) + 0.03, this.pos.z);
+          this.rings.spawn(_tmp2, spec.color, { radius: Math.max(2.4, tune.radius || 3.2), duration: spec.kind === 'snare' ? 0.9 : 0.55 });
+          break;
+        case 'cracks':
+          _tmp2.set(this.pos.x, this.world.heightAt(this.pos.x, this.pos.z) + 0.03, this.pos.z);
+          this.cracks.spawn(_tmp2, Math.max(1.6, (tune.radius || 3) * 0.7), spec.kind === 'nova' ? 4 : 3);
+          break;
+        case 'burst':
+          this.particles.emit(this.pos.clone().setY(1.0), spec.color, spec.kind === 'nova' ? 56 : 36, { speed: spec.kind === 'nova' ? 12 : 9, size: 0.32, life: 0.5, up: 1.4 });
+          break;
+        case 'charge':
+          // Aura gathers on the Ryder before the release.
+          this.particles.emit(this.pos.clone().setY(1.2), spec.color, 18, { speed: 3, size: 0.24, life: 0.3, up: 1.6 });
+          this.powerVfx.surge(0.5);
+          break;
+        case 'afterimage':
+          this.afterimages.spawn(0.35, 0.25, spec.color);
+          break;
+        case 'hitstop':
+          this.hitStopT = Math.max(this.hitStopT, spec.kind === 'nova' || active.finisher ? 0.12 : 0.06);
+          break;
+        case 'iframes':
+          this.iframes = Math.max(this.iframes, 0.5);
+          break;
+        case 'banner':
+          this.banner = { title: spec.name.toUpperCase(), sub: spec.kind === 'surge' ? `${tune.duration.toFixed(0)}s TEMPO` : spec.name.toUpperCase() };
+          this.bannerT = 1.2;
+          break;
+      }
+    }
+  }
+
+  /** The stance the active choreography (or the blitz dash) holds this frame. */
+  private powerPose(): PoseOverride | null {
+    const active = this.choreo;
+    if (active?.pose) {
+      const p = active.pose;
+      const span = Math.max(0.05, p.until - p.since);
+      const t = clamp((this.simTime - p.since) / span, 0, 1);
+      // Ease in over the first few frames, release over the last stretch of the sequence.
+      const ramp = clamp((this.simTime - p.since) / 0.06, 0, 1);
+      const left = active.started + active.choreo.duration - this.simTime;
+      const release = clamp(left / 0.14, 0, 1);
+      const weight = p.weight * Math.min(ramp, release);
+      if (weight <= 0.01) return null;
+      return { kind: p.kind, t, weight, lean: p.lean, bank: p.bank };
+    }
+    if (this.blitz) return { kind: BLITZ_DASH_POSE, t: (this.simTime * 3) % 1, weight: 1 };
+    return null;
+  }
+
+  /** Breaker hit: the front line launches, the rest of the ring is knocked back. */
+  private breakerHit(tune: DerivedTune) {
+    const base = this.meleeDamage() * tune.damageMul * this.strikeScale();
     const fx = Math.sin(this.yaw);
     const fz = Math.cos(this.yaw);
     for (const host of [...this.hosts]) {
@@ -3521,12 +3711,12 @@ export class RaidEngine {
       const dx = host.pos.x - this.pos.x;
       const dz = host.pos.z - this.pos.z;
       const dist = Math.hypot(dx, dz);
-      if (dist > spec.radius + host.radius) continue;
+      if (dist > tune.radius + host.radius) continue;
       _tmp.set(dx, 0, dz);
       if (_tmp.lengthSq() < 1e-4) _tmp.set(fx, 0, fz);
       _tmp.normalize();
       const ahead = (dx * fx + dz * fz) / Math.max(dist, 0.01);
-      const front = ahead > 0.5 && dist < spec.radius * 0.6;
+      const front = ahead > 0.5 && dist < tune.radius * 0.6;
       host.lastImpact = { x: _tmp.x, z: _tmp.z, speed: front ? 6 : 9, kind: 'ability' };
       if (front) {
         const wasGrounded = host.airY <= 0.05;
@@ -3539,27 +3729,87 @@ export class RaidEngine {
         this.hurtHost(host, base * 0.55, _tmp, 'knockback', 1.1);
       }
     }
-    _tmp2.set(this.pos.x, this.world.heightAt(this.pos.x, this.pos.z) + 0.03, this.pos.z);
-    this.rings.spawn(_tmp2, spec.color, { radius: spec.radius, duration: 0.5 });
-    this.cracks.spawn(_tmp2, spec.radius * 0.7, 3);
-    this.particles.emit(this.pos.clone().setY(1.0), spec.color, 36, { speed: 9, size: 0.32, life: 0.5, up: 1.4 });
-    this.emitSound('fight.kick.impact');
+  }
+
+  /** One bolt of a volley, fanned around the look direction. */
+  private volleyShot(spec: DerivedPowerSpec, tune: DerivedTune, index: number) {
+    this.lookDir(_look);
+    _look.y *= 0.4;
+    if (_look.lengthSq() < 0.01) _look.set(Math.sin(this.yaw), 0, Math.cos(this.yaw));
+    _look.normalize();
+    _right.set(-Math.cos(this.yaw), 0, Math.sin(this.yaw));
+    const count = Math.max(1, tune.count);
+    // Alternate left and right of centre so the fan fills from the middle out.
+    const order = index === 0 ? 0 : (index % 2 === 1 ? 1 : -1) * Math.ceil(index / 2);
+    const spread = count > 1 ? order / Math.max(1, (count - 1) / 2) : 0;
+    const dir = _tmp.copy(_look).addScaledVector(_right, spread * 0.42).normalize();
+    const origin = this.muzzle();
+    origin.y = 1.3;
+    const damage = this.shotDamage() * tune.damageMul * this.strikeScale();
+    this.spawnBolt(origin, dir, damage, true, spec.color, Math.max(18, this.spec.projectileSpeed));
+    this.particles.emit(origin, spec.color, 6, { speed: 5, size: 0.22, life: 0.25, direction: dir });
+    this.emitSound('fight.punch.swing');
+  }
+
+  /** Nova hit: everything in the ring takes damage and flies outward, closer bodies harder. */
+  private novaHit(spec: DerivedPowerSpec, tune: DerivedTune) {
+    const base = this.meleeDamage() * tune.damageMul * this.strikeScale();
+    for (const host of [...this.hosts]) {
+      if (host.ally || host.hp <= 0) continue;
+      const dx = host.pos.x - this.pos.x;
+      const dz = host.pos.z - this.pos.z;
+      const dist = Math.hypot(dx, dz);
+      if (dist > tune.radius + host.radius) continue;
+      _tmp.set(dx, 0, dz);
+      if (_tmp.lengthSq() < 1e-4) _tmp.set(Math.sin(this.yaw), 0, Math.cos(this.yaw));
+      _tmp.normalize();
+      const falloff = 1 - (dist / (tune.radius + 1)) * 0.45;
+      host.lastImpact = { x: _tmp.x, z: _tmp.z, speed: 10, kind: 'ability' };
+      this.hurtHost(host, base * falloff, _tmp, dist < tune.radius * 0.45 ? 'heavy' : 'knockback', 1.3);
+      host.hitColor = spec.color;
+    }
+  }
+
+  /** Snare hit: the ring is held in place and left exposed; a light sting marks the hold. */
+  private snareHit(spec: DerivedPowerSpec, tune: DerivedTune) {
+    const sting = this.meleeDamage() * tune.damageMul * this.strikeScale();
+    const hold = this.pvpMode() ? tune.duration * 0.6 : tune.duration;
+    for (const host of [...this.hosts]) {
+      if (host.ally || host.hp <= 0) continue;
+      const dx = host.pos.x - this.pos.x;
+      const dz = host.pos.z - this.pos.z;
+      const dist = Math.hypot(dx, dz);
+      if (dist > tune.radius + host.radius) continue;
+      _tmp.set(dx, 0, dz);
+      if (_tmp.lengthSq() < 1e-4) _tmp.set(Math.sin(this.yaw), 0, Math.cos(this.yaw));
+      _tmp.normalize();
+      this.hurtHost(host, sting, _tmp, 'stagger', 0.4);
+      if (host.hp <= 0) continue;
+      host.immobile = Math.max(host.immobile ?? 0, hold);
+      host.exposed = Math.max(host.exposed ?? 0, hold + 1.2);
+      host.knock.multiplyScalar(0.2);
+      host.hit = Math.max(host.hit, hold);
+      host.hitColor = spec.color;
+      _tmp2.set(host.pos.x, this.world.heightAt(host.pos.x, host.pos.z) + 0.03, host.pos.z);
+      this.rings.spawn(_tmp2, spec.color, { radius: host.radius + 0.5, duration: hold });
+    }
+  }
+
+  private pvpMode() {
+    return this.gameMode === GameMode.PVP;
   }
 
   /** Tempo buff: faster strikes and heavier hits until the timer runs out. */
-  private surge(spec: (typeof DERIVED_POWERS)[keyof typeof DERIVED_POWERS]) {
-    this.surgeT = spec.duration;
-    this.surgeMul = spec.damageMul;
-    this.rig.addKick(0.2);
+  private surgeApply(spec: DerivedPowerSpec, tune: DerivedTune) {
+    this.surgeT = tune.duration;
+    this.surgeMul = tune.damageMul;
     this.powerVfx.surge(1);
     this.particles.emit(this.pos.clone().setY(1.1), spec.color, 28, { speed: 6, size: 0.3, life: 0.6, up: 1.8 });
-    this.banner = { title: spec.name.toUpperCase(), sub: `${spec.duration.toFixed(0)}s TEMPO` };
-    this.bannerT = 1.2;
   }
 
   /** Ultimate: a chain of dashes through the crowd, then a radial finisher where the Ryder stops. */
-  private beginBlitz(spec: (typeof DERIVED_POWERS)[keyof typeof DERIVED_POWERS]) {
-    this.blitz = { left: 5, next: 0, spec };
+  private beginBlitz(spec: DerivedPowerSpec, tune: DerivedTune) {
+    this.blitz = { left: 5, next: 0, spec, tune };
     this.iframes = Math.max(this.iframes, 1.6);
     this.rig.addShake(0.2);
     this.banner = { title: spec.name.toUpperCase(), sub: 'ULTIMATE' };
@@ -3573,30 +3823,9 @@ export class RaidEngine {
     if (blitz.next > 0) return;
     const spec = blitz.spec;
     if (blitz.left <= 0) {
-      // Finisher: everything near the Ryder goes down.
-      const base = this.meleeDamage() * spec.damageMul * this.strikeScale();
-      for (const host of [...this.hosts]) {
-        if (host.ally || host.hp <= 0) continue;
-        const dx = host.pos.x - this.pos.x;
-        const dz = host.pos.z - this.pos.z;
-        const dist = Math.hypot(dx, dz);
-        if (dist > spec.radius + host.radius) continue;
-        _tmp.set(dx, 0, dz);
-        if (_tmp.lengthSq() < 1e-4) _tmp.set(Math.sin(this.yaw), 0, Math.cos(this.yaw));
-        _tmp.normalize();
-        host.lastImpact = { x: _tmp.x, z: _tmp.z, speed: 11, kind: 'ability' };
-        this.pendingFinisher = true;
-        this.hurtHost(host, base * (1 - (dist / (spec.radius + 1)) * 0.4), _tmp, 'slam', 1.5);
-        this.pendingFinisher = false;
-      }
-      _tmp2.set(this.pos.x, this.world.heightAt(this.pos.x, this.pos.z) + 0.03, this.pos.z);
-      this.rings.spawn(_tmp2, spec.color, { radius: spec.radius, duration: 0.65 });
-      this.cracks.spawn(_tmp2, spec.radius * 0.8, 4);
-      this.particles.emit(this.pos.clone().setY(1.0), spec.color, 60, { speed: 12, size: 0.36, life: 0.6, up: 2 });
-      this.rig.addShake(0.5);
-      this.hitStopT = Math.max(this.hitStopT, 0.12);
-      this.emitSound('fight.kick.impact');
+      // The chain is done: the finisher plays as its own choreography and lands on the slam.
       this.blitz = null;
+      this.startChoreo(spec, blitz.tune, BLITZ_FINISH, true);
       return;
     }
     // Dash to the next body in the crowd and strike it on arrival.
@@ -3616,13 +3845,36 @@ export class RaidEngine {
       this.facing = this.yaw;
       _tmp.set(dx, 0, dz).normalize();
       target.lastImpact = { x: _tmp.x, z: _tmp.z, speed: 7, kind: 'ability' };
-      this.hurtHost(target, this.meleeDamage() * 1.3 * this.strikeScale(), _tmp, 'stagger', 0.9);
+      // Every dash lands the Ryder's own swing.
+      this.meleeT = 1;
+      this.meleeStarted = true;
+      this.strikeOverride = RYDER_STYLE[this.spec.id].weapon;
+      this.hurtHost(target, this.meleeDamage() * 1.3 * this.strikeScale() * (blitz.tune.damageMul / spec.damageMul), _tmp, 'stagger', 0.9);
       this.particles.emit(this.pos.clone().setY(1.0), spec.color, 14, { speed: 7, size: 0.26, life: 0.3, up: 0.6 });
       this.emitSound('fight.punch.impact');
     }
     blitz.left -= 1;
-    blitz.next = target ? 0.16 : 0.08;
+    blitz.next = target ? 0.18 : 0.08;
     this.iframes = Math.max(this.iframes, 0.4);
+  }
+
+  /** Blitz finisher: everything near the Ryder goes down. */
+  private blitzFinisherHit(tune: DerivedTune) {
+    const base = this.meleeDamage() * tune.damageMul * this.strikeScale();
+    for (const host of [...this.hosts]) {
+      if (host.ally || host.hp <= 0) continue;
+      const dx = host.pos.x - this.pos.x;
+      const dz = host.pos.z - this.pos.z;
+      const dist = Math.hypot(dx, dz);
+      if (dist > tune.radius + host.radius) continue;
+      _tmp.set(dx, 0, dz);
+      if (_tmp.lengthSq() < 1e-4) _tmp.set(Math.sin(this.yaw), 0, Math.cos(this.yaw));
+      _tmp.normalize();
+      host.lastImpact = { x: _tmp.x, z: _tmp.z, speed: 11, kind: 'ability' };
+      this.pendingFinisher = true;
+      this.hurtHost(host, base * (1 - (dist / (tune.radius + 1)) * 0.4), _tmp, 'slam', 1.5);
+      this.pendingFinisher = false;
+    }
   }
 
   private pickBlitzTarget(): Host | null {
@@ -3646,7 +3898,7 @@ export class RaidEngine {
     this.lookDir(_look);
     _right.set(-Math.cos(this.yaw), 0, Math.sin(this.yaw));
     const origin = this.muzzle();
-    const dmg = this.shotDamage() * damageMul;
+    const dmg = this.shotDamage() * damageMul * this.castScale;
     for (let i = 0; i < count; i += 1) {
       const t = count === 1 ? 0 : i / (count - 1) - 0.5;
       const dir = _tmp.copy(_look).addScaledVector(_right, t * spread * 6).normalize();
@@ -3663,7 +3915,7 @@ export class RaidEngine {
       _tmp.set(dx, 0, dz);
       if (_tmp.lengthSq() < 0.0001) _tmp.set(Math.sin(this.yaw), 0, Math.cos(this.yaw));
       _tmp.normalize();
-      this.hurtHost(host, damage, knock < 0 ? _tmp.multiplyScalar(-1) : _tmp);
+      this.hurtHost(host, damage * this.castScale, knock < 0 ? _tmp.multiplyScalar(-1) : _tmp);
       host.knock.multiplyScalar(Math.abs(knock) / 8);
     }
   }
@@ -3684,7 +3936,7 @@ export class RaidEngine {
         const d = Math.hypot(host.pos.x - this.pos.x, host.pos.z - this.pos.z);
         if (d < host.radius + 1.35) {
           hit.add(host);
-          this.hurtHost(host, 26, _look);
+          this.hurtHost(host, 26 * this.castScale, _look);
         }
       }
     }
@@ -3695,7 +3947,7 @@ export class RaidEngine {
     this.meleeT = 1;
     this.meleeStarted = true;
     _fwd.set(Math.sin(this.yaw), 0, Math.cos(this.yaw));
-    const dmg = this.meleeDamage() * 1.45;
+    const dmg = this.meleeDamage() * 1.45 * this.castScale;
     for (const host of this.hosts) {
       const dx = host.pos.x - this.pos.x;
       const dz = host.pos.z - this.pos.z;
@@ -3716,7 +3968,7 @@ export class RaidEngine {
       const dist = Math.hypot(host.pos.x - this.pos.x, host.pos.z - this.pos.z);
       if (dist > 5.4 + host.radius) continue;
       _tmp.set(host.pos.x - this.pos.x, 0, host.pos.z - this.pos.z).normalize();
-      this.hurtHost(host, 18, _tmp);
+      this.hurtHost(host, 18 * this.castScale, _tmp);
       stolen += 9;
     }
     this.aura = Math.min(this.maxAura, this.aura + stolen);
@@ -4797,6 +5049,7 @@ export class RaidEngine {
     for (const host of this.hosts) {
       host.pacified = Math.max(0, (host.pacified ?? 0) - dt);
       host.immobile = Math.max(0, (host.immobile ?? 0) - dt);
+      host.exposed = Math.max(0, (host.exposed ?? 0) - dt);
       const crowd = (host.pacified ?? 0) > 0 || (host.immobile ?? 0) > 0;
       if (host.ally && host.cpu) {
         if ((host.down ?? 0) > 0) {
@@ -5567,6 +5820,8 @@ export class RaidEngine {
       amount = calculatePvPDamage({ baseDamage: amount, kind: this.outgoingPvpKind() });
     }
     if (!host.ally && (host.guard ?? 0) > 0) amount *= 0.45;
+    // Snared bodies are left open.
+    if (!host.ally && (host.exposed ?? 0) > 0) amount *= 1.35;
     // Team combo: a teammate's hit on a body another seat just launched lands harder.
     if (
       !host.ally &&
@@ -5929,7 +6184,7 @@ export class RaidEngine {
   private cameraState(): CameraState {
     if (this.phase === 'dead') return 'EXPLORATION';
     if (this.fireHeld && !this.burnout) return 'AIM';
-    if (this.abilityT > 0 || this.kit?.locked || this.kit?.busy || this.moveT.some((t) => t > 0)) return 'ABILITY';
+    if (this.abilityT > 0 || this.bodyLocked() || this.kit?.busy || this.moveT.some((t) => t > 0)) return 'ABILITY';
     if (this.lockTarget && this.lockTarget.hp > 0) return 'LOCK_ON';
     if (this.sprinting) return 'SPRINT';
     if (this.combatT > 0) return 'COMBAT';
