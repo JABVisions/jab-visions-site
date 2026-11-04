@@ -549,12 +549,31 @@
 }
 
 .kit small {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 8px;
   margin-top: 4px;
   color: color-mix(in srgb, var(--file) 80%, white);
   font: 700 0.52rem/1 monospace;
   letter-spacing: 0.12em;
   text-transform: uppercase;
+}
+
+/* Power type stamp, in the type's own hue. */
+.type {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--type);
+}
+
+.type::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  background: var(--type);
+  box-shadow: 0 0 5px color-mix(in srgb, var(--type) 70%, transparent);
+  transform: rotate(45deg);
 }
 
 .back {

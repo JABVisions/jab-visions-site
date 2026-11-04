@@ -1,8 +1,9 @@
 'use client';
 
 import Image from 'next/image';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { RYDERZ, type RyderId } from '@/lib/ryderz-raid/config';
+import { POWER_TYPE_COLOR, POWER_TYPE_LABEL, powerTypeOf } from '@/lib/ryderz-raid/progression/power-types';
 import {
   DOSSIER_SECTIONS,
   SECTION_LABEL,
@@ -271,7 +272,12 @@ export default function DatabasePanel({
                               <div>
                                 <strong>{move.name}</strong>
                                 <p>{move.description}</p>
-                                <small>{move.drain > 0 ? `Drains ${move.drain} aura/s` : `${move.auraCost} aura`}</small>
+                                <small>
+                                  <span className={styles.type} style={{ '--type': POWER_TYPE_COLOR[powerTypeOf(move.id)] } as CSSProperties}>
+                                    {POWER_TYPE_LABEL[powerTypeOf(move.id)]}
+                                  </span>
+                                  {move.drain > 0 ? `Drains ${move.drain} aura/s` : `${move.auraCost} aura`}
+                                </small>
                               </div>
                             </li>
                           );
