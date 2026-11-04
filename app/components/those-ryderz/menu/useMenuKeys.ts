@@ -2,7 +2,8 @@
 
 import { useEffect, useRef } from 'react';
 
-export type MenuKey = 'up' | 'down' | 'left' | 'right' | 'confirm' | 'back';
+/** `prev` / `next` page between tabs on screens that have them: Q / E, Tab, the shoulder buttons. */
+export type MenuKey = 'up' | 'down' | 'left' | 'right' | 'confirm' | 'back' | 'prev' | 'next';
 
 const KEY_MAP: Record<string, MenuKey> = {
   ArrowUp: 'up',
@@ -17,6 +18,9 @@ const KEY_MAP: Record<string, MenuKey> = {
   Space: 'confirm',
   Escape: 'back',
   Backspace: 'back',
+  KeyQ: 'prev',
+  KeyE: 'next',
+  Tab: 'next',
 };
 
 /** Standard-mapping gamepad buttons that drive menus. */
@@ -27,6 +31,8 @@ const PAD_BUTTONS: Array<[index: number, key: MenuKey]> = [
   [15, 'right'],
   [0, 'confirm'],
   [1, 'back'],
+  [4, 'prev'],
+  [5, 'next'],
 ];
 
 const STICK_DEADZONE = 0.55;
@@ -53,8 +59,9 @@ export function useMenuKeys(handler: (key: MenuKey, event: KeyboardEvent | null)
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') {
         if (event.code !== 'Escape') return;
       }
-      const key = KEY_MAP[event.code];
+      let key = KEY_MAP[event.code];
       if (!key) return;
+      if (event.code === 'Tab' && event.shiftKey) key = 'prev';
       if (latest.current(key, event)) {
         event.preventDefault();
         event.stopPropagation();
@@ -77,8 +84,8 @@ export function useMenuKeys(handler: (key: MenuKey, event: KeyboardEvent | null)
         latest.current(key, null);
         return;
       }
-      // Only directions repeat; confirm and back fire once per press.
-      if (key === 'confirm' || key === 'back') return;
+      // Only directions repeat; confirm, back and the tab keys fire once per press.
+      if (key === 'confirm' || key === 'back' || key === 'prev' || key === 'next') return;
       if (now >= next) {
         held.set(key, now + REPEAT_RATE);
         latest.current(key, null);

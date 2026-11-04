@@ -1,5 +1,10 @@
+/* Power Tree: X-Men Legends / Ultimate Alliance power screen. Nodes are
+   coloured by --type (a power type's hue, or a neutral for skills); the
+   panel's --aura themes focus, the wallet and the lit connectors. */
+
 .tree {
   min-height: 0;
+  gap: 12px;
 }
 
 .head {
@@ -12,7 +17,7 @@
 .wallet {
   display: grid;
   gap: 4px;
-  min-width: 200px;
+  min-width: 220px;
   padding: 10px 14px;
   border: 1px solid color-mix(in srgb, var(--aura) 45%, transparent);
   border-radius: 14px;
@@ -28,7 +33,7 @@
 
 .wallet span {
   color: rgba(229, 246, 234, 0.6);
-  font: 700 0.58rem/1.3 monospace;
+  font: 700 0.56rem/1.3 monospace;
   letter-spacing: 0.1em;
   text-transform: uppercase;
 }
@@ -48,179 +53,336 @@
   transform-origin: left center;
 }
 
-.body {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 240px;
-  grid-template-rows: minmax(0, 1fr);
-  gap: 16px;
-  flex: 1 1 auto;
-  min-height: 0;
-}
+/* --- Page tabs --------------------------------------------------------- */
 
-/* Columns fit the panel: four across on a wide pause menu, two when the centre column is narrow. */
-.branches {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 10px;
-  align-content: start;
-  min-height: 0;
-  overflow: auto;
-  padding-right: 4px;
-  scrollbar-width: thin;
-  scrollbar-color: color-mix(in srgb, var(--aura) 50%, transparent) transparent;
-}
-
-.branch {
+.tabs {
   display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 14px;
-  background: rgba(8, 6, 16, 0.45);
-  transition: border-color 0.18s ease;
-}
-
-.branchActive {
-  border-color: color-mix(in srgb, var(--aura) 55%, transparent);
-}
-
-.branch h3 {
-  margin: 0;
-  display: grid;
-  gap: 2px;
-  font: 800 0.74rem/1.2 monospace;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: #fff;
-}
-
-.branch h3 small {
-  color: rgba(229, 246, 234, 0.5);
-  font-size: 0.56rem;
-  letter-spacing: 0.08em;
-  font-weight: 700;
-}
-
-.branch ol {
-  display: grid;
+  align-items: stretch;
   gap: 6px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
+  flex: none;
 }
 
-/* A thin connector between tiers reads as a path without a full graph. */
-.branch li + li {
-  position: relative;
-  padding-top: 6px;
-}
-
-.branch li + li::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 22px;
-  width: 1px;
-  height: 6px;
-  background: rgba(255, 255, 255, 0.18);
-}
-
-.node {
-  appearance: none;
-  position: relative;
+.tabKey {
+  align-self: center;
   display: grid;
-  grid-template-columns: 30px 1fr;
-  gap: 1px 8px;
-  align-items: center;
-  width: 100%;
-  padding: 7px 8px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 5px;
+  color: rgba(229, 246, 234, 0.55);
+  font: 800 0.56rem/1 monospace;
+}
+
+.tab {
+  appearance: none;
+  flex: 1 1 0;
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 10px;
-  background: rgba(8, 6, 16, 0.55);
-  color: #f5fff8;
-  text-align: left;
+  background: rgba(8, 6, 16, 0.45);
+  color: rgba(229, 246, 234, 0.7);
+  font: 800 0.66rem/1 monospace;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
   cursor: pointer;
   transition:
     border-color 0.18s ease,
     background 0.18s ease,
-    transform 0.18s ease;
+    color 0.18s ease;
 }
 
-.node:hover,
-.nodeFocused {
-  border-color: rgba(255, 255, 255, 0.35);
-  background: rgba(14, 10, 26, 0.75);
+.tab small {
+  color: rgba(229, 246, 234, 0.45);
+  font-size: 0.54rem;
+  letter-spacing: 0.08em;
 }
 
-.nodeFocused {
+.tab:hover {
+  border-color: rgba(255, 255, 255, 0.3);
+  color: #fff;
+}
+
+.tabActive {
   border-color: var(--aura);
-  transform: translateY(-1px);
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--aura) 40%, transparent);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--aura) 26%, transparent), rgba(8, 6, 16, 0.5));
+  color: #fff;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--aura) 35%, transparent);
 }
 
-.node[data-state='owned'] {
-  background: linear-gradient(90deg, color-mix(in srgb, var(--aura) 20%, transparent), rgba(8, 6, 16, 0.55));
-}
-
-.node[data-state='owned'] .tier {
-  background: var(--aura);
-  color: #07040f;
-}
-
-.node[data-state='open'] .tier {
-  border-color: var(--aura);
+.tabActive small {
   color: var(--aura);
 }
 
-.node[data-state='locked'] {
-  opacity: 0.55;
+/* --- Body --------------------------------------------------------------- */
+
+.body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 256px;
+  grid-template-rows: minmax(0, 1fr);
+  gap: 14px;
+  flex: 1 1 auto;
+  min-height: 0;
+  container-type: inline-size;
+  container-name: tree-body;
+}
+
+.stage {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  overflow: auto;
+  padding: 10px 6px 10px 2px;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--aura) 50%, transparent) transparent;
+}
+
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin: 0;
+  padding: 0 4px;
+  list-style: none;
+}
+
+.legend li {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: rgba(229, 246, 234, 0.6);
+  font: 700 0.52rem/1 monospace;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.legend li::before {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  background: var(--type);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--type) 70%, transparent);
+  transform: rotate(45deg);
+}
+
+/* --- Diagram ------------------------------------------------------------ */
+
+.diagram {
+  position: relative;
+  flex: none;
+  min-width: 300px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 16px;
+  background:
+    radial-gradient(ellipse at 50% 0%, color-mix(in srgb, var(--aura) 14%, transparent), transparent 60%),
+    repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.02) 0 1px, transparent 1px 14px),
+    rgba(8, 6, 16, 0.45);
+  transition: opacity 0.18s ease;
+}
+
+.diagramDimmed {
+  opacity: 0.72;
+}
+
+.wires {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  overflow: visible;
+}
+
+.wires path {
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.14);
+  stroke-width: 2px;
+  stroke-linejoin: round;
+}
+
+.wires path[data-lit='open'] {
+  stroke: color-mix(in srgb, var(--aura) 55%, rgba(255, 255, 255, 0.2));
+  stroke-dasharray: 4 4;
+}
+
+.wires path[data-lit='on'] {
+  stroke: var(--aura);
+  filter: drop-shadow(0 0 4px color-mix(in srgb, var(--aura) 70%, transparent));
+}
+
+.node {
+  appearance: none;
+  position: absolute;
+  display: grid;
+  justify-items: center;
+  gap: 3px;
+  width: 96px;
+  padding: 6px 4px 5px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  background: rgba(8, 6, 16, 0.78);
+  color: #f5fff8;
+  text-align: center;
+  cursor: pointer;
+  transform: translate(-50%, -50%);
+  transition:
+    border-color 0.18s ease,
+    background 0.18s ease,
+    transform 0.18s ease,
+    box-shadow 0.18s ease;
+}
+
+.node:hover {
+  border-color: rgba(255, 255, 255, 0.35);
+}
+
+.nodeFocused,
+.nodeFocused:hover {
+  z-index: 2;
+  border-color: var(--aura);
+  background: rgba(14, 10, 26, 0.92);
+  transform: translate(-50%, -50%) scale(1.06);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--aura) 45%, transparent),
+    0 10px 24px rgba(0, 0, 0, 0.45);
+}
+
+/* The hex badge: the power's symbol on its type colour. */
+.badge {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border: 1.5px solid color-mix(in srgb, var(--type) 70%, transparent);
+  color: var(--type);
+  background: color-mix(in srgb, var(--type) 12%, rgba(8, 6, 16, 0.6));
+  clip-path: polygon(50% 0, 93% 25%, 93% 75%, 50% 100%, 7% 75%, 7% 25%);
+  transition:
+    background 0.18s ease,
+    color 0.18s ease;
+}
+
+.badge svg {
+  display: block;
+}
+
+.node[data-state='owned'] .badge,
+.node[data-state='rankable'] .badge {
+  color: #07040f;
+  background: var(--type);
+  filter: drop-shadow(0 0 8px color-mix(in srgb, var(--type) 60%, transparent));
+}
+
+.node[data-state='open'] .badge {
+  animation: pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    background: color-mix(in srgb, var(--type) 12%, rgba(8, 6, 16, 0.6));
+  }
+  50% {
+    background: color-mix(in srgb, var(--type) 34%, rgba(8, 6, 16, 0.6));
+  }
+}
+
+.node[data-state='locked'],
+.node[data-state='level'] {
+  opacity: 0.6;
+}
+
+.node[data-state='locked'] .badge,
+.node[data-state='level'] .badge {
+  color: rgba(229, 246, 234, 0.55);
+  border-color: rgba(255, 255, 255, 0.2);
+  background: rgba(8, 6, 16, 0.6);
 }
 
 .node[data-state='poor'] em {
   color: #ffb3a7;
 }
 
-.tier {
-  grid-row: span 2;
-  display: grid;
-  place-items: center;
-  width: 30px;
-  height: 30px;
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  border-radius: 9px;
-  font: 800 0.62rem/1 monospace;
-  letter-spacing: 0.06em;
-}
-
-/* Power nodes show the power's symbol in place of the tier mark. */
-.tier[data-power='true'] {
+.node[data-state='rankable'] em {
   color: var(--aura);
 }
 
-.node[data-state='locked'] .tier[data-power='true'] {
-  color: rgba(229, 246, 234, 0.7);
+.lock,
+.bound {
+  position: absolute;
+  right: 6px;
+  bottom: 4px;
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  background: rgba(8, 6, 16, 0.9);
+  color: rgba(229, 246, 234, 0.75);
+}
+
+.bound {
+  background: var(--aura);
+  color: #07040f;
 }
 
 .node strong {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
   overflow: hidden;
-  font-size: 0.7rem;
-  letter-spacing: 0.04em;
+  min-height: 1.9em;
+  font-size: 0.56rem;
+  line-height: 1.2;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .node em {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  color: rgba(229, 246, 234, 0.6);
-  font: 700 0.54rem/1.3 monospace;
+  color: rgba(229, 246, 234, 0.55);
+  font: 700 0.5rem/1.2 monospace;
   font-style: normal;
   letter-spacing: 0.1em;
   text-transform: uppercase;
 }
+
+/* Rank pips: one per rank, lit up to the current rank in the type colour. */
+.pips {
+  display: inline-flex;
+  gap: 3px;
+}
+
+.pips b {
+  display: block;
+  width: 9px;
+  height: 5px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.12);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+
+.pips b[data-on='true'] {
+  background: var(--type);
+  box-shadow: 0 0 5px color-mix(in srgb, var(--type) 70%, transparent);
+}
+
+.pipsLarge {
+  gap: 4px;
+}
+
+.pipsLarge b {
+  width: 18px;
+  height: 7px;
+}
+
+/* --- Detail ------------------------------------------------------------- */
 
 .detail {
   display: flex;
@@ -232,6 +394,40 @@
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 14px;
   background: rgba(8, 6, 16, 0.6);
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--aura) 50%, transparent) transparent;
+  transition: border-color 0.18s ease;
+}
+
+.detailActive {
+  border-color: color-mix(in srgb, var(--aura) 60%, transparent);
+}
+
+.info,
+.acts {
+  display: grid;
+  gap: 8px;
+  align-content: start;
+}
+
+.kind {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0;
+  color: var(--type);
+  font: 800 0.6rem/1.2 monospace;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+}
+
+.kind i {
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+  background: var(--type);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--type) 70%, transparent);
+  transform: rotate(45deg);
 }
 
 .detail h3 {
@@ -251,25 +447,75 @@
   filter: drop-shadow(0 0 6px color-mix(in srgb, var(--aura) 60%, transparent));
 }
 
+.rankRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.rankRow span {
+  color: rgba(229, 246, 234, 0.6);
+  font: 700 0.56rem/1.2 monospace;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
 .blurb {
   margin: 0;
   color: rgba(229, 246, 234, 0.7);
-  font-size: 0.8rem;
+  font-size: 0.78rem;
   line-height: 1.45;
 }
 
 .effect {
   margin: 0;
   color: var(--aura);
-  font: 700 0.6rem/1.4 monospace;
+  font: 700 0.58rem/1.4 monospace;
   letter-spacing: 0.1em;
   text-transform: uppercase;
+}
+
+.stats {
+  width: 100%;
+  border-collapse: collapse;
+  font: 700 0.6rem/1.3 monospace;
+  letter-spacing: 0.06em;
+}
+
+.stats th,
+.stats td {
+  padding: 3px 0;
+  text-align: left;
+}
+
+.stats thead th {
+  color: rgba(229, 246, 234, 0.45);
+  font-size: 0.5rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.stats tbody th {
+  color: rgba(229, 246, 234, 0.65);
+  font-weight: 700;
+  text-transform: uppercase;
+  font-size: 0.54rem;
+  letter-spacing: 0.1em;
+}
+
+.stats td {
+  color: #fff;
+}
+
+.stats td[data-next='true'] {
+  color: #9effc4;
 }
 
 .requires {
   margin: 0;
   color: rgba(229, 246, 234, 0.55);
-  font: 700 0.58rem/1.5 monospace;
+  font: 700 0.56rem/1.5 monospace;
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
@@ -284,62 +530,95 @@
 
 .actions {
   display: grid;
-  gap: 6px;
+  gap: 8px;
   margin-top: 4px;
 }
 
-.buy:not(:disabled) {
+.buy {
+  justify-self: stretch;
+  text-align: center;
+}
+
+.buy[data-ready='true'] {
   border-color: var(--aura);
   color: #fff;
   background: color-mix(in srgb, var(--aura) 22%, transparent);
+}
+
+.buy:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.actionFocused,
+.actionFocused:disabled {
+  box-shadow: 0 0 0 2px var(--aura);
 }
 
 .owned {
   color: #9effc4;
-  font: 800 0.64rem/1.3 monospace;
+  font: 800 0.62rem/1.3 monospace;
   letter-spacing: 0.14em;
   text-transform: uppercase;
 }
 
-.picker {
+.binder {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
-  margin-top: 4px;
+  gap: 5px;
+  padding: 6px;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  transition: border-color 0.18s ease;
 }
 
-.picker > span {
+.binderFocused {
+  border-color: var(--aura);
+}
+
+.binder > span {
+  flex: 1 0 100%;
   color: rgba(229, 246, 234, 0.6);
-  font: 700 0.58rem/1.3 monospace;
-  letter-spacing: 0.1em;
+  font: 700 0.54rem/1.3 monospace;
+  letter-spacing: 0.12em;
   text-transform: uppercase;
 }
 
-.pick {
+.slot {
   appearance: none;
   display: grid;
   place-items: center;
-  width: 36px;
-  height: 36px;
+  width: 30px;
+  height: 30px;
   border: 1px solid rgba(255, 255, 255, 0.18);
-  border-radius: 10px;
+  border-radius: 9px;
   background: rgba(255, 255, 255, 0.04);
   color: #fff;
-  font: 800 0.9rem/1 monospace;
+  font: 800 0.8rem/1 monospace;
   cursor: pointer;
 }
 
-.pickFocused,
-.pick:hover {
+.slot:disabled {
+  cursor: default;
+  opacity: 0.4;
+}
+
+.slot[data-bound='true'] {
   border-color: var(--aura);
-  background: color-mix(in srgb, var(--aura) 22%, transparent);
+  background: var(--aura);
+  color: #07040f;
+}
+
+.slotFocused,
+.slot:not(:disabled):hover {
+  box-shadow: 0 0 0 2px var(--aura);
 }
 
 .flash {
   margin: 0;
   color: #fff;
-  font: 700 0.6rem/1.4 monospace;
+  font: 700 0.58rem/1.4 monospace;
   letter-spacing: 0.1em;
   text-transform: uppercase;
 }
@@ -348,8 +627,10 @@
   margin-top: auto;
 }
 
-/* Stacked: the whole body scrolls as one column so neither pane can spill into the other. */
-@media (max-width: 1100px) {
+/* Narrow centre column: the tree takes the full width and the detail sits
+   under it as a two-column card (text left, numbers and actions right). The
+   whole body scrolls as one so neither pane can spill into the other. */
+@container tree-body (max-width: 640px) {
   .body {
     display: flex;
     flex-direction: column;
@@ -359,20 +640,30 @@
     scrollbar-color: color-mix(in srgb, var(--aura) 50%, transparent) transparent;
   }
 
-  .branches {
+  .stage {
     flex: none;
     overflow: visible;
     padding-right: 0;
   }
 
   .detail {
-    order: -1;
     flex: none;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 8px 16px;
     overflow: visible;
   }
 
   .back {
+    grid-column: 1 / -1;
+    justify-self: start;
     margin-top: 0;
+  }
+}
+
+@container tree-body (max-width: 420px) {
+  .detail {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 
@@ -385,5 +676,14 @@
     text-align: left;
     min-width: 0;
     width: 100%;
+  }
+
+  .tab {
+    letter-spacing: 0.08em;
+    padding: 8px 6px;
+  }
+
+  .tab small {
+    display: none;
   }
 }
