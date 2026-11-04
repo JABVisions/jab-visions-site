@@ -6,17 +6,28 @@
 .database {
   --file: var(--aura);
   min-height: 0;
+  container-type: inline-size;
 }
 
 .head {
-  display: grid;
-  gap: 12px;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px 18px;
+  flex-wrap: wrap;
+}
+
+.head > div {
+  flex: 1 1 220px;
+  min-width: 0;
 }
 
 .sections {
   display: flex;
   flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 6px;
+  flex: 1 1 260px;
 }
 
 .section {
@@ -70,7 +81,7 @@
 
 .body {
   display: grid;
-  grid-template-columns: minmax(170px, 220px) minmax(0, 1fr);
+  grid-template-columns: minmax(160px, 200px) minmax(0, 1fr);
   grid-template-rows: minmax(0, 1fr);
   gap: 14px;
   flex: 1 1 auto;
@@ -537,7 +548,16 @@
   justify-self: start;
 }
 
-@media (max-width: 960px) {
+/* Narrow centre column (small pause menus, phones): files become a strip above the dossier. */
+@container (max-width: 620px) {
+  .head > div p:last-child {
+    display: none;
+  }
+
+  .sections {
+    justify-content: flex-start;
+  }
+
   .body {
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: auto minmax(0, 1fr);
@@ -560,7 +580,7 @@
 
   .file {
     width: auto;
-    min-width: 150px;
+    min-width: 140px;
   }
 
   .fileFocused,

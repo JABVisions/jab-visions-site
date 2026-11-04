@@ -387,7 +387,7 @@ function fromRyder(id: RyderId, index: number): Dossier {
     signal: lore.signal,
     profile: lore.profile,
     notes: lore.notes,
-    tags: [spec.flaw, ...lore.tags],
+    tags: [...new Set([spec.flaw, ...lore.tags])],
     performer: lore.performer,
   };
 }
