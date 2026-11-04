@@ -1,17 +1,24 @@
-.deck {
+/*
+ * Power dock: six numbered circles in a slim pill at the bottom centre.
+ * Vitals live on the circular HUD, so this only carries the powers.
+ */
+.dock {
   --deck: #31ff96;
+  --size: 46px;
   position: absolute;
   left: 50%;
   bottom: max(12px, env(safe-area-inset-bottom));
   transform: translateX(-50%);
-  width: min(560px, calc(100vw - 24px));
-  padding: 8px 12px 8px;
-  border-radius: 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px 7px 8px;
+  border-radius: 999px;
   border: 1px solid color-mix(in srgb, var(--deck) 35%, rgba(255, 255, 255, 0.1));
-  background: rgba(4, 8, 12, 0.74);
+  background: rgba(4, 8, 12, 0.72);
   box-shadow:
-    0 12px 32px rgba(0, 0, 0, 0.45),
-    0 0 28px color-mix(in srgb, var(--deck) 14%, transparent);
+    0 10px 28px rgba(0, 0, 0, 0.45),
+    0 0 24px color-mix(in srgb, var(--deck) 14%, transparent);
   backdrop-filter: blur(14px);
   pointer-events: auto;
   color: #eef7f1;
@@ -20,254 +27,133 @@
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
-.deck[data-low='true'] {
-  border-color: rgba(255, 90, 110, 0.6);
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45), 0 0 28px rgba(255, 70, 100, 0.3);
-}
-
-.deck[data-guard='true'] {
+.dock[data-guard='true'] {
   border-color: #cfe8ff;
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45), 0 0 26px rgba(160, 210, 255, 0.45);
-}
-
-.head {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-bottom: 6px;
-}
-
-.name {
-  font: 800 0.8rem/1 inherit;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: #fff;
-  text-shadow: 0 0 14px color-mix(in srgb, var(--deck) 60%, transparent);
-}
-
-.level {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  color: color-mix(in srgb, var(--deck) 80%, white);
-  font: 800 0.58rem/1 inherit;
-  letter-spacing: 0.12em;
-}
-
-.level em {
-  font-style: normal;
-}
-
-.level i {
-  display: block;
-  width: 56px;
-  height: 4px;
-  border-radius: 4px;
-  background: rgba(255, 255, 255, 0.12);
-  overflow: hidden;
-}
-
-.level b {
-  display: block;
-  height: 100%;
-  width: 100%;
-  transform-origin: left center;
-  transform: scaleX(0);
-  background: var(--deck);
-  transition: transform 0.3s ease;
-}
-
-.tree {
-  margin-left: auto;
-  appearance: none;
-  padding: 5px 10px;
-  border-radius: 999px;
-  border: 1px solid color-mix(in srgb, var(--deck) 55%, transparent);
-  background: color-mix(in srgb, var(--deck) 12%, rgba(0, 0, 0, 0.3));
-  color: #f5fff8;
-  font: 800 0.56rem/1 inherit;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  cursor: pointer;
-}
-
-.tree:hover,
-.tree:focus-visible {
-  background: color-mix(in srgb, var(--deck) 28%, rgba(0, 0, 0, 0.3));
-  outline: none;
-}
-
-.meters {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 8px;
-  margin-bottom: 8px;
-}
-
-.meter {
-  display: grid;
-  grid-template-columns: auto 1fr auto;
-  align-items: center;
-  gap: 6px;
-  font: 800 0.52rem/1 inherit;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: rgba(229, 246, 234, 0.62);
-}
-
-.meter b {
-  display: block;
-  height: 7px;
-  border-radius: 6px;
-  background: rgba(255, 255, 255, 0.1);
-  overflow: hidden;
-}
-
-.meter i {
-  display: block;
-  height: 100%;
-  width: 100%;
-  transform-origin: left center;
-  transform: scaleX(1);
-  transition: transform 0.12s linear;
-}
-
-.meter em {
-  min-width: 2.2em;
-  text-align: right;
-  font-style: normal;
-  color: #fff;
-}
-
-.hp i {
-  background: linear-gradient(90deg, #ff4d6a, #ffd36a);
-  box-shadow: 0 0 10px rgba(255, 80, 110, 0.45);
-}
-
-.aura i {
-  background: linear-gradient(90deg, var(--deck), #66cfff);
-  box-shadow: 0 0 10px color-mix(in srgb, var(--deck) 45%, transparent);
-}
-
-.deck[data-burnout='true'] .aura i {
-  background: #5d6670;
-  box-shadow: none;
-}
-
-.slots {
-  display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 6px;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45), 0 0 22px rgba(160, 210, 255, 0.45);
 }
 
 .slot {
   position: relative;
   appearance: none;
   display: grid;
-  grid-template-rows: auto auto auto;
-  justify-items: center;
-  gap: 2px;
-  min-height: 74px;
-  padding: 6px 4px 5px;
-  border-radius: 12px;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  background: rgba(255, 255, 255, 0.04);
+  place-items: center;
+  width: var(--size);
+  height: var(--size);
+  padding: 0;
+  border-radius: 50%;
+  border: 1.5px solid rgba(255, 255, 255, 0.16);
+  background: radial-gradient(circle at 50% 35%, rgba(255, 255, 255, 0.08), rgba(0, 0, 0, 0.45) 70%);
   color: inherit;
   font: inherit;
   cursor: pointer;
-  overflow: hidden;
+  overflow: visible;
   transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
 }
 
-.slot:disabled {
+.slot[aria-disabled='true'] {
   cursor: default;
 }
 
 .slot[data-ready='true'] {
   border-color: var(--deck);
-  box-shadow: 0 0 18px color-mix(in srgb, var(--deck) 40%, transparent);
+  box-shadow:
+    0 0 14px color-mix(in srgb, var(--deck) 45%, transparent),
+    inset 0 0 10px color-mix(in srgb, var(--deck) 25%, transparent);
 }
 
-.slot[data-ready='false']:not(.slotLocked):not(.slotEmpty) .icon,
-.slot[data-ready='false']:not(.slotLocked):not(.slotEmpty) .label {
-  opacity: 0.55;
+.slot[data-ready='false']:not(.slotLocked):not(.slotEmpty) .icon {
+  opacity: 0.5;
 }
 
 .slot[data-on='true'] {
-  background: color-mix(in srgb, var(--deck) 22%, rgba(0, 0, 0, 0.3));
+  background: radial-gradient(circle at 50% 50%, color-mix(in srgb, var(--deck) 45%, transparent), rgba(0, 0, 0, 0.5) 75%);
 }
 
-.deck[data-link='true'] .slot[data-ready='true'] {
-  animation: deckLink 0.9s ease-in-out infinite;
+.dock[data-burnout='true'] .slot[data-ready='false']:not(.slotLocked) {
+  border-color: rgba(120, 130, 140, 0.4);
+}
+
+.dock[data-link='true'] .slot[data-ready='true'] {
+  animation: dockLink 0.9s ease-in-out infinite;
   border-color: #ffd0d6;
 }
 
-@keyframes deckLink {
+@keyframes dockLink {
   50% {
-    transform: translateY(-1px);
+    transform: translateY(-2px);
   }
 }
 
 .slotLocked {
   border-style: dashed;
-  border-color: rgba(255, 255, 255, 0.18);
-  background: repeating-linear-gradient(135deg, rgba(255, 255, 255, 0.03) 0 6px, transparent 6px 12px);
-  color: rgba(229, 246, 234, 0.55);
+  border-color: rgba(255, 255, 255, 0.2);
+  background: repeating-linear-gradient(135deg, rgba(255, 255, 255, 0.04) 0 4px, rgba(0, 0, 0, 0.4) 4px 8px);
+  color: rgba(229, 246, 234, 0.5);
 }
 
 .slotEmpty {
   border-style: dashed;
 }
 
-.key {
-  position: absolute;
-  top: 4px;
-  left: 6px;
-  color: color-mix(in srgb, var(--deck) 85%, white);
-  font: 800 0.56rem/1 inherit;
-  letter-spacing: 0.1em;
-}
-
 .icon {
-  margin-top: 8px;
   display: grid;
   place-items: center;
-  width: 28px;
-  height: 28px;
-  border-radius: 8px;
-  background: rgba(0, 0, 0, 0.35);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  font: 800 0.66rem/1 inherit;
-  letter-spacing: 0.06em;
-  color: #fff;
-}
-
-.label {
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font: 800 0.56rem/1.2 inherit;
+  font: 800 0.74rem/1 inherit;
   letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: #f7fff9;
+  color: #fff;
+  text-shadow: 0 0 8px color-mix(in srgb, var(--deck) 60%, transparent);
 }
 
-.state {
-  min-height: 0.7em;
-  font: 700 0.5rem/1 inherit;
+.slotLocked .icon,
+.slotEmpty .icon {
+  color: rgba(229, 246, 234, 0.55);
+  text-shadow: none;
+}
+
+/* Cooldown seconds sit over the sigil while the ring sweeps. */
+.timer {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font: 800 0.6rem/1 inherit;
   font-style: normal;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: color-mix(in srgb, var(--deck) 70%, white);
+  color: #fff;
+  pointer-events: none;
+}
+
+.slot:has(.timer:not(:empty)) .icon {
+  opacity: 0.15;
+}
+
+.key {
+  position: absolute;
+  top: -5px;
+  left: -3px;
+  display: grid;
+  place-items: center;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 4px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--deck) 70%, rgba(0, 0, 0, 0.3));
+  background: #060a0e;
+  color: color-mix(in srgb, var(--deck) 85%, white);
+  font: 800 0.6rem/1 inherit;
+}
+
+.slotLocked .key {
+  border-color: rgba(255, 255, 255, 0.22);
+  color: rgba(229, 246, 234, 0.55);
 }
 
 .ring {
   --cd: 0deg;
   position: absolute;
-  inset: 0;
+  inset: -1.5px;
+  border-radius: 50%;
   pointer-events: none;
-  background: conic-gradient(rgba(0, 0, 0, 0.55) var(--cd), transparent 0);
+  background: conic-gradient(rgba(0, 0, 0, 0.7) var(--cd), transparent 0);
   opacity: 0;
   transition: opacity 0.12s ease;
 }
@@ -276,127 +162,61 @@
   opacity: 1;
 }
 
-.foot {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  margin-top: 7px;
-}
-
 .sp {
+  appearance: none;
   display: inline-flex;
-  align-items: baseline;
-  gap: 6px;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  margin-left: 4px;
+  padding: 4px 8px;
+  border: 0;
+  border-left: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 0;
+  background: transparent;
   color: rgba(229, 246, 234, 0.7);
-  font: 800 0.58rem/1 inherit;
+  font: 800 0.5rem/1 inherit;
   letter-spacing: 0.14em;
   text-transform: uppercase;
+  cursor: pointer;
 }
 
 .sp strong {
   color: #fff;
-  font-size: 0.9rem;
-  letter-spacing: 0.04em;
+  font-size: 0.78rem;
+  letter-spacing: 0.02em;
 }
 
-.sp em {
-  font-style: normal;
-  color: color-mix(in srgb, var(--deck) 85%, white);
-  font-size: 0.6rem;
-}
-
-.hintKeys {
-  color: rgba(229, 246, 234, 0.5);
-  font: 700 0.5rem/1.3 inherit;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  text-align: right;
-}
-
-.hintKeys kbd {
-  padding: 1px 4px;
-  border-radius: 4px;
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  font: inherit;
-  color: #fff;
-}
-
-@media (max-width: 760px) {
-  .deck {
-    width: min(520px, calc(100vw - 16px));
-    padding: 6px 10px 6px;
-  }
-
-  .hintKeys {
-    display: none;
-  }
-
-  .slot {
-    min-height: 62px;
-  }
-
-  .label {
-    display: none;
-  }
+.sp:hover strong,
+.sp:focus-visible strong {
+  color: var(--deck);
 }
 
 @media (max-width: 560px) {
-  .meters {
-    grid-template-columns: 1fr;
-    gap: 4px;
-  }
-
-  .name {
-    font-size: 0.66rem;
+  .dock {
+    --size: 40px;
+    gap: 6px;
+    padding: 6px 8px 6px 7px;
   }
 
   .icon {
-    width: 24px;
-    height: 24px;
+    font-size: 0.66rem;
   }
-}
-
-.slot[aria-disabled='true'] {
-  cursor: default;
 }
 
 /*
  * Touch layouts: the stick sits bottom-left and the thumb cluster bottom-right,
- * so the deck slims down (the circular HUD already shows vitals) and stays
- * between them. Tapping a slot fires that power.
+ * so the dock stays between them. Tapping a circle fires that power.
  */
 @media (pointer: coarse) {
-  .deck {
-    width: min(300px, calc(100vw - 24px));
-    padding: 6px 8px;
-  }
-
-  .meters,
-  .hintKeys {
-    display: none;
-  }
-
-  .head {
-    margin-bottom: 4px;
-  }
-
-  .slot {
-    min-height: 56px;
-  }
-
-  .label {
-    display: none;
-  }
-
-  .foot {
-    margin-top: 4px;
+  .dock {
+    --size: 42px;
   }
 }
 
-/* Narrow phones: not enough room between the pads, so the deck lifts above the cluster. */
+/* Narrow phones: not enough room between the pads, so the dock lifts above the cluster. */
 @media (pointer: coarse) and (max-width: 720px) {
-  .deck {
+  .dock {
     bottom: max(196px, calc(env(safe-area-inset-bottom) + 184px));
   }
 }

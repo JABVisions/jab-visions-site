@@ -9,6 +9,9 @@ import { derivedPowerOfKind } from './derived-powers';
  */
 export type PowerBranch = 'combat' | 'powers' | 'defense' | 'ultimate';
 
+/** Deck slots the tree can open. 1 / 2 / 3 are always open. */
+export type ExtraSlot = '4' | '5' | '6';
+
 export const POWER_BRANCHES: PowerBranch[] = ['combat', 'powers', 'defense', 'ultimate'];
 
 export const BRANCH_LABEL: Record<PowerBranch, string> = {
@@ -40,7 +43,7 @@ export type NodeEffect =
   | { kind: 'ability'; abilityId: AbilityId }
   | { kind: 'stat'; stat: StatKey; value: number }
   | { kind: 'combo'; recipe: ComboRecipe }
-  | { kind: 'slot'; slot: '4' | '5' }
+  | { kind: 'slot'; slot: ExtraSlot }
   | { kind: 'passive'; passive: PassiveId };
 
 export interface PowerNode {
@@ -112,9 +115,10 @@ const FLAVOR: Record<RyderId, Flavor> = {
 };
 
 /**
- * Builds the standard 18-node tree for a Ryder. Canonical Q / E / R powers are
- * starter nodes and are never gated. Costs follow the design brief: starter
- * nodes free, first upgrades a few hundred SP, the ultimate 3,000.
+ * Builds the standard 19-node tree for a Ryder. The canonical three powers
+ * (slots 1 / 2 / 3) are starter nodes and are never gated. Costs follow the
+ * design brief: starter nodes free, first upgrades a few hundred SP, the
+ * ultimate 3,000.
  */
 export function buildTree(ryderId: RyderId): PowerTree {
   const spec = RYDERZ[ryderId];
@@ -171,6 +175,7 @@ export function buildTree(ryderId: RyderId): PowerTree {
     // Ultimate
     node('slot4', 'ultimate', 2, 'Expanded Deck', 'Opens a fourth power slot bound to 4.', 600, ['focus', 'fists'], { kind: 'slot', slot: '4' }),
     node('slot5', 'ultimate', 3, 'Full Deck', 'Opens a fifth power slot bound to 5.', 1200, ['slot4', 'stance'], { kind: 'slot', slot: '5' }),
+    node('slot6', 'ultimate', 4, 'Overclocked Deck', 'Opens a sixth power slot bound to 6.', 2000, ['slot5', 'second-wind'], { kind: 'slot', slot: '6' }),
     ...(blitz ? [node('blitz', 'ultimate', 4, blitz.name, blitz.description, 3000, ['slot5', 'surge'], { kind: 'ability', abilityId: blitz.id })] : []),
   ];
   return { ryderId, nodes };
@@ -202,7 +207,7 @@ export function starterNodes(ryderId: RyderId): string[] {
     .map((node) => node.id);
 }
 
-/** Structural checks: ids unique, prerequisites exist, no cycles, costs sane, 12–18 nodes. */
+/** Structural checks: ids unique, prerequisites exist, no cycles, costs sane, 12–20 nodes. */
 export function validateTree(tree: PowerTree): string[] {
   const problems: string[] = [];
   const ids = new Set<string>();
@@ -219,7 +224,7 @@ export function validateTree(tree: PowerTree): string[] {
       if (!ids.has(req)) problems.push(`node ${node.id} requires missing ${req}`);
     }
   }
-  if (tree.nodes.length < 12 || tree.nodes.length > 18) problems.push(`tree has ${tree.nodes.length} nodes; expected 12–18`);
+  if (tree.nodes.length < 12 || tree.nodes.length > 20) problems.push(`tree has ${tree.nodes.length} nodes; expected 12–20`);
   for (const branch of POWER_BRANCHES) {
     if (!tree.nodes.some((node) => node.branch === branch)) problems.push(`branch ${branch} is empty`);
   }
@@ -301,12 +306,12 @@ export function recipesGranted(tree: PowerTree, unlocked: readonly string[]): Co
   return tree.nodes.filter((node) => node.effect.kind === 'combo' && unlocked.includes(node.id)).map((node) => (node.effect as { recipe: ComboRecipe }).recipe);
 }
 
-export function slotsGranted(tree: PowerTree, unlocked: readonly string[]): Array<'4' | '5'> {
-  const out: Array<'4' | '5'> = [];
+export function slotsGranted(tree: PowerTree, unlocked: readonly string[]): ExtraSlot[] {
+  const out: ExtraSlot[] = [];
   for (const node of tree.nodes) {
     if (node.effect.kind === 'slot' && unlocked.includes(node.id)) out.push(node.effect.slot);
   }
-  return out;
+  return out.sort();
 }
 
 /** Total SP a set of owned nodes cost, for the spent ledger. */

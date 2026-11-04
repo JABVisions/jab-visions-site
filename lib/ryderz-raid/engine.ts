@@ -109,6 +109,7 @@ import {
   type SpawnOrder,
 } from './rounds/director';
 import {
+  ABILITY_KEYS,
   CombatMemory,
   FighterStriker,
   abilitySlotOf,
@@ -165,7 +166,7 @@ export interface HudState {
     cooldown: number;
     duration: number;
   }>;
-  /** Power slots the current Ryder has opened on the tree. Q / E / R are always open. */
+  /** Power slots the current Ryder has opened on the tree. 1 / 2 / 3 are always open. */
   openSlots: number;
   /** Signal Points: the persistent progression wallet. `earned` is lifetime, `round` is this round so far. */
   signal: { available: number; earned: number; round: number; level: number; progress: number };
@@ -531,9 +532,9 @@ export class RaidEngine {
   private guardTouch = false;
   /** The hit being resolved came from a finisher, so the kill pays finisher SP. */
   private pendingFinisher = false;
-  private queuedMoves = [false, false, false, false, false];
+  private queuedMoves = [false, false, false, false, false, false];
   /** True once the ability key has come up, so a held key cannot switch a power off. */
-  private releaseArmed = [true, true, true, true, true];
+  private releaseArmed = [true, true, true, true, true, true];
   /** Power Tree output for the current Ryder. Reset to neutral on every switch until the manager pushes again. */
   private modifiers: PowerModifiers = emptyModifiers();
   private treeRecipes: ComboRecipe[] = [];
@@ -590,7 +591,7 @@ export class RaidEngine {
   private pointerLocked = false;
 
   private spec: RyderSpec = RYDERZ.rubi;
-  /** Powers bound to Q / E / R. Defaults to the Ryder's signature moves; the Power Deck can rebind them. */
+  /** Powers bound to the number row. Defaults to the Ryder's signature moves; the Power Tree can rebind them. */
   private moves: AbilitySpec[] = RYDERZ.rubi.moves;
   private gameMode: GameMode = GameMode.SOLO;
   private pvpSetup: { opponentId: RyderId; localTwoPlayer: boolean } | null = null;
@@ -655,8 +656,8 @@ export class RaidEngine {
   private fireCd = 0;
   private meleeCd = 0;
   private meleeT = 0;
-  private moveCd = [0, 0, 0, 0, 0];
-  private moveT = [0, 0, 0, 0, 0];
+  private moveCd = [0, 0, 0, 0, 0, 0];
+  private moveT = [0, 0, 0, 0, 0, 0];
   private iframes = 0;
   private anim = 0;
   private points = 0;
@@ -819,10 +820,10 @@ export class RaidEngine {
     this.jumping = false;
     this.p2JumpQueued = false;
     this.p2Jumping = false;
-    this.moveCd = [0, 0, 0, 0, 0];
-    this.moveT = [0, 0, 0, 0, 0];
-    this.queuedMoves = [false, false, false, false, false];
-    this.releaseArmed = [true, true, true, true, true];
+    this.moveCd = [0, 0, 0, 0, 0, 0];
+    this.moveT = [0, 0, 0, 0, 0, 0];
+    this.queuedMoves = [false, false, false, false, false, false];
+    this.releaseArmed = [true, true, true, true, true, true];
     this.heavyQueued = false;
     this.launcherQueued = false;
     this.guarding = false;
@@ -1280,16 +1281,16 @@ export class RaidEngine {
     if (this.mapOpen && document.pointerLockElement === this.canvas) document.exitPointerLock();
   }
 
-  /** Rebind the deck (Q / E / R plus any open extra slots). Sustained powers that leave the deck are switched off first. */
+  /** Rebind the deck (slots 1 / 2 / 3 plus any open extra slots). Sustained powers that leave the deck are switched off first. */
   setLoadout(moves: AbilitySpec[]) {
     if (moves.length < 3 || moves.length > MAX_POWER_SLOTS) return;
     for (let i = 0; i < MAX_POWER_SLOTS; i += 1) {
       if (this.moveT[i] > 0 && this.moves[i]?.id !== moves[i]?.id) this.endMove(i);
     }
     this.moves = moves;
-    this.moveCd = [0, 0, 0, 0, 0];
-    this.queuedMoves = [false, false, false, false, false];
-    this.releaseArmed = [true, true, true, true, true];
+    this.moveCd = [0, 0, 0, 0, 0, 0];
+    this.queuedMoves = [false, false, false, false, false, false];
+    this.releaseArmed = [true, true, true, true, true, true];
   }
 
   /**
@@ -1410,10 +1411,10 @@ export class RaidEngine {
     this.maxAura = spec.maxAura + this.upgrades.capacity * 20;
     this.aura = this.maxAura * auraFrac;
     this.powerOut = new PowerOutage(this.gameMode === GameMode.PVP);
-    this.moveCd = [0, 0, 0, 0, 0];
-    this.moveT = [0, 0, 0, 0, 0];
-    this.queuedMoves = [false, false, false, false, false];
-    this.releaseArmed = [true, true, true, true, true];
+    this.moveCd = [0, 0, 0, 0, 0, 0];
+    this.moveT = [0, 0, 0, 0, 0, 0];
+    this.queuedMoves = [false, false, false, false, false, false];
+    this.releaseArmed = [true, true, true, true, true, true];
     this.surgeT = 0;
     this.surgeMul = 1;
     this.blitz = null;
@@ -1823,10 +1824,10 @@ export class RaidEngine {
     if (slot >= 0) this.releaseArmed[slot] = true;
   };
 
-  /** Q/1, E/2, R/3, 4, or 5 is still down, so this press is the one that turned the power on. */
+  /** The slot's number key (1–6) is still down, so this press is the one that turned the power on. */
   private abilityHeld(slot: number) {
-    const keys = slot === 0 ? ['q', '1'] : slot === 1 ? ['e', '2'] : slot === 2 ? ['r', '3'] : slot === 3 ? ['4'] : ['5'];
-    return keys.some((key) => this.keys.has(key));
+    const key = ABILITY_KEYS[slot];
+    return key !== undefined && this.keys.has(key);
   }
 
   private onMouseMove = (e: MouseEvent) => {

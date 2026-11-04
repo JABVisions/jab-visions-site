@@ -14,17 +14,22 @@ import {
   slotsGranted,
   starterNodes,
   treeFor,
+  type ExtraSlot,
   type PowerModifiers,
   type PowerNode,
   type UnlockCheck,
 } from './progression/power-tree';
 import { availableSignal, emptyLedger, levelForSignal, type SignalEvent, type SignalLedger } from './progression/signal-points';
 
-export type InputSlot = 'Q' | 'E' | 'R' | '4' | '5';
-export const INPUT_SLOTS: InputSlot[] = ['Q', 'E', 'R', '4', '5'];
+/** Deck slots sit on the number row and fire with keys 1–6. */
+export type InputSlot = '1' | '2' | '3' | '4' | '5' | '6';
+export const INPUT_SLOTS: InputSlot[] = ['1', '2', '3', '4', '5', '6'];
 /** The canonical three every Ryder starts with. */
-export const BASE_SLOTS: InputSlot[] = ['Q', 'E', 'R'];
-export const EXTRA_SLOTS: Array<'4' | '5'> = ['4', '5'];
+export const BASE_SLOTS: InputSlot[] = ['1', '2', '3'];
+export const EXTRA_SLOTS: ExtraSlot[] = ['4', '5', '6'];
+
+/** Decks saved before the number-row layout bound the canonical three to Q / E / R. */
+const LEGACY_SLOTS: Record<string, InputSlot> = { Q: '1', E: '2', R: '3' };
 
 /** A power as the Power Deck sees it: the ability spec plus ownership and deck state. */
 export interface RyderAbility {
@@ -122,8 +127,16 @@ export function sigilFor(id: AbilityId): string {
 }
 
 export function defaultLoadout(id: RyderId): PowerLoadout {
-  const [q, e, r] = RYDERZ[id].moves;
-  return { Q: q.id, E: e.id, R: r.id, '4': null, '5': null };
+  const [one, two, three] = RYDERZ[id].moves;
+  return { '1': one.id, '2': two.id, '3': three.id, '4': null, '5': null, '6': null };
+}
+
+/** Pull extra slots down so 4 fills before 5 and 5 before 6; the engine's slot order stays dense. */
+function compactExtras(deck: PowerLoadout) {
+  const held = EXTRA_SLOTS.map((slot) => deck[slot]).filter((ability): ability is AbilityId => Boolean(ability));
+  EXTRA_SLOTS.forEach((slot, i) => {
+    deck[slot] = held[i] ?? null;
+  });
 }
 
 function defaultState(): RyderManagerState {
@@ -180,9 +193,11 @@ export function hydrate(raw: unknown): RyderManagerState {
     const deck = data.loadouts?.[id];
     if (deck) {
       const slots = slotsGranted(tree, state.nodes[id]);
+      const stored = deck as Record<string, unknown>;
       for (const slot of INPUT_SLOTS) {
-        const ability = (deck as Partial<Record<InputSlot, unknown>>)[slot];
-        if (slot === '4' || slot === '5') {
+        const legacy = Object.keys(LEGACY_SLOTS).find((key) => LEGACY_SLOTS[key] === slot);
+        const ability = stored[slot] ?? (legacy ? stored[legacy] : undefined);
+        if (slot === '4' || slot === '5' || slot === '6') {
           if (!slots.includes(slot)) continue;
         }
         if (isAbilityId(ability) && state.unlocked[id].includes(ability)) state.loadouts[id][slot] = ability;
@@ -195,6 +210,7 @@ export function hydrate(raw: unknown): RyderManagerState {
         if (seen.has(ability)) state.loadouts[id][slot] = BASE_SLOTS.includes(slot) ? defaultLoadout(id)[slot] : null;
         else seen.add(ability);
       }
+      compactExtras(state.loadouts[id]);
     }
     // Spent can never exceed what the owned nodes cost; a tampered ledger is clamped.
   }
@@ -364,7 +380,7 @@ export class RyderManager {
     return modifiersFor(treeFor(id), this.state.nodes[id]);
   }
 
-  /** Slots this Ryder may equip into: Q / E / R plus whatever the tree opened. */
+  /** Slots this Ryder may equip into: 1 / 2 / 3 plus whatever the tree opened. */
   slotsFor(id: RyderId): InputSlot[] {
     return [...BASE_SLOTS, ...slotsGranted(treeFor(id), this.state.nodes[id])];
   }
@@ -417,8 +433,8 @@ export class RyderManager {
   }
 
   /**
-   * The deck as engine-ready specs: Q / E / R, then any equipped extra slot in
-   * order. Index i is the engine's slot i.
+   * The deck as engine-ready specs: slots 1 / 2 / 3, then any equipped extra
+   * slot in order. Index i is the engine's slot i.
    */
   loadoutSpecs(id: RyderId): AbilitySpec[] {
     const deck = this.state.loadouts[id];
@@ -464,7 +480,8 @@ export class RyderManager {
   /**
    * Put a power in a slot. If it already sits in another slot the two swap, so
    * a deck never holds the same power twice. Extra slots must be opened on the
-   * tree, and slot 5 fills slot 4 first so the engine's slot order stays dense.
+   * tree, and an extra slot fills the lowest empty one first so the engine's
+   * slot order stays dense.
    */
   equip(id: RyderId, slot: InputSlot, ability: AbilityId) {
     if (!this.state.unlocked[id].includes(ability)) return false;
@@ -472,30 +489,27 @@ export class RyderManager {
     if (!open.includes(slot)) return false;
     const deck = { ...this.state.loadouts[id] };
     let target = slot;
-    if (target === '5' && !deck['4']) target = '4';
+    if (!BASE_SLOTS.includes(target)) {
+      const firstEmpty = EXTRA_SLOTS.find((extra) => !deck[extra]);
+      if (firstEmpty && firstEmpty < target) target = firstEmpty;
+    }
     const previous = INPUT_SLOTS.find((other) => deck[other] === ability);
     if (previous && previous !== target) deck[previous] = deck[target];
     deck[target] = ability;
     // A base slot can never be empty after a swap.
     for (const base of BASE_SLOTS) if (!deck[base]) deck[base] = defaultLoadout(id)[base];
-    if (!deck['4'] && deck['5']) {
-      deck['4'] = deck['5'];
-      deck['5'] = null;
-    }
+    compactExtras(deck);
     this.commit({ loadouts: { ...this.state.loadouts, [id]: deck } });
     if (id === this.state.activeRyder) this.engine?.setLoadout(this.loadoutSpecs(id));
     return true;
   }
 
-  /** Empty an extra slot. Q / E / R always hold something. */
-  unequip(id: RyderId, slot: '4' | '5') {
+  /** Empty an extra slot. Slots 1 / 2 / 3 always hold something. */
+  unequip(id: RyderId, slot: ExtraSlot) {
     const deck = { ...this.state.loadouts[id] };
     if (!deck[slot]) return false;
     deck[slot] = null;
-    if (slot === '4' && deck['5']) {
-      deck['4'] = deck['5'];
-      deck['5'] = null;
-    }
+    compactExtras(deck);
     this.commit({ loadouts: { ...this.state.loadouts, [id]: deck } });
     if (id === this.state.activeRyder) this.engine?.setLoadout(this.loadoutSpecs(id));
     return true;

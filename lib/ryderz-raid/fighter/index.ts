@@ -41,6 +41,7 @@ export {
 export { hostStrikeDamage, nextHostStrike } from './hostStriker';
 export {
   ABILITY_COMMANDS,
+  ABILITY_KEYS,
   abilitySlotOf,
   commandForKey,
   isMapKey,

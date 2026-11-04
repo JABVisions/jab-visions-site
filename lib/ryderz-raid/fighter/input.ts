@@ -14,7 +14,8 @@ export type CombatCommand =
   | 'ability2'
   | 'ability3'
   | 'ability4'
-  | 'ability5';
+  | 'ability5'
+  | 'ability6';
 
 /** Sprint held while a light strike is pressed turns it heavy. */
 export function withSprintModifier(command: CombatCommand, sprinting: boolean): CombatCommand {
@@ -42,8 +43,8 @@ export const P2_BINDINGS: Record<'punch' | 'kick' | 'melee' | 'dodge' | 'jump', 
 
 /**
  * Face buttons follow a standard pad: Cross/A punch, Circle/B kick, Square/X melee.
- * LB dodges. RB / LT / RT are Q / E / R. D-pad up is the launcher, D-pad
- * down the heavy, D-pad left / right the fourth and fifth power.
+ * LB dodges. RB / LT / RT are powers 1 / 2 / 3. D-pad up is the launcher, D-pad
+ * down the heavy, D-pad left / right powers 4 and 5, R3 power 6.
  */
 export const PAD_BUTTON: Record<CombatCommand, number> = {
   punch: 0,
@@ -58,9 +59,13 @@ export const PAD_BUTTON: Record<CombatCommand, number> = {
   heavy: 13,
   ability4: 14,
   ability5: 15,
+  ability6: 11,
 };
 
-export const ABILITY_COMMANDS: CombatCommand[] = ['ability1', 'ability2', 'ability3', 'ability4', 'ability5'];
+export const ABILITY_COMMANDS: CombatCommand[] = ['ability1', 'ability2', 'ability3', 'ability4', 'ability5', 'ability6'];
+
+/** Number-row keys 1–6 fire the six power slots. Index is the slot. */
+export const ABILITY_KEYS = ['1', '2', '3', '4', '5', '6'];
 
 /** Slot index for an ability command, or -1. */
 export function abilitySlotOf(command: CombatCommand | null): number {
@@ -82,11 +87,8 @@ export function commandForKey(key: string, code: string, player: 1 | 2): CombatC
     if (P1_BINDINGS.melee.includes(lower)) return 'melee';
     if (P1_BINDINGS.dodge.includes(lower)) return 'dodge';
     if (P1_BINDINGS.jump.includes(lower) || code === 'Space') return 'jump';
-    if (lower === 'q' || lower === '1') return 'ability1';
-    if (lower === 'e' || lower === '2') return 'ability2';
-    if (lower === 'r' || lower === '3') return 'ability3';
-    if (lower === '4') return 'ability4';
-    if (lower === '5') return 'ability5';
+    const slot = ABILITY_KEYS.indexOf(lower);
+    if (slot >= 0) return ABILITY_COMMANDS[slot];
     return null;
   }
   if (P2_BINDINGS.punch.includes(lower)) return 'punch';

@@ -10,7 +10,6 @@ import { INPUT_SLOTS, type RyderManager } from '@/lib/ryderz-raid/ryder-manager'
 import ArenaSelector from './ArenaSelector';
 import GameModeSelector from './GameModeSelector';
 import PauseMenuNavigation, { type NavItem } from './PauseMenuNavigation';
-import PowerDeck from './PowerDeck';
 import PowerTreePanel from './PowerTreePanel';
 import RyderSelector from './RyderSelector';
 import RyderShowcase from './RyderShowcase';
@@ -19,15 +18,14 @@ import { RYDER_THEME } from './theme';
 import { useMenuKeys, wrap } from './useMenuKeys';
 import styles from './PauseMenu.module.css';
 
-export type PauseView = 'root' | 'deck' | 'tree' | 'upgrades' | 'ryder' | 'arena' | 'mode' | 'settings';
+export type PauseView = 'root' | 'tree' | 'upgrades' | 'ryder' | 'arena' | 'mode' | 'settings';
 type View = PauseView;
 type RootAction = View | 'resume' | 'exit' | 'map';
 
 const ROOT_ITEMS: NavItem<RootAction>[] = [
   { id: 'resume', label: 'Resume', hint: 'Back onto the block' },
   { id: 'map', label: 'Map', hint: 'Open the terrain chart' },
-  { id: 'tree', label: 'Power Tree', hint: 'Spend Signal Points' },
-  { id: 'deck', label: 'Power Deck', hint: 'Bind Q · E · R · 4 · 5' },
+  { id: 'tree', label: 'Power Tree', hint: 'Spend SP · bind powers to 1–6' },
   { id: 'ryder', label: 'Switch Ryder', hint: 'Change who is in play' },
   { id: 'arena', label: 'Arena', hint: 'Block, P.A.D., or Island Paradise' },
   { id: 'mode', label: 'Game Mode', hint: 'Solo · PvP · Raid' },
@@ -169,8 +167,7 @@ export default function PauseMenu({
             <p className={styles.eyebrow}>Signal held</p>
             <h2>Hosts freeze until you step back on</h2>
             <p>
-              Pick a command on the left. Decks are saved per Ryder, so a loadout you build here is waiting the next
-              time that Ryder drops in.
+              Pick a command on the left. Powers bind to the number row on the Power Tree and are saved per Ryder.
             </p>
           </header>
           <div className={styles.summaryCard}>
@@ -195,7 +192,6 @@ export default function PauseMenu({
           </div>
         </section>
       )}
-      {view === 'deck' && <PowerDeck manager={manager} ryderId={activeRyder} active onBack={back} />}
       {view === 'tree' && <PowerTreePanel manager={manager} ryderId={activeRyder} active onBack={back} />}
       {view === 'upgrades' && (
         <section className={styles.panel} aria-label="Raid upgrades">

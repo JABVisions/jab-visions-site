@@ -126,7 +126,7 @@ export default function RyderzStartScreen({
       <footer className={styles.foot}>
         <span>Enter select</span>
         <span>Arrows move</span>
-        <span>Q E R later</span>
+        <span>1–6 powers in the raid</span>
         <span className={styles.footRight}>Save data · Slot {activeSlot + 1}</span>
       </footer>
     </div>

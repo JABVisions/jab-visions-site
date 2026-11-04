@@ -497,7 +497,7 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
     engine.setPaused(true);
   }, []);
 
-  // The deck bar's five slots: Q / E / R always, 4 and 5 once the tree opens them.
+  // The dock's six slots: 1 / 2 / 3 always, 4 / 5 / 6 once the tree opens them.
   const deckSlots = useMemo<DeckSlotView[]>(() => {
     const open = manager.slotsFor(activeRyder);
     const deck = manager.loadout(activeRyder);
@@ -765,7 +765,7 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
 
           <div className={styles.bottomHud}>
             <p className={styles.hint}>
-              WASD turns the camera · Arrows move · Mouse / right stick look · G lock on · H cycle targets · K camera mode · Shift sprint · Space jump · C punch · V kick · Shift+C heavy · Shift+V launcher · strike in the air for an aerial · strike a downed host to finish · F / RMB melee, F again throws · Z dodge, hold Z still to guard · Click punches up close · Q E R {openSlots > 3 ? `${openSlots > 4 ? '4 5' : '4'} ` : ''}powers · T Power Tree · {INTERACT_LABEL} uses a rack, chest, beacon, or downed teammate · {pvpTwo ? 'Tab opens the map' : 'Tab or M opens the map'} · Esc pause
+              WASD turns the camera · Arrows move · Mouse / right stick look · G lock on · H cycle targets · K camera mode · Shift sprint · Space jump · C punch · V kick · Shift+C heavy · Shift+V launcher · strike in the air for an aerial · strike a downed host to finish · F / RMB melee, F again throws · Z dodge, hold Z still to guard · Click punches up close · 1–{openSlots} powers · T Power Tree · {INTERACT_LABEL} uses a rack, chest, beacon, or downed teammate · {pvpTwo ? 'Tab opens the map' : 'Tab or M opens the map'} · Esc pause
               {phase === 'intermission' ? ' · Hold the spire to buy strength' : ''}
               {pvpTwo ? ' · P2 IJKL move · U punch · O kick · P melee · N dodge · M jump' : ''}
             </p>

@@ -87,7 +87,11 @@ assert(commandForKey('m', 'KeyM', 1) === null, 'M does not jump for player 1');
 assert(isMapKey('m', 'KeyM', false), 'M opens the map when player 2 is not on this keyboard');
 assert(isMapKey('Tab', 'Tab', true), 'Tab opens the map in local versus');
 assert(!isMapKey('m', 'KeyM', true), 'local versus keeps M as player 2 jump');
-assert(commandForKey('q', 'KeyQ', 1) === 'ability1', 'Q stays the first power');
+assert(commandForKey('1', 'Digit1', 1) === 'ability1', '1 is the first power');
+assert(commandForKey('6', 'Digit6', 1) === 'ability6', '6 is the sixth power');
+assert(commandForKey('q', 'KeyQ', 1) === null, 'Q no longer fires a power');
+assert(commandForKey('e', 'KeyE', 1) === null, 'E no longer fires a power');
+assert(commandForKey('r', 'KeyR', 1) === null, 'R no longer fires a power');
 assert(commandForKey('u', 'KeyU', 2) === 'punch', 'player 2 punches with U');
 assert(commandForKey('u', 'KeyU', 1) === null, 'U does not punch for player 1');
 

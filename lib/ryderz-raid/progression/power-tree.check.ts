@@ -21,7 +21,7 @@ for (const id of RYDER_ORDER) {
   const tree = treeFor(id);
   const problems = validateTree(tree);
   assert.deepEqual(problems, [], `${id}: ${problems.join('; ')}`);
-  assert.ok(tree.nodes.length >= 12 && tree.nodes.length <= 18, `${id} has ${tree.nodes.length} nodes`);
+  assert.ok(tree.nodes.length >= 12 && tree.nodes.length <= 20, `${id} has ${tree.nodes.length} nodes`);
   for (const branch of POWER_BRANCHES) {
     assert.ok(tree.nodes.some((node) => node.branch === branch), `${id} has a ${branch} branch`);
   }
@@ -34,8 +34,8 @@ for (const id of RYDER_ORDER) {
   for (const node of tree.nodes) {
     if (node.effect.kind === 'ability') assert.ok(node.effect.abilityId in ABILITY_BANDS, `${node.effect.abilityId} has a band`);
   }
-  // The tree reaches both extra slots and an ultimate.
-  assert.deepEqual(slotsGranted(tree, tree.nodes.map((node) => node.id)), ['4', '5'], `${id} opens 4 and 5`);
+  // The tree reaches all three extra slots and an ultimate.
+  assert.deepEqual(slotsGranted(tree, tree.nodes.map((node) => node.id)), ['4', '5', '6'], `${id} opens 4, 5 and 6`);
   assert.ok(tree.nodes.some((node) => node.tier === 4 && node.branch === 'ultimate'), `${id} has an ultimate`);
 }
 

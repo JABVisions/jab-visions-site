@@ -31,7 +31,7 @@ const BRANCH_BLURB: Record<PowerBranch, string> = {
   combat: 'Fists, launchers, aerials, finishers',
   powers: 'Canonical kit, costs, and new powers',
   defense: 'Health, footwork, guard, second wind',
-  ultimate: 'Extra deck slots and the ultimate',
+  ultimate: 'Deck slots 4 · 5 · 6 and the ultimate',
 };
 
 function describeEffect(effect: NodeEffect): string {
@@ -120,7 +120,7 @@ export default function PowerTreePanel({
     }
     if (node.effect.kind === 'ability') {
       setPicking(true);
-      setPickIndex(Math.max(0, openSlots.indexOf(node.equippedIn ?? 'Q')));
+      setPickIndex(Math.max(0, openSlots.indexOf(node.equippedIn ?? '1')));
     }
   };
 
@@ -164,7 +164,7 @@ export default function PowerTreePanel({
           <p className={menu.eyebrow}>Power Tree · {spec.name}</p>
           <h2>Signal Points</h2>
           <p>
-            Spend Signal Points earned in raids. Unlocking a power adds it to the pool; your Q, E and R stay as they are until you bind it.
+            Spend Signal Points earned in raids. Unlocking a power adds it to the pool; slots 1, 2 and 3 stay as they are until you bind it to a number.
           </p>
         </div>
         <div className={styles.wallet} aria-live="polite">
