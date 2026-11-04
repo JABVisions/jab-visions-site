@@ -92,8 +92,9 @@ function Motif({ ryder, scale, cx = 12, cy = 12 }: { ryder: RyderId; scale: numb
 
 /**
  * Tree-earned powers share a frame per kind: a breaker lifts the motif over a
- * shock ring, a surge flanks it with speed chevrons, a blitz sets it inside an
- * eight-point burst.
+ * shock ring, a volley streaks it forward, a nova rings it with a dashed
+ * detonation, a snare brackets it like a target, a surge flanks it with speed
+ * chevrons, a blitz sets it inside an eight-point burst.
  */
 function derived(ryder: RyderId, kind: DerivedPowerKind): ReactNode {
   if (kind === 'breaker') {
@@ -101,6 +102,35 @@ function derived(ryder: RyderId, kind: DerivedPowerKind): ReactNode {
       <>
         <path d="M3 20.5a9 9 0 0 1 18 0" />
         <Motif ryder={ryder} scale={0.62} cy={10} />
+      </>
+    );
+  }
+  if (kind === 'volley') {
+    return (
+      <>
+        <path d="M2 8h5" />
+        <path d="M2 12h7.5" />
+        <path d="M2 16h5" />
+        <Motif ryder={ryder} scale={0.58} cx={15.5} />
+      </>
+    );
+  }
+  if (kind === 'nova') {
+    return (
+      <>
+        <circle cx="12" cy="12" r="10" strokeDasharray="2.6 2.6" />
+        <Motif ryder={ryder} scale={0.5} />
+      </>
+    );
+  }
+  if (kind === 'snare') {
+    return (
+      <>
+        <path d="M2.5 8V2.5H8" />
+        <path d="M16 2.5h5.5V8" />
+        <path d="M21.5 16v5.5H16" />
+        <path d="M8 21.5H2.5V16" />
+        <Motif ryder={ryder} scale={0.5} />
       </>
     );
   }

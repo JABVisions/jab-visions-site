@@ -4,7 +4,7 @@ import { DERIVED_POWERS, DERIVED_POWER_IDS, type DerivedPowerKind } from '../pro
 /** How an ability wants to be used. The CPU reads this; the kits do not. */
 export type AbilityBand = 'close' | 'mid' | 'long' | 'movement' | 'defensive';
 
-const DERIVED_BAND: Record<DerivedPowerKind, AbilityBand> = { breaker: 'close', surge: 'defensive', blitz: 'mid' };
+const DERIVED_BAND: Record<DerivedPowerKind, AbilityBand> = { breaker: 'close', volley: 'long', nova: 'close', snare: 'mid', surge: 'defensive', blitz: 'mid' };
 
 const DERIVED_BANDS = Object.fromEntries(DERIVED_POWER_IDS.map((id) => [id, DERIVED_BAND[DERIVED_POWERS[id].kind]])) as Record<DerivedAbilityId, AbilityBand>;
 

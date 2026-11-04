@@ -57,45 +57,94 @@ export type AbilityId =
   | DerivedAbilityId;
 
 /**
- * Powers earned on a Ryder's Power Tree. Each Ryder has a breaker (charged
- * uppercut with a shockwave), a surge (a timed tempo buff), and an ultimate
- * blitz. Their behaviour is generic and data-driven; see `progression/derived-powers.ts`.
+ * Powers earned on a Ryder's Power Tree. Each Ryder has one of every kind:
+ * a breaker (strike), a volley (projectile), a nova (radial), a snare
+ * (control), a surge (boost) and an ultimate blitz (xtreme). Their behaviour
+ * is generic and data-driven; see `progression/derived-powers.ts`.
  */
 export type DerivedAbilityId =
+  // Leo
   | 'rushBreaker'
+  | 'prideBolts'
+  | 'sonicBoom'
+  | 'lockstep'
   | 'velocitySurge'
   | 'goldenFury'
+  // Rubi
   | 'bladeBreaker'
+  | 'bladeVolley'
+  | 'crimsonBurst'
+  | 'envySnare'
   | 'stormTempo'
   | 'crimsonTempest'
+  // Aaron
   | 'shadowBreaker'
+  | 'shadowShards'
+  | 'umbralPulse'
+  | 'covetousGrip'
   | 'greedSurge'
   | 'umbralOnslaught'
+  // Zoe
   | 'plasmaBreaker'
+  | 'plasmaSalvo'
+  | 'ionNova'
+  | 'staticCage'
   | 'overcharge'
   | 'singularity'
+  // Keven
   | 'dartBreaker'
+  | 'dartFan'
+  | 'needleBurst'
+  | 'snareTrap'
   | 'acrobatFlow'
   | 'thousandNeedles'
+  // Lilly
   | 'famineBreaker'
+  | 'famineSpines'
+  | 'hungerWave'
+  | 'starvingRoots'
   | 'hungerSurge'
   | 'harvestOfRuin'
+  // Kid Paranormal
   | 'phantomBreaker'
+  | 'ectoBolts'
+  | 'spectralPulse'
+  | 'poltergeistHold'
   | 'ectoSurge'
   | 'dimensionalRift'
+  // Agent Nyx
   | 'temporalBreaker'
+  | 'chronoDarts'
+  | 'timeBurst'
+  | 'stasisField'
   | 'timeDilation'
   | 'zeroPoint'
+  // Marilyn Monroe
   | 'spotlightBreaker'
+  | 'starShower'
+  | 'flashbulb'
+  | 'spellbound'
   | 'encore'
   | 'finalCurtain'
+  // Martin Luther King Jr.
   | 'cadenceBreaker'
+  | 'clarionCall'
+  | 'rallyCry'
+  | 'heldGround'
   | 'resolve'
   | 'mountaintop'
+  // Marywantis
   | 'tideBreaker'
+  | 'tideSpray'
+  | 'tidalBurst'
+  | 'riptideHold'
   | 'riptideFlow'
   | 'maelstrom'
+  // TJ
   | 'riotBreaker'
+  | 'sprayAndPray'
+  | 'flashbang'
+  | 'lockdown'
   | 'adrenaline'
   | 'lastRound';
 
