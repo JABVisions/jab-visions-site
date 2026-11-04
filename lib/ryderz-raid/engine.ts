@@ -207,8 +207,14 @@ export interface HudState {
   ryderId: RyderId;
   ryderName: string;
   meleeOnly: boolean;
-  /** Marywantis's tide cut out. Powers are dead until it comes back. */
+  /** Marywantis's tide cut out, or the shared blackout is running. Powers are dead until it comes back. */
   tideOut: boolean;
+  /** Seconds left on the power clock. Live time while powers are up, dry time while they are out. */
+  powerLeft: number;
+  /** The shared power blackout is running. */
+  powerDown: boolean;
+  /** A duel does not run the power clock. Usage stays unlimited. */
+  powerUnlimited: boolean;
   cameraState: CameraState;
   cameraMode: CameraMode;
   lockOn: boolean;
@@ -5126,29 +5132,9 @@ export class RaidEngine {
       const farZ = host.pos.z - this.pos.z;
       const far2 = farX * farX + farZ * farZ;
       // Animation LOD: bodies past the animation radius pose every other frame.
+      // Thinking is never skipped. A host on the far side of the map still
+      // pathfinds to the Ryder every frame.
       host.animSkip = far2 > budget.animRadius * budget.animRadius && (this.frameTick + (host.lodTick ?? 0)) % 2 === 1;
-      if (
-        !host.ally &&
-        !host.duelist &&
-        host.stagger <= 0 &&
-        host.airY <= 0 &&
-        far2 > budget.thinkRadius * budget.thinkRadius
-      ) {
-        host.lodTick = (host.lodTick ?? 0) + 1;
-        if (host.lodTick % 3 !== 0) {
-          const dist = Math.hypot(farX, farZ) || 1;
-          host.pos.x -= (farX / dist) * host.speed * 0.45 * dt;
-          host.pos.z -= (farZ / dist) * host.speed * 0.45 * dt;
-          host.pos.x = clamp(host.pos.x, -this.limit(), this.limit());
-          host.pos.z = clamp(host.pos.z, -this.limit(), this.limit());
-          resolveCircle(host.pos, host.radius, this.world.obstacles);
-          group.position.copy(host.pos);
-          group.position.y = this.bodyHeight(host.pos.x, host.pos.z, Boolean(host.swims));
-          group.rotation.y = Math.atan2(-farX, -farZ);
-          this.animateHost(host, dt, 0.45, time);
-          continue;
-        }
-      }
 
       // Physical hit reactions: staggered hosts stop and reel, launched hosts
       // arc through the air and tumble, and both still drift with the shove.
@@ -5220,7 +5206,13 @@ export class RaidEngine {
     const scale = this.survivalPlan.scale;
     const holders = this.engagement.assign(
       list,
-      { slots: scale.attackSlots, reach: 4.2, rotate: 3.2 - Math.min(1.2, scale.round * 0.03), starve: Math.max(1.8, 3.8 - scale.round * 0.05), overflow: 2 },
+      {
+        slots: scale.attackSlots,
+        reach: 5.6,
+        rotate: 2.4 - Math.min(0.8, scale.round * 0.02),
+        starve: Math.max(0.9, 2.1 - scale.round * 0.04),
+        overflow: 4,
+      },
       this.simTime,
     );
     this.attackersNow = holders.size;
@@ -5307,8 +5299,8 @@ export class RaidEngine {
     host.powerCd = Math.max(0, (host.powerCd ?? 0) - dt);
     host.guard = Math.max(0, (host.guard ?? 0) - dt);
     host.sinceAttack += dt;
-    if (playerDist < 26) host.sinceSeen = 0;
-    else host.sinceSeen += dt;
+    // Hosts always know where the Ryder is. Distance never sends them back to a patrol.
+    host.sinceSeen = 0;
     const swayedEarly = swayOf(host, this.simTime);
     // Swayed hosts fight each other and ignore the token economy.
     const token = swayedEarly ? undefined : host.token;
@@ -5480,7 +5472,8 @@ export class RaidEngine {
         vz = out.z;
       }
     }
-    const speed = host.speed * profile.speed * (order.state === 'flee' || hazard ? 1.35 : 1);
+    const hunting = playerDist > 12 && order.move > 0.2 && order.state !== 'flee' && order.state !== 'search' && order.state !== 'pickup';
+    const speed = host.speed * profile.speed * (order.state === 'flee' || hazard ? 1.35 : hunting ? 1.45 : 1);
     const mag = Math.hypot(vx, vz);
     let travelX = 0;
     let travelZ = 0;
@@ -6335,6 +6328,9 @@ export class RaidEngine {
       ryderName: this.spec.name,
       meleeOnly: this.burnout || this.powersOut(),
       tideOut: this.powersOut(),
+      powerLeft: this.gameMode === GameMode.PVP ? 0 : this.powerOut.down ? this.powerOut.dry : this.powerOut.live,
+      powerDown: this.gameMode === GameMode.PVP ? false : this.powerOut.down,
+      powerUnlimited: this.gameMode === GameMode.PVP,
       cameraState: this.rig.getState(),
       cameraMode: this.cameraMode,
       lockOn: Boolean(this.lockTarget && this.lockTarget.hp > 0),

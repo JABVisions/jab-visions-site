@@ -1,18 +1,20 @@
 /**
- * Q, E, and R have no cooldown. Powers stay up for a random stretch, then cut
- * out for every fighter. While they are out the aura is dark and only melee
- * and movement work. When the stretch ends, the aura that was saved comes back.
- * The fight is to survive that gap.
+ * Q, E, and R have no cooldown. In Solo and Raid, powers stay up for a long
+ * random stretch, then cut out for every fighter. While they are out the aura
+ * is dark and only melee and movement work. When the stretch ends, the aura
+ * that was saved comes back. A duel never cuts powers: usage stays unlimited
+ * for the whole match, and the gauge does not run a clock.
  */
 
-export const POWER_LIVE_MIN = 8;
-export const POWER_LIVE_MAX = 15;
-export const POWER_DRY_MIN = 5;
-export const POWER_DRY_MAX = 10;
-export const POWER_LIVE_MIN_PVP = 6;
-export const POWER_LIVE_MAX_PVP = 11;
-export const POWER_DRY_MIN_PVP = 4;
-export const POWER_DRY_MAX_PVP = 7;
+export const POWER_LIVE_MIN = 22;
+export const POWER_LIVE_MAX = 36;
+export const POWER_DRY_MIN = 4;
+export const POWER_DRY_MAX = 7;
+/** Kept so older callers compile. PvP does not roll a live or dry window. */
+export const POWER_LIVE_MIN_PVP = 0;
+export const POWER_LIVE_MAX_PVP = 0;
+export const POWER_DRY_MIN_PVP = 0;
+export const POWER_DRY_MAX_PVP = 0;
 
 /** A tap this short may debounce a held toggle. Anything longer is not a cooldown. */
 const TAP_GUARD = 0.4;
@@ -52,7 +54,7 @@ export class PowerOutage {
   stashed = 0;
 
   constructor(pvp = false, roll: () => number = Math.random) {
-    this.live = rollLive(pvp, roll);
+    this.live = pvp ? 0 : rollLive(roll);
   }
 
   get down() {
@@ -76,18 +78,28 @@ export class PowerOutage {
     if (this.stashed <= 0) this.stashed = Math.max(0, aura);
   }
 
-  /** Drop a blackout and start a fresh live window. The beacon uses this. */
+  /** Drop a blackout and start a fresh live window. The beacon uses this. A duel stays live. */
   resume(pvp: boolean, roll: () => number = Math.random) {
     this.dry = 0;
     this.stashed = 0;
-    this.live = rollLive(pvp, roll);
+    this.live = pvp ? 0 : rollLive(roll);
   }
 
   step(dt: number, pvp: boolean, aura: number, roll: () => number = Math.random): PowerShift {
+    if (pvp) {
+      this.live = 0;
+      if (this.dry > 0 || this.stashed > 0) {
+        this.dry = 0;
+        const back = this.stashed > 0 ? this.stashed : aura;
+        this.stashed = 0;
+        return { cut: false, back: true, aura: back };
+      }
+      return { cut: false, back: false, aura };
+    }
     if (this.dry > 0) {
       this.dry = Math.max(0, this.dry - dt);
       if (this.dry === 0) {
-        this.live = rollLive(pvp, roll);
+        this.live = rollLive(roll);
         const back = this.stashed;
         this.stashed = 0;
         return { cut: false, back: true, aura: back };
@@ -96,16 +108,16 @@ export class PowerOutage {
     }
     this.live = Math.max(0, this.live - dt);
     if (this.live > 0) return { cut: false, back: false, aura };
-    this.dry = rollDry(pvp, roll);
+    this.dry = rollDry(roll);
     this.stashed = Math.max(0, aura);
     return { cut: true, back: false, aura: 0 };
   }
 }
 
-function rollLive(pvp: boolean, roll: () => number) {
-  return span(pvp ? POWER_LIVE_MIN_PVP : POWER_LIVE_MIN, pvp ? POWER_LIVE_MAX_PVP : POWER_LIVE_MAX, roll);
+function rollLive(roll: () => number) {
+  return span(POWER_LIVE_MIN, POWER_LIVE_MAX, roll);
 }
 
-function rollDry(pvp: boolean, roll: () => number) {
-  return span(pvp ? POWER_DRY_MIN_PVP : POWER_DRY_MIN, pvp ? POWER_DRY_MAX_PVP : POWER_DRY_MAX, roll);
+function rollDry(roll: () => number) {
+  return span(POWER_DRY_MIN, POWER_DRY_MAX, roll);
 }

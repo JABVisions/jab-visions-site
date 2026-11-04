@@ -29,7 +29,7 @@ export interface EngagementConfig {
   overflow: number;
 }
 
-export const DEFAULT_ENGAGEMENT: EngagementConfig = { slots: 2, reach: 4.2, rotate: 3.2, starve: 3.8, overflow: 2 };
+export const DEFAULT_ENGAGEMENT: EngagementConfig = { slots: 4, reach: 5.6, rotate: 2.4, starve: 2.1, overflow: 4 };
 
 export class EngagementDirector {
   private tokens = new Map<object, number>();

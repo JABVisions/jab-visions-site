@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {
-  POWER_DRY_MAX,
+  POWER_DRY_MAX_PVP,
   POWER_DRY_MIN,
   POWER_LIVE_MAX,
   POWER_LIVE_MAX_PVP,
@@ -44,14 +44,28 @@ assert.equal(out.down, false);
 assert.equal(out.live, POWER_LIVE_MAX);
 assert.equal(out.stashed, 0);
 
+assert.equal(POWER_LIVE_MIN_PVP, 0);
+assert.equal(POWER_LIVE_MAX_PVP, 0);
+assert.equal(POWER_DRY_MAX_PVP, 0);
+
 const duel = new PowerOutage(true, () => 0);
-assert.equal(duel.live, POWER_LIVE_MIN_PVP);
-duel.step(POWER_LIVE_MIN_PVP, true, 40, () => 1);
+assert.equal(duel.live, 0);
+assert.equal(duel.down, false);
+const held = duel.step(120, true, 40, () => 1);
+assert.equal(held.cut, false);
+assert.equal(held.aura, 40, 'a duel never darkens the aura');
+assert.equal(duel.down, false);
+assert.equal(duel.dry, 0);
+assert.equal(duel.live, 0);
+duel.cutNow(8, 40);
 assert.equal(duel.down, true);
-assert.ok(duel.dry <= POWER_DRY_MAX);
+const restored = duel.step(0.016, true, 12, () => 1);
+assert.equal(restored.back, true);
+assert.equal(restored.aura, 40, 'a forced blackout ends on the next duel frame');
+assert.equal(duel.down, false);
 duel.resume(true, () => 1);
 assert.equal(duel.down, false);
-assert.equal(duel.live, POWER_LIVE_MAX_PVP);
+assert.equal(duel.live, 0);
 assert.equal(duel.stashed, 0);
 
 const forced = new PowerOutage(false, () => 1);

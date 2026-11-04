@@ -43,7 +43,7 @@ assert.equal(anchor.tactics.hazards, false);
 assert.equal(anchor.tactics.coordinate, true);
 assert.equal(anchor.tactics.interrupt, false);
 assert.equal(anchor.population, 120);
-assert.equal(anchor.attackSlots, 4);
+assert.equal(anchor.attackSlots, 6);
 // The survival rule: exactly eight civilians per round.
 assert.equal(CIVILIANS_PER_ROUND, 8);
 for (const [round, count] of [
@@ -78,9 +78,9 @@ setCrowdBudget({ maxAlive: 12 });
 assert.equal(activeBudgetForRound(50), 12, 'a lower crowd budget caps the live count without changing the wave');
 assert.equal(roundScale(50).population, 400);
 resetCrowdBudgetForTests();
-assert.equal(attackSlotsForRound(1), 2);
-assert.equal(attackSlotsForRound(20), 5);
-assert.equal(attackSlotsForRound(20, 3), 7);
+assert.equal(attackSlotsForRound(1), 4);
+assert.equal(attackSlotsForRound(20), 7);
+assert.equal(attackSlotsForRound(20, 3), 9);
 assert.ok(attackSlotsForRound(60) <= 10);
 assert.equal(roundPressure(1), 'Light');
 assert.equal(roundPressure(10), 'Moderate');

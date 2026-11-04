@@ -373,15 +373,14 @@ export function activeBudgetForRound(round: number, squadSize = 1, difficulty: R
 }
 
 /**
- * Simultaneous attackers. Round 1 lets two hosts swing at once; by round 20
- * five press, by round 40 seven. Each squadmate opens one more slot so a
- * raid team is actually attacked.
+ * Simultaneous attackers. Round 1 lets four hosts swing at once; by round 20
+ * seven press. Each squadmate opens one more slot so a raid team is actually attacked.
  */
 export function attackSlotsForRound(round: number, squadSize = 1, difficulty: RaidDifficultyName = 'normal') {
   const n = Math.max(1, Math.floor(round));
   const allies = Math.max(0, Math.floor(squadSize) - 1);
   const tune = DIFFICULTY[difficulty] ?? DIFFICULTY.normal;
-  return Math.max(1, Math.min(10, 2 + Math.floor((n - 1) / 6) + allies + tune.slots));
+  return Math.max(1, Math.min(10, 4 + Math.floor((n - 1) / 5) + allies + tune.slots));
 }
 
 /**

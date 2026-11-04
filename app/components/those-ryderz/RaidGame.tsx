@@ -143,6 +143,7 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
       next.maxAura,
       next.burnout || next.tideOut,
       next.resonance,
+      { left: next.powerLeft, down: next.powerDown, unlimited: next.powerUnlimited },
     );
     vignette.current?.setHealth(next.hp, next.maxHp);
     comboHud.current?.setCombo(next.combo);
@@ -229,7 +230,7 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
         })
         .catch(() => {});
     }
-    if (pointsRef.current) pointsRef.current.textContent = String(next.points);
+    if (pointsRef.current) pointsRef.current.textContent = next.signal.available.toLocaleString('en-US');
     if (next.beacon && beaconCooldown.current) {
       beaconCooldown.current.textContent = `${Math.ceil(next.beacon.cooldownLeft)}s`;
     }
@@ -622,8 +623,8 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
                   <div className={styles.chip}>
                     Hosts <strong ref={remainingRef}>0</strong>
                   </div>
-                  <div className={styles.chip} title="Match currency for the Spire Shop. Signal Points for the Power Tree live on the deck below.">
-                    Raid pts <strong ref={pointsRef}>0</strong>
+                  <div className={styles.chip} title="Signal Points. Spent on the Power Tree and saved with this Ryder.">
+                    Signal <strong ref={pointsRef}>0</strong>
                   </div>
                   <div className={styles.chip}>
                     Difficulty <strong>{difficulty}</strong>
@@ -868,7 +869,11 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
 
       {playing && partyState.mode !== GameMode.PVP && (nearShop || phase === 'report') && (
         <aside className={`${styles.shop} ${phase === 'report' ? styles.shopOver : ''}`}>
-          <h3>{phase === 'report' ? 'Raid upgrades' : `Spire Shop · ${Math.ceil(intermissionLeft)}s`}</h3>
+          <h3>
+            {phase === 'report' ? 'Raid upgrades' : `Spire Shop · ${Math.ceil(intermissionLeft)}s`}
+            {' · '}
+            {points} raid pts
+          </h3>
           <ul>
             {UPGRADE_ORDER.map((id) => {
               const spec = UPGRADES[id];
