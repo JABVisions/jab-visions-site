@@ -554,11 +554,17 @@ export const RYDERZ: Record<RyderId, RyderSpec> = {
     weapon: 'Blue energy projection',
     portrait: '/assets/aria-patterson-headshot.jpg',
     icon: '/assets/those-ryderz/icons/zoe.webp',
-    glb: '/assets/those-ryderz/models/zoe-folie.glb?v=2',
+    glb: '/assets/those-ryderz/models/zoe-folie.glb?v=3',
     strikes: ['slap', 'kick', 'blast'],
-    // Export bind is a pointing left fist and a hanging right arm. Unfolding
-    // those joints ~114° around a rib-placed elbow corkscrews the gloves.
-    skelKeep: ['shoulderL', 'shoulderR', 'upperArmL', 'upperArmR', 'lowerArmL', 'lowerArmR', 'handL', 'handR'],
+    // The updated mesh is bound to the same 24-bone skeleton, but the export
+    // is a posed Mixamo stance. Unfolding those joints onto a guessed local
+    // axis corkscrews the skin, so the whole stance stays and the stride
+    // layers on top of it.
+    skelKeep: [
+      'hips', 'spine', 'chest', 'upperChest', 'neck', 'head', 'eyeL', 'eyeR',
+      'shoulderL', 'shoulderR', 'upperArmL', 'upperArmR', 'lowerArmL', 'lowerArmR', 'handL', 'handR',
+      'upperLegL', 'upperLegR', 'lowerLegL', 'lowerLegR', 'footL', 'footR', 'toesL', 'toesR',
+    ],
     maxHp: 105,
     speed: 7.2,
     fireRate: 3.4,
