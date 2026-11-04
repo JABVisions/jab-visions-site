@@ -41,6 +41,28 @@
   filter: drop-shadow(0 0 5px color-mix(in srgb, var(--ryder) 70%, transparent));
 }
 
+.gaugeClock {
+  position: absolute;
+  top: 42%;
+  right: -2px;
+  z-index: 2;
+  min-width: 28px;
+  padding: 1px 4px;
+  border: 1px solid color-mix(in srgb, var(--ryder) 65%, transparent);
+  border-radius: 999px;
+  background: rgba(6, 8, 12, 0.9);
+  color: var(--ryder);
+  font: 800 0.58rem/1.2 ui-monospace, monospace;
+  letter-spacing: 0.02em;
+  text-align: center;
+  text-shadow: 0 1px 4px #000;
+}
+
+.gaugeClock[data-down='true'] {
+  color: #ffc7b8;
+  border-color: rgba(255, 140, 120, 0.75);
+}
+
 .portrait {
   position: absolute;
   top: 22px;

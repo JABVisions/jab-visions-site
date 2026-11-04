@@ -6,7 +6,15 @@ import { RYDER_THEME } from '../menu/theme';
 import styles from './CircularPlayerHUD.module.css';
 
 export type CircularHudApi = {
-  setVitals: (hp: number, maxHp: number, aura: number, maxAura: number, burnout: boolean, resonance?: number) => void;
+  setVitals: (
+    hp: number,
+    maxHp: number,
+    aura: number,
+    maxAura: number,
+    burnout: boolean,
+    resonance?: number,
+    power?: { left: number; down: boolean; unlimited: boolean },
+  ) => void;
 };
 
 function clampPct(value: number, max: number) {
@@ -35,17 +43,27 @@ const CircularPlayerHUD = forwardRef<
   const auraArc = useRef<SVGPathElement>(null);
   const hpLabel = useRef<HTMLElement>(null);
   const auraLabel = useRef<HTMLElement>(null);
+  const clockLabel = useRef<HTMLElement>(null);
   const resLabel = useRef<HTMLElement>(null);
 
   useImperativeHandle(ref, () => ({
-    setVitals(hp, maxHp, aura, maxAura, isBurnout, resonance = 0) {
+    setVitals(hp, maxHp, aura, maxAura, isBurnout, resonance = 0, power) {
       const healthPct = clampPct(hp, maxHp);
       const auraPct = clampPct(aura, maxAura);
       paintArc(hpArc.current, healthPct);
       paintArc(auraArc.current, auraPct);
       if (hpLabel.current) hpLabel.current.textContent = `${Math.ceil(hp)}`;
+      const showClock = Boolean(power && !power.unlimited);
       if (auraLabel.current) {
         auraLabel.current.textContent = isBurnout ? 'OUT' : `${Math.ceil(aura)}`;
+      }
+      if (clockLabel.current) {
+        clockLabel.current.hidden = !showClock;
+        if (showClock && power) {
+          clockLabel.current.textContent = `${Math.max(1, Math.ceil(power.left))}s`;
+          clockLabel.current.dataset.down = power.down ? 'true' : 'false';
+          clockLabel.current.title = power.down ? 'Powers return in' : 'Powers stay up for';
+        }
       }
       if (resLabel.current) {
         resLabel.current.hidden = resonance <= 0;
@@ -81,6 +99,9 @@ const CircularPlayerHUD = forwardRef<
           d="M 60 14 A 46 46 0 0 1 60 106"
         />
       </svg>
+      <b ref={clockLabel} className={styles.gaugeClock} hidden>
+        0s
+      </b>
       <div className={styles.portrait}>
         <img src={spec.icon} alt="" />
       </div>

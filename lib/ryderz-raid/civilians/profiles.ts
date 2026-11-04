@@ -153,7 +153,7 @@ export interface CivilianSense {
   comboReady?: boolean;
   /** Metres past attack range to hold at while waiting for a token. */
   ringDistance?: number;
-  /** Seconds since the Ryder was last seen. Above a few seconds the host patrols. */
+  /** Kept for older callers. Hosts track the Ryder across the whole map, so this no longer starts a patrol. */
   sinceSeen?: number;
 }
 
@@ -192,10 +192,6 @@ export function civilianOrder(profile: CivilianProfile, sense: CivilianSense): C
   }
   if (tactics?.block && tier >= 2 && sense.playerAttacking && sense.dist < profile.attackRange + 0.45) {
     return { state: sense.rng < 0.5 ? 'defend' : 'guard', move: -0.25, strafe: 0.15, attack: null };
-  }
-  // Far away and the Ryder has been out of sight: wander instead of beelining.
-  if ((sense.sinceSeen ?? 0) > 4 && sense.dist > 30) {
-    return { state: 'patrol', move: 0.4, strafe: sense.rng < 0.5 ? 0.6 : -0.6, attack: null };
   }
   if (tactics?.interrupt && tier >= 3 && sense.playerChanneling) {
     return {

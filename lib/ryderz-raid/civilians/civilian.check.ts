@@ -86,6 +86,18 @@ for (const slot of [0, 1, 2, 3, 4]) {
   assert(packed.state === 'attack' && packed.attack != null, `slot ${slot} attacks inside range`);
 }
 
+const hunting = civilianOrder(brawler, {
+  dist: 80,
+  hpRatio: 1,
+  holding: false,
+  throwableDist: null,
+  slot: 2,
+  recovering: false,
+  rng: 0.2,
+  sinceSeen: 30,
+});
+assert(hunting.state === 'pursue' && hunting.move > 0, 'a host across the map still hunts instead of patrolling');
+
 assert(profileForKind('thrower', 0.1) === 'thrower', 'thrower spawns stay throwers');
 assert(profileForKind('walker', 0) === 'brawler', 'walkers can come out as brawlers');
 
