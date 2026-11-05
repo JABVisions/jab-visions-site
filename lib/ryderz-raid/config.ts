@@ -553,7 +553,7 @@ export const RYDERZ: Record<RyderId, RyderSpec> = {
     visual: { primaryColor: 0x24b4ff, auraColor: 0x2aa9ff, electricityColor: 0x7ad6ff, depletedAuraIntensity: 0.18, poweredAuraIntensity: 1.8 },
     weapon: 'Blue energy projection',
     portrait: '/assets/aria-patterson-headshot.jpg',
-    icon: '/assets/those-ryderz/icons/zoe.webp',
+    icon: '/assets/those-ryderz/icons/zoe.webp?v=2',
     glb: '/assets/those-ryderz/models/zoe-folie.glb?v=3',
     strikes: ['slap', 'kick', 'blast'],
     // The updated mesh is bound to the same 24-bone skeleton, but the export
