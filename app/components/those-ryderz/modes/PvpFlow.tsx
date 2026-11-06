@@ -52,7 +52,7 @@ export default function PvpFlow({
         pin={pin}
         onBack={() => setStep('type')}
         onHighlight={assign}
-        confirmLabel="Fight"
+        confirmLabel="Choose map"
         confirmDisabled={!ready}
         onConfirm={(character) => {
           const nextP1 = side === 'p1' ? character : p1;

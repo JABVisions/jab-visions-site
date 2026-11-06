@@ -1,0 +1,224 @@
+.screen {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 12px;
+  padding: clamp(14px, 2.4vh, 28px) clamp(14px, 2.4vw, 32px);
+  background:
+    radial-gradient(circle at 70% 20%, rgba(102, 207, 255, 0.16), transparent 42%),
+    #07060c;
+  color: #f6f3ff;
+  pointer-events: auto;
+}
+
+.head p {
+  margin: 0;
+  color: #66cfff;
+  font: 800 0.68rem/1 ui-monospace, monospace;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.head h1 {
+  margin: 4px 0 0;
+  font: 800 clamp(1.6rem, 3vw, 2.4rem)/1.05 sans-serif;
+}
+
+.layout {
+  display: grid;
+  grid-template-columns: minmax(200px, 260px) minmax(0, 1fr);
+  gap: 16px;
+  min-height: 0;
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  overflow: auto;
+}
+
+.card {
+  display: grid;
+  gap: 2px;
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.03);
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.card small,
+.card em {
+  font: 700 0.66rem/1.2 ui-monospace, monospace;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(246, 243, 255, 0.62);
+}
+
+.card strong {
+  font: 800 1.02rem/1.2 sans-serif;
+}
+
+.cardOn {
+  border-color: rgba(102, 207, 255, 0.85);
+  background: rgba(102, 207, 255, 0.1);
+}
+
+.cardSoon {
+  opacity: 0.55;
+}
+
+.detail {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(220px, 0.9fr);
+  gap: 16px;
+  min-height: 0;
+}
+
+.chart {
+  display: grid;
+  place-items: center;
+  min-height: 0;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 16px;
+  overflow: hidden;
+  background: #07060c;
+}
+
+.chart canvas {
+  display: block;
+  width: auto;
+  height: 100%;
+  max-width: 100%;
+  aspect-ratio: 1;
+  margin: 0 auto;
+}
+
+.chart img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.copy {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: auto;
+}
+
+.setting {
+  margin: 0;
+  color: #66cfff;
+  font: 800 0.68rem/1 ui-monospace, monospace;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.copy h2 {
+  margin: 6px 0 8px;
+  font: 800 1.7rem/1.05 sans-serif;
+}
+
+.description {
+  margin: 0;
+  color: rgba(246, 243, 255, 0.86);
+  font: 500 0.98rem/1.45 sans-serif;
+}
+
+.size {
+  margin-top: 16px;
+  padding: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.sizeHead {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  align-items: baseline;
+}
+
+.sizeHead span {
+  color: rgba(246, 243, 255, 0.62);
+  font: 800 0.66rem/1 ui-monospace, monospace;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.sizeHead strong {
+  font: 800 0.92rem/1.2 sans-serif;
+}
+
+.bars {
+  display: grid;
+  gap: 6px;
+  margin: 10px 0;
+}
+
+.bars i {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 64px;
+  gap: 8px;
+  align-items: center;
+}
+
+.bars b {
+  display: block;
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(102, 207, 255, 0.35);
+}
+
+.bars i[data-on='true'] b {
+  background: #66cfff;
+}
+
+.bars em {
+  font: 700 0.62rem/1 ui-monospace, monospace;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgba(246, 243, 255, 0.7);
+  font-style: normal;
+}
+
+.size p {
+  margin: 0;
+  color: rgba(246, 243, 255, 0.86);
+  font: 500 0.92rem/1.4 sans-serif;
+}
+
+.actions {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+@media (max-width: 860px) {
+  .layout,
+  .detail {
+    grid-template-columns: 1fr;
+  }
+
+  .chart {
+    height: 220px;
+  }
+
+  .list {
+    flex-direction: row;
+    overflow: auto;
+  }
+
+  .card {
+    min-width: 160px;
+  }
+}

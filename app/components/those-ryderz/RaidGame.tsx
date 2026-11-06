@@ -33,6 +33,7 @@ import RaidWatch from './modes/RaidWatch';
 import { launchFromSquad, type RaidSquad } from '@/lib/ryderz-raid/raid/squad';
 import { subscribeRaidLive } from '@/lib/ryderz-raid/raid/liveRoom';
 import PvpFlow, { type PvpLineup } from './modes/PvpFlow';
+import MapSelect from './modes/MapSelect';
 import SoloCharacterSelect from './modes/SoloCharacterSelect';
 import PremiereCharacterSelect from './premiere/PremiereCharacterSelect';
 import { NEUTRAL_THEME, RYDER_THEME as AURA } from './menu/theme';
@@ -61,7 +62,8 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
   // `selected` is the Ryder the raid booted with (it owns the engine's lifetime);
   // the Ryder currently in play lives in the RyderManager and can change mid-raid.
   const [selected, setSelected] = useState<RyderId | null>(null);
-  const [screen, setScreen] = useState<'start' | 'solo-select' | 'pvp' | 'raid-select' | 'raid-lobby' | 'raid-watch' | 'game'>('start');
+  const [screen, setScreen] = useState<'start' | 'solo-select' | 'pvp' | 'map' | 'raid-select' | 'raid-lobby' | 'raid-watch' | 'game'>('start');
+  const [drop, setDrop] = useState<{ mode: 'solo'; id: RyderId } | { mode: 'pvp'; lineup: PvpLineup } | null>(null);
   const [raidHost, setRaidHost] = useState<RyderId>('rubi');
   const raidPlanRef = useRef<ReturnType<typeof launchFromSquad> | null>(null);
   const netRef = useRef<{ code: string; guestId: string; authority: boolean } | null>(null);
@@ -1019,10 +1021,38 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
       )}
 
       {screen === 'solo-select' && (
-        <SoloCharacterSelect initialId={activeRyder} onBack={() => setScreen('start')} onPlay={playSolo} />
+        <SoloCharacterSelect
+          initialId={activeRyder}
+          onBack={() => setScreen('start')}
+          onPlay={(id) => {
+            setDrop({ mode: 'solo', id });
+            setScreen('map');
+          }}
+        />
       )}
 
-      {screen === 'pvp' && <PvpFlow onBack={() => setScreen('start')} onFight={playPvp} />}
+      {screen === 'pvp' && (
+        <PvpFlow
+          onBack={() => setScreen('start')}
+          onFight={(lineup) => {
+            setDrop({ mode: 'pvp', lineup });
+            setScreen('map');
+          }}
+        />
+      )}
+
+      {screen === 'map' && drop && (
+        <MapSelect
+          mode={drop.mode}
+          arenaId={managerState.arenaId}
+          onBack={() => setScreen(drop.mode === 'pvp' ? 'pvp' : 'solo-select')}
+          onConfirm={(id) => {
+            manager.setArena(id);
+            if (drop.mode === 'pvp') playPvp(drop.lineup);
+            else playSolo(drop.id);
+          }}
+        />
+      )}
 
       {screen === 'raid-select' && (
         <PremiereCharacterSelect

@@ -7,8 +7,8 @@
  * its single Ryder Beacon stands. The engine reads these when it loads an
  * arena, so there is exactly one Beacon per arena and nothing spawns at random.
  */
-import { HOME_DISTRICT } from './config';
-import { islandBeacon, islandSpawn } from './island/terrain';
+import { BOUNDARY, HOME_DISTRICT } from './config';
+import { ISLAND_HALF, islandBeacon, islandSpawn } from './island/terrain';
 
 export type ArenaId = string;
 
@@ -32,6 +32,28 @@ export interface ArenaDefinition {
   beaconCooldown: number;
   /** Which built world the engine shows. Omitted arenas stay on the city block. */
   worldKey?: 'block' | 'pad' | 'island';
+  /** How big the floor is, in words a player can compare. */
+  size: ArenaSize;
+  /** In-game photograph shown on the map select screen. */
+  picture?: string;
+}
+
+/** A floor's playable span. Metres are edge to edge. */
+export interface ArenaSize {
+  label: 'Compact' | 'City' | 'Vast';
+  metres: number;
+  /** What that span feels like once you are on the ground. */
+  guide: string;
+}
+
+/** "188 m across" or "1.6 km across". */
+export function formatSpan(metres: number) {
+  if (metres >= 1000) {
+    const km = metres / 1000;
+    const text = km >= 10 ? km.toFixed(0) : km.toFixed(1).replace(/\.0$/, '');
+    return `${text} km across`;
+  }
+  return `${Math.round(metres)} m across`;
 }
 
 /** @deprecated Use ArenaDefinition. */
@@ -67,6 +89,12 @@ registerArena({
   // The pocket park on the southwest block: off the kill lanes, visible from that plaza.
   ryderBeaconPoint: { x: -18.5 + HOME_DISTRICT, z: 18 + HOME_DISTRICT },
   beaconCooldown: DEFAULT_BEACON_COOLDOWN,
+  size: {
+    label: 'City',
+    metres: BOUNDARY * 2,
+    guide: 'A sprint crosses one block. The whole city is four of them, and the crosswalks run the length of each.',
+  },
+  picture: '/assets/those-ryderz/maps/block.webp?v=1',
 });
 
 registerArena({
@@ -78,11 +106,16 @@ registerArena({
   spawnPoint: { x: 0, z: 6 },
   ryderBeaconPoint: { x: 0, z: -6 },
   beaconCooldown: 10,
+  size: {
+    label: 'Compact',
+    metres: 40,
+    guide: 'One empty room. Not open yet.',
+  },
 });
 
 registerArena({
   id: 'training-pad',
-  name: 'Training P.A.D.',
+  name: 'P.A.D. Lab',
   setting: 'Paranormal Activity Division',
   description: 'A circular P.A.D. facility. Stairs reach the balcony, and the east corridor stays on the floor.',
   available: true,
@@ -90,6 +123,13 @@ registerArena({
   spawnPoint: { x: 0, z: 8 },
   ryderBeaconPoint: { x: -8, z: -4 },
   beaconCooldown: 12,
+  size: {
+    label: 'Compact',
+    // Lab hall west edge is about −68 m; Containment Bay sits near +28 m.
+    metres: 96,
+    guide: 'The round chamber is 32 m across. The whole floor runs about 100 m from the lab hall to containment.',
+  },
+  picture: '/assets/those-ryderz/maps/training-pad.webp?v=1',
 });
 
 registerArena({
@@ -102,6 +142,12 @@ registerArena({
   spawnPoint: islandSpawn(),
   ryderBeaconPoint: islandBeacon(),
   beaconCooldown: DEFAULT_BEACON_COOLDOWN,
+  size: {
+    label: 'Vast',
+    metres: (ISLAND_HALF - 6) * 2,
+    guide: 'Open water on every side. The beach, the jungle, and the resort are a long run apart.',
+  },
+  picture: '/assets/those-ryderz/maps/island-paradise.webp?v=1',
 });
 
 registerArena({
@@ -113,4 +159,9 @@ registerArena({
   spawnPoint: { x: 0, z: 0 },
   ryderBeaconPoint: { x: 0, z: -8 },
   beaconCooldown: DEFAULT_BEACON_COOLDOWN,
+  size: {
+    label: 'City',
+    metres: 200,
+    guide: 'Each chapter brings its own floor. Not open yet.',
+  },
 });

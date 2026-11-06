@@ -17,6 +17,7 @@ export default function SoloCharacterSelect({
     <PremiereCharacterSelect
       mode="solo"
       initialId={initialId}
+      confirmLabel="Choose map"
       onBack={onBack}
       onConfirm={(character) => {
         if (character.ryderId) onPlay(character.ryderId);
