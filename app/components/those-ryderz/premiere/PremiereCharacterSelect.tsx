@@ -25,8 +25,8 @@ const MODE_GAME: Record<'solo' | 'pvp' | 'raid', GameMode> = {
 };
 
 const COPY: Record<'solo' | 'pvp' | 'raid', string> = {
-  solo: 'One fighter. The block is already waiting.',
-  pvp: 'Pick each side. The lineup is only a preview — the match rules stay the same.',
+  solo: 'One fighter. The map is next.',
+  pvp: 'Pick each side, then choose the floor. The lineup is only a preview.',
   raid: 'Cooperative raid. Confirm your fighter, then set the squad. There is no opposing team.',
 };
 
