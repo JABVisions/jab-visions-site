@@ -158,7 +158,7 @@ export default function BoardLoginPage() {
                   href="/board/reset-password"
                   className="text-xs underline opacity-80 hover:opacity-100"
                 >
-                  Reset password
+                  Forgot password?
                 </Link>
               </div>
             </div>

@@ -1665,7 +1665,6 @@ export default function BoardProfileHubPage() {
 
       const supabase = supabaseBrowser();
       const patch: Partial<StaticProfile> = {};
-      const signedVisionSlots: Record<number, string> = {};
 
       if (avatarPath) {
         const { data } = await supabase.storage
@@ -1682,31 +1681,20 @@ export default function BoardProfileHubPage() {
       }
 
       if (visionPaths.some(Boolean)) {
+        const nextSlots = [...profile.visionSlots];
         for (let i = 0; i < visionPaths.length; i += 1) {
           const path = visionPaths[i];
           if (!path) continue;
           const { data } = await supabase.storage
             .from("board-images")
             .createSignedUrl(path, 60 * 60 * 24 * 7);
-          if (data?.signedUrl) signedVisionSlots[i] = data.signedUrl;
+          if (data?.signedUrl) nextSlots[i] = data.signedUrl;
         }
+        patch.visionSlots = nextSlots;
       }
 
-      if (
-        !cancelled &&
-        (Object.keys(patch).length > 0 || Object.keys(signedVisionSlots).length > 0)
-      ) {
-        setProfile((prev) => ({
-          ...prev,
-          ...patch,
-          ...(Object.keys(signedVisionSlots).length
-            ? {
-                visionSlots: prev.visionSlots.map(
-                  (slot, index) => signedVisionSlots[index] || slot
-                ),
-              }
-            : {}),
-        }));
+      if (!cancelled && Object.keys(patch).length > 0) {
+        setProfile((prev) => ({ ...prev, ...patch }));
       }
     }
 
@@ -1715,7 +1703,7 @@ export default function BoardProfileHubPage() {
     return () => {
       cancelled = true;
     };
-  }, [profile.avatarPath, profile.coverPath, profile.visionSlotPaths]);
+  }, [profile.avatarPath, profile.coverPath, profile.visionSlotPaths, profile.visionSlots]);
 
   const aura = useMemo(() => {
     const intensity = auraIntensity / 100;

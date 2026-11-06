@@ -8,12 +8,10 @@ function resetRedirect(
   request: NextRequest,
   key: "updated" | "error",
   message: string,
-  email = "",
-  step: "email" | "code" | "password" = "password"
+  email = ""
 ) {
   const target = new URL("/board/reset-password", request.nextUrl.origin);
   target.searchParams.set(key, message);
-  target.searchParams.set("step", step);
   if (email) target.searchParams.set("email", email);
   return NextResponse.redirect(target, { status: 303 });
 }
@@ -71,9 +69,8 @@ export async function POST(request: NextRequest) {
           resetRedirect(
             request,
             "error",
-            "Your verification session has expired. Request a new code.",
-            email,
-            "email"
+            "This reset link is invalid or has expired. Request a new link.",
+            email
           )
         );
       }
@@ -110,9 +107,7 @@ export async function POST(request: NextRequest) {
     const { error } = await supabase.auth.updateUser({ password });
     if (error) {
       if (isFormSubmission) {
-        return applyCookies(
-          resetRedirect(request, "error", error.message, email, "password")
-        );
+        return applyCookies(resetRedirect(request, "error", error.message, email));
       }
       return applyCookies(
         NextResponse.json(
@@ -137,7 +132,7 @@ export async function POST(request: NextRequest) {
     const message =
       error instanceof Error ? error.message : "Could not update password.";
     if (isFormSubmission) {
-      return resetRedirect(request, "error", message, "", "email");
+      return resetRedirect(request, "error", message);
     }
     return NextResponse.json(
       {

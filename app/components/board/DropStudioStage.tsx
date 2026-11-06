@@ -61,7 +61,7 @@ import {
 import type { BoardUploadProgress, BoardUploadProgressHandler } from "@/lib/board/uploadProgress";
 import { preparingUploadProgress, studioVisibleUploadProgress } from "@/lib/board/uploadProgress";
 import { guessUploadBytes, isBoardStorageLimitMessage } from "@/lib/board/boardMediaUpload";
-import { saveDropDraft, draftToFile, ensureVoiceStudioDraftCard, type DropDraft, type DropDraftKind } from "@/lib/board/dropDrafts";
+import { saveDropDraft, draftToFile, ensureVoiceStudioDraftCard, type DropDraft } from "@/lib/board/dropDrafts";
 import { readDropStudioV5Flag, type DropStudioV5MediaBag, type DropStudioV5Session } from "@/lib/board/dropStudioV5";
 import { exportDropStudioV5, exportNeedsFlatten } from "@/lib/board/dropStudioV5Export";
 import DropDraftsDrawer from "./DropDraftsDrawer";
@@ -88,13 +88,12 @@ import {
   removeTrackById,
   renameTrack,
   renderSessionFile,
-  sessionCanExport,
   restoreClipOriginal,
   sessionDurationMs,
   sessionHasLane,
   splitClipAtPlayhead,
   studioAudioExtension,
-  decodeAudioFile,
+  withAudioTimeout,
   createStudioTakeCapture,
   getMusicMicStream,
   undoHistory,
@@ -564,20 +563,14 @@ export default function DropStudioStage({
   const [dropbookEditingDescriptDoc, setDropbookEditingDescriptDoc] = useState<DescriptDoc | null>(
     null
   );
-  const [draftDescriptDoc, setDraftDescriptDoc] = useState<DescriptDoc | null>(null);
   const [saveNote, setSaveNote] = useState("");
   const saveNoteTimerRef = useRef<number | null>(null);
   const [draftsOpen, setDraftsOpen] = useState(false);
-  const [draftsFilter, setDraftsFilter] = useState<"all" | DropDraftKind | "document" | "art-project">("all");
   const [studioV5, setStudioV5] = useState(true);
   const [studioDraftId, setStudioDraftId] = useState("");
   const v5HandleRef = useRef<{ session: DropStudioV5Session; mediaBag: DropStudioV5MediaBag } | null>(
     null
   );
-  const openDrafts = (filter: "all" | DropDraftKind | "document" | "art-project") => {
-    setDraftsFilter(filter);
-    setDraftsOpen(true);
-  };
   const rememberV5 = useCallback(
     (next: { session: DropStudioV5Session; mediaBag: DropStudioV5MediaBag }) => {
       v5HandleRef.current = next;
@@ -810,9 +803,15 @@ export default function DropStudioStage({
     mixAbortRef.current = false;
     const engine = studioEngine();
     const shouldAbort = () => mixAbortRef.current;
-    // Export owns decoding and fails on missing audible clips. A fixed total
-    // timeout races valid long mixes and leaves the renderer running behind it.
-    return renderSessionFile(session, await engine.ensureContext(), shouldAbort);
+    return withAudioTimeout(
+      (async () => {
+        await engine.hydrateSession(session);
+        if (shouldAbort()) throw new Error("Audio session mix aborted");
+        return renderSessionFile(session, await engine.ensureContext(), shouldAbort);
+      })(),
+      20_000,
+      "mix"
+    );
   };
 
   const studioEngine = () => {
@@ -861,7 +860,7 @@ export default function DropStudioStage({
     setAudioSession((current) => {
       let next = current ?? createAudioSession();
       const vocal = fileRef.current;
-      if (!sessionHasClips(next) && vocal?.type.startsWith("audio/")) {
+      if (vocal?.type.startsWith("audio/")) {
         next = upsertLaneFromFile(next, "vocal", vocal, {
           mix: { preset: voicePreset },
           latencyMs: readStudioLatencyMs(),
@@ -945,28 +944,8 @@ export default function DropStudioStage({
       );
       audioSessionRef.current = next;
       setAudioSession(next);
-      flashSaveNote("Instrumental loaded — edit and publish, or add vocals");
+      flashSaveNote("Instrumental loaded — tap + on Vocals or Record to sing over it");
       persistVoiceProjectRef.current();
-      try {
-        const ctx = await studioEngine().ensureContext();
-        const decoded = await decodeAudioFile(owned, ctx);
-        setAudioSession((current) => {
-          if (!current) return current;
-          const hydrated = {
-            ...current,
-            tracks: current.tracks.map((track) => ({
-              ...track,
-              clips: track.clips.map((clip) => clip.file === owned
-                ? { ...clip, decoded, sourceDurationMs: decoded.duration * 1000 }
-                : clip),
-            })),
-          };
-          audioSessionRef.current = hydrated;
-          return hydrated;
-        });
-      } catch (reason) {
-        setError(playableAudioMessage(reason, owned.name));
-      }
     })();
   }, [flashSaveNote]);
 
@@ -1138,8 +1117,7 @@ export default function DropStudioStage({
   const previewVocalPreset = useCallback(
     async (presetKey?: VoicePresetKey) => {
       const session = audioSessionRef.current ?? audioSession;
-      const vocal = session?.tracks.find((track) => track.kind === "vocal" && track.clips.length)
-        ?? session?.tracks.find((track) => track.kind === "instrumental");
+      const vocal = session?.tracks.find((track) => track.kind === "vocal");
       const presetRaw = vocal?.mix.preset;
       const preset: VoicePresetKey =
         presetKey ??
@@ -1341,23 +1319,41 @@ export default function DropStudioStage({
   }, [audioSession]);
 
   const saveToDevice = useCallback(async () => {
-    const session = mode === "audio" && audioSession && sessionHasClips(audioSession) ? audioSession : null;
     let file = fileRef.current;
-    if (!file && !session) return;
-    setProcessingVocal(true);
-    try {
-      if (session) {
-        file = await mixLiveSession(session);
-      } else if (file?.type.startsWith("audio/")) {
-        file = await renderVoicePresetFile(file, voicePreset);
-      }
-    } catch (reason) {
-      setError(playableAudioMessage(reason));
-      return;
-    } finally {
-      setProcessingVocal(false);
-    }
     if (!file) return;
+    if (file.type.startsWith("audio/")) {
+      const originalFile = file;
+      setProcessingVocal(true);
+      try {
+        if (audioSession && sessionHasLane(audioSession, "instrumental")) {
+          file = await mixLiveSession({
+            ...audioSession,
+            tracks: audioSession.tracks.map((track) =>
+              track.kind === "vocal"
+                ? {
+                    ...track,
+                    latencyMs: studioLatencyMs,
+                    mix: { ...track.mix, preset: voicePreset },
+                  }
+                : track
+            ),
+          });
+        } else if (
+          audioSession &&
+          (sessionHasLane(audioSession, "adlib") || sessionHasLane(audioSession, "fx"))
+        ) {
+          file = await mixLiveSession(audioSession);
+        } else {
+          file = await renderVoicePresetFile(file, voicePreset);
+        }
+      } catch (error) {
+        console.error("[DropStudioStage] vocal download enhancement failed", error);
+        file = originalFile;
+        flashSaveNote("Mix timed out — saving the original voice.");
+      } finally {
+        setProcessingVocal(false);
+      }
+    }
     const url = URL.createObjectURL(file);
     const a = document.createElement("a");
     a.href = url;
@@ -1367,7 +1363,7 @@ export default function DropStudioStage({
     a.remove();
     window.setTimeout(() => URL.revokeObjectURL(url), 4000);
     flashSaveNote("Saved to your device ⬇");
-  }, [audioSession, flashSaveNote, mode, studioLatencyMs, voicePreset]);
+  }, [audioSession, flashSaveNote, studioLatencyMs, voicePreset]);
 
   const saveToDrafts = useCallback(
     async (auto = false, quiet = false) => {
@@ -1391,7 +1387,7 @@ export default function DropStudioStage({
         projectSaved = await saveVoiceStudioProject(draftIdRef.current, session);
       }
       if (projectSaved || (saved && !sessionHasClips(session))) {
-        ensureVoiceStudioDraftCard(draftIdRef.current, file?.name);
+        ensureVoiceStudioDraftCard(draftIdRef.current);
         rememberActiveVoiceStudioDraft(draftIdRef.current);
         lastSavedVoiceSignatureRef.current = voiceStudioEditSignature(session);
         setVoiceAutoSaveAt(Date.now());
@@ -1416,21 +1412,6 @@ export default function DropStudioStage({
     },
     [flashSaveNote]
   );
-
-  const openDraftsAndSave = (filter: "all" | DropDraftKind | "document" | "art-project") => {
-    openDrafts(filter);
-    void saveToDrafts(true, true).catch(() => {});
-  };
-
-  const openDraftsForCurrentMode = () => {
-    const filter =
-      mode === "audio" ? "audio" :
-      mode === "video" ? "video" :
-      mode === "art" ? "art-project" :
-      mode === "descript" ? "document" :
-      "image";
-    openDraftsAndSave(filter);
-  };
 
   persistVoiceProjectRef.current = () => {
     const session = audioSessionRef.current;
@@ -1721,7 +1702,6 @@ export default function DropStudioStage({
         ? initialMode
         : allowedModes[0] ?? "photo";
     setMode(safeMode);
-    setDraftDescriptDoc(null);
     if (initialFile) {
       const playable = fileWithResolvedContentType(initialFile);
       fileRef.current = playable;
@@ -2644,9 +2624,12 @@ export default function DropStudioStage({
 
   async function done() {
     if (completingRef.current) return;
-    const session = mode === "audio" && audioSession && (voiceStudioOpen || sessionHasClips(audioSession)) ? audioSession : null;
-    if (recording || adlibRecording || (session && !sessionCanExport(session))) {
-      flashSaveNote("Stop recording and add audible audio before mixing.");
+    if (
+      audioSession &&
+      sessionHasLane(audioSession, "instrumental") &&
+      !sessionHasLane(audioSession, "vocal")
+    ) {
+      flashSaveNote("Record a vocal before mixing.");
       return;
     }
 
@@ -2679,9 +2662,9 @@ export default function DropStudioStage({
     }
 
     let file =
-      (session
-        ? session.tracks.flatMap((track) => track.clips).find((clip) => clip.file?.size)?.file
-        : fileRef.current) ?? null;
+      fileRef.current ??
+      audioSession?.tracks.flatMap((track) => track.clips).find((clip) => clip.file?.size)?.file ??
+      null;
     if (!file) {
       flashSaveNote("Record or add audio before mixing.");
       return;
@@ -2729,16 +2712,28 @@ export default function DropStudioStage({
 
     if (file.type.startsWith("audio/")) {
       setProcessingVocal(true);
-      flashSaveNote(session ? "Mixing Voice Studio session…" : "Applying vocal enhancement…");
+      flashSaveNote(
+        audioSession &&
+          (sessionHasLane(audioSession, "instrumental") ||
+            sessionHasLane(audioSession, "adlib") ||
+            sessionHasLane(audioSession, "fx"))
+          ? "Mixing Voice Studio session…"
+          : "Applying vocal enhancement…"
+      );
       await new Promise<void>((resolve) => {
         if (typeof window !== "undefined") window.requestAnimationFrame(() => resolve());
         else resolve();
       });
       try {
-        if (session) {
+        if (
+          audioSession &&
+          (sessionHasLane(audioSession, "instrumental") ||
+            sessionHasLane(audioSession, "adlib") ||
+            sessionHasLane(audioSession, "fx"))
+        ) {
           const mixed = await mixLiveSession({
-            ...session,
-            tracks: session.tracks.map((track) =>
+            ...audioSession,
+            tracks: audioSession.tracks.map((track) =>
               track.kind === "vocal" ? { ...track, latencyMs: studioLatencyMs } : track
             ),
           });
@@ -3127,7 +3122,7 @@ export default function DropStudioStage({
             <button
               type="button"
               className="studioGhost"
-              onClick={openDraftsForCurrentMode}
+              onClick={() => setDraftsOpen(true)}
               aria-label="Open drafts"
             >
               🗂 Drafts
@@ -3494,13 +3489,13 @@ export default function DropStudioStage({
                   key={
                     isDropbookMode
                       ? `dropbook-descript-${dropbookEditingDescriptDoc?.id ?? "new"}`
-                      : `descript-${(draftDescriptDoc ?? initialDescriptDoc)?.id ?? "new"}`
+                      : `descript-${initialDescriptDoc?.id ?? "new"}`
                   }
-                  initialDoc={isDropbookMode ? dropbookEditingDescriptDoc : draftDescriptDoc ?? initialDescriptDoc}
+                  initialDoc={isDropbookMode ? dropbookEditingDescriptDoc : initialDescriptDoc}
                   startInEditor={
                     isDropbookMode
                       ? dropbookEditingDescriptDoc !== null
-                      : draftDescriptDoc !== null || initialDescriptDoc !== null
+                      : initialDescriptDoc !== null
                   }
                   returnOnBack={!isDropbookMode && descriptReturnOnBack}
                   onReturn={descriptOnReturn}
@@ -3686,10 +3681,9 @@ export default function DropStudioStage({
                         );
                       }}
                       onVocalPreset={(preset) => {
-                        if (sessionHasLane(audioSession, "vocal")) setVoicePreset(preset);
+                        setVoicePreset(preset);
                         pushSessionEdit((current) => {
-                          const vocal = current.tracks.find((track) => track.kind === "vocal" && track.clips.length)
-                            ?? current.tracks.find((track) => track.kind === "instrumental");
+                          const vocal = current.tracks.find((track) => track.kind === "vocal");
                           if (!vocal) return current;
                           return updateTrackMix(current, vocal.id, {
                             preset,
@@ -3699,8 +3693,7 @@ export default function DropStudioStage({
                       }}
                       onVocalAlteration={(patch: Partial<AlterationParams>) => {
                         pushSessionEdit((current) => {
-                          const vocal = current.tracks.find((track) => track.kind === "vocal" && track.clips.length)
-                            ?? current.tracks.find((track) => track.kind === "instrumental");
+                          const vocal = current.tracks.find((track) => track.kind === "vocal");
                           if (!vocal) return current;
                           return updateTrackMix(current, vocal.id, {
                             alteration: { ...defaultAlteration(vocal.mix.preset), ...vocal.mix.alteration, ...patch },
@@ -3789,18 +3782,18 @@ export default function DropStudioStage({
                       type="button"
                       className="studioGhost"
                       onClick={() => void saveToDevice()}
-                      disabled={processingVocal || recording || adlibRecording || !sessionCanExport(audioSession)}
+                      disabled={processingVocal}
                     >
                       ⬇ Save
                     </button>
-                    <button type="button" className="studioGhost" onClick={() => openDraftsAndSave("audio")}>
+                    <button type="button" className="studioGhost" onClick={() => void saveToDrafts(false)}>
                       🗂 Drafts
                     </button>
                     <button
                       type="button"
                       className="studioDone"
                       onClick={done}
-                      disabled={processingVocal || recording || adlibRecording || !sessionCanExport(audioSession)}
+                      disabled={processingVocal}
                     >
                       {processingVocal
                         ? "Mixing…"
@@ -4029,7 +4022,7 @@ export default function DropStudioStage({
                         >
                           ⬇ Save
                         </button>
-                        <button type="button" className="studioGhost" onClick={() => openDraftsAndSave("audio")}>
+                        <button type="button" className="studioGhost" onClick={() => void saveToDrafts(false)}>
                           🗂 Drafts
                         </button>
                         <button
@@ -4179,20 +4172,8 @@ export default function DropStudioStage({
 
       <DropDraftsDrawer
         open={draftsOpen}
-        initialFilter={draftsFilter}
         onClose={() => setDraftsOpen(false)}
         onOpenDraft={openDraft}
-        onOpenDescriptDoc={(doc) => {
-          setDraftDescriptDoc(doc);
-          setMode("descript");
-          setPhase("edit");
-          setDraftsOpen(false);
-        }}
-        onOpenArtDraft={() => {
-          setMode("art");
-          setPhase("edit");
-          setDraftsOpen(false);
-        }}
       />
 
     </div>,

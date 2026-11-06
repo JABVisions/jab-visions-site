@@ -1,32 +1,22 @@
 import Link from "next/link";
 import { supabaseServer } from "@/lib/supabase/server";
-
-export const dynamic = "force-dynamic";
+import RecoveryLinkHandler from "./RecoveryLinkHandler";
 
 export default async function BoardResetPasswordPage({
   searchParams,
 }: {
   searchParams?: Record<string, string | string[] | undefined>;
 }) {
-  const email = typeof searchParams?.email === "string" ? searchParams.email : "";
-  const requestedStep =
-    typeof searchParams?.step === "string" ? searchParams.step : "";
-  const sent = typeof searchParams?.sent === "string" ? searchParams.sent : "";
-  const updated =
+  const success =
     typeof searchParams?.updated === "string" ? searchParams.updated : "";
+  const sent = typeof searchParams?.sent === "string" ? searchParams.sent : "";
   const error = typeof searchParams?.error === "string" ? searchParams.error : "";
+  const requestedEmail =
+    typeof searchParams?.email === "string" ? searchParams.email : "";
   const {
     data: { user },
   } = await supabaseServer().auth.getUser();
-  const step =
-    requestedStep === "code" && !user
-      ? "code"
-      : requestedStep === "password" && user
-        ? "password"
-        : user
-          ? "password"
-          : "email";
-  const accountEmail = user?.email || email;
+  const email = user?.email || requestedEmail;
 
   return (
     <main className="min-h-screen">
@@ -48,19 +38,18 @@ export default async function BoardResetPasswordPage({
 
       <section className="mx-auto max-w-xl px-6 pb-14 pt-4">
         <div className="rounded-3xl border border-white/10 bg-black/30 p-8 shadow-[0_0_80px_rgba(0,200,255,0.08)]">
+          <RecoveryLinkHandler />
           <h1 className="text-3xl font-semibold tracking-tight">Reset password</h1>
           <p className="mt-2 text-sm opacity-80">
-            {step === "email"
-              ? "Enter your Board email and we’ll send a verification code."
-              : step === "code"
-                ? `Enter the code sent to ${email}. Then you can choose a new password.`
-                : "Choose a new password for your Board account."}
+            {user
+              ? "Choose and confirm a new password for your Board account."
+              : "Enter your Board email to receive the secure link that unlocks password reset."}
           </p>
 
-          {updated ? (
+          {success ? (
             <div className="mt-6 grid gap-4">
               <div className="rounded-2xl border border-green-200/20 bg-black/40 p-4 text-sm text-green-200">
-                {updated}
+                {success}
               </div>
               <Link
                 className="rounded-2xl bg-white px-5 py-3 text-center text-sm font-semibold text-black hover:opacity-95"
@@ -69,19 +58,19 @@ export default async function BoardResetPasswordPage({
                 Return to login
               </Link>
             </div>
-          ) : step === "email" ? (
+          ) : !user ? (
             <form
               className="mt-6 grid gap-4"
-              action="/api/board/auth/reset-password-code"
+              action="/api/board/auth/reset-password"
               method="post"
             >
-              <input type="hidden" name="action" value="send" />
+              <input type="hidden" name="returnTo" value="/board/reset-password" />
               <div className="grid gap-2">
-                <label className="text-xs opacity-70" htmlFor="reset-email">
-                  Board email
+                <label className="text-xs opacity-70" htmlFor="recovery-email">
+                  Email
                 </label>
                 <input
-                  id="reset-email"
+                  id="recovery-email"
                   name="email"
                   className="w-full rounded-2xl border border-white/10 bg-black/40 px-4 py-3 text-sm outline-none focus:border-white/20"
                   type="email"
@@ -93,69 +82,28 @@ export default async function BoardResetPasswordPage({
               </div>
 
               {error ? (
-                <div className="rounded-2xl border border-red-200/20 bg-black/40 p-4 text-sm text-red-200" role="alert">
+                <div className="rounded-2xl border border-red-200/20 bg-black/40 p-4 text-sm text-red-200">
                   {error}
                 </div>
               ) : null}
 
-              <button
-                className="mt-2 rounded-2xl bg-white px-5 py-3 text-sm font-semibold text-black hover:opacity-95"
-                type="submit"
-              >
-                Send verification code
-              </button>
-            </form>
-          ) : step === "code" ? (
-            <form
-              className="mt-6 grid gap-4"
-              action="/api/board/auth/reset-password-code"
-              method="post"
-            >
-              <input type="hidden" name="action" value="verify" />
-              <input type="hidden" name="email" value={email} />
               {sent ? (
                 <div className="rounded-2xl border border-green-200/20 bg-black/40 p-4 text-sm text-green-200">
                   {sent}
                 </div>
               ) : null}
-              <div className="grid gap-2">
-                <label className="text-xs opacity-70" htmlFor="reset-code">
-                  Verification code
-                </label>
-                <input
-                  id="reset-code"
-                  name="token"
-                  className="w-full rounded-2xl border border-white/10 bg-black/40 px-4 py-3 text-sm tracking-[0.3em] outline-none focus:border-white/20"
-                  type="text"
-                  inputMode="numeric"
-                  autoComplete="one-time-code"
-                  placeholder="Enter the code from your email"
-                  minLength={6}
-                  maxLength={10}
-                  pattern="[0-9]{6,10}"
-                  required
-                />
-              </div>
-
-              {error ? (
-                <div className="rounded-2xl border border-red-200/20 bg-black/40 p-4 text-sm text-red-200" role="alert">
-                  {error}
-                </div>
-              ) : null}
 
               <button
                 className="mt-2 rounded-2xl bg-white px-5 py-3 text-sm font-semibold text-black hover:opacity-95"
                 type="submit"
               >
-                Verify code
+                Send reset link
               </button>
 
-              <Link
-                className="text-center text-xs underline opacity-75"
-                href={`/board/reset-password?email=${encodeURIComponent(email)}`}
-              >
-                Use a different email
-              </Link>
+              <p className="text-center text-xs opacity-60">
+                Open the link in the email on this browser, then this page will
+                let you choose the new password.
+              </p>
             </form>
           ) : (
             <form
@@ -163,7 +111,23 @@ export default async function BoardResetPasswordPage({
               action="/api/board/auth/update-password"
               method="post"
             >
-              <input type="hidden" name="email" value={accountEmail} />
+              <div className="grid gap-2">
+                <label className="text-xs opacity-70" htmlFor="reset-email">
+                  Email
+                </label>
+                <input
+                  id="reset-email"
+                  name="email"
+                  className="w-full rounded-2xl border border-white/10 bg-black/40 px-4 py-3 text-sm outline-none focus:border-white/20"
+                  type="email"
+                  defaultValue={email}
+                  placeholder="you@example.com"
+                  autoComplete="email"
+                  readOnly
+                  required
+                />
+              </div>
+
               <div className="grid gap-2">
                 <label className="text-xs opacity-70" htmlFor="new-password">
                   New password
@@ -197,7 +161,7 @@ export default async function BoardResetPasswordPage({
               </div>
 
               {error ? (
-                <div className="rounded-2xl border border-red-200/20 bg-black/40 p-4 text-sm text-red-200" role="alert">
+                <div className="rounded-2xl border border-red-200/20 bg-black/40 p-4 text-sm text-red-200">
                   {error}
                 </div>
               ) : null}
