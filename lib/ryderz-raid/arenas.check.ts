@@ -14,6 +14,7 @@ assert.ok(block.size.metres > 160 && block.size.metres < 220, `block span ${bloc
 assert.match(block.description, /blocks/i);
 assert.match(block.size.guide, /four/i);
 
+assert.equal(pad.name, 'P.A.D. Lab');
 assert.equal(pad.size.label, 'Compact');
 assert.ok(pad.size.metres < block.size.metres);
 assert.match(pad.size.guide, /32 m/);

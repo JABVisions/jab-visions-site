@@ -115,7 +115,7 @@ registerArena({
 
 registerArena({
   id: 'training-pad',
-  name: 'Training P.A.D.',
+  name: 'P.A.D. Lab',
   setting: 'Paranormal Activity Division',
   description: 'A circular P.A.D. facility. Stairs reach the balcony, and the east corridor stays on the floor.',
   available: true,

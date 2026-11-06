@@ -19,7 +19,7 @@ export default function MapSelect({
   onBack: () => void;
   onConfirm: (id: string) => void;
 }) {
-  const arenas = useMemo(() => listArenas(), []);
+  const arenas = useMemo(() => listArenas().filter((arena) => arena.id !== 'training'), []);
   const [focus, setFocus] = useState(() => Math.max(0, arenas.findIndex((arena) => arena.id === arenaId)));
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const focused = arenas[focus] ?? arenas[0];
