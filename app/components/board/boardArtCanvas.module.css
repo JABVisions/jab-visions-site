@@ -724,6 +724,32 @@
   }
 }
 
+.presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.presets .ghost {
+  min-height: 36px;
+  padding: 6px 10px;
+}
+
+.stageLayerDock {
+  position: absolute;
+  z-index: 5;
+  top: 8px;
+  left: 8px;
+  right: 8px;
+  pointer-events: auto;
+}
+
+.layerDockPortal {
+  width: max-content;
+  max-width: 100%;
+  pointer-events: auto;
+}
+
 .layerStrip {
   display: flex;
   align-items: center;

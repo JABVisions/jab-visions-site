@@ -1,10 +1,16 @@
 .timeline {
   flex: 0 0 auto;
   display: grid;
+  grid-template-areas:
+    "rail"
+    "stage"
+    "inspector"
+    "commit";
+  grid-template-rows: auto minmax(0, 1fr) auto auto;
   gap: 8px;
   width: 100%;
   max-height: none;
-  padding: 8px 10px 10px;
+  padding: 8px 10px max(10px, env(safe-area-inset-bottom));
   border-top: 1px solid rgba(167, 244, 232, 0.16);
   box-shadow: 0 -16px 36px rgba(0, 0, 0, 0.35);
   background:
@@ -13,6 +19,140 @@
   color: #e8fff8;
   overflow: hidden;
 }
+
+.timeline[data-layout="tablet"],
+.timeline[data-layout="desktop"] {
+  grid-template-columns: 132px minmax(0, 1fr) minmax(168px, 240px);
+  grid-template-rows: minmax(0, 1fr) auto;
+  grid-template-areas:
+    "rail stage inspector"
+    "commit commit commit";
+  height: 100%;
+  min-height: 0;
+}
+
+.rail {
+  grid-area: rail;
+  display: flex;
+  gap: 6px;
+  min-width: 0;
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.timeline[data-layout="phone"] .rail {
+  flex-direction: row;
+  touch-action: pan-x;
+}
+
+.timeline[data-layout="phone"] .stage {
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.timeline[data-layout="tablet"] .rail,
+.timeline[data-layout="desktop"] .rail {
+  flex-direction: column;
+  touch-action: pan-y;
+}
+
+.rail button {
+  flex: 0 0 auto;
+  min-height: 44px;
+  margin: 0;
+  padding: 0.4rem 0.7rem;
+  border-radius: 999px;
+  border: 1px solid rgba(167, 244, 232, 0.22);
+  background: rgba(255, 255, 255, 0.06);
+  color: inherit;
+  font: inherit;
+  font-size: 0.68rem;
+  font-weight: 850;
+  letter-spacing: 0.04em;
+  text-transform: capitalize;
+  cursor: pointer;
+}
+
+.rail button[aria-pressed="true"] {
+  border-color: rgba(126, 226, 255, 0.7);
+  background: rgba(126, 226, 255, 0.18);
+}
+
+.stage {
+  grid-area: stage;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.inspector {
+  grid-area: inspector;
+  min-width: 0;
+  max-height: 148px;
+  overflow: auto;
+}
+
+.timeline[data-layout="tablet"] .inspector,
+.timeline[data-layout="desktop"] .inspector {
+  max-height: none;
+}
+
+.menu {
+  position: fixed;
+  z-index: 40;
+  display: grid;
+  gap: 4px;
+  min-width: 140px;
+  padding: 6px;
+  border-radius: 12px;
+  border: 1px solid rgba(167, 244, 232, 0.28);
+  background: rgba(6, 14, 18, 0.96);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.4);
+}
+
+.menu button {
+  min-height: 36px;
+  margin: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 16px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  touch-action: none;
+  cursor: ew-resize;
+  z-index: 2;
+}
+
+.handleIn { left: 0; }
+.handleOut { right: 0; }
+
+.handle::after {
+  content: "";
+  position: absolute;
+  top: 8px;
+  bottom: 8px;
+  width: 3px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.88);
+}
+
+.handleIn::after { left: 4px; }
+.handleOut::after { right: 4px; }
 
 .head {
   display: flex;
@@ -69,6 +209,64 @@
 
 .hiddenInput {
   display: none;
+}
+
+.addClip {
+  position: absolute;
+  top: 6px;
+  bottom: 6px;
+  width: 88px;
+  margin: 0;
+  padding: 0 8px;
+  border-radius: 10px;
+  border: 1px dashed rgba(127, 245, 231, 0.55);
+  background: rgba(127, 245, 231, 0.08);
+  color: #e8fff8;
+  font: inherit;
+  font-size: 0.62rem;
+  font-weight: 850;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+}
+
+.addClip:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.addDropRow {
+  grid-area: commit;
+  display: flex;
+  justify-content: center;
+  padding: 4px 0 2px;
+}
+
+.addDropCheck {
+  width: 56px;
+  height: 56px;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  border: 3px solid rgba(255, 255, 255, 0.55);
+  background: radial-gradient(circle at 35% 30%, #fff, #7ee2ff);
+  box-shadow:
+    0 0 24px rgba(126, 226, 255, 0.5),
+    0 10px 28px rgba(0, 0, 0, 0.28);
+  color: #06121a;
+  cursor: pointer;
+}
+
+.addDropCheck svg {
+  width: 26px;
+  height: 26px;
+  display: block;
+}
+
+.addDropCheck:disabled {
+  cursor: wait;
+  opacity: 0.7;
 }
 
 .aspects,
@@ -167,6 +365,8 @@
   position: absolute;
   top: 6px;
   bottom: 6px;
+  display: flex;
+  align-items: center;
   overflow: hidden;
   border-radius: 10px;
   border: 1px solid rgba(127, 245, 231, 0.28);
