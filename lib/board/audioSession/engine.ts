@@ -152,9 +152,10 @@ export class AudioSessionEngine {
       this.decodedCtx = ctx;
     }
     const key = clipFileKey(clip.file);
-    const cached = this.decodedByKey.get(key);
+    const cached = clip.decoded ?? this.decodedByKey.get(key);
     if (cached && cached.length > 0) {
       clip.decoded = cached;
+      this.decodedByKey.set(key, cached);
       return;
     }
     const buffer = await decodeAudioFile(clip.file, ctx);

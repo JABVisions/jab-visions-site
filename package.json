@@ -5,7 +5,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "test:voice": "node scripts/run-board-checks.cjs lib/board/audioSession/timeline.check.ts lib/board/audioSession/mixdown.check.ts lib/board/voiceStudioProject.check.ts lib/board/boardMediaUpload.check.ts lib/board/uploadLimits.check.ts lib/board/exclusiveAudioPreview.check.ts lib/board/ensureBoardMediaLimits.check.ts lib/board/boardUploadSession.check.ts"
   },
   "dependencies": {
     "@supabase/auth-helpers-nextjs": "^0.15.0",

@@ -22,6 +22,7 @@ export default function VoiceStudioAlterationPanel({
   onAlteration,
   onPreview,
   previewing = false,
+  label = "Voice",
 }: {
   open: boolean;
   preset: StudioPresetKey;
@@ -31,6 +32,7 @@ export default function VoiceStudioAlterationPanel({
   onAlteration: (patch: Partial<AlterationParams>) => void;
   onPreview: (preset?: VoicePresetKey) => void;
   previewing?: boolean;
+  label?: string;
 }) {
   if (!open) return null;
   const active = preset === "none" ? "clean" : preset;
@@ -45,9 +47,9 @@ export default function VoiceStudioAlterationPanel({
   };
 
   return (
-    <div className={styles.drawer} role="dialog" aria-label="Vocal alteration">
+    <div className={styles.drawer} role="dialog" aria-label={label === "Voice" ? "Vocal alteration" : label}>
       <div className={styles.drawerHead}>
-        <span>Voice</span>
+        <span>{label}</span>
         <button type="button" className={styles.drawerClose} onClick={onClose}>
           Close
         </button>

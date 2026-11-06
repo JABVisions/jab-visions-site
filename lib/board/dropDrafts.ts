@@ -115,7 +115,7 @@ export function removeDropDraft(id: string) {
 const VOICE_STUDIO_CARD_WAV =
   "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAESsAACJWAAACABAAZGF0YQAAAAA=";
 
-export function ensureVoiceStudioDraftCard(id: string): DropDraft | null {
+export function ensureVoiceStudioDraftCard(id: string, projectFileName?: string): DropDraft | null {
   if (!canUseStorage() || !id) return null;
   const prior = readDropDrafts().find((d) => d.id === id);
   const keepPreview =
@@ -127,7 +127,7 @@ export function ensureVoiceStudioDraftCard(id: string): DropDraft | null {
     id,
     kind: "audio",
     dataUrl: keepPreview ? prior.dataUrl : VOICE_STUDIO_CARD_WAV,
-    fileName: "Voice Studio project",
+    fileName: projectFileName || prior?.fileName || "Voice Studio project",
     mimeType: "audio/wav",
     createdAt: Date.now(),
     count: (prior?.count ?? 0) + 1,

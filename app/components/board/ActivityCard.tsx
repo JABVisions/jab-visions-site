@@ -18,6 +18,7 @@ import {
 import { depositToBrain, readBrain } from "@/lib/board/bucketBrain";
 import { persistReaction } from "@/lib/board/persistReaction";
 import {
+  getOwnerBoardDrops,
   findLocalDropByAnyId,
   loadDropForEdit,
   persistDropEdit,
@@ -588,6 +589,7 @@ function ActivityCard({
   // The authenticated Supabase user id for the viewer, used for a robust
   // id-based ownership check (drops store the author's user_id as a uuid).
   const [currentAuthUserId, setCurrentAuthUserId] = useState("");
+  const [ownedDropIds, setOwnedDropIds] = useState<Set<string>>(() => new Set());
 
   const rawMeta = (item as any)?.meta;
   const storedMeta = rawMeta && typeof rawMeta === "object" ? rawMeta : null;
@@ -640,14 +642,26 @@ function ActivityCard({
     storedDropCustomizations
   );
   const authorUserId = String((item as any)?.user_id || "");
-  const authorUsername = metaString(
+  const storedAuthorUsername = metaString(
     meta?.authorUsername,
     meta?.ownerUsername,
     meta?.recipientUsername,
     meta?.username,
     authorProfile.username
   ).replace(/^@+/, "");
-  const authorName =
+  const activityDropId = metaString(meta?.dropId, meta?.originalDropId);
+  const matchesOwnStoredDrop =
+    (Boolean(authorUserId) && authorUserId === currentAuthUserId) ||
+    ownedDropIds.has(id) ||
+    Boolean(activityDropId && ownedDropIds.has(activityDropId));
+  const storedAuthorIsGeneric = ["", "board", "board-user"].includes(
+    normalizeIdentityKey(storedAuthorUsername)
+  );
+  const authorUsername =
+    storedAuthorIsGeneric && matchesOwnStoredDrop
+      ? metaString(viewerIdentity.username).replace(/^@+/, "")
+      : storedAuthorUsername;
+  const storedAuthorName =
     pickBoardDisplayName(
       authorProfile.displayName,
       meta?.authorName,
@@ -657,6 +671,10 @@ function ActivityCard({
       meta?.name,
       authorUsername
     ) || "Board";
+  const authorName =
+    storedAuthorIsGeneric && matchesOwnStoredDrop && viewerIdentity.displayName
+      ? viewerIdentity.displayName
+      : storedAuthorName;
   const authorHandle = formatHandle(authorUsername || authorName);
   // Prefer the freshly-loaded Supabase profile avatar so it always reflects the
   // user's CURRENT picture; the meta.* snapshot (baked at drop-creation) is only
@@ -674,7 +692,8 @@ function ActivityCard({
     Boolean(currentAuthUserId) &&
     authorUserId === currentAuthUserId
       ? true
-      : activityOwnedByCurrentUser(item, meta, viewerIdentity));
+      : matchesOwnStoredDrop ||
+        activityOwnedByCurrentUser(item, meta, viewerIdentity));
   const canRemoveDrop = roomScoped || isCurrentUserDrop;
   const authorGlow =
     colorFromAura(meta?.authorAuraColor) ||
@@ -868,6 +887,43 @@ function ActivityCard({
     setAuthorProfile(identity);
     setViewerIdentity(identity);
   }, []);
+
+  useEffect(() => {
+    if (item?.kind !== "board_drop") return;
+    const authorIdentityValues = [
+      item?.user_id,
+      meta?.authorId,
+      meta?.ownerUserId,
+      meta?.authorUsername,
+      meta?.ownerUsername,
+      meta?.username,
+    ].map(normalizeIdentityKey);
+    const hasAuthorIdentity = authorIdentityValues.some(
+      (value) => value && value !== "board" && value !== "board-user"
+    );
+    if (hasAuthorIdentity) return;
+    let cancelled = false;
+    void getOwnerBoardDrops().then((drops) => {
+      if (cancelled) return;
+      const ids = new Set<string>();
+      for (const drop of drops) {
+        if (drop?.id) ids.add(String(drop.id));
+      }
+      setOwnedDropIds(ids);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    item?.kind,
+    item?.user_id,
+    id,
+    meta?.authorId,
+    meta?.authorUsername,
+    meta?.ownerUserId,
+    meta?.ownerUsername,
+    meta?.username,
+  ]);
 
   useEffect(() => {
     let cancelled = false;

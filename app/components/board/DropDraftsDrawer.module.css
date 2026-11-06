@@ -1,0 +1,263 @@
+.draftsScope:global(.draftsOverlay) {
+            position: fixed;
+            inset: 0;
+            z-index: 100060;
+            display: flex;
+            justify-content: flex-end;
+            background: rgba(4, 8, 14, 0.6);
+            backdrop-filter: blur(8px);
+          }
+          .draftsScope :global(.draftsDrawer) {
+            box-sizing: border-box;
+            width: min(420px, 100vw);
+            height: 100%;
+            min-height: 0;
+            display: flex;
+            flex-direction: column;
+            padding: max(14px, env(safe-area-inset-top)) 16px max(14px, env(safe-area-inset-bottom));
+            background:
+              radial-gradient(circle at 18% 0%, rgba(82, 240, 213, 0.14), transparent 40%),
+              linear-gradient(180deg, rgba(8, 26, 33, 0.96), rgba(6, 10, 22, 0.98));
+            border-left: 1px solid rgba(132, 244, 231, 0.3);
+            box-shadow: -18px 0 50px rgba(0, 0, 0, 0.5);
+            color: #e8fff8;
+          }
+          .draftsScope :global(.draftsHead) {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 12px;
+          }
+          .draftsScope :global(.draftsEyebrow) {
+            margin: 0;
+            font-size: 10px;
+            font-weight: 950;
+            letter-spacing: 0.22em;
+            text-transform: uppercase;
+            color: #7ff5e7;
+          }
+          .draftsScope :global(.draftsTitle) {
+            margin: 4px 0 0;
+            font-size: 1.3rem;
+            font-weight: 900;
+          }
+          .draftsScope :global(.draftsSubtitle) {
+            margin: 4px 0 0;
+            color: rgba(220, 255, 248, 0.58);
+            font-size: 12px;
+          }
+          .draftsScope :global(.draftsClose) {
+            border-radius: 999px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            background: rgba(255, 255, 255, 0.08);
+            color: #e8fff8;
+            width: 34px;
+            height: 34px;
+            cursor: pointer;
+          }
+          .draftsScope :global(.draftsFilters) {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 7px;
+            margin: 14px 0 10px;
+          }
+          .draftsScope :global(.draftsChip) {
+            display: inline-flex;
+            align-items: center;
+            gap: 7px;
+            border-radius: 999px;
+            padding: 7px 12px;
+            font-size: 11px;
+            font-weight: 900;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+            color: rgba(232, 255, 248, 0.74);
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(167, 244, 232, 0.18);
+            cursor: pointer;
+          }
+          .draftsScope :global(.draftsChip.on) {
+            color: #06121a;
+            background: radial-gradient(circle at 30% 20%, #fff, #7ee2ff);
+            border-color: rgba(255, 255, 255, 0.5);
+          }
+          .draftsScope :global(.draftsChipCount) {
+            font-size: 10px;
+            opacity: 0.8;
+          }
+          .draftsScope :global(.draftsList) {
+            flex: 1 1 0;
+            min-height: 0;
+            overflow-y: auto;
+            overscroll-behavior: contain;
+            -webkit-overflow-scrolling: touch;
+            scrollbar-gutter: stable;
+            display: grid;
+            gap: 12px;
+            padding-right: 2px;
+            align-content: start;
+          }
+          .draftsScope :global(.draftsEmpty) {
+            margin-top: 24px;
+            text-align: center;
+            font-size: 13px;
+            color: rgba(220, 255, 248, 0.55);
+          }
+          .draftsScope :global(.draftCard) {
+            border-radius: 18px;
+            border: 1px solid rgba(167, 244, 232, 0.16);
+            background: rgba(255, 255, 255, 0.04);
+            overflow: hidden;
+          }
+          .draftsScope :global(.documentCard) { display: grid; grid-template-columns: 66px minmax(0, 1fr); }
+          .draftsScope :global(.documentPreview) {
+            display: grid;
+            place-items: center;
+            min-height: 100%;
+            background: linear-gradient(145deg, rgba(82, 240, 213, 0.16), rgba(126, 226, 255, 0.08));
+            font-size: 24px;
+          }
+          .draftsScope :global(.documentInfo) { min-width: 0; padding: 10px 10px 0 0; }
+          .draftsScope :global(.documentTitle) { margin: 8px 12px 0; overflow: hidden; color: #f2fffc; font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }
+          .draftsScope :global(.documentExcerpt) { margin: 5px 12px 0; color: rgba(220, 255, 248, 0.56); font-size: 11px; line-height: 1.45; }
+          .draftsScope :global(.draftFileName) { flex: 1 1 auto; overflow: hidden; color: rgba(232,255,248,.72); text-overflow: ellipsis; white-space: nowrap; }
+          .draftsScope :global(.draftPreview) {
+            background: #02070a;
+            display: grid;
+            place-items: center;
+          }
+          .draftsScope :global(.draftPreview) img,
+          .draftsScope :global(.draftPreview) video {
+            display: block;
+            width: 100%;
+            max-height: 220px;
+            object-fit: contain;
+          }
+          .draftsScope :global(.draftPreview) audio {
+            width: 100%;
+            padding: 14px;
+          }
+          .draftsScope :global(.voiceProjectPreview) {
+            display: grid;
+            gap: 10px;
+            padding: 12px;
+            background:
+              radial-gradient(circle at 14% 8%, rgba(105, 239, 226, 0.2), transparent 42%),
+              linear-gradient(135deg, #071a22, #0a0c19 78%);
+          }
+          .draftsScope :global(.voiceProjectArt) {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            min-height: 72px;
+            padding: 12px;
+            border: 1px solid rgba(126, 246, 230, 0.18);
+            border-radius: 14px;
+            background: linear-gradient(120deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.015));
+          }
+          .draftsScope :global(.voiceProjectGlyph) {
+            display: grid;
+            flex: 0 0 44px;
+            width: 44px;
+            height: 44px;
+            place-items: center;
+            border-radius: 12px;
+            background: rgba(126, 246, 230, 0.13);
+            font-size: 23px;
+          }
+          .draftsScope :global(.voiceProjectWave) {
+            display: flex;
+            flex: 1;
+            align-items: center;
+            justify-content: space-between;
+            height: 36px;
+            gap: 2px;
+            overflow: hidden;
+          }
+          .draftsScope :global(.voiceProjectWave) i {
+            flex: 1 1 2px;
+            min-width: 2px;
+            max-width: 5px;
+            border-radius: 999px;
+            background: linear-gradient(180deg, #8ffff0, #4bc6dc);
+            opacity: 0.85;
+          }
+          .draftsScope :global(.voiceProjectSummary) {
+            display: grid;
+            gap: 3px;
+            min-width: 0;
+          }
+          .draftsScope :global(.voiceProjectEyebrow) {
+            color: #7ff5e7;
+            font-size: 9px;
+            font-weight: 950;
+            letter-spacing: 0.14em;
+            text-transform: uppercase;
+          }
+          .draftsScope :global(.voiceProjectSummary) strong {
+            overflow: hidden;
+            color: #f2fffc;
+            font-size: 13px;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+          }
+          .draftsScope :global(.voiceProjectSummary) > span:last-child {
+            color: rgba(220, 255, 248, 0.58);
+            font-size: 10px;
+          }
+          .draftsScope :global(.voiceProjectPlayer) {
+            display: block;
+            width: 100%;
+            min-height: 36px;
+            color-scheme: dark;
+          }
+          .draftsScope :global(.draftMeta) {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            padding: 9px 12px 0;
+            font-size: 11px;
+          }
+          .draftsScope :global(.draftKind) {
+            font-weight: 900;
+            letter-spacing: 0.1em;
+            text-transform: uppercase;
+            color: rgba(126, 246, 230, 0.9);
+          }
+          .draftsScope :global(.draftCount) {
+            font-weight: 900;
+            color: rgba(126, 246, 230, 0.9);
+          }
+          .draftsScope :global(.draftWhen) {
+            color: rgba(220, 255, 248, 0.5);
+          }
+          .draftsScope :global(.draftActions) {
+            display: flex;
+            gap: 8px;
+            padding: 10px 12px 12px;
+          }
+          .draftsScope :global(.draftBtn) {
+            flex: 1 1 auto;
+            text-align: center;
+            border-radius: 12px;
+            padding: 8px 10px;
+            font-size: 11px;
+            font-weight: 900;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+            color: #e8fff8;
+            background: rgba(255, 255, 255, 0.07);
+            border: 1px solid rgba(167, 244, 232, 0.2);
+            cursor: pointer;
+            text-decoration: none;
+          }
+          .draftsScope :global(.draftBtn.open) {
+            color: #06121a;
+            background: radial-gradient(circle at 30% 20%, #fff, #7ee2ff);
+            border-color: rgba(255, 255, 255, 0.5);
+          }
+          .draftsScope :global(.draftBtn.danger) {
+            color: #ffc4dc;
+            border-color: rgba(255, 146, 190, 0.4);
+          }

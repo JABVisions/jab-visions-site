@@ -80,7 +80,7 @@ function run() {
   const vocalTake = track("vocal", [clipWithDuration(2)]);
   const longBeat = track("instrumental", [clipWithDuration(30)]);
   const mixSession = { ...createAudioSession(), tracks: [vocalTake, longBeat] };
-  assert(mixTakeDurationMs(mixSession) === 2320, "mix to drop should follow the vocal take, not the beat");
+  assert(mixTakeDurationMs(mixSession) === 30000, "mix to drop should preserve the full audible timeline");
 
   console.log("audioSession timeline checks passed");
 }

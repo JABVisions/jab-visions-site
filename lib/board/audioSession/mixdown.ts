@@ -1,14 +1,15 @@
+import { connectScheduledClip } from "./graph";
+import { scheduleSession } from "./timeline";
 import { sessionFromVocalAndInstrumental } from "./session";
 import { audibleTracks, clipPlayableMs, clipMixStartMs, trackEndMs } from "./timeline";
 import type { AudioSession, SessionTrack, TrackClip } from "./types";
 import { decodeAudioFile, getAudioContextConstructor, withAudioTimeout } from "./wav";
 
-const TAKE_TAIL_MS = 320;
-const MIX_MAX_MS = 120_000;
-const MIX_RENDER_TIMEOUT_MS = 20_000;
+// Bound working memory, never the audio timeline.
+const MIX_BLOCK_SECONDS = 10;
+const EFFECT_PREROLL_SECONDS = 5;
 const MIX_RESUME_TIMEOUT_MS = 2_000;
 const MIX_SAMPLE_RATE_MAX = 24_000;
-const OVERLAY_YIELD_FRAMES = 24_000;
 
 function throwIfAborted(shouldAbort?: () => boolean) {
   if (shouldAbort?.()) throw new Error("Audio session mix aborted");
@@ -24,15 +25,17 @@ function yieldUi() {
   });
 }
 
-/** Mix length is the vocal take (plus a short tail), not the leftover beat. */
+/** Export the complete audible timeline, including explicit offsets and trims. */
 export function mixTakeDurationMs(session: AudioSession) {
-  const vocal = session.tracks.find((track) => track.kind === "vocal" && track.clips.length);
-  if (vocal && !vocal.mix.muted) {
-    return Math.min(MIX_MAX_MS, Math.max(1, trackEndMs(vocal) + TAKE_TAIL_MS));
-  }
-  const audible = audibleTracks(session);
-  const longest = audible.reduce((end, track) => Math.max(end, trackEndMs(track)), 0);
-  return Math.min(MIX_MAX_MS, Math.max(1, longest));
+  return audibleTracks(session).reduce((end, track) => Math.max(end, trackEndMs(track)), 0);
+}
+
+/** Unknown duration is allowed before decoding; empty/muted projects are not. */
+export function sessionCanExport(session: AudioSession) {
+  return audibleTracks(session).some((track) => track.mix.volume > 0 && track.clips.some((clip) =>
+    clip.file.size > 0 && (clip.volume ?? 1) > 0 &&
+    (clipPlayableMs(clip) > 0 || (!clip.decoded && !clip.sourceDurationMs && clip.trimOutMs === 0))
+  ));
 }
 
 function decodedBufferUsable(buffer: AudioBuffer | undefined): buffer is AudioBuffer {
@@ -49,11 +52,9 @@ async function hydrateClipBuffers(session: AudioSession, ctx: BaseAudioContext) 
   for (const track of session.tracks) {
     for (const clip of track.clips) {
       if (decodedBufferUsable(clip.decoded)) continue;
-      try {
-        clip.decoded = await decodeAudioFile(clip.file, ctx);
-      } catch {
-        clip.decoded = undefined;
-      }
+      // A missing lane must fail the export, never silently publish a partial mix.
+      clip.decoded = await decodeAudioFile(clip.file, ctx);
+      clip.sourceDurationMs = clip.decoded.duration * 1000;
     }
   }
 }
@@ -66,7 +67,8 @@ function overlayRange(
   track: SessionTrack,
   mixLengthMs: number,
   fromFrame: number,
-  frameCount: number
+  frameCount: number,
+  blockStart = 0
 ) {
   const buffer = clip.decoded;
   if (!buffer) return 0;
@@ -112,7 +114,8 @@ function overlayRange(
   const end = Math.min(frames, fromFrame + frameCount);
 
   for (let i = fromFrame; i < end; i += 1) {
-    const destIndex = destOffset + i;
+    const destIndex = destOffset + i - blockStart;
+    if (destIndex < 0) continue;
     if (destIndex >= destL.length) break;
     let l: number;
     let r: number;
@@ -144,84 +147,65 @@ function overlayRange(
   return frames;
 }
 
-function clipOverlayFrames(clip: TrackClip, track: SessionTrack, destRate: number, mixLengthMs: number) {
-  const buffer = clip.decoded;
-  if (!buffer) return 0;
-  const startMs = clipMixStartMs(clip, track.latencyMs);
-  const playableMs = clipPlayableMs(clip);
-  if (playableMs <= 0) return 0;
-  const destStart = Math.max(0, startMs) / 1000;
-  const skipSrc = startMs < 0 ? -startMs / 1000 : 0;
-  const srcStart = Math.max(0, clip.trimInMs) / 1000 + skipSrc;
-  const available = Math.max(0, buffer.duration - srcStart);
-  const destRemaining = Math.max(0, mixLengthMs / 1000 - destStart);
-  const duration = Math.min(playableMs / 1000 - skipSrc, available, destRemaining);
-  if (duration <= 0.0005) return 0;
-  return Math.floor(duration * destRate);
-}
-
-async function overlayClip(
-  destL: Float32Array,
-  destR: Float32Array,
-  destRate: number,
-  clip: TrackClip,
-  track: SessionTrack,
-  mixLengthMs: number,
-  shouldAbort?: () => boolean
-) {
-  const frames = clipOverlayFrames(clip, track, destRate, mixLengthMs);
-  for (let from = 0; from < frames; from += OVERLAY_YIELD_FRAMES) {
-    throwIfAborted(shouldAbort);
-    overlayRange(destL, destR, destRate, clip, track, mixLengthMs, from, OVERLAY_YIELD_FRAMES);
-    if (from + OVERLAY_YIELD_FRAMES < frames) await yieldUi();
-  }
-}
-
-async function floatStereoToWav(
-  left: Float32Array,
-  right: Float32Array,
-  sampleRate: number,
-  shouldAbort?: () => boolean
-) {
-  const frames = left.length;
-  const channels = 2;
-  const bytesPerSample = 2;
-  const dataLength = frames * channels * bytesPerSample;
-  const output = new ArrayBuffer(44 + dataLength);
+function wavHeader(frames: number, sampleRate: number) {
+  const output = new ArrayBuffer(44);
   const view = new DataView(output);
   const write = (offset: number, value: string) => {
-    for (let index = 0; index < value.length; index += 1) {
-      view.setUint8(offset + index, value.charCodeAt(index));
-    }
+    for (let i = 0; i < value.length; i++) view.setUint8(offset + i, value.charCodeAt(i));
   };
-  write(0, "RIFF");
-  view.setUint32(4, 36 + dataLength, true);
-  write(8, "WAVE");
-  write(12, "fmt ");
-  view.setUint32(16, 16, true);
-  view.setUint16(20, 1, true);
-  view.setUint16(22, channels, true);
-  view.setUint32(24, sampleRate, true);
-  view.setUint32(28, sampleRate * channels * bytesPerSample, true);
-  view.setUint16(32, channels * bytesPerSample, true);
-  view.setUint16(34, 16, true);
-  write(36, "data");
-  view.setUint32(40, dataLength, true);
+  const bytes = frames * 4;
+  if (bytes > 0xffffffff - 36) throw new Error("This mix exceeds the WAV file size limit.");
+  write(0, "RIFF"); view.setUint32(4, 36 + bytes, true);
+  write(8, "WAVE"); write(12, "fmt "); view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true); view.setUint16(22, 2, true);
+  view.setUint32(24, sampleRate, true); view.setUint32(28, sampleRate * 4, true);
+  view.setUint16(32, 4, true); view.setUint16(34, 16, true);
+  write(36, "data"); view.setUint32(40, bytes, true);
+  return output;
+}
 
-  let offset = 44;
-  for (let frame = 0; frame < frames; frame += 1) {
-    if (frame > 0 && frame % OVERLAY_YIELD_FRAMES === 0) {
-      throwIfAborted(shouldAbort);
-      await yieldUi();
-    }
-    const l = Math.max(-1, Math.min(1, left[frame] ?? 0));
-    const r = Math.max(-1, Math.min(1, right[frame] ?? 0));
-    view.setInt16(offset, l < 0 ? l * 0x8000 : l * 0x7fff, true);
-    offset += 2;
-    view.setInt16(offset, r < 0 ? r * 0x8000 : r * 0x7fff, true);
-    offset += 2;
+/** Stateful stereo limiter: no clipping or gain resets at block boundaries. */
+function encodeBlock(left: Float32Array, right: Float32Array, rate: number, limiter: { gain: number }) {
+  const output = new ArrayBuffer(left.length * 4);
+  const view = new DataView(output);
+  const release = Math.exp(-1 / (rate * 0.1));
+  for (let i = 0; i < left.length; i++) {
+    const peak = Math.max(Math.abs(left[i]), Math.abs(right[i]));
+    const target = peak > 0.98 ? 0.98 / peak : 1;
+    limiter.gain = Math.min(target, 1 - (1 - limiter.gain) * release);
+    view.setInt16(i * 4, Math.round(left[i] * limiter.gain * 32767), true);
+    view.setInt16(i * 4 + 2, Math.round(right[i] * limiter.gain * 32767), true);
   }
   return output;
+}
+
+async function renderBlock(session: AudioSession, rate: number, start: number, frames: number, mixMs: number) {
+  const tracks = audibleTracks(session);
+  if (tracks.some((track) => track.mix.preset !== "none")) {
+    // Reuse the preview graph, with bounded preroll for filter/reverb/delay state.
+    // The longest existing preset impulse is 4.2s. No feedback loop is used.
+    if (typeof OfflineAudioContext === "undefined") throw new Error("Audio effects export is unavailable in this browser.");
+    const from = Math.max(0, start / rate - EFFECT_PREROLL_SECONDS);
+    const skip = Math.round(start - from * rate);
+    const offline = new OfflineAudioContext(2, skip + frames, rate);
+    for (const scheduled of scheduleSession(session)) {
+      connectScheduledClip(offline, scheduled, offline.destination, {
+        window: { start: from, end: (start + frames) / rate },
+      });
+    }
+    const rendered = await withAudioTimeout(offline.startRendering(), 45_000, "effect block");
+    return [rendered.getChannelData(0).subarray(skip), rendered.getChannelData(1).subarray(skip)];
+  }
+  const left = new Float32Array(frames);
+  const right = new Float32Array(frames);
+  for (const track of tracks) {
+    for (const clip of track.clips) {
+      const offset = Math.floor(Math.max(0, clipMixStartMs(clip, track.latencyMs)) * rate / 1000);
+      const from = Math.max(0, start - offset);
+      overlayRange(left, right, rate, clip, track, mixMs, from, frames - Math.max(0, offset - start), start);
+    }
+  }
+  return [left, right];
 }
 
 async function bounceSession(
@@ -230,6 +214,8 @@ async function bounceSession(
   shouldAbort?: () => boolean
 ) {
   throwIfAborted(shouldAbort);
+  if (!sessionCanExport(session)) throw new Error("This Studio session has no audible audio.");
+  session = { ...session, tracks: audibleTracks(session) };
   const needsDecode = session.tracks.some((track) =>
     track.clips.some((clip) => !decodedBufferUsable(clip.decoded))
   );
@@ -262,19 +248,20 @@ async function bounceSession(
       session.sampleRate ||
       48_000;
     const sampleRate = Math.min(MIX_SAMPLE_RATE_MAX, nativeRate);
-    const frames = Math.max(1, Math.ceil((mixMs / 1000) * sampleRate));
-    const left = new Float32Array(frames);
-    const right = new Float32Array(frames);
-
-    for (const track of tracks) {
-      for (const clip of track.clips) {
-        await overlayClip(left, right, sampleRate, clip, track, mixMs, shouldAbort);
-      }
+    if (mixMs <= 0) throw new Error("This Studio session has no audible audio.");
+    const frames = Math.ceil((mixMs / 1000) * sampleRate);
+    const parts: BlobPart[] = [wavHeader(frames, sampleRate)];
+    const blockFrames = Math.round(sampleRate * MIX_BLOCK_SECONDS);
+    const limiter = { gain: 1 };
+    for (let start = 0; start < frames; start += blockFrames) {
+      throwIfAborted(shouldAbort);
+      const [left, right] = await renderBlock(session, sampleRate, start, Math.min(blockFrames, frames - start), mixMs);
+      throwIfAborted(shouldAbort);
+      parts.push(new Blob([encodeBlock(left, right, sampleRate, limiter)]));
+      await yieldUi();
     }
-
-    await yieldUi();
-    const wav = await floatStereoToWav(left, right, sampleRate, shouldAbort);
-    return new File([wav], `studio-mix-${Date.now()}.wav`, {
+    throwIfAborted(shouldAbort);
+    return new File(parts, `studio-mix-${Date.now()}.wav`, {
       type: "audio/wav",
       lastModified: Date.now(),
     });
@@ -284,7 +271,7 @@ async function bounceSession(
 }
 
 /**
- * Fast Mix to Drop bounce: overlay decoded lanes for the vocal take length.
+ * Bounce the full edited timeline in bounded blocks, preserving the preview effects.
  * Uses the live mixer context when provided so Safari never opens a second
  * AudioContext (that resume() can hang forever).
  */
@@ -293,7 +280,7 @@ export async function renderSessionFile(
   decodeCtx?: BaseAudioContext,
   shouldAbort?: () => boolean
 ): Promise<File> {
-  return withAudioTimeout(bounceSession(session, decodeCtx, shouldAbort), MIX_RENDER_TIMEOUT_MS, "mix");
+  return bounceSession(session, decodeCtx, shouldAbort);
 }
 
 /** Phase 1 debug hook: bounce a vocal + beat to one wav with no UI. */
