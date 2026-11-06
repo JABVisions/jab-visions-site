@@ -100,6 +100,13 @@
   margin: 0 auto;
 }
 
+.chart img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
 .copy {
   display: flex;
   flex-direction: column;

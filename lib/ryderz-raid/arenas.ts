@@ -34,6 +34,8 @@ export interface ArenaDefinition {
   worldKey?: 'block' | 'pad' | 'island';
   /** How big the floor is, in words a player can compare. */
   size: ArenaSize;
+  /** In-game photograph shown on the map select screen. */
+  picture?: string;
 }
 
 /** A floor's playable span. Metres are edge to edge. */
@@ -92,6 +94,7 @@ registerArena({
     metres: BOUNDARY * 2,
     guide: 'A sprint crosses one block. The whole city is four of them, and the crosswalks run the length of each.',
   },
+  picture: '/assets/those-ryderz/maps/block.webp?v=1',
 });
 
 registerArena({
@@ -126,6 +129,7 @@ registerArena({
     metres: 96,
     guide: 'The round chamber is 32 m across. The whole floor runs about 100 m from the lab hall to containment.',
   },
+  picture: '/assets/those-ryderz/maps/training-pad.webp?v=1',
 });
 
 registerArena({
@@ -143,6 +147,7 @@ registerArena({
     metres: (ISLAND_HALF - 6) * 2,
     guide: 'Open water on every side. The beach, the jungle, and the resort are a long run apart.',
   },
+  picture: '/assets/those-ryderz/maps/island-paradise.webp?v=1',
 });
 
 registerArena({

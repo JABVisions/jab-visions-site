@@ -22,6 +22,9 @@ assert.equal(island.size.label, 'Vast');
 assert.ok(island.size.metres > 1500);
 assert.equal(formatSpan(island.size.metres), '1.6 km across');
 assert.equal(formatSpan(block.size.metres), `${Math.round(block.size.metres)} m across`);
+assert.match(block.picture ?? '', /block\.webp/);
+assert.match(pad.picture ?? '', /training-pad\.webp/);
+assert.match(island.picture ?? '', /island-paradise\.webp/);
 
 for (const arena of listArenas()) {
   assert.ok(arena.size.guide.length > 12, arena.id);

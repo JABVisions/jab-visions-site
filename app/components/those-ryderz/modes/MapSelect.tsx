@@ -7,7 +7,7 @@ import { useMenuKeys, wrap } from '../menu/useMenuKeys';
 import GlitchButton from '../start/GlitchButton';
 import styles from './MapSelect.module.css';
 
-/** Solo and PvP pick a floor before the match. The chart, the blurb, and the size sit together. */
+/** Solo and PvP pick a floor before the match. The photograph, the blurb, and the size sit together. */
 export default function MapSelect({
   mode,
   arenaId,
@@ -39,7 +39,7 @@ export default function MapSelect({
 
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (!canvas || !focused) return;
+    if (!canvas || !focused || focused.picture) return;
     const paint = () => {
       const css = Math.max(canvas.clientWidth, 280);
       const dpr = Math.min(2, window.devicePixelRatio || 1);
@@ -111,7 +111,11 @@ function Preview({
   return (
     <article className={styles.detail}>
       <div className={styles.chart}>
-        <canvas ref={canvasRef} aria-hidden="true" />
+        {arena.picture ? (
+          <img src={arena.picture} alt="" />
+        ) : (
+          <canvas ref={canvasRef} aria-hidden="true" />
+        )}
       </div>
       <div className={styles.copy}>
         <p className={styles.setting}>{arena.available ? arena.setting : 'Coming soon'}</p>
