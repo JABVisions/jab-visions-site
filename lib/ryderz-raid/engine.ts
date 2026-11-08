@@ -4995,7 +4995,7 @@ export class RaidEngine {
     if (spawned && this.world.training) this.paintTraining(spawned, true);
   }
 
-  /** Holographic paint for hosts inside Training P.A.D. Restored when they leave. */
+  /** Cyan signal glow for hosts inside P.A.D. Lab. Bodies stay opaque. Restored when they leave. */
   private paintTraining(host: Host, on: boolean) {
     host.fighter.humanoid.group.traverse((obj) => {
       const mesh = obj as THREE.Mesh;
@@ -5004,28 +5004,17 @@ export class RaidEngine {
       for (const mat of mats) {
         const std = mat as THREE.MeshStandardMaterial;
         if (!std.emissive) continue;
-        const data = std.userData as {
-          padBase?: { opacity: number; transparent: boolean; emissive: number; intensity: number };
-        };
+        const data = std.userData as { padBase?: { emissive: number; intensity: number } };
         if (!data.padBase) {
-          data.padBase = {
-            opacity: std.opacity,
-            transparent: std.transparent,
-            emissive: std.emissive.getHex(),
-            intensity: std.emissiveIntensity ?? 0,
-          };
+          data.padBase = { emissive: std.emissive.getHex(), intensity: std.emissiveIntensity ?? 0 };
         }
         const base = data.padBase;
         if (on) {
           std.emissive.setHex(0x39e7ff);
           std.emissiveIntensity = 0.55;
-          std.transparent = true;
-          std.opacity = 0.72;
         } else {
           std.emissive.setHex(base.emissive);
           std.emissiveIntensity = base.intensity;
-          std.transparent = base.transparent;
-          std.opacity = base.opacity;
         }
       }
     });
