@@ -48,6 +48,8 @@ export interface CameraConfig {
   stickSensitivity: number;
   /** 1 flips vertical look. 0 keeps the default. */
   lookInvertY: number;
+  /** 1 eases the camera toward nearby hosts when no hard lock is held. 0 turns it off. */
+  autoLock: number;
   /** Radius used by the pseudo-spherecast when resolving collisions. */
   collisionRadius: number;
   /** Closest the camera may be pulled toward the pivot by collision. */
@@ -71,6 +73,7 @@ export const CAMERA_DEFAULTS: CameraConfig = {
   lookSensitivity: 1,
   stickSensitivity: 1,
   lookInvertY: 0,
+  autoLock: 1,
   collisionRadius: 0.32,
   minDistance: 0.85,
   pitchMin: -1.05,
@@ -212,7 +215,7 @@ function damp(current: number, target: number, timeConstant: number, dt: number)
   return THREE.MathUtils.lerp(current, target, 1 - Math.exp(-dt / timeConstant));
 }
 
-function wrapAngle(a: number) {
+export function wrapAngle(a: number) {
   while (a > Math.PI) a -= Math.PI * 2;
   while (a < -Math.PI) a += Math.PI * 2;
   return a;
@@ -294,6 +297,7 @@ export class ThirdPersonCamera {
       lookSensitivity: this.config.lookSensitivity,
       stickSensitivity: this.config.stickSensitivity,
       lookInvertY: this.config.lookInvertY,
+      autoLock: this.config.autoLock,
       collisionRadius: this.config.collisionRadius,
       minDistance: this.config.minDistance,
       pitchMin: this.config.pitchMin,

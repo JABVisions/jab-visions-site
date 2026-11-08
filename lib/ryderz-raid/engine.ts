@@ -73,6 +73,7 @@ import {
   type CameraSnapshot,
   type CameraState,
 } from './camera';
+import { AUTO_LOCK, pickAutoTarget, steerAutoLock } from './auto-lock';
 import {
   animateGltfFighter,
   BOLT_GEOMETRY,
@@ -709,6 +710,9 @@ export class RaidEngine {
   private upgradesBought = 0;
   private cameraMode: CameraMode = 'standard';
   private lockTarget: Host | null = null;
+  private autoTarget: Host | null = null;
+  /** Seconds since the player last turned the camera. Auto lock waits on it. */
+  private lookIdle: number = AUTO_LOCK.resume;
   private stormT = 0;
   private sandT = 0;
   private stations: FieldStation[] = [];
@@ -1014,6 +1018,7 @@ export class RaidEngine {
       z: this.pos.z,
       mode: this.cameraMode,
       lock: Boolean(this.lockTarget),
+      autoLock: Boolean(this.autoTarget),
       camX: this.camera.position.x,
       camZ: this.camera.position.z,
       lookX: look.x,
@@ -1958,6 +1963,9 @@ export class RaidEngine {
     if (manualLook) {
       this.recenter = false;
       this.lockTarget = null;
+      this.lookIdle = 0;
+    } else {
+      this.lookIdle += dt;
     }
     this.yaw -= this.lookAcc.x * 0.0031 * sens + stick.x * STICK_YAW_RATE * dt * stickSens;
     this.yaw += keyboardYawDelta(keyLeft, keyRight, dt);
@@ -1971,6 +1979,7 @@ export class RaidEngine {
     this.lookAcc.x = 0;
     this.lookAcc.y = 0;
     this.stepLockOn(dt);
+    this.stepAutoLock(dt);
     if (this.recenter) {
       const home = 0.2;
       this.pitch += (home - this.pitch) * (1 - Math.exp(-dt / 0.16));
@@ -6701,6 +6710,23 @@ export class RaidEngine {
     }
     const aim = Math.atan2(target.pos.x - this.pos.x, target.pos.z - this.pos.z);
     this.yaw = dampAngle(this.yaw, aim, 0.12, dt);
+  }
+
+  private stepAutoLock(dt: number) {
+    const off =
+      this.rig.config.autoLock < 0.5 ||
+      this.gameMode === GameMode.PVP ||
+      this.phase !== 'playing' ||
+      this.lockTarget !== null ||
+      this.sprinting;
+    if (off) {
+      this.autoTarget = null;
+      return;
+    }
+    this.autoTarget = pickAutoTarget(this.pos.x, this.pos.z, this.yaw, this.livingFoes(), this.autoTarget);
+    if (this.autoTarget && this.lookIdle >= AUTO_LOCK.resume) {
+      this.yaw = steerAutoLock(this.yaw, this.pos.x, this.pos.z, this.autoTarget, dt);
+    }
   }
 
   private livingFoes() {
