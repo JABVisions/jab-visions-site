@@ -40,35 +40,18 @@ function readQuality() {
   };
 }
 
-function primeDim(root: THREE.Object3D) {
-  root.traverse((object) => {
-    const mesh = object as THREE.Mesh;
-    if (!mesh.isMesh) return;
-    const list = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-    list.forEach((material) => {
-      if (!material || material.userData.retain) return;
-      material.transparent = true;
-      material.opacity = 1;
-    });
-  });
-}
-
-function setDim(root: THREE.Object3D, opacity: number) {
-  root.traverse((object) => {
-    const mesh = object as THREE.Mesh;
-    if (!mesh.isMesh) return;
-    const list = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-    list.forEach((material) => {
-      if (!material || material.userData.retain) return;
-      material.opacity = opacity;
-    });
-  });
+/** Fit a body to lineup height once, when it joins the stage. */
+function fitHeight(group: THREE.Object3D) {
+  group.updateWorldMatrix(true, true);
+  const size = new THREE.Box3().setFromObject(group).getSize(new THREE.Vector3());
+  if (size.y > 0.35) group.scale.multiplyScalar(1.75 / size.y);
 }
 
 /**
  * One WebGL context for the whole category. GLBs come from the raid's shared
- * loader cache. A failed model becomes a marked stand-in instead of taking
- * the rest of the lineup down.
+ * loader cache. Each fighter steps on as soon as its own model is ready, so a
+ * large file never holds back the rest. Only a failed load becomes a marked
+ * stand-in. Bodies stay opaque; the ring and the aura light mark the pick.
  */
 export default function CharacterLineupStage({
   characters,
@@ -192,21 +175,12 @@ export default function CharacterLineupStage({
       window.addEventListener('resize', resize);
       const clock = new THREE.Clock();
 
+      const widths = new Map<Actor, number>();
       const place = () => {
-        const widths = actors.map((actor) => {
-          actor.fighter.humanoid.group.updateWorldMatrix(true, true);
-          const box = new THREE.Box3().setFromObject(actor.fighter.humanoid.group);
-          const size = box.getSize(new THREE.Vector3());
-          if (size.y > 0.35) actor.fighter.humanoid.group.scale.multiplyScalar(1.75 / size.y);
-          const fitted = new THREE.Box3().setFromObject(actor.fighter.humanoid.group);
-          return Math.max(0.55, fitted.getSize(new THREE.Vector3()).x);
-        });
-        const slots = lineupFormation(actors.length, lineupGap(widths));
+        const slots = lineupFormation(actors.length, lineupGap(actors.map((actor) => widths.get(actor) ?? 0.55)));
         actors.forEach((actor, index) => {
           actor.slotX = slots[index]?.x ?? 0;
           actor.slotZ = slots[index]?.z ?? 0;
-          actor.fighter.humanoid.group.position.x = actor.slotX;
-          actor.fighter.humanoid.group.position.z = actor.slotZ;
         });
         const span = slots.reduce((max, slot) => Math.max(max, Math.abs(slot.x)), 1);
         floor.scale.setScalar(Math.max(1, (span + 2.2) / 9));
@@ -265,7 +239,6 @@ export default function CharacterLineupStage({
           } else {
             animateHumanoid(actor.fighter.humanoid, actor.phase, 0, time);
           }
-          setDim(group, 1 - (1 - actor.present) * 0.4);
           const ringMat = actor.ring.material as THREE.MeshBasicMaterial;
           ringMat.opacity = 0.2 + actor.present * 0.65;
           actor.ring.position.set(group.position.x, 0.03, group.position.z);
@@ -309,93 +282,73 @@ export default function CharacterLineupStage({
         renderer.dispose();
       };
 
-      void (async () => {
-        const built: Array<Actor | null> = lineup.map(() => null);
-        await Promise.all(
-          lineup.map(async (character, index) => {
-            const id = character.ryderId as RyderId;
-            const spec = RYDERZ[id];
-            let missing = !spec?.glb;
-            if (spec?.glb) {
-              const load = preloadRyderGltf(spec);
-              load.catch(() => undefined);
-              try {
-                await Promise.race([
-                  load,
-                  new Promise((_, reject) => {
-                    window.setTimeout(() => reject(new Error('timed out')), 15000);
-                  }),
-                ]);
-              } catch (error) {
-                missing = true;
-                console.warn('[premiere] model failed', spec.glb, error);
-              }
-            }
-            if (disposed || !spec) return;
-            let fighter: Fighter;
-            try {
-              fighter = buildRyder(spec);
-            } catch (error) {
-              missing = true;
-              status[character.id] = 'missing';
-              console.warn('[premiere] could not build', id, error);
-              return;
-            }
-            if (disposed) {
-              disposeObject(fighter.humanoid.group);
-              return;
-            }
-            primeDim(fighter.humanoid.group);
-            fighter.humanoid.group.traverse((object) => {
-              const mesh = object as THREE.Mesh;
-              if (mesh.isMesh) mesh.castShadow = true;
-            });
-            const ring = new THREE.Mesh(
-              new THREE.RingGeometry(0.32, 0.5, 28),
-              new THREE.MeshBasicMaterial({
-                color: spec.color,
-                transparent: true,
-                opacity: 0.24,
-                side: THREE.DoubleSide,
-                depthWrite: false,
-              }),
-            );
-            ring.rotation.x = -Math.PI / 2;
-            scene.add(ring);
-            fighter.humanoid.group.position.y = -0.4;
-            scene.add(fighter.humanoid.group);
-            status[character.id] = missing ? 'missing' : 'ready';
-            built[index] = {
-              id: character.id,
-              fighter,
-              ring,
-              slotX: 0,
-              slotZ: 0,
-              present: character.id === selectedRef.current ? 1 : 0,
-              phase: index * 0.7,
-            };
-          }),
-        );
-        if (disposed) {
-          built.forEach((actor) => {
-            if (!actor) return;
-            scene.remove(actor.fighter.humanoid.group);
-            scene.remove(actor.ring);
-            disposeObject(actor.fighter.humanoid.group);
-            actor.ring.geometry.dispose();
-            (actor.ring.material as THREE.Material).dispose();
-          });
+      const order = new Map<Actor, number>();
+      const enter = (character: RaidCharacter, index: number, missing: boolean) => {
+        const spec = RYDERZ[character.ryderId as RyderId];
+        if (disposed || !spec) return;
+        let fighter: Fighter;
+        try {
+          fighter = buildRyder(spec);
+        } catch (error) {
+          status[character.id] = 'missing';
+          statusRef.current?.({ ...status });
+          console.warn('[premiere] could not build', spec.id, error);
           return;
         }
-        built.forEach((actor) => {
-          if (actor) actors.push(actor);
+        fighter.humanoid.group.traverse((object) => {
+          const mesh = object as THREE.Mesh;
+          if (mesh.isMesh) mesh.castShadow = true;
         });
+        fitHeight(fighter.humanoid.group);
+        const ring = new THREE.Mesh(
+          new THREE.RingGeometry(0.32, 0.5, 28),
+          new THREE.MeshBasicMaterial({
+            color: spec.color,
+            transparent: true,
+            opacity: 0.24,
+            side: THREE.DoubleSide,
+            depthWrite: false,
+          }),
+        );
+        ring.rotation.x = -Math.PI / 2;
+        scene.add(ring);
+        const actor: Actor = {
+          id: character.id,
+          fighter,
+          ring,
+          slotX: 0,
+          slotZ: 0,
+          present: character.id === selectedRef.current ? 1 : 0,
+          phase: index * 0.7,
+        };
+        widths.set(actor, Math.max(0.55, new THREE.Box3().setFromObject(fighter.humanoid.group).getSize(new THREE.Vector3()).x));
+        order.set(actor, index);
+        actors.push(actor);
+        actors.sort((a, b) => (order.get(a) ?? 0) - (order.get(b) ?? 0));
         place();
+        fighter.humanoid.group.position.set(actor.slotX, -0.4, actor.slotZ);
+        scene.add(fighter.humanoid.group);
+        status[character.id] = missing ? 'missing' : 'ready';
         statusRef.current?.({ ...status });
         setNotice('');
-        clock.start();
-        raf = requestAnimationFrame(loop);
-      })();
+      };
+
+      lineup.forEach((character, index) => {
+        const spec = RYDERZ[character.ryderId as RyderId];
+        if (!spec?.glb) {
+          enter(character, index, true);
+          return;
+        }
+        preloadRyderGltf(spec).then(
+          () => enter(character, index, false),
+          (error) => {
+            console.warn('[premiere] model failed', spec.glb, error);
+            enter(character, index, true);
+          },
+        );
+      });
+      clock.start();
+      raf = requestAnimationFrame(loop);
 
       return stop;
     } catch (error) {

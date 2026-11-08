@@ -226,7 +226,13 @@ export default function PremiereCharacterSelect({
                   ) : (
                     <span className={styles.fallback}>{character.name.slice(0, 1)}</span>
                   )}
-                  {locked ? <em className={styles.flag}>Locked</em> : model === 'missing' ? <em className={styles.flag}>No model</em> : null}
+                  {locked ? (
+                    <em className={styles.flag}>Locked</em>
+                  ) : model === 'missing' ? (
+                    <em className={styles.flag}>No model</em>
+                  ) : model === 'loading' ? (
+                    <em className={styles.flag}>Loading</em>
+                  ) : null}
                   <span className={styles.tileName}>{character.name}</span>
                 </button>
               );

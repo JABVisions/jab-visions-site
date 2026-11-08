@@ -162,10 +162,20 @@ async function loadGltfTemplate(url: string, label: string, repair?: GlbRepair):
   return { scene: gltf.scene, clips, strikes, skinned };
 }
 
-export async function preloadRyderGltf(spec: RyderSpec) {
-  if (spec.id === 'lilly') await preloadLillyFork();
-  if (!spec.glb || gltfTemplates.has(spec.id)) return;
-  gltfTemplates.set(spec.id, await loadGltfTemplate(spec.glb, spec.id, spec.glbRepair));
+/** Ryder GLBs run 1–33 MB. A second caller joins the download already in flight. */
+const ryderLoads = new Map<RyderId, Promise<void>>();
+
+export function preloadRyderGltf(spec: RyderSpec): Promise<void> {
+  const pending = ryderLoads.get(spec.id);
+  if (pending) return pending;
+  const load = (async () => {
+    if (spec.id === 'lilly') await preloadLillyFork();
+    if (!spec.glb || gltfTemplates.has(spec.id)) return;
+    gltfTemplates.set(spec.id, await loadGltfTemplate(spec.glb, spec.id, spec.glbRepair));
+  })();
+  ryderLoads.set(spec.id, load);
+  load.catch(() => ryderLoads.delete(spec.id));
+  return load;
 }
 
 /** Load the host mob models; failures are logged and that model is skipped. */
