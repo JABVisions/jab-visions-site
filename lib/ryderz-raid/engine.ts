@@ -3781,11 +3781,11 @@ export class RaidEngine {
     // Alternate left and right of centre so the fan fills from the middle out.
     const order = index === 0 ? 0 : (index % 2 === 1 ? 1 : -1) * Math.ceil(index / 2);
     const spread = count > 1 ? order / Math.max(1, (count - 1) / 2) : 0;
-    const dir = _tmp.copy(_look).addScaledVector(_right, spread * 0.42).normalize();
+    const dir = _tmp.copy(_look).addScaledVector(_right, spread * 0.6).normalize();
     const origin = this.muzzle();
     origin.y = 1.3;
     const damage = this.shotDamage() * tune.damageMul * this.strikeScale();
-    this.spawnBolt(origin, dir, damage, true, spec.color, Math.max(22, this.spec.projectileSpeed), powerLook(this.spec.id).shot);
+    this.spawnBolt(origin, dir, damage, true, spec.color, 19, powerLook(this.spec.id).shot);
     this.particles.emit(origin, spec.color, 6, { speed: 5, size: 0.22, life: 0.25, direction: dir });
     this.emitSound('fight.punch.swing');
   }
@@ -6141,7 +6141,7 @@ export class RaidEngine {
     shape?: ShotShape,
   ) {
     if (shape) {
-      const shot = this.powerFx.acquireShot(shape, color);
+      const shot = this.powerFx.acquireShot(shape, color, fromPlayer ? 1.7 : 1.3);
       const shaped: Bolt = {
         active: true,
         mesh: BOLT_PLACEHOLDER,

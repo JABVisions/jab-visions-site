@@ -261,11 +261,13 @@ export class PowerFx {
 
   // --- Projectiles -----------------------------------------------------------
 
-  acquireShot(shape: ShotShape, color: number): ShotInstance {
+  acquireShot(shape: ShotShape, color: number, scale = 1): ShotInstance {
     const key = `${shape}:${color}`;
     const pooled = this.pools.get(key)?.pop();
     const shot = pooled ?? this.makeShot(key, shape, color);
     shot.root.visible = true;
+    shot.root.scale.setScalar(scale);
+    shot.trail.intensity = 0.9 * Math.sqrt(scale);
     shot.trail.clear();
     shot.spin = Math.random() * Math.PI * 2;
     this.live.add(shot);
@@ -824,19 +826,22 @@ export class PowerFx {
     const root = new THREE.Group();
     root.name = 'SurgeAura';
     const ringMat = additive(color, 0.7);
-    const shellMat = additive(color, 0.12);
+    const bandMat = additive(color, 0.55);
     const ring = new THREE.Mesh(GEO.ring, ringMat);
     ring.scale.setScalar(0.85);
-    const shell = new THREE.Mesh(GEO.beam, shellMat);
-    shell.scale.set(0.62, 2.1, 0.62);
-    root.add(ring, shell);
+    const band = new THREE.Mesh(GEO.arc, bandMat);
+    band.scale.set(0.55, 1.6, 0.55);
+    band.position.y = 1.05;
+    root.add(ring, band);
     this.push({
       root,
       life: duration,
-      materials: [ringMat, shellMat],
+      materials: [ringMat, bandMat],
       follow: { pos: anchor },
       step: (fx, k, dt) => {
         ring.rotation.y += dt * 4;
+        band.rotation.y -= dt * 7;
+        band.position.y = 1.05 + Math.sin(this.time * 3) * 0.35;
         const pulse = 0.75 + Math.sin(this.time * 10) * 0.25;
         const tail = Math.min(1, (1 - k) * duration * 2);
         fx.materials[0].opacity = fx.base[0] * pulse * tail;
