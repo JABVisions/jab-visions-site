@@ -6328,9 +6328,14 @@ export class RaidEngine {
 
   private updateCamera(dt: number) {
     // Feet in the world, including stairs, jumps, levitation, and swimming.
-    const feet = this.player
+    const body = this.player
       ? this.player.humanoid.group.position.y
       : this.world.heightAt(this.pos.x, this.pos.z) + (this.kit?.airY ?? 0) + this.airY - (this.pvpCpu?.playerSink() ?? 0);
+    // A body pulled under the street (Afterimage, a phase grab) is watched from
+    // above: the camera holds at street level instead of following it down.
+    const street = this.world.heightAt(this.pos.x, this.pos.z);
+    const sunk = (this.swim.mode === 'land' || this.swim.mode === 'wade') && body < street - 0.05;
+    const feet = sunk ? street : body;
     this.cameraPivot.set(this.pos.x, feet, this.pos.z);
     if (this.camReady) {
       const hop = Math.hypot(this.cameraPivot.x - this.lastCam.x, this.cameraPivot.z - this.lastCam.z);
@@ -6348,6 +6353,10 @@ export class RaidEngine {
       height: this.kit?.cameraExtra?.height ?? 0,
       targetHeight: this.kit?.cameraExtra?.targetHeight ?? 0,
     };
+    if (sunk && !this.kit?.cameraExtra) {
+      extra.distance += 2.4;
+      extra.height += 3;
+    }
     // Crowd framing: pull back as the ring around the Ryder fills, capped so the
     // fight never turns into a top-down map. Only bodies close enough to matter count.
     const near = this.grid.count(this.pos.x, this.pos.z, 9);
