@@ -57,6 +57,8 @@ import {
 import { EngagementDirector, type EngagementCandidate } from './civilians/engagement';
 import { CrowdGrid } from './crowd/grid';
 import { AfterimagePool } from './speed-vfx';
+import { PowerFx, type ShotInstance, type ShotShape } from './power-fx';
+import { AURA_PARTICLES, powerLook } from './progression/power-looks';
 import { createRyderKit, type KitContext, type KitTarget, type MeleeStep, type RyderKit } from './ryderz';
 import type { MeleeStyle, PoseOverride } from './skeletal';
 import {
@@ -469,6 +471,8 @@ interface Bolt {
   fromPlayer: boolean;
   life: number;
   radius: number;
+  /** A shaped projectile (dart, blade, bullet...) flown in place of the plain bolt mesh. */
+  shot?: ShotInstance;
 }
 
 interface Clone {
@@ -477,6 +481,8 @@ interface Clone {
   side: number;
 }
 
+/** Shaped bolts are drawn by `PowerFx`; they never show this. */
+const BOLT_PLACEHOLDER = new THREE.Mesh();
 const _fwd = new THREE.Vector3();
 const _right = new THREE.Vector3();
 const _look = new THREE.Vector3();
@@ -585,7 +591,8 @@ export class RaidEngine {
   private surgeT = 0;
   private surgeMul = 1;
   /** Blitz dash chain: hits left, seconds to the next dash. */
-  private blitz: { left: number; next: number; spec: DerivedPowerSpec; tune: DerivedTune } | null = null;
+  private blitz: { left: number; next: number; spec: DerivedPowerSpec; tune: DerivedTune; pull: number; pulled: boolean } | null = null;
+  private surgeColor = 0xffffff;
   /** The tree-earned power whose choreography the body is playing. */
   private choreo: ActiveChoreo | null = null;
   /** Power ranks from the tree (1 when unranked). */
@@ -756,6 +763,7 @@ export class RaidEngine {
   private rings = new ShockRingPool(10);
   private cracks = new CrackDecalPool(4);
   private afterimages = new AfterimagePool(5);
+  private powerFx!: PowerFx;
   private fallen: Fallen[] = [];
   private hitStopT = 0;
   /** Gameplay seconds actually simulated (sum of clamped dt); hit windows and combos run on this, not wall time. */
@@ -810,6 +818,8 @@ export class RaidEngine {
     this.scene.add(this.particles.points);
     this.powerVfx = new RyderPowerVFX(this.scene, this.particles);
     this.scene.add(this.rings.group, this.cracks.group, this.afterimages.group);
+    this.powerFx = new PowerFx(this.particles, (x, z) => this.world.heightAt(x, z));
+    this.scene.add(this.powerFx.group);
 
     this.arena = arenaSpec(DEFAULT_ARENA)!;
     this.loadArena(this.arena.id);
@@ -880,6 +890,7 @@ export class RaidEngine {
     this.surgeMul = 1;
     this.blitz = null;
     this.choreo = null;
+    this.powerFx.clear();
     this.castScale = 1;
     this.secondWindUsed = false;
     this.signalBank.reset();
@@ -1478,6 +1489,7 @@ export class RaidEngine {
     this.surgeMul = 1;
     this.blitz = null;
     this.choreo = null;
+    this.powerFx.clear();
     this.castScale = 1;
     this.meleeT = 0;
     this.meleeCd = 0;
@@ -1772,6 +1784,7 @@ export class RaidEngine {
     this.rings.dispose();
     this.cracks.dispose();
     this.afterimages.dispose();
+    this.powerFx.dispose();
     this.unloadBeacon();
     for (const world of this.worlds.values()) world.dispose();
     this.particles.dispose();
@@ -2003,6 +2016,7 @@ export class RaidEngine {
     if (this.surgeT > 0) {
       this.surgeT = Math.max(0, this.surgeT - dt);
       if (this.surgeT <= 0) this.surgeMul = 1;
+      else this.surgeParticles(dt);
     }
     this.stepChoreo();
     this.stepBlitz(dt);
@@ -2104,6 +2118,7 @@ export class RaidEngine {
     this.rings.update(dt);
     this.cracks.update(dt);
     this.afterimages.update(dt);
+    this.powerFx.update(dt, this.camera);
     this.beacon?.update(dt, time, this.pos, this.spec.visual.auraColor, this.camera);
     this.powerVfx.update(dt, time, this.aura, this.maxAura, !this.burnout && !this.powerOut.down, this.camera);
   }
@@ -3606,6 +3621,10 @@ export class RaidEngine {
   private startChoreo(spec: DerivedPowerSpec, tune: DerivedTune, choreo: PowerChoreo, finisher: boolean) {
     this.choreo = { spec, tune, choreo, started: this.simTime, next: 0, pose: null, shots: 0, finisher };
     if (spec.kind === 'breaker' || spec.kind === 'nova' || spec.kind === 'snare') this.faceNearest(Math.max(tune.radius, 4));
+    if (spec.kind === 'nova' && !finisher && powerLook(this.spec.id).nova.implode) {
+      const charge = choreo.beats.find((beat) => beat.events?.includes('hit'))?.at ?? 0.4;
+      this.powerFx.implode(this.pos, spec.color, tune.radius * 0.8, charge);
+    }
     this.stepChoreo();
   }
 
@@ -3654,9 +3673,14 @@ export class RaidEngine {
     for (const event of beat.events ?? []) {
       switch (event) {
         case 'hit':
-          if (active.finisher) this.blitzFinisherHit(tune);
-          else if (spec.kind === 'breaker') this.breakerHit(tune);
-          else if (spec.kind === 'nova') this.novaHit(spec, tune);
+          if (active.finisher) this.blitzFinisherHit(spec, tune);
+          else if (spec.kind === 'breaker') {
+            this.breakerHit(tune);
+            this.breakerFx(spec, tune);
+          } else if (spec.kind === 'nova') {
+            this.novaHit(spec, tune);
+            this.novaFx(spec, tune);
+          }
           else if (spec.kind === 'snare') this.snareHit(spec, tune);
           else if (spec.kind === 'surge') this.surgeApply(spec, tune);
           break;
@@ -3761,7 +3785,7 @@ export class RaidEngine {
     const origin = this.muzzle();
     origin.y = 1.3;
     const damage = this.shotDamage() * tune.damageMul * this.strikeScale();
-    this.spawnBolt(origin, dir, damage, true, spec.color, Math.max(18, this.spec.projectileSpeed));
+    this.spawnBolt(origin, dir, damage, true, spec.color, Math.max(22, this.spec.projectileSpeed), powerLook(this.spec.id).shot);
     this.particles.emit(origin, spec.color, 6, { speed: 5, size: 0.22, life: 0.25, direction: dir });
     this.emitSound('fight.punch.swing');
   }
@@ -3805,8 +3829,7 @@ export class RaidEngine {
       host.knock.multiplyScalar(0.2);
       host.hit = Math.max(host.hit, hold);
       host.hitColor = spec.color;
-      _tmp2.set(host.pos.x, this.world.heightAt(host.pos.x, host.pos.z) + 0.03, host.pos.z);
-      this.rings.spawn(_tmp2, spec.color, { radius: host.radius + 0.5, duration: hold });
+      this.powerFx.bind(host, powerLook(this.spec.id).snare, spec.color, hold);
     }
   }
 
@@ -3818,13 +3841,81 @@ export class RaidEngine {
   private surgeApply(spec: DerivedPowerSpec, tune: DerivedTune) {
     this.surgeT = tune.duration;
     this.surgeMul = tune.damageMul;
+    this.surgeColor = spec.color;
+    this.powerFx.aura(this.pos, spec.color, tune.duration);
     this.powerVfx.surge(1);
     this.particles.emit(this.pos.clone().setY(1.1), spec.color, 28, { speed: 6, size: 0.3, life: 0.6, up: 1.8 });
   }
 
+  /** Chest height over the floor under the Ryder: where sprays and bursts leave from. */
+  private chest(out: THREE.Vector3, lift = 1.1) {
+    return out.set(this.pos.x, this.world.heightAt(this.pos.x, this.pos.z) + this.airY + lift, this.pos.z);
+  }
+
+  private breakerFx(spec: DerivedPowerSpec, tune: DerivedTune) {
+    const look = powerLook(this.spec.id);
+    const fx = look.breaker;
+    const front = new THREE.Vector3(this.pos.x + Math.sin(this.yaw) * 1.3, 0, this.pos.z + Math.cos(this.yaw) * 1.3);
+    if (fx.pillar) this.powerFx.pillar(fx.pillar === 'slash' ? this.pos : front, fx.pillar, spec.color, this.yaw, fx.pillar === 'spikes' ? tune.radius / 4.6 : 1);
+    if (fx.spray) this.powerFx.spray(this.chest(new THREE.Vector3(), 1.3), this.yaw, 1.6, look.shot, spec.color, fx.spray, tune.radius, 26, true);
+    if (fx.wave) this.powerFx.wave(this.pos, fx.wave, spec.color, tune.radius);
+    if (fx.flash) this.powerFx.flash(front.setY(this.world.heightAt(front.x, front.z) + 1.2), spec.color, 1.8);
+  }
+
+  private novaFx(spec: DerivedPowerSpec, tune: DerivedTune) {
+    const look = powerLook(this.spec.id);
+    const fx = look.nova;
+    const chest = this.chest(new THREE.Vector3(), 1.0);
+    if (fx.radial) this.powerFx.radial(chest, look.shot, spec.color, fx.radial, tune.radius + 1.5);
+    if (fx.wave) this.powerFx.wave(this.pos, fx.wave, spec.color, tune.radius);
+    if (fx.flash) this.powerFx.flash(chest, spec.color, tune.radius * 0.7, 0.4);
+  }
+
+  private blitzFx(spec: DerivedPowerSpec, tune: DerivedTune) {
+    const look = powerLook(this.spec.id);
+    const fx = look.blitz;
+    const chest = this.chest(new THREE.Vector3(), 1.0);
+    if (fx.pillar) this.powerFx.pillar(this.pos, fx.pillar, spec.color, this.yaw, fx.pillar === 'spikes' ? tune.radius / 4.6 : 1.4);
+    if (fx.radial) this.powerFx.radial(chest, look.shot, spec.color, fx.radial, tune.radius + 2);
+    if (fx.wave) this.powerFx.wave(this.pos, fx.wave, spec.color, tune.radius);
+    if (fx.flash) this.powerFx.flash(chest, spec.color, tune.radius * 0.6, 0.45);
+  }
+
+  /** A surge keeps throwing its element off the body for as long as it lasts. */
+  private surgeParticles(dt: number) {
+    const style = AURA_PARTICLES[powerLook(this.spec.id).surge];
+    const count = Math.floor(style.rate * dt + Math.random());
+    if (count <= 0) return;
+    const at = this.chest(_tmp2, 0.2 + Math.random() * 1.5);
+    this.particles.emit(at, style.white && Math.random() < 0.5 ? 0xffffff : this.surgeColor, count, {
+      speed: style.speed,
+      size: style.size,
+      life: style.life,
+      up: style.up,
+      spread: 1.4,
+    });
+  }
+
+  /** Drags living hosts toward the Ryder, stopping just short of her. */
+  private pullCrowd(radius: number, dt: number) {
+    for (const host of this.hosts) {
+      if (host.ally || host.hp <= 0 || host.held > 0) continue;
+      const dx = this.pos.x - host.pos.x;
+      const dz = this.pos.z - host.pos.z;
+      const dist = Math.hypot(dx, dz);
+      if (dist > radius || dist < 1.3) continue;
+      const step = Math.min(dist - 1.3, (6 + dist * 2.2) * dt);
+      host.pos.x += (dx / dist) * step;
+      host.pos.z += (dz / dist) * step;
+      resolveCircle(host.pos, host.radius, this.world.obstacles);
+      host.knock.multiplyScalar(0.5);
+      host.stagger = Math.max(host.stagger, 0.2);
+    }
+  }
+
   /** Ultimate: a chain of dashes through the crowd, then a radial finisher where the Ryder stops. */
   private beginBlitz(spec: DerivedPowerSpec, tune: DerivedTune) {
-    this.blitz = { left: 5, next: 0, spec, tune };
+    this.blitz = { left: 5, next: 0, spec, tune, pull: 0, pulled: false };
     this.iframes = Math.max(this.iframes, 1.6);
     this.rig.addShake(0.2);
     this.banner = { title: spec.name.toUpperCase(), sub: 'ULTIMATE' };
@@ -3834,9 +3925,23 @@ export class RaidEngine {
   private stepBlitz(dt: number) {
     const blitz = this.blitz;
     if (!blitz) return;
+    if (blitz.pull > 0) {
+      blitz.pull = Math.max(0, blitz.pull - dt);
+      this.pullCrowd(blitz.tune.radius * 1.5, dt);
+    }
     blitz.next -= dt;
     if (blitz.next > 0) return;
     const spec = blitz.spec;
+    if (blitz.left <= 0 && !blitz.pulled && powerLook(this.spec.id).blitz.vortex) {
+      // The street is dragged in on the Ryder before the finisher lets it go.
+      blitz.pulled = true;
+      blitz.pull = 0.5;
+      blitz.next = 0.5;
+      this.powerFx.vortex(this.pos, spec.color, blitz.tune.radius * 1.3, 0.55);
+      this.powerFx.implode(this.pos, spec.color, blitz.tune.radius, 0.5);
+      this.rig.addShake(0.2);
+      return;
+    }
     if (blitz.left <= 0) {
       // The chain is done: the finisher plays as its own choreography and lands on the slam.
       this.blitz = null;
@@ -3850,6 +3955,7 @@ export class RaidEngine {
       const dz = target.pos.z - this.pos.z;
       const dist = Math.hypot(dx, dz) || 0.01;
       this.afterimages.spawn(0.5, 0.3, spec.color);
+      _tmp2.copy(this.pos).setY(this.world.heightAt(this.pos.x, this.pos.z));
       const stop = Math.max(0, dist - 1.1);
       this.pos.x += (dx / dist) * stop;
       this.pos.z += (dz / dist) * stop;
@@ -3865,6 +3971,8 @@ export class RaidEngine {
       this.meleeStarted = true;
       this.strikeOverride = RYDER_STYLE[this.spec.id].weapon;
       this.hurtHost(target, this.meleeDamage() * 1.3 * this.strikeScale() * (blitz.tune.damageMul / spec.damageMul), _tmp, 'stagger', 0.9);
+      this.powerFx.streak(_tmp2, _look.copy(this.pos).setY(this.world.heightAt(this.pos.x, this.pos.z)), spec.color);
+      if (powerLook(this.spec.id).blitz.stick && target.hp > 0) this.powerFx.stick(target, powerLook(this.spec.id).shot, spec.color, this.pos);
       this.particles.emit(this.pos.clone().setY(1.0), spec.color, 14, { speed: 7, size: 0.26, life: 0.3, up: 0.6 });
       this.emitSound('fight.punch.impact');
     }
@@ -3874,8 +3982,17 @@ export class RaidEngine {
   }
 
   /** Blitz finisher: everything near the Ryder goes down. */
-  private blitzFinisherHit(tune: DerivedTune) {
+  private blitzFinisherHit(spec: DerivedPowerSpec, tune: DerivedTune) {
     const base = this.meleeDamage() * tune.damageMul * this.strikeScale();
+    this.blitzFx(spec, tune);
+    // Darts left in bodies by the dashes go off wherever those bodies are now.
+    for (const target of this.powerFx.detonateStuck()) {
+      const host = this.hosts.find((h) => h === target);
+      if (!host || host.hp <= 0) continue;
+      if (Math.hypot(host.pos.x - this.pos.x, host.pos.z - this.pos.z) <= tune.radius + host.radius) continue;
+      _tmp.set(host.pos.x - this.pos.x, 0, host.pos.z - this.pos.z).normalize();
+      this.hurtHost(host, base * 0.5, _tmp, 'knockback', 1);
+    }
     for (const host of [...this.hosts]) {
       if (host.ally || host.hp <= 0) continue;
       const dx = host.pos.x - this.pos.x;
@@ -6020,7 +6137,25 @@ export class RaidEngine {
     fromPlayer: boolean,
     color: number,
     speed: number,
+    shape?: ShotShape,
   ) {
+    if (shape) {
+      const shot = this.powerFx.acquireShot(shape, color);
+      const shaped: Bolt = {
+        active: true,
+        mesh: BOLT_PLACEHOLDER,
+        vel: dir.clone().normalize().multiplyScalar(speed),
+        pos: origin.clone(),
+        damage,
+        fromPlayer,
+        life: 1.6,
+        radius: fromPlayer ? 0.26 : 0.3,
+        shot,
+      };
+      this.powerFx.placeShot(shot, shaped.pos, shaped.vel, 0);
+      this.bolts.push(shaped);
+      return;
+    }
     let bolt = this.boltPool.pop();
     if (!bolt) {
       const mesh = new THREE.Mesh(BOLT_GEOMETRY, glow(color, 1.8));
@@ -6055,7 +6190,8 @@ export class RaidEngine {
       const bolt = this.bolts[i];
       bolt.life -= dt;
       bolt.pos.addScaledVector(bolt.vel, dt);
-      bolt.mesh.position.copy(bolt.pos);
+      if (bolt.shot) this.powerFx.placeShot(bolt.shot, bolt.pos, bolt.vel, dt);
+      else bolt.mesh.position.copy(bolt.pos);
       const floor = this.world.heightAt(bolt.pos.x, bolt.pos.z);
       const water = this.world.water;
       const surface = water ? water.surfaceAt(bolt.pos.x, bolt.pos.z) : floor;
@@ -6103,8 +6239,12 @@ export class RaidEngine {
   private retireBolt(index: number) {
     const bolt = this.bolts[index];
     bolt.active = false;
-    bolt.mesh.visible = false;
     this.bolts.splice(index, 1);
+    if (bolt.shot) {
+      this.powerFx.releaseShot(bolt.shot);
+      return;
+    }
+    bolt.mesh.visible = false;
     this.boltPool.push(bolt);
   }
 
@@ -6989,11 +7129,8 @@ export class RaidEngine {
     this.fallen = [];
     this.unbindKit();
     this.clearClones();
-    this.bolts.forEach((b) => {
-      b.mesh.visible = false;
-      this.boltPool.push(b);
-    });
-    this.bolts = [];
+    for (let i = this.bolts.length - 1; i >= 0; i -= 1) this.retireBolt(i);
+    this.powerFx.clear();
     if (this.player) {
       this.scene.remove(this.player.humanoid.group);
       disposeObject(this.player.humanoid.group);
