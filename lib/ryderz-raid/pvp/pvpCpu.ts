@@ -567,7 +567,7 @@ export class PvpCpu {
       }
     }
     const hop = this.hooks.routeTo?.(body.pos.x, body.pos.z, x, z, body.radius);
-    if (hop && Math.hypot(hop.x - body.pos.x, hop.z - body.pos.z) > 0.6) return hop;
+    if (hop) return hop;
     return { x, z };
   }
 

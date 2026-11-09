@@ -231,7 +231,9 @@ interface Field {
   made: number;
 }
 
-const SIZE_CLASSES = [0.5, 0.95, 1.4];
+const SIZE_CLASSES = [0.75, 1.1, 1.55];
+/** Steering probes at radius + 0.15, so a body is routed with that much room. */
+const STEER_SKIN = 0.15;
 const FIELD_TTL = 450;
 const STRAIGHT = 1;
 const DIAGONAL = Math.SQRT2;
@@ -282,7 +284,7 @@ export class NavGrid {
   }
 
   private sizeClass(radius: number) {
-    return SIZE_CLASSES.find((c) => radius <= c) ?? SIZE_CLASSES[SIZE_CLASSES.length - 1];
+    return SIZE_CLASSES.find((c) => radius + STEER_SKIN <= c) ?? SIZE_CLASSES[SIZE_CLASSES.length - 1];
   }
 
   /** Nearest cell a body of this size can stand in, searching outward a few metres. */
@@ -404,7 +406,7 @@ export class NavGrid {
    */
   routeTo(fromX: number, fromZ: number, toX: number, toZ: number, radius = 0.5): { x: number; z: number } | null {
     const need = this.sizeClass(radius);
-    if (this.lineClear(fromX, fromZ, toX, toZ, need * 0.85)) return null;
+    if (this.lineClear(fromX, fromZ, toX, toZ, need)) return null;
     // Goals snap to a 2 m block so a crowd ringing one player shares one field.
     const goal = this.standable(this.index(Math.floor(toX / 2) * 2 + 1, Math.floor(toZ / 2) * 2 + 1), need);
     const start = this.standable(this.index(fromX, fromZ), need);
@@ -436,12 +438,45 @@ export class NavGrid {
       k = next;
       if (first === start) first = k;
       const c = this.centre(k);
-      if (this.lineClear(fromX, fromZ, c.x, c.z, need * 0.85)) best = k;
+      if (this.lineClear(fromX, fromZ, c.x, c.z, need)) best = k;
       else if (step > 4) break;
       if (k === goal) break;
     }
     // Nothing visible down the path yet: step to the first cell of it.
     return this.centre(best === start ? first : best);
+  }
+
+  /**
+   * The most open point within a few metres that a body can walk to in a
+   * straight line. A body grinding against a corner heads here to free itself.
+   */
+  openSpot(x: number, z: number, radius = 0.5, reach = 5): { x: number; z: number } | null {
+    const need = this.sizeClass(radius);
+    const k0 = this.index(x, z);
+    const i0 = k0 % this.n;
+    const j0 = (k0 - i0) / this.n;
+    const span = Math.ceil(reach / this.cell);
+    let best: { x: number; z: number } | null = null;
+    let bestScore = -Infinity;
+    for (let dj = -span; dj <= span; dj += 2) {
+      for (let di = -span; di <= span; di += 2) {
+        const i = i0 + di;
+        const j = j0 + dj;
+        if (i < 0 || j < 0 || i >= this.n || j >= this.n) continue;
+        const d = Math.hypot(di, dj) * this.cell;
+        if (d < 1.5 || d > reach) continue;
+        const k = j * this.n + i;
+        const c = this.clearance[k];
+        if (c < need + 0.4) continue;
+        const score = c - d * 0.12;
+        if (score <= bestScore) continue;
+        const at = this.centre(k);
+        if (!this.lineClear(x, z, at.x, at.z, need)) continue;
+        best = at;
+        bestScore = score;
+      }
+    }
+    return best;
   }
 
   /** Remaining path length in metres, or Infinity when there is no way. */

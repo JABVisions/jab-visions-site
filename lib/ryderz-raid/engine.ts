@@ -404,6 +404,8 @@ interface Host {
   swims?: boolean;
   /** Wall-slide memory so a blocked step does not grind in place. */
   nav?: NavHint;
+  /** Net-progress watch: a host that has not got anywhere for a while walks out to open ground. */
+  stall?: { x: number; z: number; t: number; out: number; ox: number; oz: number };
   /** This raid teammate is already committed to a host and may chase a little farther. */
   pressing?: boolean;
   /** Frames skipped while this host is far enough to simulate cheaply. */
@@ -5364,6 +5366,35 @@ export class RaidEngine {
     return best;
   }
 
+  private watchStall(host: Host, watch: NonNullable<Host['stall']>, wants: boolean, gx: number, gz: number, dt: number) {
+    // Net movement over a fixed window: a host shuffling back and forth on a corner still counts as stuck.
+    if (!wants) {
+      watch.x = host.pos.x;
+      watch.z = host.pos.z;
+      watch.t = 0;
+      return;
+    }
+    watch.t += dt;
+    if (watch.t < 1.6) return;
+    const moved = Math.hypot(host.pos.x - watch.x, host.pos.z - watch.z);
+    watch.x = host.pos.x;
+    watch.z = host.pos.z;
+    watch.t = 0;
+    if (moved > 1.2) return;
+    let spot = this.world.openSpot?.(host.pos.x, host.pos.z, host.radius) ?? null;
+    if (!spot) {
+      const dx = gx - host.pos.x;
+      const dz = gz - host.pos.z;
+      const len = Math.hypot(dx, dz) || 1;
+      const side = Math.random() < 0.5 ? 1 : -1;
+      spot = { x: host.pos.x - (dz / len) * 3 * side - (dx / len) * 1.2, z: host.pos.z + (dx / len) * 3 * side - (dz / len) * 1.2 };
+    }
+    watch.ox = spot.x;
+    watch.oz = spot.z;
+    watch.out = 1.4;
+    if (host.nav) host.nav.lock = 0;
+  }
+
   /** Walls, cars, and the map edge. Used so NPCs turn before they grind. */
   private npcBlocked(x: number, z: number, radius: number) {
     if (Math.abs(x) > this.limit() || Math.abs(z) > this.limit() || pointBlocked(x, z, radius, this.world.obstacles)) {
@@ -5557,10 +5588,19 @@ export class RaidEngine {
         }
       }
     }
-    const hop = this.world.routeTo?.(host.pos.x, host.pos.z, gx, gz, host.radius);
-    if (hop && Math.hypot(hop.x - host.pos.x, hop.z - host.pos.z) > 1.15) {
-      gx = hop.x;
-      gz = hop.z;
+    const watch = (host.stall ??= { x: host.pos.x, z: host.pos.z, t: 0, out: 0, ox: 0, oz: 0 });
+    const aimDist = Math.hypot(gx - host.pos.x, gz - host.pos.z);
+    if (watch.out > 0) {
+      watch.out -= dt;
+      if (Math.hypot(watch.ox - host.pos.x, watch.oz - host.pos.z) < 0.6) watch.out = 0;
+      gx = watch.ox;
+      gz = watch.oz;
+    } else {
+      const hop = this.world.routeTo?.(host.pos.x, host.pos.z, gx, gz, host.radius);
+      if (hop) {
+        gx = hop.x;
+        gz = hop.z;
+      }
     }
     const gdx = gx - host.pos.x;
     const gdz = gz - host.pos.z;
@@ -5618,6 +5658,7 @@ export class RaidEngine {
     host.pos.x = clamp(host.pos.x, -this.limit(), this.limit());
     host.pos.z = clamp(host.pos.z, -this.limit(), this.limit());
     resolveCircle(host.pos, host.radius, this.world.obstacles);
+    this.watchStall(host, watch, order.move > 0.2 && aimDist > 2.5 && !striker.busy, gx, gz, dt);
     if (!phased && !this.kit?.passthrough) {
       const sx = host.pos.x - this.pos.x;
       const sz = host.pos.z - this.pos.z;

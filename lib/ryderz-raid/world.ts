@@ -56,6 +56,8 @@ export interface World {
   toggleBarriers?: () => boolean;
   /** Intermediate waypoint when a straight line would miss stairs or a door. */
   routeTo?: (fromX: number, fromZ: number, toX: number, toZ: number, radius?: number) => { x: number; z: number } | null;
+  /** Open ground a few metres away, reachable in a straight line, for a body that is wedged. */
+  openSpot?: (x: number, z: number, radius: number) => { x: number; z: number } | null;
   /** Doors and other facility motion. Agents are the player and anyone who should trip a trigger. */
   stepFacility?: (agents: { x: number; z: number }[], dt: number) => void;
   /** Latest footfall, so sand and grass can scuff under the fighter. */
@@ -1380,6 +1382,10 @@ export function buildWorld(): World {
     routeTo: (fromX, fromZ, toX, toZ, radius) => {
       nav ??= new NavGrid(obstacles, BOUNDARY);
       return nav.routeTo(fromX, fromZ, toX, toZ, radius);
+    },
+    openSpot: (x, z, radius) => {
+      nav ??= new NavGrid(obstacles, BOUNDARY);
+      return nav.openSpot(x, z, radius);
     },
     heightAt: (x, z) => {
       const local = districtLocal(x, z);
