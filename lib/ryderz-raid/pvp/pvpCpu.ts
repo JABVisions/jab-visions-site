@@ -72,6 +72,8 @@ export interface PvpCpuHooks {
   heightAt(x: number, z: number): number;
   resolve(pos: THREE.Vector3): void;
   blocked(x: number, z: number, radius: number): boolean;
+  /** Next waypoint around buildings toward a goal, or null when the straight line is open. */
+  routeTo?(fromX: number, fromZ: number, toX: number, toZ: number, radius: number): { x: number; z: number } | null;
   hurtPlayer(amount: number, dir: THREE.Vector3, kind: PvpDamageKind, physical?: PhysicalHit): void;
   playerWhiff(): boolean;
   playerStunned(): boolean;
@@ -102,6 +104,8 @@ interface PlayerBody extends ReactiveBody, KitTarget {
 const _dir = new THREE.Vector3();
 /** A computer teammate stops a steered power after this long. The player holds theirs until they switch it off. */
 const STEER_SWEEP_LIMIT = 5;
+/** Past this gap a CPU stops circling and closes in. */
+const LONG_GAP = 12;
 
 /**
  * One CPU Ryder. Decisions are scored, then the same kit the player would
@@ -413,9 +417,14 @@ export class PvpCpu {
       this.intent = 'punch';
       this.strikeQueued = false;
     }
+    if (!regrouping && dist > LONG_GAP && (this.intent === 'reposition' || this.intent === 'evade' || this.intent === 'dodge')) {
+      // Out of the fight: close the gap instead of circling at range.
+      this.intent = 'chase';
+    }
     const hazard = this.playerHazard(body.pos.x, body.pos.z);
-    let mx = dx / dist;
-    let mz = dz / dist;
+    const goal = this.chaseGoal(dist);
+    let mx = (goal.x - body.pos.x) / (Math.hypot(goal.x - body.pos.x, goal.z - body.pos.z) || 1);
+    let mz = (goal.z - body.pos.z) / (Math.hypot(goal.x - body.pos.x, goal.z - body.pos.z) || 1);
     if (hazard) {
       mx = hazard.x;
       mz = hazard.z;
@@ -480,8 +489,8 @@ export class PvpCpu {
         (mz / len) * speed,
         body.radius,
         (x, z, radius) => this.hooks.blocked(x, z, radius),
-        foe.pos.x,
-        foe.pos.z,
+        goal.x,
+        goal.z,
         dt,
       );
       body.pos.x += steered.x * dt;
@@ -511,8 +520,10 @@ export class PvpCpu {
     const dz = foe.pos.z - body.pos.z;
     const dist = Math.hypot(dx, dz) || 0.001;
     const hazard = this.playerHazard(body.pos.x, body.pos.z);
-    const mx = hazard ? hazard.x : dx / dist;
-    const mz = hazard ? hazard.z : dz / dist;
+    const goal = this.chaseGoal(dist);
+    const gl = Math.hypot(goal.x - body.pos.x, goal.z - body.pos.z) || 1;
+    const mx = hazard ? hazard.x : (goal.x - body.pos.x) / gl;
+    const mz = hazard ? hazard.z : (goal.z - body.pos.z) / gl;
     const speed = spec.speed * this.tempo() * 0.96 * (this.burnout ? 0.82 : 1) * (this.kit?.moveScale ?? 1);
     const steered = commitSteer(
       this.nav,
@@ -522,8 +533,8 @@ export class PvpCpu {
       mz * speed,
       body.radius,
       (x, z, radius) => this.hooks.blocked(x, z, radius),
-      foe.pos.x,
-      foe.pos.z,
+      goal.x,
+      goal.z,
       dt,
     );
     body.pos.x += steered.x * dt;
@@ -533,6 +544,31 @@ export class PvpCpu {
     else if (dist > 0.2) this.facing = Math.atan2(dx, dz);
     this.place(body.pos);
     this.intent = 'chase';
+  }
+
+  /**
+   * Where to run: ahead of a moving foe by roughly the time it takes to get
+   * there, and around buildings when the straight line is walled off.
+   */
+  private chaseGoal(dist: number) {
+    const body = this.body!;
+    const foe = this.foe!;
+    const vel = this.hooks.playerVelocity();
+    const speed = Math.max(1, this.spec?.speed ?? 6);
+    const lead = Math.min(0.9, dist / speed) * (0.35 + this.tuning.prediction * 0.65);
+    let x = foe.pos.x;
+    let z = foe.pos.z;
+    if (dist > 3) {
+      x += vel.x * lead;
+      z += vel.z * lead;
+      if (this.hooks.blocked(x, z, body.radius)) {
+        x = foe.pos.x;
+        z = foe.pos.z;
+      }
+    }
+    const hop = this.hooks.routeTo?.(body.pos.x, body.pos.z, x, z, body.radius);
+    if (hop && Math.hypot(hop.x - body.pos.x, hop.z - body.pos.z) > 0.6) return hop;
+    return { x, z };
   }
 
   /** Body contact keeps people apart. A strike is a hitbox, not a shove. */

@@ -4554,6 +4554,7 @@ export class RaidEngine {
           resolveCircle(body, PLAYER_RADIUS, this.world.obstacles);
         },
         blocked: (x, z, radius) => this.npcBlocked(x, z, radius),
+        routeTo: (fromX, fromZ, toX, toZ, radius) => this.world.routeTo?.(fromX, fromZ, toX, toZ, radius) ?? null,
         hurtPlayer: (amount, dir, _kind, physical) => {
           const target = foe;
           if (!target || target.hp <= 0 || target.ally) return;
@@ -5556,7 +5557,7 @@ export class RaidEngine {
         }
       }
     }
-    const hop = this.world.routeTo?.(host.pos.x, host.pos.z, gx, gz);
+    const hop = this.world.routeTo?.(host.pos.x, host.pos.z, gx, gz, host.radius);
     if (hop && Math.hypot(hop.x - host.pos.x, hop.z - host.pos.z) > 1.15) {
       gx = hop.x;
       gz = hop.z;
@@ -6681,6 +6682,7 @@ export class RaidEngine {
           resolveCircle(pos, PLAYER_RADIUS, this.world.obstacles);
         },
         blocked: (x, z, radius) => this.npcBlocked(x, z, radius),
+        routeTo: (fromX, fromZ, toX, toZ, radius) => this.world.routeTo?.(fromX, fromZ, toX, toZ, radius) ?? null,
         hurtPlayer: (amount, dir, kind, physical) => this.hurtPlayer(amount, dir, kind, physical),
         stunPlayer: (seconds) => this.setStasis(seconds),
         suppressPlayer: (factor) => this.setSuppress(factor),
