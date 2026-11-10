@@ -1,7 +1,7 @@
 'use client';
 
 import { ArrowUpFromLine, Check, Footprints, Heart, HeartPulse, LayoutGrid, Link2, Lock, Magnet, Shield, Sparkles, Swords, Wind, Zap } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from 'react';
 import { RYDERZ, type RyderId } from '@/lib/ryderz-raid/config';
 import { DERIVED_POWERS, derivedAtRank, isDerivedAbility, rankScaling } from '@/lib/ryderz-raid/progression/derived-powers';
 import { POWER_TYPES, POWER_TYPE_COLOR, POWER_TYPE_LABEL } from '@/lib/ryderz-raid/progression/power-types';
@@ -54,6 +54,9 @@ const STAT_ICON: Record<StatKey, ReactNode> = {
 const ROW_H = 98;
 /** Card width, px; keep in step with `.node` in the stylesheet. */
 const NODE_W = 88;
+
+/** How long the pointer rests on a card before the detail panel switches to it. */
+const HOVER_INTENT_MS = 180;
 
 const SKILL_COLOR = 'rgba(229, 246, 234, 0.75)';
 
@@ -204,6 +207,23 @@ export default function PowerTreePanel({ manager, ryderId, active, onBack }: { m
     setZone('tree');
   };
 
+  // Hover previews a card only once the pointer rests on it, so gliding across
+  // the tree to the bind buttons does not swap the panel to every card passed.
+  const hoverTimer = useRef<number | null>(null);
+  const cancelHover = () => {
+    if (hoverTimer.current !== null) window.clearTimeout(hoverTimer.current);
+    hoverTimer.current = null;
+  };
+  useEffect(() => cancelHover, []);
+  const hoverNode = (r: number, c: number) => {
+    cancelHover();
+    if (zone === 'actions') return;
+    hoverTimer.current = window.setTimeout(() => {
+      hoverTimer.current = null;
+      focusNode(page, r, c);
+    }, HOVER_INTENT_MS);
+  };
+
   const say = (message: string) => setFlash(message);
 
   const reasonText = (node: PowerNodeView) => {
@@ -245,8 +265,14 @@ export default function PowerTreePanel({ manager, ryderId, active, onBack }: { m
   const bind = useCallback(
     (node: PowerNodeView, slot: InputSlot) => {
       if (node.effect.kind !== 'ability' || !node.owned) return;
-      const ok = manager.equip(ryderId, slot, node.effect.abilityId);
-      setFlash(ok ? `${node.name} bound to ${slot}` : `Slot ${slot} is not open`);
+      const ability = node.effect.abilityId;
+      if (!manager.equip(ryderId, slot, ability)) {
+        const from = node.equippedIn;
+        setFlash(from ? `Slot ${from} needs another power before ${node.name} can move` : `Slot ${slot} is not open`);
+        return;
+      }
+      const landed = INPUT_SLOTS.find((key) => manager.loadout(ryderId)[key] === ability) ?? slot;
+      setFlash(landed === slot ? `${node.name} bound to ${slot}` : `${node.name} bound to ${landed} · ${landed} fills before ${slot}`);
     },
     [manager, ryderId],
   );
@@ -438,15 +464,17 @@ export default function PowerTreePanel({ manager, ryderId, active, onBack }: { m
             byId={current.layout.byId}
             focusedId={focused?.id ?? null}
             dimmed={zone === 'actions'}
-            onFocus={(r, c) => focusNode(page, r, c)}
+            onHover={hoverNode}
+            onHoverEnd={cancelHover}
             onActivate={(node, r, c) => {
+              cancelHover();
               focusNode(page, r, c);
               activate(node);
             }}
           />
         </div>
 
-        <aside className={`${styles.detail} ${zone === 'actions' ? styles.detailActive : ''}`} aria-live="polite">
+        <aside className={`${styles.detail} ${zone === 'actions' ? styles.detailActive : ''}`} aria-live="polite" onMouseEnter={cancelHover}>
           {focused ? (
             <>
               <div className={styles.info}>
@@ -535,7 +563,7 @@ export default function PowerTreePanel({ manager, ryderId, active, onBack }: { m
                             data-bound={focused.equippedIn === slot ? 'true' : undefined}
                             onMouseEnter={() => open && setSlotIndex(i)}
                             onClick={() => bind(focused, slot)}
-                            title={open ? `Bind to ${slot}` : `Slot ${slot} opens on the Signal page`}
+                            title={open ? `Bind to ${slot}` : `Slot ${slot} is locked`}
                           >
                             {open ? slot : <Lock size={10} />}
                           </button>
@@ -573,7 +601,8 @@ function TreeDiagram({
   byId,
   focusedId,
   dimmed,
-  onFocus,
+  onHover,
+  onHoverEnd,
   onActivate,
 }: {
   rows: PlacedNode<PowerNodeView>[][];
@@ -581,7 +610,8 @@ function TreeDiagram({
   byId: Map<string, PlacedNode<PowerNodeView>>;
   focusedId: string | null;
   dimmed: boolean;
-  onFocus: (row: number, col: number) => void;
+  onHover: (row: number, col: number) => void;
+  onHoverEnd: () => void;
   onActivate: (node: PowerNodeView, row: number, col: number) => void;
 }) {
   const height = rows.length * ROW_H;
@@ -630,7 +660,9 @@ function TreeDiagram({
               data-node-id={node.id}
               aria-selected={isFocused}
               style={{ left: `${p.x * 100}%`, top: (r + 0.5) * ROW_H, '--type': nodeColor(node) } as CSSProperties}
-              onMouseEnter={() => onFocus(r, c)}
+              onMouseEnter={() => onHover(r, c)}
+              onMouseMove={() => onHover(r, c)}
+              onMouseLeave={onHoverEnd}
               onClick={() => onActivate(node, r, c)}
               title={node.description}
             >
