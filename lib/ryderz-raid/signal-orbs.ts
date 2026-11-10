@@ -428,7 +428,7 @@ export class SignalOrbs {
       this.spinQ.setFromAxisAngle(this.axis, orb.spin);
       this.m.compose(orb.pos, this.spinQ, this.s.setScalar(size));
       this.cores.setMatrixAt(n, this.m);
-      const halo = (orb.state === 'homing' ? 0.85 : 0.7) * size;
+      const halo = (orb.state === 'homing' ? 1.05 : 0.9) * size;
       this.m.compose(orb.pos, this.q, this.s.setScalar(halo));
       this.glows.setMatrixAt(n, this.m);
       n += 1;
