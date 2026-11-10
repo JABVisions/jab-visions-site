@@ -7,6 +7,7 @@ import { forkOn, type LillyFork } from './lilly-fork';
 import {
   BOOST_DRAIN,
   BOOST_SPEED,
+  FLIGHT_CEILING,
   FLY_DRAIN,
   FLY_SPEED,
   MOUNT_TIME,
@@ -663,12 +664,14 @@ export class LillyKit implements RyderKit {
     } else {
       this.boosting = (frame.boost ?? false) && this.flight === 'flying';
       const climb: -1 | 0 | 1 = frame.ascend ? 1 : frame.descend ? -1 : 0;
+      const roof = ctx.headroom?.(ctx.pos.x, ctx.pos.z);
+      const ceiling = roof === null || roof === undefined ? FLIGHT_CEILING : Math.max(0.6, Math.min(FLIGHT_CEILING, roof));
       if (this.flight === 'attacking' && this.airKind === 'melee') {
         this.altitude = Math.max(0, this.altitude - 22 * frame.dt);
       } else if (this.flight === 'attacking') {
-        this.altitude = stepAltitude(this.altitude, frame.dt, frame.descend ? -1 : 0);
+        this.altitude = stepAltitude(this.altitude, frame.dt, frame.descend ? -1 : 0, { ceiling });
       } else {
-        this.altitude = stepAltitude(this.altitude, frame.dt, climb);
+        this.altitude = stepAltitude(this.altitude, frame.dt, climb, { ceiling });
       }
       this.stepAirAttack(frame);
       const phase = this.flight as FlightPhase;

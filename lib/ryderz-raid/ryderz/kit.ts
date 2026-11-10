@@ -55,6 +55,8 @@ export interface KitContext {
   /** Base melee damage after upgrades / burnout. */
   meleeDamage(): number;
   heightAt(x: number, z: number): number;
+  /** How high the feet may rise here before the crown meets a roof. Null or absent under open sky. */
+  headroom?(x: number, z: number): number | null;
   /** Clamp to the arena and push out of obstacles. */
   resolve(pos: THREE.Vector3): void;
   blocked(x: number, z: number, radius: number): boolean;

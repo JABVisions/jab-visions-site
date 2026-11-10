@@ -239,6 +239,7 @@ export class ThirdPersonCamera {
 
   private occluders: THREE.Object3D[];
   private groundAt: ((x: number, z: number) => number) | null = null;
+  private roofAt: ((x: number, z: number) => number | null) | null = null;
   /** Seconds for the pivot to catch the player's feet. Longer while walking. */
   ySmoothing = 0.08;
   private state: CameraState = 'EXPLORATION';
@@ -277,6 +278,11 @@ export class ThirdPersonCamera {
   /** Ground under a point. The lens is lifted so it cannot sit inside a hill. */
   setGround(probe: ((x: number, z: number) => number) | null) {
     this.groundAt = probe;
+  }
+
+  /** Underside of a roof over a point. The lens is held below it. */
+  setRoof(probe: ((x: number, z: number) => number | null) | null) {
+    this.roofAt = probe;
   }
 
   setConfig(patch: Partial<CameraConfig>) {
@@ -515,10 +521,13 @@ export class ThirdPersonCamera {
     this.collisionDist = Math.min(this.collisionDist, fullLen);
 
     this.camera.position.copy(_origin).addScaledVector(_dir, this.collisionDist);
+    let minY = -Infinity;
     if (this.groundAt) {
-      const minY = this.groundAt(this.camera.position.x, this.camera.position.z) + 0.45;
+      minY = this.groundAt(this.camera.position.x, this.camera.position.z) + 0.45;
       if (this.camera.position.y < minY) this.camera.position.y = minY;
     }
+    const roof = this.roofAt?.(this.camera.position.x, this.camera.position.z);
+    if (roof != null) this.camera.position.y = Math.max(minY, Math.min(this.camera.position.y, roof - 0.3));
 
     // --- Shake (restrained) -------------------------------------------------
     if (this.trauma > 0) {

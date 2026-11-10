@@ -104,6 +104,8 @@ import { buildWorld, nearDistrictHub, pointBlocked, resolveCircle, type World } 
 import { chartBlocks, type MapBlock } from './map-chart';
 import { buildPadWorld } from './world-pad';
 import { buildIslandWorld } from './world-island';
+import { buildRiverdaleWorld } from './world-riverdale';
+import { untrackInstances } from './render/instancing';
 import { emptySwim, shallowDirection, stepSwim, type SwimState, type WaterColumn } from './island/swim';
 import { calculatePvPDamage, pvpHealth, PvpCpu, type PvpDamageKind } from './pvp';
 import type { PvpDifficulty } from './pvp/aiProfile';
@@ -318,6 +320,8 @@ export interface HudState {
   } | null;
   /** Null on arenas with no ocean. Present on dry sand too, so the HUD can tell land from water. */
   water: { mode: SwimState['mode']; oxygen: number; submerged: boolean } | null;
+  /** How loud the arena's party is where the player stands, 0 to 1. Null where there is none. */
+  partyLevel: number | null;
 }
 
 interface Host {
@@ -509,6 +513,8 @@ const _fwd = new THREE.Vector3();
 const _right = new THREE.Vector3();
 const _look = new THREE.Vector3();
 const _tmp = new THREE.Vector3();
+/** Top of a standing body above its feet at scale 1. */
+const BODY_CROWN = 1.9;
 const _tmp2 = new THREE.Vector3();
 const _aimPoint = new THREE.Vector3();
 const _ray = new THREE.Raycaster();
@@ -560,7 +566,7 @@ export class RaidEngine {
   private camera: THREE.PerspectiveCamera;
   private rig: ThirdPersonCamera;
   private world: World;
-  private worlds = new Map<'block' | 'pad' | 'island', World>();
+  private worlds = new Map<'block' | 'pad' | 'island' | 'riverdale', World>();
   private particles: ParticleSystem;
   private clock = new THREE.Clock();
   private raf = 0;
@@ -752,6 +758,8 @@ export class RaidEngine {
   private chartWorld: World | null = null;
   private readonly exploreN = 48;
   private explored = new Uint8Array(48 * 48);
+  /** Hidden caches already opened this match. */
+  private foundCaches = new Set<string>();
   private round = 0;
   private phase: HudState['phase'] = 'playing';
   private intermissionLeft = 0;
@@ -1014,6 +1022,8 @@ export class RaidEngine {
       this.raidPlan = null;
       this.beginRound(1);
     }
+    this.foundCaches.clear();
+    this.world.resetCaches?.();
     this.spawnThrowables();
     if (this.gameMode !== GameMode.PVP) {
       this.spawnStations();
@@ -1549,7 +1559,7 @@ export class RaidEngine {
       this.homeId = spec.id;
       this.homeMoves = this.moves;
     }
-    this.particles.emit(this.pos.clone().setY(1.1), spec.color, 30, {
+    this.particles.emit(this.playerAt(1.1), spec.color, 30, {
       speed: 7,
       size: 0.32,
       life: 0.6,
@@ -1688,7 +1698,7 @@ export class RaidEngine {
     });
     this.banner = { title: spec.name.toUpperCase(), sub: 'YOU TAKE THE LEAD' };
     this.bannerT = 1.6;
-    this.particles.emit(this.pos.clone().setY(1.1), spec.color, 22, { speed: 6, size: 0.28, life: 0.45, up: 1 });
+    this.particles.emit(this.playerAt(1.1), spec.color, 22, { speed: 6, size: 0.28, life: 0.45, up: 1 });
     return true;
   }
 
@@ -2148,9 +2158,13 @@ export class RaidEngine {
         );
       }
     }
-    this.throwables?.update(dt, this.simTime, (x, z) => this.world.heightAt(x, z), (item, point) => {
-      this.resolveThrowImpact(item, point);
-    });
+    this.throwables?.update(
+      dt,
+      this.simTime,
+      (x, z) => this.world.heightAt(x, z),
+      (item, point) => this.resolveThrowImpact(item, point),
+      (item, point) => this.shatterProp(item, point),
+    );
     this.updateCombatDebug();
     this.updateFallen(dt);
     this.updateBolts(dt);
@@ -2190,6 +2204,11 @@ export class RaidEngine {
       this.worlds.set('island', next);
       this.scene.add(next.group);
     }
+    if (!next && key === 'riverdale') {
+      next = buildRiverdaleWorld();
+      this.worlds.set('riverdale', next);
+      this.scene.add(next.group);
+    }
     if (!next) next = this.worlds.get('block') ?? this.world;
     if (next !== this.world) {
       const previous = this.world;
@@ -2200,13 +2219,19 @@ export class RaidEngine {
       this.scene.updateMatrixWorld(true);
       this.rig.setOccluders(this.world.occluders);
       this.pipeline.useLights(next.group);
-      const island = this.worlds.get('island');
-      if (island && previous === island && next !== island) {
-        this.pipeline.forgetLights(island.group);
-        this.scene.remove(island.group);
-        island.dispose();
-        this.worlds.delete('island');
+      // The big outdoor arenas are rebuilt on demand rather than kept hidden.
+      for (const heavy of ['island', 'riverdale'] as const) {
+        const world = this.worlds.get(heavy);
+        if (!world || previous !== world || next === world) continue;
+        this.pipeline.forgetLights(world.group);
+        untrackInstances(world.group);
+        this.scene.remove(world.group);
+        world.dispose();
+        this.worlds.delete(heavy);
       }
+      this.foundCaches.clear();
+      this.world.resetCaches?.();
+      this.spawnThrowables();
     }
     const atmosphere = this.pipeline.apply(key);
     this.aboveFog.setHex(atmosphere.fog.color);
@@ -2341,7 +2366,7 @@ export class RaidEngine {
       // Finish: a bright surge across the Ryder and a shock ring from the feet.
       this.powerVfx.surge(1.2);
       this.rig.addShake(0.16);
-      this.particles.emit(this.pos.clone().setY(0.3), this.spec.visual.electricityColor, 26, {
+      this.particles.emit(this.playerAt(0.3), this.spec.visual.electricityColor, 26, {
         speed: 9,
         size: 0.3,
         life: 0.5,
@@ -2361,7 +2386,7 @@ export class RaidEngine {
         this.kit?.interrupt();
         this.banner = { title: 'POWERS OUT', sub: 'Melee only · get clear of the hosts' };
         this.bannerT = 2.6;
-        this.particles.emit(this.pos.clone().setY(1.1), 0x8899aa, 16, { speed: 3.2, size: 0.22, life: 0.4, up: 0.6 });
+        this.particles.emit(this.playerAt(1.1), 0x8899aa, 16, { speed: 3.2, size: 0.22, life: 0.4, up: 0.6 });
         return;
       }
       if (shift.back) {
@@ -2633,18 +2658,16 @@ export class RaidEngine {
 
     this.player.humanoid.group.position.copy(this.pos);
     const swimming = this.swim.mode === 'surface' || this.swim.mode === 'under';
-    this.player.humanoid.group.position.y = swimming
-      ? this.swim.feetY
-      : this.world.heightAt(this.pos.x, this.pos.z) + (this.kit?.airY ?? 0) + this.airY - (this.pvpCpu?.playerSink() ?? 0);
+    const bodyScale = this.roofScale(this.pos.x, this.pos.z, this.kit?.bodyScale ?? 1);
+    this.player.humanoid.group.position.y = swimming ? this.swim.feetY : this.standY(bodyScale);
     this.player.humanoid.group.rotation.y = this.facing + (this.kit?.bodyYaw ?? 0);
-    const bodyScale = this.kit?.bodyScale ?? 1;
     if (Math.abs(this.player.humanoid.group.scale.x - bodyScale) > 0.0001) {
       this.player.humanoid.group.scale.setScalar(bodyScale);
     }
 
     if (this.shield) {
       this.shield.visible = this.isActive('forcefield') && !this.kitClaimed.has('forcefield');
-      this.shield.position.copy(this.pos).setY(1.1);
+      this.shield.position.copy(this.pos).setY(this.feetY() + 1.1);
       this.shield.rotation.y = time * 1.4;
       const pulse = 1 + Math.sin(time * 8) * 0.04;
       this.shield.scale.setScalar(pulse);
@@ -2664,7 +2687,7 @@ export class RaidEngine {
       this.playerGlow = kitGlow;
     }
     if (phased && !this.kit) {
-      this.particles.emit(this.pos.clone().setY(1), this.spec.color, 1, {
+      this.particles.emit(this.playerAt(1), this.spec.color, 1, {
         speed: 1.4,
         size: 0.18,
         life: 0.35,
@@ -2978,8 +3001,7 @@ export class RaidEngine {
         else this.hitStun = Math.max(this.hitStun, 0.18);
       }
       if (this.player) {
-        this.player.humanoid.group.position.y =
-          this.world.heightAt(this.pos.x, this.pos.z) + (this.kit?.airY ?? 0) + this.airY - (this.pvpCpu?.playerSink() ?? 0);
+        this.player.humanoid.group.position.y = this.standY(this.player.humanoid.group.scale.x);
       }
     }
     const canAct = !locked && !busy && this.hitStun < 0.12 && this.dodgeT <= 0 && this.stasis <= 0;
@@ -3281,7 +3303,7 @@ export class RaidEngine {
         host.lastImpact = { x: _tmp.x, z: _tmp.z, speed: 5, kind: 'melee' };
         this.hurtHost(host, dmg, _tmp, shaped.reaction, shaped.strength);
         this.kit?.noteHit?.();
-        this.particles.emit(host.pos.clone().setY(1.1), 0xffffff, 4, { speed: 3, size: 0.3, life: 0.16 });
+        this.particles.emit(this.hostAt(host, 1.1), 0xffffff, 4, { speed: 3, size: 0.3, life: 0.16 });
       }
       this.emitSound(step.sound);
       if (snap.recipeId) this.kit?.noteCombo?.(snap);
@@ -3460,6 +3482,7 @@ export class RaidEngine {
       },
       meleeDamage: () => this.meleeDamage(),
       heightAt: (x, z) => this.world.heightAt(x, z),
+      headroom: (x, z) => this.headroom(x, z),
       resolve: (pos) => {
         pos.x = clamp(pos.x, -this.limit(), this.limit());
         pos.z = clamp(pos.z, -this.limit(), this.limit());
@@ -3616,7 +3639,7 @@ export class RaidEngine {
       // Generic stand-in for a Ryder without Aaron's kit: one siphon on switch-on.
       if (!kitOwned && move.id === 'greedSiphon') this.greedSiphon();
       if (!kitOwned) {
-        this.particles.emit(this.pos.clone().setY(1.1), this.spec.color, 22, {
+        this.particles.emit(this.playerAt(1.1), this.spec.color, 22, {
           speed: 8,
           size: 0.3,
           life: 0.45,
@@ -3657,7 +3680,7 @@ export class RaidEngine {
     if (id === 'greedSiphon') this.greedSiphon();
     if (id === 'heartbreak') this.pulse(8.8, 38, 6);
     if (id === 'dartStorm') this.fireSpread(10, 0.32, 0.85);
-    this.particles.emit(this.pos.clone().setY(1.1), this.spec.color, 18, {
+    this.particles.emit(this.playerAt(1.1), this.spec.color, 18, {
       speed: 8,
       size: 0.28,
       life: 0.4,
@@ -3781,11 +3804,11 @@ export class RaidEngine {
           this.cracks.spawn(_tmp2, Math.max(1.6, (tune.radius || 3) * 0.7), spec.kind === 'nova' ? 4 : 3);
           break;
         case 'burst':
-          this.particles.emit(this.pos.clone().setY(1.0), spec.color, spec.kind === 'nova' ? 56 : 36, { speed: spec.kind === 'nova' ? 12 : 9, size: 0.32, life: 0.5, up: 1.4 });
+          this.particles.emit(this.playerAt(1.0), spec.color, spec.kind === 'nova' ? 56 : 36, { speed: spec.kind === 'nova' ? 12 : 9, size: 0.32, life: 0.5, up: 1.4 });
           break;
         case 'charge':
           // Aura gathers on the Ryder before the release.
-          this.particles.emit(this.pos.clone().setY(1.2), spec.color, 18, { speed: 3, size: 0.24, life: 0.3, up: 1.6 });
+          this.particles.emit(this.playerAt(1.2), spec.color, 18, { speed: 3, size: 0.24, life: 0.3, up: 1.6 });
           this.powerVfx.surge(0.5);
           break;
         case 'afterimage':
@@ -3867,7 +3890,7 @@ export class RaidEngine {
     const spread = count > 1 ? order / Math.max(1, (count - 1) / 2) : 0;
     const dir = _tmp.copy(_look).addScaledVector(_right, spread * 0.6).normalize();
     const origin = this.muzzle();
-    origin.y = 1.3;
+    origin.y = this.feetY() + 1.3;
     const damage = this.shotDamage() * tune.damageMul * this.strikeScale();
     this.spawnBolt(origin, dir, damage, true, spec.color, 19, powerLook(this.spec.id).shot);
     this.particles.emit(origin, spec.color, 6, { speed: 5, size: 0.22, life: 0.25, direction: dir });
@@ -3928,7 +3951,7 @@ export class RaidEngine {
     this.surgeColor = spec.color;
     this.powerFx.aura(this.pos, spec.color, tune.duration);
     this.powerVfx.surge(1);
-    this.particles.emit(this.pos.clone().setY(1.1), spec.color, 28, { speed: 6, size: 0.3, life: 0.6, up: 1.8 });
+    this.particles.emit(this.playerAt(1.1), spec.color, 28, { speed: 6, size: 0.3, life: 0.6, up: 1.8 });
   }
 
   /** Chest height over the floor under the Ryder: where sprays and bursts leave from. */
@@ -4057,7 +4080,7 @@ export class RaidEngine {
       this.hurtHost(target, this.meleeDamage() * 1.3 * this.strikeScale() * (blitz.tune.damageMul / spec.damageMul), _tmp, 'stagger', 0.9);
       this.powerFx.streak(_tmp2, _look.copy(this.pos).setY(this.world.heightAt(this.pos.x, this.pos.z)), spec.color);
       if (powerLook(this.spec.id).blitz.stick && target.hp > 0) this.powerFx.stick(target, powerLook(this.spec.id).shot, spec.color, this.pos);
-      this.particles.emit(this.pos.clone().setY(1.0), spec.color, 14, { speed: 7, size: 0.26, life: 0.3, up: 0.6 });
+      this.particles.emit(this.playerAt(1.0), spec.color, 14, { speed: 7, size: 0.26, life: 0.3, up: 0.6 });
       this.emitSound('fight.punch.impact');
     }
     blitz.left -= 1;
@@ -4270,9 +4293,13 @@ export class RaidEngine {
       clone.fireCd -= dt;
       if (this.spec.id === 'zoe' && clone.fireCd <= 0 && target && !this.burnout) {
         clone.fireCd = 1 / Math.max(2, this.spec.fireRate * 0.75);
-        _tmp2.copy(target.pos).setY(1.1).sub(clone.fighter.humanoid.group.position.clone().setY(1.1)).normalize();
+        _tmp2
+          .copy(target.pos)
+          .setY(target.fighter.humanoid.group.position.y + 1.1)
+          .sub(clone.fighter.humanoid.group.position.clone().setY(clone.fighter.humanoid.group.position.y + 1.1))
+          .normalize();
         this.spawnBolt(
-          clone.fighter.humanoid.group.position.clone().setY(1.25),
+          clone.fighter.humanoid.group.position.clone().setY(clone.fighter.humanoid.group.position.y + 1.25),
           _tmp2,
           this.shotDamage() * 0.55,
           true,
@@ -4937,7 +4964,7 @@ export class RaidEngine {
     }
     this.banner = { title: 'BACK UP', sub: `${by.toUpperCase()} PICKED YOU UP` };
     this.bannerT = 2;
-    this.particles.emit(this.pos.clone().setY(0.8), this.spec.color, 18, { speed: 5, size: 0.28, life: 0.45, up: 1.2 });
+    this.particles.emit(this.playerAt(0.8), this.spec.color, 18, { speed: 5, size: 0.28, life: 0.45, up: 1.2 });
   }
 
   private reviveAlly(host: Host, by: string) {
@@ -4961,7 +4988,7 @@ export class RaidEngine {
     const name = host.ryderId ? RYDERZ[host.ryderId].name : 'Teammate';
     this.banner = { title: 'PICKED UP', sub: `${by.toUpperCase()} GOT ${name.toUpperCase()} UP` };
     this.bannerT = 1.8;
-    this.particles.emit(host.pos.clone().setY(0.8), host.ryderId ? RYDERZ[host.ryderId].color : 0x39ff88, 16, {
+    this.particles.emit(this.hostAt(host, 0.8), host.ryderId ? RYDERZ[host.ryderId].color : 0x39ff88, 16, {
       speed: 5,
       size: 0.26,
       life: 0.4,
@@ -5090,7 +5117,7 @@ export class RaidEngine {
       this.hazardWait = 15;
     }
     const hazard = this.signalHazard;
-    this.particles.emit(new THREE.Vector3(hazard.x, 0.15, hazard.z), 0xff4d6a, 3, { speed: 1.4, size: 0.28, life: 0.28, up: 0.5 });
+    this.particles.emit(new THREE.Vector3(hazard.x, this.world.heightAt(hazard.x, hazard.z) + 0.15, hazard.z), 0xff4d6a, 3, { speed: 1.4, size: 0.28, life: 0.28, up: 0.5 });
     hazard.fuse -= dt;
     if (hazard.fuse > 0) return;
     const dx = this.pos.x - hazard.x;
@@ -5098,7 +5125,7 @@ export class RaidEngine {
     if (this.hp > 0 && dx * dx + dz * dz < 3.1 * 3.1) {
       this.hurtPlayer(12 * this.survivalPlan.scale.damage, new THREE.Vector3(dx, 0, dz).normalize());
     }
-    this.particles.emit(new THREE.Vector3(hazard.x, 0.4, hazard.z), 0xff4d6a, 18, { speed: 6, size: 0.36, life: 0.45, up: 1.2 });
+    this.particles.emit(new THREE.Vector3(hazard.x, this.world.heightAt(hazard.x, hazard.z) + 0.4, hazard.z), 0xff4d6a, 18, { speed: 6, size: 0.36, life: 0.45, up: 1.2 });
     this.signalHazard = null;
   }
 
@@ -5343,10 +5370,16 @@ export class RaidEngine {
       const landed = stepReaction(host, dt);
       if (landed) {
         host.stagger = Math.max(host.stagger, 0.35);
-        this.particles.emit(host.pos.clone().setY(0.15), 0x6a6070, 8, { speed: 3.5, size: 0.24, life: 0.4, up: 0.6, gravity: 6 });
+        this.particles.emit(this.hostAt(host, 0.15), 0x6a6070, 8, { speed: 3.5, size: 0.24, life: 0.4, up: 0.6, gravity: 6 });
       }
-      if (host.airY > 0) host.tumble += host.spin * dt;
-      else host.tumble *= Math.max(0, 1 - dt * 10);
+      if (host.airY > 0) {
+        host.tumble += host.spin * dt;
+        const room = this.headroom(host.pos.x, host.pos.z, 0.6);
+        if (room !== null && host.airY > room) {
+          host.airY = room;
+          host.airVel = Math.min(host.airVel, 0);
+        }
+      } else host.tumble *= Math.max(0, 1 - dt * 10);
       if (host.stagger > 0 || host.airY > 0) {
         host.pos.x += host.knock.x * dt;
         host.pos.z += host.knock.z * dt;
@@ -5536,7 +5569,7 @@ export class RaidEngine {
         if (!host.swims && this.world.water && this.waterDepth(x, z) > 1.05) continue;
         if (!this.openLine(x, z, tx, tz, host.radius)) continue;
         if (this.hosts.some((o) => o !== host && o.hp > 0 && Math.hypot(o.pos.x - x, o.pos.z - z) < o.radius + host.radius + 0.4)) continue;
-        this.particles.emit(host.pos.clone().setY(1), 0xc45cff, 14, { speed: 4, size: 0.22, life: 0.4, up: 1 });
+        this.particles.emit(this.hostAt(host, 1), 0xc45cff, 14, { speed: 4, size: 0.22, life: 0.4, up: 1 });
         host.pos.x = x;
         host.pos.z = z;
         host.knock.set(0, 0, 0);
@@ -5549,7 +5582,7 @@ export class RaidEngine {
           host.stall.x = x;
           host.stall.z = z;
         }
-        this.particles.emit(host.pos.clone().setY(1), 0xc45cff, 18, { speed: 4, size: 0.24, life: 0.45, up: 1 });
+        this.particles.emit(this.hostAt(host, 1), 0xc45cff, 18, { speed: 4, size: 0.24, life: 0.45, up: 1 });
         return true;
       }
     }
@@ -5670,7 +5703,7 @@ export class RaidEngine {
     if (order.state === 'dodge' && host.cooldown <= 0.1) {
       // The side-step costs a beat and shows a dust kick, so a dodge is readable.
       host.cooldown = Math.max(host.cooldown, 0.35);
-      this.particles.emit(host.pos.clone().setY(0.2), 0x9a90a8, 6, { speed: 3, size: 0.2, life: 0.3, up: 0.5, gravity: 5 });
+      this.particles.emit(this.hostAt(host, 0.2), 0x9a90a8, 6, { speed: 3, size: 0.2, life: 0.3, up: 0.5, gravity: 5 });
     }
     if (
       !swayed &&
@@ -5684,7 +5717,7 @@ export class RaidEngine {
     ) {
       host.powerCd = 5.4;
       const pulse = new THREE.Vector3((aim.x - host.pos.x) / playerDist, 0, (aim.z - host.pos.z) / playerDist);
-      this.particles.emit(host.pos.clone().setY(1.2), 0xc45cff, 12, { speed: 5, size: 0.24, life: 0.35, direction: pulse });
+      this.particles.emit(this.hostAt(host, 1.2), 0xc45cff, 12, { speed: 5, size: 0.24, life: 0.35, direction: pulse });
       this.hurtPlayer(host.damage * 0.8, pulse);
     }
 
@@ -5709,13 +5742,13 @@ export class RaidEngine {
         const item = host.heldItem;
         const flight = Math.min(0.65, playerDist / Math.max(6, item.stats.throwForce));
         const thrownAt = this.hostAim(host);
-        const aim = new THREE.Vector3(thrownAt.x, 1.05, thrownAt.z);
+        const aim = new THREE.Vector3(thrownAt.x, this.world.heightAt(thrownAt.x, thrownAt.z) + 1.05, thrownAt.z);
         const lead = thrownAt;
         aim.x += lead.vx * flight * 0.55;
         aim.z += lead.vz * flight * 0.55;
         const spread = 2.4 + (1 - profile.throwBias) * 3.2;
         const miss = (Math.random() - 0.5) * spread;
-        this.throwables?.throwAt(item, host.pos.clone().setY(1.35), aim, miss, host, this.simTime);
+        this.throwables?.throwAt(item, this.hostAt(host, 1.35), aim, miss, host, this.simTime);
         host.heldItem = null;
         host.cooldown = 0.95 + Math.random() * 0.5;
         host.swing = true;
@@ -5920,7 +5953,7 @@ export class RaidEngine {
 
     this.cueStrike(frame);
     if (shielded && frame.hits.length) {
-      this.particles.emit(this.pos.clone().setY(1.2), 0x66e7ff, 10, { speed: 6, size: 0.22, life: 0.3 });
+      this.particles.emit(this.playerAt(1.2), 0x66e7ff, 10, { speed: 6, size: 0.22, life: 0.3 });
       host.knock.set(-Math.sin(facing) * 8, 0, -Math.cos(facing) * 8);
       return;
     }
@@ -6057,7 +6090,7 @@ export class RaidEngine {
     if (blocked) {
       braced = Math.max(braced, clamp(0.72 + this.modifiers.guard, 0, 0.95));
       this.guardT = Math.max(this.guardT, 0.1);
-      this.particles.emit(this.pos.clone().setY(1.1), this.spec.color, 10, { speed: 5, size: 0.24, life: 0.3, up: 0.6 });
+      this.particles.emit(this.playerAt(1.1), this.spec.color, 10, { speed: 5, size: 0.24, life: 0.3, up: 0.6 });
       this.emitSound('fight.punch.swing');
     }
     let incoming = scaled * (1 - (blocked ? braced : 0.4 * braced)) * resist;
@@ -6101,7 +6134,7 @@ export class RaidEngine {
     this.combatT = COMBAT_LINGER;
     this.rig.addShake(0.4 * (1 - 0.7 * braced));
     this.rig.addKick(0.22 * (1 - 0.7 * braced));
-    this.particles.emit(this.pos.clone().setY(1.2), 0xff5570, 14, { speed: 6, size: 0.28, life: 0.4, up: 0.5 });
+    this.particles.emit(this.playerAt(1.2), 0xff5570, 14, { speed: 6, size: 0.28, life: 0.4, up: 0.5 });
     if (this.hp <= 0) {
       this.hp = 0;
       if (this.gameMode === GameMode.RAID && this.raidPlan && this.squadUp()) {
@@ -6145,6 +6178,7 @@ export class RaidEngine {
    */
   private hurtHost(host: Host, amount: number, dir: THREE.Vector3, reaction?: HitReaction, strength = 1) {
     if (host.hp <= 0) return;
+    this.world.impact?.(host.pos.x, host.pos.z, reaction === 'launch' || strength > 1.2 ? 2.2 : 1.1);
     if (host.ally && !this.allowAllyDamage) return;
     if (!host.ally && !this.infighting && this.spec.id === 'tj') provoke(host);
     if (host.ally && host.cpu) amount *= host.cpu.incomingScale;
@@ -6188,7 +6222,7 @@ export class RaidEngine {
     } else {
       host.knock.copy(dir).setY(0).multiplyScalar(8 / host.mass);
     }
-    this.particles.emit(host.pos.clone().setY(1.1), this.spec.color, 8, {
+    this.particles.emit(this.hostAt(host, 1.1), this.spec.color, 8, {
       speed: 7,
       size: 0.22,
       life: 0.28,
@@ -6253,7 +6287,7 @@ export class RaidEngine {
       this.aura = Math.min(this.maxAura, this.aura + KILL_AURA_SIPHON + this.upgrades.siphon * 4 + siphon);
     }
     this.engagement.release(host);
-    this.burst(host.pos.clone().setY(1), host.kind === 'broadcaster' ? 0xb84dff : 0x7dff9a, host.kind === 'broadcaster' ? 40 : 16);
+    this.burst(this.hostAt(host, 1), host.kind === 'broadcaster' ? 0xb84dff : 0x7dff9a, host.kind === 'broadcaster' ? 40 : 16);
     this.hosts = this.hosts.filter((h) => h !== host);
     if (this.gameMode === GameMode.RAID && this.raidPlan && this.hp <= 0 && this.livingAllies() === 0 && this.phase === 'playing') {
       this.failRaid();
@@ -6430,7 +6464,7 @@ export class RaidEngine {
         this.retireBolt(i);
         continue;
       }
-      if (pointBlocked(bolt.pos.x, bolt.pos.z, 0.12, this.world.obstacles) && bolt.pos.y < 2.4) {
+      if (pointBlocked(bolt.pos.x, bolt.pos.z, 0.12, this.world.obstacles) && bolt.pos.y < floor + 2.4) {
         this.particles.emit(bolt.pos, 0xffffff, 5, { speed: 4, size: 0.16, life: 0.2 });
         this.retireBolt(i);
         continue;
@@ -6439,7 +6473,7 @@ export class RaidEngine {
         let hit = false;
         for (const host of this.hosts) {
           const dx = host.pos.x - bolt.pos.x;
-          const dy = 1.1 - bolt.pos.y;
+          const dy = host.fighter.humanoid.group.position.y + 1.1 - bolt.pos.y;
           const dz = host.pos.z - bolt.pos.z;
           const r = host.radius + bolt.radius;
           if (dx * dx + dy * dy * 0.4 + dz * dz < r * r) {
@@ -6451,7 +6485,7 @@ export class RaidEngine {
         if (hit) this.retireBolt(i);
       } else {
         const dx = this.pos.x - bolt.pos.x;
-        const dy = 1.15 - bolt.pos.y;
+        const dy = this.feetY() + 1.15 - bolt.pos.y;
         const dz = this.pos.z - bolt.pos.z;
         const r = PLAYER_RADIUS + bolt.radius + (shielded ? 1.2 : 0);
         if (dx * dx + dy * dy + dz * dz < r * r) {
@@ -6504,7 +6538,7 @@ export class RaidEngine {
     const hits = _ray.intersectObjects(this.world.occluders, false);
     if (hits.length) range = Math.min(range, hits[0].distance);
     for (const host of this.hosts) {
-      _tmp.copy(host.pos).setY(1.1);
+      _tmp.copy(host.pos).setY(host.fighter.humanoid.group.position.y + 1.1);
       const hitDist = raySphere(_aimRay, _tmp, host.radius + 0.35);
       if (hitDist > 0 && hitDist < range) range = hitDist;
     }
@@ -6519,9 +6553,55 @@ export class RaidEngine {
   private muzzle() {
     return _tmp2.set(
       this.pos.x + Math.sin(this.yaw) * 0.7,
-      1.25,
+      this.feetY() + 1.25,
       this.pos.z + Math.cos(this.yaw) * 0.7,
     );
+  }
+
+  /**
+   * Feet height for the player: ground, kit lift and jump, held under any roof
+   * so the crown never passes through it. A jump that meets the roof stops rising.
+   */
+  private standY(scale = 1) {
+    const floor = this.world.heightAt(this.pos.x, this.pos.z);
+    const lift = (this.kit?.airY ?? 0) + this.airY;
+    const y = floor + lift - (this.pvpCpu?.playerSink() ?? 0);
+    const room = this.headroom(this.pos.x, this.pos.z, scale);
+    if (room === null || lift <= room) return y;
+    if (this.airY > 0) {
+      this.airY = Math.max(0.02, room - (this.kit?.airY ?? 0));
+      this.airVel = Math.min(this.airVel, 0);
+    }
+    return floor + room;
+  }
+
+  /** How far a body's feet may rise above the ground before its crown meets the roof. Null under open sky. */
+  private headroom(x: number, z: number, scale = 1) {
+    const roof = this.world.ceilingAt?.(x, z);
+    if (roof === null || roof === undefined) return null;
+    return Math.max(0, roof - this.world.heightAt(x, z) - BODY_CROWN * scale);
+  }
+
+  /** Body scale a growth power may reach here without clipping the roof. */
+  private roofScale(x: number, z: number, scale: number) {
+    if (scale <= 1) return scale;
+    const roof = this.world.ceilingAt?.(x, z);
+    if (roof === null || roof === undefined) return scale;
+    return Math.min(scale, Math.max(1, (roof - this.world.heightAt(x, z) - 0.1) / BODY_CROWN));
+  }
+
+  /** Where the player's feet are, including jumps and flight. */
+  private feetY() {
+    return this.player?.humanoid.group.position.y ?? this.world.heightAt(this.pos.x, this.pos.z);
+  }
+
+  /** A point `lift` metres above the player's feet, for effects and throws on sloped ground. */
+  private playerAt(lift: number) {
+    return new THREE.Vector3(this.pos.x, this.feetY() + lift, this.pos.z);
+  }
+
+  private hostAt(host: Host, lift: number) {
+    return new THREE.Vector3(host.pos.x, host.fighter.humanoid.group.position.y + lift, host.pos.z);
   }
 
   private nearestHost(from: THREE.Vector3) {
@@ -6577,6 +6657,7 @@ export class RaidEngine {
       this.jumping || this.airY > 0.15 || Math.abs(this.airVel) > 0.45 || this.swim.mode === 'surface' || this.swim.mode === 'under';
     this.rig.ySmoothing = airborne ? 0.05 : 0.16;
     this.rig.setGround((x, z) => this.world.heightAt(x, z));
+    this.rig.setRoof(this.world.roofAt ?? null);
     const extra = {
       distance: this.kit?.cameraExtra?.distance ?? 0,
       height: this.kit?.cameraExtra?.height ?? 0,
@@ -6601,6 +6682,8 @@ export class RaidEngine {
     _camLead.set(this.playerVel.x * lead, 0, this.playerVel.z * lead);
     this.rig.update(dt, this.cameraPivot, this.yaw, this.pitch, this.cameraState(), false, _camLead);
     this.stepFacility(dt);
+    this.stepCaches();
+    this.world.storyTriggers?.update(this.pos.x, this.pos.z);
     this.tintPadFog(dt);
     this.tintWater(dt);
   }
@@ -6616,6 +6699,30 @@ export class RaidEngine {
     const blend = 1 - Math.exp(-dt * 3.2);
     fog.color.lerp(this.waterTint, blend);
     fog.density += (density - fog.density) * blend;
+  }
+
+  private partyLevel() {
+    const source = this.world.ambience;
+    if (source?.kind !== 'party') return null;
+    const d = Math.hypot(source.x - this.pos.x, source.z - this.pos.z);
+    return Math.max(0, Math.min(1, 1 - (d - 4) / 70));
+  }
+
+  /** Walking onto a hidden cache opens it once per match and spills its Signal Orbs. */
+  private stepCaches() {
+    const caches = this.world.caches;
+    if (!caches || !this.player || this.hp <= 0 || this.gameMode === GameMode.PVP) return;
+    const feet = this.feetY();
+    for (const cache of caches) {
+      if (this.foundCaches.has(cache.id)) continue;
+      if ((cache.x - this.pos.x) ** 2 + (cache.z - this.pos.z) ** 2 > 1.7 * 1.7 || Math.abs(feet - cache.y) > 2.2) continue;
+      this.foundCaches.add(cache.id);
+      this.world.claimCache?.(cache.id);
+      this.signalOrbs.drop(cache.reward, this.actingSeat(), cache.x, cache.y + 0.7, cache.z);
+      this.particles.emit(new THREE.Vector3(cache.x, cache.y + 0.5, cache.z), 0x7ad8ff, 18, { speed: 3, size: 0.2, life: 0.5, up: 1.4 });
+      this.banner = { title: 'SUPPLY CACHE', sub: `${cache.label.toUpperCase()} · ${this.foundCaches.size}/${caches.length}` };
+      this.bannerT = 1.8;
+    }
   }
 
   private stepFacility(dt: number) {
@@ -6780,6 +6887,7 @@ export class RaidEngine {
       water: this.world.water
         ? { mode: this.swim.mode, oxygen: this.swim.oxygen, submerged: this.swim.mode === 'under' }
         : null,
+      partyLevel: this.partyLevel(),
     });
   }
 
@@ -7168,7 +7276,8 @@ export class RaidEngine {
     const dx = position.x - this.pos.x;
     const dz = position.z - this.pos.z;
     const reach = dx * dx + dz * dz;
-    if (reach > 8 * 8) return true;
+    const clear = this.world.spawnClear ?? 8;
+    if (reach > clear * clear) return true;
     const dist = Math.sqrt(reach) || 1;
     const facing = (dx / dist) * Math.sin(this.yaw) + (dz / dist) * Math.cos(this.yaw);
     return facing < 0.2;
@@ -7244,7 +7353,7 @@ export class RaidEngine {
   private spawnThrowables() {
     this.throwables?.dispose();
     this.heldThrow = null;
-    this.throwables = new ThrowableField(this.scene);
+    this.throwables = new ThrowableField(this.scene, this.world.throwSpots);
   }
 
   private tryPickup() {
@@ -7264,9 +7373,18 @@ export class RaidEngine {
       aim.x += Math.sin(this.yaw) * 6;
       aim.z += Math.cos(this.yaw) * 6;
     }
-    aim.y = 1.1;
-    this.throwables.throwAt(item, this.pos.clone().setY(1.2), aim, 0.2, this.playerBody, this.simTime);
+    aim.y = this.world.heightAt(aim.x, aim.z) + 1.1;
+    this.throwables.throwAt(item, this.playerAt(1.2), aim, 0.2, this.playerBody, this.simTime);
     this.heldThrow = null;
+  }
+
+  /** A thrown prop broke on landing: glass, splinters or bent steel, and anything fragile nearby reacts. */
+  private shatterProp(item: ThrowBody, point: THREE.Vector3) {
+    const kind = item.stats.kind;
+    const color = kind === 'bottle' ? 0x9fe0b0 : kind === 'chair' ? 0x8a8c94 : kind === 'brick' ? 0x9a4a3a : 0x9a7848;
+    const at = new THREE.Vector3(point.x, point.y + 0.15, point.z);
+    this.particles.emit(at, color, kind === 'bottle' ? 14 : 10, { speed: kind === 'bottle' ? 4.5 : 3.5, size: kind === 'bottle' ? 0.09 : 0.16, life: 0.55, up: 1.1, gravity: 9 });
+    this.world.impact?.(point.x, point.z, 1.4);
   }
 
   private resolveThrowImpact(item: ThrowBody, point: THREE.Vector3) {
@@ -7287,7 +7405,8 @@ export class RaidEngine {
     }
     const dx = this.pos.x - point.x;
     const dz = this.pos.z - point.z;
-    const inBody = point.y > -0.05 && point.y < 1.85;
+    const rel = point.y - this.feetY();
+    const inBody = rel > -0.05 && rel < 1.85;
     if (!inBody || dx * dx + dz * dz > 0.8 * 0.8) return;
     item.dealt = true;
     _tmp.set(dx, 0, dz);
