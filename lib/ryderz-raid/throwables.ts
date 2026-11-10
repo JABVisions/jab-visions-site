@@ -147,11 +147,12 @@ export class ThrowableField {
     return item;
   }
 
-  nearestFree(x: number, z: number, max = 14): ThrowBody | null {
+  nearestFree(x: number, z: number, max = 14, skip?: (item: ThrowBody) => boolean): ThrowBody | null {
     let best: ThrowBody | null = null;
     let bestD = max * max;
     for (const item of this.items) {
       if (item.heldBy || item.broken || item.flying) continue;
+      if (skip?.(item)) continue;
       const d = (item.pos.x - x) ** 2 + (item.pos.z - z) ** 2;
       if (d < bestD) {
         bestD = d;

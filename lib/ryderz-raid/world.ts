@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import { ARENA_BLOCK, ARENA_BUILDINGS, ARENA_HALF, ARENA_TREE, CAR_MODELS, DISTRICT_SPAN } from './config';
+import { ARENA_BLOCK, ARENA_BUILDINGS, ARENA_HALF, ARENA_TREE, BOUNDARY, CAR_MODELS, DISTRICT_SPAN } from './config';
+import { NavGrid, sealCrevices } from './nav-grid';
 import { glow } from './toon';
 import {
   adoptImportedMesh,
@@ -54,7 +55,9 @@ export interface World {
   /** Drop or raise holographic barriers. Returns true when the lane is open. */
   toggleBarriers?: () => boolean;
   /** Intermediate waypoint when a straight line would miss stairs or a door. */
-  routeTo?: (fromX: number, fromZ: number, toX: number, toZ: number) => { x: number; z: number } | null;
+  routeTo?: (fromX: number, fromZ: number, toX: number, toZ: number, radius?: number) => { x: number; z: number } | null;
+  /** Open ground a few metres away, reachable in a straight line, for a body that is wedged. */
+  openSpot?: (x: number, z: number, radius: number) => { x: number; z: number } | null;
   /** Doors and other facility motion. Agents are the player and anyone who should trip a trigger. */
   stepFacility?: (agents: { x: number; z: number }[], dt: number) => void;
   /** Latest footfall, so sand and grass can scuff under the fighter. */
@@ -1365,12 +1368,25 @@ export function buildWorld(): World {
     rain.dispose();
   };
 
+  // Gaps between buildings, the edge wall and props that a body can be knocked
+  // into but not walk out of are filled in. Lanes between two streets stay open.
+  obstacles.push(...sealCrevices(obstacles, BOUNDARY));
+  let nav: NavGrid | null = null;
+
   return {
     group: city,
     obstacles,
     occluders,
     alleys,
     alleyNodes,
+    routeTo: (fromX, fromZ, toX, toZ, radius) => {
+      nav ??= new NavGrid(obstacles, BOUNDARY);
+      return nav.routeTo(fromX, fromZ, toX, toZ, radius);
+    },
+    openSpot: (x, z, radius) => {
+      nav ??= new NavGrid(obstacles, BOUNDARY);
+      return nav.openSpot(x, z, radius);
+    },
     heightAt: (x, z) => {
       const local = districtLocal(x, z);
       return groundHeight(local.x, local.z);

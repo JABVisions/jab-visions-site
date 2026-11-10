@@ -101,6 +101,12 @@ export class KevenKit implements RyderKit {
     return this.air;
   }
 
+  /** Afterimage plays out under the street: the camera rises and looks down on the hunt, the grab and the throw. */
+  get cameraExtra() {
+    if (this.seq?.kind !== 'grab') return null;
+    return { distance: 2.6, height: 3.4, targetHeight: 0 };
+  }
+
   get pose() {
     return this.poseState;
   }

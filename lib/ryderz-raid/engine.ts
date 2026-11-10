@@ -57,6 +57,8 @@ import {
 import { EngagementDirector, type EngagementCandidate } from './civilians/engagement';
 import { CrowdGrid } from './crowd/grid';
 import { AfterimagePool } from './speed-vfx';
+import { PowerFx, type ShotInstance, type ShotShape } from './power-fx';
+import { AURA_PARTICLES, powerLook } from './progression/power-looks';
 import { createRyderKit, type KitContext, type KitTarget, type MeleeStep, type RyderKit } from './ryderz';
 import type { MeleeStyle, PoseOverride } from './skeletal';
 import {
@@ -362,6 +364,9 @@ interface Host {
   profileId?: CivilianProfileId;
   animMap?: CivilianDefinition['animationMap'];
   heldItem?: ThrowBody | null;
+  /** A prop this host could not reach; it ignores it until `passPropT` runs out. */
+  passProp?: ThrowBody | null;
+  passPropT?: number;
   /** Seconds left in a raise-then-throw. 0 means not winding up. */
   throwWind: number;
   /** Dream Vision. The host stands and does not attack. Not a lift. */
@@ -402,6 +407,22 @@ interface Host {
   swims?: boolean;
   /** Wall-slide memory so a blocked step does not grind in place. */
   nav?: NavHint;
+  /** Net-progress watch: a host that has not got anywhere for a while walks out to open ground. */
+  stall?: {
+    x: number;
+    z: number;
+    t: number;
+    out: number;
+    ox: number;
+    oz: number;
+    /** Back-to-back stalls; the second one jumps the host to its target. */
+    strikes: number;
+    /** Distance-to-target window: a host that is not closing in at all gets the same jump. */
+    closeT: number;
+    closeD: number;
+    closePx: number;
+    closePz: number;
+  };
   /** This raid teammate is already committed to a host and may chase a little farther. */
   pressing?: boolean;
   /** Frames skipped while this host is far enough to simulate cheaply. */
@@ -469,6 +490,8 @@ interface Bolt {
   fromPlayer: boolean;
   life: number;
   radius: number;
+  /** A shaped projectile (dart, blade, bullet...) flown in place of the plain bolt mesh. */
+  shot?: ShotInstance;
 }
 
 interface Clone {
@@ -477,6 +500,8 @@ interface Clone {
   side: number;
 }
 
+/** Shaped bolts are drawn by `PowerFx`; they never show this. */
+const BOLT_PLACEHOLDER = new THREE.Mesh();
 const _fwd = new THREE.Vector3();
 const _right = new THREE.Vector3();
 const _look = new THREE.Vector3();
@@ -585,7 +610,8 @@ export class RaidEngine {
   private surgeT = 0;
   private surgeMul = 1;
   /** Blitz dash chain: hits left, seconds to the next dash. */
-  private blitz: { left: number; next: number; spec: DerivedPowerSpec; tune: DerivedTune } | null = null;
+  private blitz: { left: number; next: number; spec: DerivedPowerSpec; tune: DerivedTune; pull: number; pulled: boolean } | null = null;
+  private surgeColor = 0xffffff;
   /** The tree-earned power whose choreography the body is playing. */
   private choreo: ActiveChoreo | null = null;
   /** Power ranks from the tree (1 when unranked). */
@@ -756,6 +782,7 @@ export class RaidEngine {
   private rings = new ShockRingPool(10);
   private cracks = new CrackDecalPool(4);
   private afterimages = new AfterimagePool(5);
+  private powerFx!: PowerFx;
   private fallen: Fallen[] = [];
   private hitStopT = 0;
   /** Gameplay seconds actually simulated (sum of clamped dt); hit windows and combos run on this, not wall time. */
@@ -810,6 +837,8 @@ export class RaidEngine {
     this.scene.add(this.particles.points);
     this.powerVfx = new RyderPowerVFX(this.scene, this.particles);
     this.scene.add(this.rings.group, this.cracks.group, this.afterimages.group);
+    this.powerFx = new PowerFx(this.particles, (x, z) => this.world.heightAt(x, z));
+    this.scene.add(this.powerFx.group);
 
     this.arena = arenaSpec(DEFAULT_ARENA)!;
     this.loadArena(this.arena.id);
@@ -880,6 +909,7 @@ export class RaidEngine {
     this.surgeMul = 1;
     this.blitz = null;
     this.choreo = null;
+    this.powerFx.clear();
     this.castScale = 1;
     this.secondWindUsed = false;
     this.signalBank.reset();
@@ -1478,6 +1508,7 @@ export class RaidEngine {
     this.surgeMul = 1;
     this.blitz = null;
     this.choreo = null;
+    this.powerFx.clear();
     this.castScale = 1;
     this.meleeT = 0;
     this.meleeCd = 0;
@@ -1772,6 +1803,7 @@ export class RaidEngine {
     this.rings.dispose();
     this.cracks.dispose();
     this.afterimages.dispose();
+    this.powerFx.dispose();
     this.unloadBeacon();
     for (const world of this.worlds.values()) world.dispose();
     this.particles.dispose();
@@ -2003,6 +2035,7 @@ export class RaidEngine {
     if (this.surgeT > 0) {
       this.surgeT = Math.max(0, this.surgeT - dt);
       if (this.surgeT <= 0) this.surgeMul = 1;
+      else this.surgeParticles(dt);
     }
     this.stepChoreo();
     this.stepBlitz(dt);
@@ -2104,6 +2137,7 @@ export class RaidEngine {
     this.rings.update(dt);
     this.cracks.update(dt);
     this.afterimages.update(dt);
+    this.powerFx.update(dt, this.camera);
     this.beacon?.update(dt, time, this.pos, this.spec.visual.auraColor, this.camera);
     this.powerVfx.update(dt, time, this.aura, this.maxAura, !this.burnout && !this.powerOut.down, this.camera);
   }
@@ -3606,6 +3640,10 @@ export class RaidEngine {
   private startChoreo(spec: DerivedPowerSpec, tune: DerivedTune, choreo: PowerChoreo, finisher: boolean) {
     this.choreo = { spec, tune, choreo, started: this.simTime, next: 0, pose: null, shots: 0, finisher };
     if (spec.kind === 'breaker' || spec.kind === 'nova' || spec.kind === 'snare') this.faceNearest(Math.max(tune.radius, 4));
+    if (spec.kind === 'nova' && !finisher && powerLook(this.spec.id).nova.implode) {
+      const charge = choreo.beats.find((beat) => beat.events?.includes('hit'))?.at ?? 0.4;
+      this.powerFx.implode(this.pos, spec.color, tune.radius * 0.8, charge);
+    }
     this.stepChoreo();
   }
 
@@ -3654,9 +3692,14 @@ export class RaidEngine {
     for (const event of beat.events ?? []) {
       switch (event) {
         case 'hit':
-          if (active.finisher) this.blitzFinisherHit(tune);
-          else if (spec.kind === 'breaker') this.breakerHit(tune);
-          else if (spec.kind === 'nova') this.novaHit(spec, tune);
+          if (active.finisher) this.blitzFinisherHit(spec, tune);
+          else if (spec.kind === 'breaker') {
+            this.breakerHit(tune);
+            this.breakerFx(spec, tune);
+          } else if (spec.kind === 'nova') {
+            this.novaHit(spec, tune);
+            this.novaFx(spec, tune);
+          }
           else if (spec.kind === 'snare') this.snareHit(spec, tune);
           else if (spec.kind === 'surge') this.surgeApply(spec, tune);
           break;
@@ -3757,11 +3800,11 @@ export class RaidEngine {
     // Alternate left and right of centre so the fan fills from the middle out.
     const order = index === 0 ? 0 : (index % 2 === 1 ? 1 : -1) * Math.ceil(index / 2);
     const spread = count > 1 ? order / Math.max(1, (count - 1) / 2) : 0;
-    const dir = _tmp.copy(_look).addScaledVector(_right, spread * 0.42).normalize();
+    const dir = _tmp.copy(_look).addScaledVector(_right, spread * 0.6).normalize();
     const origin = this.muzzle();
     origin.y = 1.3;
     const damage = this.shotDamage() * tune.damageMul * this.strikeScale();
-    this.spawnBolt(origin, dir, damage, true, spec.color, Math.max(18, this.spec.projectileSpeed));
+    this.spawnBolt(origin, dir, damage, true, spec.color, 19, powerLook(this.spec.id).shot);
     this.particles.emit(origin, spec.color, 6, { speed: 5, size: 0.22, life: 0.25, direction: dir });
     this.emitSound('fight.punch.swing');
   }
@@ -3805,8 +3848,7 @@ export class RaidEngine {
       host.knock.multiplyScalar(0.2);
       host.hit = Math.max(host.hit, hold);
       host.hitColor = spec.color;
-      _tmp2.set(host.pos.x, this.world.heightAt(host.pos.x, host.pos.z) + 0.03, host.pos.z);
-      this.rings.spawn(_tmp2, spec.color, { radius: host.radius + 0.5, duration: hold });
+      this.powerFx.bind(host, powerLook(this.spec.id).snare, spec.color, hold);
     }
   }
 
@@ -3818,13 +3860,81 @@ export class RaidEngine {
   private surgeApply(spec: DerivedPowerSpec, tune: DerivedTune) {
     this.surgeT = tune.duration;
     this.surgeMul = tune.damageMul;
+    this.surgeColor = spec.color;
+    this.powerFx.aura(this.pos, spec.color, tune.duration);
     this.powerVfx.surge(1);
     this.particles.emit(this.pos.clone().setY(1.1), spec.color, 28, { speed: 6, size: 0.3, life: 0.6, up: 1.8 });
   }
 
+  /** Chest height over the floor under the Ryder: where sprays and bursts leave from. */
+  private chest(out: THREE.Vector3, lift = 1.1) {
+    return out.set(this.pos.x, this.world.heightAt(this.pos.x, this.pos.z) + this.airY + lift, this.pos.z);
+  }
+
+  private breakerFx(spec: DerivedPowerSpec, tune: DerivedTune) {
+    const look = powerLook(this.spec.id);
+    const fx = look.breaker;
+    const front = new THREE.Vector3(this.pos.x + Math.sin(this.yaw) * 1.3, 0, this.pos.z + Math.cos(this.yaw) * 1.3);
+    if (fx.pillar) this.powerFx.pillar(fx.pillar === 'slash' ? this.pos : front, fx.pillar, spec.color, this.yaw, fx.pillar === 'spikes' ? tune.radius / 4.6 : 1);
+    if (fx.spray) this.powerFx.spray(this.chest(new THREE.Vector3(), 1.3), this.yaw, 1.6, look.shot, spec.color, fx.spray, tune.radius, 26, true);
+    if (fx.wave) this.powerFx.wave(this.pos, fx.wave, spec.color, tune.radius);
+    if (fx.flash) this.powerFx.flash(front.setY(this.world.heightAt(front.x, front.z) + 1.2), spec.color, 1.8);
+  }
+
+  private novaFx(spec: DerivedPowerSpec, tune: DerivedTune) {
+    const look = powerLook(this.spec.id);
+    const fx = look.nova;
+    const chest = this.chest(new THREE.Vector3(), 1.0);
+    if (fx.radial) this.powerFx.radial(chest, look.shot, spec.color, fx.radial, tune.radius + 1.5);
+    if (fx.wave) this.powerFx.wave(this.pos, fx.wave, spec.color, tune.radius);
+    if (fx.flash) this.powerFx.flash(chest, spec.color, tune.radius * 0.7, 0.4);
+  }
+
+  private blitzFx(spec: DerivedPowerSpec, tune: DerivedTune) {
+    const look = powerLook(this.spec.id);
+    const fx = look.blitz;
+    const chest = this.chest(new THREE.Vector3(), 1.0);
+    if (fx.pillar) this.powerFx.pillar(this.pos, fx.pillar, spec.color, this.yaw, fx.pillar === 'spikes' ? tune.radius / 4.6 : 1.4);
+    if (fx.radial) this.powerFx.radial(chest, look.shot, spec.color, fx.radial, tune.radius + 2);
+    if (fx.wave) this.powerFx.wave(this.pos, fx.wave, spec.color, tune.radius);
+    if (fx.flash) this.powerFx.flash(chest, spec.color, tune.radius * 0.6, 0.45);
+  }
+
+  /** A surge keeps throwing its element off the body for as long as it lasts. */
+  private surgeParticles(dt: number) {
+    const style = AURA_PARTICLES[powerLook(this.spec.id).surge];
+    const count = Math.floor(style.rate * dt + Math.random());
+    if (count <= 0) return;
+    const at = this.chest(_tmp2, 0.2 + Math.random() * 1.5);
+    this.particles.emit(at, style.white && Math.random() < 0.5 ? 0xffffff : this.surgeColor, count, {
+      speed: style.speed,
+      size: style.size,
+      life: style.life,
+      up: style.up,
+      spread: 1.4,
+    });
+  }
+
+  /** Drags living hosts toward the Ryder, stopping just short of her. */
+  private pullCrowd(radius: number, dt: number) {
+    for (const host of this.hosts) {
+      if (host.ally || host.hp <= 0 || host.held > 0) continue;
+      const dx = this.pos.x - host.pos.x;
+      const dz = this.pos.z - host.pos.z;
+      const dist = Math.hypot(dx, dz);
+      if (dist > radius || dist < 1.3) continue;
+      const step = Math.min(dist - 1.3, (6 + dist * 2.2) * dt);
+      host.pos.x += (dx / dist) * step;
+      host.pos.z += (dz / dist) * step;
+      resolveCircle(host.pos, host.radius, this.world.obstacles);
+      host.knock.multiplyScalar(0.5);
+      host.stagger = Math.max(host.stagger, 0.2);
+    }
+  }
+
   /** Ultimate: a chain of dashes through the crowd, then a radial finisher where the Ryder stops. */
   private beginBlitz(spec: DerivedPowerSpec, tune: DerivedTune) {
-    this.blitz = { left: 5, next: 0, spec, tune };
+    this.blitz = { left: 5, next: 0, spec, tune, pull: 0, pulled: false };
     this.iframes = Math.max(this.iframes, 1.6);
     this.rig.addShake(0.2);
     this.banner = { title: spec.name.toUpperCase(), sub: 'ULTIMATE' };
@@ -3834,9 +3944,23 @@ export class RaidEngine {
   private stepBlitz(dt: number) {
     const blitz = this.blitz;
     if (!blitz) return;
+    if (blitz.pull > 0) {
+      blitz.pull = Math.max(0, blitz.pull - dt);
+      this.pullCrowd(blitz.tune.radius * 1.5, dt);
+    }
     blitz.next -= dt;
     if (blitz.next > 0) return;
     const spec = blitz.spec;
+    if (blitz.left <= 0 && !blitz.pulled && powerLook(this.spec.id).blitz.vortex) {
+      // The street is dragged in on the Ryder before the finisher lets it go.
+      blitz.pulled = true;
+      blitz.pull = 0.5;
+      blitz.next = 0.5;
+      this.powerFx.vortex(this.pos, spec.color, blitz.tune.radius * 1.3, 0.55);
+      this.powerFx.implode(this.pos, spec.color, blitz.tune.radius, 0.5);
+      this.rig.addShake(0.2);
+      return;
+    }
     if (blitz.left <= 0) {
       // The chain is done: the finisher plays as its own choreography and lands on the slam.
       this.blitz = null;
@@ -3850,6 +3974,7 @@ export class RaidEngine {
       const dz = target.pos.z - this.pos.z;
       const dist = Math.hypot(dx, dz) || 0.01;
       this.afterimages.spawn(0.5, 0.3, spec.color);
+      _tmp2.copy(this.pos).setY(this.world.heightAt(this.pos.x, this.pos.z));
       const stop = Math.max(0, dist - 1.1);
       this.pos.x += (dx / dist) * stop;
       this.pos.z += (dz / dist) * stop;
@@ -3865,6 +3990,8 @@ export class RaidEngine {
       this.meleeStarted = true;
       this.strikeOverride = RYDER_STYLE[this.spec.id].weapon;
       this.hurtHost(target, this.meleeDamage() * 1.3 * this.strikeScale() * (blitz.tune.damageMul / spec.damageMul), _tmp, 'stagger', 0.9);
+      this.powerFx.streak(_tmp2, _look.copy(this.pos).setY(this.world.heightAt(this.pos.x, this.pos.z)), spec.color);
+      if (powerLook(this.spec.id).blitz.stick && target.hp > 0) this.powerFx.stick(target, powerLook(this.spec.id).shot, spec.color, this.pos);
       this.particles.emit(this.pos.clone().setY(1.0), spec.color, 14, { speed: 7, size: 0.26, life: 0.3, up: 0.6 });
       this.emitSound('fight.punch.impact');
     }
@@ -3874,8 +4001,17 @@ export class RaidEngine {
   }
 
   /** Blitz finisher: everything near the Ryder goes down. */
-  private blitzFinisherHit(tune: DerivedTune) {
+  private blitzFinisherHit(spec: DerivedPowerSpec, tune: DerivedTune) {
     const base = this.meleeDamage() * tune.damageMul * this.strikeScale();
+    this.blitzFx(spec, tune);
+    // Darts left in bodies by the dashes go off wherever those bodies are now.
+    for (const target of this.powerFx.detonateStuck()) {
+      const host = this.hosts.find((h) => h === target);
+      if (!host || host.hp <= 0) continue;
+      if (Math.hypot(host.pos.x - this.pos.x, host.pos.z - this.pos.z) <= tune.radius + host.radius) continue;
+      _tmp.set(host.pos.x - this.pos.x, 0, host.pos.z - this.pos.z).normalize();
+      this.hurtHost(host, base * 0.5, _tmp, 'knockback', 1);
+    }
     for (const host of [...this.hosts]) {
       if (host.ally || host.hp <= 0) continue;
       const dx = host.pos.x - this.pos.x;
@@ -4437,6 +4573,7 @@ export class RaidEngine {
           resolveCircle(body, PLAYER_RADIUS, this.world.obstacles);
         },
         blocked: (x, z, radius) => this.npcBlocked(x, z, radius),
+        routeTo: (fromX, fromZ, toX, toZ, radius) => this.world.routeTo?.(fromX, fromZ, toX, toZ, radius) ?? null,
         hurtPlayer: (amount, dir, _kind, physical) => {
           const target = foe;
           if (!target || target.hp <= 0 || target.ally) return;
@@ -5246,6 +5383,123 @@ export class RaidEngine {
     return best;
   }
 
+  private watchStall(
+    host: Host,
+    watch: NonNullable<Host['stall']>,
+    wants: boolean,
+    gx: number,
+    gz: number,
+    dt: number,
+    seeking: ThrowBody | null,
+  ) {
+    // Net movement over a fixed window: a host shuffling back and forth on a corner still counts as stuck.
+    if (!wants) {
+      watch.x = host.pos.x;
+      watch.z = host.pos.z;
+      watch.t = 0;
+      return;
+    }
+    watch.t += dt;
+    if (watch.t < 1.6) return;
+    const moved = Math.hypot(host.pos.x - watch.x, host.pos.z - watch.z);
+    watch.x = host.pos.x;
+    watch.z = host.pos.z;
+    watch.t = 0;
+    if (moved > 1.2) {
+      watch.strikes = 0;
+      return;
+    }
+    if (seeking) {
+      host.passProp = seeking;
+      host.passPropT = 12;
+      watch.strikes = 0;
+      return;
+    }
+    watch.strikes += 1;
+    if (watch.strikes >= 2) {
+      const aim = this.hostAim(host);
+      if (Math.hypot(aim.x - host.pos.x, aim.z - host.pos.z) > 6 && this.blinkNear(host, aim.x, aim.z)) return;
+    }
+    let spot = this.world.openSpot?.(host.pos.x, host.pos.z, host.radius) ?? null;
+    if (!spot) {
+      const dx = gx - host.pos.x;
+      const dz = gz - host.pos.z;
+      const len = Math.hypot(dx, dz) || 1;
+      const side = Math.random() < 0.5 ? 1 : -1;
+      spot = { x: host.pos.x - (dz / len) * 3 * side - (dx / len) * 1.2, z: host.pos.z + (dx / len) * 3 * side - (dz / len) * 1.2 };
+    }
+    watch.ox = spot.x;
+    watch.oz = spot.z;
+    watch.out = 1.4;
+    if (host.nav) host.nav.lock = 0;
+  }
+
+  /**
+   * A hunting host that has not closed on its target over a few seconds, while
+   * the target stayed put, is lost behind something: it jumps in next to them.
+   */
+  private watchClosing(host: Host, watch: NonNullable<Host['stall']>, hunting: boolean, tx: number, tz: number, dt: number) {
+    const dist = Math.hypot(tx - host.pos.x, tz - host.pos.z);
+    if (!hunting || dist < 8 || host.held > 0) {
+      watch.closeT = 0;
+      return;
+    }
+    if (watch.closeT === 0) {
+      watch.closeD = dist;
+      watch.closePx = tx;
+      watch.closePz = tz;
+    }
+    watch.closeT += dt;
+    if (watch.closeT < 5) return;
+    const closed = watch.closeD - dist;
+    const targetMoved = Math.hypot(tx - watch.closePx, tz - watch.closePz);
+    watch.closeT = 0;
+    if (closed < 1.5 && targetMoved < 6) this.blinkNear(host, tx, tz);
+  }
+
+  /** Signal glitch: the host vanishes and reappears on open ground a few metres from (tx, tz). */
+  private blinkNear(host: Host, tx: number, tz: number) {
+    const start = Math.random() * Math.PI * 2;
+    for (const ring of [3.5, 4.5, 6, 8]) {
+      for (let i = 0; i < 16; i += 1) {
+        const ang = start + (i / 16) * Math.PI * 2;
+        const x = tx + Math.cos(ang) * ring;
+        const z = tz + Math.sin(ang) * ring;
+        if (this.npcBlocked(x, z, host.radius + 0.25)) continue;
+        if (!host.swims && this.world.water && this.waterDepth(x, z) > 1.05) continue;
+        if (!this.openLine(x, z, tx, tz, host.radius)) continue;
+        if (this.hosts.some((o) => o !== host && o.hp > 0 && Math.hypot(o.pos.x - x, o.pos.z - z) < o.radius + host.radius + 0.4)) continue;
+        this.particles.emit(host.pos.clone().setY(1), 0xc45cff, 14, { speed: 4, size: 0.22, life: 0.4, up: 1 });
+        host.pos.x = x;
+        host.pos.z = z;
+        host.knock.set(0, 0, 0);
+        host.nav = freshNav();
+        if (host.stall) {
+          host.stall.out = 0;
+          host.stall.strikes = 0;
+          host.stall.t = 0;
+          host.stall.closeT = 0;
+          host.stall.x = x;
+          host.stall.z = z;
+        }
+        this.particles.emit(host.pos.clone().setY(1), 0xc45cff, 18, { speed: 4, size: 0.24, life: 0.45, up: 1 });
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /** A body of `radius` can walk the straight segment between two points. */
+  private openLine(ax: number, az: number, bx: number, bz: number, radius: number) {
+    const len = Math.hypot(bx - ax, bz - az);
+    const steps = Math.max(1, Math.ceil(len / 0.5));
+    for (let i = 1; i < steps; i += 1) {
+      const t = i / steps;
+      if (this.npcBlocked(ax + (bx - ax) * t, az + (bz - az) * t, radius)) return false;
+    }
+    return true;
+  }
+
   /** Walls, cars, and the map edge. Used so NPCs turn before they grind. */
   private npcBlocked(x: number, z: number, radius: number) {
     if (Math.abs(x) > this.limit() || Math.abs(z) > this.limit() || pointBlocked(x, z, radius, this.world.obstacles)) {
@@ -5292,7 +5546,15 @@ export class RaidEngine {
     const pdx = aim.x - host.pos.x;
     const pdz = aim.z - host.pos.z;
     const playerDist = Math.hypot(pdx, pdz) || 0.0001;
-    const prop = this.throwables?.nearestFree(host.pos.x, host.pos.z) ?? null;
+    host.passPropT = Math.max(0, (host.passPropT ?? 0) - dt);
+    if (!host.passPropT) host.passProp = null;
+    const prop =
+      this.throwables?.nearestFree(
+        host.pos.x,
+        host.pos.z,
+        14,
+        (item) => item === host.passProp || this.npcBlocked(item.pos.x, item.pos.z, 0.3),
+      ) ?? null;
     const propDist = prop ? Math.hypot(prop.pos.x - host.pos.x, prop.pos.z - host.pos.z) : null;
     host.powerCd = Math.max(0, (host.powerCd ?? 0) - dt);
     host.guard = Math.max(0, (host.guard ?? 0) - dt);
@@ -5439,10 +5701,19 @@ export class RaidEngine {
         }
       }
     }
-    const hop = this.world.routeTo?.(host.pos.x, host.pos.z, gx, gz);
-    if (hop && Math.hypot(hop.x - host.pos.x, hop.z - host.pos.z) > 1.15) {
-      gx = hop.x;
-      gz = hop.z;
+    const watch = (host.stall ??= { x: host.pos.x, z: host.pos.z, t: 0, out: 0, ox: 0, oz: 0, strikes: 0, closeT: 0, closeD: 0, closePx: 0, closePz: 0 });
+    const aimDist = Math.hypot(gx - host.pos.x, gz - host.pos.z);
+    if (watch.out > 0) {
+      watch.out -= dt;
+      if (Math.hypot(watch.ox - host.pos.x, watch.oz - host.pos.z) < 0.6) watch.out = 0;
+      gx = watch.ox;
+      gz = watch.oz;
+    } else {
+      const hop = this.world.routeTo?.(host.pos.x, host.pos.z, gx, gz, host.radius);
+      if (hop) {
+        gx = hop.x;
+        gz = hop.z;
+      }
     }
     const gdx = gx - host.pos.x;
     const gdz = gz - host.pos.z;
@@ -5500,6 +5771,10 @@ export class RaidEngine {
     host.pos.x = clamp(host.pos.x, -this.limit(), this.limit());
     host.pos.z = clamp(host.pos.z, -this.limit(), this.limit());
     resolveCircle(host.pos, host.radius, this.world.obstacles);
+    const seeking = (order.state === 'search' || order.state === 'pickup') && prop ? prop : null;
+    this.watchStall(host, watch, order.move > 0.2 && aimDist > 2.5 && !striker.busy, gx, gz, dt, seeking);
+    const closingIn = !swayed && order.move > 0.2 && order.state !== 'flee' && order.state !== 'search' && order.state !== 'pickup';
+    this.watchClosing(host, watch, closingIn, chase.x, chase.z, dt);
     if (!phased && !this.kit?.passthrough) {
       const sx = host.pos.x - this.pos.x;
       const sz = host.pos.z - this.pos.z;
@@ -6020,7 +6295,25 @@ export class RaidEngine {
     fromPlayer: boolean,
     color: number,
     speed: number,
+    shape?: ShotShape,
   ) {
+    if (shape) {
+      const shot = this.powerFx.acquireShot(shape, color, fromPlayer ? 1.7 : 1.3);
+      const shaped: Bolt = {
+        active: true,
+        mesh: BOLT_PLACEHOLDER,
+        vel: dir.clone().normalize().multiplyScalar(speed),
+        pos: origin.clone(),
+        damage,
+        fromPlayer,
+        life: 1.6,
+        radius: fromPlayer ? 0.26 : 0.3,
+        shot,
+      };
+      this.powerFx.placeShot(shot, shaped.pos, shaped.vel, 0);
+      this.bolts.push(shaped);
+      return;
+    }
     let bolt = this.boltPool.pop();
     if (!bolt) {
       const mesh = new THREE.Mesh(BOLT_GEOMETRY, glow(color, 1.8));
@@ -6055,7 +6348,8 @@ export class RaidEngine {
       const bolt = this.bolts[i];
       bolt.life -= dt;
       bolt.pos.addScaledVector(bolt.vel, dt);
-      bolt.mesh.position.copy(bolt.pos);
+      if (bolt.shot) this.powerFx.placeShot(bolt.shot, bolt.pos, bolt.vel, dt);
+      else bolt.mesh.position.copy(bolt.pos);
       const floor = this.world.heightAt(bolt.pos.x, bolt.pos.z);
       const water = this.world.water;
       const surface = water ? water.surfaceAt(bolt.pos.x, bolt.pos.z) : floor;
@@ -6103,8 +6397,12 @@ export class RaidEngine {
   private retireBolt(index: number) {
     const bolt = this.bolts[index];
     bolt.active = false;
-    bolt.mesh.visible = false;
     this.bolts.splice(index, 1);
+    if (bolt.shot) {
+      this.powerFx.releaseShot(bolt.shot);
+      return;
+    }
+    bolt.mesh.visible = false;
     this.boltPool.push(bolt);
   }
 
@@ -6187,9 +6485,14 @@ export class RaidEngine {
 
   private updateCamera(dt: number) {
     // Feet in the world, including stairs, jumps, levitation, and swimming.
-    const feet = this.player
+    const body = this.player
       ? this.player.humanoid.group.position.y
       : this.world.heightAt(this.pos.x, this.pos.z) + (this.kit?.airY ?? 0) + this.airY - (this.pvpCpu?.playerSink() ?? 0);
+    // A body pulled under the street (Afterimage, a phase grab) is watched from
+    // above: the camera holds at street level instead of following it down.
+    const street = this.world.heightAt(this.pos.x, this.pos.z);
+    const sunk = (this.swim.mode === 'land' || this.swim.mode === 'wade') && body < street - 0.05;
+    const feet = sunk ? street : body;
     this.cameraPivot.set(this.pos.x, feet, this.pos.z);
     if (this.camReady) {
       const hop = Math.hypot(this.cameraPivot.x - this.lastCam.x, this.cameraPivot.z - this.lastCam.z);
@@ -6207,6 +6510,10 @@ export class RaidEngine {
       height: this.kit?.cameraExtra?.height ?? 0,
       targetHeight: this.kit?.cameraExtra?.targetHeight ?? 0,
     };
+    if (sunk && !this.kit?.cameraExtra) {
+      extra.distance += 2.4;
+      extra.height += 3;
+    }
     // Crowd framing: pull back as the ring around the Ryder fills, capped so the
     // fight never turns into a top-down map. Only bodies close enough to matter count.
     const near = this.grid.count(this.pos.x, this.pos.z, 9);
@@ -6541,6 +6848,7 @@ export class RaidEngine {
           resolveCircle(pos, PLAYER_RADIUS, this.world.obstacles);
         },
         blocked: (x, z, radius) => this.npcBlocked(x, z, radius),
+        routeTo: (fromX, fromZ, toX, toZ, radius) => this.world.routeTo?.(fromX, fromZ, toX, toZ, radius) ?? null,
         hurtPlayer: (amount, dir, kind, physical) => this.hurtPlayer(amount, dir, kind, physical),
         stunPlayer: (seconds) => this.setStasis(seconds),
         suppressPlayer: (factor) => this.setSuppress(factor),
@@ -6989,11 +7297,8 @@ export class RaidEngine {
     this.fallen = [];
     this.unbindKit();
     this.clearClones();
-    this.bolts.forEach((b) => {
-      b.mesh.visible = false;
-      this.boltPool.push(b);
-    });
-    this.bolts = [];
+    for (let i = this.bolts.length - 1; i >= 0; i -= 1) this.retireBolt(i);
+    this.powerFx.clear();
     if (this.player) {
       this.scene.remove(this.player.humanoid.group);
       disposeObject(this.player.humanoid.group);
