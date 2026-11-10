@@ -31,7 +31,7 @@ for (const id of RYDER_ORDER) {
   const tree = treeFor(id);
   const problems = validateTree(tree);
   assert.deepEqual(problems, [], `${id}: ${problems.join('; ')}`);
-  assert.equal(tree.nodes.length, 23, `${id} has ${tree.nodes.length} nodes`);
+  assert.equal(tree.nodes.length, 20, `${id} has ${tree.nodes.length} nodes`);
   for (const branch of POWER_BRANCHES) {
     assert.ok(tree.nodes.some((node) => node.branch === branch), `${id} has a ${branch} branch`);
   }
@@ -57,8 +57,8 @@ for (const id of RYDER_ORDER) {
   for (const node of tree.nodes) {
     if (node.effect.kind === 'ability') assert.ok(node.effect.abilityId in ABILITY_BANDS, `${node.effect.abilityId} has a band`);
   }
-  // The tree reaches all three extra slots.
-  assert.deepEqual(slotsGranted(tree, tree.nodes.map((node) => node.id)), ['4', '5', '6'], `${id} opens 4, 5 and 6`);
+  // All six slots are open from the start, so the tree sells none of them.
+  assert.deepEqual(slotsGranted(tree, tree.nodes.map((node) => node.id)), [], `${id} sells no slots`);
 }
 
 // Derived powers: six per Ryder, one of each kind, each owned by that Ryder and typed by kind.
@@ -139,8 +139,6 @@ assert.equal(canUnlock(leo, base, 'leo:breaker', 5000, 2).ok, true);
 assert.equal(canUnlock(leo, base, 'leo:breaker', 5000).ok, true, 'omitting the level skips the gate');
 
 const owned = [...base, 'leo:fists', 'leo:stance', 'leo:focus'];
-assert.equal(canUnlock(leo, owned, 'leo:slot4', 600, 9).ok, true, 'slot 4 opens with focus');
-assert.equal(canUnlock(leo, owned, 'leo:slot5', 5000, 9).reason, 'locked', 'slot 5 needs slot 4');
 assert.equal(canUnlock(leo, owned, 'leo:blitz', 9999, 9).reason, 'locked', 'the Xtreme sits at the crown of the Powers tree');
 assert.equal(canUnlock(leo, [...owned, 'leo:breaker', 'leo:volley', 'leo:snare', 'leo:nova', 'leo:surge'], 'leo:blitz', 9999, 6).reason, 'level', 'the Xtreme asks for level 7');
 assert.equal(canUnlock(leo, [...owned, 'leo:breaker', 'leo:volley', 'leo:snare', 'leo:nova', 'leo:surge'], 'leo:blitz', 9999, 7).ok, true);
@@ -158,9 +156,6 @@ assert.equal(canUpgrade(leo, owned, { 'leo:fists': MAX_RANK }, 'leo:fists', 9999
 assert.equal(canUpgrade(leo, owned, { 'leo:fists': 2 }, 'leo:fists', 9999, 3).reason, 'level', 'rank 3 waits for level 4');
 assert.equal(canUpgrade(leo, owned, { 'leo:fists': 2 }, 'leo:fists', 9999, 4).ok, true);
 assert.equal(canUpgrade(leo, base, {}, 'leo:q', 9999, 2).ok, true, 'a starter power ranks up like any other');
-const slot4Owned = [...owned, 'leo:slot4'];
-assert.equal(canUpgrade(leo, slot4Owned, {}, 'leo:slot4', 9999, 40).reason, 'max', 'a slot is a one-rank node');
-
 // Ranks sanitise against ownership and maxRank, and every owned node is at least rank 1.
 const ranks = sanitizeRanks(leo, owned, { 'leo:fists': 3, 'leo:stance': 99, 'leo:launcher': 2, 'leo:focus': 'x', 'leo:q': 2 });
 assert.equal(ranks['leo:fists'], 3);

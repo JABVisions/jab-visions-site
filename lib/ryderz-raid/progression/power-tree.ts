@@ -252,12 +252,9 @@ export function buildTree(ryderId: RyderId): PowerTree {
     node('footwork', 'defense', 2, f.footwork, 'Dodge recovers 8% faster per rank.', 500, ['stance'], { kind: 'stat', stat: 'dodgeCooldown', value: -0.08 }),
     node('guard', 'defense', 2, f.guard, 'Holding dodge blocks 8% more damage per rank.', 500, ['stance'], { kind: 'stat', stat: 'guard', value: 0.08 }),
     node('second-wind', 'defense', 3, f.secondWind, 'Once per round, a lethal blow leaves you at 1 health instead.', 1200, ['footwork', 'guard'], { kind: 'passive', passive: 'secondWind' }),
-    // Signal: power cost and the deck
+    // Signal: power cost and orb pickup. All six deck slots are open from the start.
     node('focus', 'signal', 1, 'Signal Focus', 'Powers cost 5% less aura per rank.', 400, [], { kind: 'stat', stat: 'abilityCost', value: -0.05 }),
     node('magnet', 'signal', 1, 'Signal Magnet', 'Signal Orbs fly to you from 1 m farther away per rank.', 300, [], { kind: 'stat', stat: 'pickupRadius', value: 1 }),
-    node('slot4', 'signal', 2, 'Expanded Deck', 'Opens a fourth power slot bound to 4.', 600, ['focus'], { kind: 'slot', slot: '4' }),
-    node('slot5', 'signal', 3, 'Full Deck', 'Opens a fifth power slot bound to 5.', 1200, ['slot4'], { kind: 'slot', slot: '5' }),
-    node('slot6', 'signal', 4, 'Overclocked Deck', 'Opens a sixth power slot bound to 6.', 2000, ['slot5'], { kind: 'slot', slot: '6' }),
   ];
   return { ryderId, nodes };
 }

@@ -15,7 +15,6 @@ import {
   recipesGranted,
   sanitizeRanks,
   sanitizeUnlocked,
-  slotsGranted,
   spentOn,
   starterNodes,
   treeFor,
@@ -154,14 +153,10 @@ export function hydrate(raw: unknown): RyderManagerState {
     }
     const deck = data.loadouts?.[id];
     if (deck) {
-      const slots = slotsGranted(tree, state.nodes[id]);
       const stored = deck as Record<string, unknown>;
       for (const slot of INPUT_SLOTS) {
         const legacy = Object.keys(LEGACY_SLOTS).find((key) => LEGACY_SLOTS[key] === slot);
         const ability = stored[slot] ?? (legacy ? stored[legacy] : undefined);
-        if (slot === '4' || slot === '5' || slot === '6') {
-          if (!slots.includes(slot)) continue;
-        }
         if (isAbilityId(ability) && state.unlocked[id].includes(ability)) state.loadouts[id][slot] = ability;
       }
       // Never hold the same power twice.
@@ -360,9 +355,9 @@ export class RyderManager {
     return abilityRanks(treeFor(id), this.state.nodes[id], this.state.ranks[id])[ability] ?? 1;
   }
 
-  /** Slots this Ryder may equip into: 1 / 2 / 3 plus whatever the tree opened. */
-  slotsFor(id: RyderId): InputSlot[] {
-    return [...BASE_SLOTS, ...slotsGranted(treeFor(id), this.state.nodes[id])];
+  /** Slots this Ryder may equip into: all six keys on the number row. */
+  slotsFor(_id: RyderId): InputSlot[] {
+    return [...INPUT_SLOTS];
   }
 
   treeView(id: RyderId): PowerNodeView[] {
@@ -485,8 +480,8 @@ export class RyderManager {
 
   /**
    * Put a power in a slot. If it already sits in another slot the two swap, so
-   * a deck never holds the same power twice. Extra slots must be opened on the
-   * tree, and an extra slot fills the lowest empty one first so the engine's
+   * a deck never holds the same power twice. An extra slot (4 / 5 / 6) fills
+   * the lowest empty one first so the engine's
    * slot order stays dense.
    */
   equip(id: RyderId, slot: InputSlot, ability: AbilityId) {
@@ -500,7 +495,15 @@ export class RyderManager {
       if (firstEmpty && firstEmpty < target) target = firstEmpty;
     }
     const previous = INPUT_SLOTS.find((other) => deck[other] === ability);
-    if (previous && previous !== target) deck[previous] = deck[target];
+    if (previous && previous !== target) {
+      // Moving out of 1 / 2 / 3 into an empty extra slot backfills the base slot with an owned power not already in the deck.
+      let swapIn = deck[target];
+      if (!swapIn && BASE_SLOTS.includes(previous)) {
+        swapIn = this.state.unlocked[id].find((owned) => !INPUT_SLOTS.some((key) => deck[key] === owned)) ?? null;
+        if (!swapIn) return false;
+      }
+      deck[previous] = swapIn;
+    }
     deck[target] = ability;
     // A base slot can never be empty after a swap.
     for (const base of BASE_SLOTS) if (!deck[base]) deck[base] = defaultLoadout(id)[base];
