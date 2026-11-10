@@ -364,6 +364,9 @@ interface Host {
   profileId?: CivilianProfileId;
   animMap?: CivilianDefinition['animationMap'];
   heldItem?: ThrowBody | null;
+  /** A prop this host could not reach; it ignores it until `passPropT` runs out. */
+  passProp?: ThrowBody | null;
+  passPropT?: number;
   /** Seconds left in a raise-then-throw. 0 means not winding up. */
   throwWind: number;
   /** Dream Vision. The host stands and does not attack. Not a lift. */
@@ -405,7 +408,21 @@ interface Host {
   /** Wall-slide memory so a blocked step does not grind in place. */
   nav?: NavHint;
   /** Net-progress watch: a host that has not got anywhere for a while walks out to open ground. */
-  stall?: { x: number; z: number; t: number; out: number; ox: number; oz: number };
+  stall?: {
+    x: number;
+    z: number;
+    t: number;
+    out: number;
+    ox: number;
+    oz: number;
+    /** Back-to-back stalls; the second one jumps the host to its target. */
+    strikes: number;
+    /** Distance-to-target window: a host that is not closing in at all gets the same jump. */
+    closeT: number;
+    closeD: number;
+    closePx: number;
+    closePz: number;
+  };
   /** This raid teammate is already committed to a host and may chase a little farther. */
   pressing?: boolean;
   /** Frames skipped while this host is far enough to simulate cheaply. */
@@ -5366,7 +5383,15 @@ export class RaidEngine {
     return best;
   }
 
-  private watchStall(host: Host, watch: NonNullable<Host['stall']>, wants: boolean, gx: number, gz: number, dt: number) {
+  private watchStall(
+    host: Host,
+    watch: NonNullable<Host['stall']>,
+    wants: boolean,
+    gx: number,
+    gz: number,
+    dt: number,
+    seeking: ThrowBody | null,
+  ) {
     // Net movement over a fixed window: a host shuffling back and forth on a corner still counts as stuck.
     if (!wants) {
       watch.x = host.pos.x;
@@ -5380,7 +5405,21 @@ export class RaidEngine {
     watch.x = host.pos.x;
     watch.z = host.pos.z;
     watch.t = 0;
-    if (moved > 1.2) return;
+    if (moved > 1.2) {
+      watch.strikes = 0;
+      return;
+    }
+    if (seeking) {
+      host.passProp = seeking;
+      host.passPropT = 12;
+      watch.strikes = 0;
+      return;
+    }
+    watch.strikes += 1;
+    if (watch.strikes >= 2) {
+      const aim = this.hostAim(host);
+      if (Math.hypot(aim.x - host.pos.x, aim.z - host.pos.z) > 6 && this.blinkNear(host, aim.x, aim.z)) return;
+    }
     let spot = this.world.openSpot?.(host.pos.x, host.pos.z, host.radius) ?? null;
     if (!spot) {
       const dx = gx - host.pos.x;
@@ -5393,6 +5432,72 @@ export class RaidEngine {
     watch.oz = spot.z;
     watch.out = 1.4;
     if (host.nav) host.nav.lock = 0;
+  }
+
+  /**
+   * A hunting host that has not closed on its target over a few seconds, while
+   * the target stayed put, is lost behind something: it jumps in next to them.
+   */
+  private watchClosing(host: Host, watch: NonNullable<Host['stall']>, hunting: boolean, tx: number, tz: number, dt: number) {
+    const dist = Math.hypot(tx - host.pos.x, tz - host.pos.z);
+    if (!hunting || dist < 8 || host.held > 0) {
+      watch.closeT = 0;
+      return;
+    }
+    if (watch.closeT === 0) {
+      watch.closeD = dist;
+      watch.closePx = tx;
+      watch.closePz = tz;
+    }
+    watch.closeT += dt;
+    if (watch.closeT < 5) return;
+    const closed = watch.closeD - dist;
+    const targetMoved = Math.hypot(tx - watch.closePx, tz - watch.closePz);
+    watch.closeT = 0;
+    if (closed < 1.5 && targetMoved < 6) this.blinkNear(host, tx, tz);
+  }
+
+  /** Signal glitch: the host vanishes and reappears on open ground a few metres from (tx, tz). */
+  private blinkNear(host: Host, tx: number, tz: number) {
+    const start = Math.random() * Math.PI * 2;
+    for (const ring of [3.5, 4.5, 6, 8]) {
+      for (let i = 0; i < 16; i += 1) {
+        const ang = start + (i / 16) * Math.PI * 2;
+        const x = tx + Math.cos(ang) * ring;
+        const z = tz + Math.sin(ang) * ring;
+        if (this.npcBlocked(x, z, host.radius + 0.25)) continue;
+        if (!host.swims && this.world.water && this.waterDepth(x, z) > 1.05) continue;
+        if (!this.openLine(x, z, tx, tz, host.radius)) continue;
+        if (this.hosts.some((o) => o !== host && o.hp > 0 && Math.hypot(o.pos.x - x, o.pos.z - z) < o.radius + host.radius + 0.4)) continue;
+        this.particles.emit(host.pos.clone().setY(1), 0xc45cff, 14, { speed: 4, size: 0.22, life: 0.4, up: 1 });
+        host.pos.x = x;
+        host.pos.z = z;
+        host.knock.set(0, 0, 0);
+        host.nav = freshNav();
+        if (host.stall) {
+          host.stall.out = 0;
+          host.stall.strikes = 0;
+          host.stall.t = 0;
+          host.stall.closeT = 0;
+          host.stall.x = x;
+          host.stall.z = z;
+        }
+        this.particles.emit(host.pos.clone().setY(1), 0xc45cff, 18, { speed: 4, size: 0.24, life: 0.45, up: 1 });
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /** A body of `radius` can walk the straight segment between two points. */
+  private openLine(ax: number, az: number, bx: number, bz: number, radius: number) {
+    const len = Math.hypot(bx - ax, bz - az);
+    const steps = Math.max(1, Math.ceil(len / 0.5));
+    for (let i = 1; i < steps; i += 1) {
+      const t = i / steps;
+      if (this.npcBlocked(ax + (bx - ax) * t, az + (bz - az) * t, radius)) return false;
+    }
+    return true;
   }
 
   /** Walls, cars, and the map edge. Used so NPCs turn before they grind. */
@@ -5441,7 +5546,15 @@ export class RaidEngine {
     const pdx = aim.x - host.pos.x;
     const pdz = aim.z - host.pos.z;
     const playerDist = Math.hypot(pdx, pdz) || 0.0001;
-    const prop = this.throwables?.nearestFree(host.pos.x, host.pos.z) ?? null;
+    host.passPropT = Math.max(0, (host.passPropT ?? 0) - dt);
+    if (!host.passPropT) host.passProp = null;
+    const prop =
+      this.throwables?.nearestFree(
+        host.pos.x,
+        host.pos.z,
+        14,
+        (item) => item === host.passProp || this.npcBlocked(item.pos.x, item.pos.z, 0.3),
+      ) ?? null;
     const propDist = prop ? Math.hypot(prop.pos.x - host.pos.x, prop.pos.z - host.pos.z) : null;
     host.powerCd = Math.max(0, (host.powerCd ?? 0) - dt);
     host.guard = Math.max(0, (host.guard ?? 0) - dt);
@@ -5588,7 +5701,7 @@ export class RaidEngine {
         }
       }
     }
-    const watch = (host.stall ??= { x: host.pos.x, z: host.pos.z, t: 0, out: 0, ox: 0, oz: 0 });
+    const watch = (host.stall ??= { x: host.pos.x, z: host.pos.z, t: 0, out: 0, ox: 0, oz: 0, strikes: 0, closeT: 0, closeD: 0, closePx: 0, closePz: 0 });
     const aimDist = Math.hypot(gx - host.pos.x, gz - host.pos.z);
     if (watch.out > 0) {
       watch.out -= dt;
@@ -5658,7 +5771,10 @@ export class RaidEngine {
     host.pos.x = clamp(host.pos.x, -this.limit(), this.limit());
     host.pos.z = clamp(host.pos.z, -this.limit(), this.limit());
     resolveCircle(host.pos, host.radius, this.world.obstacles);
-    this.watchStall(host, watch, order.move > 0.2 && aimDist > 2.5 && !striker.busy, gx, gz, dt);
+    const seeking = (order.state === 'search' || order.state === 'pickup') && prop ? prop : null;
+    this.watchStall(host, watch, order.move > 0.2 && aimDist > 2.5 && !striker.busy, gx, gz, dt, seeking);
+    const closingIn = !swayed && order.move > 0.2 && order.state !== 'flee' && order.state !== 'search' && order.state !== 'pickup';
+    this.watchClosing(host, watch, closingIn, chase.x, chase.z, dt);
     if (!phased && !this.kit?.passthrough) {
       const sx = host.pos.x - this.pos.x;
       const sz = host.pos.z - this.pos.z;
