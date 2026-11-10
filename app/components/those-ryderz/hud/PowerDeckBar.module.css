@@ -192,6 +192,25 @@
   letter-spacing: 0.02em;
 }
 
+.sp strong {
+  transition:
+    color 160ms ease,
+    text-shadow 160ms ease,
+    transform 160ms ease;
+}
+
+.sp[data-gain='true'] {
+  color: #8dffbb;
+}
+
+.sp[data-gain='true'] strong {
+  color: #b8ffd2;
+  text-shadow:
+    0 0 6px rgba(61, 255, 138, 0.95),
+    0 0 14px rgba(61, 255, 138, 0.6);
+  transform: translateY(-1px) scale(1.12);
+}
+
 .sp:hover strong,
 .sp:focus-visible strong {
   color: var(--deck);

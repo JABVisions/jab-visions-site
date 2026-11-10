@@ -33,7 +33,7 @@ export const BRANCH_BLURB: Record<PowerBranch, string> = {
   powers: 'Nine powers of six types, ranked 1–5',
   combat: 'Fists, launchers, aerials, finishers',
   defense: 'Health, footwork, guard, second wind',
-  signal: 'Power cost and deck slots 4 · 5 · 6',
+  signal: 'Power cost, orb magnet, deck slots 4 · 5 · 6',
 };
 
 export type StatKey =
@@ -50,7 +50,8 @@ export type StatKey =
   | 'abilityCost'
   | 'comboWindow'
   | 'knockback'
-  | 'hitStunResist';
+  | 'hitStunResist'
+  | 'pickupRadius';
 
 export type PassiveId = 'secondWind' | 'auraOnKill' | 'momentum';
 
@@ -111,6 +112,7 @@ export function emptyModifiers(): PowerModifiers {
     comboWindow: 0,
     knockback: 0,
     hitStunResist: 0,
+    pickupRadius: 0,
     passives: [],
   };
 }
@@ -171,7 +173,7 @@ export function costThroughRank(node: PowerNode, rank: number) {
 }
 
 /**
- * Builds the standard 22-node tree for a Ryder. The canonical three powers
+ * Builds the standard 23-node tree for a Ryder. The canonical three powers
  * (slots 1 / 2 / 3) are starter nodes and are never gated. Costs follow the
  * design brief: starter nodes free, first upgrades a few hundred SP, the
  * Xtreme 3,000. Stat values are per rank.
@@ -252,6 +254,7 @@ export function buildTree(ryderId: RyderId): PowerTree {
     node('second-wind', 'defense', 3, f.secondWind, 'Once per round, a lethal blow leaves you at 1 health instead.', 1200, ['footwork', 'guard'], { kind: 'passive', passive: 'secondWind' }),
     // Signal: power cost and the deck
     node('focus', 'signal', 1, 'Signal Focus', 'Powers cost 5% less aura per rank.', 400, [], { kind: 'stat', stat: 'abilityCost', value: -0.05 }),
+    node('magnet', 'signal', 1, 'Signal Magnet', 'Signal Orbs fly to you from 1 m farther away per rank.', 300, [], { kind: 'stat', stat: 'pickupRadius', value: 1 }),
     node('slot4', 'signal', 2, 'Expanded Deck', 'Opens a fourth power slot bound to 4.', 600, ['focus'], { kind: 'slot', slot: '4' }),
     node('slot5', 'signal', 3, 'Full Deck', 'Opens a fifth power slot bound to 5.', 1200, ['slot4'], { kind: 'slot', slot: '5' }),
     node('slot6', 'signal', 4, 'Overclocked Deck', 'Opens a sixth power slot bound to 6.', 2000, ['slot5'], { kind: 'slot', slot: '6' }),

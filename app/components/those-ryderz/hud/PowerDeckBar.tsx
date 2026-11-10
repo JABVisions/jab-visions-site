@@ -57,6 +57,11 @@ const PowerDeckBar = forwardRef<
 >(function PowerDeckBar({ slots, color, onOpenTree, onPress }, ref) {
   const root = useRef<HTMLDivElement>(null);
   const spText = useRef<HTMLElement>(null);
+  const spButton = useRef<HTMLButtonElement>(null);
+  /** Counter as drawn: it climbs toward the balance instead of jumping, and glows while it does. */
+  const spShown = useRef<number | null>(null);
+  const spGlowUntil = useRef(0);
+  const spLast = useRef(0);
   const slotRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const ringRefs = useRef<Array<HTMLElement | null>>([]);
   const timerRefs = useRef<Array<HTMLElement | null>>([]);
@@ -65,7 +70,20 @@ const PowerDeckBar = forwardRef<
     setLive(state) {
       const node = root.current;
       if (!node) return;
-      if (spText.current) spText.current.textContent = state.signalAvailable.toLocaleString('en-US');
+      const now = performance.now();
+      const target = state.signalAvailable;
+      const dt = Math.min(0.1, (now - (spLast.current || now)) / 1000);
+      spLast.current = now;
+      let shown = spShown.current ?? target;
+      if (target > shown) {
+        if (spShown.current !== null) spGlowUntil.current = now + 650;
+        shown = Math.min(target, shown + Math.max(1, Math.ceil((target - shown) * Math.min(1, dt * 9))));
+      } else {
+        shown = target;
+      }
+      if (shown !== spShown.current && spText.current) spText.current.textContent = shown.toLocaleString('en-US');
+      spShown.current = shown;
+      if (spButton.current) spButton.current.dataset.gain = now < spGlowUntil.current ? 'true' : 'false';
       node.dataset.burnout = state.burnout || state.powersOut ? 'true' : 'false';
       node.dataset.guard = state.guarding ? 'true' : 'false';
       node.dataset.link = state.linked ? 'true' : 'false';
@@ -132,7 +150,7 @@ const PowerDeckBar = forwardRef<
           <b className={styles.key}>{slot.key || MOVE_KEYS[i]}</b>
         </button>
       ))}
-      <button type="button" className={styles.sp} onClick={onOpenTree} title="Signal Points · open the Power Tree (T)">
+      <button ref={spButton} type="button" className={styles.sp} data-gain="false" onClick={onOpenTree} title="Signal Points · open the Power Tree (T)">
         <strong ref={spText}>0</strong>
         <span>SP</span>
       </button>

@@ -79,6 +79,7 @@ export function levelProgress(earned: number) {
  */
 export class SignalBank {
   private paidHosts = new WeakSet<object>();
+  private paidOrbs = new Set<number>();
   /** `${round}:${seat}` so each seat is paid once per round in co-op. */
   private paidRounds = new Set<string>();
   private paidRevives = new Map<string, number>();
@@ -101,6 +102,7 @@ export class SignalBank {
 
   reset() {
     this.paidHosts = new WeakSet();
+    this.paidOrbs.clear();
     this.paidRounds.clear();
     this.paidRevives.clear();
     this.earned = 0;
@@ -123,6 +125,28 @@ export class SignalBank {
     return total;
   }
 
+  /**
+   * A kill whose reward drops as Signal Orbs. The host is marked so it can
+   * never drop twice, a finisher bonus pays at once, and the kill's own SP is
+   * returned for the orbs to carry. 0 when this host already dropped.
+   */
+  claimKill(host: object, tier: number, boss: boolean, finisher: boolean, round: number, seat: number): number {
+    if (this.paidHosts.has(host)) return 0;
+    this.paidHosts.add(host);
+    this.tally.kill += 1;
+    if (finisher) this.pay('finisher', SP_REWARDS.finisher, round, seat);
+    return signalForKill(tier, boss);
+  }
+
+  /** Pays collected orbs. Ids already paid are skipped, so a replayed pickup pays nothing. */
+  collect(ids: readonly number[], amount: number, round: number, seat: number): number {
+    const fresh = ids.filter((id) => !this.paidOrbs.has(id));
+    if (!fresh.length) return 0;
+    for (const id of fresh) this.paidOrbs.add(id);
+    const share = ids.length ? Math.round((amount * fresh.length) / ids.length) : 0;
+    return this.pay('kill', share, round, seat, false);
+  }
+
   /** Pays the round clear once per round number per seat, plus the milestone bonus on tens. */
   roundClear(round: number, seat: number): number {
     const n = Math.max(1, Math.floor(round));
@@ -142,12 +166,12 @@ export class SignalBank {
     return this.pay('revive', SP_REWARDS.revive, n, seat);
   }
 
-  private pay(kind: SignalEventKind, amount: number, round: number, seat: number) {
+  private pay(kind: SignalEventKind, amount: number, round: number, seat: number, count = true) {
     if (amount <= 0) return 0;
     this.earned += amount;
     this.earnedRound += amount;
     this.bySeat.set(seat, (this.bySeat.get(seat) ?? 0) + amount);
-    this.tally[kind] += 1;
+    if (count) this.tally[kind] += 1;
     const event: SignalEvent = { kind, amount, round, seat };
     this.listeners.forEach((listener) => listener(event));
     return amount;

@@ -51,6 +51,7 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
   const radarHud = useRef<RadarApi>(null);
   const mapHud = useRef<RadarApi>(null);
   const deckHud = useRef<DeckBarApi>(null);
+  const popLayer = useRef<HTMLDivElement>(null);
   const partyHud = useRef<PartyHudApi | null>(null);
   const pvpRef = useRef<PvpLineup | null>(null);
   const pointsRef = useRef<HTMLElement>(null);
@@ -166,6 +167,19 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
       moves: next.moves,
       linked: next.combo.power,
     });
+    const pops = popLayer.current;
+    if (pops) {
+      for (const pop of next.signalPops) {
+        if (pops.childElementCount > 14) pops.firstElementChild?.remove();
+        const label = document.createElement('span');
+        label.className = styles.signalPop;
+        label.textContent = `+${pop.amount} SP`;
+        label.style.left = `${pop.x + (Math.random() - 0.5) * 4}%`;
+        label.style.top = `${pop.y}%`;
+        label.addEventListener('animationend', () => label.remove(), { once: true });
+        pops.appendChild(label);
+      }
+    }
     if (next.opponent) {
       foeHud.current?.setVitals(next.opponent.hp, next.opponent.maxHp, next.opponent.aura, next.opponent.maxAura, next.opponent.aura <= 1);
     }
@@ -587,6 +601,7 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
           if (playing && phase === 'playing' && !paused) engineRef.current?.requestPointerLock();
         }}
       />
+      <div ref={popLayer} className={styles.signalPops} aria-hidden="true" />
 
       {playing && statBoard && phase === 'report' && (
         <StatBoard board={statBoard} secondsRef={boardSeconds} onContinue={() => engineRef.current?.continueReport()} />

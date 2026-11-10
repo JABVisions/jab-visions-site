@@ -58,6 +58,7 @@ import { EngagementDirector, type EngagementCandidate } from './civilians/engage
 import { CrowdGrid } from './crowd/grid';
 import { AfterimagePool } from './speed-vfx';
 import { PowerFx, type ShotInstance, type ShotShape } from './power-fx';
+import { ORB_MAGNET_RADIUS, SignalOrbs, type OrbCollector, type OrbPickup } from './signal-orbs';
 import { AURA_PARTICLES, powerLook } from './progression/power-looks';
 import { createRyderKit, type KitContext, type KitTarget, type MeleeStep, type RyderKit } from './ryderz';
 import type { MeleeStyle, PoseOverride } from './skeletal';
@@ -183,6 +184,8 @@ export interface HudState {
   openSlots: number;
   /** Signal Points: the persistent progression wallet. `earned` is lifetime, `round` is this round so far. */
   signal: { available: number; earned: number; round: number; level: number; progress: number };
+  /** Signal Orb payouts since the last HUD frame, placed over the Ryder in screen percent. */
+  signalPops: { amount: number; x: number; y: number }[];
   /** Local player is holding guard. */
   guarding: boolean;
   round: number;
@@ -783,6 +786,10 @@ export class RaidEngine {
   private cracks = new CrackDecalPool(4);
   private afterimages = new AfterimagePool(5);
   private powerFx!: PowerFx;
+  private signalOrbs!: SignalOrbs;
+  private readonly orbCollectors: OrbCollector[] = [];
+  /** Floating +SP labels waiting for the next HUD frame, in screen percent. */
+  private signalPops: { amount: number; x: number; y: number }[] = [];
   private fallen: Fallen[] = [];
   private hitStopT = 0;
   /** Gameplay seconds actually simulated (sum of clamped dt); hit windows and combos run on this, not wall time. */
@@ -839,6 +846,16 @@ export class RaidEngine {
     this.scene.add(this.rings.group, this.cracks.group, this.afterimages.group);
     this.powerFx = new PowerFx(this.particles, (x, z) => this.world.heightAt(x, z));
     this.scene.add(this.powerFx.group);
+    this.signalOrbs = new SignalOrbs({
+      floor: (x, z) => {
+        const ground = this.world.heightAt(x, z);
+        const water = this.world.water;
+        return water && water.depthAt(x, z) > 0.2 ? Math.max(ground, water.surfaceAt(x, z)) : ground;
+      },
+      blocked: (x, z, radius) => this.npcBlocked(x, z, radius),
+      spark: (pos, color) => this.particles.emit(pos, color, 1, { speed: 0.4, size: 0.12, life: 0.28, up: 0.2 }),
+    });
+    this.scene.add(this.signalOrbs.group);
 
     this.arena = arenaSpec(DEFAULT_ARENA)!;
     this.loadArena(this.arena.id);
@@ -912,6 +929,7 @@ export class RaidEngine {
     this.powerFx.clear();
     this.castScale = 1;
     this.secondWindUsed = false;
+    this.flushSignalOrbs(false);
     this.signalBank.reset();
     this.engagement.reset();
     this.attackersNow = 0;
@@ -1795,6 +1813,7 @@ export class RaidEngine {
   }
 
   dispose() {
+    this.flushSignalOrbs(false);
     this.disposed = true;
     cancelAnimationFrame(this.raf);
     this.unbind();
@@ -1804,6 +1823,7 @@ export class RaidEngine {
     this.cracks.dispose();
     this.afterimages.dispose();
     this.powerFx.dispose();
+    this.signalOrbs.dispose();
     this.unloadBeacon();
     for (const world of this.worlds.values()) world.dispose();
     this.particles.dispose();
@@ -2138,6 +2158,7 @@ export class RaidEngine {
     this.cracks.update(dt);
     this.afterimages.update(dt);
     this.powerFx.update(dt, this.camera);
+    this.stepSignalOrbs(dt, time);
     this.beacon?.update(dt, time, this.pos, this.spec.visual.auraColor, this.camera);
     this.powerVfx.update(dt, time, this.aura, this.maxAura, !this.burnout && !this.powerOut.down, this.camera);
   }
@@ -3320,6 +3341,46 @@ export class RaidEngine {
     this.hitStopT = Math.max(this.hitStopT, seconds);
   }
 
+  /** Pull orbs toward every Ryder in the fight and pay what reaches them. */
+  private stepSignalOrbs(dt: number, time: number) {
+    const collectors = this.orbCollectors;
+    collectors.length = 0;
+    if (this.hp > 0 && this.player) {
+      collectors.push({
+        seat: this.controlledSeat,
+        x: this.pos.x,
+        y: this.player.humanoid.group.position.y + 1,
+        z: this.pos.z,
+        radius: ORB_MAGNET_RADIUS + this.modifiers.pickupRadius,
+      });
+    }
+    for (const host of this.hosts) {
+      if (!host.ally || !host.cpu || host.hp <= 0 || (host.down ?? 0) > 0 || host.seat === undefined) continue;
+      collectors.push({ seat: host.seat, x: host.pos.x, y: host.fighter.humanoid.group.position.y + 1, z: host.pos.z, radius: ORB_MAGNET_RADIUS });
+    }
+    if (!this.signalOrbs.count) return;
+    this.paySignalOrbs(this.signalOrbs.update(dt, time, collectors, this.camera), true);
+  }
+
+  /** Round clear, a lost fight, a restart: whatever is still on the street pays its owner. */
+  private flushSignalOrbs(show: boolean) {
+    if (!this.signalOrbs?.count) return;
+    this.paySignalOrbs(this.signalOrbs.flush(), show);
+  }
+
+  private paySignalOrbs(pickups: OrbPickup[], show: boolean) {
+    const round = this.currentRound();
+    for (const pickup of pickups) {
+      const paid = this.signalBank.collect(pickup.ids, pickup.amount, round, pickup.seat);
+      if (paid <= 0 || pickup.seat !== this.controlledSeat || !show) continue;
+      this.emitSound(`signal.orb.${Math.min(9, pickup.orbs)}`);
+      const at = _tmp.set(this.pos.x, (this.player?.humanoid.group.position.y ?? 0) + 2.1, this.pos.z).project(this.camera);
+      if (at.z < 1 && this.signalPops.length < 12) {
+        this.signalPops.push({ amount: paid, x: (at.x * 0.5 + 0.5) * 100, y: (0.5 - at.y * 0.5) * 100 });
+      }
+    }
+  }
+
   private emitSound(id: string) {
     this.onSound?.(id);
   }
@@ -4295,6 +4356,7 @@ export class RaidEngine {
   }
 
   private failRaid() {
+    this.flushSignalOrbs(false);
     this.phase = 'dead';
     this.banner = { title: 'RAID DEFEAT', sub: 'THE SQUAD IS DOWN' };
     this.bannerT = 30;
@@ -4371,6 +4433,7 @@ export class RaidEngine {
     // Round clear SP goes to every seat that is still in the fight. The bank
     // keeps the round keyed, so a reopened board cannot pay twice.
     const seats = this.gameMode === GameMode.RAID && this.raidPlan ? [...this.statLines.keys()] : [this.controlledSeat];
+    this.flushSignalOrbs(true);
     for (const seat of seats) this.signalBank.roundClear(round, seat);
     this.phase = 'report';
     this.mapOpen = false;
@@ -6053,6 +6116,7 @@ export class RaidEngine {
         this.failRaid();
         return;
       }
+      this.flushSignalOrbs(false);
       this.phase = 'dead';
       this.kit?.interrupt();
       this.scheduler.clear();
@@ -6171,10 +6235,14 @@ export class RaidEngine {
         this.awardPoints(killReward(host.tier ?? 1, boss));
         const finisher = Boolean(flungBy) || this.pendingFinisher;
         if (finisher) this.awardPoints(RAID_REWARDS.finisher);
-        // Signal Points: keyed by body, so a flung corpse or a replayed death never pays twice.
+        // Signal Points: keyed by body, so a flung corpse or a replayed death never drops twice.
+        // The kill's SP leaves the body as Signal Orbs and pays when a Ryder collects them.
         if (this.gameMode !== GameMode.PVP && !host.paid) {
           host.paid = true;
-          this.signalBank.kill(host, host.tier ?? 1, boss, finisher, this.currentRound(), this.actingSeat());
+          const seat = this.actingSeat();
+          const owed = this.signalBank.claimKill(host, host.tier ?? 1, boss, finisher, this.currentRound(), seat);
+          const y = this.bodyHeight(host.pos.x, host.pos.z, Boolean(host.swims)) + 1;
+          this.signalOrbs.drop(owed, seat, host.pos.x, y, host.pos.z);
         }
       }
       const siphon = this.modifiers.passives.includes('auraOnKill') ? 6 : 0;
@@ -6614,6 +6682,7 @@ export class RaidEngine {
       })),
       openSlots: this.openSlots,
       signal: this.signalHud(),
+      signalPops: this.drainSignalPops(),
       guarding: this.guarding,
       round: this.gameMode === GameMode.RAID && this.raidPlan ? this.raidWave : this.round,
       remaining:
@@ -6708,6 +6777,13 @@ export class RaidEngine {
         ? { mode: this.swim.mode, oxygen: this.swim.oxygen, submerged: this.swim.mode === 'under' }
         : null,
     });
+  }
+
+  private drainSignalPops() {
+    if (!this.signalPops.length) return [];
+    const out = this.signalPops;
+    this.signalPops = [];
+    return out;
   }
 
   private signalHud(): HudState['signal'] {

@@ -31,7 +31,7 @@ for (const id of RYDER_ORDER) {
   const tree = treeFor(id);
   const problems = validateTree(tree);
   assert.deepEqual(problems, [], `${id}: ${problems.join('; ')}`);
-  assert.equal(tree.nodes.length, 22, `${id} has ${tree.nodes.length} nodes`);
+  assert.equal(tree.nodes.length, 23, `${id} has ${tree.nodes.length} nodes`);
   for (const branch of POWER_BRANCHES) {
     assert.ok(tree.nodes.some((node) => node.branch === branch), `${id} has a ${branch} branch`);
   }

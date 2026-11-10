@@ -1,6 +1,6 @@
 'use client';
 
-import { ArrowUpFromLine, Check, Footprints, Heart, HeartPulse, LayoutGrid, Link2, Lock, Shield, Sparkles, Swords, Wind, Zap } from 'lucide-react';
+import { ArrowUpFromLine, Check, Footprints, Heart, HeartPulse, LayoutGrid, Link2, Lock, Magnet, Shield, Sparkles, Swords, Wind, Zap } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from 'react';
 import { RYDERZ, type RyderId } from '@/lib/ryderz-raid/config';
 import { DERIVED_POWERS, derivedAtRank, isDerivedAbility, rankScaling } from '@/lib/ryderz-raid/progression/derived-powers';
@@ -29,6 +29,7 @@ const STAT_LABEL: Record<StatKey, string> = {
   comboWindow: 'Combo window',
   knockback: 'Knockback',
   hitStunResist: 'Hit-stun resist',
+  pickupRadius: 'Orb magnet',
 };
 
 const STAT_ICON: Record<StatKey, ReactNode> = {
@@ -46,6 +47,7 @@ const STAT_ICON: Record<StatKey, ReactNode> = {
   comboWindow: <Link2 size={18} />,
   knockback: <Swords size={18} />,
   hitStunResist: <Shield size={18} />,
+  pickupRadius: <Magnet size={18} />,
 };
 
 /** Row height of the tree diagram, px. Nodes sit on row centres. */
@@ -75,17 +77,20 @@ function nodeGlyph(node: PowerNodeView): ReactNode {
   }
 }
 
-function signed(value: number, pct: boolean) {
+function signed(value: number, pct: boolean, unit = '') {
   const v = pct ? Math.round(value * 100) : Math.round(value);
-  return `${v > 0 ? '+' : ''}${v}${pct ? '%' : ''}`;
+  return `${v > 0 ? '+' : ''}${v}${pct ? '%' : unit}`;
 }
+
+/** Stats that read as flat amounts instead of percentages, with their unit. */
+const FLAT_STATS: Partial<Record<StatKey, string>> = { maxHp: '', maxAura: '', pickupRadius: ' m' };
 
 function describeEffect(effect: NodeEffect): string {
   switch (effect.kind) {
     case 'ability':
       return 'A power for the deck. Rank it up to hit harder for less aura.';
     case 'stat':
-      return `${signed(effect.value, effect.stat !== 'maxHp' && effect.stat !== 'maxAura')} ${STAT_LABEL[effect.stat].toLowerCase()} per rank`;
+      return `${signed(effect.value, !(effect.stat in FLAT_STATS), FLAT_STATS[effect.stat])} ${STAT_LABEL[effect.stat].toLowerCase()} per rank`;
     case 'combo':
       return `New combo · ${effect.recipe.sequence.map((step) => step.toUpperCase()).join(' › ')}`;
     case 'slot':
@@ -107,8 +112,9 @@ function rankLines(node: PowerNodeView): StatLine[] {
   const next = node.rank > 0 && node.rank < node.maxRank ? node.rank + 1 : null;
   const effect = node.effect;
   if (effect.kind === 'stat') {
-    const pct = effect.stat !== 'maxHp' && effect.stat !== 'maxAura';
-    return [{ label: STAT_LABEL[effect.stat], now: signed(effect.value * rank, pct), next: next ? signed(effect.value * next, pct) : null }];
+    const pct = !(effect.stat in FLAT_STATS);
+    const unit = FLAT_STATS[effect.stat];
+    return [{ label: STAT_LABEL[effect.stat], now: signed(effect.value * rank, pct, unit), next: next ? signed(effect.value * next, pct, unit) : null }];
   }
   if (effect.kind !== 'ability') return [];
   const id = effect.abilityId;

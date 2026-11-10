@@ -160,10 +160,83 @@ export function createRaidAudio(): RaidAudio {
     osc.stop(when + 1.45);
   };
 
+  // Signal Orb pickup: an airy swoosh and a rising sweep that land on a bright
+  // two-note chime. Rapid pickups climb in pitch; a short voice gate keeps a
+  // shower of orbs from stacking into distortion.
+  let orbStreak = 0;
+  let orbLast = -1;
+  const orbVoices: number[] = [];
+  const shwoop = (batch: number) => {
+    const when = ctx.currentTime;
+    while (orbVoices.length && orbVoices[0] < when) orbVoices.shift();
+    if (orbVoices.length >= 3) return;
+    orbVoices.push(when + 0.34);
+    orbStreak = when - orbLast < 0.6 ? Math.min(8, orbStreak + 1) : 0;
+    orbLast = when;
+    const lift = 2 ** ((orbStreak * 1.5 + (Math.random() - 0.5) * 0.6) / 12);
+    const loud = Math.min(1.5, 1 + Math.log2(Math.max(1, batch)) * 0.18);
+    const out = ctx.createGain();
+    out.gain.value = 0.9 * loud;
+    out.connect(master);
+
+    const air = ctx.createBufferSource();
+    air.buffer = bed;
+    air.loop = true;
+    const airBand = ctx.createBiquadFilter();
+    airBand.type = 'bandpass';
+    airBand.Q.value = 1.1;
+    airBand.frequency.setValueAtTime(700 * lift, when);
+    airBand.frequency.exponentialRampToValueAtTime(5200 * lift, when + 0.17);
+    const airGain = ctx.createGain();
+    airGain.gain.setValueAtTime(0.0001, when);
+    airGain.gain.exponentialRampToValueAtTime(0.16, when + 0.07);
+    airGain.gain.exponentialRampToValueAtTime(0.0001, when + 0.2);
+    air.connect(airBand);
+    airBand.connect(airGain);
+    airGain.connect(out);
+    air.start(when);
+    air.stop(when + 0.22);
+
+    const sweep = ctx.createOscillator();
+    sweep.type = 'triangle';
+    sweep.frequency.setValueAtTime(480 * lift, when);
+    sweep.frequency.exponentialRampToValueAtTime(1500 * lift, when + 0.15);
+    const sweepGain = ctx.createGain();
+    sweepGain.gain.setValueAtTime(0.0001, when);
+    sweepGain.gain.exponentialRampToValueAtTime(0.1, when + 0.04);
+    sweepGain.gain.exponentialRampToValueAtTime(0.0001, when + 0.17);
+    sweep.connect(sweepGain);
+    sweepGain.connect(out);
+    sweep.start(when);
+    sweep.stop(when + 0.19);
+
+    const ring = when + 0.13;
+    const notes = batch > 2 ? [1568, 2349, 3136] : [1568, 2349];
+    notes.forEach((freq, index) => {
+      const osc = ctx.createOscillator();
+      osc.type = 'sine';
+      osc.frequency.value = freq * lift;
+      osc.detune.value = (Math.random() - 0.5) * 8;
+      const gain = ctx.createGain();
+      const at = ring + index * 0.035;
+      gain.gain.setValueAtTime(0.0001, at);
+      gain.gain.exponentialRampToValueAtTime(index === 0 ? 0.09 : 0.06, at + 0.008);
+      gain.gain.exponentialRampToValueAtTime(0.0001, at + 0.2);
+      osc.connect(gain);
+      gain.connect(out);
+      osc.start(at);
+      osc.stop(at + 0.22);
+    });
+  };
+
   const play = (id: string) => {
     plays.push(id);
     if (plays.length > 24) plays.shift();
     void ctx.resume();
+    if (id.startsWith('signal.orb')) {
+      shwoop(Number(id.split('.')[2]) || 1);
+      return;
+    }
     const heavy = /kick|smash|heavy/.test(id);
     if (/whiff|swing/.test(id)) {
       whoosh(heavy);
