@@ -2,6 +2,8 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { ARENA_BLOCK, ARENA_BUILDINGS, ARENA_HALF, ARENA_TREE, BOUNDARY, CAR_MODELS, DISTRICT_SPAN } from './config';
 import { NavGrid, sealCrevices } from './nav-grid';
+import type { StoryTriggerSet } from './riverdale/story';
+import type { ThrowSpot } from './throwables';
 import { instanceCopies, mergeStatic, swapOccluders } from './render/instancing';
 import { glow } from './toon';
 import {
@@ -63,6 +65,26 @@ export interface World {
   stepFacility?: (agents: { x: number; z: number }[], dt: number) => void;
   /** Latest footfall, so sand and grass can scuff under the fighter. */
   stepTrail?: (x: number, z: number) => void;
+  /** Highest a body's crown may reach under a roof. Null where the sky is open. */
+  ceilingAt?: (x: number, z: number) => number | null;
+  /** Underside of a solid roof the camera lens must stay below. Null where the sky is open. */
+  roofAt?: (x: number, z: number) => number | null;
+  /** Within this distance a spawn waits until the player looks away. The default is 8 m. */
+  spawnClear?: number;
+  /** Loose props this arena starts with, in place of the street set. */
+  throwSpots?: readonly ThrowSpot[];
+  /** Hidden supply caches that pay Signal Orbs once per match. */
+  caches?: readonly { id: string; label: string; x: number; y: number; z: number; reward: number }[];
+  claimCache?: (id: string) => void;
+  resetCaches?: () => void;
+  /** A blow, blast or landing prop at (x, z). Decorations nearby react; lights can break. */
+  impact?: (x: number, z: number, radius: number) => void;
+  /** Story Mode region hooks. Dormant until a story controller activates them. */
+  storyTriggers?: StoryTriggerSet;
+  /** Where the arena's music plays from, for the audio mix. */
+  ambience?: { kind: 'party'; x: number; y: number; z: number };
+  /** Spawn zones, caches and trigger regions drawn in the world. Off by default. */
+  setDebugOverlay?: (on: boolean) => void;
 }
 
 /*

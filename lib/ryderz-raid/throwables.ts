@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { toon } from './toon';
 
-export type ThrowableKind = 'bottle' | 'brick' | 'crate' | 'cone' | 'can';
+export type ThrowableKind = 'bottle' | 'brick' | 'crate' | 'cone' | 'can' | 'chair' | 'plank';
 
 export interface ThrowableStats {
   kind: ThrowableKind;
@@ -11,15 +11,25 @@ export interface ThrowableStats {
   damage: number;
   stun: number;
   breakable: boolean;
+  /** Breaks on any landing after a throw, not only on a hit. */
+  shatters?: boolean;
 }
 
 export const THROWABLE_STATS: Record<ThrowableKind, ThrowableStats> = {
-  bottle: { kind: 'bottle', mass: 0.4, pickupRadius: 0.85, throwForce: 11, damage: 6, stun: 0.16, breakable: true },
+  bottle: { kind: 'bottle', mass: 0.4, pickupRadius: 0.85, throwForce: 11, damage: 6, stun: 0.16, breakable: true, shatters: true },
   brick: { kind: 'brick', mass: 1.1, pickupRadius: 0.8, throwForce: 13, damage: 9, stun: 0.22, breakable: true },
   crate: { kind: 'crate', mass: 2.4, pickupRadius: 1.05, throwForce: 9, damage: 11, stun: 0.28, breakable: true },
   cone: { kind: 'cone', mass: 0.6, pickupRadius: 0.9, throwForce: 10, damage: 5, stun: 0.14, breakable: false },
   can: { kind: 'can', mass: 1.6, pickupRadius: 1, throwForce: 10, damage: 8, stun: 0.2, breakable: false },
+  chair: { kind: 'chair', mass: 2, pickupRadius: 1, throwForce: 9.5, damage: 10, stun: 0.26, breakable: true },
+  plank: { kind: 'plank', mass: 1.4, pickupRadius: 1.1, throwForce: 11, damage: 9, stun: 0.24, breakable: true },
 };
+
+export interface ThrowSpot {
+  kind: ThrowableKind;
+  x: number;
+  z: number;
+}
 
 export interface ThrowBody {
   id: number;
@@ -41,6 +51,7 @@ export interface ThrowBody {
 
 const KINDS: ThrowableKind[] = ['bottle', 'brick', 'crate', 'cone', 'can', 'bottle', 'brick', 'cone', 'can', 'crate'];
 
+/** The Block's loose props. Other worlds pass their own spots. */
 const SPOTS: Array<[number, number]> = [
   [15.5, 18],
   [-16, 15],
@@ -77,6 +88,25 @@ function propMesh(kind: ThrowableKind) {
     const base = new THREE.Mesh(new THREE.CylinderGeometry(0.24, 0.24, 0.06, 8), toon(0xc8c4bc));
     base.position.y = 0.03;
     group.add(cone, base);
+  } else if (kind === 'chair') {
+    const metal = toon(0x3a3c42);
+    const seat = new THREE.Mesh(new THREE.BoxGeometry(0.44, 0.04, 0.42), metal);
+    seat.position.y = 0.45;
+    const back = new THREE.Mesh(new THREE.BoxGeometry(0.44, 0.36, 0.04), metal);
+    back.position.set(0, 0.75, -0.21);
+    group.add(seat, back);
+    for (const lx of [-0.2, 0.2]) {
+      for (const lz of [-0.19, 0.19]) {
+        const leg = new THREE.Mesh(new THREE.BoxGeometry(0.025, 0.45, 0.025), metal);
+        leg.position.set(lx, 0.225, lz);
+        group.add(leg);
+      }
+    }
+  } else if (kind === 'plank') {
+    const plank = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.05, 0.2), toon(0x8a6a44));
+    plank.position.y = 0.03;
+    plank.rotation.y = 0.4;
+    group.add(plank);
   } else {
     const can = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.24, 0.7, 10), toon(0x3e4654));
     can.position.y = 0.35;
@@ -95,30 +125,11 @@ export class ThrowableField {
   readonly items: ThrowBody[] = [];
   private seq = 1;
 
-  constructor(private scene: THREE.Scene) {
-    SPOTS.forEach(([x, z], i) => {
-      const kind = KINDS[i % KINDS.length];
-      const mesh = propMesh(kind);
-      const pos = new THREE.Vector3(x, 0, z);
-      mesh.position.copy(pos);
-      scene.add(mesh);
-      this.items.push({
-        id: this.seq,
-        stats: THROWABLE_STATS[kind],
-        mesh,
-        pos,
-        vel: new THREE.Vector3(),
-        heldBy: null,
-        gripped: false,
-        lastThrower: null,
-        safeUntil: 0,
-        flying: false,
-        dealt: false,
-        broken: false,
-        spin: 0,
-      });
-      this.seq += 1;
-    });
+  constructor(
+    private scene: THREE.Scene,
+    spots: readonly ThrowSpot[] = SPOTS.map(([x, z], i) => ({ kind: KINDS[i % KINDS.length], x, z })),
+  ) {
+    for (const spot of spots) this.place(spot.kind, spot.x, spot.z);
   }
 
   /** Drop another street prop. Weapon racks call this when a round restocks. */
@@ -220,7 +231,7 @@ export class ThrowableField {
     item.flying = true;
     item.dealt = false;
     item.pos.copy(origin);
-    item.pos.y = Math.max(item.pos.y, 1.05);
+    item.pos.y = Math.max(item.pos.y, from.y - 0.15);
     item.vel.copy(dir).multiplyScalar(item.stats.throwForce);
     item.vel.y += 2.2;
   }
@@ -236,6 +247,7 @@ export class ThrowableField {
     time: number,
     groundAt: (x: number, z: number) => number,
     onImpact: (item: ThrowBody, point: THREE.Vector3) => void,
+    onBreak?: (item: ThrowBody, point: THREE.Vector3) => void,
   ) {
     for (const item of this.items) {
       if (item.broken) continue;
@@ -263,7 +275,10 @@ export class ThrowableField {
           item.flying = false;
           item.vel.set(0, 0, 0);
         }
-        if (item.stats.breakable && item.dealt) item.broken = true;
+        if (item.stats.breakable && (item.dealt || item.stats.shatters)) {
+          item.broken = true;
+          onBreak?.(item, item.pos);
+        }
       }
       item.mesh.position.copy(item.pos);
       item.mesh.rotation.x = item.spin;

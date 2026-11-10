@@ -5,6 +5,7 @@ import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPa
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { cullInstances, untrackInstances } from './instancing';
 import { LightPool } from './light-pool';
+import { RIVERDALE, type RiverdaleTime } from '../riverdale/config';
 
 /**
  * Frame pipeline for the raid: an HDR scene pass with MSAA, filmic tone
@@ -16,7 +17,7 @@ import { LightPool } from './light-pool';
  * it swaps worlds and leaves the per-frame work to `follow` and `render`.
  */
 
-export type WorldKey = 'block' | 'pad' | 'island';
+export type WorldKey = 'block' | 'pad' | 'island' | 'riverdale';
 
 export interface Atmosphere {
   fog: { color: number; density: number };
@@ -37,6 +38,49 @@ export interface Atmosphere {
   camera: { near: number; far: number };
   shadow: { radius: number; far: number; bias: number; normalBias: number };
 }
+
+/**
+ * Riverdale Park under the structure. Dusk is the default: a low orange sun
+ * rakes in under the slab from the open side while the party lights take over.
+ */
+export const RIVERDALE_ATMOSPHERES: Record<RiverdaleTime, Atmosphere> = {
+  day: {
+    fog: { color: 0x9aa69a, density: 0.0062 },
+    background: null,
+    sun: { color: 0xfff0dc, intensity: 1.45, offset: [-36, 64, 44] },
+    hemi: { sky: 0xbcd4e8, ground: 0x5a4a34, intensity: 0.75 },
+    fill: { color: 0xd8e4ff, intensity: 0.2, position: [30, 14, 40] },
+    exposure: 0.95,
+    bloom: { strength: 0.22, radius: 0.5, threshold: 1.0 },
+    environment: { zenith: 0x4a7cc0, horizon: 0xc8d8dc, ground: 0x5a4a30, intensity: 0.6 },
+    camera: { near: 0.08, far: 620 },
+    shadow: { radius: 48, far: 200, bias: -0.0004, normalBias: 0.04 },
+  },
+  dusk: {
+    fog: { color: 0x2a2a3a, density: 0.0105 },
+    background: null,
+    sun: { color: 0xffa868, intensity: 1.1, offset: [-52, 22, 46] },
+    hemi: { sky: 0x6a70a0, ground: 0x2c3022, intensity: 1.0 },
+    fill: { color: 0xff6ab0, intensity: 0.12, position: [0, 6, -30] },
+    exposure: 1.08,
+    bloom: { strength: 0.62, radius: 0.55, threshold: 0.8 },
+    environment: { zenith: 0x1c2048, horizon: 0xb86a50, ground: 0x1a1410, intensity: 0.5 },
+    camera: { near: 0.08, far: 620 },
+    shadow: { radius: 48, far: 200, bias: -0.0004, normalBias: 0.04 },
+  },
+  night: {
+    fog: { color: 0x0e0f1a, density: 0.013 },
+    background: null,
+    sun: { color: 0x9fb4ff, intensity: 0.5, offset: [-30, 60, 30] },
+    hemi: { sky: 0x2a3050, ground: 0x16100c, intensity: 0.75 },
+    fill: { color: 0xff4fa8, intensity: 0.32, position: [0, 6, -30] },
+    exposure: 1.18,
+    bloom: { strength: 0.7, radius: 0.55, threshold: 0.75 },
+    environment: { zenith: 0x05060f, horizon: 0x2a2238, ground: 0x0a0806, intensity: 0.4 },
+    camera: { near: 0.08, far: 620 },
+    shadow: { radius: 48, far: 200, bias: -0.0004, normalBias: 0.04 },
+  },
+};
 
 export const ATMOSPHERES: Record<WorldKey, Atmosphere> = {
   // Rain-soaked downtown at night. The moon is the key; sodium lamps and neon fill from below.
@@ -84,6 +128,7 @@ export const ATMOSPHERES: Record<WorldKey, Atmosphere> = {
     camera: { near: 0.3, far: 2200 },
     shadow: { radius: 56, far: 260, bias: -0.0004, normalBias: 0.05 },
   },
+  riverdale: RIVERDALE_ATMOSPHERES[RIVERDALE.timeOfDay],
 };
 
 export interface PipelineLights {
