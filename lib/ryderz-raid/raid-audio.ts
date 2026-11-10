@@ -9,6 +9,11 @@ export interface RaidAudio {
   startCity(): void;
   /** Tropical bed instead of traffic. Safe to call every frame. */
   setIsland(on: boolean): void;
+  /**
+   * Woods instead of traffic, with the party's beat at `level` (0 far, 1 at the
+   * speakers). Null leaves the woods. Safe to call every frame.
+   */
+  setParty(level: number | null): void;
   /** Muffles the bed while the camera is under the wave. */
   setSubmerged(on: boolean): void;
   dispose(): void;
@@ -51,6 +56,8 @@ export function createRaidAudio(): RaidAudio {
   let timer = 0;
   let islandOn = false;
   let surf: { stop: () => void } | null = null;
+  let party: { stop: () => void; level: GainNode } | null = null;
+  let partyWall: BiquadFilterNode | null = null;
   const muffler = ctx.createBiquadFilter();
   muffler.type = 'lowpass';
   muffler.frequency.value = 2800;
@@ -264,7 +271,7 @@ export function createRaidAudio(): RaidAudio {
     const armTraffic = () => {
       if (timer || islandOn) return;
       timer = window.setInterval(() => {
-        events[Math.floor(Math.random() * events.length)]();
+        if (!party) events[Math.floor(Math.random() * events.length)]();
       }, 3400);
     };
     armTraffic();
@@ -322,9 +329,126 @@ export function createRaidAudio(): RaidAudio {
     if (!timer) {
       const events = [carPass, carPass, horn, siren];
       timer = window.setInterval(() => {
-        events[Math.floor(Math.random() * events.length)]();
+        if (!party) events[Math.floor(Math.random() * events.length)]();
       }, 3400);
     }
+  };
+
+  /** One muffled bar step: a kick on every beat, a soft hat between, heard through the woods. */
+  const beat = (out: AudioNode, when: number, step: number) => {
+    if (step % 2 === 0) {
+      const kick = ctx.createOscillator();
+      kick.type = 'sine';
+      kick.frequency.setValueAtTime(110, when);
+      kick.frequency.exponentialRampToValueAtTime(42, when + 0.16);
+      const g = envGain(ctx, 0.9, 0.32, when);
+      kick.connect(g);
+      g.connect(out);
+      kick.start(when);
+      kick.stop(when + 0.34);
+    }
+    if (step % 4 === 2 || step % 8 === 7) {
+      const bass = ctx.createOscillator();
+      bass.type = 'triangle';
+      bass.frequency.value = step % 8 === 7 ? 73.4 : 55;
+      const g = envGain(ctx, 0.35, 0.22, when);
+      bass.connect(g);
+      g.connect(out);
+      bass.start(when);
+      bass.stop(when + 0.24);
+    }
+    if (step % 2 === 1) {
+      const hat = ctx.createBufferSource();
+      hat.buffer = bed;
+      const hp = ctx.createBiquadFilter();
+      hp.type = 'highpass';
+      hp.frequency.value = 3000;
+      const g = envGain(ctx, 0.12, 0.05, when);
+      hat.connect(hp);
+      hp.connect(g);
+      g.connect(out);
+      hat.start(when, Math.random());
+      hat.stop(when + 0.06);
+    }
+  };
+
+  const startParty = () => {
+    const level = ctx.createGain();
+    level.gain.value = 0;
+    // Walls and trees take the top off; up close the filter opens a little.
+    const wall = ctx.createBiquadFilter();
+    wall.type = 'lowpass';
+    wall.frequency.value = 420;
+    level.connect(wall);
+    wall.connect(muffler);
+    const leaves = ctx.createBufferSource();
+    leaves.buffer = bed;
+    leaves.loop = true;
+    const band = ctx.createBiquadFilter();
+    band.type = 'bandpass';
+    band.frequency.value = 900;
+    band.Q.value = 0.5;
+    const leafGain = ctx.createGain();
+    leafGain.gain.value = 0.035;
+    leaves.connect(band);
+    band.connect(leafGain);
+    leafGain.connect(muffler);
+    leaves.start();
+    const stepSeconds = 60 / 122 / 2;
+    let next = ctx.currentTime + 0.1;
+    let step = 0;
+    const schedule = window.setInterval(() => {
+      while (next < ctx.currentTime + 0.3) {
+        beat(level, next, step);
+        next += stepSeconds;
+        step += 1;
+      }
+      // Crickets once the light goes.
+      if (Math.random() < 0.08) {
+        const when = ctx.currentTime + Math.random() * 0.2;
+        for (let k = 0; k < 3; k += 1) {
+          const chirp = ctx.createOscillator();
+          chirp.type = 'sine';
+          chirp.frequency.value = 4400 + Math.random() * 300;
+          const g = envGain(ctx, 0.012, 0.04, when + k * 0.07);
+          chirp.connect(g);
+          g.connect(muffler);
+          chirp.start(when + k * 0.07);
+          chirp.stop(when + k * 0.07 + 0.05);
+        }
+      }
+    }, 100);
+    party = {
+      level,
+      stop: () => {
+        window.clearInterval(schedule);
+        try {
+          leaves.stop();
+        } catch {
+          /* already stopped */
+        }
+        level.disconnect();
+      },
+    };
+    partyWall = wall;
+  };
+  const setParty = (level: number | null) => {
+    if (level === null) {
+      if (!party) return;
+      party.stop();
+      party = null;
+      partyWall = null;
+      if (city && !islandOn) city.gain.gain.value = 0.07;
+      return;
+    }
+    if (!party) {
+      startParty();
+      if (city) city.gain.gain.value = 0.025;
+    }
+    const now = ctx.currentTime;
+    const v = Math.max(0, Math.min(1, level));
+    party!.level.gain.setTargetAtTime(0.06 + v * 0.34, now, 0.25);
+    partyWall?.frequency.setTargetAtTime(380 + v * 900, now, 0.25);
   };
 
   const setSubmerged = (on: boolean) => {
@@ -338,8 +462,11 @@ export function createRaidAudio(): RaidAudio {
     resume: () => ctx.resume().then(() => undefined),
     startCity,
     setIsland,
+    setParty,
     setSubmerged,
     dispose: () => {
+      party?.stop();
+      party = null;
       surf?.stop();
       surf = null;
       city?.stop();
