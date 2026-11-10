@@ -242,7 +242,7 @@ export default function PauseMenu({
           onBack={back}
         />
       )}
-      {view === 'arena' && <ArenaSelector manager={manager} arenaId={arenaId} active onBack={back} />}
+      {view === 'arena' && <ArenaSelector manager={manager} arenaId={arenaId} gameMode={gameMode} active onBack={back} />}
       {view === 'mode' && <GameModeSelector manager={manager} gameMode={gameMode} active onBack={back} />}
       {view === 'settings' && (
         <SettingsMenu engine={engine} active onBack={back} onOpenCameraTuning={onOpenCameraTuning} />

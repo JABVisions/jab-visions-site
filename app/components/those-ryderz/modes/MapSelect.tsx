@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState, type RefObject } from 'react';
-import { formatSpan, listArenas, type ArenaDefinition } from '@/lib/ryderz-raid/arenas';
+import { arenaAllows, formatSpan, listArenas, type ArenaDefinition } from '@/lib/ryderz-raid/arenas';
 import { paintArenaPreview } from '@/lib/ryderz-raid/arena-preview';
 import { useMenuKeys, wrap } from '../menu/useMenuKeys';
 import GlitchButton from '../start/GlitchButton';
@@ -19,7 +19,7 @@ export default function MapSelect({
   onBack: () => void;
   onConfirm: (id: string) => void;
 }) {
-  const arenas = useMemo(() => listArenas().filter((arena) => arena.id !== 'training'), []);
+  const arenas = useMemo(() => listArenas().filter((arena) => arena.id !== 'training' && arenaAllows(arena, mode)), [mode]);
   const [focus, setFocus] = useState(() => Math.max(0, arenas.findIndex((arena) => arena.id === arenaId)));
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const focused = arenas[focus] ?? arenas[0];

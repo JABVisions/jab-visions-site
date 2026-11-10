@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { RyderId } from '@/lib/ryderz-raid/config';
 import { RYDERZ } from '@/lib/ryderz-raid/config';
-import { listArenas } from '@/lib/ryderz-raid/arenas';
+import { arenaAllows, listArenas } from '@/lib/ryderz-raid/arenas';
 import { GameMode } from '@/lib/ryderz-raid/game-mode';
 import { playableCharacters } from '@/lib/ryderz-raid/roster';
 import {
@@ -62,7 +62,7 @@ export default function RaidLobby({
   onSpectate: (net: { code: string; guestId: string }) => void;
 }) {
   const roster = useMemo(() => playableCharacters(GameMode.RAID), []);
-  const arenas = useMemo(() => listArenas().filter((arena) => arena.available), []);
+  const arenas = useMemo(() => listArenas().filter((arena) => arena.available && arenaAllows(arena, 'raid')), []);
   const [guest, setGuest] = useState('');
   const [squad, setSquad] = useState<RaidSquad>(() => defaultSquad(hostId));
   const [focus, setFocus] = useState(0);

@@ -106,6 +106,7 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
   const waterKey = useRef('');
   const audioRef = useRef<{
     setIsland(on: boolean): void;
+    setParty(level: number | null): void;
     setSubmerged(on: boolean): void;
   } | null>(null);
   const boardSeconds = useRef<HTMLElement>(null);
@@ -218,6 +219,7 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
       setWater(next.water);
     }
     audioRef.current?.setIsland(Boolean(next.water));
+    audioRef.current?.setParty(next.partyLevel);
     audioRef.current?.setSubmerged(Boolean(next.water?.submerged));
     playerStore.syncLocalVitals({
       health: next.hp,
@@ -331,6 +333,7 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
       resume(): Promise<void>;
       startCity(): void;
       setIsland(on: boolean): void;
+      setParty(level: number | null): void;
       setSubmerged(on: boolean): void;
       dispose(): void;
     } | null = null;
@@ -436,8 +439,8 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
     netRef.current = net;
     setPvpOpponent(null);
     setPvpTwo(false);
-    manager.setArena(squad.arenaId);
     manager.setGameMode(GameMode.RAID);
+    manager.setArena(squad.arenaId);
     playerStore.configure({
       mode: GameMode.RAID,
       localRyder: ryder,
@@ -1062,6 +1065,7 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
           arenaId={managerState.arenaId}
           onBack={() => setScreen(drop.mode === 'pvp' ? 'pvp' : 'solo-select')}
           onConfirm={(id) => {
+            manager.setGameMode(drop.mode === 'pvp' ? GameMode.PVP : GameMode.SOLO);
             manager.setArena(id);
             if (drop.mode === 'pvp') playPvp(drop.lineup);
             else playSolo(drop.id);

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { arenaSpec, formatSpan, listArenas } from './arenas';
 
 const playable = listArenas().filter((arena) => arena.available).map((arena) => arena.id);
-assert.deepEqual(playable, ['block', 'training-pad', 'island-paradise']);
+assert.deepEqual(playable, ['block', 'training-pad', 'island-paradise', 'riverdale_party']);
 
 const block = arenaSpec('block');
 const pad = arenaSpec('training-pad');
@@ -26,6 +26,12 @@ assert.equal(formatSpan(block.size.metres), `${Math.round(block.size.metres)} m 
 assert.match(block.picture ?? '', /block\.webp/);
 assert.match(pad.picture ?? '', /training-pad\.webp/);
 assert.match(island.picture ?? '', /island-paradise\.webp/);
+
+const riverdale = arenaSpec('riverdale_party');
+assert.ok(riverdale);
+assert.equal(riverdale.size.label, 'City');
+assert.deepEqual(riverdale.modes, ['solo', 'raid']);
+assert.match(riverdale.picture ?? '', /riverdale-party\.webp/);
 
 for (const arena of listArenas()) {
   assert.ok(arena.size.guide.length > 12, arena.id);

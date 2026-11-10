@@ -1,4 +1,4 @@
-import { DEFAULT_ARENA, arenaSpec, type ArenaId } from './arenas';
+import { DEFAULT_ARENA, arenaAllows, arenaSpec, type ArenaId } from './arenas';
 import { arenaChangeRestarts } from './raid/control';
 import { RYDERZ, RYDER_ORDER, type AbilityId, type AbilitySpec, type RyderId } from './config';
 import type { RaidEngine } from './engine';
@@ -535,8 +535,11 @@ export class RyderManager {
 
   setGameMode(mode: GameMode) {
     if (!gameModeSpec(mode).available) return false;
-    this.commit({ gameMode: mode });
+    const current = arenaSpec(this.state.arenaId);
+    const leave = current && !arenaAllows(current, mode);
+    this.commit(leave ? { gameMode: mode, arenaId: DEFAULT_ARENA } : { gameMode: mode });
     this.engine?.setGameMode(mode);
+    if (leave) this.engine?.loadArena(DEFAULT_ARENA, { restart: Boolean(this.engine?.matchLive()) });
     return true;
   }
 
@@ -561,7 +564,8 @@ export class RyderManager {
   }
 
   setArena(id: ArenaId) {
-    if (!arenaSpec(id)?.available) return false;
+    const spec = arenaSpec(id);
+    if (!spec?.available || !arenaAllows(spec, this.state.gameMode)) return false;
     const previous = this.state.arenaId;
     const live = Boolean(this.engine?.matchLive());
     this.commit({ arenaId: id });

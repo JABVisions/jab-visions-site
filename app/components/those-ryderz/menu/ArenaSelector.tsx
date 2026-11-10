@@ -1,7 +1,8 @@
 'use client';
 
 import { useState } from 'react';
-import { listArenas } from '@/lib/ryderz-raid/arenas';
+import { arenaAllows, listArenas } from '@/lib/ryderz-raid/arenas';
+import type { GameMode } from '@/lib/ryderz-raid/game-mode';
 import type { RyderManager } from '@/lib/ryderz-raid/ryder-manager';
 import { useMenuKeys, wrap } from './useMenuKeys';
 import styles from './PauseMenu.module.css';
@@ -10,15 +11,17 @@ import styles from './PauseMenu.module.css';
 export default function ArenaSelector({
   manager,
   arenaId,
+  gameMode,
   active,
   onBack,
 }: {
   manager: RyderManager;
   arenaId: string;
+  gameMode: GameMode;
   active: boolean;
   onBack: () => void;
 }) {
-  const arenas = listArenas();
+  const arenas = listArenas().filter((arena) => arenaAllows(arena, gameMode));
   const [focus, setFocus] = useState(Math.max(0, arenas.findIndex((a) => a.id === arenaId)));
 
   useMenuKeys((key) => {
@@ -38,7 +41,7 @@ export default function ArenaSelector({
       <header className={styles.panelHead}>
         <p className={styles.eyebrow}>Arena select</p>
         <h2>Choose a floor</h2>
-        <p>The Block is the city. P.A.D. Lab is the facility. Island Paradise is the ocean. Choosing another floor restarts the match.</p>
+        <p>The Block is the city. P.A.D. Lab is the facility. Island Paradise is the ocean. The Riverdale Party is the woods. Choosing another floor restarts the match.</p>
       </header>
       <div className={`${styles.scroll} ${styles.options}`} role="listbox" aria-label="Arenas">
         {arenas.map((arena, i) => (

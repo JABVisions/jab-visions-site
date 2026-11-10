@@ -9,8 +9,12 @@
  */
 import { BOUNDARY, HOME_DISTRICT } from './config';
 import { ISLAND_HALF, islandBeacon, islandSpawn } from './island/terrain';
+import { RIVERDALE, RIVERDALE_BEACON, RIVERDALE_SPAWN } from './riverdale/config';
 
 export type ArenaId = string;
+
+/** Solo raid, co-op raid lobby, and Ryder-versus-Ryder. */
+export type ArenaMode = 'solo' | 'raid' | 'pvp';
 
 export interface ArenaPoint {
   x: number;
@@ -31,7 +35,9 @@ export interface ArenaDefinition {
   /** Seconds the Beacon needs to recharge after restoring a Ryder. */
   beaconCooldown: number;
   /** Which built world the engine shows. Omitted arenas stay on the city block. */
-  worldKey?: 'block' | 'pad' | 'island';
+  worldKey?: 'block' | 'pad' | 'island' | 'riverdale';
+  /** Modes that may pick this arena. Omitted means every mode. */
+  modes?: readonly ArenaMode[];
   /** How big the floor is, in words a player can compare. */
   size: ArenaSize;
   /** In-game photograph shown on the map select screen. */
@@ -75,6 +81,10 @@ export function listArenas(): ArenaDefinition[] {
 
 export function arenaSpec(id: ArenaId): ArenaDefinition | undefined {
   return registry.get(id);
+}
+
+export function arenaAllows(arena: ArenaDefinition, mode: ArenaMode) {
+  return !arena.modes || arena.modes.includes(mode);
 }
 
 export const DEFAULT_ARENA: ArenaId = 'block';
@@ -148,6 +158,25 @@ registerArena({
     guide: 'Open water on every side. The beach, the jungle, and the resort are a long run apart.',
   },
   picture: '/assets/those-ryderz/maps/island-paradise.webp?v=1',
+});
+
+registerArena({
+  id: 'riverdale_party',
+  name: 'The Riverdale Party',
+  setting: 'Urban / Woodland · Riverdale Park, Bronx',
+  description: 'A secret party beneath an abandoned concrete structure deep in the woods. When the celebration turns into chaos, the Ryderz must survive.',
+  available: true,
+  worldKey: 'riverdale',
+  modes: ['solo', 'raid'],
+  spawnPoint: RIVERDALE_SPAWN,
+  ryderBeaconPoint: RIVERDALE_BEACON,
+  beaconCooldown: DEFAULT_BEACON_COOLDOWN,
+  size: {
+    label: 'City',
+    metres: RIVERDALE.bounds * 2,
+    guide: 'The structure is 100 m end to end. The trail in from the woods is a long jog; the party floor is a few strides across.',
+  },
+  picture: '/assets/those-ryderz/maps/riverdale-party.webp?v=1',
 });
 
 registerArena({
