@@ -807,7 +807,8 @@ export class RaidEngine {
 
     this.renderer = new THREE.WebGLRenderer({
       canvas,
-      antialias: true,
+      // The composer resolves its own MSAA target; the canvas only receives the final full-screen pass.
+      antialias: false,
       alpha: false,
       powerPreference: 'high-performance',
     });
@@ -838,6 +839,7 @@ export class RaidEngine {
     this.worlds.set('block', this.world);
     this.scene.add(this.world.group);
     this.scene.updateMatrixWorld(true);
+    this.pipeline.useLights(this.world.group);
     this.rig = new ThirdPersonCamera(this.camera, this.world.occluders);
 
     this.particles = new ParticleSystem();
@@ -2197,8 +2199,10 @@ export class RaidEngine {
       this.explored.fill(0);
       this.scene.updateMatrixWorld(true);
       this.rig.setOccluders(this.world.occluders);
+      this.pipeline.useLights(next.group);
       const island = this.worlds.get('island');
       if (island && previous === island && next !== island) {
+        this.pipeline.forgetLights(island.group);
         this.scene.remove(island.group);
         island.dispose();
         this.worlds.delete('island');

@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { ARENA_BLOCK, ARENA_BUILDINGS, ARENA_HALF, ARENA_TREE, BOUNDARY, CAR_MODELS, DISTRICT_SPAN } from './config';
 import { NavGrid, sealCrevices } from './nav-grid';
+import { instanceCopies, mergeStatic, swapOccluders } from './render/instancing';
 import { glow } from './toon';
 import {
   adoptImportedMesh,
@@ -632,6 +633,7 @@ export function buildWorld(): World {
   const materials: THREE.Material[] = [];
   const neon: THREE.MeshBasicMaterial[] = [];
   const pointLights: THREE.PointLight[] = [];
+  const staticGeometries: THREE.BufferGeometry[] = [];
   const registry = { materials, textures, flicker: neon };
   let disposed = false;
 
@@ -903,6 +905,8 @@ export function buildWorld(): World {
           }
           mountBuilding(template.scene, slot, parent);
         });
+        const roots = parent.children.filter((child) => child.name === 'arena-building');
+        swapOccluders(occluders, instanceCopies(parent, roots, 'arena-buildings'));
       });
     });
   }
@@ -1168,6 +1172,7 @@ export function buildWorld(): World {
           root.add(wrapper);
           occluders.push(...meshes);
         });
+        swapOccluders(occluders, instanceCopies(parent, roots, 'parked-cars'));
       });
     });
   }
@@ -1232,6 +1237,7 @@ export function buildWorld(): World {
               adoptImportedMesh(mesh, 0.8);
             });
           });
+          instanceCopies(parent, parent.children.filter((obj) => obj.name === 'arena-tree'), 'arena-trees');
           const standIns = parent.children.filter((obj) => obj.userData.treeStandIn);
           standIns.forEach((obj) => parent.remove(obj));
         });
@@ -1291,6 +1297,9 @@ export function buildWorld(): World {
   occluders.forEach((obj) => {
     obj.userData.raidOccluder = true;
   });
+  // Procedural cars are swapped for models once they load, so they stay loose.
+  const loose = new Set<THREE.Object3D>(group.children.filter((child) => child.name === 'parked-car'));
+  staticGeometries.push(...mergeStatic(group, loose));
   const localObstacles = obstacles.slice();
   const localAlleys = alleys.slice();
   const origins: [number, number][] = [
@@ -1363,6 +1372,7 @@ export function buildWorld(): World {
     disposeTextures(textures);
     materials.forEach((m) => m.dispose());
     steamGeometries.forEach((g) => g.dispose());
+    staticGeometries.forEach((g) => g.dispose());
     sky.dispose();
     skyline.dispose();
     rain.dispose();

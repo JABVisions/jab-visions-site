@@ -3,6 +3,8 @@ import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
+import { cullInstances, untrackInstances } from './instancing';
+import { LightPool } from './light-pool';
 
 /**
  * Frame pipeline for the raid: an HDR scene pass with MSAA, filmic tone
@@ -90,7 +92,16 @@ export interface PipelineLights {
   fill: THREE.DirectionalLight;
 }
 
+/** Render-resolution steps, as a fraction of the device pixel ratio the engine asked for. */
+const RESOLUTION_STEPS = [1, 0.85, 0.72, 0.6];
+const MIN_PIXEL_RATIO = 0.6;
+/** Smoothed frame time (ms) above which resolution steps down, and below which it may step back up. */
+const SLOW_FRAME_MS = 19.5;
+const SMOOTH_FRAME_MS = 17.4;
+
 export class RenderPipeline {
+  /** Off for scripted captures that render on demand, where frame gaps say nothing about the GPU. */
+  adaptive = true;
   private renderer: THREE.WebGLRenderer;
   private scene: THREE.Scene;
   private camera: THREE.PerspectiveCamera;
@@ -101,12 +112,26 @@ export class RenderPipeline {
   private environments = new Map<WorldKey, THREE.Texture>();
   private sunOffset = new THREE.Vector3(-26, 48, 18);
   private key: WorldKey = 'block';
+  private lightPool: LightPool;
+  private view = new THREE.Frustum();
+  private viewProjection = new THREE.Matrix4();
+  private baseRatio: number;
+  private step = 0;
+  private frameMs = 16.7;
+  private lastFrame = 0;
+  private settle = 2000;
+  private lastStepDown = -Infinity;
+  private lastStepUp = -Infinity;
+  /** How long frames must stay smooth before trying a sharper step; doubles each time a step up does not hold. */
+  private upHold = 8000;
 
   constructor(renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.PerspectiveCamera, lights: PipelineLights) {
     this.renderer = renderer;
     this.scene = scene;
     this.camera = camera;
     this.lights = lights;
+    this.baseRatio = renderer.getPixelRatio();
+    this.lightPool = new LightPool(scene, 6);
 
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1;
@@ -196,13 +221,75 @@ export class RenderPipeline {
     sun.position.copy(target).add(this.sunOffset);
     sun.target.position.copy(target);
     sun.target.updateMatrixWorld();
+    this.lightPool.update(target);
+  }
+
+  /** Hand the point lights of an arena to the pool. The arena's own lights stay hidden as anchors. */
+  useLights(root: THREE.Object3D) {
+    this.lightPool.use(root);
+  }
+
+  forgetLights(root: THREE.Object3D) {
+    this.lightPool.forget(root);
   }
 
   render() {
+    this.adapt();
+    this.cull();
     this.composer.render();
   }
 
+  private cull() {
+    const camera = this.camera;
+    camera.updateMatrixWorld();
+    this.viewProjection.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+    this.view.setFromProjectionMatrix(this.viewProjection);
+    const sun = this.lights.sun;
+    sun.updateMatrixWorld();
+    sun.shadow.updateMatrices(sun);
+    cullInstances([this.view, sun.shadow.getFrustum()]);
+  }
+
+  /** Current render scale against the requested pixel ratio. */
+  get resolutionScale() {
+    return this.renderer.getPixelRatio() / this.baseRatio;
+  }
+
+  /**
+   * Hold a steady frame rate by trading resolution: step down when frames run
+   * long, and creep back up once they have been smooth for a while.
+   */
+  private adapt() {
+    const now = performance.now();
+    const gap = now - this.lastFrame;
+    this.lastFrame = now;
+    if (!this.adaptive || gap <= 0 || gap > 250) return;
+    this.frameMs += (gap - this.frameMs) * 0.05;
+    this.settle -= gap;
+    if (this.settle > 0) return;
+    if (this.frameMs > SLOW_FRAME_MS && this.step < RESOLUTION_STEPS.length - 1) {
+      if (now - this.lastStepUp < 4000) this.upHold = Math.min(64000, this.upHold * 2);
+      this.setStep(this.step + 1);
+      this.lastStepDown = now;
+    } else if (this.frameMs < SMOOTH_FRAME_MS && this.step > 0 && now - this.lastStepDown > this.upHold) {
+      this.setStep(this.step - 1);
+      this.lastStepUp = now;
+    }
+  }
+
+  private setStep(step: number) {
+    this.step = step;
+    this.settle = 1500;
+    const ratio = Math.max(MIN_PIXEL_RATIO, this.baseRatio * RESOLUTION_STEPS[step]);
+    if (ratio === this.renderer.getPixelRatio()) return;
+    const size = this.renderer.getSize(new THREE.Vector2());
+    this.renderer.setPixelRatio(ratio);
+    this.setSize(size.x, size.y);
+  }
+
   dispose() {
+    untrackInstances();
+    this.lightPool.dispose();
     for (const texture of this.environments.values()) texture.dispose();
     this.environments.clear();
     this.pmrem.dispose();
