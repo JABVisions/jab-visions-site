@@ -374,6 +374,10 @@ interface Host {
   /** A prop this host could not reach; it ignores it until `passPropT` runs out. */
   passProp?: ThrowBody | null;
   passPropT?: number;
+  /** Seconds spent in the current flight from the Ryder. */
+  fleeT?: number;
+  /** Seconds left before this host may flee again. */
+  braveT?: number;
   /** Seconds left in a raise-then-throw. 0 means not winding up. */
   throwWind: number;
   /** Dream Vision. The host stands and does not attack. Not a lift. */
@@ -5664,7 +5668,7 @@ export class RaidEngine {
     const swayedEarly = swayOf(host, this.simTime);
     // Swayed hosts fight each other and ignore the token economy.
     const token = swayedEarly ? undefined : host.token;
-    let order = civilianOrder(profile, {
+    const sense: Parameters<typeof civilianOrder>[1] = {
       dist: playerDist,
       hpRatio: host.maxHp > 0 ? host.hp / host.maxHp : 1,
       holding: Boolean(host.heldItem),
@@ -5681,12 +5685,26 @@ export class RaidEngine {
       comboReady: host.sinceAttack < 0.9 && host.sinceAttack > 0.3,
       ringDistance: 1.1 + Math.min(2.2, (slot % 4) * 0.45),
       sinceSeen: host.sinceSeen,
-    });
+    };
+    let order = civilianOrder(profile, sense);
     const swayed = swayOf(host, this.simTime);
     const turned = Boolean(swayed) && isProvoked(host);
     const rival = swayed && !turned ? pickRival(host, this.hosts) : null;
     const nowhereToTurn = Boolean(swayed) && !turned && !rival && influenceRank(host) !== 'elite';
     if (nowhereToTurn) order = { state: 'guard', move: 0, strafe: 0, attack: null };
+    // A wounded host breaks off for a few seconds, then comes back. Left unchecked it runs into
+    // the trees and hides there, and the last host of a round never comes out to be finished.
+    host.braveT = Math.max(0, (host.braveT ?? 0) - dt);
+    if (order.state === 'flee') {
+      host.fleeT = (host.fleeT ?? 0) + dt;
+      if (host.fleeT > 3.5 || playerDist > 16) {
+        host.fleeT = 0;
+        host.braveT = 10;
+      }
+      if (host.braveT > 0 || this.livingEnemies() <= 1) order = civilianOrder(profile, { ...sense, hpRatio: 1 });
+    } else {
+      host.fleeT = 0;
+    }
     host.aiState = order.state;
     host.aiDist = playerDist;
     host.aiAttack = order.attack;

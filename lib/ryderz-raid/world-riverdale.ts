@@ -19,7 +19,7 @@ import { buildStructure } from './riverdale/structure';
 import { forestFloor } from './riverdale/surfaces';
 import { MUD_HOLLOWS, riverdaleCeiling, riverdaleDirt, riverdaleRoof, riverdaleGround, riverdaleObstacles, trailDistance, underStructure } from './riverdale/terrain';
 import { buildVegetation } from './riverdale/vegetation';
-import type { World } from './world';
+import type { Obstacle, World } from './world';
 
 /**
  * THE RIVERDALE PARTY: a secret party under an abandoned concrete structure
@@ -316,14 +316,31 @@ function buildDebugOverlay(kit: BuildKit) {
   };
 }
 
-function spawnAlleys() {
+/** Entry points across each zone, slid onto open ground where a trunk or rock sits on the planned spot. */
+function spawnAlleys(obstacles: readonly Obstacle[]) {
+  const blocked = (x: number, z: number) =>
+    obstacles.some((o) =>
+      o.kind === 'box'
+        ? x > o.minX - 0.8 && x < o.maxX + 0.8 && z > o.minZ - 0.8 && z < o.maxZ + 0.8
+        : Math.hypot(x - o.x, z - o.z) < o.r + 0.8,
+    );
+  const clear = (x: number, z: number) => {
+    if (!blocked(x, z)) return { x, z };
+    for (let r = 0.5; r <= 4; r += 0.5) {
+      for (let a = 0; a < 12; a += 1) {
+        const px = x + Math.cos((a / 12) * Math.PI * 2) * r;
+        const pz = z + Math.sin((a / 12) * Math.PI * 2) * r;
+        if (!blocked(px, pz)) return { x: px, z: pz };
+      }
+    }
+    return { x, z };
+  };
   const out: World['alleys'] = [];
   for (const zone of SPAWN_ZONES) {
     const inward = new THREE.Vector3(zone.toward.x, 0, zone.toward.z).normalize();
     const side = new THREE.Vector3(-inward.z, 0, inward.x);
     for (const k of [-1, 0, 1]) {
-      const x = zone.x + side.x * zone.spread * 0.6 * k;
-      const z = zone.z + side.z * zone.spread * 0.6 * k;
+      const { x, z } = clear(zone.x + side.x * zone.spread * 0.6 * k, zone.z + side.z * zone.spread * 0.6 * k);
       out.push({ position: new THREE.Vector3(x, riverdaleGround(x, z), z), inward: inward.clone() });
     }
   }
@@ -386,7 +403,7 @@ export function buildRiverdaleWorld(): World {
     group,
     obstacles,
     occluders: kit.occluders,
-    alleys: spawnAlleys(),
+    alleys: spawnAlleys(obstacles),
     alleyNodes: [],
     bounds: RIVERDALE.bounds,
     spawnReach: 60,
