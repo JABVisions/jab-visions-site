@@ -84,9 +84,9 @@ import {
   buildRyder,
   preloadCivilianModels,
   preloadHostGltf,
-  preloadRyderGltf,
   type Fighter,
 } from './characters';
+import { resolveAppearance } from './skins/appearance';
 import { ParticleSystem } from './particles';
 import {
   animateHumanoid,
@@ -408,6 +408,8 @@ interface Host {
   /** Local player 2, rather than CPU. */
   controlled?: boolean;
   ryderId?: RyderId;
+  /** The Ryder's spec in the skin this body was built with. */
+  look?: RyderSpec;
   aura?: number;
   maxAura?: number;
   /** Party strip slot for a raid teammate. */
@@ -975,17 +977,11 @@ export class RaidEngine {
     this.rig.snap(this.pos, this.yaw, this.pitch);
     this.camReady = false;
 
-    await Promise.all([
-      this.spec.glb
-        ? preloadRyderGltf(this.spec).catch((error) => {
-            console.warn('[raid] failed to load Ryder GLB, using block figure', error);
-          })
-        : Promise.resolve(),
-      preloadHostGltf(),
-    ]);
+    const [look] = await Promise.all([resolveAppearance(id), preloadHostGltf()]);
     await preloadCivilianModels(CIVILIAN_REGISTRY.map((entry) => entry.modelPath));
     if (this.disposed || token !== this.startToken) return;
 
+    this.spec = look.spec;
     this.player = buildRyder(this.spec);
     this.scene.add(this.player.humanoid.group);
     this.powerVfx.attach(this.player, this.spec.visual);
@@ -1514,12 +1510,7 @@ export class RaidEngine {
   async switchRyder(id: RyderId, moves?: AbilitySpec[]) {
     if (this.spec.id === id && !moves) return;
     const token = ++this.switchToken;
-    const spec = RYDERZ[id];
-    if (spec.glb) {
-      await preloadRyderGltf(spec).catch((error) => {
-        console.warn('[raid] failed to load Ryder GLB, using block figure', error);
-      });
-    }
+    const { spec } = await resolveAppearance(id);
     if (this.disposed || token !== this.switchToken) return;
 
     this.endAllMoves();
@@ -1577,6 +1568,32 @@ export class RaidEngine {
   }
 
   /**
+   * Redraw the local fighter after its equipped skin changed. Only the model
+   * is swapped: position, facing, vitals, cooldowns and the deck carry on.
+   */
+  async refreshAppearance(ids: RyderId[]) {
+    if (!this.player || !ids.includes(this.spec.id)) return;
+    const id = this.spec.id;
+    const token = ++this.switchToken;
+    const look = await resolveAppearance(id);
+    if (this.disposed || token !== this.switchToken || !this.player || this.spec.id !== id) return;
+    if (look.spec.glb === this.spec.glb) return;
+    const previous = this.player;
+    this.endAllMoves();
+    this.unbindKit();
+    const next = buildRyder(look.spec);
+    next.humanoid.group.position.copy(previous.humanoid.group.position);
+    next.humanoid.group.rotation.copy(previous.humanoid.group.rotation);
+    this.scene.remove(previous.humanoid.group);
+    disposeObject(previous.humanoid.group);
+    this.spec = look.spec;
+    this.player = next;
+    this.scene.add(next.humanoid.group);
+    this.powerVfx.attach(next, look.spec.visual);
+    this.bindKit();
+  }
+
+  /**
    * Take over a CPU teammate. Their body, vital fraction, and seat become the
    * local fighter. The body you leave is handed to the CPU at your old seat.
    * Another human's bar is not a switch.
@@ -1599,8 +1616,9 @@ export class RaidEngine {
       return false;
     }
     this.switchToken += 1;
-    const spec = RYDERZ[host.ryderId];
+    const spec = host.look ?? RYDERZ[host.ryderId];
     const leavingId = this.spec.id;
+    const leavingLook = this.spec;
     const leavingSeat = this.controlledSeat;
     const leavingFighter = this.player;
     const leaving = {
@@ -1688,6 +1706,7 @@ export class RaidEngine {
     );
     this.spawnAlly(leavingId, 0, null, false, leavingSeat, {
       fighter: leavingFighter,
+      look: leavingLook,
       x: leaving.x,
       z: leaving.z,
       yaw: leaving.yaw,
@@ -4535,7 +4554,7 @@ export class RaidEngine {
     let index = 0;
     for (const ally of allies) {
       if (this.disposed) return;
-      await this.spawnAlly(ally.ryderId, index, ally.playerId, ally.human, ally.seat);
+      await this.spawnAlly(ally.ryderId, index, ally.playerId, ally.human, ally.seat, undefined, ally.human ? ally.skinId ?? null : undefined);
       index += 1;
     }
   }
@@ -4559,14 +4578,12 @@ export class RaidEngine {
       maxAura: number;
       down: number;
       power?: PowerClock;
+      look?: RyderSpec;
     },
+    /** A remote player's skin from the room. Undefined uses this player's own pick for that Ryder. */
+    skinId?: string | null,
   ) {
-    const spec = RYDERZ[id];
-    if (!placed?.fighter && spec.glb) {
-      await preloadRyderGltf(spec).catch((error) => {
-        console.warn('[raid] failed to load ally GLB, using block figure', error);
-      });
-    }
+    const spec = placed?.fighter ? placed.look ?? RYDERZ[id] : (await resolveAppearance(id, remoteHuman ? skinId ?? null : skinId)).spec;
     if (this.disposed) return;
     const fighter = placed?.fighter ?? buildRyder(spec, { clone: true });
     const offsets = [
@@ -4628,6 +4645,7 @@ export class RaidEngine {
       playerId,
       remoteHuman,
       ryderId: id,
+      look: spec,
       aura: placed?.aura ?? spec.maxAura,
       maxAura: placed?.maxAura ?? spec.maxAura,
       dealt: 0,
@@ -6960,12 +6978,7 @@ export class RaidEngine {
   }
 
   private async spawnDuelist(id: RyderId, controlled: boolean) {
-    const spec = RYDERZ[id];
-    if (spec.glb) {
-      await preloadRyderGltf(spec).catch((error) => {
-        console.warn('[raid] failed to load opponent GLB, using block figure', error);
-      });
-    }
+    const { spec } = await resolveAppearance(id);
     if (this.disposed) return;
     const fighter = buildRyder(spec, { clone: true });
     const pos = new THREE.Vector3(-Math.sign(this.pos.x || 1) * 8, 0, -Math.sign(this.pos.z || 1) * 8);

@@ -25,6 +25,7 @@ export async function POST(request: Request) {
     guestId?: string;
     name?: string;
     ryderId?: string;
+    skinId?: string | null;
     code?: string;
     slot?: number;
     ready?: boolean;
@@ -63,6 +64,7 @@ export async function POST(request: Request) {
         code: body.code,
         slot: body.slot,
         ryderId: body.ryderId,
+        skinId: typeof body.skinId === 'string' ? body.skinId : null,
         ready: body.ready,
         difficulty: body.difficulty,
         arenaId: body.arenaId,

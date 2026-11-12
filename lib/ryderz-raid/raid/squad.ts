@@ -1,5 +1,6 @@
 import { RYDERZ, RYDER_ORDER, type EnemyKind, type RyderId } from '../config';
 import { directRound } from '../rounds/director';
+import { isSkinFor } from '../skins/catalog';
 
 /** Cooperative raid is allies versus civilians. It is not PvP. */
 export const SQUAD_SIZE = 5;
@@ -23,6 +24,8 @@ export interface SquadSlot {
   index: number;
   control: SlotControl;
   ryderId: RyderId | null;
+  /** Equipped skin of the human in this seat. Appearance metadata only; each client loads the model itself. */
+  skinId?: string | null;
   displayName: string;
   ready: boolean;
   /** Guest id of the human in this slot. Null for computer slots. */
@@ -109,6 +112,7 @@ export interface RaidAllyLaunch {
   ryderId: RyderId;
   human: boolean;
   playerId: string | null;
+  skinId?: string | null;
   /** Party strip slot. Slot 0 is the local player and is not spawned as an ally. */
   seat: number;
 }
@@ -129,6 +133,7 @@ export function launchFromSquad(squad: RaidSquad, localRyder: RyderId): RaidLaun
         ryderId: slot.ryderId,
         human: slot.control === 'human' && !slot.aiCover,
         playerId: slot.playerId,
+        skinId: isSkinFor(slot.ryderId, slot.skinId) ? slot.skinId : null,
         seat: slot.index,
       }];
     }),

@@ -1,4 +1,5 @@
 import { RYDERZ, BOUNDARY, type RyderId } from '../config';
+import { isSkinFor } from '../skins/catalog';
 import {
   SQUAD_SIZE,
   computerSlot,
@@ -59,7 +60,7 @@ export interface RaidRoom {
   snapshot: RaidSnapshot | null;
   inputs: Record<string, { x: number; z: number; at: number }>;
   /** Guest ids reserved during a reconnect window. */
-  reserved: { guestId: string; slot: number; until: number; ryderId: RyderId | null; name: string }[];
+  reserved: { guestId: string; slot: number; until: number; ryderId: RyderId | null; skinId?: string | null; name: string }[];
 }
 
 export interface RoomView {
@@ -127,6 +128,7 @@ function sweep(room: RaidRoom, now: number) {
         slot: slot.index,
         until: now + RECONNECT_MS,
         ryderId: slot.ryderId,
+        skinId: slot.skinId ?? null,
         name: slot.displayName,
       });
     }
@@ -223,6 +225,8 @@ export interface RoomAct {
   name?: string;
   slot?: number;
   ryderId?: string;
+  /** Equipped skin for that Ryder. Stored as appearance metadata only. */
+  skinId?: string | null;
   difficulty?: RaidDifficulty;
   arenaId?: string;
   ready?: boolean;
@@ -269,6 +273,7 @@ function joinRoom(body: RoomAct, now: number): RoomView {
     slot.connected = true;
     slot.aiCover = false;
     slot.ryderId = reserved.ryderId;
+    slot.skinId = reserved.skinId ?? null;
     slot.displayName = reserved.name;
     member.slot = reserved.slot;
     room.reserved = room.reserved.filter((entry) => entry.guestId !== body.guestId);
@@ -340,6 +345,7 @@ function setCharacter(room: RaidRoom, body: RoomAct) {
   const hostEditingAi = body.guestId === room.hostGuestId && (slot.control === 'computer' || slot.control === 'open');
   if (!mine && !hostEditingAi) throw new Error('cannot edit that slot');
   slot.ryderId = body.ryderId;
+  slot.skinId = mine && isSkinFor(body.ryderId, body.skinId) ? body.skinId : null;
   slot.displayName = slot.control === 'human' ? room.members.find((entry) => entry.guestId === slot.playerId)?.name || RYDERZ[body.ryderId].name : RYDERZ[body.ryderId].name;
   if (slot.control === 'human') slot.ready = false;
   room.lifecycle = 'LOBBY';

@@ -11,9 +11,9 @@ export interface RaidRoomCast {
 }
 
 export type RaidWireIntent =
-  | { intent: 'join'; guestId: string; name?: string; ryderId?: string | null; ready?: boolean }
+  | { intent: 'join'; guestId: string; name?: string; ryderId?: string | null; skinId?: string | null; ready?: boolean }
   | { intent: 'ready'; guestId: string; ready: boolean; name?: string }
-  | { intent: 'character'; guestId: string; slot: number; ryderId: string; name?: string }
+  | { intent: 'character'; guestId: string; slot: number; ryderId: string; skinId?: string | null; name?: string }
   | { intent: 'input'; guestId: string; x: number; z: number };
 
 type Handlers = {

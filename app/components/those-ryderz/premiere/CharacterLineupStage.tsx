@@ -2,8 +2,9 @@
 
 import { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
-import { RYDERZ, type RyderId } from '@/lib/ryderz-raid/config';
-import { animateGltfFighter, buildRyder, preloadRyderGltf, type Fighter } from '@/lib/ryderz-raid/characters';
+import { RYDERZ, type RyderId, type RyderSpec } from '@/lib/ryderz-raid/config';
+import { animateGltfFighter, buildRyder, ryderModelMotion, type Fighter } from '@/lib/ryderz-raid/characters';
+import { resolveAppearance } from '@/lib/ryderz-raid/skins/appearance';
 import type { RaidCharacter } from '@/lib/ryderz-raid/roster';
 import { lineupFormation, lineupFrame, lineupGap, type PremiereCategory } from '@/lib/ryderz-raid/roster/premiere';
 import { animateHumanoid, disposeObject } from '@/lib/ryderz-raid/toon';
@@ -25,6 +26,7 @@ interface Actor {
   slotZ: number;
   present: number;
   phase: number;
+  face: number;
 }
 
 function readQuality() {
@@ -220,7 +222,7 @@ export default function CharacterLineupStage({
           actor.present += ((selected ? 1 : 0) - actor.present) * Math.min(1, dt * 4.4);
           actor.phase += dt * (selected ? 4.6 : 3.1);
           const group = actor.fighter.humanoid.group;
-          const face = actor.id === 'keven' ? Math.PI : 0;
+          const face = actor.face;
           const idle = Math.sin(time * 0.65 + actor.slotX) * 0.07 * (selected ? 0.2 : 1);
           const targetYaw = face + (1 - actor.present) * 0.55 + idle;
           const targetX = actor.slotX;
@@ -283,8 +285,8 @@ export default function CharacterLineupStage({
       };
 
       const order = new Map<Actor, number>();
-      const enter = (character: RaidCharacter, index: number, missing: boolean) => {
-        const spec = RYDERZ[character.ryderId as RyderId];
+      const enter = (character: RaidCharacter, index: number, missing: boolean, worn?: RyderSpec) => {
+        const spec = worn ?? RYDERZ[character.ryderId as RyderId];
         if (disposed || !spec) return;
         let fighter: Fighter;
         try {
@@ -320,6 +322,8 @@ export default function CharacterLineupStage({
           slotZ: 0,
           present: character.id === selectedRef.current ? 1 : 0,
           phase: index * 0.7,
+          // Keven's rig faces his chest away from this camera; skins face it already.
+          face: spec.id === 'keven' && spec.glb === RYDERZ.keven.glb ? Math.PI : 0,
         };
         widths.set(actor, Math.max(0.55, new THREE.Box3().setFromObject(fighter.humanoid.group).getSize(new THREE.Vector3()).x));
         order.set(actor, index);
@@ -339,8 +343,8 @@ export default function CharacterLineupStage({
           enter(character, index, true);
           return;
         }
-        preloadRyderGltf(spec).then(
-          () => enter(character, index, false),
+        resolveAppearance(spec.id).then(
+          (look) => enter(character, index, ryderModelMotion(look.spec) === null, look.spec),
           (error) => {
             console.warn('[premiere] model failed', spec.glb, error);
             enter(character, index, true);

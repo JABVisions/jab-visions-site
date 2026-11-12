@@ -3,7 +3,9 @@
 import { useEffect, useRef } from 'react';
 import * as THREE from 'three';
 import { RYDERZ, type RyderId } from '@/lib/ryderz-raid/config';
-import { animateGltfFighter, buildRyder, preloadRyderGltf, type Fighter } from '@/lib/ryderz-raid/characters';
+import { animateGltfFighter, buildRyder, type Fighter } from '@/lib/ryderz-raid/characters';
+import { resolveAppearance } from '@/lib/ryderz-raid/skins/appearance';
+import { useEquippedSkin } from '../skins/useEquippedSkin';
 import { animateHumanoid, disposeObject } from '@/lib/ryderz-raid/toon';
 import styles from './StatBoard.module.css';
 
@@ -11,8 +13,10 @@ import styles from './StatBoard.module.css';
  * The round MVP, built from that Ryder's GLB. They hold a victory stance
  * inside their own aura.
  */
-export default function MvpStage({ ryderId }: { ryderId: RyderId }) {
+export default function MvpStage({ ryderId, skinId }: { ryderId: RyderId; skinId?: string | null }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const equipped = useEquippedSkin(ryderId);
+  const wear = skinId === undefined ? equipped : skinId;
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -65,7 +69,7 @@ export default function MvpStage({ ryderId }: { ryderId: RyderId }) {
 
     const clock = new THREE.Clock();
     let anim = 0;
-    const menuYaw = ryderId === 'keven' ? Math.PI : 0;
+    let menuYaw = 0;
 
     const loop = () => {
       if (disposed) return;
@@ -89,9 +93,10 @@ export default function MvpStage({ ryderId }: { ryderId: RyderId }) {
     };
 
     void (async () => {
-      if (spec.glb) await preloadRyderGltf(spec).catch(() => undefined);
+      const look = (await resolveAppearance(ryderId, wear)).spec;
       if (disposed) return;
-      fighter = buildRyder(spec);
+      menuYaw = ryderId === 'keven' && look.glb === RYDERZ.keven.glb ? Math.PI : 0;
+      fighter = buildRyder(look);
       scene.add(fighter.humanoid.group);
       clock.start();
       raf = requestAnimationFrame(loop);
@@ -109,7 +114,7 @@ export default function MvpStage({ ryderId }: { ryderId: RyderId }) {
       (ring.material as THREE.Material).dispose();
       renderer.dispose();
     };
-  }, [ryderId]);
+  }, [ryderId, wear]);
 
   return <canvas ref={canvasRef} className={styles.stage} aria-hidden="true" />;
 }

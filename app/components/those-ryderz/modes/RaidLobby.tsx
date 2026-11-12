@@ -17,6 +17,7 @@ import {
 import { applyGuestIntent, seatMissing, type LiveGuest } from '@/lib/ryderz-raid/raid/online';
 import { raidLiveEnabled, sendRaidIntent, sendRaidRoom, subscribeRaidLive } from '@/lib/ryderz-raid/raid/liveRoom';
 import type { RoomView } from '@/lib/ryderz-raid/raid/roomStore';
+import { equippedSkinId } from '@/lib/ryderz-raid/skins/appearance';
 import { CharacterGrid } from '../roster/CharacterGrid';
 import styles from './RaidLobby.module.css';
 
@@ -197,11 +198,12 @@ export default function RaidLobby({
   const selectCharacter = async (ryderId: RyderId) => {
     if (!focused) return;
     if (online) {
+      const skinId = focused.playerId === guest ? equippedSkinId(ryderId) : null;
       if (focused.playerId === guest) {
-        void sendRaidIntent(code, { intent: 'character', guestId: guest, slot: focused.index, ryderId });
+        void sendRaidIntent(code, { intent: 'character', guestId: guest, slot: focused.index, ryderId, skinId });
       }
       try {
-        const room = await roomPost({ action: 'character', code, guestId: guest, slot: focused.index, ryderId });
+        const room = await roomPost({ action: 'character', code, guestId: guest, slot: focused.index, ryderId, skinId });
         setSquad(amHostRef.current ? seatMissing(room.squad, liveGuests.current) : room.squad);
         setError('');
       } catch (reason) {

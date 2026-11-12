@@ -3,7 +3,8 @@
 import { useEffect, useRef } from 'react';
 import * as THREE from 'three';
 import { RYDERZ, type RyderId } from '@/lib/ryderz-raid/config';
-import { animateGltfFighter, buildRyder, preloadRyderGltf, type Fighter } from '@/lib/ryderz-raid/characters';
+import { animateGltfFighter, buildRyder, type Fighter } from '@/lib/ryderz-raid/characters';
+import { resolveAppearance } from '@/lib/ryderz-raid/skins/appearance';
 import { animateHumanoid, disposeObject, poseAim, poseMelee } from '@/lib/ryderz-raid/toon';
 import styles from './PauseMenu.module.css';
 
@@ -14,10 +15,16 @@ import styles from './PauseMenu.module.css';
  */
 export default function RyderShowcase({
   ryderId,
+  skinId,
+  preview = false,
   poseKey,
   className,
 }: {
   ryderId: RyderId;
+  /** Skin to wear. Undefined wears the player's equipped skin; null the default model. */
+  skinId?: string | null;
+  /** Database preview: an unrigged scan may stand in. */
+  preview?: boolean;
   /** Bump to make the figure shift pose (e.g. when the menu focus moves). */
   poseKey: number;
   className?: string;
@@ -36,7 +43,7 @@ export default function RyderShowcase({
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const spec = RYDERZ[ryderId];
+    let spec = RYDERZ[ryderId];
     let disposed = false;
     let raf = 0;
     let fighter: Fighter | null = null;
@@ -79,9 +86,7 @@ export default function RyderShowcase({
     let meleeT = 0;
     let meleeStarted = false;
     let consumed = pendingPose.current;
-    // The rig turns Keven's chest to raid-forward (+Z). This camera sits on
-    // +Z, so that leaves the menu looking at his back. Spin him toward the lens.
-    const menuYaw = ryderId === 'keven' ? Math.PI : 0;
+    let menuYaw = 0;
 
     const loop = () => {
       if (disposed) return;
@@ -111,10 +116,11 @@ export default function RyderShowcase({
     };
 
     (async () => {
-      if (spec.glb) {
-        await preloadRyderGltf(spec).catch(() => undefined);
-      }
+      spec = (await resolveAppearance(ryderId, skinId, { preview })).spec;
       if (disposed) return;
+      // The rig turns Keven's chest to raid-forward (+Z). This camera sits on
+      // +Z, so that leaves the menu looking at his back. Spin him toward the lens.
+      menuYaw = ryderId === 'keven' && spec.glb === RYDERZ.keven.glb ? Math.PI : 0;
       fighter = buildRyder(spec);
       scene.add(fighter.humanoid.group);
       clock.start();
@@ -131,7 +137,7 @@ export default function RyderShowcase({
       }
       renderer.dispose();
     };
-  }, [ryderId]);
+  }, [ryderId, skinId, preview]);
 
   return <canvas ref={canvasRef} className={`${styles.showcaseCanvas} ${className ?? ''}`} aria-hidden="true" />;
 }
