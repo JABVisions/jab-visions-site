@@ -79,6 +79,8 @@ export interface SkinDef {
   rarity: SkinRarity;
   description: string;
   thumbnail: string | null;
+  /** Round headshot for the HUD. */
+  icon: string;
   /** Null draws the Ryder's own model. */
   model: SkinModel | null;
   unlock: SkinUnlock;
@@ -114,6 +116,7 @@ function defaultSkin(ryderId: RyderId, order: number): SkinDef {
     rarity: 'standard',
     description: `${spec.name}'s standard look.`,
     thumbnail: spec.icon,
+    icon: spec.icon,
     model: null,
     unlock: { kind: 'default' },
     accent: spec.colorHex,
@@ -123,7 +126,7 @@ function defaultSkin(ryderId: RyderId, order: number): SkinDef {
 
 const MOVIE_PACK = 'movie_pack_vol1';
 /** Bump when the movie model files change so browsers drop the cached copy. */
-const MODEL_VERSION = 2;
+const MODEL_VERSION = 3;
 
 /**
  * The movie scans are rigged in the pose they were captured in. Animating from
@@ -140,7 +143,7 @@ function skinUnlock(collection: string): SkinUnlock {
   return cost > 0 ? { kind: 'signal', cost } : { kind: 'free' };
 }
 
-function movieSkin(ryderId: RyderId, file: string, accent: string, order: number): SkinDef {
+function movieSkin(ryderId: RyderId, file: string, accent: string, order: number, fit: Partial<SkinModel> = {}): SkinDef {
   const spec = RYDERZ[ryderId];
   return {
     id: `${ryderId}_movie`,
@@ -151,7 +154,8 @@ function movieSkin(ryderId: RyderId, file: string, accent: string, order: number
     rarity: 'cinematic',
     description: `${spec.name}'s live-action appearance from THOSE RYDERZ. Cosmetic only: kit, stats and powers are unchanged.`,
     thumbnail: `/assets/those-ryderz/skins/${file}.webp`,
-    model: { glb: `/assets/those-ryderz/models/skins/${file}.glb?v=${MODEL_VERSION}`, skelKeep: SCAN_KEEP },
+    icon: `/assets/those-ryderz/icons/skins/${file}.webp`,
+    model: { glb: `/assets/those-ryderz/models/skins/${file}.glb?v=${MODEL_VERSION}`, skelKeep: SCAN_KEEP, ...fit },
     unlock: skinUnlock(MOVIE_PACK),
     accent,
     order,
@@ -160,7 +164,8 @@ function movieSkin(ryderId: RyderId, file: string, accent: string, order: number
 
 export const SKINS: SkinDef[] = [
   ...RYDER_ORDER.map((id, i) => defaultSkin(id, i)),
-  movieSkin('keven', 'keven-movie', '#ff4fa8', 100),
+  // Keven's scan strides toward his left side with his head turned back over his shoulder.
+  movieSkin('keven', 'keven-movie', '#ff4fa8', 100, { modelYaw: Math.PI / 2 }),
   movieSkin('leo', 'leo-movie', '#ffd23a', 101),
   movieSkin('aaron', 'aaron-movie', '#8f7bff', 102),
 ];

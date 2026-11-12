@@ -5,6 +5,8 @@ import { RYDERZ } from '@/lib/ryderz-raid/config';
 import { GameMode } from '@/lib/ryderz-raid/game-mode';
 import type { PartySlot } from '@/lib/ryderz-raid/multiplayer';
 import { RYDER_THEME } from '../menu/theme';
+import { skinById } from '@/lib/ryderz-raid/skins/catalog';
+import { useEquippedSkins } from '../skins/useEquippedSkin';
 import styles from './PlayerPartyHUD.module.css';
 
 export type PartyHudApi = {
@@ -45,6 +47,7 @@ export default function PlayerPartyHUD({
   onPlay?: (index: number) => void;
 }) {
   const nodes = useRef(new Map<number, SlotNodes>());
+  const worn = useEquippedSkins();
   const latest = useRef(new Map<number, SlotVital>());
 
   const paint = (index: number) => {
@@ -132,7 +135,7 @@ export default function PlayerPartyHUD({
             }}
           >
             <div className={styles.portrait}>
-              {ryder ? <img src={ryder.icon} alt="" /> : <span>{slot.index + 1}</span>}
+              {ryder ? <img src={local ? skinById(worn[ryder.id])?.icon ?? ryder.icon : ryder.icon} alt="" /> : <span>{slot.index + 1}</span>}
               <i className={styles.status} />
             </div>
             <div className={styles.meta}>

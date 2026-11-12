@@ -3,6 +3,7 @@
 import { forwardRef, useImperativeHandle, useRef } from 'react';
 import { RYDERZ, type RyderId } from '@/lib/ryderz-raid/config';
 import { RYDER_THEME } from '../menu/theme';
+import { useRyderIcon } from '../skins/useEquippedSkin';
 import styles from './CircularPlayerHUD.module.css';
 
 export type CircularHudApi = {
@@ -38,6 +39,7 @@ const CircularPlayerHUD = forwardRef<
 >(function CircularPlayerHUD({ ryderId, burnout, badge }, ref) {
   const spec = RYDERZ[ryderId];
   const theme = RYDER_THEME[ryderId];
+  const icon = useRyderIcon(ryderId);
   const root = useRef<HTMLDivElement>(null);
   const hpArc = useRef<SVGPathElement>(null);
   const auraArc = useRef<SVGPathElement>(null);
@@ -103,7 +105,7 @@ const CircularPlayerHUD = forwardRef<
         0s
       </b>
       <div className={styles.portrait}>
-        <img src={spec.icon} alt="" />
+        <img src={icon} alt="" />
       </div>
       <div className={styles.bolt} aria-hidden="true" />
       <div className={styles.caption}>
