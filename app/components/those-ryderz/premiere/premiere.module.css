@@ -248,6 +248,69 @@
   text-transform: uppercase;
 }
 
+.skinFlag {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  padding: 3px 6px;
+  border-radius: 999px;
+  background: #ffd23a;
+  color: #120f18;
+  font: 900 0.55rem/1 ui-monospace, monospace;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  box-shadow: 0 0 10px rgba(255, 210, 58, 0.55);
+}
+
+.skins {
+  display: grid;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.skins > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.skinChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 999px;
+  background: transparent;
+  color: rgba(246, 243, 255, 0.82);
+  font-family: inherit;
+  font-size: 0.72rem;
+  font-weight: 800;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.skinChip[aria-checked='true'] {
+  border-color: var(--aura, #fff);
+  background: color-mix(in srgb, var(--aura, #fff) 22%, transparent);
+  color: #fff;
+}
+
+.skinChip b {
+  padding: 2px 5px;
+  border-radius: 999px;
+  background: var(--aura, #fff);
+  color: #120f18;
+  font-size: 0.58rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.skinChip:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
 .details {
   display: grid;
   align-content: start;

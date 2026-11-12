@@ -5,6 +5,7 @@ import * as THREE from 'three';
 import { RYDERZ, type RyderId, type RyderSpec } from '@/lib/ryderz-raid/config';
 import { animateGltfFighter, buildRyder, ryderModelMotion, type Fighter } from '@/lib/ryderz-raid/characters';
 import { resolveAppearance } from '@/lib/ryderz-raid/skins/appearance';
+import { useEquippedSkins } from '../skins/useEquippedSkin';
 import type { RaidCharacter } from '@/lib/ryderz-raid/roster';
 import { lineupFormation, lineupFrame, lineupGap, type PremiereCategory } from '@/lib/ryderz-raid/roster/premiere';
 import { animateHumanoid, disposeObject } from '@/lib/ryderz-raid/toon';
@@ -74,7 +75,8 @@ export default function CharacterLineupStage({
   selectedRef.current = selectedId;
   categoryRef.current = category;
   statusRef.current = onStatus;
-  const lineupKey = characters.map((character) => character.id).join('|');
+  const wornSkins = useEquippedSkins();
+  const lineupKey = characters.map((character) => `${character.id}:${wornSkins[character.ryderId as RyderId] ?? ''}`).join('|');
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -343,7 +345,7 @@ export default function CharacterLineupStage({
           enter(character, index, true);
           return;
         }
-        resolveAppearance(spec.id).then(
+        resolveAppearance(spec.id, undefined, { preview: true }).then(
           (look) => enter(character, index, ryderModelMotion(look.spec) === null, look.spec),
           (error) => {
             console.warn('[premiere] model failed', spec.glb, error);
@@ -360,7 +362,7 @@ export default function CharacterLineupStage({
       setNotice('The 3D lineup could not start. The roster below still works.');
       return undefined;
     }
-    // The lineup identity is the id string. `characters` is read from that render.
+    // The lineup identity is the id and worn-skin string. `characters` is read from that render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lineupKey]);
 

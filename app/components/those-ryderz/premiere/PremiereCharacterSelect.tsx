@@ -13,7 +13,9 @@ import {
   premiereRoster,
   type PremiereCategory,
 } from '@/lib/ryderz-raid/roster/premiere';
+import { collectionById, skinFor, skinsOf } from '@/lib/ryderz-raid/skins/catalog';
 import PowerIcon from '../icons/PowerIcon';
+import { useEquippedSkins } from '../skins/useEquippedSkin';
 import { useMenuKeys, wrap } from '../menu/useMenuKeys';
 import CharacterLineupStage, { type ModelStatus } from './CharacterLineupStage';
 import styles from './premiere.module.css';
@@ -40,6 +42,7 @@ export default function PremiereCharacterSelect({
   pin,
   onHighlight,
   toolbar,
+  onEquipSkin,
 }: {
   mode: 'solo' | 'pvp' | 'raid';
   initialId?: string | null;
@@ -50,7 +53,10 @@ export default function PremiereCharacterSelect({
   pin?: { token: number; id: string | null };
   onHighlight?: (character: RaidCharacter) => void;
   toolbar?: React.ReactNode;
+  /** Equip a skin from the details panel. Without it the panel only shows what is worn. */
+  onEquipSkin?: (skinId: string) => void;
 }) {
+  const worn = useEquippedSkins();
   const roster = useMemo(() => premiereRoster(), []);
   const gameMode = MODE_GAME[mode];
   const initial = roster.find((character) => character.id === initialId || character.ryderId === initialId) ?? null;
@@ -200,6 +206,8 @@ export default function PremiereCharacterSelect({
               const locked = !canConfirmFighter(character, gameMode);
               const selected = index === focus;
               const model = models[character.id];
+              const skin = character.ryderId ? skinFor(character.ryderId as RyderId, worn[character.ryderId as RyderId]) : null;
+              const skinned = Boolean(skin?.model);
               return (
                 <button
                   key={character.id}
@@ -221,7 +229,9 @@ export default function PremiereCharacterSelect({
                     if (!locked) onConfirm(character);
                   }}
                 >
-                  {character.portrait ? (
+                  {skinned && skin?.thumbnail ? (
+                    <img src={skin.thumbnail} alt="" />
+                  ) : character.portrait ? (
                     <img src={character.portrait} alt="" />
                   ) : (
                     <span className={styles.fallback}>{character.name.slice(0, 1)}</span>
@@ -233,6 +243,7 @@ export default function PremiereCharacterSelect({
                   ) : model === 'loading' ? (
                     <em className={styles.flag}>Loading</em>
                   ) : null}
+                  {skinned ? <em className={styles.skinFlag}>{collectionById(skin?.collection)?.badge === 'film' ? 'Movie skin' : 'Skin'}</em> : null}
                   <span className={styles.tileName}>{character.name}</span>
                 </button>
               );
@@ -265,6 +276,7 @@ export default function PremiereCharacterSelect({
                 ) : (
                   <p>Powers are not in the raid yet. This fighter stays locked.</p>
                 )}
+                {spec ? <SkinPicker ryderId={spec.id} worn={worn[spec.id] ?? null} onEquip={onEquipSkin} /> : null}
                 {models[focused.id] === 'missing' ? <p>The model file did not load. The rest of the lineup is still up.</p> : null}
               </>
             ) : (
@@ -281,6 +293,36 @@ export default function PremiereCharacterSelect({
           </button>
         </div>
       </section>
+    </div>
+  );
+}
+
+function SkinPicker({ ryderId, worn, onEquip }: { ryderId: RyderId; worn: string | null; onEquip?: (skinId: string) => void }) {
+  const skins = skinsOf(ryderId);
+  if (skins.length < 2) return null;
+  const active = skinFor(ryderId, worn);
+  return (
+    <div className={styles.skins} role="radiogroup" aria-label="Skin">
+      <small>Skin</small>
+      <div>
+        {skins.map((skin) => {
+          const on = skin.id === active.id;
+          return (
+            <button
+              key={skin.id}
+              type="button"
+              role="radio"
+              aria-checked={on}
+              className={styles.skinChip}
+              disabled={!onEquip && !on}
+              onClick={() => !on && onEquip?.(skin.id)}
+            >
+              {skin.model ? (collectionById(skin.collection)?.badge === 'film' ? 'Movie' : skin.name) : 'Default'}
+              {on ? <b>Active</b> : null}
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }

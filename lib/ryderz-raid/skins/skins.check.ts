@@ -37,10 +37,10 @@ const MOVIE = ['keven_movie', 'leo_movie', 'aaron_movie'];
     assert.ok(skin.model?.glb.startsWith('/assets/those-ryderz/models/skins/'), `${id} model path`);
     assert.ok(!Object.values(RYDERZ).some((spec) => spec.glb === skin.model!.glb), `${id} does not reuse a roster model`);
     files.add(skin.model!.glb);
-    assert.deepEqual(skin.unlock, { kind: 'signal', cost: skinPrice('movie_pack_vol1') });
+    assert.deepEqual(skin.unlock, { kind: 'free' }, `${id} needs no Signal Points`);
   }
   assert.equal(files.size, 3, 'each movie skin has its own file');
-  assert.equal(skinPrice('movie_pack_vol1'), 1000, 'default price is 1,000 SP');
+  assert.equal(skinPrice('movie_pack_vol1'), 0, 'the movie pack is free');
   for (const id of RYDER_ORDER) {
     const fallback = skinFor(id, null);
     assert.equal(fallback.id, defaultSkinId(id));
@@ -58,6 +58,29 @@ const MOVIE = ['keven_movie', 'leo_movie', 'aaron_movie'];
 function managerWith(earned: number) {
   return new RyderManager({ signal: { earned, spent: 0 } });
 }
+
+// Free movie skins: owned from the start, equipped with no Signal Points.
+{
+  const manager = managerWith(0);
+  for (const id of MOVIE) {
+    const check = manager.canUnlockSkin(id);
+    assert.equal(!check.ok && check.reason, 'owned');
+    assert.equal(manager.equipSkin(id), true, `${id} equips with 0 SP`);
+  }
+  assert.equal(manager.signalAvailable(), 0);
+  assert.deepEqual(manager.wardrobe().equipped, { keven: 'keven_movie', leo: 'leo_movie', aaron: 'aaron_movie' });
+  assert.deepEqual(hydrate(JSON.parse(JSON.stringify(manager.getState()))).skins.equipped, manager.wardrobe().equipped, 'equipped free skins survive a reload');
+  const progress = collectionProgress(emptyWardrobe()).find((entry) => entry.collection.id === 'movie_pack_vol1')!;
+  assert.deepEqual([progress.owned, progress.total], [3, 3]);
+  // A save that paid for a movie skin before it went free gets the points back.
+  const paid = hydrate({ ...JSON.parse(JSON.stringify(managerWith(1500).getState())), skins: { owned: { leo_movie: { at: 1, paid: 1000 } }, equipped: { leo: 'leo_movie' } } });
+  assert.equal(paid.signal.spent, 0);
+  assert.equal(paid.skins.equipped.leo, 'leo_movie');
+}
+
+// The purchase rules below still hold for any skin given a price.
+const freeUnlocks = MOVIE.map((id) => skinById(id)!.unlock);
+for (const id of MOVIE) skinById(id)!.unlock = { kind: 'signal', cost: 1000 };
 
 // 3. A locked skin cannot be equipped.
 {
@@ -131,6 +154,10 @@ function managerWith(earned: number) {
   assert.deepEqual([progress.owned, progress.total], [1, 3]);
 }
 
+MOVIE.forEach((id, i) => {
+  skinById(id)!.unlock = freeUnlocks[i];
+});
+
 // 8. A skin changes how a Ryder looks, never what they do.
 {
   for (const id of MOVIE) {
@@ -183,12 +210,9 @@ function managerWith(earned: number) {
 // Test unlock is free, recorded as a test grant, and only where enabled.
 {
   const manager = managerWith(0);
-  assert.equal(manager.grantSkin('leo_movie'), SKIN_ECONOMY.testUnlock);
-  if (SKIN_ECONOMY.testUnlock) {
-    assert.equal(manager.wardrobe().owned.leo_movie.test, true);
-    assert.equal(manager.signal().spent, 0);
-    assert.equal(manager.grantSkin('leo_movie'), false);
-  }
+  assert.equal(manager.grantSkin('leo_movie'), false, 'a free skin is already owned');
+  assert.equal(manager.grantSkin('leo_default'), false);
+  assert.equal(typeof SKIN_ECONOMY.testUnlock, 'boolean');
 }
 
 console.log('skins checks passed');

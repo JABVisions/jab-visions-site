@@ -19,9 +19,11 @@ export interface PvpLineup {
 export default function PvpFlow({
   onBack,
   onFight,
+  onEquipSkin,
 }: {
   onBack: () => void;
   onFight: (lineup: PvpLineup) => void;
+  onEquipSkin?: (skinId: string) => void;
 }) {
   const [step, setStep] = useState<'type' | 'select'>('type');
   const [type, setType] = useState<PvpType>('singlePlayer');
@@ -52,6 +54,7 @@ export default function PvpFlow({
         pin={pin}
         onBack={() => setStep('type')}
         onHighlight={assign}
+        onEquipSkin={onEquipSkin}
         confirmLabel="Choose map"
         confirmDisabled={!ready}
         onConfirm={(character) => {

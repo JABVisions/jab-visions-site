@@ -54,11 +54,12 @@ export function sanitizeWardrobe(raw: unknown): Wardrobe {
 }
 
 export function ownsSkin(wardrobe: Wardrobe, skin: SkinDef) {
-  return skin.unlock.kind === 'default' || skin.id in wardrobe.owned;
+  return skin.unlock.kind === 'default' || skin.unlock.kind === 'free' || skin.id in wardrobe.owned;
 }
 
+/** Signal Points held by bought skins. A skin that has since gone free stops counting, which hands its price back. */
 export function spentOnSkins(wardrobe: Wardrobe) {
-  return Object.values(wardrobe.owned).reduce((sum, entry) => sum + entry.paid, 0);
+  return Object.entries(wardrobe.owned).reduce((sum, [id, entry]) => (skinById(id)?.unlock.kind === 'signal' ? sum + entry.paid : sum), 0);
 }
 
 export type SkinUnlockCheck =
@@ -83,7 +84,7 @@ export function withSkinBought(wardrobe: Wardrobe, skinId: string, cost: number,
 
 export function withSkinGranted(wardrobe: Wardrobe, skinId: string, at: number): Wardrobe | null {
   const skin = skinById(skinId);
-  if (!SKIN_ECONOMY.testUnlock || !skin || skin.unlock.kind === 'default' || skinId in wardrobe.owned) return null;
+  if (!SKIN_ECONOMY.testUnlock || !skin || ownsSkin(wardrobe, skin)) return null;
   return { ...wardrobe, owned: { ...wardrobe.owned, [skinId]: { at, paid: 0, test: true } } };
 }
 

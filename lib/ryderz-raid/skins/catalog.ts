@@ -32,6 +32,8 @@ export const RARITY_LABEL: Record<SkinRarity, string> = {
 
 export type SkinUnlock =
   | { kind: 'default' }
+  /** Owned by every player from the start; only needs equipping. */
+  | { kind: 'free' }
   | { kind: 'signal'; cost: number }
   /** Shown with its condition; not purchasable. */
   | { kind: 'condition'; label: string };
@@ -121,6 +123,11 @@ function defaultSkin(ryderId: RyderId, order: number): SkinDef {
 
 const MOVIE_PACK = 'movie_pack_vol1';
 
+function skinUnlock(collection: string): SkinUnlock {
+  const cost = skinPrice(collection);
+  return cost > 0 ? { kind: 'signal', cost } : { kind: 'free' };
+}
+
 function movieSkin(ryderId: RyderId, file: string, accent: string, order: number): SkinDef {
   const spec = RYDERZ[ryderId];
   return {
@@ -133,7 +140,7 @@ function movieSkin(ryderId: RyderId, file: string, accent: string, order: number
     description: `${spec.name}'s live-action appearance from THOSE RYDERZ. Cosmetic only: kit, stats and powers are unchanged.`,
     thumbnail: `/assets/those-ryderz/skins/${file}.webp`,
     model: { glb: `/assets/those-ryderz/models/skins/${file}.glb` },
-    unlock: { kind: 'signal', cost: skinPrice(MOVIE_PACK) },
+    unlock: skinUnlock(MOVIE_PACK),
     accent,
     order,
   };

@@ -75,6 +75,9 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
   const [pvpLabel, setPvpLabel] = useState('CPU');
   const [pvpTwo, setPvpTwo] = useState(false);
   const manager = useMemo(() => new RyderManager(), []);
+  const equipSkin = useCallback((skinId: string) => {
+    manager.equipSkin(skinId);
+  }, [manager]);
   const playerStore = useMemo(() => new PlayerStore(), []);
   const saves = useMemo(() => new SaveManager(), []);
   const subscribe = useCallback((listener: () => void) => manager.subscribe(listener), [manager]);
@@ -1046,6 +1049,7 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
         <SoloCharacterSelect
           initialId={activeRyder}
           onBack={() => setScreen('start')}
+          onEquipSkin={equipSkin}
           onPlay={(id) => {
             setDrop({ mode: 'solo', id });
             setScreen('map');
@@ -1056,6 +1060,7 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
       {screen === 'pvp' && (
         <PvpFlow
           onBack={() => setScreen('start')}
+          onEquipSkin={equipSkin}
           onFight={(lineup) => {
             setDrop({ mode: 'pvp', lineup });
             setScreen('map');
@@ -1082,6 +1087,7 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
           mode="raid"
           initialId={raidHost}
           onBack={() => setScreen('start')}
+          onEquipSkin={equipSkin}
           onConfirm={(character) => {
             if (!character.ryderId) return;
             setRaidHost(character.ryderId);

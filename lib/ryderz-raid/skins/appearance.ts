@@ -89,6 +89,11 @@ export function equippedSkinId(ryderId: RyderId): string | null {
   return equipped[ryderId] ?? null;
 }
 
+/** Every equipped skin. The object is replaced on each change, so it is a stable store snapshot. */
+export function equippedSkins(): Readonly<Partial<Record<RyderId, string>>> {
+  return equipped;
+}
+
 export interface Appearance {
   spec: RyderSpec;
   skin: SkinDef;

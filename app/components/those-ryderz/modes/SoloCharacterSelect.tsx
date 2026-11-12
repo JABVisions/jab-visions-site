@@ -8,10 +8,12 @@ export default function SoloCharacterSelect({
   initialId,
   onBack,
   onPlay,
+  onEquipSkin,
 }: {
   initialId: RyderId;
   onBack: () => void;
   onPlay: (id: RyderId) => void;
+  onEquipSkin?: (skinId: string) => void;
 }) {
   return (
     <PremiereCharacterSelect
@@ -19,6 +21,7 @@ export default function SoloCharacterSelect({
       initialId={initialId}
       confirmLabel="Choose map"
       onBack={onBack}
+      onEquipSkin={onEquipSkin}
       onConfirm={(character) => {
         if (character.ryderId) onPlay(character.ryderId);
       }}

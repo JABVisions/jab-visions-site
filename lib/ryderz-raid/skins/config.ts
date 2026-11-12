@@ -13,9 +13,9 @@ function envPrice(raw: string | undefined): number | null {
 export const SKIN_ECONOMY = {
   /** Price for any purchasable skin whose collection does not set its own. */
   defaultPrice: 1000,
-  /** Per-collection prices. */
+  /** Per-collection prices. 0 makes every skin in the collection free and owned from the start. */
   collectionPrice: {
-    movie_pack_vol1: envPrice(process.env.NEXT_PUBLIC_RAID_MOVIE_SKIN_PRICE) ?? 1000,
+    movie_pack_vol1: envPrice(process.env.NEXT_PUBLIC_RAID_MOVIE_SKIN_PRICE) ?? 0,
   } as Record<string, number>,
   /**
    * Free test unlock for checking models without grinding Signal Points.

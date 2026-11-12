@@ -266,7 +266,7 @@ export default function SkinVault({
                   <small>{pack ? pack.title.replace(/^THOSE RYDERZ: /, '') : RARITY_LABEL[entry.rarity]}</small>
                 </span>
                 <span className={styles.tileState}>
-                  {worn ? 'Equipped' : have ? 'Unlocked' : entry.unlock.kind === 'signal' ? `${entry.unlock.cost.toLocaleString('en-US')} SP` : 'Locked'}
+                  {worn ? 'Equipped' : entry.unlock.kind === 'free' ? 'Free' : have ? 'Unlocked' : entry.unlock.kind === 'signal' ? `${entry.unlock.cost.toLocaleString('en-US')} SP` : 'Locked'}
                 </span>
               </button>
             );
@@ -286,13 +286,13 @@ export default function SkinVault({
           </header>
           <p className={styles.detailText}>{skin.description}</p>
           {status === 'static' && (
-            <p className={styles.warn}>This scan has no skeleton yet. Until a rigged file replaces it, the Ryder plays in their default model while this skin is equipped.</p>
+            <p className={styles.warn}>This scan has no skeleton yet. Equipped, it stands in the character select lineup and the menus; in a match the Ryder still moves in their default model until a rigged file replaces it.</p>
           )}
           {status === 'missing' && <p className={styles.warn}>The model file has not been added yet. It can be unlocked and equipped now and will appear once the file is in place.</p>}
           <dl className={styles.requirements}>
             <div>
               <dt>Unlock</dt>
-              <dd>{skin.unlock.kind === 'default' ? 'Included' : skin.unlock.kind === 'signal' ? `${skin.unlock.cost.toLocaleString('en-US')} Signal Points` : skin.unlock.label}</dd>
+              <dd>{skin.unlock.kind === 'default' ? 'Included' : skin.unlock.kind === 'free' ? 'Free · no Signal Points needed' : skin.unlock.kind === 'signal' ? `${skin.unlock.cost.toLocaleString('en-US')} Signal Points` : skin.unlock.label}</dd>
             </div>
             <div>
               <dt>Your balance</dt>
