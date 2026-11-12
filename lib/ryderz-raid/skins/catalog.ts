@@ -122,6 +122,18 @@ function defaultSkin(ryderId: RyderId, order: number): SkinDef {
 }
 
 const MOVIE_PACK = 'movie_pack_vol1';
+/** Bump when the movie model files change so browsers drop the cached copy. */
+const MODEL_VERSION = 2;
+
+/**
+ * The movie scans are rigged in the pose they were captured in. Animating from
+ * that pose keeps the scan intact; unfolding it to a stock stance would stretch it.
+ */
+const SCAN_KEEP: BoneKey[] = [
+  'hips', 'spine', 'chest', 'upperChest', 'neck', 'head',
+  'shoulderL', 'shoulderR', 'upperArmL', 'upperArmR', 'lowerArmL', 'lowerArmR', 'handL', 'handR',
+  'upperLegL', 'upperLegR', 'lowerLegL', 'lowerLegR', 'footL', 'footR',
+];
 
 function skinUnlock(collection: string): SkinUnlock {
   const cost = skinPrice(collection);
@@ -139,7 +151,7 @@ function movieSkin(ryderId: RyderId, file: string, accent: string, order: number
     rarity: 'cinematic',
     description: `${spec.name}'s live-action appearance from THOSE RYDERZ. Cosmetic only: kit, stats and powers are unchanged.`,
     thumbnail: `/assets/those-ryderz/skins/${file}.webp`,
-    model: { glb: `/assets/those-ryderz/models/skins/${file}.glb` },
+    model: { glb: `/assets/those-ryderz/models/skins/${file}.glb?v=${MODEL_VERSION}`, skelKeep: SCAN_KEEP },
     unlock: skinUnlock(MOVIE_PACK),
     accent,
     order,

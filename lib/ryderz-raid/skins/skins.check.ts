@@ -50,7 +50,7 @@ const MOVIE = ['keven_movie', 'leo_movie', 'aaron_movie'];
   assert.equal(new Set(RYDER_ORDER).size, RYDER_ORDER.length);
   const publicDir = path.join(__dirname, '../../../public');
   for (const id of MOVIE) {
-    assert.ok(fs.existsSync(path.join(publicDir, skinById(id)!.model!.glb)), `${id} model is supplied`);
+    assert.ok(fs.existsSync(path.join(publicDir, skinById(id)!.model!.glb.split('?')[0])), `${id} model is supplied`);
     assert.ok(fs.existsSync(path.join(publicDir, skinById(id)!.thumbnail!)), `${id} thumbnail is supplied`);
   }
 }
