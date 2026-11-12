@@ -105,7 +105,7 @@ interface GltfTemplate {
 }
 
 const gltfLoader = new GLTFLoader();
-const gltfTemplates = new Map<RyderId, GltfTemplate>();
+const gltfTemplates = new Map<string, GltfTemplate>();
 const hostTemplates: GltfTemplate[] = [];
 const civilianByUrl = new Map<string, GltfTemplate>();
 
@@ -162,20 +162,40 @@ async function loadGltfTemplate(url: string, label: string, repair?: GlbRepair):
   return { scene: gltf.scene, clips, strikes, skinned };
 }
 
+/**
+ * Templates are cached per Ryder and model file, so a skin and the default
+ * model of the same Ryder live side by side and switching back costs nothing.
+ */
+function templateKey(spec: RyderSpec) {
+  return spec.glb ? `${spec.id}@${spec.glb}` : spec.id;
+}
+
 /** Ryder GLBs run 1–33 MB. A second caller joins the download already in flight. */
-const ryderLoads = new Map<RyderId, Promise<void>>();
+const ryderLoads = new Map<string, Promise<void>>();
 
 export function preloadRyderGltf(spec: RyderSpec): Promise<void> {
-  const pending = ryderLoads.get(spec.id);
+  const key = templateKey(spec);
+  const pending = ryderLoads.get(key);
   if (pending) return pending;
   const load = (async () => {
     if (spec.id === 'lilly') await preloadLillyFork();
-    if (!spec.glb || gltfTemplates.has(spec.id)) return;
-    gltfTemplates.set(spec.id, await loadGltfTemplate(spec.glb, spec.id, spec.glbRepair));
+    if (!spec.glb || gltfTemplates.has(key)) return;
+    gltfTemplates.set(key, await loadGltfTemplate(spec.glb, spec.id, spec.glbRepair));
   })();
-  ryderLoads.set(spec.id, load);
-  load.catch(() => ryderLoads.delete(spec.id));
+  ryderLoads.set(key, load);
+  load.catch(() => ryderLoads.delete(key));
   return load;
+}
+
+/**
+ * How a loaded model can move. 'animated' has a skeleton (or clips) the
+ * animator drives; 'static' is one rigid mesh that would only slide around.
+ * Null until the template has loaded.
+ */
+export function ryderModelMotion(spec: RyderSpec): 'animated' | 'static' | null {
+  const template = gltfTemplates.get(templateKey(spec));
+  if (!template) return null;
+  return template.skinned || template.clips.length > 0 ? 'animated' : 'static';
 }
 
 /** Load the host mob models; failures are logged and that model is skipped. */
@@ -747,7 +767,7 @@ function attachPlasmaOrbs(parent: THREE.Object3D, color: THREE.ColorRepresentati
 }
 
 export function buildRyder(spec: RyderSpec, options: { clone?: boolean } = {}): Fighter {
-  const template = gltfTemplates.get(spec.id);
+  const template = gltfTemplates.get(templateKey(spec));
   if (template) {
     // Own materials: the player fades, glows and goes translucent per frame, and
     // none of that may bleed into the template shared with clones and the showcase.

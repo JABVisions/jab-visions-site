@@ -15,6 +15,8 @@ export interface SaveSnapshot {
   ranks?: RyderManagerState['ranks'];
   /** Signal Points ledger. Absent on older saves; hydrate starts at zero. */
   signal?: RyderManagerState['signal'];
+  /** Owned and equipped skins. Absent on saves written before skins; hydrate starts with defaults only. */
+  skins?: RyderManagerState['skins'];
   gameMode: GameMode;
   arenaId: RyderManagerState['arenaId'];
 }
@@ -194,6 +196,7 @@ export function captureManager(manager: RyderManager): SaveSnapshot {
     nodes: state.nodes,
     ranks: state.ranks,
     signal: { ...state.signal },
+    skins: { owned: { ...state.skins.owned }, equipped: { ...state.skins.equipped } },
     gameMode: coerceGameMode(state.gameMode),
     arenaId: state.arenaId,
   };

@@ -26,6 +26,19 @@ import {
   type UpgradeCheck,
 } from './progression/power-tree';
 import { availableSignal, emptyLedger, levelForSignal, type SignalEvent, type SignalLedger } from './progression/signal-points';
+import { publishEquippedSkins } from './skins/appearance';
+import {
+  checkSkinUnlock,
+  emptyWardrobe,
+  equippedSkinOf,
+  sanitizeWardrobe,
+  spentOnSkins,
+  withSkinBought,
+  withSkinEquipped,
+  withSkinGranted,
+  type SkinUnlockCheck,
+  type Wardrobe,
+} from './skins/wardrobe';
 
 /** Deck slots sit on the number row and fire with keys 1–6. */
 export type InputSlot = '1' | '2' | '3' | '4' | '5' | '6';
@@ -69,6 +82,8 @@ export interface RyderManagerState {
   ranks: Record<RyderId, NodeRanks>;
   /** Signal Points: lifetime earned and lifetime spent. The wallet is shared across Ryderz. */
   signal: SignalLedger;
+  /** Owned and equipped skins. Cosmetic only. */
+  skins: Wardrobe;
   gameMode: GameMode;
   arenaId: ArenaId;
 }
@@ -108,6 +123,7 @@ function defaultState(): RyderManagerState {
     nodes: Object.fromEntries(RYDER_ORDER.map((id) => [id, starterNodes(id)])) as Record<RyderId, string[]>,
     ranks: Object.fromEntries(RYDER_ORDER.map((id) => [id, sanitizeRanks(treeFor(id), starterNodes(id), {})])) as Record<RyderId, NodeRanks>,
     signal: emptyLedger(),
+    skins: emptyWardrobe(),
     gameMode: GameMode.SOLO,
     arenaId: DEFAULT_ARENA,
   };
@@ -170,9 +186,11 @@ export function hydrate(raw: unknown): RyderManagerState {
       compactExtras(state.loadouts[id]);
     }
   }
-  // The owned nodes and their ranks are the ledger of record: a save from an
-  // older price list, or a tampered one, settles to what the trees say was spent.
-  state.signal.spent = RYDER_ORDER.reduce((sum, id) => sum + spentOn(treeFor(id), state.nodes[id], state.ranks[id]), 0);
+  state.skins = sanitizeWardrobe(data.skins);
+  // The owned nodes, their ranks and the skins bought are the ledger of record:
+  // a save from an older price list, or a tampered one, settles to what was spent.
+  state.signal.spent =
+    RYDER_ORDER.reduce((sum, id) => sum + spentOn(treeFor(id), state.nodes[id], state.ranks[id]), 0) + spentOnSkins(state.skins);
   if (state.signal.spent > state.signal.earned) state.signal.spent = state.signal.earned;
   return state;
 }
@@ -206,6 +224,7 @@ export class RyderManager {
 
   constructor(initial?: Partial<RyderManagerState>) {
     this.state = { ...this.load(), ...initial };
+    publishEquippedSkins(this.state.skins.equipped);
   }
 
   // --- Store -------------------------------------------------------------------
@@ -223,6 +242,7 @@ export class RyderManager {
 
   private commit(patch: Partial<RyderManagerState>) {
     this.state = { ...this.state, ...patch };
+    if (patch.skins) publishEquippedSkins(this.state.skins.equipped);
     this.save();
     this.listeners.forEach((listener) => listener());
   }
@@ -330,6 +350,51 @@ export class RyderManager {
     if (!Number.isFinite(amount) || amount <= 0) return;
     this.commit({ signal: { ...this.state.signal, earned: this.state.signal.earned + Math.floor(amount) } });
     this.pushProgression(this.state.activeRyder);
+  }
+
+  // --- Skins -------------------------------------------------------------------
+
+  wardrobe(): Wardrobe {
+    return this.state.skins;
+  }
+
+  equippedSkin(id: RyderId) {
+    return equippedSkinOf(this.state.skins, id);
+  }
+
+  canUnlockSkin(skinId: string): SkinUnlockCheck {
+    return checkSkinUnlock(this.state.skins, skinId, this.signalAvailable());
+  }
+
+  /** Buy a skin with Signal Points. Checked against the live balance, charged once. */
+  unlockSkin(skinId: string): boolean {
+    const check = this.canUnlockSkin(skinId);
+    if (!check.ok) return false;
+    this.commit({
+      skins: withSkinBought(this.state.skins, skinId, check.cost, Date.now()),
+      signal: { ...this.state.signal, spent: this.state.signal.spent + check.cost },
+    });
+    this.pushProgression(this.state.activeRyder);
+    return true;
+  }
+
+  /** Free unlock for testing models. Only works where SKIN_ECONOMY.testUnlock is on. */
+  grantSkin(skinId: string): boolean {
+    const next = withSkinGranted(this.state.skins, skinId, Date.now());
+    if (!next) return false;
+    this.commit({ skins: next });
+    return true;
+  }
+
+  /** Equip an owned skin. The Ryder in play changes look on the spot; nothing else about them changes. */
+  equipSkin(skinId: string): boolean {
+    const next = withSkinEquipped(this.state.skins, skinId);
+    if (!next) return false;
+    const before = this.state.skins.equipped;
+    this.commit({ skins: next });
+    const changed = (Object.keys({ ...before, ...next.equipped }) as RyderId[]).filter((id) => before[id] !== next.equipped[id]);
+    if (changed.length) void this.engine?.refreshAppearance(changed);
+    return true;
   }
 
   // --- Power Tree --------------------------------------------------------------
@@ -549,6 +614,7 @@ export class RyderManager {
   /** Replace session state from a save slot without tearing down the manager. */
   applySnapshot(snapshot: SaveSnapshot) {
     this.state = hydrate(snapshot);
+    publishEquippedSkins(this.state.skins.equipped);
     this.save();
     this.listeners.forEach((listener) => listener());
     this.engine?.setGameMode(this.state.gameMode);
@@ -560,6 +626,7 @@ export class RyderManager {
 
   resetSession() {
     this.state = defaultState();
+    publishEquippedSkins(this.state.skins.equipped);
     this.save();
     this.listeners.forEach((listener) => listener());
     this.engine?.setGameMode(this.state.gameMode);
