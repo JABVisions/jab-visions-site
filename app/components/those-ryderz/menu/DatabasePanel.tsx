@@ -15,12 +15,20 @@ import {
 } from '@/lib/ryderz-raid/database/dossiers';
 import { INPUT_SLOTS, type RyderManager } from '@/lib/ryderz-raid/ryder-manager';
 import PowerIcon from '../icons/PowerIcon';
+import SkinVault from '../skins/SkinVault';
 import { RYDER_THEME } from './theme';
 import { useMenuKeys, wrap } from './useMenuKeys';
 import menu from './PauseMenu.module.css';
 import styles from './DatabasePanel.module.css';
 
 const THREAT_LABEL = ['', 'Nuisance', 'Street', 'Block', 'District', 'Catastrophic'];
+
+export type DatabaseTab = 'characters' | 'skins' | 'archives';
+const TABS: { id: DatabaseTab; label: string }[] = [
+  { id: 'characters', label: 'Characters' },
+  { id: 'skins', label: 'Skins' },
+  { id: 'archives', label: 'Archives' },
+];
 
 /**
  * The Database: a journal of everyone the signal has touched. Sections run
@@ -33,14 +41,20 @@ export default function DatabasePanel({
   activeRyder,
   active,
   onPreview,
+  onWide,
   onBack,
+  initialTab = 'characters',
 }: {
   manager: RyderManager;
   activeRyder: RyderId;
   active: boolean;
   onPreview: (id: RyderId | null) => void;
+  /** The skins screens need the full width; the host hides its showcase while true. */
+  onWide?: (wide: boolean) => void;
   onBack: () => void;
+  initialTab?: DatabaseTab;
 }) {
+  const [tab, setTab] = useState<DatabaseTab>(initialTab);
   const entries = useMemo(() => allDossiers(), []);
   const sections = useMemo(() => DOSSIER_SECTIONS.filter((section) => entries.some((entry) => entry.section === section)), [entries]);
   const [section, setSection] = useState<DossierSection>(() => entries.find((entry) => entry.id === activeRyder)?.section ?? sections[0]);
@@ -51,8 +65,12 @@ export default function DatabasePanel({
   const file: Dossier | undefined = files[Math.min(row, files.length - 1)];
 
   useEffect(() => {
-    onPreview(file?.ryderId ?? null);
-  }, [file, onPreview]);
+    onPreview(tab === 'characters' ? file?.ryderId ?? null : null);
+  }, [file, onPreview, tab]);
+  useEffect(() => {
+    onWide?.(tab !== 'characters');
+  }, [tab, onWide]);
+  useEffect(() => () => onWide?.(false), [onWide]);
   useEffect(() => () => onPreview(null), [onPreview]);
   useEffect(() => {
     detail.current?.scrollTo({ top: 0 });
@@ -62,6 +80,13 @@ export default function DatabasePanel({
     setSection(next);
     setRow(0);
   };
+
+  useMenuKeys((key) => {
+    if (key !== 'prev' && key !== 'next') return false;
+    const index = TABS.findIndex((entry) => entry.id === tab);
+    setTab(TABS[wrap(index + (key === 'next' ? 1 : -1), TABS.length)].id);
+    return true;
+  }, active);
 
   useMenuKeys((key) => {
     if (key === 'back') {
@@ -87,7 +112,7 @@ export default function DatabasePanel({
       return true;
     }
     return false;
-  }, active);
+  }, active && tab === 'characters');
 
   const spec = file?.ryderId ? RYDERZ[file.ryderId] : null;
   const theme = file?.ryderId ? RYDER_THEME[file.ryderId] : null;
@@ -99,201 +124,238 @@ export default function DatabasePanel({
     <section className={`${menu.panel} ${styles.database}`} aria-label="Database" style={theme ? { ['--file' as string]: theme.aura } : undefined}>
       <header className={`${menu.panelHead} ${styles.head}`}>
         <div>
-          <p className={menu.eyebrow}>Database · {read} of {entries.length} files open</p>
-          <h2>Journal</h2>
-          <p>Everyone the signal has touched. Profiles, field notes, and the kit as recorded on the block.</p>
+          <nav className={styles.tabs} role="tablist" aria-label="Database">
+            {TABS.map((entry) => (
+              <button
+                key={entry.id}
+                type="button"
+                role="tab"
+                aria-selected={entry.id === tab}
+                className={styles.tab}
+                onClick={() => setTab(entry.id)}
+              >
+                {entry.label}
+              </button>
+            ))}
+            <small className={styles.tabHint}>Q / E</small>
+          </nav>
+          {tab === 'characters' ? (
+            <>
+              <p className={menu.eyebrow}>Database · {read} of {entries.length} files open</p>
+              <h2>Journal</h2>
+              <p>Everyone the signal has touched. Profiles, field notes, and the kit as recorded on the block.</p>
+            </>
+          ) : tab === 'skins' ? (
+            <>
+              <p className={menu.eyebrow}>Database · Cosmetics</p>
+              <h2>Skins</h2>
+              <p>Change how a Ryder looks. Powers, stats and hitboxes stay the same in every skin.</p>
+            </>
+          ) : (
+            <>
+              <p className={menu.eyebrow}>Database · Collections</p>
+              <h2>Archives</h2>
+              <p>Every collection and how much of it you own.</p>
+            </>
+          )}
         </div>
-        <nav className={styles.sections} aria-label="Sections">
-          {sections.map((id) => (
-            <button
-              key={id}
-              type="button"
-              className={`${styles.section} ${id === section ? styles.sectionActive : ''}`}
-              aria-pressed={id === section}
-              onClick={() => changeSection(id)}
-            >
-              <b>{SECTION_LABEL[id].code}</b>
-              {SECTION_LABEL[id].title}
-            </button>
-          ))}
-        </nav>
+        {tab === 'characters' && (
+          <nav className={styles.sections} aria-label="Sections">
+            {sections.map((id) => (
+              <button
+                key={id}
+                type="button"
+                className={`${styles.section} ${id === section ? styles.sectionActive : ''}`}
+                aria-pressed={id === section}
+                onClick={() => changeSection(id)}
+              >
+                <b>{SECTION_LABEL[id].code}</b>
+                {SECTION_LABEL[id].title}
+              </button>
+            ))}
+          </nav>
+        )}
       </header>
 
-      <div className={styles.body}>
-        <ol className={styles.files} aria-label={SECTION_LABEL[section].title}>
-          <li className={styles.filesHead}>
-            <strong>{SECTION_LABEL[section].title}</strong>
-            <small>{SECTION_LABEL[section].blurb}</small>
-          </li>
-          {files.map((entry, i) => {
-            const focused = entry.id === file?.id;
-            const tint = entry.ryderId ? RYDER_THEME[entry.ryderId].aura : entry.sealed ? '#8a8fa3' : '#9bd6c4';
-            return (
-              <li key={entry.id}>
-                <button
-                  type="button"
-                  className={`${styles.file} ${focused ? styles.fileFocused : ''} ${entry.sealed ? styles.fileSealed : ''}`}
-                  aria-current={focused}
-                  style={{ ['--file' as string]: tint }}
-                  onMouseEnter={() => setRow(i)}
-                  onClick={() => setRow(i)}
-                >
-                  <span className={styles.fileNo}>{entry.entry}</span>
-                  <strong>{entry.name}</strong>
-                  <small>{entry.sealed ? 'Sealed' : entry.codename}</small>
-                </button>
-              </li>
-            );
-          })}
-        </ol>
+      {tab !== 'characters' ? (
+        <SkinVault manager={manager} mode={tab} active={active} onBack={onBack} />
+      ) : (
+        <div className={styles.body}>
+          <ol className={styles.files} aria-label={SECTION_LABEL[section].title}>
+            <li className={styles.filesHead}>
+              <strong>{SECTION_LABEL[section].title}</strong>
+              <small>{SECTION_LABEL[section].blurb}</small>
+            </li>
+            {files.map((entry, i) => {
+              const focused = entry.id === file?.id;
+              const tint = entry.ryderId ? RYDER_THEME[entry.ryderId].aura : entry.sealed ? '#8a8fa3' : '#9bd6c4';
+              return (
+                <li key={entry.id}>
+                  <button
+                    type="button"
+                    className={`${styles.file} ${focused ? styles.fileFocused : ''} ${entry.sealed ? styles.fileSealed : ''}`}
+                    aria-current={focused}
+                    style={{ ['--file' as string]: tint }}
+                    onMouseEnter={() => setRow(i)}
+                    onClick={() => setRow(i)}
+                  >
+                    <span className={styles.fileNo}>{entry.entry}</span>
+                    <strong>{entry.name}</strong>
+                    <small>{entry.sealed ? 'Sealed' : entry.codename}</small>
+                  </button>
+                </li>
+              );
+            })}
+          </ol>
 
-        <article ref={detail} className={styles.dossier} aria-live="polite">
-          {file && (
-            <>
-              <header className={styles.dossierHead}>
-                <div className={styles.stamp} data-sealed={file.sealed ? 'true' : 'false'}>
-                  {spec?.icon ? <Image src={spec.icon} alt="" fill unoptimized sizes="120px" /> : <span>{file.sealed ? '?' : SECTION_LABEL[file.section].code}</span>}
-                </div>
-                <div className={styles.identity}>
-                  <p className={menu.eyebrow}>
-                    File {file.entry} · {SECTION_LABEL[file.section].title}
-                  </p>
-                  <h3>{file.name}</h3>
-                  <p className={styles.codename}>{file.codename}</p>
-                  <ul className={styles.tags}>
-                    {file.tags.map((tag) => (
-                      <li key={tag}>{tag}</li>
-                    ))}
-                  </ul>
-                </div>
-              </header>
-
-              <dl className={styles.facts}>
-                <div>
-                  <dt>Designation</dt>
-                  <dd>{file.designation}</dd>
-                </div>
-                <div>
-                  <dt>Affiliation</dt>
-                  <dd>{file.affiliation}</dd>
-                </div>
-                <div>
-                  <dt>Status</dt>
-                  <dd>{file.status}</dd>
-                </div>
-                <div>
-                  <dt>Threat</dt>
-                  <dd className={styles.threat} aria-label={`Threat ${file.threat} of 5`}>
-                    <span>
-                      {[1, 2, 3, 4, 5].map((n) => (
-                        <i key={n} data-on={n <= file.threat ? 'true' : 'false'} />
-                      ))}
-                    </span>
-                    {file.sealed ? 'Unknown' : THREAT_LABEL[file.threat]}
-                  </dd>
-                </div>
-                {spec && (
-                  <div>
-                    <dt>Weapon</dt>
-                    <dd>{spec.weapon}</dd>
+          <article ref={detail} className={styles.dossier} aria-live="polite">
+            {file && (
+              <>
+                <header className={styles.dossierHead}>
+                  <div className={styles.stamp} data-sealed={file.sealed ? 'true' : 'false'}>
+                    {spec?.icon ? <Image src={spec.icon} alt="" fill unoptimized sizes="120px" /> : <span>{file.sealed ? '?' : SECTION_LABEL[file.section].code}</span>}
                   </div>
-                )}
-                {file.performer && (
-                  <div>
-                    <dt>Performed by</dt>
-                    <dd>{file.performer}</dd>
-                  </div>
-                )}
-              </dl>
-
-              {file.sealed ? (
-                <section className={styles.block}>
-                  <h4>Profile</h4>
-                  <div className={styles.redacted} aria-label="Redacted">
-                    <i style={{ width: '92%' }} />
-                    <i style={{ width: '71%' }} />
-                    <i style={{ width: '84%' }} />
-                    <i style={{ width: '46%' }} />
-                  </div>
-                  <p className={styles.sealedNote}>Clearance pending. This file opens when the character drops into the raid.</p>
-                </section>
-              ) : (
-                <>
-                  <section className={styles.block}>
-                    <h4>Signal reading</h4>
-                    <p className={styles.signal}>{file.signal}</p>
-                  </section>
-
-                  <section className={styles.block}>
-                    <h4>Profile</h4>
-                    {file.profile.map((paragraph) => (
-                      <p key={paragraph}>{paragraph}</p>
-                    ))}
-                  </section>
-
-                  <section className={styles.block}>
-                    <h4>Field notes</h4>
-                    <ul className={styles.notes}>
-                      {file.notes.map((note) => (
-                        <li key={note}>{note}</li>
+                  <div className={styles.identity}>
+                    <p className={menu.eyebrow}>
+                      File {file.entry} · {SECTION_LABEL[file.section].title}
+                    </p>
+                    <h3>{file.name}</h3>
+                    <p className={styles.codename}>{file.codename}</p>
+                    <ul className={styles.tags}>
+                      {file.tags.map((tag) => (
+                        <li key={tag}>{tag}</li>
                       ))}
                     </ul>
-                  </section>
+                  </div>
+                </header>
 
-                  {attributes.length > 0 && (
+                <dl className={styles.facts}>
+                  <div>
+                    <dt>Designation</dt>
+                    <dd>{file.designation}</dd>
+                  </div>
+                  <div>
+                    <dt>Affiliation</dt>
+                    <dd>{file.affiliation}</dd>
+                  </div>
+                  <div>
+                    <dt>Status</dt>
+                    <dd>{file.status}</dd>
+                  </div>
+                  <div>
+                    <dt>Threat</dt>
+                    <dd className={styles.threat} aria-label={`Threat ${file.threat} of 5`}>
+                      <span>
+                        {[1, 2, 3, 4, 5].map((n) => (
+                          <i key={n} data-on={n <= file.threat ? 'true' : 'false'} />
+                        ))}
+                      </span>
+                      {file.sealed ? 'Unknown' : THREAT_LABEL[file.threat]}
+                    </dd>
+                  </div>
+                  {spec && (
+                    <div>
+                      <dt>Weapon</dt>
+                      <dd>{spec.weapon}</dd>
+                    </div>
+                  )}
+                  {file.performer && (
+                    <div>
+                      <dt>Performed by</dt>
+                      <dd>{file.performer}</dd>
+                    </div>
+                  )}
+                </dl>
+
+                {file.sealed ? (
+                  <section className={styles.block}>
+                    <h4>Profile</h4>
+                    <div className={styles.redacted} aria-label="Redacted">
+                      <i style={{ width: '92%' }} />
+                      <i style={{ width: '71%' }} />
+                      <i style={{ width: '84%' }} />
+                      <i style={{ width: '46%' }} />
+                    </div>
+                    <p className={styles.sealedNote}>Clearance pending. This file opens when the character drops into the raid.</p>
+                  </section>
+                ) : (
+                  <>
                     <section className={styles.block}>
-                      <h4>Attributes</h4>
-                      <ul className={styles.attributes}>
-                        {attributes.map((attr) => (
-                          <li key={attr.label}>
-                            <span>{attr.label}</span>
-                            <i>
-                              <b style={{ transform: `scaleX(${attr.max > 0 ? Math.max(0.04, Math.min(1, attr.value / attr.max)) : 0})` }} />
-                            </i>
-                            <em>{Number.isInteger(attr.value) ? attr.value : attr.value.toFixed(1)}</em>
-                          </li>
+                      <h4>Signal reading</h4>
+                      <p className={styles.signal}>{file.signal}</p>
+                    </section>
+
+                    <section className={styles.block}>
+                      <h4>Profile</h4>
+                      {file.profile.map((paragraph) => (
+                        <p key={paragraph}>{paragraph}</p>
+                      ))}
+                    </section>
+
+                    <section className={styles.block}>
+                      <h4>Field notes</h4>
+                      <ul className={styles.notes}>
+                        {file.notes.map((note) => (
+                          <li key={note}>{note}</li>
                         ))}
                       </ul>
                     </section>
-                  )}
 
-                  {spec && (
-                    <section className={styles.block}>
-                      <h4>Recorded kit</h4>
-                      <ul className={styles.kit}>
-                        {spec.moves.map((move, i) => {
-                          const bound = deck ? INPUT_SLOTS.find((slot) => deck[slot] === move.id) : null;
-                          return (
-                            <li key={move.id}>
-                              <b>{bound ?? INPUT_SLOTS[i]}</b>
-                              <i className={styles.glyph}>
-                                <PowerIcon id={move.id} size={22} title={`${move.name} symbol`} />
+                    {attributes.length > 0 && (
+                      <section className={styles.block}>
+                        <h4>Attributes</h4>
+                        <ul className={styles.attributes}>
+                          {attributes.map((attr) => (
+                            <li key={attr.label}>
+                              <span>{attr.label}</span>
+                              <i>
+                                <b style={{ transform: `scaleX(${attr.max > 0 ? Math.max(0.04, Math.min(1, attr.value / attr.max)) : 0})` }} />
                               </i>
-                              <div>
-                                <strong>{move.name}</strong>
-                                <p>{move.description}</p>
-                                <small>
-                                  <span className={styles.type} style={{ '--type': POWER_TYPE_COLOR[powerTypeOf(move.id)] } as CSSProperties}>
-                                    {POWER_TYPE_LABEL[powerTypeOf(move.id)]}
-                                  </span>
-                                  {move.drain > 0 ? `Drains ${move.drain} aura/s` : `${move.auraCost} aura`}
-                                </small>
-                              </div>
+                              <em>{Number.isInteger(attr.value) ? attr.value : attr.value.toFixed(1)}</em>
                             </li>
-                          );
-                        })}
-                      </ul>
-                    </section>
-                  )}
-                </>
-              )}
-            </>
-          )}
-          <button type="button" className={`${menu.ghostBtn} ${styles.back}`} onClick={onBack}>
-            Back
-          </button>
-        </article>
-      </div>
+                          ))}
+                        </ul>
+                      </section>
+                    )}
+
+                    {spec && (
+                      <section className={styles.block}>
+                        <h4>Recorded kit</h4>
+                        <ul className={styles.kit}>
+                          {spec.moves.map((move, i) => {
+                            const bound = deck ? INPUT_SLOTS.find((slot) => deck[slot] === move.id) : null;
+                            return (
+                              <li key={move.id}>
+                                <b>{bound ?? INPUT_SLOTS[i]}</b>
+                                <i className={styles.glyph}>
+                                  <PowerIcon id={move.id} size={22} title={`${move.name} symbol`} />
+                                </i>
+                                <div>
+                                  <strong>{move.name}</strong>
+                                  <p>{move.description}</p>
+                                  <small>
+                                    <span className={styles.type} style={{ '--type': POWER_TYPE_COLOR[powerTypeOf(move.id)] } as CSSProperties}>
+                                      {POWER_TYPE_LABEL[powerTypeOf(move.id)]}
+                                    </span>
+                                    {move.drain > 0 ? `Drains ${move.drain} aura/s` : `${move.auraCost} aura`}
+                                  </small>
+                                </div>
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      </section>
+                    )}
+                  </>
+                )}
+              </>
+            )}
+            <button type="button" className={`${menu.ghostBtn} ${styles.back}`} onClick={onBack}>
+              Back
+            </button>
+          </article>
+        </div>
+      )}
     </section>
   );
 }

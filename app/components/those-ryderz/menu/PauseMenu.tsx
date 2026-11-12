@@ -16,6 +16,7 @@ import PowerTreePanel from './PowerTreePanel';
 import RyderSelector from './RyderSelector';
 import RyderShowcase from './RyderShowcase';
 import SettingsMenu from './SettingsMenu';
+import { useEquippedSkin } from '../skins/useEquippedSkin';
 import { RYDER_THEME } from './theme';
 import { useMenuKeys, wrap } from './useMenuKeys';
 import styles from './PauseMenu.module.css';
@@ -80,6 +81,7 @@ export default function PauseMenu({
   const [poseKey, setPoseKey] = useState(0);
   const [preview, setPreview] = useState<RyderId | null>(null);
   const [switching, setSwitching] = useState(false);
+  const [wide, setWide] = useState(false);
 
   const rootItems: NavItem<RootAction>[] =
     gameMode === GameMode.PVP
@@ -90,6 +92,7 @@ export default function PauseMenu({
           ...ROOT_ITEMS.slice(1),
         ];
   const shown = preview ?? activeRyder;
+  const shownSkin = useEquippedSkin(shown);
   const spec = RYDERZ[shown];
   const theme = RYDER_THEME[shown];
   const deck = manager.loadoutSpecs(shown);
@@ -140,7 +143,7 @@ export default function PauseMenu({
 
   return (
     <div
-      className={`${styles.menu} ${view === 'tree' ? styles.menuBackdrop : ''}`}
+      className={`${styles.menu} ${view === 'tree' ? styles.menuBackdrop : ''} ${view === 'database' && wide ? styles.menuWide : ''}`}
       role="dialog"
       aria-modal="true"
       aria-label="Raid paused"
@@ -197,7 +200,7 @@ export default function PauseMenu({
         </section>
       )}
       {view === 'database' && (
-        <DatabasePanel manager={manager} activeRyder={activeRyder} active onPreview={previewRyder} onBack={back} />
+        <DatabasePanel manager={manager} activeRyder={activeRyder} active onPreview={previewRyder} onWide={setWide} onBack={back} />
       )}
       {view === 'tree' && <PowerTreePanel manager={manager} ryderId={activeRyder} active onBack={back} />}
       {view === 'upgrades' && (
@@ -253,7 +256,7 @@ export default function PauseMenu({
         <span className={styles.watermark} aria-hidden="true">
           {fighterMark(spec, theme.label)}
         </span>
-        <RyderShowcase ryderId={shown} poseKey={poseKey} />
+        <RyderShowcase ryderId={shown} skinId={shownSkin} poseKey={poseKey} />
         <div className={styles.caption}>
           <h3>
             <small>

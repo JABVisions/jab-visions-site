@@ -769,6 +769,14 @@
 /* Power Tree: the figure leaves the column and stands behind the screen,
    so the tree and its detail pane can use the width. A lane on the right
    stays clear of the panel so the Ryder is still on screen. */
+.menuWide {
+  grid-template-columns: minmax(180px, 210px) minmax(0, 1fr);
+}
+
+.menuWide .showcase {
+  display: none;
+}
+
 .menuBackdrop {
   grid-template-columns: minmax(180px, 210px) minmax(0, 1fr);
 }

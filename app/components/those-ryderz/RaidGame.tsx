@@ -38,6 +38,7 @@ import SoloCharacterSelect from './modes/SoloCharacterSelect';
 import PremiereCharacterSelect from './premiere/PremiereCharacterSelect';
 import { NEUTRAL_THEME, RYDER_THEME as AURA } from './menu/theme';
 import RyderzStartScreen from './start/RyderzStartScreen';
+import DatabaseScreen from './skins/DatabaseScreen';
 import styles from './RaidGame.module.css';
 
 export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'page' }) {
@@ -63,7 +64,7 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
   // `selected` is the Ryder the raid booted with (it owns the engine's lifetime);
   // the Ryder currently in play lives in the RyderManager and can change mid-raid.
   const [selected, setSelected] = useState<RyderId | null>(null);
-  const [screen, setScreen] = useState<'start' | 'solo-select' | 'pvp' | 'map' | 'raid-select' | 'raid-lobby' | 'raid-watch' | 'game'>('start');
+  const [screen, setScreen] = useState<'start' | 'database' | 'solo-select' | 'pvp' | 'map' | 'raid-select' | 'raid-lobby' | 'raid-watch' | 'game'>('start');
   const [drop, setDrop] = useState<{ mode: 'solo'; id: RyderId } | { mode: 'pvp'; lineup: PvpLineup } | null>(null);
   const [raidHost, setRaidHost] = useState<RyderId>('rubi');
   const raidPlanRef = useRef<ReturnType<typeof launchFromSquad> | null>(null);
@@ -1035,8 +1036,11 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
             manager.setGameMode(mode);
             setScreen(mode === GameMode.PVP ? 'pvp' : mode === GameMode.RAID ? 'raid-select' : 'solo-select');
           }}
+          onDatabase={() => setScreen('database')}
         />
       )}
+
+      {screen === 'database' && <DatabaseScreen manager={manager} activeRyder={activeRyder} onBack={() => setScreen('start')} />}
 
       {screen === 'solo-select' && (
         <SoloCharacterSelect

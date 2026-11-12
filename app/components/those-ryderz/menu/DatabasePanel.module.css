@@ -22,6 +22,46 @@
   min-width: 0;
 }
 
+.tabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 10px;
+}
+
+.tab {
+  appearance: none;
+  padding: 7px 14px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: none;
+  color: rgba(245, 255, 248, 0.55);
+  font: 900 0.66rem/1 monospace;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition:
+    color 0.18s ease,
+    border-color 0.18s ease;
+}
+
+.tab[aria-selected='true'] {
+  color: #fff;
+  border-bottom-color: var(--aura);
+}
+
+.tab:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+
+.tabHint {
+  margin-left: 6px;
+  color: rgba(245, 255, 248, 0.35);
+  font: 700 0.54rem/1 monospace;
+  letter-spacing: 0.12em;
+}
+
 .sections {
   display: flex;
   flex-wrap: wrap;

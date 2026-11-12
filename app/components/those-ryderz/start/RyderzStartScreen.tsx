@@ -49,6 +49,7 @@ export default function RyderzStartScreen({
   onContinue,
   onNewGame,
   onPickMode,
+  onDatabase,
 }: {
   slots: SaveSlot[];
   activeSlot: number;
@@ -57,16 +58,22 @@ export default function RyderzStartScreen({
   onContinue: () => void;
   onNewGame: () => void;
   onPickMode: (mode: GameMode) => void;
+  onDatabase?: () => void;
 }) {
   const hasSave = slots.some((slot) => !slot.empty);
   const current = slots[activeSlot];
   const canContinue = Boolean(current && !current.empty);
   const [modeFocus, setModeFocus] = useState(Math.max(0, GAME_MODES.findIndex((mode) => mode.id === lastMode)));
 
+  // The Database sits after the modes in the focus order.
+  const items = GAME_MODES.length + (onDatabase ? 1 : 0);
   useMenuKeys((key) => {
-    if (key === 'left' || key === 'up') setModeFocus((i) => wrap(i - 1, GAME_MODES.length));
-    else if (key === 'right' || key === 'down') setModeFocus((i) => wrap(i + 1, GAME_MODES.length));
-    else if (key === 'confirm') onPickMode(GAME_MODES[modeFocus].id);
+    if (key === 'left' || key === 'up') setModeFocus((i) => wrap(i - 1, items));
+    else if (key === 'right' || key === 'down') setModeFocus((i) => wrap(i + 1, items));
+    else if (key === 'confirm') {
+      if (modeFocus >= GAME_MODES.length) onDatabase?.();
+      else onPickMode(GAME_MODES[modeFocus].id);
+    }
     else return false;
     return true;
   }, true);
@@ -121,6 +128,19 @@ export default function RyderzStartScreen({
             />
           ))}
         </div>
+
+        {onDatabase ? (
+          <div className={styles.continueRow}>
+            <GlitchButton
+              label="Database"
+              hint="Characters · Skins · Archives"
+              dim
+              selected={modeFocus === GAME_MODES.length}
+              onMouseEnter={() => setModeFocus(GAME_MODES.length)}
+              onClick={onDatabase}
+            />
+          </div>
+        ) : null}
       </div>
 
       <footer className={styles.foot}>
