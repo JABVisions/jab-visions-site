@@ -120,6 +120,9 @@ async function loadGltfTemplate(url: string, label: string, repair?: GlbRepair):
     mesh.frustumCulled = false;
     const mark = (material: THREE.Material) => {
       material.userData.retain = true;
+      for (const value of Object.values(material)) {
+        if ((value as THREE.Texture | null)?.isTexture) (value as THREE.Texture).anisotropy = 8;
+      }
     };
     if (Array.isArray(mesh.material)) mesh.material.forEach(mark);
     else if (mesh.material) mark(mesh.material);
