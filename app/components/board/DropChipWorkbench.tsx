@@ -65,6 +65,7 @@ export default function DropChipWorkbench({
   onToggleFrame,
   monitorAspect,
   monitorRatio,
+  openDeckToken = 0,
 }: {
   chip: ReactNode;
   deck: ReactNode;
@@ -75,6 +76,8 @@ export default function DropChipWorkbench({
   /** V5 monitor shape. Omitted on the V4 workbench so the chip still fills the host. */
   monitorAspect?: string;
   monitorRatio?: number;
+  /** Bumps when a timeline tool wants the Palette open. */
+  openDeckToken?: number;
 }) {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [paletteFull, setPaletteFull] = useState(false);
@@ -104,6 +107,10 @@ export default function DropChipWorkbench({
     setPaletteDragging(false);
     panelRef.current?.style.removeProperty("width");
   }, []);
+
+  useEffect(() => {
+    if (openDeckToken > 0) openPalette();
+  }, [openDeckToken, openPalette]);
 
   useEffect(() => {
     if (!paletteOpen) return;
@@ -175,6 +182,7 @@ export default function DropChipWorkbench({
                 : undefined
             }
           >
+            <div className={styles.monitorLayerAnchor} data-art-layer-anchor />
             <DropChipMonitor
               overlay={
                 showDock ? (

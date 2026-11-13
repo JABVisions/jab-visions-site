@@ -4120,10 +4120,18 @@ export default function DropStudioStage({
                           mode === "art" ||
                           (studioV5 && (mode === "photo" || mode === "video"))
                         }
+                        preferArt={mode === "art"}
                         studioV5={studioV5}
                         studioDraftId={studioDraftId}
                         onV5Change={rememberV5}
                         onMediaError={handleMediaPreviewError}
+                        onAddDrop={studioV5 && mode === "video" ? done : undefined}
+                        addDropBusy={processingVocal}
+                        addDropLabel={
+                          isDropbookMode
+                            ? "Add Video to Dropbook"
+                            : destinationPublishLabel || "Add Video to Drop"
+                        }
                       />
                       {liveUploadProgress && mediaKind === "video" ? (
                         <div className="capStudioSaveNote">
@@ -4135,6 +4143,7 @@ export default function DropStudioStage({
                       ) : saveNote ? (
                         <span className="saveNote capStudioSaveNote">{saveNote}</span>
                       ) : null}
+                      {studioV5 && mode === "video" ? null : (
                       <button
                         type="button"
                         className="studioDoneCheck"
@@ -4167,6 +4176,7 @@ export default function DropStudioStage({
                           />
                         </svg>
                       </button>
+                      )}
                     </div>
                   )}
                 </div>

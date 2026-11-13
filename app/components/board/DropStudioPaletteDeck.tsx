@@ -1,48 +1,29 @@
 "use client";
 
 import type { ReactNode } from "react";
+import { artToolLabel, STUDIO_OBJECT_TOOLS, type StudioObjectTool } from "@/lib/board/artBrush";
 import styles from "./DropStudio.module.css";
 
-export type ObjectTool = "text" | "stickers" | "button" | "effects" | "filters" | "enhance";
+export type ObjectTool = StudioObjectTool;
 
-export const OBJECT_TOOLS: ObjectTool[] = [
-  "text",
-  "stickers",
-  "button",
-  "effects",
-  "filters",
-  "enhance",
-];
+export const OBJECT_TOOLS: ObjectTool[] = [...STUDIO_OBJECT_TOOLS];
 
 function objectToolLabel(item: ObjectTool) {
-  switch (item) {
-    case "text":
-      return "Text";
-    case "stickers":
-      return "Stickers";
-    case "button":
-      return "Button";
-    case "effects":
-      return "Effects";
-    case "filters":
-      return "Filters";
-    case "enhance":
-      return "Enhance";
-    default:
-      return item;
-  }
+  return artToolLabel(item);
 }
 
 export function ObjectToolToolbar({
   tool,
+  tools = OBJECT_TOOLS,
   onToolChange,
 }: {
   tool: ObjectTool;
+  tools?: ObjectTool[];
   onToolChange: (tool: ObjectTool) => void;
 }) {
   return (
     <div className={styles.workbenchTools} aria-label="Drop Studio object tools">
-      {OBJECT_TOOLS.map((item) => (
+      {tools.map((item) => (
         <button
           key={item}
           type="button"
@@ -60,11 +41,13 @@ export function ObjectToolToolbar({
 /** Palette drawer — object toolbar on top, scrollable body with tool panels + art tools. */
 export default function DropStudioPaletteDeck({
   tool,
+  tools,
   onToolChange,
   drawer,
   artTools,
 }: {
   tool: ObjectTool;
+  tools?: ObjectTool[];
   onToolChange: (tool: ObjectTool) => void;
   drawer?: ReactNode;
   artTools?: ReactNode;
@@ -72,7 +55,7 @@ export default function DropStudioPaletteDeck({
   return (
     <div className={styles.workbenchDock}>
       <div className={styles.workbenchPaletteScroll}>
-        <ObjectToolToolbar tool={tool} onToolChange={onToolChange} />
+        <ObjectToolToolbar tool={tool} tools={tools} onToolChange={onToolChange} />
         {drawer ? <div className={styles.workbenchDrawer}>{drawer}</div> : null}
         {artTools ? <div className={styles.workbenchArtTools}>{artTools}</div> : null}
       </div>

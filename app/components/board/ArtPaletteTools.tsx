@@ -1,9 +1,10 @@
 "use client";
 
 import type { RefObject } from "react";
+import { ART_BRUSH_PRESETS, type ArtBrushMode, type ArtBrushPreset } from "@/lib/board/artBrush";
 import styles from "./boardArtCanvas.module.css";
 
-export type ArtBrushMode = "paint" | "blend" | "erase";
+export type { ArtBrushMode };
 
 type ArtPaletteToolsProps = {
   wheelRef: RefObject<HTMLDivElement | null>;
@@ -72,6 +73,12 @@ export default function ArtPaletteTools({
   onClear,
   onSave,
 }: ArtPaletteToolsProps) {
+  function applyPreset(preset: ArtBrushPreset) {
+    onBrushModeChange(preset.mode);
+    onSizeChange(preset.size);
+    onOpacityChange(preset.opacity);
+  }
+
   return (
     <div className={[styles.paletteToolsRoot, styles.toolsDeck, styles.toolsPalette].join(" ")}>
       <div className={styles.wheelRow}>
@@ -188,14 +195,33 @@ export default function ArtPaletteTools({
         </div>
       </div>
 
+      <div className={styles.presets} aria-label="Brush presets">
+        {ART_BRUSH_PRESETS.map((preset) => {
+          const selected =
+            brushMode === preset.mode && size === preset.size && Math.abs(opacity - preset.opacity) < 0.02;
+          return (
+            <button
+              key={preset.id}
+              type="button"
+              className={[styles.ghost, selected ? styles.ghostOn : ""].filter(Boolean).join(" ")}
+              aria-pressed={selected}
+              onClick={() => applyPreset(preset)}
+            >
+              {preset.label}
+            </button>
+          );
+        })}
+      </div>
+
       <div className={styles.actions}>
         <button
           type="button"
           className={[styles.ghost, brushMode === "paint" ? styles.ghostOn : ""].filter(Boolean).join(" ")}
           onClick={() => onBrushModeChange("paint")}
           aria-pressed={brushMode === "paint"}
+          aria-label="Clean Brush"
         >
-          Paint
+          Clean Brush
         </button>
         <button
           type="button"

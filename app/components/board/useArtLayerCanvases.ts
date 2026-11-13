@@ -120,7 +120,16 @@ export function useArtLayerCanvases(
     stashActiveLayer();
     const target = storesRef.current.get(targetId);
     const dragged = storesRef.current.get(draggedId);
-    if (target && dragged) target.getContext("2d")?.drawImage(dragged, 0, 0);
+    if (target && dragged) {
+      const ctx = target.getContext("2d");
+      if (ctx) {
+        ctx.save();
+        ctx.globalCompositeOperation = "source-over";
+        ctx.globalAlpha = 1;
+        ctx.drawImage(dragged, 0, 0);
+        ctx.restore();
+      }
+    }
     storesRef.current.delete(draggedId);
     commitLayers(deleteArtLayer(current, draggedId));
     setActiveLayerId(targetId);
