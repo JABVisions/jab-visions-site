@@ -192,7 +192,7 @@ export function formatProfile(report: ProfileReport) {
   return lines.join('\n');
 }
 
-/** A fixed text panel in the corner of the page. Pointer events pass through to the game. */
+/** A fixed text panel at the edge of the page. Pointer events pass through to the game. */
 export class ProfilerOverlay {
   private element: HTMLPreElement | null = null;
   private nextAt = 0;
@@ -203,8 +203,10 @@ export class ProfilerOverlay {
     element.setAttribute('data-raid-profiler', '');
     element.style.cssText = [
       'position:fixed',
-      'left:8px',
-      'bottom:8px',
+      // Right edge, between the gear map and the controls legend: clear of the vitals ring.
+      'right:8px',
+      'top:44%',
+      'transform:translateY(-50%)',
       'z-index:2147483000',
       'margin:0',
       'padding:8px 10px',
