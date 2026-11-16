@@ -868,6 +868,7 @@ export class RaidEngine {
       ? new BvhOcclusion(() => this.world.occluders)
       : new LegacyOcclusion(() => this.world.occluders);
     if (this.flags.cameraBvh) this.rig.setOcclusion(this.occlusion);
+    this.rig.steadyFollow = this.flags.cameraFollow;
 
     this.particles = new ParticleSystem();
     this.scene.add(this.particles.points);

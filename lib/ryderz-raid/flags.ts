@@ -17,7 +17,7 @@
 export interface RaidFlags {
   /** Camera and aim raycasts walk a bounding-volume tree instead of every triangle. */
   cameraBvh: boolean;
-  /** Camera follow whose lag does not change with frame time, plus a smoothed lead. */
+  /** Camera follow whose trailing distance and turn lag do not change with frame time. */
   cameraFollow: boolean;
   /** Jump presses are held briefly, and a jump still fires just after leaving a ledge. */
   jumpAssist: boolean;
