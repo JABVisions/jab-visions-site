@@ -41,6 +41,9 @@ import RyderzStartScreen from './start/RyderzStartScreen';
 import DatabaseScreen from './skins/DatabaseScreen';
 import styles from './RaidGame.module.css';
 
+/** Just under two 60 fps frames, so the maps repaint on every other one. */
+const RADAR_PAINT_INTERVAL_MS = 31;
+
 export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'page' }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const engineRef = useRef<RaidEngine | null>(null);
@@ -51,6 +54,7 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
   const comboHud = useRef<ComboHudApi>(null);
   const radarHud = useRef<RadarApi>(null);
   const mapHud = useRef<RadarApi>(null);
+  const radarPaintedAt = useRef(0);
   const deckHud = useRef<DeckBarApi>(null);
   const popLayer = useRef<HTMLDivElement>(null);
   const partyHud = useRef<PartyHudApi | null>(null);
@@ -155,8 +159,14 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
     );
     vignette.current?.setHealth(next.hp, next.maxHp);
     comboHud.current?.setCombo(next.combo);
-    radarHud.current?.draw(next.radar);
-    mapHud.current?.draw(next.radar);
+    // The gear map and the chart repaint a whole canvas. Thirty times a second
+    // reads the same as every frame at this size and halves their cost at 60 fps.
+    const now = performance.now();
+    if (now - radarPaintedAt.current >= RADAR_PAINT_INTERVAL_MS) {
+      radarPaintedAt.current = now;
+      radarHud.current?.draw(next.radar);
+      mapHud.current?.draw(next.radar);
+    }
     deckHud.current?.setLive({
       hp: next.hp,
       maxHp: next.maxHp,
