@@ -998,6 +998,8 @@ export class RaidEngine {
     this.paused = false;
     this.mapOpen = false;
     this.phase = 'playing';
+    // The match is still loading the Ryder: index the arena's walls now, where a pause does not show.
+    if (this.occlusion instanceof BvhOcclusion) this.occlusion.warm();
     this.rig.snap(this.pos, this.yaw, this.pitch);
     this.camReady = false;
 
@@ -2140,6 +2142,7 @@ export class RaidEngine {
       fastMsPerRay: a.ms / samples,
       slowMsPerRay: b.ms / samples,
       pendingTrees: fast instanceof BvhOcclusion ? fast.pendingTrees : -1,
+      treeBuildMs: fast instanceof BvhOcclusion ? fast.buildMs : 0,
     };
   }
 

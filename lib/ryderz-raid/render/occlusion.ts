@@ -53,8 +53,13 @@ interface Entry {
   stamp: Float64Array;
 }
 
-/** Longest a single cast may spend building trees before it falls back for the rest. */
-const BUILD_BUDGET_MS = 5;
+/**
+ * Tree building is spread out so late-loading buildings never cost a visible
+ * hitch: at most this much per window, and geometry still waiting is answered
+ * by the original test in the meantime.
+ */
+const BUILD_BUDGET_MS = 4;
+const BUILD_WINDOW_MS = 16;
 
 const trees = new WeakMap<THREE.BufferGeometry, MeshBVH | false>();
 
@@ -98,6 +103,10 @@ export class BvhOcclusion implements Occlusion {
   private others: THREE.Object3D[] = [];
   private seen: THREE.Object3D[] = [];
   private pending = 0;
+  private windowStart = -Infinity;
+  private windowSpent = 0;
+  /** Total time spent building trees, ms. */
+  buildMs = 0;
   private fallback = new THREE.Raycaster();
   private now: () => number;
 
@@ -147,11 +156,24 @@ export class BvhOcclusion implements Occlusion {
       }
       this.pending = this.entries.filter((entry) => !entry.bvh && trees.get(entry.mesh.geometry) !== false).length;
     }
-    if (this.pending > 0) this.build();
+    if (this.pending > 0) this.build(false);
   }
 
-  private build() {
+  /**
+   * Index everything now. Call while a loading screen is up, where a pause of
+   * a tenth of a second is invisible; whatever arrives later is built on a budget.
+   */
+  warm() {
+    this.sync();
+    if (this.pending > 0) this.build(true);
+  }
+
+  private build(all: boolean) {
     const start = this.now();
+    if (start - this.windowStart >= BUILD_WINDOW_MS) {
+      this.windowStart = start;
+      this.windowSpent = 0;
+    }
     let left = 0;
     for (const entry of this.entries) {
       if (entry.bvh) continue;
@@ -159,7 +181,7 @@ export class BvhOcclusion implements Occlusion {
       let tree = trees.get(geometry);
       if (tree === false) continue;
       if (!tree) {
-        if (this.now() - start > BUILD_BUDGET_MS) {
+        if (!all && this.windowSpent + (this.now() - start) > BUILD_BUDGET_MS) {
           left += 1;
           continue;
         }
@@ -175,6 +197,9 @@ export class BvhOcclusion implements Occlusion {
       entry.bvh = tree;
     }
     this.pending = left;
+    const spent = this.now() - start;
+    this.windowSpent += spent;
+    this.buildMs += spent;
   }
 
   cast(ray: THREE.Ray, far: number) {
