@@ -24,19 +24,19 @@ share you can win (SOM) is a slice of SAM over a few years, with the reason
 written next to it. Every input says where it came from, and the guesses are
 labelled as guesses so nobody mistakes them for facts.
 
-`${CLAUDE_SKILL_DIR}` below is this skill's folder (where this SKILL.md lives).
+Run the commands below from the project root; `.cursor/skills/seed-market` is this skill's folder (where this SKILL.md lives).
 
 ```bash
-python3 "${CLAUDE_SKILL_DIR}/market.py" top-down --population 71M --population-name "US homes with a dog" \
+python3 ".cursor/skills/seed-market/market.py" top-down --population 71M --population-name "US homes with a dog" \
     --population-source "APPA 2026 State of the Industry report (americanpetproducts.org)" \
     --share 10% --share-source "assumption: about 1 in 10 dog homes pays for walks; check with a survey" \
     --spend 2400 --spend-source "assumption: 8 walks a month at the \$25 price" --write
-python3 "${CLAUDE_SKILL_DIR}/market.py" bottom-up --customers 400K --customers-source "..." \
+python3 ".cursor/skills/seed-market/market.py" bottom-up --customers 400K --customers-source "..." \
     --frequency 96 --frequency-source "..." --price 25 --price-source "..." --unit walk --write
-python3 "${CLAUDE_SKILL_DIR}/market.py" som --share 2.5% --years 3 --reason "who switches, and why" --write
-python3 "${CLAUDE_SKILL_DIR}/market.py" cite --name "US pet industry spend, 2025" --value 158B --source "APPA ..." --write
-python3 "${CLAUDE_SKILL_DIR}/market.py" show
-python3 "${CLAUDE_SKILL_DIR}/market.py" check      # exit 1 if anything is out of order or unsourced
+python3 ".cursor/skills/seed-market/market.py" som --share 2.5% --years 3 --reason "who switches, and why" --write
+python3 ".cursor/skills/seed-market/market.py" cite --name "US pet industry spend, 2025" --value 158B --source "APPA ..." --write
+python3 ".cursor/skills/seed-market/market.py" show
+python3 ".cursor/skills/seed-market/market.py" check      # exit 1 if anything is out of order or unsourced
 ```
 
 Other flags: `--level tam|sam` (either method can fill either level),

@@ -27,14 +27,14 @@ index so the investor can find everything. It also keeps the sequence
 straight: the deck and the model go out after a first meeting; the cap table,
 contracts and bank statements wait for a signed term sheet.
 
-`${CLAUDE_SKILL_DIR}` below is this skill's folder (where this SKILL.md lives).
+Run the commands below from the project root; `.cursor/skills/seed-dataroom` is this skill's folder (where this SKILL.md lives).
 
 ```bash
-python3 "${CLAUDE_SKILL_DIR}/dataroom.py" init                        # the nine folders in seed/dataroom/
-python3 "${CLAUDE_SKILL_DIR}/dataroom.py" check --today 2026-10-26    # present / missing / stale
-python3 "${CLAUDE_SKILL_DIR}/dataroom.py" check --stage before        # only what goes out before a term sheet
-python3 "${CLAUDE_SKILL_DIR}/dataroom.py" index                       # writes seed/dataroom/INDEX.md
-python3 "${CLAUDE_SKILL_DIR}/dataroom.py" share-list --stage before   # what to send now, and what waits
+python3 ".cursor/skills/seed-dataroom/dataroom.py" init                        # the nine folders in seed/dataroom/
+python3 ".cursor/skills/seed-dataroom/dataroom.py" check --today 2026-10-26    # present / missing / stale
+python3 ".cursor/skills/seed-dataroom/dataroom.py" check --stage before        # only what goes out before a term sheet
+python3 ".cursor/skills/seed-dataroom/dataroom.py" index                       # writes seed/dataroom/INDEX.md
+python3 ".cursor/skills/seed-dataroom/dataroom.py" share-list --stage before   # what to send now, and what waits
 ```
 
 Every command takes `--dir` (default `./seed`) and `--today`; `check` and

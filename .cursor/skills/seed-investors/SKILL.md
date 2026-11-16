@@ -24,17 +24,17 @@ research on the open web, writes one row per investor with the links it
 read, and this tool ranks the rows the same way every time and says why.
 Every fact keeps its source, so you can check it before you lean on it.
 
-`${CLAUDE_SKILL_DIR}` below is this skill's folder (where this SKILL.md lives).
+Run the commands below from the project root; `.cursor/skills/seed-investors` is this skill's folder (where this SKILL.md lives).
 
 ```bash
-python3 "${CLAUDE_SKILL_DIR}/investors.py" formd --q "pet care" --since 2025-01-01      # who raised, how much, when
-python3 "${CLAUDE_SKILL_DIR}/investors.py" import seed/research.csv                     # rows from public research
-python3 "${CLAUDE_SKILL_DIR}/investors.py" add --name "Maya Chen" --firm "Northlight Ventures" \
+python3 ".cursor/skills/seed-investors/investors.py" formd --q "pet care" --since 2025-01-01      # who raised, how much, when
+python3 ".cursor/skills/seed-investors/investors.py" import seed/research.csv                     # rows from public research
+python3 ".cursor/skills/seed-investors/investors.py" add --name "Maya Chen" --firm "Northlight Ventures" \
     --stage seed --check 250K-1M --sectors "pet care; consumer marketplaces" --geo US \
     --last-deal "led a pet-care seed round" --last-deal-date 2026-04-13 --source URL --source URL
-python3 "${CLAUDE_SKILL_DIR}/investors.py" rank --write                                 # fit 0-100 with reasons
-python3 "${CLAUDE_SKILL_DIR}/investors.py" show                                         # the ranked list
-python3 "${CLAUDE_SKILL_DIR}/investors.py" show maya-chen                               # one row, every source
+python3 ".cursor/skills/seed-investors/investors.py" rank --write                                 # fit 0-100 with reasons
+python3 ".cursor/skills/seed-investors/investors.py" show                                         # the ranked list
+python3 ".cursor/skills/seed-investors/investors.py" show maya-chen                               # one row, every source
 ```
 
 `investors.example.csv` in this folder is the format (the reel's six

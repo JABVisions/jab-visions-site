@@ -25,15 +25,15 @@ go up and come back. This skill keeps the numbers in one file, works out the
 growth and the runway exactly, and writes the update in the standard shape.
 It writes. It does not send: the founder reads it and says yes first.
 
-`${CLAUDE_SKILL_DIR}` below is this skill's folder (where this SKILL.md lives).
+Run the commands below from the project root; `.cursor/skills/seed-updates` is this skill's folder (where this SKILL.md lives).
 
 ```bash
-python3 "${CLAUDE_SKILL_DIR}/update.py" init                                 # seed/metrics.json from the example
-python3 "${CLAUDE_SKILL_DIR}/update.py" add --month 2026-12 --set revenue=7875 --set walks=2100 --cash 160000
-python3 "${CLAUDE_SKILL_DIR}/update.py" add --month 2026-12 --highlight "..." --lowlight "..." --ask "..."
-python3 "${CLAUDE_SKILL_DIR}/update.py" write --month 2026-11                # seed/updates/2026-11.md
-python3 "${CLAUDE_SKILL_DIR}/update.py" write --month 2026-11 --to prospects # seed/updates/2026-11-prospects.md
-python3 "${CLAUDE_SKILL_DIR}/update.py" write --stdout                       # the latest month, printed only
+python3 ".cursor/skills/seed-updates/update.py" init                                 # seed/metrics.json from the example
+python3 ".cursor/skills/seed-updates/update.py" add --month 2026-12 --set revenue=7875 --set walks=2100 --cash 160000
+python3 ".cursor/skills/seed-updates/update.py" add --month 2026-12 --highlight "..." --lowlight "..." --ask "..."
+python3 ".cursor/skills/seed-updates/update.py" write --month 2026-11                # seed/updates/2026-11.md
+python3 ".cursor/skills/seed-updates/update.py" write --month 2026-11 --to prospects # seed/updates/2026-11-prospects.md
+python3 ".cursor/skills/seed-updates/update.py" write --stdout                       # the latest month, printed only
 ```
 
 Other flags: `--dir PATH` (default `./seed`), `add --money-in N` (funding

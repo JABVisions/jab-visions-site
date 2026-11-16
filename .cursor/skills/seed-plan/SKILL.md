@@ -29,14 +29,14 @@ another, a use of funds that does not add up, a market share bigger than the
 market. A plan is a way to think clearly, not a promise of funding: the pack
 does the work, investors decide.
 
-`${CLAUDE_SKILL_DIR}` below is this skill's folder (where this SKILL.md lives).
+Run the commands below from the project root; `.cursor/skills/seed-plan` is this skill's folder (where this SKILL.md lives).
 
 ```bash
-python3 "${CLAUDE_SKILL_DIR}/plan.py" init --name "Leashly" --one-liner "A dog-walking app with flat prices and a backup walker on every walk" \
+python3 ".cursor/skills/seed-plan/plan.py" init --name "Leashly" --one-liner "A dog-walking app with flat prices and a backup walker on every walk" \
   --raise 1.5M --instrument "post-money SAFE" --founder "Your Name" --email you@leashly.example \
   --tagline "Dog walks without the surprise fees."
-python3 "${CLAUDE_SKILL_DIR}/plan.py" build                 # seed/plan.md + the numbers in seed/plan.json
-python3 "${CLAUDE_SKILL_DIR}/plan.py" check                 # the checks only: exit 0 clean, 1 something to fix
+python3 ".cursor/skills/seed-plan/plan.py" build                 # seed/plan.md + the numbers in seed/plan.json
+python3 ".cursor/skills/seed-plan/plan.py" check                 # the checks only: exit 0 clean, 1 something to fix
 ```
 
 Other flags: `--dir PATH` (default `./seed`), `init --brand/--ink/--accent

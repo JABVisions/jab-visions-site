@@ -27,13 +27,13 @@ from the raise. The deck is a single HTML file you can open anywhere, present
 with the arrow keys and print to PDF. A good deck earns a meeting; it does
 not guarantee a check. Investors decide.
 
-`${CLAUDE_SKILL_DIR}` below is this skill's folder (where this SKILL.md lives).
+Run the commands below from the project root; `.cursor/skills/seed-deck` is this skill's folder (where this SKILL.md lives).
 
 ```bash
-python3 "${CLAUDE_SKILL_DIR}/deck.py" outline               # what each slide will say, with its word count
-python3 "${CLAUDE_SKILL_DIR}/deck.py" build                 # seed/deck.html, then the lint
-python3 "${CLAUDE_SKILL_DIR}/deck.py" build --brand "#2F6FEB" --ink "#0E1B33" --accent "#FFB020"
-python3 "${CLAUDE_SKILL_DIR}/deck.py" lint                  # exit 0 clean, 1 something to fix
+python3 ".cursor/skills/seed-deck/deck.py" outline               # what each slide will say, with its word count
+python3 ".cursor/skills/seed-deck/deck.py" build                 # seed/deck.html, then the lint
+python3 ".cursor/skills/seed-deck/deck.py" build --brand "#2F6FEB" --ink "#0E1B33" --accent "#FFB020"
+python3 ".cursor/skills/seed-deck/deck.py" lint                  # exit 0 clean, 1 something to fix
 ```
 
 Other flags: `--dir PATH` (default `./seed`), `--plan PATH`, `build --out

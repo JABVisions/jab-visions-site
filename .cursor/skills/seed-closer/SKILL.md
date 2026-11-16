@@ -31,20 +31,20 @@ user said yes to that exact batch in the chat, and Claude's own "Allow once"
 card asks again for every email. All the user has to do is say yes, show up
 and pitch. Investors decide; nothing here promises a check.
 
-`${CLAUDE_SKILL_DIR}` below is this skill's folder (where this SKILL.md lives).
+Run the commands below from the project root; `.cursor/skills/seed-closer` is this skill's folder (where this SKILL.md lives).
 
 ```bash
-python3 "${CLAUDE_SKILL_DIR}/closer.py" draft --top 20          # one .eml per investor, status drafted
-python3 "${CLAUDE_SKILL_DIR}/closer.py" batch                   # recipients, their personal lines, the first email in full
-python3 "${CLAUDE_SKILL_DIR}/closer.py" approve --batch 3f9a1c2e --reply "yes"   # the user's reply, word for word
-python3 "${CLAUDE_SKILL_DIR}/closer.py" outbox --json           # exactly what to send: to, subject, body, thread
-python3 "${CLAUDE_SKILL_DIR}/closer.py" log --id maya-chen --event sent --thread-id 18c2f0a1
-python3 "${CLAUDE_SKILL_DIR}/closer.py" due --today 2026-10-29  # who gets a follow-up today
-python3 "${CLAUDE_SKILL_DIR}/closer.py" followup --due --extra "Here's our 60-second demo: https://..."
-python3 "${CLAUDE_SKILL_DIR}/closer.py" inbox --file replies.json            # sort replies, then --write
-python3 "${CLAUDE_SKILL_DIR}/closer.py" reply --id maya-chen --body-file answer.txt
-python3 "${CLAUDE_SKILL_DIR}/closer.py" book --id maya-chen --start "2026-11-05 10:00" --tz America/New_York --link https://meet.google.com/abc-defg-hij
-python3 "${CLAUDE_SKILL_DIR}/closer.py" status                  # the funnel
+python3 ".cursor/skills/seed-closer/closer.py" draft --top 20          # one .eml per investor, status drafted
+python3 ".cursor/skills/seed-closer/closer.py" batch                   # recipients, their personal lines, the first email in full
+python3 ".cursor/skills/seed-closer/closer.py" approve --batch 3f9a1c2e --reply "yes"   # the user's reply, word for word
+python3 ".cursor/skills/seed-closer/closer.py" outbox --json           # exactly what to send: to, subject, body, thread
+python3 ".cursor/skills/seed-closer/closer.py" log --id maya-chen --event sent --thread-id 18c2f0a1
+python3 ".cursor/skills/seed-closer/closer.py" due --today 2026-10-29  # who gets a follow-up today
+python3 ".cursor/skills/seed-closer/closer.py" followup --due --extra "Here's our 60-second demo: https://..."
+python3 ".cursor/skills/seed-closer/closer.py" inbox --file replies.json            # sort replies, then --write
+python3 ".cursor/skills/seed-closer/closer.py" reply --id maya-chen --body-file answer.txt
+python3 ".cursor/skills/seed-closer/closer.py" book --id maya-chen --start "2026-11-05 10:00" --tz America/New_York --link https://meet.google.com/abc-defg-hij
+python3 ".cursor/skills/seed-closer/closer.py" status                  # the funnel
 ```
 
 Every command takes `--dir` (default `./seed`) and `--today YYYY-MM-DD` (pin

@@ -25,16 +25,16 @@ about, and turns that into one plain sentence per rival that a business plan
 and a pitch deck can stand on. It reports what reviewers wrote and how often.
 It never makes a complaint up, and it never calls a rival bad in general.
 
-`${CLAUDE_SKILL_DIR}` below is this skill's folder (where this SKILL.md lives).
+Run the commands below from the project root; `.cursor/skills/seed-scout` is this skill's folder (where this SKILL.md lives).
 
 ```bash
-python3 "${CLAUDE_SKILL_DIR}/scout.py" find "dog walking"                   # the apps people find for the idea
-python3 "${CLAUDE_SKILL_DIR}/scout.py" reviews 547320928 --write            # 500 most recent -> seed/reviews/
-python3 "${CLAUDE_SKILL_DIR}/scout.py" reviews "Wag" --write                # a name works: it says which app it picked
-python3 "${CLAUDE_SKILL_DIR}/scout.py" themes 547320928                     # what the 1-2 star reviews say
-python3 "${CLAUDE_SKILL_DIR}/scout.py" compare 547320928 940734609 --write  # weak points -> seed/competitors.json
-python3 "${CLAUDE_SKILL_DIR}/scout.py" pricing 547320928 --note "keeps 20% of each booking" --source URL --write
-python3 "${CLAUDE_SKILL_DIR}/scout.py" show
+python3 ".cursor/skills/seed-scout/scout.py" find "dog walking"                   # the apps people find for the idea
+python3 ".cursor/skills/seed-scout/scout.py" reviews 547320928 --write            # 500 most recent -> seed/reviews/
+python3 ".cursor/skills/seed-scout/scout.py" reviews "Wag" --write                # a name works: it says which app it picked
+python3 ".cursor/skills/seed-scout/scout.py" themes 547320928                     # what the 1-2 star reviews say
+python3 ".cursor/skills/seed-scout/scout.py" compare 547320928 940734609 --write  # weak points -> seed/competitors.json
+python3 ".cursor/skills/seed-scout/scout.py" pricing 547320928 --note "keeps 20% of each booking" --source URL --write
+python3 ".cursor/skills/seed-scout/scout.py" show
 ```
 
 Other flags: `--pages 1..10` (50 reviews a page), `--stars 1` (one-star

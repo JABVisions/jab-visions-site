@@ -27,15 +27,15 @@ for itself and what each customer is worth. Every number traces back to an
 assumption you can change and defend. It is a plan, not a forecast: the
 model is only as honest as its inputs.
 
-`${CLAUDE_SKILL_DIR}` below is this skill's folder (where this SKILL.md lives).
+Run the commands below from the project root; `.cursor/skills/seed-model` is this skill's folder (where this SKILL.md lives).
 
 ```bash
-python3 "${CLAUDE_SKILL_DIR}/model.py" init                # seed/assumptions.json from the example
-python3 "${CLAUDE_SKILL_DIR}/model.py" run                 # the summary, nothing written
-python3 "${CLAUDE_SKILL_DIR}/model.py" run --write         # also writes seed/model.json
-python3 "${CLAUDE_SKILL_DIR}/model.py" run --months        # every month in a table
-python3 "${CLAUDE_SKILL_DIR}/model.py" funds               # the use of funds against the raise
-python3 "${CLAUDE_SKILL_DIR}/model.py" csv                 # seed/model.csv for a spreadsheet
+python3 ".cursor/skills/seed-model/model.py" init                # seed/assumptions.json from the example
+python3 ".cursor/skills/seed-model/model.py" run                 # the summary, nothing written
+python3 ".cursor/skills/seed-model/model.py" run --write         # also writes seed/model.json
+python3 ".cursor/skills/seed-model/model.py" run --months        # every month in a table
+python3 ".cursor/skills/seed-model/model.py" funds               # the use of funds against the raise
+python3 ".cursor/skills/seed-model/model.py" csv                 # seed/model.csv for a spreadsheet
 ```
 
 Other flags: `--dir PATH` (default `./seed`), `--assumptions PATH`, `--json`,

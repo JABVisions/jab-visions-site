@@ -33,15 +33,15 @@ regret, in plain words, with the exact question to put to a lawyer.
 keyword reader. A startup lawyer should read every document before the user
 signs anything, and the scanner only flags clauses it knows.
 
-`${CLAUDE_SKILL_DIR}` below is this skill's folder (where this SKILL.md lives).
+Run the commands below from the project root; `.cursor/skills/seed-terms` is this skill's folder (where this SKILL.md lives).
 
 ```bash
-python3 "${CLAUDE_SKILL_DIR}/terms.py" safe --investment 500k --cap 10m                      # 5.00% at the cap
-python3 "${CLAUDE_SKILL_DIR}/terms.py" safe --investment 500k --cap 10m --other 1m@10m       # the whole SAFE round
-python3 "${CLAUDE_SKILL_DIR}/terms.py" safe --investment 500k --cap 10m --discount 20 --round-pre 24m --round-raise 6m --pool 10
-python3 "${CLAUDE_SKILL_DIR}/terms.py" round --pre 6m --raise 1.5m --pool 10 --shares 7000000
-python3 "${CLAUDE_SKILL_DIR}/terms.py" round --pre 24m --raise 6m --pool 10 --cap-table seed/terms/cap-table.json
-python3 "${CLAUDE_SKILL_DIR}/terms.py" scan term-sheet.txt                                  # exit 3 = a high flag
+python3 ".cursor/skills/seed-terms/terms.py" safe --investment 500k --cap 10m                      # 5.00% at the cap
+python3 ".cursor/skills/seed-terms/terms.py" safe --investment 500k --cap 10m --other 1m@10m       # the whole SAFE round
+python3 ".cursor/skills/seed-terms/terms.py" safe --investment 500k --cap 10m --discount 20 --round-pre 24m --round-raise 6m --pool 10
+python3 ".cursor/skills/seed-terms/terms.py" round --pre 6m --raise 1.5m --pool 10 --shares 7000000
+python3 ".cursor/skills/seed-terms/terms.py" round --pre 24m --raise 6m --pool 10 --cap-table seed/terms/cap-table.json
+python3 ".cursor/skills/seed-terms/terms.py" scan term-sheet.txt                                  # exit 3 = a high flag
 ```
 
 Amounts: `500k`, `1.5m`, `$1,500,000`. Percentages: `20` or `20%`. A SAFE:

@@ -25,15 +25,15 @@ each one so you can answer in a sentence. Then it grades what you say against
 the things investors listen for, and lays out the 20 minutes of a booked
 call so you spend them on the story, not on small talk.
 
-`${CLAUDE_SKILL_DIR}` below is this skill's folder (where this SKILL.md lives).
+Run the commands below from the project root; `.cursor/skills/seed-coach` is this skill's folder (where this SKILL.md lives).
 
 ```bash
-python3 "${CLAUDE_SKILL_DIR}/coach.py" drill --n 10 --customers owners --provider walker
-python3 "${CLAUDE_SKILL_DIR}/coach.py" drill --investor maya-chen --category "the ask"
-python3 "${CLAUDE_SKILL_DIR}/coach.py" drill --category "unit economics" --seed 3 --write
-python3 "${CLAUDE_SKILL_DIR}/coach.py" grade --answer "15% flat, no owner fee. ..." --question ue-take
-python3 "${CLAUDE_SKILL_DIR}/coach.py" grade --file answer.txt
-python3 "${CLAUDE_SKILL_DIR}/coach.py" agenda --investor maya-chen --write
+python3 ".cursor/skills/seed-coach/coach.py" drill --n 10 --customers owners --provider walker
+python3 ".cursor/skills/seed-coach/coach.py" drill --investor maya-chen --category "the ask"
+python3 ".cursor/skills/seed-coach/coach.py" drill --category "unit economics" --seed 3 --write
+python3 ".cursor/skills/seed-coach/coach.py" grade --answer "15% flat, no owner fee. ..." --question ue-take
+python3 ".cursor/skills/seed-coach/coach.py" grade --file answer.txt
+python3 ".cursor/skills/seed-coach/coach.py" agenda --investor maya-chen --write
 ```
 
 Other flags: `--dir` (default `./seed`), `--json`, `--minutes 10..60` for the
