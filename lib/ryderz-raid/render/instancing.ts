@@ -142,6 +142,16 @@ function track(batch: THREE.InstancedMesh) {
   tracked.add({ batch, matrices, spheres, key: -1 });
 }
 
+/**
+ * Every copy a tracked batch holds, in its parent's space. The batch's own
+ * instance buffer only lists the copies in view this frame, so collision
+ * queries must read from here instead.
+ */
+export function instanceMatrices(batch: THREE.InstancedMesh): readonly THREE.Matrix4[] | null {
+  for (const entry of tracked) if (entry.batch === batch) return entry.matrices;
+  return null;
+}
+
 const _world = new THREE.Matrix4();
 const _sphere = new THREE.Sphere();
 

@@ -27,6 +27,7 @@ import {
 } from './config';
 import { GameMode } from './game-mode';
 import { readRaidFlags, type RaidFlags } from './flags';
+import { BvhOcclusion, LegacyOcclusion, type Occlusion } from './render/occlusion';
 import { FrameProfiler, ProfilerOverlay, type ProfileReport } from './profiler';
 import { PowerOutage, abilityLockout, type PowerClock } from './power-outage';
 import { DEFAULT_ARENA, arenaSpec, type ArenaDefinition, type ArenaId } from './arenas';
@@ -819,6 +820,8 @@ export class RaidEngine {
   /** RAID 2.0 switches, read once per engine. See `flags.ts`. */
   readonly flags: RaidFlags = readRaidFlags();
   private profiler = new FrameProfiler();
+  /** Nearest wall along a ray, for the camera boom and the crosshair. */
+  private occlusion: Occlusion;
   private profilerOverlay = new ProfilerOverlay();
 
   constructor(canvas: HTMLCanvasElement, onHud: (hud: HudState) => void) {
@@ -861,6 +864,10 @@ export class RaidEngine {
     this.scene.updateMatrixWorld(true);
     this.pipeline.useLights(this.world.group);
     this.rig = new ThirdPersonCamera(this.camera, this.world.occluders);
+    this.occlusion = this.flags.cameraBvh
+      ? new BvhOcclusion(() => this.world.occluders)
+      : new LegacyOcclusion(() => this.world.occluders);
+    if (this.flags.cameraBvh) this.rig.setOcclusion(this.occlusion);
 
     this.particles = new ParticleSystem();
     this.scene.add(this.particles.points);
@@ -2065,6 +2072,65 @@ export class RaidEngine {
 
   profileReport(): ProfileReport {
     return this.profiler.report();
+  }
+
+  /**
+   * Fire the same rays through the accelerated and the original occlusion
+   * query and report how they compare. Rays start around the fighter at chest
+   * height, the way the camera boom's do.
+   */
+  debugOcclusion(samples = 400, far = 12) {
+    const fast = this.occlusion;
+    const slow = new LegacyOcclusion(() => this.world.occluders);
+    const ray = new THREE.Ray();
+    let seed = 12345;
+    const rand = () => ((seed = (Math.imul(seed, 1664525) + 1013904223) | 0) >>> 0) / 4294967296;
+    const rays: Array<[number, number, number, number, number, number]> = [];
+    for (let i = 0; i < samples; i += 1) {
+      const yaw = rand() * Math.PI * 2;
+      const pitch = (rand() - 0.35) * 1.2;
+      rays.push([
+        this.pos.x + (rand() - 0.5) * 6,
+        this.world.heightAt(this.pos.x, this.pos.z) + 0.6 + rand() * 1.6,
+        this.pos.z + (rand() - 0.5) * 6,
+        Math.sin(yaw) * Math.cos(pitch),
+        Math.sin(pitch),
+        Math.cos(yaw) * Math.cos(pitch),
+      ]);
+    }
+    const run = (query: Occlusion) => {
+      const out: number[] = [];
+      const start = performance.now();
+      for (const [ox, oy, oz, dx, dy, dz] of rays) {
+        ray.origin.set(ox, oy, oz);
+        ray.direction.set(dx, dy, dz).normalize();
+        out.push(query.cast(ray, far));
+      }
+      return { out, ms: performance.now() - start };
+    };
+    run(fast);
+    const a = run(fast);
+    const b = run(slow);
+    let hits = 0;
+    let nearer = 0;
+    let missed = 0;
+    for (let i = 0; i < samples; i += 1) {
+      if (b.out[i] < Infinity) hits += 1;
+      if (a.out[i] === b.out[i] || Math.abs(a.out[i] - b.out[i]) < 1e-3) continue;
+      // Nearer: the tree found a solid the original skipped (an instanced copy
+      // trimmed from the draw buffer). Missed would be a real regression.
+      if (a.out[i] < b.out[i]) nearer += 1;
+      else missed += 1;
+    }
+    return {
+      samples,
+      hits,
+      nearer,
+      missed,
+      fastMsPerRay: a.ms / samples,
+      slowMsPerRay: b.ms / samples,
+      pendingTrees: fast instanceof BvhOcclusion ? fast.pendingTrees : -1,
+    };
   }
 
   private update(dt: number, time: number) {
@@ -6622,8 +6688,7 @@ export class RaidEngine {
     _ray.ray.copy(_aimRay);
     _ray.near = 0;
     _ray.far = range;
-    const hits = _ray.intersectObjects(this.world.occluders, false);
-    if (hits.length) range = Math.min(range, hits[0].distance);
+    range = Math.min(range, this.occlusion.cast(_ray.ray, range));
     for (const host of this.hosts) {
       _tmp.copy(host.pos).setY(host.fighter.humanoid.group.position.y + 1.1);
       const hitDist = raySphere(_aimRay, _tmp, host.radius + 0.35);

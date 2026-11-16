@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import type { Occlusion } from './render/occlusion';
 
 /**
  * Third-person camera for Ryderz: Raid.
@@ -238,6 +239,7 @@ export class ThirdPersonCamera {
   private mode: CameraMode = 'standard';
 
   private occluders: THREE.Object3D[];
+  private occlusion: Occlusion | null = null;
   private groundAt: ((x: number, z: number) => number) | null = null;
   private roofAt: ((x: number, z: number) => number | null) | null = null;
   /** Seconds for the pivot to catch the player's feet. Longer while walking. */
@@ -273,6 +275,11 @@ export class ThirdPersonCamera {
 
   setOccluders(occluders: THREE.Object3D[]) {
     this.occluders = occluders;
+  }
+
+  /** Route the boom's collision rays through an accelerated query. Null restores the built-in raycast. */
+  setOcclusion(occlusion: Occlusion | null) {
+    this.occlusion = occlusion;
   }
 
   /** Ground under a point. The lens is lifted so it cannot sit inside a hill. */
@@ -502,6 +509,11 @@ export class ThirdPersonCamera {
     for (const [ox, oy] of offsets2) {
       _ray.ray.origin.copy(_origin).addScaledVector(camRight, ox).addScaledVector(camUp, oy);
       _ray.ray.direction.copy(_dir);
+      if (this.occlusion) {
+        const hit = this.occlusion.cast(_ray.ray, _ray.far);
+        if (hit < Infinity) allowed = Math.min(allowed, Math.max(0, hit - pad));
+        continue;
+      }
       const hits = _ray.intersectObjects(this.occluders, false);
       if (hits.length) allowed = Math.min(allowed, Math.max(0, hits[0].distance - pad));
     }
