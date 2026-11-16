@@ -103,7 +103,7 @@ import {
 } from './toon';
 import { ledgeDrop, resolveFooting, slopeBlocks, STEP_HEIGHT } from './footing';
 import { allyFocusIndex, commitSteer, formUp, freshNav, pressTarget, type NavHint, type TrackPoint } from './nav';
-import { buildWorld, nearDistrictHub, pointBlocked, resolveCircle, type World } from './world';
+import { buildWorld, nearDistrictHub, pointBlocked, resolveCircle, sweepCircle, type World } from './world';
 import { chartBlocks, type MapBlock } from './map-chart';
 import { buildPadWorld } from './world-pad';
 import { buildIslandWorld } from './world-island';
@@ -533,6 +533,9 @@ const _camLead = new THREE.Vector3();
 const SPRINT_MULTIPLIER = 1.28;
 /** Short hop. v² / (2g) with g = 22 lands near 1.15 m. */
 const JUMP_SPEED = 7.1;
+/** How long an early jump press is held, and how long after a ledge a jump still fires. */
+const JUMP_BUFFER_TIME = 0.12;
+const COYOTE_TIME = 0.1;
 const STICK_YAW_RATE = 2.6;
 const STICK_PITCH_RATE = 1.85;
 const COMBAT_LINGER = 2.6;
@@ -602,6 +605,10 @@ export class RaidEngine {
   private kickQueued = false;
   private dodgeQueued = false;
   private jumpQueued = false;
+  /** Seconds a jump press that could not fire yet is still held for. */
+  private jumpBufferT = 0;
+  /** When the body last walked off a ledge, or -1. A jump shortly after still counts as grounded. */
+  private ledgeFellAt = -1;
   /** Sim time of the last grounded hop, so a second press can mount. */
   private jumpAt = -10;
   private jumping = false;
@@ -942,6 +949,8 @@ export class RaidEngine {
     this.kickQueued = false;
     this.dodgeQueued = false;
     this.jumpQueued = false;
+    this.jumpBufferT = 0;
+    this.ledgeFellAt = -1;
     this.jumping = false;
     this.p2JumpQueued = false;
     this.p2Jumping = false;
@@ -2593,7 +2602,29 @@ export class RaidEngine {
       this.airY = feet - floor;
       this.airVel = Math.min(0, this.airVel);
       this.jumping = true;
+      this.ledgeFellAt = this.simTime;
     }
+  }
+
+  /**
+   * Finish a move that has already been added to `pos`: hold it inside the
+   * arena and out of the walls. With sweptMove the walls are tested along the
+   * way from (fromX, fromZ), so a dodge, a launch, or one long frame cannot
+   * carry a body through a fence.
+   */
+  private settleMove(pos: THREE.Vector3, fromX: number, fromZ: number, radius: number) {
+    const limit = this.limit();
+    if (this.flags.sweptMove) {
+      const dx = pos.x - fromX;
+      const dz = pos.z - fromZ;
+      pos.x = fromX;
+      pos.z = fromZ;
+      sweepCircle(pos, dx, dz, radius, this.world.obstacles, limit);
+      return;
+    }
+    pos.x = clamp(pos.x, -limit, limit);
+    pos.z = clamp(pos.z, -limit, limit);
+    resolveCircle(pos, radius, this.world.obstacles);
   }
 
   /** City keeps its old edge. Larger arenas publish their own. */
@@ -2751,12 +2782,12 @@ export class RaidEngine {
       _tmp.set(this.dodgeX, 0, this.dodgeZ);
       speed = 15;
     } else if (_tmp.lengthSq() > 0) _tmp.normalize();
+    const beforeX = this.pos.x;
+    const beforeZ = this.pos.z;
     this.pos.addScaledVector(_tmp, speed * dt);
     this.hitKnock.multiplyScalar(Math.max(0, 1 - dt * 5));
     this.pos.addScaledVector(this.hitKnock, dt);
-    this.pos.x = clamp(this.pos.x, -this.limit(), this.limit());
-    this.pos.z = clamp(this.pos.z, -this.limit(), this.limit());
-    resolveCircle(this.pos, this.playerRadius(), this.world.obstacles);
+    this.settleMove(this.pos, beforeX, beforeZ, this.playerRadius());
     this.holdGround(footX, footZ, footFloor);
 
     // Hosts shoulder the Ryder aside, except while a kit sequence is carrying
@@ -3081,29 +3112,77 @@ export class RaidEngine {
     }
   }
 
-  /** Grounded hop. A second press while that hop is still up can mount, for a kit that flies. */
-  private tryJump() {
+  /**
+   * Grounded hop. A second press while that hop is still up can mount, for a kit that flies.
+   * Returns true when the press did something, so an unanswered one can be held for a moment.
+   */
+  private tryJump(): boolean {
     if (this.swim.mode === 'surface' || this.swim.mode === 'under') {
       this.swimRise = 0.28;
-      return;
+      return true;
     }
     const airborne = this.jumping || this.airY > 0.04 || this.airVel > 0.2 || (this.kit?.flying ?? false);
     if (airborne) {
+      // Coyote time: a step past a ledge still jumps, as long as the fall has only just begun.
+      const offLedge =
+        this.flags.jumpAssist &&
+        this.ledgeFellAt >= 0 &&
+        this.simTime - this.ledgeFellAt <= COYOTE_TIME &&
+        this.airVel <= 0 &&
+        !this.kit?.flying;
+      if (offLedge && this.jumpClear()) {
+        this.launchJump();
+        return true;
+      }
       const since = this.simTime - this.jumpAt;
       if (this.kit?.tryAirJump?.(since, this.airY)) {
         this.airY = 0;
         this.airVel = 0;
         this.jumping = false;
+        return true;
       }
-      return;
+      return false;
     }
-    if (this.hitStun > 0.12 || this.dodgeT > 0 || this.bodyLocked()) return;
-    if (this.pvpCpu?.grabsPlayer()) return;
-    this.airVel = JUMP_SPEED;
+    if (!this.jumpClear()) return false;
     this.airY = 0.02;
+    this.launchJump();
+    return true;
+  }
+
+  /** Nothing is holding the body down: not a stagger, a dodge, an ability lock, or a grab. */
+  private jumpClear() {
+    if (this.hitStun > 0.12 || this.dodgeT > 0 || this.bodyLocked()) return false;
+    return !this.pvpCpu?.grabsPlayer();
+  }
+
+  private launchJump() {
+    this.airVel = JUMP_SPEED;
     this.jumping = true;
     this.jumpAt = this.simTime;
+    this.ledgeFellAt = -1;
+    this.jumpBufferT = 0;
     this.emitSound('move.jump.swing');
+  }
+
+  /**
+   * A jump pressed a moment too early (still landing, still in a dodge or a
+   * stagger) fires as soon as the body is free, instead of being dropped.
+   */
+  private stepJumpInput(dt: number, locked: boolean) {
+    if (this.jumpQueued) {
+      this.jumpQueued = false;
+      const done = !locked && this.tryJump();
+      if (!this.flags.jumpAssist) return;
+      this.jumpBufferT = done ? 0 : JUMP_BUFFER_TIME;
+      return;
+    }
+    if (this.jumpBufferT <= 0) return;
+    this.jumpBufferT = Math.max(0, this.jumpBufferT - dt);
+    const grounded = !(this.jumping || this.airY > 0.04 || this.airVel > 0.2 || (this.kit?.flying ?? false));
+    const swimming = this.swim.mode === 'surface' || this.swim.mode === 'under';
+    // Only the grounded hop is held. A held press never turns into an air mount later.
+    if (locked || !grounded || swimming || !this.jumpClear()) return;
+    this.tryJump();
   }
 
   /** Launch while rising, tuck while falling. Kits that already own a pose win. */
@@ -3120,24 +3199,24 @@ export class RaidEngine {
     this.takenGap += dt;
     this.dodgeCd = Math.max(0, this.dodgeCd - dt);
     if (this.dodgeT > 0) this.dodgeT = Math.max(0, this.dodgeT - dt);
-    if (this.jumpQueued) {
-      this.jumpQueued = false;
-      if (!locked) this.tryJump();
-    }
+    this.stepJumpInput(dt, locked);
     if (this.kit?.flying) {
       this.airY = 0;
       this.airVel = 0;
       this.jumping = false;
+      this.ledgeFellAt = -1;
     } else if (this.swim.mode === 'surface' || this.swim.mode === 'under') {
       this.airY = 0;
       this.airVel = 0;
       this.jumping = false;
+      this.ledgeFellAt = -1;
     } else if (this.airY > 0 || this.airVel > 0) {
       this.airVel -= 22 * dt;
       this.airY += this.airVel * dt;
       if (this.airY <= 0) {
         this.airY = 0;
         this.airVel = 0;
+        this.ledgeFellAt = -1;
         if (this.jumping) this.jumping = false;
         else this.hitStun = Math.max(this.hitStun, 0.18);
       }
@@ -5998,6 +6077,8 @@ export class RaidEngine {
     const hunting = playerDist > 12 && order.move > 0.2 && order.state !== 'flee' && order.state !== 'search' && order.state !== 'pickup';
     const speed = host.speed * profile.speed * (order.state === 'flee' || hazard ? 1.35 : hunting ? 1.45 : 1);
     const mag = Math.hypot(vx, vz);
+    const hostFromX = host.pos.x;
+    const hostFromZ = host.pos.z;
     let travelX = 0;
     let travelZ = 0;
     if (mag > 0.05) {
@@ -6022,9 +6103,7 @@ export class RaidEngine {
       host.pos.x += host.knock.x * dt;
       host.pos.z += host.knock.z * dt;
     }
-    host.pos.x = clamp(host.pos.x, -this.limit(), this.limit());
-    host.pos.z = clamp(host.pos.z, -this.limit(), this.limit());
-    resolveCircle(host.pos, host.radius, this.world.obstacles);
+    this.settleMove(host.pos, hostFromX, hostFromZ, host.radius);
     const seeking = (order.state === 'search' || order.state === 'pickup') && prop ? prop : null;
     this.watchStall(host, watch, order.move > 0.2 && aimDist > 2.5 && !striker.busy, gx, gz, dt, seeking);
     const closingIn = !swayed && order.move > 0.2 && order.state !== 'flee' && order.state !== 'search' && order.state !== 'pickup';
