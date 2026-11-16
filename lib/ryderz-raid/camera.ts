@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import type { Occlusion } from './render/occlusion';
 
 /**
  * Third-person camera for Ryderz: Raid.
@@ -215,6 +216,69 @@ function damp(current: number, target: number, timeConstant: number, dt: number)
   return THREE.MathUtils.lerp(current, target, 1 - Math.exp(-dt / timeConstant));
 }
 
+/**
+ * Ease toward a target that moved steadily over the frame, from `previous` to
+ * `target`. A plain `damp` treats the whole move as if it happened at the
+ * start of the frame, so the distance it trails by depends on how long the
+ * frame was: a camera chasing a runner sits closer on a long frame than on a
+ * short one, and uneven frame pacing shows up as the fighter shaking against
+ * the view. Here the trailing distance is `rate * timeConstant` whatever the
+ * frame time.
+ *
+ * A jump faster than `maxRate` per second is a cut, not motion, and is eased plainly.
+ */
+export function dampTracking(
+  current: number,
+  target: number,
+  previous: number,
+  timeConstant: number,
+  dt: number,
+  maxRate = Infinity,
+) {
+  if (timeConstant <= 0) return target;
+  if (dt <= 0) return current;
+  const moved = target - previous;
+  if (Math.abs(moved) > maxRate * dt) return damp(current, target, timeConstant, dt);
+  const trail = moved * (timeConstant / dt);
+  return target - trail + (current - previous + trail) * Math.exp(-dt / timeConstant);
+}
+
+/** `dampTracking` for an angle, taking the short way around. */
+export function dampAngleTracking(
+  current: number,
+  target: number,
+  previous: number,
+  timeConstant: number,
+  dt: number,
+  maxRate = Infinity,
+) {
+  const goal = wrapAngle(target);
+  if (timeConstant <= 0) return goal;
+  if (dt <= 0) return current;
+  const moved = wrapAngle(goal - previous);
+  if (Math.abs(moved) > maxRate * dt) return dampAngle(current, target, timeConstant, dt);
+  const trail = moved * (timeConstant / dt);
+  const behind = wrapAngle(current - previous);
+  return wrapAngle(goal - trail + (behind + trail) * Math.exp(-dt / timeConstant));
+}
+
+const REFERENCE_DT = 1 / 60;
+
+/**
+ * The time constant at which `dampTracking` trails a steady mover by exactly
+ * as much as `damp` did at 60 fps. The smoothing numbers in the presets were
+ * tuned by eye at that rate, so tracking keeps the look they were tuned for.
+ */
+export function trackingTimeConstant(timeConstant: number) {
+  if (timeConstant <= 0) return 0;
+  const e = Math.exp(-REFERENCE_DT / timeConstant);
+  return (REFERENCE_DT * e) / (1 - e);
+}
+
+/** Pivot speed (m/s) and turn rate (rad/s) above which a change is treated as a cut. */
+const MAX_TRACK_SPEED = 60;
+const MAX_TRACK_TURN = 40;
+
 export function wrapAngle(a: number) {
   while (a > Math.PI) a -= Math.PI * 2;
   while (a < -Math.PI) a += Math.PI * 2;
@@ -238,6 +302,17 @@ export class ThirdPersonCamera {
   private mode: CameraMode = 'standard';
 
   private occluders: THREE.Object3D[];
+  private occlusion: Occlusion | null = null;
+  /**
+   * Frame-time-independent follow. Off, the rig eases the way it always did,
+   * with a trailing distance that changes with the frame time.
+   */
+  steadyFollow = false;
+  private lastTarget = new THREE.Vector3();
+  private lastYaw = 0;
+  private lastPitch = 0;
+  /** Set by a cut. The next update starts tracking from where the target is, not from where it was. */
+  private retrack = true;
   private groundAt: ((x: number, z: number) => number) | null = null;
   private roofAt: ((x: number, z: number) => number | null) | null = null;
   /** Seconds for the pivot to catch the player's feet. Longer while walking. */
@@ -273,6 +348,11 @@ export class ThirdPersonCamera {
 
   setOccluders(occluders: THREE.Object3D[]) {
     this.occluders = occluders;
+  }
+
+  /** Route the boom's collision rays through an accelerated query. Null restores the built-in raycast. */
+  setOcclusion(occlusion: Occlusion | null) {
+    this.occlusion = occlusion;
   }
 
   /** Ground under a point. The lens is lifted so it cannot sit inside a hill. */
@@ -374,6 +454,7 @@ export class ThirdPersonCamera {
   relocate(playerPos: THREE.Vector3) {
     this.smoothPivot.copy(playerPos);
     this.initialized = true;
+    this.retrack = true;
   }
 
   /** Place the camera immediately (no smoothing). Use on spawn / respawn. */
@@ -387,6 +468,7 @@ export class ThirdPersonCamera {
     this.kickVel = 0;
     this.fovPunch = 0;
     this.initialized = true;
+    this.retrack = true;
     this.update(1 / 60, playerPos, yaw, pitch, 'EXPLORATION', true);
   }
 
@@ -417,6 +499,7 @@ export class ThirdPersonCamera {
 
     if (!this.initialized) {
       this.initialized = true;
+      this.retrack = true;
       this.smoothPivot.copy(playerPos);
       this.smoothYaw = yaw;
       this.smoothPitch = pitch;
@@ -446,13 +529,37 @@ export class ThirdPersonCamera {
     // --- Smooth follow + look -----------------------------------------------
     const posTc = instant ? 0 : cfg.positionSmoothing;
     const rotTc = instant ? 0 : cfg.rotationSmoothing;
-    const leadX = lead?.x ?? 0;
-    const leadZ = lead?.z ?? 0;
-    this.smoothPivot.x = damp(this.smoothPivot.x, playerPos.x + leadX, posTc, dt);
-    this.smoothPivot.y = damp(this.smoothPivot.y, playerPos.y, instant ? 0 : this.ySmoothing, dt);
-    this.smoothPivot.z = damp(this.smoothPivot.z, playerPos.z + leadZ, posTc, dt);
-    this.smoothYaw = dampAngle(this.smoothYaw, yaw, rotTc, dt);
-    this.smoothPitch = damp(this.smoothPitch, pitch, rotTc, dt);
+    if (this.steadyFollow) {
+      const tx = playerPos.x + (lead?.x ?? 0);
+      const ty = playerPos.y;
+      const tz = playerPos.z + (lead?.z ?? 0);
+      if (this.retrack) {
+        this.lastTarget.set(tx, ty, tz);
+        this.lastYaw = yaw;
+        this.lastPitch = pitch;
+        this.retrack = false;
+      }
+      const posTrack = trackingTimeConstant(posTc);
+      const rotTrack = trackingTimeConstant(rotTc);
+      const yTrack = trackingTimeConstant(instant ? 0 : this.ySmoothing);
+      const last = this.lastTarget;
+      this.smoothPivot.x = dampTracking(this.smoothPivot.x, tx, last.x, posTrack, dt, MAX_TRACK_SPEED);
+      this.smoothPivot.y = dampTracking(this.smoothPivot.y, ty, last.y, yTrack, dt, MAX_TRACK_SPEED);
+      this.smoothPivot.z = dampTracking(this.smoothPivot.z, tz, last.z, posTrack, dt, MAX_TRACK_SPEED);
+      this.smoothYaw = dampAngleTracking(this.smoothYaw, yaw, this.lastYaw, rotTrack, dt, MAX_TRACK_TURN);
+      this.smoothPitch = dampTracking(this.smoothPitch, pitch, this.lastPitch, rotTrack, dt, MAX_TRACK_TURN);
+      last.set(tx, ty, tz);
+      this.lastYaw = yaw;
+      this.lastPitch = pitch;
+    } else {
+      const leadX = lead?.x ?? 0;
+      const leadZ = lead?.z ?? 0;
+      this.smoothPivot.x = damp(this.smoothPivot.x, playerPos.x + leadX, posTc, dt);
+      this.smoothPivot.y = damp(this.smoothPivot.y, playerPos.y, instant ? 0 : this.ySmoothing, dt);
+      this.smoothPivot.z = damp(this.smoothPivot.z, playerPos.z + leadZ, posTc, dt);
+      this.smoothYaw = dampAngle(this.smoothYaw, yaw, rotTc, dt);
+      this.smoothPitch = damp(this.smoothPitch, pitch, rotTc, dt);
+    }
 
     // --- Kick spring (ability / landing / hit response) ---------------------
     const stiffness = 90;
@@ -502,6 +609,11 @@ export class ThirdPersonCamera {
     for (const [ox, oy] of offsets2) {
       _ray.ray.origin.copy(_origin).addScaledVector(camRight, ox).addScaledVector(camUp, oy);
       _ray.ray.direction.copy(_dir);
+      if (this.occlusion) {
+        const hit = this.occlusion.cast(_ray.ray, _ray.far);
+        if (hit < Infinity) allowed = Math.min(allowed, Math.max(0, hit - pad));
+        continue;
+      }
       const hits = _ray.intersectObjects(this.occluders, false);
       if (hits.length) allowed = Math.min(allowed, Math.max(0, hits[0].distance - pad));
     }

@@ -23,14 +23,31 @@ function clampPct(value: number, max: number) {
   return Math.max(0, Math.min(100, (value / max) * 100));
 }
 
-/** Paint a semicircle from its real length. CSS dash arrays ignore SVG pathLength, so a 0–100 dash stays visually full. */
+const arcLengths = new WeakMap<SVGPathElement, number>();
+const arcDashes = new WeakMap<SVGPathElement, string>();
+
+/**
+ * Paint a semicircle from its real length. CSS dash arrays ignore SVG pathLength, so a 0–100 dash stays visually full.
+ * The engine calls this every frame: the length is measured once per path, and the DOM is only touched when the dash moves.
+ */
 function paintArc(path: SVGPathElement | null, pct: number) {
   if (!path) return;
-  const length = path.getTotalLength() || 1;
+  let length = arcLengths.get(path);
+  if (!length) {
+    length = path.getTotalLength();
+    if (length > 0) arcLengths.set(path, length);
+    else length = 1;
+  }
   const shown = (Math.max(0, Math.min(100, pct)) / 100) * length;
-  const dash = `${shown} ${length}`;
+  const dash = `${shown.toFixed(2)} ${length.toFixed(2)}`;
+  if (arcDashes.get(path) === dash) return;
+  arcDashes.set(path, dash);
   path.setAttribute('stroke-dasharray', dash);
   path.style.strokeDasharray = dash;
+}
+
+function setText(node: HTMLElement | null, text: string) {
+  if (node && node.textContent !== text) node.textContent = text;
 }
 
 const CircularPlayerHUD = forwardRef<
@@ -54,22 +71,25 @@ const CircularPlayerHUD = forwardRef<
       const auraPct = clampPct(aura, maxAura);
       paintArc(hpArc.current, healthPct);
       paintArc(auraArc.current, auraPct);
-      if (hpLabel.current) hpLabel.current.textContent = `${Math.ceil(hp)}`;
+      setText(hpLabel.current, `${Math.ceil(hp)}`);
       const showClock = Boolean(power && !power.unlimited);
-      if (auraLabel.current) {
-        auraLabel.current.textContent = isBurnout ? 'OUT' : `${Math.ceil(aura)}`;
-      }
-      if (clockLabel.current) {
-        clockLabel.current.hidden = !showClock;
+      setText(auraLabel.current, isBurnout ? 'OUT' : `${Math.ceil(aura)}`);
+      const clock = clockLabel.current;
+      if (clock) {
+        if (clock.hidden !== !showClock) clock.hidden = !showClock;
         if (showClock && power) {
-          clockLabel.current.textContent = `${Math.max(1, Math.ceil(power.left))}s`;
-          clockLabel.current.dataset.down = power.down ? 'true' : 'false';
-          clockLabel.current.title = power.down ? 'Powers return in' : 'Powers stay up for';
+          setText(clock, `${Math.max(1, Math.ceil(power.left))}s`);
+          const down = power.down ? 'true' : 'false';
+          if (clock.dataset.down !== down) {
+            clock.dataset.down = down;
+            clock.title = power.down ? 'Powers return in' : 'Powers stay up for';
+          }
         }
       }
-      if (resLabel.current) {
-        resLabel.current.hidden = resonance <= 0;
-        resLabel.current.textContent = resonance >= 100 ? 'RES READY' : `RES ${Math.floor(resonance)}`;
+      const res = resLabel.current;
+      if (res) {
+        if (res.hidden !== resonance <= 0) res.hidden = resonance <= 0;
+        setText(res, resonance >= 100 ? 'RES READY' : `RES ${Math.floor(resonance)}`);
       }
       const node = root.current;
       if (!node) return;

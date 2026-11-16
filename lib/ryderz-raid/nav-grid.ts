@@ -10,6 +10,8 @@ import type { Obstacle } from './world';
  * - `NavGrid.routeTo`: the next waypoint on the shortest walkable path to a
  *   goal, for a fighter whose straight line is blocked. Distance fields are
  *   cached per goal cell and body size, so a crowd chasing one player shares one.
+ *   A field grows outward from its goal only as far as the bodies asking about
+ *   it, so a crowd ringing the player never floods the whole district.
  */
 
 const CAP = 3;
@@ -227,17 +229,33 @@ export function sealCrevices(obstacles: readonly Obstacle[], limit: number, opti
 interface Field {
   goal: number;
   clearance: number;
+  /** Cost to the goal. Final for every cell cheaper than the frontier, a bound or Infinity beyond it. */
   cost: Float32Array;
-  made: number;
+  /** Dijkstra's open set, kept between queries so the search resumes where it stopped. */
+  heap: Int32Array;
+  heapCost: Float32Array;
+  size: number;
+  /** Query counter value when this field was last read. The stalest field is recycled first. */
+  used: number;
+}
+
+export interface NavGridOptions {
+  cell?: number;
+  /** Flood each field to the edge of the map when it is made, as the grid did before fields were grown on demand. */
+  eager?: boolean;
 }
 
 const SIZE_CLASSES = [0.75, 1.1, 1.55];
 /** Steering probes at radius + 0.15, so a body is routed with that much room. */
 const STEER_SKIN = 0.15;
-const FIELD_TTL = 450;
+/**
+ * Fields kept at once. A crowd around one player asks for a handful of goal
+ * cells in up to three body sizes, and the goals move as the player does; with
+ * too few slots the same fields are thrown away and rebuilt every frame.
+ */
+const MAX_FIELDS = 16;
 const STRAIGHT = 1;
 const DIAGONAL = Math.SQRT2;
-const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
 
 export class NavGrid {
   readonly n: number;
@@ -245,13 +263,17 @@ export class NavGrid {
   readonly limit: number;
   readonly clearance: Float32Array;
   private fields: Field[] = [];
-  private heap = new Int32Array(0);
-  private heapCost = new Float32Array(0);
+  private eager: boolean;
+  private tick = 0;
+  /** Cells settled since the grid was made. For profiling and checks. */
+  expanded = 0;
 
-  constructor(obstacles: readonly Obstacle[], limit: number, cell = 0.5) {
+  constructor(obstacles: readonly Obstacle[], limit: number, options: number | NavGridOptions = {}) {
+    const opts = typeof options === 'number' ? { cell: options } : options;
     this.limit = limit;
-    this.cell = cell;
-    const { field, n } = clearanceField(obstacles, limit, cell);
+    this.cell = opts.cell ?? 0.5;
+    this.eager = opts.eager ?? false;
+    const { field, n } = clearanceField(obstacles, limit, this.cell);
     this.n = n;
     this.clearance = field;
   }
@@ -313,66 +335,107 @@ export class NavGrid {
     return -1;
   }
 
-  private field(goal: number, need: number): Field | null {
-    const t = now();
-    const hit = this.fields.find((f) => f.goal === goal && f.clearance === need && t - f.made < FIELD_TTL);
-    if (hit) return hit;
-    const cost = this.flood(goal, need);
-    const made = { goal, clearance: need, cost, made: t };
-    this.fields.push(made);
-    if (this.fields.length > 8) this.fields.shift();
+  private field(goal: number, need: number): Field {
+    this.tick += 1;
+    for (const f of this.fields) {
+      if (f.goal === goal && f.clearance === need) {
+        f.used = this.tick;
+        return f;
+      }
+    }
+    const total = this.n * this.n;
+    let made: Field;
+    if (this.fields.length >= MAX_FIELDS) {
+      // Recycle the stalest field and its buffers rather than allocating a megabyte per new goal.
+      let stale = 0;
+      for (let i = 1; i < this.fields.length; i += 1) if (this.fields[i].used < this.fields[stale].used) stale = i;
+      made = this.fields[stale];
+      made.cost.fill(Infinity);
+    } else {
+      made = {
+        goal,
+        clearance: need,
+        cost: new Float32Array(total).fill(Infinity),
+        heap: new Int32Array(1024),
+        heapCost: new Float32Array(1024),
+        size: 0,
+        used: 0,
+      };
+      this.fields.push(made);
+    }
+    made.goal = goal;
+    made.clearance = need;
+    made.used = this.tick;
+    made.size = 0;
+    made.cost[goal] = 0;
+    this.push(made, goal, 0);
+    if (this.eager) this.settle(made, -1);
     return made;
   }
 
-  /** Dijkstra from the goal over every cell a body of `need` clearance fits. */
-  private flood(goal: number, need: number) {
-    const n = this.n;
-    const total = n * n;
-    const cost = new Float32Array(total).fill(Infinity);
-    if (this.heap.length < total * 2) {
-      this.heap = new Int32Array(total * 2);
-      this.heapCost = new Float32Array(total * 2);
+  private push(f: Field, k: number, c: number) {
+    if (f.size === f.heap.length) {
+      const heap = new Int32Array(f.heap.length * 2);
+      const heapCost = new Float32Array(f.heap.length * 2);
+      heap.set(f.heap);
+      heapCost.set(f.heapCost);
+      f.heap = heap;
+      f.heapCost = heapCost;
     }
-    const heap = this.heap;
-    const hc = this.heapCost;
-    let size = 0;
-    const push = (k: number, c: number) => {
-      let i = size++;
-      while (i > 0) {
-        const p = (i - 1) >> 1;
-        if (hc[p] <= c) break;
-        heap[i] = heap[p];
-        hc[i] = hc[p];
-        i = p;
-      }
-      heap[i] = k;
-      hc[i] = c;
-    };
-    const pop = () => {
-      const top = heap[0];
-      const lastK = heap[--size];
-      const lastC = hc[size];
-      let i = 0;
-      for (;;) {
-        let child = i * 2 + 1;
-        if (child >= size) break;
-        if (child + 1 < size && hc[child + 1] < hc[child]) child += 1;
-        if (hc[child] >= lastC) break;
-        heap[i] = heap[child];
-        hc[i] = hc[child];
-        i = child;
-      }
-      heap[i] = lastK;
-      hc[i] = lastC;
-      return top;
-    };
-    cost[goal] = 0;
-    push(goal, 0);
+    const heap = f.heap;
+    const hc = f.heapCost;
+    let i = f.size++;
+    while (i > 0) {
+      const p = (i - 1) >> 1;
+      if (hc[p] <= c) break;
+      heap[i] = heap[p];
+      hc[i] = hc[p];
+      i = p;
+    }
+    heap[i] = k;
+    hc[i] = c;
+  }
+
+  private pop(f: Field) {
+    const heap = f.heap;
+    const hc = f.heapCost;
+    const top = heap[0];
+    const size = --f.size;
+    const lastK = heap[size];
+    const lastC = hc[size];
+    let i = 0;
+    for (;;) {
+      let child = i * 2 + 1;
+      if (child >= size) break;
+      if (child + 1 < size && hc[child + 1] < hc[child]) child += 1;
+      if (hc[child] >= lastC) break;
+      heap[i] = heap[child];
+      hc[i] = hc[child];
+      i = child;
+    }
+    heap[i] = lastK;
+    hc[i] = lastC;
+    return top;
+  }
+
+  /**
+   * Dijkstra from the field's goal over every cell a body of its clearance
+   * fits, run until `target` has its final cost (or, with -1, until nothing is
+   * left). The open set is kept, so a later query further out carries on from
+   * here. Returns the cost at `target`, Infinity when it cannot be reached.
+   */
+  private settle(f: Field, target: number) {
+    const n = this.n;
+    const cost = f.cost;
+    const need = f.clearance;
     const clearance = this.clearance;
-    while (size > 0) {
+    const hc = f.heapCost;
+    // Every cell cheaper than the cheapest open one is final.
+    while (f.size > 0 && (target < 0 || hc[0] < cost[target])) {
       const top = hc[0];
-      const k = pop();
+      const k = this.pop(f);
       if (top > cost[k]) continue;
+      this.expanded += 1;
       const i = k % n;
       const j = (k - i) / n;
       for (let dj = -1; dj <= 1; dj += 1) {
@@ -391,12 +454,12 @@ export class NavGrid {
           const c = top + (di && dj ? DIAGONAL : STRAIGHT) + tight;
           if (c < cost[m]) {
             cost[m] = c;
-            push(m, c);
+            this.push(f, m, c);
           }
         }
       }
     }
-    return cost;
+    return target < 0 ? Infinity : cost[target];
   }
 
   /**
@@ -412,7 +475,8 @@ export class NavGrid {
     const start = this.standable(this.index(fromX, fromZ), need);
     if (goal < 0 || start < 0) return null;
     const field = this.field(goal, need);
-    if (!field || !Number.isFinite(field.cost[start])) return null;
+    // Settling the start settles every cell on the way down to the goal: they are all cheaper.
+    if (!Number.isFinite(this.settle(field, start))) return null;
     const n = this.n;
     let k = start;
     let best = start;
@@ -485,7 +549,6 @@ export class NavGrid {
     const goal = this.standable(this.index(toX, toZ), need);
     const start = this.standable(this.index(fromX, fromZ), need);
     if (goal < 0 || start < 0) return Infinity;
-    const field = this.field(goal, need);
-    return field ? field.cost[start] * this.cell : Infinity;
+    return this.settle(this.field(goal, need), start) * this.cell;
   }
 }

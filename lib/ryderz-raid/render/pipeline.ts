@@ -163,6 +163,7 @@ export class RenderPipeline {
   private baseRatio: number;
   private step = 0;
   private frameMs = 16.7;
+  private counting = false;
   private lastFrame = 0;
   private settle = 2000;
   private lastStepDown = -Infinity;
@@ -281,7 +282,30 @@ export class RenderPipeline {
   render() {
     this.adapt();
     this.cull();
+    if (this.counting) this.renderer.info.reset();
     this.composer.render();
+  }
+
+  /**
+   * Count draw calls and triangles across every pass of a frame. Left to
+   * itself the renderer resets its counters per pass, so they only ever
+   * describe the final full-screen quad.
+   */
+  countDraws(on: boolean) {
+    this.counting = on;
+    this.renderer.info.autoReset = !on;
+  }
+
+  /** Totals for the frame just drawn. Only meaningful while `countDraws(true)` is in effect. */
+  drawCounters() {
+    const info = this.renderer.info;
+    return {
+      calls: info.render.calls,
+      triangles: info.render.triangles,
+      geometries: info.memory.geometries,
+      textures: info.memory.textures,
+      programs: info.programs?.length ?? 0,
+    };
   }
 
   private cull() {

@@ -26,6 +26,9 @@ import {
   type UpgradeId,
 } from './config';
 import { GameMode } from './game-mode';
+import { readRaidFlags, type RaidFlags } from './flags';
+import { BvhOcclusion, LegacyOcclusion, type Occlusion } from './render/occlusion';
+import { FrameProfiler, ProfilerOverlay, type ProfileReport } from './profiler';
 import { PowerOutage, abilityLockout, type PowerClock } from './power-outage';
 import { DEFAULT_ARENA, arenaSpec, type ArenaDefinition, type ArenaId } from './arenas';
 import { RyderBeacon, type BeaconHudState } from './beacon';
@@ -100,7 +103,7 @@ import {
 } from './toon';
 import { ledgeDrop, resolveFooting, slopeBlocks, STEP_HEIGHT } from './footing';
 import { allyFocusIndex, commitSteer, formUp, freshNav, pressTarget, type NavHint, type TrackPoint } from './nav';
-import { buildWorld, nearDistrictHub, pointBlocked, resolveCircle, type World } from './world';
+import { buildWorld, nearDistrictHub, pointBlocked, resolveCircle, sweepCircle, type World } from './world';
 import { chartBlocks, type MapBlock } from './map-chart';
 import { buildPadWorld } from './world-pad';
 import { buildIslandWorld } from './world-island';
@@ -530,6 +533,9 @@ const _camLead = new THREE.Vector3();
 const SPRINT_MULTIPLIER = 1.28;
 /** Short hop. v² / (2g) with g = 22 lands near 1.15 m. */
 const JUMP_SPEED = 7.1;
+/** How long an early jump press is held, and how long after a ledge a jump still fires. */
+const JUMP_BUFFER_TIME = 0.12;
+const COYOTE_TIME = 0.1;
 const STICK_YAW_RATE = 2.6;
 const STICK_PITCH_RATE = 1.85;
 const COMBAT_LINGER = 2.6;
@@ -599,6 +605,10 @@ export class RaidEngine {
   private kickQueued = false;
   private dodgeQueued = false;
   private jumpQueued = false;
+  /** Seconds a jump press that could not fire yet is still held for. */
+  private jumpBufferT = 0;
+  /** When the body last walked off a ledge, or -1. A jump shortly after still counts as grounded. */
+  private ledgeFellAt = -1;
   /** Sim time of the last grounded hop, so a second press can mount. */
   private jumpAt = -10;
   private jumping = false;
@@ -814,6 +824,12 @@ export class RaidEngine {
   private cameraPivot = new THREE.Vector3();
   private strikeOverride: MeleeStyle | null = null;
   private onSound: ((id: string) => void) | null = null;
+  /** RAID 2.0 switches, read once per engine. See `flags.ts`. */
+  readonly flags: RaidFlags = readRaidFlags();
+  private profiler = new FrameProfiler();
+  /** Nearest wall along a ray, for the camera boom and the crosshair. */
+  private occlusion: Occlusion;
+  private profilerOverlay = new ProfilerOverlay();
 
   constructor(canvas: HTMLCanvasElement, onHud: (hud: HudState) => void) {
     this.canvas = canvas;
@@ -855,6 +871,11 @@ export class RaidEngine {
     this.scene.updateMatrixWorld(true);
     this.pipeline.useLights(this.world.group);
     this.rig = new ThirdPersonCamera(this.camera, this.world.occluders);
+    this.occlusion = this.flags.cameraBvh
+      ? new BvhOcclusion(() => this.world.occluders)
+      : new LegacyOcclusion(() => this.world.occluders);
+    if (this.flags.cameraBvh) this.rig.setOcclusion(this.occlusion);
+    this.rig.steadyFollow = this.flags.cameraFollow;
 
     this.particles = new ParticleSystem();
     this.scene.add(this.particles.points);
@@ -883,6 +904,7 @@ export class RaidEngine {
 
     this.resize();
     this.bind();
+    if (this.flags.profiler) this.profile(true);
     this.clock.start();
     this.loop = this.loop.bind(this);
     this.raf = requestAnimationFrame(this.loop);
@@ -927,6 +949,8 @@ export class RaidEngine {
     this.kickQueued = false;
     this.dodgeQueued = false;
     this.jumpQueued = false;
+    this.jumpBufferT = 0;
+    this.ledgeFellAt = -1;
     this.jumping = false;
     this.p2JumpQueued = false;
     this.p2Jumping = false;
@@ -974,6 +998,8 @@ export class RaidEngine {
     this.paused = false;
     this.mapOpen = false;
     this.phase = 'playing';
+    // The match is still loading the Ryder: index the arena's walls now, where a pause does not show.
+    if (this.occlusion instanceof BvhOcclusion) this.occlusion.warm();
     this.rig.snap(this.pos, this.yaw, this.pitch);
     this.camReady = false;
 
@@ -1852,6 +1878,7 @@ export class RaidEngine {
     this.disposed = true;
     cancelAnimationFrame(this.raf);
     this.unbind();
+    this.profilerOverlay.hide();
     this.clearCombat();
     this.powerVfx.dispose();
     this.rings.dispose();
@@ -2011,6 +2038,8 @@ export class RaidEngine {
   private loop() {
     if (this.disposed) return;
     this.raf = requestAnimationFrame(this.loop);
+    const prof = this.profiler;
+    prof.beginFrame();
     let dt = Math.min(0.05, this.clock.getDelta());
     const time = this.clock.elapsedTime;
     // Hit-stop: the world crawls for a few frames so a heavy impact has weight.
@@ -2018,13 +2047,103 @@ export class RaidEngine {
       this.hitStopT = Math.max(0, this.hitStopT - dt);
       dt *= 0.06;
     }
+    prof.begin('sim');
     if (!this.paused && this.player && this.phase !== 'dead' && this.phase !== 'victory') this.update(dt, time);
     else if (this.player) this.updateCamera(dt);
+    prof.end('sim');
+    prof.begin('world');
     this.world.animate(time);
     this.particles.update(dt);
     this.pipeline.follow(this.player ? this.player.humanoid.group.position : this.pos);
+    prof.end('world');
+    prof.begin('render');
     this.pipeline.render();
+    prof.end('render');
+    prof.begin('hud');
     this.emitHud();
+    prof.end('hud');
+    if (prof.enabled) {
+      prof.setRender(this.pipeline.drawCounters());
+      prof.setCount('hosts', this.hosts.length);
+      prof.setCount('scale', Math.round(this.pipeline.resolutionScale * 100));
+      prof.endFrame();
+      this.profilerOverlay.update(prof, performance.now());
+    }
+  }
+
+  /**
+   * Turn frame profiling on or off. With `overlay` the numbers are drawn in the
+   * corner of the page; without it they are only available from `profileReport()`.
+   */
+  profile(on: boolean, overlay = true) {
+    this.profiler.setEnabled(on);
+    this.pipeline.countDraws(on);
+    if (on && overlay) this.profilerOverlay.show();
+    else this.profilerOverlay.hide();
+  }
+
+  profileReport(): ProfileReport {
+    return this.profiler.report();
+  }
+
+  /**
+   * Fire the same rays through the accelerated and the original occlusion
+   * query and report how they compare. Rays start around the fighter at chest
+   * height, the way the camera boom's do.
+   */
+  debugOcclusion(samples = 400, far = 12) {
+    const fast = this.occlusion;
+    const slow = new LegacyOcclusion(() => this.world.occluders);
+    const ray = new THREE.Ray();
+    let seed = 12345;
+    const rand = () => ((seed = (Math.imul(seed, 1664525) + 1013904223) | 0) >>> 0) / 4294967296;
+    const rays: Array<[number, number, number, number, number, number]> = [];
+    for (let i = 0; i < samples; i += 1) {
+      const yaw = rand() * Math.PI * 2;
+      const pitch = (rand() - 0.35) * 1.2;
+      rays.push([
+        this.pos.x + (rand() - 0.5) * 6,
+        this.world.heightAt(this.pos.x, this.pos.z) + 0.6 + rand() * 1.6,
+        this.pos.z + (rand() - 0.5) * 6,
+        Math.sin(yaw) * Math.cos(pitch),
+        Math.sin(pitch),
+        Math.cos(yaw) * Math.cos(pitch),
+      ]);
+    }
+    const run = (query: Occlusion) => {
+      const out: number[] = [];
+      const start = performance.now();
+      for (const [ox, oy, oz, dx, dy, dz] of rays) {
+        ray.origin.set(ox, oy, oz);
+        ray.direction.set(dx, dy, dz).normalize();
+        out.push(query.cast(ray, far));
+      }
+      return { out, ms: performance.now() - start };
+    };
+    run(fast);
+    const a = run(fast);
+    const b = run(slow);
+    let hits = 0;
+    let nearer = 0;
+    let missed = 0;
+    for (let i = 0; i < samples; i += 1) {
+      if (b.out[i] < Infinity) hits += 1;
+      if (a.out[i] === b.out[i] || Math.abs(a.out[i] - b.out[i]) < 1e-3) continue;
+      // Nearer: the tree found a solid the original skipped (an instanced copy
+      // trimmed from the draw buffer). Missed would be a real regression.
+      if (a.out[i] < b.out[i]) nearer += 1;
+      else missed += 1;
+    }
+    return {
+      samples,
+      hits,
+      nearer,
+      missed,
+      fastMsPerRay: a.ms / samples,
+      slowMsPerRay: b.ms / samples,
+      pendingTrees: fast instanceof BvhOcclusion ? fast.pendingTrees : -1,
+      treeBuildMs: fast instanceof BvhOcclusion ? fast.buildMs : 0,
+    };
   }
 
   private update(dt: number, time: number) {
@@ -2099,6 +2218,7 @@ export class RaidEngine {
       if (this.bannerT <= 0) this.banner = null;
     }
 
+    const prof = this.profiler;
     const footX = this.pos.x;
     const footZ = this.pos.z;
     const footFloor = this.world.heightAt(footX, footZ);
@@ -2126,7 +2246,9 @@ export class RaidEngine {
       });
       this.striker.setFork(this.kit.forkArmed ?? false);
     } else this.striker.setFork(false);
+    prof.begin('sim.player');
     this.updatePlayerMove(dt, time, footX, footZ, footFloor);
+    prof.end('sim.player');
     this.world.stepTrail?.(this.pos.x, this.pos.z);
     this.markExplored(this.pos.x, this.pos.z);
     this.kickSand(dt, footFloor);
@@ -2158,8 +2280,10 @@ export class RaidEngine {
       this.fireEdge = false;
       this.suppressFire = false;
     }
+    prof.begin('sim.player');
     this.stepPhysical(dt, locked, busy);
     this.presentPlayer(dt, time);
+    prof.end('sim.player');
     if (this.fireHeld && !this.suppressFire && !locked && !busy) this.tryFire();
     if (this.interactQueued) {
       this.interactQueued = false;
@@ -2168,7 +2292,9 @@ export class RaidEngine {
 
     this.updateClones(dt);
     this.tickSquadDown(dt);
+    prof.begin('sim.hosts');
     this.updateHosts(dt, time);
+    prof.end('sim.hosts');
     if (this.heldThrow && this.throwables) {
       const socket = this.player?.rig?.weaponSocket;
       if (socket) this.throwables.grip(this.heldThrow, socket, 0);
@@ -2192,7 +2318,10 @@ export class RaidEngine {
     this.updateFallen(dt);
     this.updateBolts(dt);
     this.updateRound(dt);
+    prof.begin('sim.camera');
     this.updateCamera(dt);
+    prof.end('sim.camera');
+    prof.begin('sim.fx');
     this.rings.update(dt);
     this.cracks.update(dt);
     this.afterimages.update(dt);
@@ -2200,6 +2329,7 @@ export class RaidEngine {
     this.stepSignalOrbs(dt, time);
     this.beacon?.update(dt, time, this.pos, this.spec.visual.auraColor, this.camera);
     this.powerVfx.update(dt, time, this.aura, this.maxAura, !this.burnout && !this.powerOut.down, this.camera);
+    prof.end('sim.fx');
   }
 
   // ---------------------------------------------------------------------------
@@ -2475,7 +2605,29 @@ export class RaidEngine {
       this.airY = feet - floor;
       this.airVel = Math.min(0, this.airVel);
       this.jumping = true;
+      this.ledgeFellAt = this.simTime;
     }
+  }
+
+  /**
+   * Finish a move that has already been added to `pos`: hold it inside the
+   * arena and out of the walls. With sweptMove the walls are tested along the
+   * way from (fromX, fromZ), so a dodge, a launch, or one long frame cannot
+   * carry a body through a fence.
+   */
+  private settleMove(pos: THREE.Vector3, fromX: number, fromZ: number, radius: number) {
+    const limit = this.limit();
+    if (this.flags.sweptMove) {
+      const dx = pos.x - fromX;
+      const dz = pos.z - fromZ;
+      pos.x = fromX;
+      pos.z = fromZ;
+      sweepCircle(pos, dx, dz, radius, this.world.obstacles, limit);
+      return;
+    }
+    pos.x = clamp(pos.x, -limit, limit);
+    pos.z = clamp(pos.z, -limit, limit);
+    resolveCircle(pos, radius, this.world.obstacles);
   }
 
   /** City keeps its old edge. Larger arenas publish their own. */
@@ -2633,12 +2785,12 @@ export class RaidEngine {
       _tmp.set(this.dodgeX, 0, this.dodgeZ);
       speed = 15;
     } else if (_tmp.lengthSq() > 0) _tmp.normalize();
+    const beforeX = this.pos.x;
+    const beforeZ = this.pos.z;
     this.pos.addScaledVector(_tmp, speed * dt);
     this.hitKnock.multiplyScalar(Math.max(0, 1 - dt * 5));
     this.pos.addScaledVector(this.hitKnock, dt);
-    this.pos.x = clamp(this.pos.x, -this.limit(), this.limit());
-    this.pos.z = clamp(this.pos.z, -this.limit(), this.limit());
-    resolveCircle(this.pos, this.playerRadius(), this.world.obstacles);
+    this.settleMove(this.pos, beforeX, beforeZ, this.playerRadius());
     this.holdGround(footX, footZ, footFloor);
 
     // Hosts shoulder the Ryder aside, except while a kit sequence is carrying
@@ -2963,29 +3115,77 @@ export class RaidEngine {
     }
   }
 
-  /** Grounded hop. A second press while that hop is still up can mount, for a kit that flies. */
-  private tryJump() {
+  /**
+   * Grounded hop. A second press while that hop is still up can mount, for a kit that flies.
+   * Returns true when the press did something, so an unanswered one can be held for a moment.
+   */
+  private tryJump(): boolean {
     if (this.swim.mode === 'surface' || this.swim.mode === 'under') {
       this.swimRise = 0.28;
-      return;
+      return true;
     }
     const airborne = this.jumping || this.airY > 0.04 || this.airVel > 0.2 || (this.kit?.flying ?? false);
     if (airborne) {
+      // Coyote time: a step past a ledge still jumps, as long as the fall has only just begun.
+      const offLedge =
+        this.flags.jumpAssist &&
+        this.ledgeFellAt >= 0 &&
+        this.simTime - this.ledgeFellAt <= COYOTE_TIME &&
+        this.airVel <= 0 &&
+        !this.kit?.flying;
+      if (offLedge && this.jumpClear()) {
+        this.launchJump();
+        return true;
+      }
       const since = this.simTime - this.jumpAt;
       if (this.kit?.tryAirJump?.(since, this.airY)) {
         this.airY = 0;
         this.airVel = 0;
         this.jumping = false;
+        return true;
       }
-      return;
+      return false;
     }
-    if (this.hitStun > 0.12 || this.dodgeT > 0 || this.bodyLocked()) return;
-    if (this.pvpCpu?.grabsPlayer()) return;
-    this.airVel = JUMP_SPEED;
+    if (!this.jumpClear()) return false;
     this.airY = 0.02;
+    this.launchJump();
+    return true;
+  }
+
+  /** Nothing is holding the body down: not a stagger, a dodge, an ability lock, or a grab. */
+  private jumpClear() {
+    if (this.hitStun > 0.12 || this.dodgeT > 0 || this.bodyLocked()) return false;
+    return !this.pvpCpu?.grabsPlayer();
+  }
+
+  private launchJump() {
+    this.airVel = JUMP_SPEED;
     this.jumping = true;
     this.jumpAt = this.simTime;
+    this.ledgeFellAt = -1;
+    this.jumpBufferT = 0;
     this.emitSound('move.jump.swing');
+  }
+
+  /**
+   * A jump pressed a moment too early (still landing, still in a dodge or a
+   * stagger) fires as soon as the body is free, instead of being dropped.
+   */
+  private stepJumpInput(dt: number, locked: boolean) {
+    if (this.jumpQueued) {
+      this.jumpQueued = false;
+      const done = !locked && this.tryJump();
+      if (!this.flags.jumpAssist) return;
+      this.jumpBufferT = done ? 0 : JUMP_BUFFER_TIME;
+      return;
+    }
+    if (this.jumpBufferT <= 0) return;
+    this.jumpBufferT = Math.max(0, this.jumpBufferT - dt);
+    const grounded = !(this.jumping || this.airY > 0.04 || this.airVel > 0.2 || (this.kit?.flying ?? false));
+    const swimming = this.swim.mode === 'surface' || this.swim.mode === 'under';
+    // Only the grounded hop is held. A held press never turns into an air mount later.
+    if (locked || !grounded || swimming || !this.jumpClear()) return;
+    this.tryJump();
   }
 
   /** Launch while rising, tuck while falling. Kits that already own a pose win. */
@@ -3002,24 +3202,24 @@ export class RaidEngine {
     this.takenGap += dt;
     this.dodgeCd = Math.max(0, this.dodgeCd - dt);
     if (this.dodgeT > 0) this.dodgeT = Math.max(0, this.dodgeT - dt);
-    if (this.jumpQueued) {
-      this.jumpQueued = false;
-      if (!locked) this.tryJump();
-    }
+    this.stepJumpInput(dt, locked);
     if (this.kit?.flying) {
       this.airY = 0;
       this.airVel = 0;
       this.jumping = false;
+      this.ledgeFellAt = -1;
     } else if (this.swim.mode === 'surface' || this.swim.mode === 'under') {
       this.airY = 0;
       this.airVel = 0;
       this.jumping = false;
+      this.ledgeFellAt = -1;
     } else if (this.airY > 0 || this.airVel > 0) {
       this.airVel -= 22 * dt;
       this.airY += this.airVel * dt;
       if (this.airY <= 0) {
         this.airY = 0;
         this.airVel = 0;
+        this.ledgeFellAt = -1;
         if (this.jumping) this.jumping = false;
         else this.hitStun = Math.max(this.hitStun, 0.18);
       }
@@ -5880,6 +6080,8 @@ export class RaidEngine {
     const hunting = playerDist > 12 && order.move > 0.2 && order.state !== 'flee' && order.state !== 'search' && order.state !== 'pickup';
     const speed = host.speed * profile.speed * (order.state === 'flee' || hazard ? 1.35 : hunting ? 1.45 : 1);
     const mag = Math.hypot(vx, vz);
+    const hostFromX = host.pos.x;
+    const hostFromZ = host.pos.z;
     let travelX = 0;
     let travelZ = 0;
     if (mag > 0.05) {
@@ -5904,9 +6106,7 @@ export class RaidEngine {
       host.pos.x += host.knock.x * dt;
       host.pos.z += host.knock.z * dt;
     }
-    host.pos.x = clamp(host.pos.x, -this.limit(), this.limit());
-    host.pos.z = clamp(host.pos.z, -this.limit(), this.limit());
-    resolveCircle(host.pos, host.radius, this.world.obstacles);
+    this.settleMove(host.pos, hostFromX, hostFromZ, host.radius);
     const seeking = (order.state === 'search' || order.state === 'pickup') && prop ? prop : null;
     this.watchStall(host, watch, order.move > 0.2 && aimDist > 2.5 && !striker.busy, gx, gz, dt, seeking);
     const closingIn = !swayed && order.move > 0.2 && order.state !== 'flee' && order.state !== 'search' && order.state !== 'pickup';
@@ -6571,8 +6771,7 @@ export class RaidEngine {
     _ray.ray.copy(_aimRay);
     _ray.near = 0;
     _ray.far = range;
-    const hits = _ray.intersectObjects(this.world.occluders, false);
-    if (hits.length) range = Math.min(range, hits[0].distance);
+    range = Math.min(range, this.occlusion.cast(_ray.ray, range));
     for (const host of this.hosts) {
       _tmp.copy(host.pos).setY(host.fighter.humanoid.group.position.y + 1.1);
       const hitDist = raySphere(_aimRay, _tmp, host.radius + 0.35);
