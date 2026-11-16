@@ -26,6 +26,8 @@ import {
   type UpgradeId,
 } from './config';
 import { GameMode } from './game-mode';
+import { readRaidFlags, type RaidFlags } from './flags';
+import { FrameProfiler, ProfilerOverlay, type ProfileReport } from './profiler';
 import { PowerOutage, abilityLockout, type PowerClock } from './power-outage';
 import { DEFAULT_ARENA, arenaSpec, type ArenaDefinition, type ArenaId } from './arenas';
 import { RyderBeacon, type BeaconHudState } from './beacon';
@@ -814,6 +816,10 @@ export class RaidEngine {
   private cameraPivot = new THREE.Vector3();
   private strikeOverride: MeleeStyle | null = null;
   private onSound: ((id: string) => void) | null = null;
+  /** RAID 2.0 switches, read once per engine. See `flags.ts`. */
+  readonly flags: RaidFlags = readRaidFlags();
+  private profiler = new FrameProfiler();
+  private profilerOverlay = new ProfilerOverlay();
 
   constructor(canvas: HTMLCanvasElement, onHud: (hud: HudState) => void) {
     this.canvas = canvas;
@@ -883,6 +889,7 @@ export class RaidEngine {
 
     this.resize();
     this.bind();
+    if (this.flags.profiler) this.profile(true);
     this.clock.start();
     this.loop = this.loop.bind(this);
     this.raf = requestAnimationFrame(this.loop);
@@ -1852,6 +1859,7 @@ export class RaidEngine {
     this.disposed = true;
     cancelAnimationFrame(this.raf);
     this.unbind();
+    this.profilerOverlay.hide();
     this.clearCombat();
     this.powerVfx.dispose();
     this.rings.dispose();
@@ -2011,6 +2019,8 @@ export class RaidEngine {
   private loop() {
     if (this.disposed) return;
     this.raf = requestAnimationFrame(this.loop);
+    const prof = this.profiler;
+    prof.beginFrame();
     let dt = Math.min(0.05, this.clock.getDelta());
     const time = this.clock.elapsedTime;
     // Hit-stop: the world crawls for a few frames so a heavy impact has weight.
@@ -2018,13 +2028,43 @@ export class RaidEngine {
       this.hitStopT = Math.max(0, this.hitStopT - dt);
       dt *= 0.06;
     }
+    prof.begin('sim');
     if (!this.paused && this.player && this.phase !== 'dead' && this.phase !== 'victory') this.update(dt, time);
     else if (this.player) this.updateCamera(dt);
+    prof.end('sim');
+    prof.begin('world');
     this.world.animate(time);
     this.particles.update(dt);
     this.pipeline.follow(this.player ? this.player.humanoid.group.position : this.pos);
+    prof.end('world');
+    prof.begin('render');
     this.pipeline.render();
+    prof.end('render');
+    prof.begin('hud');
     this.emitHud();
+    prof.end('hud');
+    if (prof.enabled) {
+      prof.setRender(this.pipeline.drawCounters());
+      prof.setCount('hosts', this.hosts.length);
+      prof.setCount('scale', Math.round(this.pipeline.resolutionScale * 100));
+      prof.endFrame();
+      this.profilerOverlay.update(prof, performance.now());
+    }
+  }
+
+  /**
+   * Turn frame profiling on or off. With `overlay` the numbers are drawn in the
+   * corner of the page; without it they are only available from `profileReport()`.
+   */
+  profile(on: boolean, overlay = true) {
+    this.profiler.setEnabled(on);
+    this.pipeline.countDraws(on);
+    if (on && overlay) this.profilerOverlay.show();
+    else this.profilerOverlay.hide();
+  }
+
+  profileReport(): ProfileReport {
+    return this.profiler.report();
   }
 
   private update(dt: number, time: number) {
@@ -2099,6 +2139,7 @@ export class RaidEngine {
       if (this.bannerT <= 0) this.banner = null;
     }
 
+    const prof = this.profiler;
     const footX = this.pos.x;
     const footZ = this.pos.z;
     const footFloor = this.world.heightAt(footX, footZ);
@@ -2126,7 +2167,9 @@ export class RaidEngine {
       });
       this.striker.setFork(this.kit.forkArmed ?? false);
     } else this.striker.setFork(false);
+    prof.begin('sim.player');
     this.updatePlayerMove(dt, time, footX, footZ, footFloor);
+    prof.end('sim.player');
     this.world.stepTrail?.(this.pos.x, this.pos.z);
     this.markExplored(this.pos.x, this.pos.z);
     this.kickSand(dt, footFloor);
@@ -2158,8 +2201,10 @@ export class RaidEngine {
       this.fireEdge = false;
       this.suppressFire = false;
     }
+    prof.begin('sim.player');
     this.stepPhysical(dt, locked, busy);
     this.presentPlayer(dt, time);
+    prof.end('sim.player');
     if (this.fireHeld && !this.suppressFire && !locked && !busy) this.tryFire();
     if (this.interactQueued) {
       this.interactQueued = false;
@@ -2168,7 +2213,9 @@ export class RaidEngine {
 
     this.updateClones(dt);
     this.tickSquadDown(dt);
+    prof.begin('sim.hosts');
     this.updateHosts(dt, time);
+    prof.end('sim.hosts');
     if (this.heldThrow && this.throwables) {
       const socket = this.player?.rig?.weaponSocket;
       if (socket) this.throwables.grip(this.heldThrow, socket, 0);
@@ -2192,7 +2239,10 @@ export class RaidEngine {
     this.updateFallen(dt);
     this.updateBolts(dt);
     this.updateRound(dt);
+    prof.begin('sim.camera');
     this.updateCamera(dt);
+    prof.end('sim.camera');
+    prof.begin('sim.fx');
     this.rings.update(dt);
     this.cracks.update(dt);
     this.afterimages.update(dt);
@@ -2200,6 +2250,7 @@ export class RaidEngine {
     this.stepSignalOrbs(dt, time);
     this.beacon?.update(dt, time, this.pos, this.spec.visual.auraColor, this.camera);
     this.powerVfx.update(dt, time, this.aura, this.maxAura, !this.burnout && !this.powerOut.down, this.camera);
+    prof.end('sim.fx');
   }
 
   // ---------------------------------------------------------------------------
