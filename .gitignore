@@ -8,3 +8,6 @@ node_modules
 .next
 .next
 .vercel
+
+# Seed skill: raw App Store review dumps stay local
+seed/reviews/
