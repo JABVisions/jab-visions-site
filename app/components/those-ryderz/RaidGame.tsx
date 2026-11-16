@@ -980,6 +980,9 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
               <button type="button" onClick={changeRyder}>
                 Change Ryder
               </button>
+              <button type="button" onClick={exitToStart}>
+                Main menu
+              </button>
             </div>
           </div>
         </div>
@@ -1010,6 +1013,9 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
               </button>
               <button type="button" onClick={changeRyder}>
                 Change Ryderz
+              </button>
+              <button type="button" onClick={exitToStart}>
+                Main menu
               </button>
             </div>
           </div>
