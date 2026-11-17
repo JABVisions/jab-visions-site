@@ -14,6 +14,8 @@ Hi {first_name},
 
 We're raising a {raise} {stage} on a {instrument}. Open to a 20-minute call next week? Happy to send the deck and the 36-month model first.
 
+You can reach me for further communication at johnandy@jabvisions.com.
+
 {optout}
 
 {signature}
