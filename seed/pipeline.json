@@ -248,7 +248,7 @@
       "next_due": null,
       "labels": [],
       "notes": "",
-      "personal_line": "Asylum backs founders as artists and led Danger Testing's pre-seed; Those Ryderz is a writer-director's studio releasing a film and a game.",
+      "personal_line": "Asylum backs founders as artists and led Danger Testing's pre-seed; Those Ryderz is a story world with a film in development and a free browser game you can play now.",
       "sources": [
         "https://www.asylum.vc/terms-of-use"
       ],
@@ -288,6 +288,11 @@
           "date": "2026-11-17",
           "event": "approved",
           "note": "batch 7a0c8079, reply 'yes'"
+        },
+        {
+          "date": "2026-11-17",
+          "event": "drafted",
+          "note": "intro"
         },
         {
           "date": "2026-11-17",
