@@ -6,7 +6,7 @@
       "name": "Ben Lerer",
       "firm": "Lerer Hippeau",
       "fit": 74,
-      "status": "drafted",
+      "status": "approved",
       "touches": [],
       "next_due": null,
       "labels": [],
@@ -23,8 +23,12 @@
         "file": "outreach/ben-lerer-1.eml",
         "subject": "JAB Visions: story worlds and creator commerce",
         "message_id": "<ben-lerer-1.8d836e9fbac2@gmail.com>",
-        "state": "drafted",
-        "drafted_on": "2026-11-17"
+        "state": "approved",
+        "drafted_on": "2026-11-17",
+        "approved_on": "2026-11-17",
+        "reply": "yes",
+        "batch": "7a0c8079",
+        "sha": "5f209396b95a56ed0066787a93c6e7aa739ae916a8d35db80761e4e236f98d87"
       },
       "history": [
         {
@@ -46,6 +50,11 @@
           "date": "2026-11-17",
           "event": "drafted",
           "note": "intro"
+        },
+        {
+          "date": "2026-11-17",
+          "event": "approved",
+          "note": "batch 7a0c8079, reply 'yes'"
         }
       ]
     },
@@ -55,7 +64,7 @@
       "name": "Nimi Katragadda",
       "firm": "BoxGroup",
       "fit": 74,
-      "status": "drafted",
+      "status": "approved",
       "touches": [],
       "next_due": null,
       "labels": [],
@@ -72,8 +81,12 @@
         "file": "outreach/nimi-katragadda-1.eml",
         "subject": "JAB Visions: story worlds and creator commerce",
         "message_id": "<nimi-katragadda-1.c6ec677a5c76@gmail.com>",
-        "state": "drafted",
-        "drafted_on": "2026-11-17"
+        "state": "approved",
+        "drafted_on": "2026-11-17",
+        "approved_on": "2026-11-17",
+        "reply": "yes",
+        "batch": "7a0c8079",
+        "sha": "903f9cc81e204e58c5fe2d3a0a1235e6c88794672ba427f310d18f5cf21a505d"
       },
       "history": [
         {
@@ -95,6 +108,11 @@
           "date": "2026-11-17",
           "event": "drafted",
           "note": "intro"
+        },
+        {
+          "date": "2026-11-17",
+          "event": "approved",
+          "note": "batch 7a0c8079, reply 'yes'"
         }
       ]
     },
@@ -104,7 +122,7 @@
       "name": "Will Porteous",
       "firm": "RRE Ventures",
       "fit": 74,
-      "status": "drafted",
+      "status": "approved",
       "touches": [],
       "next_due": null,
       "labels": [],
@@ -121,8 +139,12 @@
         "file": "outreach/will-porteous-1.eml",
         "subject": "JAB Visions: story worlds and creator commerce",
         "message_id": "<will-porteous-1.983abc57a665@gmail.com>",
-        "state": "drafted",
-        "drafted_on": "2026-11-17"
+        "state": "approved",
+        "drafted_on": "2026-11-17",
+        "approved_on": "2026-11-17",
+        "reply": "yes",
+        "batch": "7a0c8079",
+        "sha": "e792f69604700e973077e84725f871cd316b29044eb8320d0dccadce9289903b"
       },
       "history": [
         {
@@ -144,6 +166,11 @@
           "date": "2026-11-17",
           "event": "drafted",
           "note": "intro"
+        },
+        {
+          "date": "2026-11-17",
+          "event": "approved",
+          "note": "batch 7a0c8079, reply 'yes'"
         }
       ]
     },
@@ -153,7 +180,7 @@
       "name": "Marshall Sandman",
       "firm": "Animal Capital",
       "fit": 72,
-      "status": "drafted",
+      "status": "approved",
       "touches": [],
       "next_due": null,
       "labels": [],
@@ -171,8 +198,12 @@
         "file": "outreach/marshall-sandman-1.eml",
         "subject": "JAB Visions: story worlds and creator commerce",
         "message_id": "<marshall-sandman-1.2d07e8c6a948@gmail.com>",
-        "state": "drafted",
-        "drafted_on": "2026-11-17"
+        "state": "approved",
+        "drafted_on": "2026-11-17",
+        "approved_on": "2026-11-17",
+        "reply": "yes",
+        "batch": "7a0c8079",
+        "sha": "dc1de4bacae7a2217c8cfa903be0d4ed42c5dc0bc072f2467523dd76e0b84208"
       },
       "history": [
         {
@@ -194,6 +225,11 @@
           "date": "2026-11-17",
           "event": "drafted",
           "note": "intro"
+        },
+        {
+          "date": "2026-11-17",
+          "event": "approved",
+          "note": "batch 7a0c8079, reply 'yes'"
         }
       ]
     },
@@ -203,7 +239,7 @@
       "name": "Nicholas Chirls",
       "firm": "Asylum Ventures",
       "fit": 72,
-      "status": "drafted",
+      "status": "approved",
       "touches": [],
       "next_due": null,
       "labels": [],
@@ -220,8 +256,12 @@
         "file": "outreach/nicholas-chirls-1.eml",
         "subject": "JAB Visions: story worlds and creator commerce",
         "message_id": "<nicholas-chirls-1.76e5079c70f5@gmail.com>",
-        "state": "drafted",
-        "drafted_on": "2026-11-17"
+        "state": "approved",
+        "drafted_on": "2026-11-17",
+        "approved_on": "2026-11-17",
+        "reply": "yes",
+        "batch": "7a0c8079",
+        "sha": "80fa5008105daced7b5ada4f2011ce9ea89e08e849de3061853982b778eba709"
       },
       "history": [
         {
@@ -243,6 +283,11 @@
           "date": "2026-11-17",
           "event": "drafted",
           "note": "intro"
+        },
+        {
+          "date": "2026-11-17",
+          "event": "approved",
+          "note": "batch 7a0c8079, reply 'yes'"
         }
       ]
     },
@@ -252,7 +297,7 @@
       "name": "Peter Boyce II",
       "firm": "Stellation Capital",
       "fit": 72,
-      "status": "drafted",
+      "status": "approved",
       "touches": [],
       "next_due": null,
       "labels": [],
@@ -270,8 +315,12 @@
         "file": "outreach/peter-boyce-ii-1.eml",
         "subject": "JAB Visions: story worlds and creator commerce",
         "message_id": "<peter-boyce-ii-1.edc8265d437e@gmail.com>",
-        "state": "drafted",
-        "drafted_on": "2026-11-17"
+        "state": "approved",
+        "drafted_on": "2026-11-17",
+        "approved_on": "2026-11-17",
+        "reply": "yes",
+        "batch": "7a0c8079",
+        "sha": "894cd34b59349d9a9caadacb23d488f89b33f80ddf990bcc34699b0e4beebccb"
       },
       "history": [
         {
@@ -298,6 +347,11 @@
           "date": "2026-11-17",
           "event": "drafted",
           "note": "intro"
+        },
+        {
+          "date": "2026-11-17",
+          "event": "approved",
+          "note": "batch 7a0c8079, reply 'yes'"
         }
       ]
     },
@@ -307,7 +361,7 @@
       "name": "Ryan Hoover",
       "firm": "Weekend Fund",
       "fit": 71,
-      "status": "drafted",
+      "status": "approved",
       "touches": [],
       "next_due": null,
       "labels": [],
@@ -325,8 +379,12 @@
         "file": "outreach/ryan-hoover-1.eml",
         "subject": "JAB Visions: story worlds and creator commerce",
         "message_id": "<ryan-hoover-1.4ff490389044@gmail.com>",
-        "state": "drafted",
-        "drafted_on": "2026-11-17"
+        "state": "approved",
+        "drafted_on": "2026-11-17",
+        "approved_on": "2026-11-17",
+        "reply": "yes",
+        "batch": "7a0c8079",
+        "sha": "775d4e4a97aa81859f1bcda6a10d54c21840eaecadb148d9cab4b9f23a08485f"
       },
       "history": [
         {
@@ -348,6 +406,11 @@
           "date": "2026-11-17",
           "event": "drafted",
           "note": "intro"
+        },
+        {
+          "date": "2026-11-17",
+          "event": "approved",
+          "note": "batch 7a0c8079, reply 'yes'"
         }
       ]
     },
@@ -357,7 +420,7 @@
       "name": "Scott Birnbaum",
       "firm": "Red Sea Ventures",
       "fit": 70,
-      "status": "drafted",
+      "status": "approved",
       "touches": [],
       "next_due": null,
       "labels": [],
@@ -374,8 +437,12 @@
         "file": "outreach/scott-birnbaum-1.eml",
         "subject": "JAB Visions: story worlds and creator commerce",
         "message_id": "<scott-birnbaum-1.d1d6196376c4@gmail.com>",
-        "state": "drafted",
-        "drafted_on": "2026-11-17"
+        "state": "approved",
+        "drafted_on": "2026-11-17",
+        "approved_on": "2026-11-17",
+        "reply": "yes",
+        "batch": "7a0c8079",
+        "sha": "072837f3eaf4d967f599d561f3583a817b08d219427cd21614882a109338a26c"
       },
       "history": [
         {
@@ -397,6 +464,11 @@
           "date": "2026-11-17",
           "event": "drafted",
           "note": "intro"
+        },
+        {
+          "date": "2026-11-17",
+          "event": "approved",
+          "note": "batch 7a0c8079, reply 'yes'"
         }
       ]
     },
@@ -406,7 +478,7 @@
       "name": "Jordan Crook",
       "firm": "Betaworks",
       "fit": 69,
-      "status": "drafted",
+      "status": "approved",
       "touches": [],
       "next_due": null,
       "labels": [],
@@ -423,8 +495,12 @@
         "file": "outreach/jordan-crook-1.eml",
         "subject": "JAB Visions: story worlds and creator commerce",
         "message_id": "<jordan-crook-1.79205d0913fb@gmail.com>",
-        "state": "drafted",
-        "drafted_on": "2026-11-17"
+        "state": "approved",
+        "drafted_on": "2026-11-17",
+        "approved_on": "2026-11-17",
+        "reply": "yes",
+        "batch": "7a0c8079",
+        "sha": "ee5aae7b838f2a6d7da318ffc6fd47123dd37cc8bd0d9e53a742914de7e587b2"
       },
       "history": [
         {
@@ -446,6 +522,11 @@
           "date": "2026-11-17",
           "event": "drafted",
           "note": "intro"
+        },
+        {
+          "date": "2026-11-17",
+          "event": "approved",
+          "note": "batch 7a0c8079, reply 'yes'"
         }
       ]
     },
@@ -455,7 +536,7 @@
       "name": "Jonathan Keidan",
       "firm": "Torch Capital",
       "fit": 65,
-      "status": "drafted",
+      "status": "approved",
       "touches": [],
       "next_due": null,
       "labels": [],
@@ -472,8 +553,12 @@
         "file": "outreach/jonathan-keidan-1.eml",
         "subject": "JAB Visions: story worlds and creator commerce",
         "message_id": "<jonathan-keidan-1.1ab65d0128aa@gmail.com>",
-        "state": "drafted",
-        "drafted_on": "2026-11-17"
+        "state": "approved",
+        "drafted_on": "2026-11-17",
+        "approved_on": "2026-11-17",
+        "reply": "yes",
+        "batch": "7a0c8079",
+        "sha": "8344e54084bf7cf1296141f04a095807143f9a150cf3031b8ec357a2cdeda59a"
       },
       "history": [
         {
@@ -495,6 +580,11 @@
           "date": "2026-11-17",
           "event": "drafted",
           "note": "intro"
+        },
+        {
+          "date": "2026-11-17",
+          "event": "approved",
+          "note": "batch 7a0c8079, reply 'yes'"
         }
       ]
     },
@@ -504,7 +594,7 @@
       "name": "Amanda Herson",
       "firm": "Founder Collective",
       "fit": 64,
-      "status": "drafted",
+      "status": "approved",
       "touches": [],
       "next_due": null,
       "labels": [],
@@ -521,8 +611,12 @@
         "file": "outreach/amanda-herson-1.eml",
         "subject": "JAB Visions: story worlds and creator commerce",
         "message_id": "<amanda-herson-1.40316d8ca11b@gmail.com>",
-        "state": "drafted",
-        "drafted_on": "2026-11-17"
+        "state": "approved",
+        "drafted_on": "2026-11-17",
+        "approved_on": "2026-11-17",
+        "reply": "yes",
+        "batch": "7a0c8079",
+        "sha": "8bd8d26c1c9ea8654ec9f299bc9e7ed73a06f6acd0ef924404697e3b274c9f9c"
       },
       "history": [
         {
@@ -544,6 +638,11 @@
           "date": "2026-11-17",
           "event": "drafted",
           "note": "intro"
+        },
+        {
+          "date": "2026-11-17",
+          "event": "approved",
+          "note": "batch 7a0c8079, reply 'yes'"
         }
       ]
     },
@@ -553,7 +652,7 @@
       "name": "Alex Pall",
       "firm": "Mantis VC",
       "fit": 61,
-      "status": "drafted",
+      "status": "approved",
       "touches": [],
       "next_due": null,
       "labels": [],
@@ -571,8 +670,12 @@
         "file": "outreach/alex-pall-1.eml",
         "subject": "JAB Visions: story worlds and creator commerce",
         "message_id": "<alex-pall-1.af453fb522c0@gmail.com>",
-        "state": "drafted",
-        "drafted_on": "2026-11-17"
+        "state": "approved",
+        "drafted_on": "2026-11-17",
+        "approved_on": "2026-11-17",
+        "reply": "yes",
+        "batch": "7a0c8079",
+        "sha": "93be4a394555d50dc224e550c2a7860c2fb504ca9f96a21da4cfa34cf961765e"
       },
       "history": [
         {
@@ -594,6 +697,11 @@
           "date": "2026-11-17",
           "event": "drafted",
           "note": "intro"
+        },
+        {
+          "date": "2026-11-17",
+          "event": "approved",
+          "note": "batch 7a0c8079, reply 'yes'"
         }
       ]
     },
@@ -603,7 +711,7 @@
       "name": "Jay Chi",
       "firm": "Makers Fund",
       "fit": 60,
-      "status": "drafted",
+      "status": "approved",
       "touches": [],
       "next_due": null,
       "labels": [],
@@ -622,8 +730,12 @@
         "file": "outreach/jay-chi-1.eml",
         "subject": "JAB Visions: story worlds and creator commerce",
         "message_id": "<jay-chi-1.50608bee1df7@gmail.com>",
-        "state": "drafted",
-        "drafted_on": "2026-11-17"
+        "state": "approved",
+        "drafted_on": "2026-11-17",
+        "approved_on": "2026-11-17",
+        "reply": "yes",
+        "batch": "7a0c8079",
+        "sha": "01979e542f5f4c6989e7ccdc3ec13125165e05cec5ba8fc6e177baa05fd837f9"
       },
       "history": [
         {
@@ -645,6 +757,11 @@
           "date": "2026-11-17",
           "event": "drafted",
           "note": "intro"
+        },
+        {
+          "date": "2026-11-17",
+          "event": "approved",
+          "note": "batch 7a0c8079, reply 'yes'"
         }
       ]
     },
@@ -654,7 +771,7 @@
       "name": "Logan Paul",
       "firm": "Anti Fund",
       "fit": 60,
-      "status": "drafted",
+      "status": "approved",
       "touches": [],
       "next_due": null,
       "labels": [],
@@ -671,8 +788,12 @@
         "file": "outreach/logan-paul-1.eml",
         "subject": "JAB Visions: story worlds and creator commerce",
         "message_id": "<logan-paul-1.32b8df9b775d@gmail.com>",
-        "state": "drafted",
-        "drafted_on": "2026-11-17"
+        "state": "approved",
+        "drafted_on": "2026-11-17",
+        "approved_on": "2026-11-17",
+        "reply": "yes",
+        "batch": "7a0c8079",
+        "sha": "5a9d3791921463447a7828aadc75e9f1e8163f7a2c8a2f419e123b4ce921e2d7"
       },
       "history": [
         {
@@ -694,6 +815,11 @@
           "date": "2026-11-17",
           "event": "drafted",
           "note": "intro"
+        },
+        {
+          "date": "2026-11-17",
+          "event": "approved",
+          "note": "batch 7a0c8079, reply 'yes'"
         }
       ]
     },
@@ -703,7 +829,7 @@
       "name": "Mike Duda",
       "firm": "Bullish",
       "fit": 60,
-      "status": "drafted",
+      "status": "approved",
       "touches": [],
       "next_due": null,
       "labels": [],
@@ -720,8 +846,12 @@
         "file": "outreach/mike-duda-1.eml",
         "subject": "JAB Visions: story worlds and creator commerce",
         "message_id": "<mike-duda-1.5ceaa89a1cd8@gmail.com>",
-        "state": "drafted",
-        "drafted_on": "2026-11-17"
+        "state": "approved",
+        "drafted_on": "2026-11-17",
+        "approved_on": "2026-11-17",
+        "reply": "yes",
+        "batch": "7a0c8079",
+        "sha": "cdf89ac37c7e9933eb2236bccc370196c2fd4678b58fbe8929fc2759f4284d2b"
       },
       "history": [
         {
@@ -743,6 +873,11 @@
           "date": "2026-11-17",
           "event": "drafted",
           "note": "intro"
+        },
+        {
+          "date": "2026-11-17",
+          "event": "approved",
+          "note": "batch 7a0c8079, reply 'yes'"
         }
       ]
     },
@@ -752,7 +887,7 @@
       "name": "Rich Greenfield",
       "firm": "LightShed Ventures",
       "fit": 60,
-      "status": "drafted",
+      "status": "approved",
       "touches": [],
       "next_due": null,
       "labels": [],
@@ -769,8 +904,12 @@
         "file": "outreach/rich-greenfield-1.eml",
         "subject": "JAB Visions: story worlds and creator commerce",
         "message_id": "<rich-greenfield-1.9ada577a5135@gmail.com>",
-        "state": "drafted",
-        "drafted_on": "2026-11-17"
+        "state": "approved",
+        "drafted_on": "2026-11-17",
+        "approved_on": "2026-11-17",
+        "reply": "yes",
+        "batch": "7a0c8079",
+        "sha": "49f4b536fc9fd2ca4cdd7b10287b86298478ef49c36d41531f5a2e99094c8195"
       },
       "history": [
         {
@@ -792,6 +931,11 @@
           "date": "2026-11-17",
           "event": "drafted",
           "note": "intro"
+        },
+        {
+          "date": "2026-11-17",
+          "event": "approved",
+          "note": "batch 7a0c8079, reply 'yes'"
         }
       ]
     },
@@ -801,7 +945,7 @@
       "name": "Susan Lyne",
       "firm": "BBG Ventures",
       "fit": 60,
-      "status": "drafted",
+      "status": "approved",
       "touches": [],
       "next_due": null,
       "labels": [],
@@ -818,8 +962,12 @@
         "file": "outreach/susan-lyne-1.eml",
         "subject": "JAB Visions: story worlds and creator commerce",
         "message_id": "<susan-lyne-1.568925239b71@gmail.com>",
-        "state": "drafted",
-        "drafted_on": "2026-11-17"
+        "state": "approved",
+        "drafted_on": "2026-11-17",
+        "approved_on": "2026-11-17",
+        "reply": "yes",
+        "batch": "7a0c8079",
+        "sha": "486e6007905b5746c32b21b69601e2c5c1b1bbb392e06e728893637c4af91b8c"
       },
       "history": [
         {
@@ -841,6 +989,11 @@
           "date": "2026-11-17",
           "event": "drafted",
           "note": "intro"
+        },
+        {
+          "date": "2026-11-17",
+          "event": "approved",
+          "note": "batch 7a0c8079, reply 'yes'"
         }
       ]
     },
@@ -850,7 +1003,7 @@
       "name": "Jason Yeh",
       "firm": "Patron",
       "fit": 59,
-      "status": "drafted",
+      "status": "approved",
       "touches": [],
       "next_due": null,
       "labels": [],
@@ -868,8 +1021,12 @@
         "file": "outreach/jason-yeh-1.eml",
         "subject": "JAB Visions: story worlds and creator commerce",
         "message_id": "<jason-yeh-1.6ff44c050d36@gmail.com>",
-        "state": "drafted",
-        "drafted_on": "2026-11-17"
+        "state": "approved",
+        "drafted_on": "2026-11-17",
+        "approved_on": "2026-11-17",
+        "reply": "yes",
+        "batch": "7a0c8079",
+        "sha": "50692400ee87ce009a798ee07aeed899a33081d1eaa3773f36a6200b9372803c"
       },
       "history": [
         {
@@ -891,6 +1048,11 @@
           "date": "2026-11-17",
           "event": "drafted",
           "note": "intro"
+        },
+        {
+          "date": "2026-11-17",
+          "event": "approved",
+          "note": "batch 7a0c8079, reply 'yes'"
         }
       ]
     },
@@ -900,7 +1062,7 @@
       "name": "Roger Ehrenberg",
       "firm": "Game Changers Ventures",
       "fit": 59,
-      "status": "drafted",
+      "status": "approved",
       "touches": [],
       "next_due": null,
       "labels": [],
@@ -918,8 +1080,12 @@
         "file": "outreach/roger-ehrenberg-1.eml",
         "subject": "JAB Visions: story worlds and creator commerce",
         "message_id": "<roger-ehrenberg-1.468d00f7ef79@gmail.com>",
-        "state": "drafted",
-        "drafted_on": "2026-11-17"
+        "state": "approved",
+        "drafted_on": "2026-11-17",
+        "approved_on": "2026-11-17",
+        "reply": "yes",
+        "batch": "7a0c8079",
+        "sha": "539210aa369aebc074426cf5f9cbb20fa223cdeb49cf17d086712b4412820616"
       },
       "history": [
         {
@@ -941,6 +1107,11 @@
           "date": "2026-11-17",
           "event": "drafted",
           "note": "intro"
+        },
+        {
+          "date": "2026-11-17",
+          "event": "approved",
+          "note": "batch 7a0c8079, reply 'yes'"
         }
       ]
     },
@@ -950,7 +1121,7 @@
       "name": "Joe Marchese",
       "firm": "Human Ventures",
       "fit": 58,
-      "status": "drafted",
+      "status": "approved",
       "touches": [],
       "next_due": null,
       "labels": [],
@@ -967,8 +1138,12 @@
         "file": "outreach/joe-marchese-1.eml",
         "subject": "JAB Visions: story worlds and creator commerce",
         "message_id": "<joe-marchese-1.7148317ebe83@gmail.com>",
-        "state": "drafted",
-        "drafted_on": "2026-11-17"
+        "state": "approved",
+        "drafted_on": "2026-11-17",
+        "approved_on": "2026-11-17",
+        "reply": "yes",
+        "batch": "7a0c8079",
+        "sha": "37164b1e2679e272f55c20acd10e8af43f2dd1d5eb6ca1af86cf84e583615a1a"
       },
       "history": [
         {
@@ -990,6 +1165,11 @@
           "date": "2026-11-17",
           "event": "drafted",
           "note": "intro"
+        },
+        {
+          "date": "2026-11-17",
+          "event": "approved",
+          "note": "batch 7a0c8079, reply 'yes'"
         }
       ]
     },
