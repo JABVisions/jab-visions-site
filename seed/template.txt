@@ -1,0 +1,47 @@
+# Closer template for JAB Visions. The note above the first section is never sent.
+# Follow-ups stay the stock Closer notes. The intro is the one written for this raise.
+# There is no postal address in seed/config.json yet. CAN-SPAM expects one in the
+# signature; add founder.company_address before anything is sent.
+
+=== intro ===
+Subject: JAB Visions: story worlds and creator commerce
+
+Hi {first_name},
+
+{personal_line}
+
+I'm John Andy, founder of {startup} in New York. {startup} is {one_liner_sentence}.
+
+Three things are already in motion. THOSE RYDERZ is the story world: a feature film in development, and Those Ryderz: Raid, a free browser game people can play now, with Solo, PvP and five-seat co-op, a 12-character roster and four arenas. The JAB Visions Store sells wearable and collectible artifacts from that world, priced from $8.77 to $59.99. Board, the creator-production network we built for the film's cast and crew, is in web beta: a profile, a Work Page, Drops, Rooms, and Pay Drops through Stripe Connect. The platform fee on those payments is 0% today.
+
+We're raising a {raise} {stage} on a {instrument}. Of that, $300,000 takes Board out of beta, $150,000 shoots the THOSE RYDERZ proof-of-concept, $120,000 funds the first artifact runs, $120,000 covers community and marketing, and $60,000 covers operations and legal. The 36-month model, from our own assumptions, puts Store revenue at $99,814, $495,638 and $1,246,440 across the three years, with breakeven in month 32. That is a plan, not a forecast.
+
+Open to a 20-minute call next week? The deck is attached. Happy to send the 36-month model too.
+
+{optout}
+
+{signature}
+
+=== followup 1 ===
+Subject: Re: {intro_subject}
+
+Hi {first_name},
+
+Bumping this up: my note from {intro_day} about {startup}, {one_liner_sentence}. {extra}
+
+Open to 20 minutes next week?
+
+{optout}
+
+{signature}
+
+=== followup 2 ===
+Subject: Re: {intro_subject}
+
+Hi {first_name},
+
+Quick one, and my last note on this: {ask}
+
+{optout}
+
+{signature}
