@@ -207,7 +207,7 @@
       "next_due": null,
       "labels": [],
       "notes": "",
-      "personal_line": "You joined Swsh's seed to back superfan data, and Board pays creator crews through Stripe Connect Pay Drops on every production.",
+      "personal_line": "You joined Swsh's seed to back superfan data, and Those Ryderz is a story world fans can already play.",
       "sources": [
         "https://stellation.substack.com/p/the-next-five-years",
         "https://www.billboard.com/pro/ai-fan-engagement-platform-swsh-raises-4m-seed-round/"
@@ -224,6 +224,11 @@
         "drafted_on": "2026-11-17"
       },
       "history": [
+        {
+          "date": "2026-11-17",
+          "event": "drafted",
+          "note": "intro"
+        },
         {
           "date": "2026-11-17",
           "event": "drafted",
