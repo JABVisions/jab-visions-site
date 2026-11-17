@@ -1,0 +1,43 @@
+# Closer template for JAB Visions. The note above the first section is never sent.
+# Follow-ups stay the stock Closer notes. The intro is the one written for this raise.
+# There is no postal address in seed/config.json yet. CAN-SPAM expects one in the
+# signature; add founder.company_address before anything is sent.
+
+=== intro ===
+Subject: JAB Visions: story worlds and creator commerce
+
+Hi {first_name},
+
+{personal_line}
+
+{startup} is {one_liner_sentence}. THOSE RYDERZ is the story world (a feature film in development and a free browser game, playable now), the JAB Visions Store sells artifacts from it, and Board, our creator-production network, is in web beta.
+
+We're raising a {raise} {stage} on a {instrument}. Open to a 20-minute call next week? Happy to send the deck and the 36-month model first.
+
+{optout}
+
+{signature}
+
+=== followup 1 ===
+Subject: Re: {intro_subject}
+
+Hi {first_name},
+
+Bumping this up: my note from {intro_day} about {startup}, {one_liner_sentence}. {extra}
+
+Open to 20 minutes next week?
+
+{optout}
+
+{signature}
+
+=== followup 2 ===
+Subject: Re: {intro_subject}
+
+Hi {first_name},
+
+Quick one, and my last note on this: {ask}
+
+{optout}
+
+{signature}

@@ -2,18 +2,19 @@
   "startup": {
     "name": "JAB Visions",
     "one_liner": "An entertainment-tech company turning original story worlds into creator commerce and the production network that connects them",
-    "sector": "entertainment-tech: cinematic IP, creator commerce and creator-production tools",
+    "sector": "entertainment; cinematic IP; creator commerce; gaming; consumer; media",
     "stage": "pre-seed",
-    "geography": "United States (New York)",
+    "geography": "US; New York",
     "raise": 750000,
     "instrument": "post-money SAFE"
   },
   "founder": {
     "name": "John Andy",
-    "email": "support@jabvisions.com",
+    "email": "johnandy@jabvisions.com",
+    "title": "Founder",
     "company_address": ""
   },
-  "sec_user_agent": "John Andy support@jabvisions.com",
+  "sec_user_agent": "John Andy johnandy@jabvisions.com",
   "outreach": {
     "daily_cap": 20,
     "followup_days": [

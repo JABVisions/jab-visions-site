@@ -1,0 +1,910 @@
+{
+  "investors": [
+    {
+      "id": "ben-lerer",
+      "email": "contact@lererhippeau.com",
+      "name": "Ben Lerer",
+      "firm": "Lerer Hippeau",
+      "fit": 74,
+      "status": "drafted",
+      "touches": [],
+      "next_due": null,
+      "labels": [],
+      "notes": "",
+      "personal_line": "You said Brodie attracted users digitally and hooked them offline, the same two jobs our story world and Board have to do.",
+      "sources": [
+        "https://www.lererhippeau.com/"
+      ],
+      "thread_id": null,
+      "call": null,
+      "draft": {
+        "n": 1,
+        "kind": "intro",
+        "file": "outreach/ben-lerer-1.eml",
+        "subject": "JAB Visions: story worlds and creator commerce",
+        "message_id": "<ben-lerer-1.8d836e9fbac2@jabvisions.com>",
+        "state": "drafted",
+        "drafted_on": "2026-11-17"
+      },
+      "history": [
+        {
+          "date": "2026-11-17",
+          "event": "drafted",
+          "note": "intro"
+        },
+        {
+          "date": "2026-11-17",
+          "event": "drafted",
+          "note": "intro"
+        }
+      ]
+    },
+    {
+      "id": "nimi-katragadda",
+      "email": "nimi@boxgroup.com",
+      "name": "Nimi Katragadda",
+      "firm": "BoxGroup",
+      "fit": 74,
+      "status": "drafted",
+      "touches": [],
+      "next_due": null,
+      "labels": [],
+      "notes": "",
+      "personal_line": "BoxGroup just backed A Vinyl Bar in Shibuya, a label that drops apps like singles, and Those Ryderz pairs a film with a browser game.",
+      "sources": [
+        "https://www.boxgroup.com/team"
+      ],
+      "thread_id": null,
+      "call": null,
+      "draft": {
+        "n": 1,
+        "kind": "intro",
+        "file": "outreach/nimi-katragadda-1.eml",
+        "subject": "JAB Visions: story worlds and creator commerce",
+        "message_id": "<nimi-katragadda-1.c6ec677a5c76@jabvisions.com>",
+        "state": "drafted",
+        "drafted_on": "2026-11-17"
+      },
+      "history": [
+        {
+          "date": "2026-11-17",
+          "event": "drafted",
+          "note": "intro"
+        },
+        {
+          "date": "2026-11-17",
+          "event": "drafted",
+          "note": "intro"
+        }
+      ]
+    },
+    {
+      "id": "will-porteous",
+      "email": "info@rre.com",
+      "name": "Will Porteous",
+      "firm": "RRE Ventures",
+      "fit": 74,
+      "status": "drafted",
+      "touches": [],
+      "next_due": null,
+      "labels": [],
+      "notes": "",
+      "personal_line": "You sit on Wave's board for virtual concerts and RRE just joined A Vinyl Bar in Shibuya's pre-seed; Those Ryderz is a playable story world.",
+      "sources": [
+        "https://rre.com/team"
+      ],
+      "thread_id": null,
+      "call": null,
+      "draft": {
+        "n": 1,
+        "kind": "intro",
+        "file": "outreach/will-porteous-1.eml",
+        "subject": "JAB Visions: story worlds and creator commerce",
+        "message_id": "<will-porteous-1.983abc57a665@jabvisions.com>",
+        "state": "drafted",
+        "drafted_on": "2026-11-17"
+      },
+      "history": [
+        {
+          "date": "2026-11-17",
+          "event": "drafted",
+          "note": "intro"
+        },
+        {
+          "date": "2026-11-17",
+          "event": "drafted",
+          "note": "intro"
+        }
+      ]
+    },
+    {
+      "id": "marshall-sandman",
+      "email": "info@animalcapital.com",
+      "name": "Marshall Sandman",
+      "firm": "Animal Capital",
+      "fit": 72,
+      "status": "drafted",
+      "touches": [],
+      "next_due": null,
+      "labels": [],
+      "notes": "",
+      "personal_line": "You closed Fund III to back consumer companies that make life more entertaining, which is the thesis behind THOSE RYDERZ's film and game.",
+      "sources": [
+        "https://animalcapital.com/",
+        "https://www.businesswire.com/news/home/20260610169775/en/Animal-Capital-Closes-%2433-Million-Fund-III-to-Double-Down-on-Early-Stage-Strategy"
+      ],
+      "thread_id": null,
+      "call": null,
+      "draft": {
+        "n": 1,
+        "kind": "intro",
+        "file": "outreach/marshall-sandman-1.eml",
+        "subject": "JAB Visions: story worlds and creator commerce",
+        "message_id": "<marshall-sandman-1.2d07e8c6a948@jabvisions.com>",
+        "state": "drafted",
+        "drafted_on": "2026-11-17"
+      },
+      "history": [
+        {
+          "date": "2026-11-17",
+          "event": "drafted",
+          "note": "intro"
+        },
+        {
+          "date": "2026-11-17",
+          "event": "drafted",
+          "note": "intro"
+        }
+      ]
+    },
+    {
+      "id": "nicholas-chirls",
+      "email": "hello@asylum.vc",
+      "name": "Nicholas Chirls",
+      "firm": "Asylum Ventures",
+      "fit": 72,
+      "status": "drafted",
+      "touches": [],
+      "next_due": null,
+      "labels": [],
+      "notes": "",
+      "personal_line": "Asylum backs founders as artists and led Danger Testing's pre-seed; Those Ryderz is a writer-director's studio releasing a film and a game.",
+      "sources": [
+        "https://www.asylum.vc/terms-of-use"
+      ],
+      "thread_id": null,
+      "call": null,
+      "draft": {
+        "n": 1,
+        "kind": "intro",
+        "file": "outreach/nicholas-chirls-1.eml",
+        "subject": "JAB Visions: story worlds and creator commerce",
+        "message_id": "<nicholas-chirls-1.76e5079c70f5@jabvisions.com>",
+        "state": "drafted",
+        "drafted_on": "2026-11-17"
+      },
+      "history": [
+        {
+          "date": "2026-11-17",
+          "event": "drafted",
+          "note": "intro"
+        },
+        {
+          "date": "2026-11-17",
+          "event": "drafted",
+          "note": "intro"
+        }
+      ]
+    },
+    {
+      "id": "peter-boyce-ii",
+      "email": "hello@stellation.vc",
+      "name": "Peter Boyce II",
+      "firm": "Stellation Capital",
+      "fit": 72,
+      "status": "drafted",
+      "touches": [],
+      "next_due": null,
+      "labels": [],
+      "notes": "",
+      "personal_line": "You joined Swsh's seed to back superfan data, and Board pays creator crews through Stripe Connect Pay Drops on every production.",
+      "sources": [
+        "https://stellation.substack.com/p/the-next-five-years",
+        "https://www.billboard.com/pro/ai-fan-engagement-platform-swsh-raises-4m-seed-round/"
+      ],
+      "thread_id": null,
+      "call": null,
+      "draft": {
+        "n": 1,
+        "kind": "intro",
+        "file": "outreach/peter-boyce-ii-1.eml",
+        "subject": "JAB Visions: story worlds and creator commerce",
+        "message_id": "<peter-boyce-ii-1.edc8265d437e@jabvisions.com>",
+        "state": "drafted",
+        "drafted_on": "2026-11-17"
+      },
+      "history": [
+        {
+          "date": "2026-11-17",
+          "event": "drafted",
+          "note": "intro"
+        },
+        {
+          "date": "2026-11-17",
+          "event": "drafted",
+          "note": "intro"
+        }
+      ]
+    },
+    {
+      "id": "ryan-hoover",
+      "email": "team@weekend.fund",
+      "name": "Ryan Hoover",
+      "firm": "Weekend Fund",
+      "fit": 71,
+      "status": "drafted",
+      "touches": [],
+      "next_due": null,
+      "labels": [],
+      "notes": "",
+      "personal_line": "You backed Clouted's seed to scale entertainment-brand distribution, which is exactly what THOSE RYDERZ needs for its film and game launch.",
+      "sources": [
+        "https://weekend.fund/",
+        "https://techcrunch.com/2026/05/20/clouted-wants-to-take-the-guesswork-out-of-making-short-videos-go-viral/"
+      ],
+      "thread_id": null,
+      "call": null,
+      "draft": {
+        "n": 1,
+        "kind": "intro",
+        "file": "outreach/ryan-hoover-1.eml",
+        "subject": "JAB Visions: story worlds and creator commerce",
+        "message_id": "<ryan-hoover-1.4ff490389044@jabvisions.com>",
+        "state": "drafted",
+        "drafted_on": "2026-11-17"
+      },
+      "history": [
+        {
+          "date": "2026-11-17",
+          "event": "drafted",
+          "note": "intro"
+        },
+        {
+          "date": "2026-11-17",
+          "event": "drafted",
+          "note": "intro"
+        }
+      ]
+    },
+    {
+      "id": "scott-birnbaum",
+      "email": "hello@redseaventures.com",
+      "name": "Scott Birnbaum",
+      "firm": "Red Sea Ventures",
+      "fit": 70,
+      "status": "drafted",
+      "touches": [],
+      "next_due": null,
+      "labels": [],
+      "notes": "",
+      "personal_line": "You told Tech:NYC early-stage consumer VC is genuinely underfunded; Those Ryderz is a consumer story world raising a $750K pre-seed now.",
+      "sources": [
+        "https://www.redseaventures.com/contact"
+      ],
+      "thread_id": null,
+      "call": null,
+      "draft": {
+        "n": 1,
+        "kind": "intro",
+        "file": "outreach/scott-birnbaum-1.eml",
+        "subject": "JAB Visions: story worlds and creator commerce",
+        "message_id": "<scott-birnbaum-1.d1d6196376c4@jabvisions.com>",
+        "state": "drafted",
+        "drafted_on": "2026-11-17"
+      },
+      "history": [
+        {
+          "date": "2026-11-17",
+          "event": "drafted",
+          "note": "intro"
+        },
+        {
+          "date": "2026-11-17",
+          "event": "drafted",
+          "note": "intro"
+        }
+      ]
+    },
+    {
+      "id": "jordan-crook",
+      "email": "info@betaworks.com",
+      "name": "Jordan Crook",
+      "firm": "Betaworks",
+      "fit": 69,
+      "status": "drafted",
+      "touches": [],
+      "next_due": null,
+      "labels": [],
+      "notes": "",
+      "personal_line": "Betaworks led Solaya's $2M pre-seed for a mobile 3D content app this year, and Those Ryderz ships a free browser game beside the film.",
+      "sources": [
+        "https://www.betaworks.com/contact"
+      ],
+      "thread_id": null,
+      "call": null,
+      "draft": {
+        "n": 1,
+        "kind": "intro",
+        "file": "outreach/jordan-crook-1.eml",
+        "subject": "JAB Visions: story worlds and creator commerce",
+        "message_id": "<jordan-crook-1.79205d0913fb@jabvisions.com>",
+        "state": "drafted",
+        "drafted_on": "2026-11-17"
+      },
+      "history": [
+        {
+          "date": "2026-11-17",
+          "event": "drafted",
+          "note": "intro"
+        },
+        {
+          "date": "2026-11-17",
+          "event": "drafted",
+          "note": "intro"
+        }
+      ]
+    },
+    {
+      "id": "jonathan-keidan",
+      "email": "hello@torchcapital.vc",
+      "name": "Jonathan Keidan",
+      "firm": "Torch Capital",
+      "fit": 65,
+      "status": "drafted",
+      "touches": [],
+      "next_due": null,
+      "labels": [],
+      "notes": "",
+      "personal_line": "Your firm wrote the Kontext memo about ads inside entertainment and gaming apps and has backed VoyceMe since 2022; that is our audience.",
+      "sources": [
+        "https://www.torchcapital.vc/"
+      ],
+      "thread_id": null,
+      "call": null,
+      "draft": {
+        "n": 1,
+        "kind": "intro",
+        "file": "outreach/jonathan-keidan-1.eml",
+        "subject": "JAB Visions: story worlds and creator commerce",
+        "message_id": "<jonathan-keidan-1.1ab65d0128aa@jabvisions.com>",
+        "state": "drafted",
+        "drafted_on": "2026-11-17"
+      },
+      "history": [
+        {
+          "date": "2026-11-17",
+          "event": "drafted",
+          "note": "intro"
+        },
+        {
+          "date": "2026-11-17",
+          "event": "drafted",
+          "note": "intro"
+        }
+      ]
+    },
+    {
+      "id": "amanda-herson",
+      "email": "contact@foundercollective.com",
+      "name": "Amanda Herson",
+      "firm": "Founder Collective",
+      "fit": 64,
+      "status": "drafted",
+      "touches": [],
+      "next_due": null,
+      "labels": [],
+      "notes": "",
+      "personal_line": "Founder Collective backed Weavy's $4M seed for creative media tooling, and Those Ryderz is a creative studio pairing a film with a browser game.",
+      "sources": [
+        "https://foundercollective.com/team/"
+      ],
+      "thread_id": null,
+      "call": null,
+      "draft": {
+        "n": 1,
+        "kind": "intro",
+        "file": "outreach/amanda-herson-1.eml",
+        "subject": "JAB Visions: story worlds and creator commerce",
+        "message_id": "<amanda-herson-1.40316d8ca11b@jabvisions.com>",
+        "state": "drafted",
+        "drafted_on": "2026-11-17"
+      },
+      "history": [
+        {
+          "date": "2026-11-17",
+          "event": "drafted",
+          "note": "intro"
+        },
+        {
+          "date": "2026-11-17",
+          "event": "drafted",
+          "note": "intro"
+        }
+      ]
+    },
+    {
+      "id": "alex-pall",
+      "email": "contact@mantisvc.com",
+      "name": "Alex Pall",
+      "firm": "Mantis VC",
+      "fit": 61,
+      "status": "drafted",
+      "touches": [],
+      "next_due": null,
+      "labels": [],
+      "notes": "",
+      "personal_line": "Your consumer list includes A Vinyl Bar in Shibuya, a generative-AI music label for creators and fans, and THOSE RYDERZ pairs a film with a game.",
+      "sources": [
+        "https://www.mantisvc.com/team",
+        "https://www.mantisvc.com/portfolio-categories/consumer"
+      ],
+      "thread_id": null,
+      "call": null,
+      "draft": {
+        "n": 1,
+        "kind": "intro",
+        "file": "outreach/alex-pall-1.eml",
+        "subject": "JAB Visions: story worlds and creator commerce",
+        "message_id": "<alex-pall-1.af453fb522c0@jabvisions.com>",
+        "state": "drafted",
+        "drafted_on": "2026-11-17"
+      },
+      "history": [
+        {
+          "date": "2026-11-17",
+          "event": "drafted",
+          "note": "intro"
+        },
+        {
+          "date": "2026-11-17",
+          "event": "drafted",
+          "note": "intro"
+        }
+      ]
+    },
+    {
+      "id": "jay-chi",
+      "email": "info@makersfund.com",
+      "name": "Jay Chi",
+      "firm": "Makers Fund",
+      "fit": 60,
+      "status": "drafted",
+      "touches": [],
+      "next_due": null,
+      "labels": [],
+      "notes": "",
+      "personal_line": "You closed a $250M Fund IV on August 20 and said creators are the constant, which is the bet behind THOSE RYDERZ.",
+      "sources": [
+        "https://www.makersfund.com/",
+        "https://www.makersfund.com/news",
+        "https://www.gamedeveloper.com/business/makers-fund-expands-game-industry-footprint-after-closing-250-million-investment-round"
+      ],
+      "thread_id": null,
+      "call": null,
+      "draft": {
+        "n": 1,
+        "kind": "intro",
+        "file": "outreach/jay-chi-1.eml",
+        "subject": "JAB Visions: story worlds and creator commerce",
+        "message_id": "<jay-chi-1.50608bee1df7@jabvisions.com>",
+        "state": "drafted",
+        "drafted_on": "2026-11-17"
+      },
+      "history": [
+        {
+          "date": "2026-11-17",
+          "event": "drafted",
+          "note": "intro"
+        },
+        {
+          "date": "2026-11-17",
+          "event": "drafted",
+          "note": "intro"
+        }
+      ]
+    },
+    {
+      "id": "logan-paul",
+      "email": "founders@antifund.com",
+      "name": "Logan Paul",
+      "firm": "Anti Fund",
+      "fit": 60,
+      "status": "drafted",
+      "touches": [],
+      "next_due": null,
+      "labels": [],
+      "notes": "",
+      "personal_line": "Anti Fund lists a 2025 seed in Khloud, and THOSE RYDERZ turns one film into a browser game and a merch line.",
+      "sources": [
+        "https://www.antifund.com/"
+      ],
+      "thread_id": null,
+      "call": null,
+      "draft": {
+        "n": 1,
+        "kind": "intro",
+        "file": "outreach/logan-paul-1.eml",
+        "subject": "JAB Visions: story worlds and creator commerce",
+        "message_id": "<logan-paul-1.32b8df9b775d@jabvisions.com>",
+        "state": "drafted",
+        "drafted_on": "2026-11-17"
+      },
+      "history": [
+        {
+          "date": "2026-11-17",
+          "event": "drafted",
+          "note": "intro"
+        },
+        {
+          "date": "2026-11-17",
+          "event": "drafted",
+          "note": "intro"
+        }
+      ]
+    },
+    {
+      "id": "mike-duda",
+      "email": "hey@bullish.co",
+      "name": "Mike Duda",
+      "firm": "Bullish",
+      "fit": 60,
+      "status": "drafted",
+      "touches": [],
+      "next_due": null,
+      "labels": [],
+      "notes": "",
+      "personal_line": "You backed Bandit for building a brand into an existing running community; Those Ryderz merch is built for a fan community the same way.",
+      "sources": [
+        "https://www.bullish.co/"
+      ],
+      "thread_id": null,
+      "call": null,
+      "draft": {
+        "n": 1,
+        "kind": "intro",
+        "file": "outreach/mike-duda-1.eml",
+        "subject": "JAB Visions: story worlds and creator commerce",
+        "message_id": "<mike-duda-1.5ceaa89a1cd8@jabvisions.com>",
+        "state": "drafted",
+        "drafted_on": "2026-11-17"
+      },
+      "history": [
+        {
+          "date": "2026-11-17",
+          "event": "drafted",
+          "note": "intro"
+        },
+        {
+          "date": "2026-11-17",
+          "event": "drafted",
+          "note": "intro"
+        }
+      ]
+    },
+    {
+      "id": "rich-greenfield",
+      "email": "info@lightshedvc.com",
+      "name": "Rich Greenfield",
+      "firm": "LightShed Ventures",
+      "fit": 60,
+      "status": "drafted",
+      "touches": [],
+      "next_due": null,
+      "labels": [],
+      "notes": "",
+      "personal_line": "LightShed just backed Eventual, a seed-stage media company built around a live show; Those Ryderz builds a media business around one story world.",
+      "sources": [
+        "https://www.lightshedvc.com/team"
+      ],
+      "thread_id": null,
+      "call": null,
+      "draft": {
+        "n": 1,
+        "kind": "intro",
+        "file": "outreach/rich-greenfield-1.eml",
+        "subject": "JAB Visions: story worlds and creator commerce",
+        "message_id": "<rich-greenfield-1.9ada577a5135@jabvisions.com>",
+        "state": "drafted",
+        "drafted_on": "2026-11-17"
+      },
+      "history": [
+        {
+          "date": "2026-11-17",
+          "event": "drafted",
+          "note": "intro"
+        },
+        {
+          "date": "2026-11-17",
+          "event": "drafted",
+          "note": "intro"
+        }
+      ]
+    },
+    {
+      "id": "susan-lyne",
+      "email": "hello@bbgventures.com",
+      "name": "Susan Lyne",
+      "firm": "BBG Ventures",
+      "fit": 60,
+      "status": "drafted",
+      "touches": [],
+      "next_due": null,
+      "labels": [],
+      "notes": "",
+      "personal_line": "Your Deep Humanity thesis post argued for reinvesting in consumer; Those Ryderz builds fandom through a film, a game and collectibles.",
+      "sources": [
+        "https://www.bbgventures.com/"
+      ],
+      "thread_id": null,
+      "call": null,
+      "draft": {
+        "n": 1,
+        "kind": "intro",
+        "file": "outreach/susan-lyne-1.eml",
+        "subject": "JAB Visions: story worlds and creator commerce",
+        "message_id": "<susan-lyne-1.568925239b71@jabvisions.com>",
+        "state": "drafted",
+        "drafted_on": "2026-11-17"
+      },
+      "history": [
+        {
+          "date": "2026-11-17",
+          "event": "drafted",
+          "note": "intro"
+        },
+        {
+          "date": "2026-11-17",
+          "event": "drafted",
+          "note": "intro"
+        }
+      ]
+    },
+    {
+      "id": "jason-yeh",
+      "email": "info@patron.fund",
+      "name": "Jason Yeh",
+      "firm": "Patron",
+      "fit": 59,
+      "status": "drafted",
+      "touches": [],
+      "next_due": null,
+      "labels": [],
+      "notes": "",
+      "personal_line": "Your June 2 portfolio note points at Brynn Putnam's game startup Board and its $20M round, and Those Ryderz is a film with a free browser game beside it.",
+      "sources": [
+        "https://patron.fund/",
+        "https://techcrunch.com/2026/06/02/board-the-new-game-startup-from-mirror-founder-brynn-putnam-raises-20m-has-already-sold-thousands/"
+      ],
+      "thread_id": null,
+      "call": null,
+      "draft": {
+        "n": 1,
+        "kind": "intro",
+        "file": "outreach/jason-yeh-1.eml",
+        "subject": "JAB Visions: story worlds and creator commerce",
+        "message_id": "<jason-yeh-1.6ff44c050d36@jabvisions.com>",
+        "state": "drafted",
+        "drafted_on": "2026-11-17"
+      },
+      "history": [
+        {
+          "date": "2026-11-17",
+          "event": "drafted",
+          "note": "intro"
+        },
+        {
+          "date": "2026-11-17",
+          "event": "drafted",
+          "note": "intro"
+        }
+      ]
+    },
+    {
+      "id": "roger-ehrenberg",
+      "email": "contact@gamechangers.vc",
+      "name": "Roger Ehrenberg",
+      "firm": "Game Changers Ventures",
+      "fit": 59,
+      "status": "drafted",
+      "touches": [],
+      "next_due": null,
+      "labels": [],
+      "notes": "",
+      "personal_line": "You led Swsh's $4M seed in June and describe your edge as the seam between fan culture and the systems that power it.",
+      "sources": [
+        "https://www.gamechangers.vc/contact",
+        "https://www.billboard.com/pro/ai-fan-engagement-platform-swsh-raises-4m-seed-round/"
+      ],
+      "thread_id": null,
+      "call": null,
+      "draft": {
+        "n": 1,
+        "kind": "intro",
+        "file": "outreach/roger-ehrenberg-1.eml",
+        "subject": "JAB Visions: story worlds and creator commerce",
+        "message_id": "<roger-ehrenberg-1.468d00f7ef79@jabvisions.com>",
+        "state": "drafted",
+        "drafted_on": "2026-11-17"
+      },
+      "history": [
+        {
+          "date": "2026-11-17",
+          "event": "drafted",
+          "note": "intro"
+        },
+        {
+          "date": "2026-11-17",
+          "event": "drafted",
+          "note": "intro"
+        }
+      ]
+    },
+    {
+      "id": "joe-marchese",
+      "email": "human@human.vc",
+      "name": "Joe Marchese",
+      "firm": "Human Ventures",
+      "fit": 58,
+      "status": "drafted",
+      "touches": [],
+      "next_due": null,
+      "labels": [],
+      "notes": "",
+      "personal_line": "You led Caper's seed to back a new media brand, and THOSE RYDERZ pairs a film with a browser game and merch.",
+      "sources": [
+        "https://human.vc/"
+      ],
+      "thread_id": null,
+      "call": null,
+      "draft": {
+        "n": 1,
+        "kind": "intro",
+        "file": "outreach/joe-marchese-1.eml",
+        "subject": "JAB Visions: story worlds and creator commerce",
+        "message_id": "<joe-marchese-1.7148317ebe83@jabvisions.com>",
+        "state": "drafted",
+        "drafted_on": "2026-11-17"
+      },
+      "history": [
+        {
+          "date": "2026-11-17",
+          "event": "drafted",
+          "note": "intro"
+        },
+        {
+          "date": "2026-11-17",
+          "event": "drafted",
+          "note": "intro"
+        }
+      ]
+    },
+    {
+      "id": "john-neamonitis",
+      "email": "john@lakehouse.vc",
+      "name": "John Neamonitis",
+      "firm": "Lakehouse Ventures",
+      "fit": 58,
+      "status": "drafted",
+      "touches": [],
+      "next_due": null,
+      "labels": [],
+      "notes": "",
+      "personal_line": "Lakehouse calls itself a pre-seed firm for exceptional consumer experiences and co-led Keeper's $4M round; our round is also pre-seed.",
+      "sources": [
+        "https://lakehouse.vc/"
+      ],
+      "thread_id": null,
+      "call": null,
+      "draft": {
+        "n": 1,
+        "kind": "intro",
+        "file": "outreach/john-neamonitis-1.eml",
+        "subject": "JAB Visions: story worlds and creator commerce",
+        "message_id": "<john-neamonitis-1.6731582cd546@jabvisions.com>",
+        "state": "drafted",
+        "drafted_on": "2026-11-17"
+      },
+      "history": [
+        {
+          "date": "2026-11-17",
+          "event": "drafted",
+          "note": "intro"
+        },
+        {
+          "date": "2026-11-17",
+          "event": "drafted",
+          "note": "intro"
+        }
+      ]
+    },
+    {
+      "id": "ilia-eremeev",
+      "email": "apply@gamesfund.vc",
+      "name": "Ilia Eremeev",
+      "firm": "The Games Fund",
+      "fit": 47,
+      "status": "drafted",
+      "touches": [],
+      "next_due": null,
+      "labels": [],
+      "notes": "",
+      "personal_line": "Dark Passenger, on your portfolio, is a Witcher 3 and Cyberpunk team building a co-op action game, which is the lane Those Ryderz Raid is in.",
+      "sources": [
+        "https://www.gamesfund.vc/"
+      ],
+      "thread_id": null,
+      "call": null,
+      "draft": {
+        "n": 1,
+        "kind": "intro",
+        "file": "outreach/ilia-eremeev-1.eml",
+        "subject": "JAB Visions: story worlds and creator commerce",
+        "message_id": "<ilia-eremeev-1.4362a6ec36d4@jabvisions.com>",
+        "state": "drafted",
+        "drafted_on": "2026-11-17"
+      },
+      "history": [
+        {
+          "date": "2026-11-17",
+          "event": "drafted",
+          "note": "intro"
+        },
+        {
+          "date": "2026-11-17",
+          "event": "drafted",
+          "note": "intro"
+        }
+      ]
+    },
+    {
+      "id": "dan-levitan",
+      "email": "maveron@maveron.com",
+      "name": "Dan Levitan",
+      "firm": "Maveron",
+      "fit": 37,
+      "status": "drafted",
+      "touches": [],
+      "next_due": null,
+      "labels": [],
+      "notes": "",
+      "personal_line": "The Maveron homepage says you are leading BetterDays' $7 million seed, and our Store turns a story world into things people wear.",
+      "sources": [
+        "https://www.maveron.com/"
+      ],
+      "thread_id": null,
+      "call": null,
+      "draft": {
+        "n": 1,
+        "kind": "intro",
+        "file": "outreach/dan-levitan-1.eml",
+        "subject": "JAB Visions: story worlds and creator commerce",
+        "message_id": "<dan-levitan-1.ad15e23da78a@jabvisions.com>",
+        "state": "drafted",
+        "drafted_on": "2026-11-17"
+      },
+      "history": [
+        {
+          "date": "2026-11-17",
+          "event": "drafted",
+          "note": "intro"
+        },
+        {
+          "date": "2026-11-17",
+          "event": "drafted",
+          "note": "intro"
+        }
+      ]
+    }
+  ],
+  "updated": "2026-11-17"
+}

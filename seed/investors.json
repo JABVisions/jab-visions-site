@@ -1,0 +1,938 @@
+{
+  "created_by": "seed-investors",
+  "generated": "2026-11-17",
+  "ask": 750000,
+  "criteria": {
+    "stage": "pre-seed",
+    "sectors": [
+      "entertainment",
+      "cinematic IP",
+      "creator commerce",
+      "gaming",
+      "consumer",
+      "media"
+    ],
+    "geo": [
+      "US",
+      "New York"
+    ],
+    "check": {
+      "min": 37500,
+      "max": 375000
+    }
+  },
+  "investors": [
+    {
+      "id": "ben-lerer",
+      "name": "Ben Lerer",
+      "firm": "Lerer Hippeau",
+      "role": "Managing Partner",
+      "email": "contact@lererhippeau.com",
+      "stage": [
+        "pre-seed",
+        "seed"
+      ],
+      "check_min": null,
+      "check_max": null,
+      "sectors": [
+        "entertainment",
+        "consumer",
+        "media"
+      ],
+      "geo": [
+        "New York",
+        "US"
+      ],
+      "last_relevant_deal": {
+        "what": "led the seed of Brodie Rec. League, an app with filmed games",
+        "date": "2026-09-29"
+      },
+      "sources": [
+        "https://www.lererhippeau.com/"
+      ],
+      "warm_intro": false,
+      "personal_line": "You said Brodie attracted users digitally and hooked them offline, the same two jobs our story world and Board have to do.",
+      "notes": "Email is the site footer contact, rechecked 2026-11-17. Deal from the Nov 16 research pass.",
+      "fit": 74,
+      "reasons": [
+        "invests at pre-seed (+25)",
+        "sectors match: entertainment, consumer, media (+25)",
+        "check size unknown (+0)",
+        "led the seed of Brodie Rec. League, an app with filmed games, 49 days ago (+14)",
+        "invests in US (+10)"
+      ],
+      "added": "2026-11-17"
+    },
+    {
+      "id": "nimi-katragadda",
+      "name": "Nimi Katragadda",
+      "firm": "BoxGroup",
+      "role": "Investor",
+      "email": "nimi@boxgroup.com",
+      "stage": [
+        "pre-seed",
+        "seed"
+      ],
+      "check_min": null,
+      "check_max": null,
+      "sectors": [
+        "consumer",
+        "entertainment",
+        "media"
+      ],
+      "geo": [
+        "New York",
+        "US"
+      ],
+      "last_relevant_deal": {
+        "what": "joined the pre-seed of A Vinyl Bar in Shibuya, a New York music-software label",
+        "date": "2026-09-14"
+      },
+      "sources": [
+        "https://www.boxgroup.com/team"
+      ],
+      "warm_intro": false,
+      "personal_line": "BoxGroup just backed A Vinyl Bar in Shibuya, a label that drops apps like singles, and Those Ryderz pairs a film with a browser game.",
+      "notes": "nimi@ is a mailto on the team page, rechecked 2026-11-17. General hello@boxgroup.com is also on the page.",
+      "fit": 74,
+      "reasons": [
+        "invests at pre-seed (+25)",
+        "sectors match: entertainment, consumer, media (+25)",
+        "check size unknown (+0)",
+        "joined the pre-seed of A Vinyl Bar in Shibuya, a New York music-software label, 64 days ago (+14)",
+        "invests in US (+10)"
+      ],
+      "added": "2026-11-17"
+    },
+    {
+      "id": "will-porteous",
+      "name": "Will Porteous",
+      "firm": "RRE Ventures",
+      "role": "General Partner and COO",
+      "email": "info@rre.com",
+      "stage": [
+        "pre-seed",
+        "seed"
+      ],
+      "check_min": null,
+      "check_max": null,
+      "sectors": [
+        "consumer",
+        "media",
+        "entertainment"
+      ],
+      "geo": [
+        "New York",
+        "US"
+      ],
+      "last_relevant_deal": {
+        "what": "joined A Vinyl Bar in Shibuya pre-seed; bio lists a board seat at Wave",
+        "date": "2026-09-14"
+      },
+      "sources": [
+        "https://rre.com/team"
+      ],
+      "warm_intro": false,
+      "personal_line": "You sit on Wave's board for virtual concerts and RRE just joined A Vinyl Bar in Shibuya's pre-seed; Those Ryderz is a playable story world.",
+      "notes": "info@ is on the team page, rechecked 2026-11-17. RRE is multi-stage.",
+      "fit": 74,
+      "reasons": [
+        "invests at pre-seed (+25)",
+        "sectors match: entertainment, consumer, media (+25)",
+        "check size unknown (+0)",
+        "joined A Vinyl Bar in Shibuya pre-seed; bio lists a board seat at Wave, 64 days ago (+14)",
+        "invests in US (+10)"
+      ],
+      "added": "2026-11-17"
+    },
+    {
+      "id": "marshall-sandman",
+      "name": "Marshall Sandman",
+      "firm": "Animal Capital",
+      "role": "Founder",
+      "email": "info@animalcapital.com",
+      "stage": [
+        "pre-seed",
+        "seed"
+      ],
+      "check_min": null,
+      "check_max": null,
+      "sectors": [
+        "consumer",
+        "entertainment",
+        "creators"
+      ],
+      "geo": [
+        "US"
+      ],
+      "last_relevant_deal": {
+        "what": "closed Fund III and backed Breakaway, a live-music festival brand",
+        "date": "2026-06-10"
+      },
+      "sources": [
+        "https://animalcapital.com/",
+        "https://www.businesswire.com/news/home/20260610169775/en/Animal-Capital-Closes-%2433-Million-Fund-III-to-Double-Down-on-Early-Stage-Strategy"
+      ],
+      "warm_intro": false,
+      "personal_line": "You closed Fund III to back consumer companies that make life more entertaining, which is the thesis behind THOSE RYDERZ's film and game.",
+      "notes": "info@ is the investor, founder, and press address on the homepage, rechecked 2026-11-17. Fund III release is the title source.",
+      "fit": 72,
+      "reasons": [
+        "invests at pre-seed (+25)",
+        "sectors match: entertainment, creator commerce, consumer (+25)",
+        "check size unknown (+0)",
+        "closed Fund III and backed Breakaway, a live-music festival brand, 160 days ago (+12)",
+        "invests in US (+10)"
+      ],
+      "added": "2026-11-17"
+    },
+    {
+      "id": "nicholas-chirls",
+      "name": "Nicholas Chirls",
+      "firm": "Asylum Ventures",
+      "role": "Partner",
+      "email": "hello@asylum.vc",
+      "stage": [
+        "pre-seed",
+        "seed"
+      ],
+      "check_min": 1000000,
+      "check_max": 2000000,
+      "sectors": [
+        "consumer",
+        "entertainment",
+        "gaming"
+      ],
+      "geo": [
+        "New York",
+        "US"
+      ],
+      "last_relevant_deal": {
+        "what": "led the pre-seed of Danger Testing, a New York studio that drops apps like songs",
+        "date": "2026-07-15"
+      },
+      "sources": [
+        "https://www.asylum.vc/terms-of-use"
+      ],
+      "warm_intro": false,
+      "personal_line": "Asylum backs founders as artists and led Danger Testing's pre-seed; Those Ryderz is a writer-director's studio releasing a film and a game.",
+      "notes": "hello@ is on the terms page, rechecked 2026-11-17. Stated checks of $1M-$2M are larger than this $750K round, so this is a co-investor note, not a lead ask.",
+      "fit": 72,
+      "reasons": [
+        "invests at pre-seed (+25)",
+        "sectors match: entertainment, gaming, consumer (+25)",
+        "their smallest check, $1M, is bigger than your whole $750K round (+0)",
+        "led the pre-seed of Danger Testing, a New York studio that drops apps like songs, 125 days ago (+12)",
+        "invests in US (+10)"
+      ],
+      "added": "2026-11-17"
+    },
+    {
+      "id": "peter-boyce-ii",
+      "name": "Peter Boyce II",
+      "firm": "Stellation Capital",
+      "role": "Founder and Managing Partner",
+      "email": "hello@stellation.vc",
+      "stage": [
+        "pre-seed",
+        "seed"
+      ],
+      "check_min": 1000000,
+      "check_max": 3000000,
+      "sectors": [
+        "consumer",
+        "entertainment"
+      ],
+      "geo": [
+        "New York",
+        "US"
+      ],
+      "last_relevant_deal": {
+        "what": "participated in Swsh seed and co-led its pre-seed",
+        "date": "2026-06-16"
+      },
+      "sources": [
+        "https://stellation.substack.com/p/the-next-five-years",
+        "https://www.billboard.com/pro/ai-fan-engagement-platform-swsh-raises-4m-seed-round/"
+      ],
+      "warm_intro": false,
+      "personal_line": "You joined Swsh's seed to back superfan data, and Board pays creator crews through Stripe Connect Pay Drops on every production.",
+      "notes": "hello@ is in Stellation's own Aug 28 2026 Substack. Checks of $1M-$3M in that post are too large to lead a $750K round. Co-investor only.",
+      "fit": 72,
+      "reasons": [
+        "invests at pre-seed (+25)",
+        "sectors match: entertainment, consumer (+25)",
+        "their smallest check, $1M, is bigger than your whole $750K round (+0)",
+        "participated in Swsh seed and co-led its pre-seed, 154 days ago (+12)",
+        "invests in US (+10)"
+      ],
+      "added": "2026-11-17"
+    },
+    {
+      "id": "ryan-hoover",
+      "name": "Ryan Hoover",
+      "firm": "Weekend Fund",
+      "role": "Founder",
+      "email": "team@weekend.fund",
+      "stage": [
+        "pre-seed",
+        "seed"
+      ],
+      "check_min": null,
+      "check_max": null,
+      "sectors": [
+        "consumer",
+        "entertainment"
+      ],
+      "geo": [
+        "US"
+      ],
+      "last_relevant_deal": {
+        "what": "participated in Clouted seed, an AI virality engine for consumer and entertainment brands",
+        "date": "2026-05-20"
+      },
+      "sources": [
+        "https://weekend.fund/",
+        "https://techcrunch.com/2026/05/20/clouted-wants-to-take-the-guesswork-out-of-making-short-videos-go-viral/"
+      ],
+      "warm_intro": false,
+      "personal_line": "You backed Clouted's seed to scale entertainment-brand distribution, which is exactly what THOSE RYDERZ needs for its film and game launch.",
+      "notes": "Homepage says if you are building something big, reach out. team@ and ryan@ are both on the page. ryan@ is the LP note. team@ is the one used here. Rechecked 2026-11-17.",
+      "fit": 71,
+      "reasons": [
+        "invests at pre-seed (+25)",
+        "sectors match: entertainment, consumer (+25)",
+        "check size unknown (+0)",
+        "participated in Clouted seed, an AI virality engine for consumer and entertainment brands, 181 days ago (+11)",
+        "invests in US (+10)"
+      ],
+      "added": "2026-11-17"
+    },
+    {
+      "id": "scott-birnbaum",
+      "name": "Scott Birnbaum",
+      "firm": "Red Sea Ventures",
+      "role": "Managing Partner",
+      "email": "hello@redseaventures.com",
+      "stage": [
+        "pre-seed",
+        "seed"
+      ],
+      "check_min": 500000,
+      "check_max": 2000000,
+      "sectors": [
+        "consumer",
+        "media",
+        "entertainment"
+      ],
+      "geo": [
+        "New York",
+        "US"
+      ],
+      "last_relevant_deal": {
+        "what": "backed VoyceMe, webcomics and manga plus creator tools",
+        "date": "2024-08-14"
+      },
+      "sources": [
+        "https://www.redseaventures.com/contact"
+      ],
+      "warm_intro": false,
+      "personal_line": "You told Tech:NYC early-stage consumer VC is genuinely underfunded; Those Ryderz is a consumer story world raising a $750K pre-seed now.",
+      "notes": "hello@ is in the contact page HTML, rechecked 2026-11-17. Check range is from his April 2026 Tech:NYC interview, per the Nov 16 pass. user@domain.com on the same page is a placeholder and was not used.",
+      "fit": 70,
+      "reasons": [
+        "invests at pre-seed (+25)",
+        "sectors match: entertainment, consumer, media (+25)",
+        "checks of $500K-$2M are close to the $37.5K-$375K you want (+10)",
+        "backed VoyceMe, webcomics and manga plus creator tools, 825 days ago (+0)",
+        "invests in US (+10)"
+      ],
+      "added": "2026-11-17"
+    },
+    {
+      "id": "jordan-crook",
+      "name": "Jordan Crook",
+      "firm": "Betaworks",
+      "role": "Partner",
+      "email": "info@betaworks.com",
+      "stage": [
+        "pre-seed",
+        "seed"
+      ],
+      "check_min": null,
+      "check_max": null,
+      "sectors": [
+        "consumer",
+        "media",
+        "entertainment"
+      ],
+      "geo": [
+        "New York",
+        "US"
+      ],
+      "last_relevant_deal": {
+        "what": "firm led Solaya pre-seed, a phone video into 3D models app",
+        "date": "2026-02-01"
+      },
+      "sources": [
+        "https://www.betaworks.com/contact"
+      ],
+      "warm_intro": false,
+      "personal_line": "Betaworks led Solaya's $2M pre-seed for a mobile 3D content app this year, and Those Ryderz ships a free browser game beside the film.",
+      "notes": "info@ is on the contact page, rechecked 2026-11-17. Solaya date is month-only, recorded as the 1st.",
+      "fit": 69,
+      "reasons": [
+        "invests at pre-seed (+25)",
+        "sectors match: entertainment, consumer, media (+25)",
+        "check size unknown (+0)",
+        "firm led Solaya pre-seed, a phone video into 3D models app, 289 days ago (+9)",
+        "invests in US (+10)"
+      ],
+      "added": "2026-11-17"
+    },
+    {
+      "id": "jonathan-keidan",
+      "name": "Jonathan Keidan",
+      "firm": "Torch Capital",
+      "role": "Founder and Managing Partner",
+      "email": "hello@torchcapital.vc",
+      "stage": [
+        "pre-seed",
+        "seed"
+      ],
+      "check_min": null,
+      "check_max": null,
+      "sectors": [
+        "consumer",
+        "media",
+        "entertainment"
+      ],
+      "geo": [
+        "New York",
+        "US"
+      ],
+      "last_relevant_deal": {
+        "what": "joined Kontext seed, an ad network inside entertainment and gaming apps, and has backed VoyceMe",
+        "date": "2025-08-05"
+      },
+      "sources": [
+        "https://www.torchcapital.vc/"
+      ],
+      "warm_intro": false,
+      "personal_line": "Your firm wrote the Kontext memo about ads inside entertainment and gaming apps and has backed VoyceMe since 2022; that is our audience.",
+      "notes": "hello@ is the homepage mailto, rechecked 2026-11-17. hey@torchcapital.vc is not the address.",
+      "fit": 65,
+      "reasons": [
+        "invests at pre-seed (+25)",
+        "sectors match: entertainment, consumer, media (+25)",
+        "check size unknown (+0)",
+        "joined Kontext seed, an ad network inside entertainment and gaming apps, and has backed VoyceMe, 469 days ago (+5)",
+        "invests in US (+10)"
+      ],
+      "added": "2026-11-17"
+    },
+    {
+      "id": "amanda-herson",
+      "name": "Amanda Herson",
+      "firm": "Founder Collective",
+      "role": "General Partner",
+      "email": "contact@foundercollective.com",
+      "stage": [
+        "pre-seed",
+        "seed"
+      ],
+      "check_min": null,
+      "check_max": null,
+      "sectors": [
+        "consumer",
+        "media"
+      ],
+      "geo": [
+        "US"
+      ],
+      "last_relevant_deal": {
+        "what": "firm backed Weavy seed, AI media editing for creative teams",
+        "date": "2025-06-10"
+      },
+      "sources": [
+        "https://foundercollective.com/team/"
+      ],
+      "warm_intro": false,
+      "personal_line": "Founder Collective backed Weavy's $4M seed for creative media tooling, and Those Ryderz is a creative studio pairing a film with a browser game.",
+      "notes": "contact@ is on the team page, rechecked 2026-11-17. Press on Weavy names David Frankel, not Amanda.",
+      "fit": 64,
+      "reasons": [
+        "invests at pre-seed (+25)",
+        "sectors match: consumer, media (+25)",
+        "check size unknown (+0)",
+        "firm backed Weavy seed, AI media editing for creative teams, 525 days ago (+4)",
+        "invests in US (+10)"
+      ],
+      "added": "2026-11-17"
+    },
+    {
+      "id": "alex-pall",
+      "name": "Alex Pall",
+      "firm": "Mantis VC",
+      "role": "General Partner",
+      "email": "contact@mantisvc.com",
+      "stage": [
+        "seed"
+      ],
+      "check_min": null,
+      "check_max": null,
+      "sectors": [
+        "consumer",
+        "creators",
+        "entertainment"
+      ],
+      "geo": [
+        "US"
+      ],
+      "last_relevant_deal": {
+        "what": "consumer portfolio includes A Vinyl Bar in Shibuya, a generative-AI music label for creators and fans",
+        "date": "2026-09-14"
+      },
+      "sources": [
+        "https://www.mantisvc.com/team",
+        "https://www.mantisvc.com/portfolio-categories/consumer"
+      ],
+      "warm_intro": false,
+      "personal_line": "Your consumer list includes A Vinyl Bar in Shibuya, a generative-AI music label for creators and fans, and THOSE RYDERZ pairs a film with a game.",
+      "notes": "contact@ is published on mantisvc.com. Alex Pall is General Partner on the team page. The Sept 14 2026 date is the Shibuya round date from the Nov 16 pass; this row does not claim Mantis led it. The portfolio page is the source for the company description.",
+      "fit": 61,
+      "reasons": [
+        "invests at seed, one stage off pre-seed (+12)",
+        "sectors match: entertainment, creator commerce, consumer (+25)",
+        "check size unknown (+0)",
+        "consumer portfolio includes A Vinyl Bar in Shibuya, a generative-AI music label for creators and fans, 64 days ago (+14)",
+        "invests in US (+10)"
+      ],
+      "added": "2026-11-17"
+    },
+    {
+      "id": "jay-chi",
+      "name": "Jay Chi",
+      "firm": "Makers Fund",
+      "role": "General Partner",
+      "email": "info@makersfund.com",
+      "stage": [
+        "seed"
+      ],
+      "check_min": null,
+      "check_max": null,
+      "sectors": [
+        "entertainment",
+        "gaming",
+        "creators"
+      ],
+      "geo": [
+        "global"
+      ],
+      "last_relevant_deal": {
+        "what": "closed a $250M Fund IV for interactive entertainment and said creators are the constant",
+        "date": "2026-08-20"
+      },
+      "sources": [
+        "https://www.makersfund.com/",
+        "https://www.makersfund.com/news",
+        "https://www.gamedeveloper.com/business/makers-fund-expands-game-industry-footprint-after-closing-250-million-investment-round"
+      ],
+      "warm_intro": false,
+      "personal_line": "You closed a $250M Fund IV on August 20 and said creators are the constant, which is the bet behind THOSE RYDERZ.",
+      "notes": "info@ is on the homepage and the news page. Team page lists Jay Chi under Investment. Game Developer, Aug 20 2026, quotes him as general partner. Their news index also lists Bold Games raising $6m on July 8 2026.",
+      "fit": 60,
+      "reasons": [
+        "invests at seed, one stage off pre-seed (+12)",
+        "sectors match: entertainment, creator commerce, gaming (+25)",
+        "check size unknown (+0)",
+        "closed a $250M Fund IV for interactive entertainment and said creators are the constant, 89 days ago (+13)",
+        "invests globally (+10)"
+      ],
+      "added": "2026-11-17"
+    },
+    {
+      "id": "logan-paul",
+      "name": "Logan Paul",
+      "firm": "Anti Fund",
+      "role": "General Partner",
+      "email": "founders@antifund.com",
+      "stage": [
+        "pre-seed",
+        "seed"
+      ],
+      "check_min": null,
+      "check_max": null,
+      "sectors": [
+        "consumer",
+        "entertainment"
+      ],
+      "geo": [
+        "US"
+      ],
+      "last_relevant_deal": null,
+      "sources": [
+        "https://www.antifund.com/"
+      ],
+      "warm_intro": false,
+      "personal_line": "Anti Fund lists a 2025 seed in Khloud, and THOSE RYDERZ turns one film into a browser game and a merch line.",
+      "notes": "founders@ is the For founders address, rechecked 2026-11-17. The Khloud date is year-only, so 2025-01-01 is the year, not a known closing day. Consumer is selective on their site; core focus includes AI, robotics, and defense.",
+      "fit": 60,
+      "reasons": [
+        "invests at pre-seed (+25)",
+        "sectors match: entertainment, consumer (+25)",
+        "check size unknown (+0)",
+        "no relevant deal on record (+0)",
+        "invests in US (+10)"
+      ],
+      "added": "2026-11-17"
+    },
+    {
+      "id": "mike-duda",
+      "name": "Mike Duda",
+      "firm": "Bullish",
+      "role": "Managing Partner",
+      "email": "hey@bullish.co",
+      "stage": [
+        "pre-seed",
+        "seed"
+      ],
+      "check_min": null,
+      "check_max": null,
+      "sectors": [
+        "consumer"
+      ],
+      "geo": [
+        "US"
+      ],
+      "last_relevant_deal": {
+        "what": "led Singing Pastures seed and backed Bandit, a running brand",
+        "date": "2026-04-07"
+      },
+      "sources": [
+        "https://www.bullish.co/"
+      ],
+      "warm_intro": false,
+      "personal_line": "You backed Bandit for building a brand into an existing running community; Those Ryderz merch is built for a fan community the same way.",
+      "notes": "hey@ is a mailto on the homepage, rechecked 2026-11-17. Portfolio is mostly CPG, so the fit is partial.",
+      "fit": 60,
+      "reasons": [
+        "invests at pre-seed (+25)",
+        "sectors match: consumer (+15)",
+        "check size unknown (+0)",
+        "led Singing Pastures seed and backed Bandit, a running brand, 224 days ago (+10)",
+        "invests in US (+10)"
+      ],
+      "added": "2026-11-17"
+    },
+    {
+      "id": "rich-greenfield",
+      "name": "Rich Greenfield",
+      "firm": "LightShed Ventures",
+      "role": "General Partner",
+      "email": "info@lightshedvc.com",
+      "stage": [
+        "seed",
+        "series a"
+      ],
+      "check_min": null,
+      "check_max": null,
+      "sectors": [
+        "media",
+        "consumer",
+        "entertainment"
+      ],
+      "geo": [
+        "New York",
+        "US"
+      ],
+      "last_relevant_deal": {
+        "what": "backed the seed of Eventual, a prediction-markets media company with a live show",
+        "date": "2026-07-28"
+      },
+      "sources": [
+        "https://www.lightshedvc.com/team"
+      ],
+      "warm_intro": false,
+      "personal_line": "LightShed just backed Eventual, a seed-stage media company built around a live show; Those Ryderz builds a media business around one story world.",
+      "notes": "info@ is the Get in Touch mailto on the team page, rechecked 2026-11-17. Pre-seed fit is uncertain because the firm says seed through Series B.",
+      "fit": 60,
+      "reasons": [
+        "invests at seed, series a, one stage off pre-seed (+12)",
+        "sectors match: entertainment, consumer, media (+25)",
+        "check size unknown (+0)",
+        "backed the seed of Eventual, a prediction-markets media company with a live show, 112 days ago (+13)",
+        "invests in US (+10)"
+      ],
+      "added": "2026-11-17"
+    },
+    {
+      "id": "susan-lyne",
+      "name": "Susan Lyne",
+      "firm": "BBG Ventures",
+      "role": "Co-founder and Managing Partner",
+      "email": "hello@bbgventures.com",
+      "stage": [
+        "pre-seed",
+        "seed"
+      ],
+      "check_min": null,
+      "check_max": null,
+      "sectors": [
+        "consumer"
+      ],
+      "geo": [
+        "New York",
+        "US"
+      ],
+      "last_relevant_deal": {
+        "what": "co-led Boop pre-seed, a social travel app",
+        "date": "2026-03-10"
+      },
+      "sources": [
+        "https://www.bbgventures.com/"
+      ],
+      "warm_intro": false,
+      "personal_line": "Your Deep Humanity thesis post argued for reinvesting in consumer; Those Ryderz builds fandom through a film, a game and collectibles.",
+      "notes": "hello@ is in the homepage HTML, rechecked 2026-11-17. Historical thesis was teams with at least one woman founder; the site now says diverse founders. Fit is uncertain.",
+      "fit": 60,
+      "reasons": [
+        "invests at pre-seed (+25)",
+        "sectors match: consumer (+15)",
+        "check size unknown (+0)",
+        "co-led Boop pre-seed, a social travel app, 252 days ago (+10)",
+        "invests in US (+10)"
+      ],
+      "added": "2026-11-17"
+    },
+    {
+      "id": "jason-yeh",
+      "name": "Jason Yeh",
+      "firm": "Patron",
+      "role": "Co-Founder, General Partner",
+      "email": "info@patron.fund",
+      "stage": [
+        "seed"
+      ],
+      "check_min": null,
+      "check_max": null,
+      "sectors": [
+        "consumer",
+        "gaming",
+        "entertainment"
+      ],
+      "geo": [
+        "US"
+      ],
+      "last_relevant_deal": {
+        "what": "portfolio news on June 2 pointed at Brynn Putnam's game startup Board raising $20M",
+        "date": "2026-06-02"
+      },
+      "sources": [
+        "https://patron.fund/",
+        "https://techcrunch.com/2026/06/02/board-the-new-game-startup-from-mirror-founder-brynn-putnam-raises-20m-has-already-sold-thousands/"
+      ],
+      "warm_intro": false,
+      "personal_line": "Your June 2 portfolio note points at Brynn Putnam's game startup Board and its $20M round, and Those Ryderz is a film with a free browser game beside it.",
+      "notes": "info@ is on patron.fund. Jason Yeh is Co-Founder, General Partner, Los Angeles, on that page. The TechCrunch page did not name Patron in the HTML fetched on Nov 17, so this line cites Patron's own portfolio news link, not a claim that Patron led the round.",
+      "fit": 59,
+      "reasons": [
+        "invests at seed, one stage off pre-seed (+12)",
+        "sectors match: entertainment, gaming, consumer (+25)",
+        "check size unknown (+0)",
+        "portfolio news on June 2 pointed at Brynn Putnam's game startup Board raising $20M, 168 days ago (+12)",
+        "invests in US (+10)"
+      ],
+      "added": "2026-11-17"
+    },
+    {
+      "id": "roger-ehrenberg",
+      "name": "Roger Ehrenberg",
+      "firm": "Game Changers Ventures",
+      "role": "Managing Partner",
+      "email": "contact@gamechangers.vc",
+      "stage": [
+        "seed"
+      ],
+      "check_min": null,
+      "check_max": null,
+      "sectors": [
+        "media",
+        "gaming",
+        "entertainment",
+        "consumer"
+      ],
+      "geo": [
+        "New York",
+        "US"
+      ],
+      "last_relevant_deal": {
+        "what": "led Swsh seed, turning fan-captured live-event content into data",
+        "date": "2026-06-16"
+      },
+      "sources": [
+        "https://www.gamechangers.vc/contact",
+        "https://www.billboard.com/pro/ai-fan-engagement-platform-swsh-raises-4m-seed-round/"
+      ],
+      "warm_intro": false,
+      "personal_line": "You led Swsh's $4M seed in June and describe your edge as the seam between fan culture and the systems that power it.",
+      "notes": "contact@ is on the homepage and contact page, rechecked 2026-11-17. roger@ is also published; the contact page asks for a short note and a viewable deck link, so this draft goes to contact@.",
+      "fit": 59,
+      "reasons": [
+        "invests at seed, one stage off pre-seed (+12)",
+        "sectors match: entertainment, gaming, consumer, media (+25)",
+        "check size unknown (+0)",
+        "led Swsh seed, turning fan-captured live-event content into data, 154 days ago (+12)",
+        "invests in US (+10)"
+      ],
+      "added": "2026-11-17"
+    },
+    {
+      "id": "joe-marchese",
+      "name": "Joe Marchese",
+      "firm": "Human Ventures",
+      "role": "CEO",
+      "email": "human@human.vc",
+      "stage": [
+        "seed"
+      ],
+      "check_min": null,
+      "check_max": null,
+      "sectors": [
+        "media",
+        "consumer",
+        "entertainment"
+      ],
+      "geo": [
+        "New York",
+        "US"
+      ],
+      "last_relevant_deal": {
+        "what": "led the seed of Caper, a business-media brand",
+        "date": "2026-04-21"
+      },
+      "sources": [
+        "https://human.vc/"
+      ],
+      "warm_intro": false,
+      "personal_line": "You led Caper's seed to back a new media brand, and THOSE RYDERZ pairs a film with a browser game and merch.",
+      "notes": "human@ is the Contact Us address on human.vc, rechecked 2026-11-17. The page also lists 225 Liberty St, which is their office, not ours.",
+      "fit": 58,
+      "reasons": [
+        "invests at seed, one stage off pre-seed (+12)",
+        "sectors match: entertainment, consumer, media (+25)",
+        "check size unknown (+0)",
+        "led the seed of Caper, a business-media brand, 210 days ago (+11)",
+        "invests in US (+10)"
+      ],
+      "added": "2026-11-17"
+    },
+    {
+      "id": "john-neamonitis",
+      "name": "John Neamonitis",
+      "firm": "Lakehouse Ventures",
+      "role": "Founder, General Partner",
+      "email": "john@lakehouse.vc",
+      "stage": [
+        "pre-seed"
+      ],
+      "check_min": null,
+      "check_max": null,
+      "sectors": [
+        "consumer"
+      ],
+      "geo": [
+        "US"
+      ],
+      "last_relevant_deal": {
+        "what": "co-led Keeper pre-seed, an AI matchmaking company",
+        "date": "2025-12-11"
+      },
+      "sources": [
+        "https://lakehouse.vc/"
+      ],
+      "warm_intro": false,
+      "personal_line": "Lakehouse calls itself a pre-seed firm for exceptional consumer experiences and co-led Keeper's $4M round; our round is also pre-seed.",
+      "notes": "john@ is a mailto on the homepage, rechecked 2026-11-17.",
+      "fit": 58,
+      "reasons": [
+        "invests at pre-seed (+25)",
+        "sectors match: consumer (+15)",
+        "check size unknown (+0)",
+        "co-led Keeper pre-seed, an AI matchmaking company, 341 days ago (+8)",
+        "invests in US (+10)"
+      ],
+      "added": "2026-11-17"
+    },
+    {
+      "id": "ilia-eremeev",
+      "name": "Ilia Eremeev",
+      "firm": "The Games Fund",
+      "role": "General Partner",
+      "email": "apply@gamesfund.vc",
+      "stage": [
+        "seed"
+      ],
+      "check_min": null,
+      "check_max": null,
+      "sectors": [
+        "gaming",
+        "entertainment"
+      ],
+      "geo": [
+        "New York",
+        "US"
+      ],
+      "last_relevant_deal": null,
+      "sources": [
+        "https://www.gamesfund.vc/"
+      ],
+      "warm_intro": false,
+      "personal_line": "Dark Passenger, on your portfolio, is a Witcher 3 and Cyberpunk team building a co-op action game, which is the lane Those Ryderz Raid is in.",
+      "notes": "apply@ is the Apply address on gamesfund.vc. Ilia Eremeev is listed as General Partner in New York. The March 2025 date is the year marker visible on the page, not a confirmed closing day for Dark Passenger. info@gamesfund.vc is also published.",
+      "fit": 47,
+      "reasons": [
+        "invests at seed, one stage off pre-seed (+12)",
+        "sectors match: entertainment, gaming (+25)",
+        "check size unknown (+0)",
+        "no relevant deal on record (+0)",
+        "invests in US (+10)"
+      ],
+      "added": "2026-11-17"
+    },
+    {
+      "id": "dan-levitan",
+      "name": "Dan Levitan",
+      "firm": "Maveron",
+      "role": "Co-founder",
+      "email": "maveron@maveron.com",
+      "stage": [
+        "seed"
+      ],
+      "check_min": null,
+      "check_max": null,
+      "sectors": [
+        "consumer"
+      ],
+      "geo": [
+        "US"
+      ],
+      "last_relevant_deal": null,
+      "sources": [
+        "https://www.maveron.com/"
+      ],
+      "warm_intro": false,
+      "personal_line": "The Maveron homepage says you are leading BetterDays' $7 million seed, and our Store turns a story world into things people wear.",
+      "notes": "maveron@ is on maveron.com. Homepage text: Dan Levitan and Howard founded Maveron, and Maveron is excited to lead BetterDays' $7 million seed. No closing date is on that page, so 2026-01-01 is not a known close. $3B-scale peers were left off; this one stays because the check they describe is a seed lead.",
+      "fit": 37,
+      "reasons": [
+        "invests at seed, one stage off pre-seed (+12)",
+        "sectors match: consumer (+15)",
+        "check size unknown (+0)",
+        "no relevant deal on record (+0)",
+        "invests in US (+10)"
+      ],
+      "added": "2026-11-17"
+    }
+  ]
+}
