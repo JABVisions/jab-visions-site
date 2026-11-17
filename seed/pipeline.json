@@ -659,10 +659,28 @@
       "name": "Amanda Herson",
       "firm": "Founder Collective",
       "fit": 64,
-      "status": "drafted",
-      "touches": [],
+      "status": "replied",
+      "touches": [
+        {
+          "n": 1,
+          "date": "2026-11-17",
+          "kind": "intro",
+          "from": "us",
+          "subject": "JAB Visions: story worlds and creator commerce",
+          "message_id": "<amanda-herson-1.40316d8ca11b@jabvisions.com>",
+          "file": "outreach/amanda-herson-1.eml"
+        },
+        {
+          "date": "2026-11-17",
+          "kind": "reply",
+          "from": "them",
+          "class": "unclear"
+        }
+      ],
       "next_due": null,
-      "labels": [],
+      "labels": [
+        "Replied"
+      ],
       "notes": "",
       "personal_line": "Founder Collective backed Weavy's $4M seed for creative media tooling, and Those Ryderz is a story world with a film in development and a free browser game you can play now.",
       "sources": [
@@ -671,11 +689,12 @@
       "thread_id": null,
       "call": null,
       "draft": {
-        "n": 1,
-        "kind": "intro",
-        "file": "outreach/amanda-herson-1.eml",
-        "subject": "JAB Visions: story worlds and creator commerce",
-        "message_id": "<amanda-herson-1.40316d8ca11b@jabvisions.com>",
+        "n": 2,
+        "kind": "reply",
+        "file": "outreach/amanda-herson-2.eml",
+        "subject": "Re: JAB Visions: story worlds and creator commerce",
+        "message_id": "<amanda-herson-2.e1050e754cfd@jabvisions.com>",
+        "in_reply_to": "<amanda-herson-1.40316d8ca11b@jabvisions.com>",
         "state": "drafted",
         "drafted_on": "2026-11-17"
       },
@@ -719,6 +738,21 @@
           "date": "2026-11-17",
           "event": "drafted",
           "note": "intro"
+        },
+        {
+          "date": "2026-11-17",
+          "event": "sent",
+          "note": "intro 1, left johnandy@jabvisions.com; Founder Collective replied the same day"
+        },
+        {
+          "date": "2026-11-17",
+          "event": "unclear",
+          "note": "Standard inbound reply. They will look and reach out if it is a fit, and they asked for the deck in slides."
+        },
+        {
+          "date": "2026-11-17",
+          "event": "drafted",
+          "note": "reply"
         }
       ]
     },
