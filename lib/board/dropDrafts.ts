@@ -118,6 +118,12 @@ const VOICE_STUDIO_CARD_WAV =
 export function ensureVoiceStudioDraftCard(id: string, projectFileName?: string): DropDraft | null {
   if (!canUseStorage() || !id) return null;
   const prior = readDropDrafts().find((d) => d.id === id);
+  // A photo or video already owns this id. Park the song card beside it
+  // instead of relabeling the picture as audio.
+  if (prior && prior.kind !== "audio") {
+    if (id.endsWith("_voice")) return prior;
+    return ensureVoiceStudioDraftCard(`${id}_voice`, projectFileName);
+  }
   const keepPreview =
     prior?.kind === "audio" &&
     typeof prior.dataUrl === "string" &&

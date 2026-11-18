@@ -51,13 +51,36 @@ export function studioModeForUploadedMedia(
 }
 
 /**
- * Art's canvas is the capture surface. If Drafts selected Art while the loaded
- * file is still a vocal, show the canvas anyway — that is the stuck-voice bug.
+ * Art's canvas is the drawing surface. Show it whenever Art is selected and
+ * there isn't already a picture or video open in the editor. A leftover vocal
+ * must not keep the photo editor — and its mix button — on screen.
  */
-export function studioArtOverridesVoiceMedia(
+export function studioShowsArtCanvas(
   mode: StudioCaptureMode,
   phase: StudioPhase,
-  mediaKind: StudioMediaKind
+  mediaKind: StudioMediaKind,
+  hasVisualPreview: boolean
 ): boolean {
-  return mode === "art" && phase !== "capture" && mediaKind === "audio";
+  if (mode !== "art") return false;
+  if (phase === "edit" && hasVisualPreview && mediaKind !== "audio") return false;
+  return true;
+}
+
+/** A voice-project card may only replace a vocal draft. Photos and videos keep their own kind. */
+export function shouldStampVoiceDraftCard(
+  fileKind: StudioMediaKind | null,
+  projectSaved: boolean
+): boolean {
+  if (!projectSaved) return false;
+  if (fileKind === "image" || fileKind === "video") return false;
+  return true;
+}
+
+/** A photo or video saved in the same moment as a song gets its own draft id. */
+export function voiceDraftIdForSave(
+  mediaDraftId: string,
+  fileKind: StudioMediaKind | null
+): string {
+  if (fileKind === "image" || fileKind === "video") return `voice_${mediaDraftId}`;
+  return mediaDraftId;
 }

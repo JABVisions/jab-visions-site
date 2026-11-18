@@ -63,10 +63,12 @@ import { preparingUploadProgress, studioVisibleUploadProgress } from "@/lib/boar
 import { guessUploadBytes, isBoardStorageLimitMessage } from "@/lib/board/boardMediaUpload";
 import { saveDropDraft, draftToFile, ensureVoiceStudioDraftCard, type DropDraft, type DropDraftKind } from "@/lib/board/dropDrafts";
 import {
-  studioArtOverridesVoiceMedia,
+  shouldStampVoiceDraftCard,
   studioEditShowsVoiceReview,
   studioModeForUploadedMedia,
+  studioShowsArtCanvas,
   studioSurfaceForDraft,
+  voiceDraftIdForSave,
   type StudioDraftKind,
 } from "@/lib/board/studioDraftSurface";
 import { readDropStudioV5Flag, type DropStudioV5MediaBag, type DropStudioV5Session } from "@/lib/board/dropStudioV5";
@@ -1378,11 +1380,16 @@ export default function DropStudioStage({
 
   const saveToDrafts = useCallback(
     async (auto = false, quiet = false) => {
-      const session = audioSessionRef.current;
+      const session = mode === "audio" ? audioSessionRef.current : null;
       const file =
         fileRef.current ??
         session?.tracks.flatMap((track) => track.clips).find((clip) => clip.file)?.file;
-      if (!file && !sessionHasClips(session)) return false;
+      // A leftover vocal is not a Vision, Video, or Art draft.
+      const mediaFile =
+        file && (mode === "audio" || !file.type.startsWith("audio/")) ? file : null;
+      const fileKind = mediaFile ? studioMediaKindForFile(mediaFile) : null;
+      const keepSession = sessionHasClips(session) ? session : null;
+      if (!mediaFile && !keepSession) return false;
       if (!draftIdRef.current) {
         draftIdRef.current = `draft_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
       }
@@ -1393,24 +1400,25 @@ export default function DropStudioStage({
       if (!quiet) setVoiceAutoSaving(true);
       else if (auto) setVoiceAutoSaving(true);
       let saved = false;
-      if (file) {
-        saved = Boolean(await saveDropDraft(file, draftId));
+      if (mediaFile) {
+        saved = Boolean(await saveDropDraft(mediaFile, draftId));
       }
       let projectSaved = false;
-      if (sessionHasClips(session) && session) {
-        projectSaved = await saveVoiceStudioProject(draftId, session);
-      }
-      if (projectSaved || (saved && !sessionHasClips(session))) {
-        ensureVoiceStudioDraftCard(draftId, file?.name);
-        rememberActiveVoiceStudioDraft(draftId);
-        lastSavedVoiceSignatureRef.current = voiceStudioEditSignature(session);
-        setVoiceAutoSaveAt(Date.now());
+      if (keepSession) {
+        const voiceId = voiceDraftIdForSave(draftId, fileKind);
+        projectSaved = await saveVoiceStudioProject(voiceId, keepSession);
+        if (shouldStampVoiceDraftCard(fileKind, projectSaved)) {
+          ensureVoiceStudioDraftCard(voiceId, mediaFile?.name);
+          rememberActiveVoiceStudioDraft(voiceId);
+          lastSavedVoiceSignatureRef.current = voiceStudioEditSignature(keepSession);
+          setVoiceAutoSaveAt(Date.now());
+        }
       }
       setVoiceAutoSaving(false);
       if (auto) {
-        if (!quiet && (projectSaved || (saved && !sessionHasClips(session)))) {
+        if (!quiet && (projectSaved || saved)) {
           flashSaveNote("Auto-saved to Drafts");
-        } else if (!quiet && sessionHasClips(session) && !projectSaved) {
+        } else if (!quiet && keepSession && !projectSaved) {
           flashSaveNote("Couldn't auto-save this song");
         }
         return projectSaved || saved;
@@ -1418,13 +1426,13 @@ export default function DropStudioStage({
       flashSaveNote(
         projectSaved || saved
           ? "Saved to Drafts 🗂"
-          : sessionHasClips(session)
+          : keepSession
             ? "Couldn't auto-save this song"
             : "Too large to save to Drafts"
       );
       return projectSaved || saved;
     },
-    [flashSaveNote]
+    [flashSaveNote, mode]
   );
 
   const openDraftsAndSave = (filter: "all" | DropDraftKind | "document" | "art-project") => {
@@ -1433,13 +1441,10 @@ export default function DropStudioStage({
   };
 
   const openDraftsForCurrentMode = () => {
-    const filter =
-      mode === "audio" ? "audio" :
-      mode === "video" ? "video" :
-      mode === "art" ? "art-project" :
-      mode === "descript" ? "document" :
-      "image";
-    openDraftsAndSave(filter);
+    if (mode === "art") persistArtSurface();
+    // Show every draft kind. Filtering to the current mode hid photos, video,
+    // art, and writing behind the voice list.
+    openDraftsAndSave("all");
   };
 
   persistVoiceProjectRef.current = () => {
@@ -2694,8 +2699,8 @@ export default function DropStudioStage({
     void saveToDrafts(true);
   }
 
-  function retake() {
-    if (voiceSessionActive) {
+  function retake(force = false) {
+    if (!force && voiceSessionActive) {
       flashSaveNote("Finish this song in Voice Studio first.");
       return;
     }
@@ -2750,7 +2755,15 @@ export default function DropStudioStage({
         ? session.tracks.flatMap((track) => track.clips).find((clip) => clip.file?.size)?.file
         : fileRef.current) ?? null;
     if (!file) {
-      flashSaveNote("Record or add audio before mixing.");
+      flashSaveNote(
+        mode === "video"
+          ? "Record or add a video first."
+          : mode === "audio"
+            ? "Record or add audio before mixing."
+            : mode === "art"
+              ? "Draw on the canvas before saving this Art drop."
+              : "Capture or add a photo first."
+      );
       return;
     }
 
@@ -3171,11 +3184,13 @@ export default function DropStudioStage({
                 ? "Dropbook Mode"
                 : mode === "descript"
                   ? "Descript"
-                  : phase === "edit"
-                    ? `${modeLabel(mode)} Tools`
-                    : phase === "capture"
-                      ? "Capture Mode"
-                      : "New Drop"}
+                  : mode === "art"
+                    ? "Art Tools"
+                    : phase === "edit"
+                      ? `${modeLabel(mode)} Tools`
+                      : phase === "capture"
+                        ? "Capture Mode"
+                        : "New Drop"}
             </span>
             <DropDestinationBadge destination={destination} />
           </div>
@@ -3200,7 +3215,7 @@ export default function DropStudioStage({
               🗂 Drafts
             </button>
             {phase === "edit" && mode !== "descript" && !voiceSessionActive ? (
-              <button type="button" className="studioGhost" onClick={retake}>
+              <button type="button" className="studioGhost" onClick={() => retake()}>
                 Retake
               </button>
             ) : null}
@@ -3241,10 +3256,6 @@ export default function DropStudioStage({
                       }`}
                       onClick={() => {
                         if (!enabled) return;
-                        if (voiceSessionActive && m !== mode) {
-                          flashSaveNote("Finish this song in Voice Studio first.");
-                          return;
-                        }
                         if (isDropbookMode) {
                           if (dropbookShelfFull) {
                             flashSaveNote("Dropbook holds up to 3 drops plus your cover");
@@ -3256,21 +3267,27 @@ export default function DropStudioStage({
                           setDropbookCoverMode("choose");
                           setDropbookCreating(true);
                         }
+                        if (m !== mode && voiceSessionActive) parkActiveStudioSurface();
+                        if (m === "art") {
+                          const keepPicture =
+                            Boolean(mediaUrl) && mediaKind !== "audio" && m === mode;
+                          if (mediaKind === "audio") clearParkedMedia();
+                          setDrawOpen(keepPicture);
+                          setMode("art");
+                          setPhase(keepPicture ? "edit" : "capture");
+                          return;
+                        }
                         if (m === "descript") {
+                          if (mediaKind === "audio") clearParkedMedia();
                           setMode("descript");
                           return;
                         }
                         // Switching mode mid-edit returns to live capture in that mode.
-                        if (phase === "edit" && mode !== "descript") retake();
+                        if (phase === "edit" && mode !== "descript") retake(true);
+                        if (mediaKind === "audio" && m !== "audio") clearParkedMedia();
                         setMode(m);
                       }}
-                      disabled={
-                        recording ||
-                        adlibRecording ||
-                        processingVocal ||
-                        !enabled ||
-                        (voiceSessionActive && m !== mode)
-                      }
+                      disabled={recording || adlibRecording || processingVocal || !enabled}
                       title={
                         enabled
                           ? modeLabel(m)
@@ -3383,7 +3400,7 @@ export default function DropStudioStage({
               } ${
                 phase === "choose" ||
                 phase === "capture" ||
-                studioArtOverridesVoiceMedia(mode, phase, mediaKind)
+                studioShowsArtCanvas(mode, phase, mediaKind, Boolean(mediaUrl))
                   ? "capMainMonitor"
                   : ""
               }`}
@@ -3929,7 +3946,7 @@ export default function DropStudioStage({
                     {renderModeChooseMonitor()}
                   </DropChipStage>
                 </div>
-              ) : phase === "capture" || studioArtOverridesVoiceMedia(mode, phase, mediaKind) ? (
+              ) : phase === "capture" || studioShowsArtCanvas(mode, phase, mediaKind, Boolean(mediaUrl)) ? (
                 <div className="capMonitorHost">
                   {mode === "art" ? (
                     <BoardClientErrorBoundary
