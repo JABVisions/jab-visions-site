@@ -6,6 +6,13 @@ import ArtPaletteTools, { type ArtBrushMode } from "./ArtPaletteTools";
 import ArtLayerStrip from "./ArtLayerStrip";
 import { useArtLayerCanvases } from "./useArtLayerCanvases";
 import { ART_BLEND_STRENGTH, grabArtSmudge, stampArtSmudge } from "@/lib/board/artSmudge";
+import {
+  beginArtGlowStroke,
+  compositeArtGlowStroke,
+  paintArtGlowSegment,
+  stampArtGlow,
+  type ArtGlowStroke,
+} from "@/lib/board/artGlow";
 import styles from "./DropStudio.module.css";
 
 function hslToHex(h: number, s: number, l: number) {
@@ -53,6 +60,7 @@ export default function DropStudioArtPalette({
   const smudgeBufRef = useRef<HTMLCanvasElement | null>(null);
   const smudgeCtxRef = useRef<CanvasRenderingContext2D | null>(null);
   const blendDiamRef = useRef(0);
+  const glowStrokeRef = useRef<ArtGlowStroke | null>(null);
   const dprRef = useRef(1);
   const initialPaintedRef = useRef(false);
   const [portalReady, setPortalReady] = useState(false);
@@ -276,6 +284,15 @@ export default function DropStudioArtPalette({
       grabSmudge(next.x * dprRef.current, next.y * dprRef.current, diameter);
       return;
     }
+    if (brushMode === "glow") {
+      const stroke = beginArtGlowStroke(event.currentTarget, dprRef.current);
+      glowStrokeRef.current = stroke;
+      if (stroke) {
+        stampArtGlow(stroke.layerCtx, next.x, next.y, size / 2, color);
+        compositeArtGlowStroke(context, stroke, opacity);
+      }
+      return;
+    }
     configureBrush(context);
     context.beginPath();
     context.arc(next.x, next.y, size / 2, 0, Math.PI * 2);
@@ -290,6 +307,15 @@ export default function DropStudioArtPalette({
     event.preventDefault();
     const next = point(event);
     const previous = lastPointRef.current ?? next;
+    if (brushMode === "glow") {
+      const stroke = glowStrokeRef.current;
+      if (stroke) {
+        paintArtGlowSegment(stroke.layerCtx, previous.x, previous.y, next.x, next.y, size / 2, color);
+        compositeArtGlowStroke(context, stroke, opacity);
+      }
+      lastPointRef.current = next;
+      return;
+    }
     if (brushMode === "blend") {
       const buffer = smudgeBufRef.current;
       if (!buffer) return;
@@ -332,6 +358,7 @@ export default function DropStudioArtPalette({
     if (!drawingRef.current) return;
     drawingRef.current = false;
     lastPointRef.current = null;
+    glowStrokeRef.current = null;
     const context = contextRef.current;
     if (context) {
       context.globalCompositeOperation = "source-over";
@@ -370,7 +397,7 @@ export default function DropStudioArtPalette({
     const saturation = radius ? Math.min(100, Math.round((Math.hypot(dx, dy) / radius) * 100)) : 100;
     setWheelHue(hue);
     setWheelSat(saturation);
-    setBrushMode("paint");
+    setBrushMode((mode) => (mode === "glow" ? mode : "paint"));
     setColor(hslToHex(hue, saturation, nextLight));
   }
 
@@ -465,7 +492,11 @@ export default function DropStudioArtPalette({
           onWheelPointerMove={(x, y) => wheelDraggingRef.current && pickFromWheel(x, y)}
           onWheelDragStart={() => { wheelDraggingRef.current = true; }}
           onWheelDragEnd={() => { wheelDraggingRef.current = false; }}
-          onColorPick={(next) => { setBrushMode("paint"); setColor(next); setDrawArmed(true); }}
+          onColorPick={(next) => {
+            setBrushMode((mode) => (mode === "glow" ? mode : "paint"));
+            setColor(next);
+            setDrawArmed(true);
+          }}
           onLightChange={(next) => { setLight(next); setColor(hslToHex(wheelHue, wheelSat, next)); }}
           onSizeChange={setSize}
           onOpacityChange={setOpacity}

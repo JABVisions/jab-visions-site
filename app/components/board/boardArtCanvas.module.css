@@ -289,11 +289,18 @@
   min-width: 0;
 }
 
+.toolsPalette .brushModeRow {
+  display: flex;
+  gap: 6px;
+}
+
 .toolsPalette .blendBrushBtn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 100%;
+  flex: 1 1 0;
+  width: auto;
+  min-width: 0;
   padding: 7px 10px;
   border-radius: 999px;
   border: 1px solid rgba(255, 255, 255, 0.2);
@@ -314,6 +321,15 @@
     rgba(89, 240, 216, 0.18);
   box-shadow: 0 0 14px rgba(72, 238, 211, 0.22);
   color: #bffff4;
+}
+
+.toolsPalette .glowBrushBtnOn {
+  border-color: rgba(255, 236, 186, 0.86);
+  background:
+    radial-gradient(circle at 50% 35%, rgba(255, 255, 255, 0.72), transparent 42%),
+    rgba(255, 186, 72, 0.28);
+  box-shadow: 0 0 16px rgba(255, 206, 110, 0.48);
+  color: #fff8e6;
 }
 
 .toolsPalette .fieldLabel {

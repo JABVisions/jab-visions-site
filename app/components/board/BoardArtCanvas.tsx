@@ -5,12 +5,19 @@
 // same tools let you draw directly on a Vision). Save composites bg + strokes
 // into a PNG File that flows into the drop media flow.
 // Brush modes: paint (opaque), blend (real smudge — drags & merges the painted
-// strokes underneath, like Procreate), erase.
+// strokes underneath, like Procreate), glow (luminescent paint), erase.
 
 "use client";
 
 import { useEffect, useRef, useState } from "react";
 import ArtPaletteTools, { type ArtBrushMode } from "./ArtPaletteTools";
+import {
+  beginArtGlowStroke,
+  compositeArtGlowStroke,
+  paintArtGlowSegment,
+  stampArtGlow,
+  type ArtGlowStroke,
+} from "@/lib/board/artGlow";
 import ArtLayerStrip from "./ArtLayerStrip";
 import { useArtLayerCanvases } from "./useArtLayerCanvases";
 import DropChipWorkbench from "./DropChipWorkbench";
@@ -85,6 +92,7 @@ export default function BoardArtCanvas({
   const smudgeBufRef = useRef<HTMLCanvasElement | null>(null);
   const smudgeCtxRef = useRef<CanvasRenderingContext2D | null>(null);
   const blendDiamRef = useRef(0);
+  const glowStrokeRef = useRef<ArtGlowStroke | null>(null);
 
   const [objectTool, setObjectTool] = useState<ObjectTool>("text");
   const [color, setColor] = useState("#FF4FD8");
@@ -140,7 +148,7 @@ export default function BoardArtCanvas({
     const sat = radius > 0 ? Math.round((dist / radius) * 100) : 100;
     setWheelHue(hue);
     setWheelSat(sat);
-    setBrushMode("paint");
+    setBrushMode((mode) => (mode === "glow" ? mode : "paint"));
     setColor(hslToHex(hue, sat, nextLight));
   }
 
@@ -454,6 +462,16 @@ export default function BoardArtCanvas({
       return;
     }
 
+    if (brushMode === "glow") {
+      const stroke = beginArtGlowStroke(e.currentTarget, dprRef.current);
+      glowStrokeRef.current = stroke;
+      if (stroke) {
+        stampArtGlow(stroke.layerCtx, x, y, size / 2, color);
+        compositeArtGlowStroke(ctx, stroke, opacity);
+      }
+      return;
+    }
+
     if (brushMode === "erase") {
       ctx.globalCompositeOperation = "destination-out";
       ctx.globalAlpha = 1;
@@ -488,6 +506,19 @@ export default function BoardArtCanvas({
       typeof native.getCoalescedEvents === "function" && native.getCoalescedEvents().length
         ? native.getCoalescedEvents()
         : [native];
+
+    if (brushMode === "glow") {
+      const stroke = glowStrokeRef.current;
+      if (!stroke) return;
+      for (const sample of samples) {
+        const { x, y } = pointFromXY(sample.clientX, sample.clientY);
+        const last = lastPtRef.current ?? { x, y };
+        paintArtGlowSegment(stroke.layerCtx, last.x, last.y, x, y, size / 2, color);
+        lastPtRef.current = { x, y };
+      }
+      compositeArtGlowStroke(ctx, stroke, opacity);
+      return;
+    }
 
     if (brushMode === "blend") {
       for (const sample of samples) {
@@ -524,12 +555,13 @@ export default function BoardArtCanvas({
     const last = lastPtRef.current;
     // Finish the path at the final point so the very end of the stroke renders.
     // (Blend has no path — it stamps as it moves — so skip the line finish.)
-    if (ctx && last && brushMode !== "blend") {
+    if (ctx && last && brushMode !== "blend" && brushMode !== "glow") {
       ctx.lineTo(last.x, last.y);
       ctx.stroke();
     }
     drawingRef.current = false;
     lastPtRef.current = null;
+    glowStrokeRef.current = null;
     if (ctx) {
       ctx.globalCompositeOperation = "source-over";
       ctx.globalAlpha = 1;
@@ -740,12 +772,12 @@ export default function BoardArtCanvas({
         wheelDraggingRef.current = false;
       }}
       onColorPick={(c) => {
-        setBrushMode("paint");
+        setBrushMode((mode) => (mode === "glow" ? mode : "paint"));
         setColor(c);
       }}
       onLightChange={(l) => {
         setLight(l);
-        setBrushMode("paint");
+        setBrushMode((mode) => (mode === "glow" ? mode : "paint"));
         setColor(hslToHex(wheelHue, wheelSat, l));
       }}
       onSizeChange={setSize}
