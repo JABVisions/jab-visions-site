@@ -6,6 +6,7 @@ import ArtPaletteTools, { type ArtBrushMode } from "./ArtPaletteTools";
 import ArtLayerStrip from "./ArtLayerStrip";
 import { useArtLayerCanvases } from "./useArtLayerCanvases";
 import { ART_BLEND_STRENGTH, grabArtSmudge, stampArtSmudge } from "@/lib/board/artSmudge";
+import { paintArtGlowSegment, stampArtGlow } from "@/lib/board/artGlow";
 import styles from "./DropStudio.module.css";
 
 function hslToHex(h: number, s: number, l: number) {
@@ -276,6 +277,10 @@ export default function DropStudioArtPalette({
       grabSmudge(next.x * dprRef.current, next.y * dprRef.current, diameter);
       return;
     }
+    if (brushMode === "glow") {
+      stampArtGlow(context, next.x, next.y, size / 2, color, opacity);
+      return;
+    }
     configureBrush(context);
     context.beginPath();
     context.arc(next.x, next.y, size / 2, 0, Math.PI * 2);
@@ -290,6 +295,11 @@ export default function DropStudioArtPalette({
     event.preventDefault();
     const next = point(event);
     const previous = lastPointRef.current ?? next;
+    if (brushMode === "glow") {
+      paintArtGlowSegment(context, previous.x, previous.y, next.x, next.y, size / 2, color, opacity);
+      lastPointRef.current = next;
+      return;
+    }
     if (brushMode === "blend") {
       const buffer = smudgeBufRef.current;
       if (!buffer) return;

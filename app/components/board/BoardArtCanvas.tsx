@@ -5,12 +5,13 @@
 // same tools let you draw directly on a Vision). Save composites bg + strokes
 // into a PNG File that flows into the drop media flow.
 // Brush modes: paint (opaque), blend (real smudge — drags & merges the painted
-// strokes underneath, like Procreate), erase.
+// strokes underneath, like Procreate), glow (luminescent paint), erase.
 
 "use client";
 
 import { useEffect, useRef, useState } from "react";
 import ArtPaletteTools, { type ArtBrushMode } from "./ArtPaletteTools";
+import { paintArtGlowSegment, stampArtGlow } from "@/lib/board/artGlow";
 import ArtLayerStrip from "./ArtLayerStrip";
 import { useArtLayerCanvases } from "./useArtLayerCanvases";
 import DropChipWorkbench from "./DropChipWorkbench";
@@ -454,6 +455,11 @@ export default function BoardArtCanvas({
       return;
     }
 
+    if (brushMode === "glow") {
+      stampArtGlow(ctx, x, y, size / 2, color, opacity);
+      return;
+    }
+
     if (brushMode === "erase") {
       ctx.globalCompositeOperation = "destination-out";
       ctx.globalAlpha = 1;
@@ -488,6 +494,16 @@ export default function BoardArtCanvas({
       typeof native.getCoalescedEvents === "function" && native.getCoalescedEvents().length
         ? native.getCoalescedEvents()
         : [native];
+
+    if (brushMode === "glow") {
+      for (const sample of samples) {
+        const { x, y } = pointFromXY(sample.clientX, sample.clientY);
+        const last = lastPtRef.current ?? { x, y };
+        paintArtGlowSegment(ctx, last.x, last.y, x, y, size / 2, color, opacity);
+        lastPtRef.current = { x, y };
+      }
+      return;
+    }
 
     if (brushMode === "blend") {
       for (const sample of samples) {
@@ -524,7 +540,7 @@ export default function BoardArtCanvas({
     const last = lastPtRef.current;
     // Finish the path at the final point so the very end of the stroke renders.
     // (Blend has no path — it stamps as it moves — so skip the line finish.)
-    if (ctx && last && brushMode !== "blend") {
+    if (ctx && last && brushMode !== "blend" && brushMode !== "glow") {
       ctx.lineTo(last.x, last.y);
       ctx.stroke();
     }
