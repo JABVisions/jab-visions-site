@@ -38,6 +38,19 @@ export function studioEditShowsVoiceReview(
 }
 
 /**
+ * Uploading a vocal from Photo or Video should open Voice when that mode is
+ * available. Otherwise the file stays on the image editor with no playback.
+ */
+export function studioModeForUploadedMedia(
+  current: StudioCaptureMode,
+  kind: StudioMediaKind,
+  allowed: readonly StudioCaptureMode[]
+): StudioCaptureMode {
+  if (kind === "audio" && allowed.includes("audio")) return "audio";
+  return current;
+}
+
+/**
  * Art's canvas is the capture surface. If Drafts selected Art while the loaded
  * file is still a vocal, show the canvas anyway — that is the stuck-voice bug.
  */

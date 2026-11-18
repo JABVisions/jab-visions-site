@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import {
   studioArtOverridesVoiceMedia,
   studioEditShowsVoiceReview,
+  studioModeForUploadedMedia,
   studioSurfaceForDraft,
 } from "./studioDraftSurface";
 
@@ -29,5 +30,12 @@ assert.equal(studioEditShowsVoiceReview("audio", "audio"), true);
 assert.equal(studioArtOverridesVoiceMedia("art", "edit", "image"), false);
 assert.equal(studioArtOverridesVoiceMedia("art", "capture", "audio"), false);
 assert.equal(studioArtOverridesVoiceMedia("audio", "edit", "audio"), false);
+
+const withVoice = ["photo", "video", "audio", "art"] as const;
+assert.equal(studioModeForUploadedMedia("photo", "audio", withVoice), "audio");
+assert.equal(studioModeForUploadedMedia("video", "audio", withVoice), "audio");
+assert.equal(studioModeForUploadedMedia("photo", "image", withVoice), "photo");
+assert.equal(studioModeForUploadedMedia("art", "video", withVoice), "art");
+assert.equal(studioModeForUploadedMedia("photo", "audio", ["photo", "video"]), "photo");
 
 console.log("studio draft surface checks passed");

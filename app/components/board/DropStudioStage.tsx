@@ -65,6 +65,7 @@ import { saveDropDraft, draftToFile, ensureVoiceStudioDraftCard, type DropDraft,
 import {
   studioArtOverridesVoiceMedia,
   studioEditShowsVoiceReview,
+  studioModeForUploadedMedia,
   studioSurfaceForDraft,
   type StudioDraftKind,
 } from "@/lib/board/studioDraftSurface";
@@ -1787,7 +1788,9 @@ export default function DropStudioStage({
     if (initialFile) {
       const playable = fileWithResolvedContentType(initialFile);
       fileRef.current = playable;
-      setMediaKind(studioMediaKindForFile(playable));
+      const openedKind = studioMediaKindForFile(playable);
+      setMediaKind(openedKind);
+      setMode(studioModeForUploadedMedia(safeMode, openedKind, allowedModes));
       setMediaContentType(resolveUploadContentType(playable));
       setSource("upload");
       setPhase("edit");
@@ -2532,6 +2535,7 @@ export default function DropStudioStage({
     const base = kind === "audio" ? "board-vocal" : "board-vision";
     fileRef.current = new File([blob], `${base}-${Date.now()}.${ext}`, { type });
     setMediaKind(kind);
+    setMode((current) => studioModeForUploadedMedia(current, kind, allowedModes));
     setMediaContentType(type);
     setSource(src);
     stopCamera();
@@ -2669,6 +2673,7 @@ export default function DropStudioStage({
     fileRef.current = file;
     const kind = studioMediaKindForFile(file);
     setMediaKind(kind);
+    setMode((current) => studioModeForUploadedMedia(current, kind, allowedModes));
     setMediaContentType(resolveUploadContentType(file));
     setSource("upload");
     stopCamera();
