@@ -11,7 +11,13 @@
 
 import { useEffect, useRef, useState } from "react";
 import ArtPaletteTools, { type ArtBrushMode } from "./ArtPaletteTools";
-import { paintArtGlowSegment, stampArtGlow } from "@/lib/board/artGlow";
+import {
+  beginArtGlowStroke,
+  compositeArtGlowStroke,
+  paintArtGlowSegment,
+  stampArtGlow,
+  type ArtGlowStroke,
+} from "@/lib/board/artGlow";
 import ArtLayerStrip from "./ArtLayerStrip";
 import { useArtLayerCanvases } from "./useArtLayerCanvases";
 import DropChipWorkbench from "./DropChipWorkbench";
@@ -86,6 +92,7 @@ export default function BoardArtCanvas({
   const smudgeBufRef = useRef<HTMLCanvasElement | null>(null);
   const smudgeCtxRef = useRef<CanvasRenderingContext2D | null>(null);
   const blendDiamRef = useRef(0);
+  const glowStrokeRef = useRef<ArtGlowStroke | null>(null);
 
   const [objectTool, setObjectTool] = useState<ObjectTool>("text");
   const [color, setColor] = useState("#FF4FD8");
@@ -141,7 +148,7 @@ export default function BoardArtCanvas({
     const sat = radius > 0 ? Math.round((dist / radius) * 100) : 100;
     setWheelHue(hue);
     setWheelSat(sat);
-    setBrushMode("paint");
+    setBrushMode((mode) => (mode === "glow" ? mode : "paint"));
     setColor(hslToHex(hue, sat, nextLight));
   }
 
@@ -456,7 +463,12 @@ export default function BoardArtCanvas({
     }
 
     if (brushMode === "glow") {
-      stampArtGlow(ctx, x, y, size / 2, color, opacity);
+      const stroke = beginArtGlowStroke(e.currentTarget, dprRef.current);
+      glowStrokeRef.current = stroke;
+      if (stroke) {
+        stampArtGlow(stroke.layerCtx, x, y, size / 2, color);
+        compositeArtGlowStroke(ctx, stroke, opacity);
+      }
       return;
     }
 
@@ -496,12 +508,15 @@ export default function BoardArtCanvas({
         : [native];
 
     if (brushMode === "glow") {
+      const stroke = glowStrokeRef.current;
+      if (!stroke) return;
       for (const sample of samples) {
         const { x, y } = pointFromXY(sample.clientX, sample.clientY);
         const last = lastPtRef.current ?? { x, y };
-        paintArtGlowSegment(ctx, last.x, last.y, x, y, size / 2, color, opacity);
+        paintArtGlowSegment(stroke.layerCtx, last.x, last.y, x, y, size / 2, color);
         lastPtRef.current = { x, y };
       }
+      compositeArtGlowStroke(ctx, stroke, opacity);
       return;
     }
 
@@ -546,6 +561,7 @@ export default function BoardArtCanvas({
     }
     drawingRef.current = false;
     lastPtRef.current = null;
+    glowStrokeRef.current = null;
     if (ctx) {
       ctx.globalCompositeOperation = "source-over";
       ctx.globalAlpha = 1;
@@ -756,12 +772,12 @@ export default function BoardArtCanvas({
         wheelDraggingRef.current = false;
       }}
       onColorPick={(c) => {
-        setBrushMode("paint");
+        setBrushMode((mode) => (mode === "glow" ? mode : "paint"));
         setColor(c);
       }}
       onLightChange={(l) => {
         setLight(l);
-        setBrushMode("paint");
+        setBrushMode((mode) => (mode === "glow" ? mode : "paint"));
         setColor(hslToHex(wheelHue, wheelSat, l));
       }}
       onSizeChange={setSize}
