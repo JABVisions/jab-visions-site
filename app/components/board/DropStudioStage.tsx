@@ -62,6 +62,12 @@ import type { BoardUploadProgress, BoardUploadProgressHandler } from "@/lib/boar
 import { preparingUploadProgress, studioVisibleUploadProgress } from "@/lib/board/uploadProgress";
 import { guessUploadBytes, isBoardStorageLimitMessage } from "@/lib/board/boardMediaUpload";
 import { saveDropDraft, draftToFile, ensureVoiceStudioDraftCard, type DropDraft, type DropDraftKind } from "@/lib/board/dropDrafts";
+import {
+  studioArtOverridesVoiceMedia,
+  studioEditShowsVoiceReview,
+  studioSurfaceForDraft,
+  type StudioDraftKind,
+} from "@/lib/board/studioDraftSurface";
 import { readDropStudioV5Flag, type DropStudioV5MediaBag, type DropStudioV5Session } from "@/lib/board/dropStudioV5";
 import { exportDropStudioV5, exportNeedsFlatten } from "@/lib/board/dropStudioV5Export";
 import DropDraftsDrawer from "./DropDraftsDrawer";
@@ -1379,20 +1385,23 @@ export default function DropStudioStage({
       if (!draftIdRef.current) {
         draftIdRef.current = `draft_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
       }
-      setStudioDraftId(draftIdRef.current);
+      // Capture the id before any await. Opening another draft parks this song
+      // and replaces draftIdRef; the save must stay on the song that started it.
+      const draftId = draftIdRef.current;
+      setStudioDraftId(draftId);
       if (!quiet) setVoiceAutoSaving(true);
       else if (auto) setVoiceAutoSaving(true);
       let saved = false;
       if (file) {
-        saved = Boolean(await saveDropDraft(file, draftIdRef.current));
+        saved = Boolean(await saveDropDraft(file, draftId));
       }
       let projectSaved = false;
       if (sessionHasClips(session) && session) {
-        projectSaved = await saveVoiceStudioProject(draftIdRef.current, session);
+        projectSaved = await saveVoiceStudioProject(draftId, session);
       }
       if (projectSaved || (saved && !sessionHasClips(session))) {
-        ensureVoiceStudioDraftCard(draftIdRef.current, file?.name);
-        rememberActiveVoiceStudioDraft(draftIdRef.current);
+        ensureVoiceStudioDraftCard(draftId, file?.name);
+        rememberActiveVoiceStudioDraft(draftId);
         lastSavedVoiceSignatureRef.current = voiceStudioEditSignature(session);
         setVoiceAutoSaveAt(Date.now());
       }
@@ -1540,6 +1549,53 @@ export default function DropStudioStage({
     setRecording(false);
   }, []);
 
+  // Leave the mode that's on screen without closing Drop Studio. Drafts is an
+  // explicit switch: the previous vocal must not keep the window or lock the rail.
+  const parkActiveStudioSurface = useCallback(() => {
+    persistArtSurface();
+    persistVoiceProjectRef.current();
+    haltStudioTransport();
+    studioTakeRef.current?.dispose();
+    studioTakeRef.current = null;
+    adlibTakeRef.current?.dispose();
+    adlibTakeRef.current = null;
+    adlibRecordGenRef.current += 1;
+    studioRecordGenRef.current += 1;
+    stopCamera();
+    setVoiceStudioOpen(false);
+    setAudioSession(null);
+    setAudioPlaying(false);
+    setDrawOpen(false);
+    setProcessingVocal(false);
+    setAdlibRecording(false);
+    setStudioMicStream(null);
+    setPresetPreviewing(false);
+    setError("");
+  }, [persistArtSurface, stopCamera]);
+
+  const clearParkedMedia = useCallback(() => {
+    fileRef.current = null;
+    urlRef.current = "";
+    setMediaUrl("");
+    setMediaKind("image");
+    setMediaContentType("");
+    draftIdRef.current = "";
+    syncMediaPreview();
+  }, [syncMediaPreview]);
+
+  const enterDraftSurface = useCallback(
+    (kind: StudioDraftKind) => {
+      const surface = studioSurfaceForDraft(kind);
+      parkActiveStudioSurface();
+      if (surface.clearMedia) clearParkedMedia();
+      setMode(surface.mode);
+      setPhase(surface.phase);
+      setDraftsOpen(false);
+      return surface;
+    },
+    [clearParkedMedia, parkActiveStudioSurface]
+  );
+
   useEffect(() => {
     return () => {
       stopAllExclusiveAudioPreviews();
@@ -1553,24 +1609,30 @@ export default function DropStudioStage({
     };
   }, []);
 
-  // Reopen a saved draft straight into the editor.
+  // Reopen a saved draft straight into that draft's mode, not whatever was on screen.
   const openDraft = useCallback(
     (draft: DropDraft) => {
       const file = draftToFile(draft);
       if (!file) return;
       const playable = fileWithResolvedContentType(file);
+      const surface = studioSurfaceForDraft(draft.kind);
+      parkActiveStudioSurface();
       fileRef.current = playable;
       setMediaKind(draft.kind === "audio" || draft.kind === "video" ? draft.kind : studioMediaKindForFile(playable));
       setMediaContentType(resolveUploadContentType(playable));
       setSource("upload");
       draftIdRef.current = draft.id; // re-saving updates this same draft
-      stopCamera();
-      setPhase("edit");
+      setStudioDraftId(draft.id);
+      setMode(surface.mode);
+      setPhase(surface.phase);
       setDraftsOpen(false);
       syncMediaPreview();
       if (draft.kind === "audio") {
+        const openedId = draft.id;
         void (async () => {
-          const project = await loadVoiceStudioProject(draft.id);
+          const project = await loadVoiceStudioProject(openedId);
+          // A later Drafts pick (Art, Vision, another song) owns the window now.
+          if (draftIdRef.current !== openedId) return;
           if (project) {
             setAudioSession(project);
             setSessionHistory(createSessionHistory());
@@ -1579,7 +1641,7 @@ export default function DropStudioStage({
             const preset = vocal?.mix.preset;
             if (preset && preset !== "none") setVoicePreset(preset);
             flashSaveNote("Voice Studio project restored");
-            rememberActiveVoiceStudioDraft(draft.id);
+            rememberActiveVoiceStudioDraft(openedId);
             lastSavedVoiceSignatureRef.current = voiceStudioEditSignature(project);
             setVoiceAutoSaveAt(Date.now());
             return;
@@ -1592,7 +1654,7 @@ export default function DropStudioStage({
         })();
       }
     },
-    [flashSaveNote, stopCamera, syncMediaPreview, voicePreset]
+    [flashSaveNote, parkActiveStudioSurface, syncMediaPreview, voicePreset]
   );
 
   const startCamera = useCallback(
@@ -3313,7 +3375,13 @@ export default function DropStudioStage({
                 isDropbookMode ? "capMainDropbook" : ""
               } ${dropbookCreating ? "capMainCreating" : ""} ${
                 dropbookIntroPhase === "splash" ? "capMainSplash" : ""
-              } ${phase === "choose" || phase === "capture" ? "capMainMonitor" : ""}`}
+              } ${
+                phase === "choose" ||
+                phase === "capture" ||
+                studioArtOverridesVoiceMedia(mode, phase, mediaKind)
+                  ? "capMainMonitor"
+                  : ""
+              }`}
             >
               {isDropbookMode && dropbookIntroPhase !== "splash" ? (
                 <>
@@ -3856,7 +3924,7 @@ export default function DropStudioStage({
                     {renderModeChooseMonitor()}
                   </DropChipStage>
                 </div>
-              ) : phase === "capture" ? (
+              ) : phase === "capture" || studioArtOverridesVoiceMedia(mode, phase, mediaKind) ? (
                 <div className="capMonitorHost">
                   {mode === "art" ? (
                     <BoardClientErrorBoundary
@@ -3997,7 +4065,7 @@ export default function DropStudioStage({
                 </div>
               ) : (
                 <div className="capEdit">
-                  {mediaKind === "audio" ? (
+                  {studioEditShowsVoiceReview(mode, mediaKind) ? (
                     <>
                       <div className="capEditScroll">
                         <div className="vocalReview">
@@ -4183,15 +4251,12 @@ export default function DropStudioStage({
         onClose={() => setDraftsOpen(false)}
         onOpenDraft={openDraft}
         onOpenDescriptDoc={(doc) => {
+          enterDraftSurface("document");
           setDraftDescriptDoc(doc);
-          setMode("descript");
-          setPhase("edit");
-          setDraftsOpen(false);
         }}
         onOpenArtDraft={() => {
-          setMode("art");
-          setPhase("edit");
-          setDraftsOpen(false);
+          enterDraftSurface("art-project");
+          flashSaveNote("Recovered Draft");
         }}
       />
 
