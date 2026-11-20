@@ -108,14 +108,23 @@ function libraryKindFromAsset(kind: string): WorkBoardLibraryKind {
   return "media";
 }
 
-function libraryKindFromBoardDrop(type: string, mediaKind: string): WorkBoardLibraryKind {
+function libraryKindFromBoardDrop(
+  type: string,
+  mediaKind: string,
+  paymentHref?: string | null
+): WorkBoardLibraryKind {
   const t = type.toLowerCase();
+  const hasMedia = mediaKind === "audio" || mediaKind === "video" || mediaKind === "image";
   if (t.includes("youtube")) return "youtube";
   if (t.includes("music")) return "music";
   if (t.includes("doc")) return "doc";
   if (t.includes("thought") || t.includes("note")) return "note";
-  if (t.includes("link") || t.includes("news") || t.includes("pay")) return "link";
-  if (mediaKind === "audio" || mediaKind === "video" || mediaKind === "image") return "media";
+  if (t.includes("link") || t.includes("news")) return "link";
+  if (t.includes("pay")) {
+    if (paymentHref) return "link";
+    if (hasMedia) return "media";
+  }
+  if (hasMedia) return "media";
   return "media";
 }
 
@@ -202,14 +211,17 @@ export function libraryDropFromBoardDrop(raw: unknown): WorkBoardLibraryDrop | n
 
   const type = asString(drop.type);
   const mediaKind = asString(drop.mediaKind).toLowerCase();
-  const kind = libraryKindFromBoardDrop(type, mediaKind);
+  const paymentHref = asString(drop.linkUrl) || asString(drop.paymentLink) || null;
+  const kind = libraryKindFromBoardDrop(type, mediaKind, paymentHref);
   const mediaType =
     mediaKind === "video" || mediaKind === "audio" || mediaKind === "image"
       ? mediaKind
       : kind === "media"
         ? "image"
         : null;
-  const pageUrl = asString(drop.linkUrl) || asString(drop.url) || asString(drop.paymentLink) || null;
+  const attachmentUrl = asString(drop.url);
+  const pageUrl =
+    paymentHref || (kind === "link" || kind === "doc" ? attachmentUrl : null) || null;
   const previewImage = publicMediaUrl(drop.previewImage);
   const rawMedia = publicMediaUrl(drop.mediaUrl);
   const isPageLink = kind === "link" || kind === "doc";

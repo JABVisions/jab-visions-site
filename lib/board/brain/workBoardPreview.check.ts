@@ -81,4 +81,34 @@ assert(vision?.kind === "media", "vision drops stay media");
 assert(vision?.mediaUrl === "https://cdn.example.com/still.jpg", "vision drops still show their image");
 assert(workBoardLinkUrl(vision!) == null, "vision drops do not become external link cards");
 
+const payProof = "https://example.supabase.co/storage/v1/object/sign/board-media/user/proof.jpg?token=abc";
+const payImage = libraryDropFromBoardDrop({
+  id: "pay-image",
+  title: "Proof",
+  type: "Pay",
+  visibility: "public",
+  mediaKind: "image",
+  url: payProof,
+  mediaUrl: payProof,
+});
+
+assert(payImage?.kind === "media", "a Pay Drop with only an uploaded image stays media");
+assert(workBoardLinkUrl(payImage!) == null, "the uploaded proof is not opened as a Drop link");
+assert(payImage?.mediaUrl?.includes("proof.jpg"), "the Pay Drop still has its image preview");
+
+const payCheckout = libraryDropFromBoardDrop({
+  id: "pay-link",
+  title: "Checkout",
+  type: "Pay",
+  visibility: "public",
+  mediaKind: "image",
+  url: payProof,
+  mediaUrl: payProof,
+  linkUrl: "https://buy.stripe.com/test",
+  paymentLink: "https://buy.stripe.com/test",
+});
+
+assert(payCheckout?.kind === "link", "a Pay Drop with a checkout link stays a link");
+assert(workBoardLinkUrl(payCheckout!) === "https://buy.stripe.com/test", "the Drop link opens the checkout page");
+
 console.log("work board link drop checks passed");
