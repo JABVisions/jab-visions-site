@@ -23,7 +23,9 @@ export default function BoardLayout({ children }: { children: React.ReactNode })
     pathname === "/board/forums" ||
     pathname.startsWith("/board/forums/") ||
     pathname === "/board/explore" ||
-    pathname.startsWith("/board/explore/");
+    pathname.startsWith("/board/explore/") ||
+    pathname === "/board/anderzone" ||
+    pathname.startsWith("/board/anderzone/");
 
   const isAuthRoute =
     pathname === "/board/login" ||

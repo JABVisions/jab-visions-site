@@ -6,7 +6,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "test:voice": "node scripts/run-board-checks.cjs lib/board/audioSession/timeline.check.ts lib/board/audioSession/mixdown.check.ts lib/board/voiceStudioProject.check.ts lib/board/boardMediaUpload.check.ts lib/board/uploadLimits.check.ts lib/board/exclusiveAudioPreview.check.ts lib/board/ensureBoardMediaLimits.check.ts lib/board/boardUploadSession.check.ts"
+    "test:voice": "node scripts/run-board-checks.cjs lib/board/audioSession/timeline.check.ts lib/board/audioSession/mixdown.check.ts lib/board/voiceStudioProject.check.ts lib/board/boardMediaUpload.check.ts lib/board/uploadLimits.check.ts lib/board/exclusiveAudioPreview.check.ts lib/board/ensureBoardMediaLimits.check.ts lib/board/boardUploadSession.check.ts",
+    "anderzone:server": "node server/anderzone/start.cjs"
   },
   "dependencies": {
     "@supabase/auth-helpers-nextjs": "^0.15.0",
@@ -19,18 +20,21 @@
     "jszip": "^3.10.1",
     "lucide-react": "^0.562.0",
     "next": "^14.2.31",
+    "phaser": "^4.2.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "stripe": "^17.5.0",
     "tailwind-merge": "^3.5.0",
     "three": "^0.170.0",
-    "tus-js-client": "^4.3.1"
+    "tus-js-client": "^4.3.1",
+    "ws": "^8.23.0"
   },
   "devDependencies": {
     "@types/node": "24.1.0",
     "@types/react": "^19.1.9",
     "@types/react-dom": "^19.1.7",
     "@types/three": "^0.170.0",
+    "@types/ws": "^8.18.2",
     "autoprefixer": "^10.4.21",
     "postcss": "^8.5.6",
     "tailwindcss": "^3.4.17",

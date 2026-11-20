@@ -557,6 +557,21 @@ export default function ExplorePage() {
           ) : null}
         </section>
 
+        <section className="mb-6 overflow-hidden rounded-[30px] border border-lime-300/20 bg-black/40 p-5">
+          <p className="text-[11px] uppercase tracking-[0.3em] text-lime-300/70">Anderzone</p>
+          <h2 className="mt-2 text-2xl font-black">ANDERZONE CENTRAL</h2>
+          <p className="mt-2 max-w-2xl text-sm text-white/55">
+            A playful top-down district on Board. Walk the plaza, meet a Dooboo, and open your Home Pod.
+            Pixel Paradise, Whisper Woods, Outer Grid, Underground, and Null Zone are mapped and still closed.
+          </p>
+          <Link
+            href="/board/anderzone"
+            className="mt-4 inline-flex rounded-full border border-lime-300/40 px-4 py-2 text-xs font-black uppercase tracking-[0.16em] text-lime-100"
+          >
+            Enter ANDERZONE CENTRAL
+          </Link>
+        </section>
+
         <section className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_420px]">
           <div className="min-w-0">
             <StoreDropMarketplace />
