@@ -3,7 +3,12 @@
 import styles from "./workBoardPreview.module.css";
 import BoardFeedVideo from "@/app/components/board/BoardFeedVideo";
 import VoiceDropSoundboard from "@/app/components/board/VoiceDropSoundboard";
-import type { WorkBoardLibraryDrop } from "@/lib/board/brain/workBoardPreview";
+import { LinkDropCard } from "./LinkDropPreview";
+import {
+  looksLikeImageUrl,
+  workBoardLinkUrl,
+  type WorkBoardLibraryDrop,
+} from "@/lib/board/brain/workBoardPreview";
 import { kindLabel } from "@/lib/board/utils";
 
 export default function WorkBoardDropViewer({
@@ -65,7 +70,11 @@ export function WorkBoardDropBody({
       </div>
     );
   }
-  if (drop.mediaUrl && drop.mediaType !== "file") {
+  const linkUrl = workBoardLinkUrl(drop);
+  if (linkUrl) {
+    return <LinkDropCard drop={drop} href={linkUrl} />;
+  }
+  if (drop.mediaUrl && drop.mediaType !== "file" && (drop.mediaType === "image" || looksLikeImageUrl(drop.mediaUrl))) {
     return (
       <div className={styles.media}>
         {/* eslint-disable-next-line @next/next/no-img-element */}
