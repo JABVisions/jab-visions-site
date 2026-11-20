@@ -203,6 +203,11 @@ export function saveEdit(pod: HomePod, editor: EditorState, expectedVersion: num
   };
 }
 
+export function confirmedPodVersion(responseOk: boolean, body: { ok?: boolean; version?: unknown } | null) {
+  if (!responseOk || !body?.ok || typeof body.version !== "number" || !Number.isFinite(body.version)) return null;
+  return body.version;
+}
+
 export function petBedCenter(layout: PlacedFurniture[]) {
   const bed = layout.find((item) => item.kind === "bed");
   if (!bed) return null;

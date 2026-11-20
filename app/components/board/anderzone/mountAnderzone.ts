@@ -3,6 +3,7 @@ import { avatarPalette } from "@/lib/anderzone/avatar";
 import { speciesById } from "@/lib/anderzone/dooboo/species";
 import { stepPet } from "@/lib/anderzone/dooboo/pet";
 import { petBedCenter } from "@/lib/anderzone/homePod";
+import { sharesDistrict } from "@/lib/anderzone/room";
 import type { AnderzoneDebug, AnderzoneSession } from "@/lib/anderzone/session";
 import { enterRegion, moveBody, nearestInteractable, TILE, tileKind } from "@/lib/anderzone/world";
 
@@ -182,6 +183,7 @@ export function mountAnderzone(parent: HTMLElement, session: AnderzoneSession, p
           session.regionId = hit.to;
           session.mapEpoch += 1;
           session.prompt = hit.prompt;
+          if (!sharesDistrict(hit.to)) session.remote = [];
         }
         publish();
       }

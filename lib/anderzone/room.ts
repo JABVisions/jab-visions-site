@@ -109,3 +109,25 @@ export function resolveJoinIdentity(verifiedUserId: string | null, devId: string
   if (allowDev && devId.trim()) return devId.trim().slice(0, 80);
   return null;
 }
+
+/** Home Pods are private. Only the hub district is shared with other players. */
+export function sharesDistrict(regionId: string) {
+  return regionId === "anderzone-central";
+}
+
+export function districtJoinFrame(input: {
+  userId: string;
+  name: string;
+  appearance: AvatarAppearance;
+  pet: PetPresence | null;
+  token?: string | null;
+}) {
+  return {
+    type: "join" as const,
+    userId: input.userId,
+    name: input.name,
+    appearance: input.appearance,
+    pet: input.pet,
+    ...(input.token ? { token: input.token } : {}),
+  };
+}

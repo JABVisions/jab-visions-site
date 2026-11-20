@@ -11,10 +11,11 @@ import {
   redoEdit,
   removeItem,
   rotateItem,
+  confirmedPodVersion,
   saveEdit,
   undoEdit,
 } from "./homePod";
-import { createDistrict, interpolatePresence, resolveJoinIdentity } from "./room";
+import { createDistrict, districtJoinFrame, interpolatePresence, resolveJoinIdentity, sharesDistrict } from "./room";
 import {
   bodyHitsSolid,
   directionFromKeys,
@@ -92,6 +93,9 @@ const blocked = placeItem(editor, { id: "lamp-1", kind: "lamp", x: 0, y: 0, rota
 assert(blocked.error, "walls reject furniture");
 const saved = saveEdit(pod, editor, 1);
 assert(saved.ok && saved.pod.version === 2, "a valid layout saves and bumps the version");
+assert(confirmedPodVersion(false, { ok: true, version: 2 }) === null, "a failed Home Pod response is not saved");
+assert(confirmedPodVersion(true, { ok: false, version: 2 }) === null, "a conflict response is not saved");
+assert(confirmedPodVersion(true, { ok: true, version: 2 }) === 2, "a saved Home Pod uses the version the account returned");
 const stale = saveEdit(saved.pod, saved.editor, 1);
 assert(!stale.ok, "a stale layout version is rejected");
 const cancelled = cancelEdit(createEditor(saved.pod.layout));
@@ -127,7 +131,21 @@ const step = district.input("b", { seq: 2, x: 150, y: 120, facing: "e" }, 1_200)
 assert(step.ok, "a short step is accepted");
 const shot = district.snapshot();
 assert(shot.players.length === 2, "two players share the district");
+district.leave("a");
+assert(district.snapshot().players.every((player) => player.id !== "a"), "leaving the hub removes that presence");
 assert(!("seq" in shot.players[0]) && !("path" in shot), "snapshots omit per-frame history");
+assert(sharesDistrict("anderzone-central"), "ANDERZONE CENTRAL is the shared district");
+assert(!sharesDistrict("home-pod"), "a Home Pod does not share the hub district");
+const signedIn = districtJoinFrame({
+  userId: "real-user",
+  name: "Ada",
+  appearance,
+  pet: null,
+  token: "board-access-token",
+});
+assert(signedIn.token === "board-access-token", "a configured room join carries the Board access token");
+const localJoin = districtJoinFrame({ userId: "dev", name: "Ada", appearance, pet: null, token: "" });
+assert(!("token" in localJoin), "a local room join does not invent a token");
 const mid = interpolatePresence({ x: 0, y: 0 }, { x: 10, y: 20 }, 0.5);
 assert(mid.x === 5 && mid.y === 10, "remote players can be interpolated");
 assert(resolveJoinIdentity(null, "dev", false) === null, "a spoofed id is rejected when dev entry is closed");

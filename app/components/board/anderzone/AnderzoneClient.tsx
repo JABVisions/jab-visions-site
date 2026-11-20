@@ -6,6 +6,7 @@ import { DOOBOO_SPECIES } from "@/lib/anderzone/dooboo/species";
 import { adoptFirstDooboo, commandPet, feedPet, type Dooboo } from "@/lib/anderzone/dooboo/pet";
 import {
   cancelEdit,
+  confirmedPodVersion,
   createEditor,
   createStarterPod,
   ensureStarterPod,
@@ -20,6 +21,7 @@ import {
   type EditorState,
   type HomePod,
 } from "@/lib/anderzone/homePod";
+import { districtJoinFrame, sharesDistrict } from "@/lib/anderzone/room";
 import type { AnderzoneSession } from "@/lib/anderzone/session";
 import { enterRegion } from "@/lib/anderzone/world";
 import { supabaseBrowser, isSupabaseConfigured } from "@/lib/supabase/browser";
@@ -65,6 +67,8 @@ export default function AnderzoneClient() {
   const [pod, setPod] = useState<HomePod | null>(null);
   const [note, setNote] = useState("");
   const [userId, setUserId] = useState("");
+  const accountReady = useRef(false);
+  const avatarSaveTimer = useRef<number | null>(null);
 
   useEffect(() => {
     const media = window.matchMedia("(prefers-reduced-motion: reduce)");
@@ -105,6 +109,7 @@ export default function AnderzoneClient() {
           if (body?.appearance) nextAvatar = sanitizeAvatar(body.appearance);
           if (Array.isArray(body?.dooboos) && body.dooboos[0]) nextPet = body.dooboos[0];
           if (body?.displayName) nextName = body.displayName;
+          accountReady.current = true;
           persistenceNote = "Saved to your Board account.";
         }
       } catch {
@@ -171,6 +176,7 @@ export default function AnderzoneClient() {
     return () => {
       cancelled = true;
       destroy();
+      if (avatarSaveTimer.current) window.clearTimeout(avatarSaveTimer.current);
     };
   }, []);
 
@@ -195,28 +201,90 @@ export default function AnderzoneClient() {
     if (!url || !userId || !ready) return;
     let socket: WebSocket;
     let seq = 1;
+    let present = false;
+    let joining = false;
+    let refused = false;
     try {
       socket = new WebSocket(url);
     } catch {
       setConnection("failed");
       return;
     }
-    socket.onopen = () => {
-      setConnection("online");
-      socket.send(JSON.stringify({ type: "join", userId, name: "Ander", appearance: avatar, pet }));
+    const petFrame = (session: AnderzoneSession) =>
+      session.pet
+        ? { name: session.pet.name, speciesId: session.pet.speciesId, behavior: session.pet.behavior, x: session.pet.x, y: session.pet.y }
+        : null;
+    const sendJoin = async () => {
+      const session = sessionRef.current;
+      if (!session || socket.readyState !== WebSocket.OPEN) return;
+      let token = "";
+      if (isSupabaseConfigured()) {
+        try {
+          const { data } = await supabaseBrowser().auth.getSession();
+          token = data.session?.access_token || "";
+        } catch {
+          token = "";
+        }
+      }
+      if (socket.readyState !== WebSocket.OPEN) return;
+      socket.send(JSON.stringify(districtJoinFrame({
+        userId,
+        token,
+        name: session.name || "Ander",
+        appearance: session.avatar,
+        pet: petFrame(session),
+      })));
     };
     socket.onerror = () => setConnection("failed");
     socket.onclose = () => setConnection((current) => (current === "online" ? "failed" : current));
     socket.onmessage = (event) => {
       const session = sessionRef.current;
       if (!session) return;
-      const message = JSON.parse(String(event.data)) as { snapshot?: AnderzoneSession["remote"] extends never ? never : { players: AnderzoneSession["remote"] } };
-      const players = (message as { snapshot?: { players?: AnderzoneSession["remote"] } }).snapshot?.players;
+      let message: { type?: string; message?: string; snapshot?: { players?: AnderzoneSession["remote"] } };
+      try {
+        message = JSON.parse(String(event.data)) as typeof message;
+      } catch {
+        return;
+      }
+      if (message.type === "error") {
+        present = false;
+        refused = true;
+        session.remote = [];
+        setConnection("failed");
+        setNote(message.message || "District refused the join.");
+        return;
+      }
+      if (message.type === "joined") {
+        present = true;
+        refused = false;
+        setConnection("online");
+      }
+      if (!sharesDistrict(session.regionId)) {
+        session.remote = [];
+        return;
+      }
+      const players = message.snapshot?.players;
       if (players) session.remote = players.filter((player) => player.id !== userId);
     };
     const timer = window.setInterval(() => {
       const session = sessionRef.current;
-      if (!session || socket.readyState !== WebSocket.OPEN) return;
+      if (!session || socket.readyState !== WebSocket.OPEN || refused) return;
+      if (!sharesDistrict(session.regionId)) {
+        if (session.remote.length) session.remote = [];
+        if (present) {
+          present = false;
+          socket.send(JSON.stringify({ type: "leave" }));
+        }
+        return;
+      }
+      if (!present) {
+        if (joining) return;
+        joining = true;
+        void sendJoin().finally(() => {
+          joining = false;
+        });
+        return;
+      }
       seq += 1;
       socket.send(JSON.stringify({
         type: "input",
@@ -224,7 +292,7 @@ export default function AnderzoneClient() {
         x: session.player.x,
         y: session.player.y,
         facing: session.player.facing,
-        pet: session.pet ? { name: session.pet.name, speciesId: session.pet.speciesId, behavior: session.pet.behavior, x: session.pet.x, y: session.pet.y } : null,
+        pet: petFrame(session),
       }));
     }, 100);
     return () => {
@@ -286,6 +354,26 @@ export default function AnderzoneClient() {
     edit(result.editor, result.error);
   };
 
+  const chooseAvatar = (next: AvatarAppearance) => {
+    setAvatar(next);
+    if (sessionRef.current) sessionRef.current.avatar = next;
+    if (!accountReady.current) return;
+    if (avatarSaveTimer.current) window.clearTimeout(avatarSaveTimer.current);
+    avatarSaveTimer.current = window.setTimeout(() => {
+      const appearance = sessionRef.current?.avatar ?? next;
+      void fetch("/api/board/anderzone", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          appearance,
+          displayName: sessionRef.current?.name || "Ander",
+        }),
+      }).then(async (response) => {
+        if (!response.ok) setNote("Avatar could not be saved to your Board account.");
+      }).catch(() => setNote("Avatar could not be saved to your Board account."));
+    }, 400);
+  };
+
   const commitPod = async () => {
     if (!editor || !pod) return;
     const saved = saveEdit(pod, editor, pod.version);
@@ -293,14 +381,33 @@ export default function AnderzoneClient() {
       setNote(saved.reason === "version" ? "This Home Pod changed somewhere else. Reload before saving." : saved.reason);
       return;
     }
-    setPod(saved.pod);
-    setEditor(saved.editor);
-    setNote("Home Pod saved.");
-    await fetch("/api/board/anderzone/pod", {
-      method: "PUT",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ layout: saved.pod.layout, version: pod.version, visitorAccess: saved.pod.visitorAccess }),
-    }).catch(() => undefined);
+    if (!accountReady.current) {
+      setPod(saved.pod);
+      setEditor(saved.editor);
+      setNote("Home Pod saved.");
+      return;
+    }
+    try {
+      const response = await fetch("/api/board/anderzone/pod", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ layout: saved.pod.layout, version: pod.version, visitorAccess: saved.pod.visitorAccess }),
+      });
+      const body = (await response.json().catch(() => null)) as { ok?: boolean; version?: unknown } | null;
+      const version = confirmedPodVersion(response.ok, body);
+      if (version === null) {
+        setNote(response.status === 409
+          ? "This Home Pod changed somewhere else. Reload before saving."
+          : "Home Pod could not be saved.");
+        return;
+      }
+      const confirmed = { ...saved.pod, version };
+      setPod(confirmed);
+      setEditor({ ...saved.editor, saved: confirmed.layout });
+      setNote("Home Pod saved.");
+    } catch {
+      setNote("Home Pod could not be saved.");
+    }
   };
 
   return (
@@ -331,11 +438,11 @@ export default function AnderzoneClient() {
       <div className="anderzone-panels">
         <fieldset>
           <legend>Ander</legend>
-          <label>Skin<select value={avatar.skin} onChange={(event) => setAvatar({ ...avatar, skin: event.target.value as AvatarAppearance["skin"] })}>{SKIN_TONES.map((item) => <option key={item}>{item}</option>)}</select></label>
-          <label>Eyes<select value={avatar.eyes} onChange={(event) => setAvatar({ ...avatar, eyes: event.target.value as AvatarAppearance["eyes"] })}>{EYE_STYLES.map((item) => <option key={item}>{item}</option>)}</select></label>
-          <label>Hair<select value={avatar.hair} onChange={(event) => setAvatar({ ...avatar, hair: event.target.value as AvatarAppearance["hair"] })}>{HAIR_STYLES.map((item) => <option key={item}>{item}</option>)}</select></label>
-          <label>Clothes<select value={avatar.clothing} onChange={(event) => setAvatar({ ...avatar, clothing: event.target.value as AvatarAppearance["clothing"] })}>{CLOTHING.map((item) => <option key={item}>{item}</option>)}</select></label>
-          <label>Extra<select value={avatar.accessory} onChange={(event) => setAvatar({ ...avatar, accessory: event.target.value as AvatarAppearance["accessory"] })}>{ACCESSORIES.map((item) => <option key={item}>{item}</option>)}</select></label>
+          <label>Skin<select value={avatar.skin} onChange={(event) => chooseAvatar({ ...avatar, skin: event.target.value as AvatarAppearance["skin"] })}>{SKIN_TONES.map((item) => <option key={item}>{item}</option>)}</select></label>
+          <label>Eyes<select value={avatar.eyes} onChange={(event) => chooseAvatar({ ...avatar, eyes: event.target.value as AvatarAppearance["eyes"] })}>{EYE_STYLES.map((item) => <option key={item}>{item}</option>)}</select></label>
+          <label>Hair<select value={avatar.hair} onChange={(event) => chooseAvatar({ ...avatar, hair: event.target.value as AvatarAppearance["hair"] })}>{HAIR_STYLES.map((item) => <option key={item}>{item}</option>)}</select></label>
+          <label>Clothes<select value={avatar.clothing} onChange={(event) => chooseAvatar({ ...avatar, clothing: event.target.value as AvatarAppearance["clothing"] })}>{CLOTHING.map((item) => <option key={item}>{item}</option>)}</select></label>
+          <label>Extra<select value={avatar.accessory} onChange={(event) => chooseAvatar({ ...avatar, accessory: event.target.value as AvatarAppearance["accessory"] })}>{ACCESSORIES.map((item) => <option key={item}>{item}</option>)}</select></label>
         </fieldset>
         {action === "adopt" || !pet ? (
           <fieldset>

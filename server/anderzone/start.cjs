@@ -1,19 +1,31 @@
-const fs = require("node:fs");
+const { register, stripTypeScriptTypes } = require("node:module");
 const path = require("node:path");
-const Module = require("node:module");
-const ts = require("typescript");
+const { pathToFileURL } = require("node:url");
 
-const root = path.resolve(__dirname, "../..");
-const resolve = Module._resolveFilename;
-Module._resolveFilename = function (name, ...args) {
-  return resolve.call(this, name.startsWith("@/") ? path.join(root, name.slice(2)) : name, ...args);
-};
-require.extensions[".ts"] = function (module, filename) {
-  const result = ts.transpileModule(fs.readFileSync(filename, "utf8"), {
-    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true },
-    fileName: filename,
+const quiet = "--disable-warning=ExperimentalWarning";
+if (!process.execArgv.includes(quiet)) {
+  const { spawn } = require("node:child_process");
+  const child = spawn(process.execPath, [quiet, ...process.execArgv, __filename], {
+    stdio: "inherit",
+    env: process.env,
   });
-  module._compile(result.outputText, filename);
-};
+  child.on("exit", (code, signal) => {
+    if (signal) process.kill(process.pid, signal);
+    else process.exit(code ?? 1);
+  });
+  return;
+}
 
-require("./listen.ts");
+if (typeof stripTypeScriptTypes !== "function") {
+  console.error(
+    "ANDERZONE room needs Node.js 22.6 or newer. It runs the TypeScript sources with Node's built-in type stripper, so a production install does not need the typescript package."
+  );
+  process.exit(1);
+}
+
+register(pathToFileURL(path.join(__dirname, "ts-hooks.mjs")).href);
+
+import(pathToFileURL(path.join(__dirname, "listen.ts")).href).catch((error) => {
+  console.error(error);
+  process.exit(1);
+});

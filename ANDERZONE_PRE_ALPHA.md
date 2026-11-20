@@ -41,7 +41,9 @@ Defined and not enterable: Pixel Paradise, Whisper Woods, Outer Grid, Undergroun
 | `NEXT_PUBLIC_ANDERZONE_ROOM_URL` | Optional, e.g. `ws://127.0.0.1:2567` |
 | `ANDERZONE_ROOM_PORT` | Room process port, default `2567` |
 
-When Supabase is missing, the page plays with a browser-local draft and says so. The room process accepts a dev id only when Supabase is not configured. With Supabase configured, join requires a verified access token.
+When Supabase is missing, the page plays with a browser-local draft and says so. The room process accepts a dev id only when Supabase is not configured. With Supabase configured, the client sends the Board access token on join and the room accepts that join only after `auth/v1/user` verifies it. The district stays connected only after a `joined` frame. A refused join is shown as a failure.
+
+Avatar selectors save through `PUT /api/board/anderzone` once the account profile has loaded. A Home Pod save stays unsaved until `PUT /api/board/anderzone/pod` returns `ok` and a version. Entering a Home Pod sends `leave`, drops hub players from that map, and stops publishing coordinates until the player returns to ANDERZONE CENTRAL.
 
 ## Database
 
@@ -59,6 +61,8 @@ High-frequency positions are not columns that the client streams into. Saved pet
 npm run anderzone:server
 ```
 
+The process needs Node.js 22.6 or newer. `server/anderzone/start.cjs` loads the TypeScript sources with Node's built-in type stripper, so `npm ci --omit=dev` does not need the `typescript` package. A malformed socket frame is ignored and does not stop the process.
+
 Point `NEXT_PUBLIC_ANDERZONE_ROOM_URL` at that process. On Vercel, run the same command on a long-lived host and set the public URL. Do not expect the Next.js deployment to keep the room alive.
 
 ## Manual checks
@@ -72,8 +76,12 @@ Point `NEXT_PUBLIC_ANDERZONE_ROOM_URL` at that process. On Vercel, run the same 
 
 ## Verification log
 
-- `node scripts/run-board-checks.cjs lib/anderzone/anderzone.check.ts` passed.
-- Typecheck of the Anderzone files passed. A stale generated type for a removed dev page was the only other `tsc` error and was deleted locally.
+- `node scripts/run-board-checks.cjs lib/anderzone/anderzone.check.ts` passed, including Home Pod version confirmation, hub-only presence, and the signed-in join frame.
+- `npx tsc --noEmit` passed.
+- A room on port 25991 ignored a malformed frame, kept both players, removed a player who left for a Home Pod, and respawned that player at the hub spawn. The same process did not load the `typescript` package.
+- A room started with Supabase environment variables rejected joins that had no token and joins with a token the auth server could not verify. The process stayed up.
+- Headless Chrome at `http://127.0.0.1:3010/board/anderzone`, with `NEXT_PUBLIC_ANDERZONE_ROOM_URL` pointed at that room, connected the district, changed the hair select without calling the account save (Supabase is not configured here), walked into the Home Pod, disappeared from the other player's hub snapshot, and returned to the hub spawn.
+- An earlier typecheck of the Anderzone files passed. A stale generated type for a removed dev page was the only other `tsc` error and was deleted locally.
 - Chrome at a phone size opened `/board/anderzone`, showed ANDERZONE CENTRAL, drew a canvas, moved east with the keyboard (x 112 → 172), and adopted Pip. The pet appeared beside the player. The page stated that the draft was local because Supabase is not configured here.
 - A desktop view showed the pixel avatar and nameplate, the adoption-center door, the plaza sign, and the purple Home Pod portal. Explore still rendered Profile Galaxy plus the new portal.
 - Two websocket clients joined `ws://127.0.0.1:2567` and both names were in the snapshot. A later rejoin of Bea was still at the spawn point after a far input.
@@ -81,7 +89,7 @@ Point `NEXT_PUBLIC_ANDERZONE_ROOM_URL` at that process. On Vercel, run the same 
 Not verified, so not treated as done:
 
 - The SQL has not been applied to the live Supabase project.
-- Two signed-in Board accounts were not joined from browsers.
+- Two signed-in Board accounts were not joined from browsers. The client sends `getSession().access_token` on join, and the room rejects a join when that token does not verify, but this environment has no Board session to exercise the success path.
 - A physical iPad was not used. The phone viewport and on-screen buttons were.
-- The Home Pod portal and furniture tools were not clicked in the browser. Their rules passed the check file.
+- The Home Pod furniture tools were not clicked in the browser. Placement, undo, and version rules passed the check file. The portal itself was used from the keyboard.
 - Drop Studio, Work Boards, banking, and Drop Pad OS were not re-walked. Their files were not edited, except the Explore page gained a portal above the existing market.
