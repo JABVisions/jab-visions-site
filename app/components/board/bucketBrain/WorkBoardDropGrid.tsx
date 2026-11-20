@@ -1,7 +1,8 @@
 "use client";
 
 import styles from "./workBoardPreview.module.css";
-import type { WorkBoardLibraryDrop, WorkBoardSection } from "@/lib/board/brain/workBoardPreview";
+import { LinkDropThumb } from "./LinkDropPreview";
+import { workBoardLinkUrl, type WorkBoardLibraryDrop, type WorkBoardSection } from "@/lib/board/brain/workBoardPreview";
 import { kindEmoji, kindLabel } from "@/lib/board/utils";
 
 export default function WorkBoardDropGrid({
@@ -23,6 +24,7 @@ export default function WorkBoardDropGrid({
     <div className={styles.grid} data-space-scroll>
       {drops.map((drop) => {
         const kind = drop.kind === "media" ? "media" : drop.kind;
+        const linkUrl = workBoardLinkUrl(drop);
         return (
           <button
             key={drop.id}
@@ -31,7 +33,9 @@ export default function WorkBoardDropGrid({
             onClick={() => onOpen(drop)}
           >
             <span className={styles.thumb}>
-              {drop.mediaUrl && drop.mediaType === "image" ? (
+              {linkUrl ? (
+                <LinkDropThumb drop={drop} href={linkUrl} />
+              ) : drop.mediaUrl && drop.mediaType === "image" ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img src={drop.mediaUrl} alt="" />
               ) : drop.mediaUrl && drop.mediaType === "video" ? (

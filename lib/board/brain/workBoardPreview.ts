@@ -17,6 +17,7 @@ export type WorkBoardLibraryDrop = {
   mediaType?: "image" | "video" | "audio" | "file" | null;
   embedUrl?: string | null;
   url?: string | null;
+  previewImage?: string | null;
   text?: string | null;
   source: "board_assets" | "board_drops";
   section: WorkBoardSection;
@@ -111,11 +112,42 @@ function libraryKindFromBoardDrop(type: string, mediaKind: string): WorkBoardLib
   const t = type.toLowerCase();
   if (t.includes("youtube")) return "youtube";
   if (t.includes("music")) return "music";
-  if (mediaKind === "audio" || mediaKind === "video" || mediaKind === "image") return "media";
   if (t.includes("doc")) return "doc";
   if (t.includes("thought") || t.includes("note")) return "note";
   if (t.includes("link") || t.includes("news") || t.includes("pay")) return "link";
+  if (mediaKind === "audio" || mediaKind === "video" || mediaKind === "image") return "media";
   return "media";
+}
+
+const DIRECT_IMAGE = /\.(?:png|jpe?g|gif|webp|avif|svg)(?:$|[?#])/i;
+
+export function looksLikeImageUrl(value?: string | null) {
+  const raw = asString(value);
+  if (!raw) return false;
+  try {
+    return DIRECT_IMAGE.test(new URL(raw).pathname);
+  } catch {
+    return DIRECT_IMAGE.test(raw);
+  }
+}
+
+export function workBoardLinkUrl(drop: Pick<WorkBoardLibraryDrop, "kind" | "url">) {
+  if (drop.kind !== "link" && drop.kind !== "doc") return null;
+  const url = asString(drop.url);
+  if (!/^https?:\/\//i.test(url)) return null;
+  return url;
+}
+
+export function storedLinkThumbnail(
+  drop: Pick<WorkBoardLibraryDrop, "url" | "mediaUrl" | "previewImage">
+) {
+  const page = asString(drop.url);
+  const preview = asString(drop.previewImage);
+  if (preview && (preview !== page || looksLikeImageUrl(preview))) return preview;
+  const media = asString(drop.mediaUrl);
+  if (media && looksLikeImageUrl(media)) return media;
+  if (page && looksLikeImageUrl(page)) return page;
+  return null;
 }
 
 export function libraryDropFromAssetRow(row: AssetRow, section: WorkBoardSection): WorkBoardLibraryDrop | null {
@@ -137,6 +169,11 @@ export function libraryDropFromAssetRow(row: AssetRow, section: WorkBoardSection
       : kind === "media"
         ? "image"
         : null;
+  const pageUrl = asString(payload?.url);
+  const isPageLink = kind === "link" || kind === "doc";
+  const rawMedia = publicMediaUrl(payload?.mediaUrl);
+  const storedFile =
+    mediaType === "image" || mediaType === "video" || mediaType === "audio" || mediaType === "file";
 
   return {
     id,
@@ -144,10 +181,11 @@ export function libraryDropFromAssetRow(row: AssetRow, section: WorkBoardSection
     kind,
     createdAt: Date.parse(asString(row.created_at)) || 0,
     description: asString(row.description) || asString(payload?.text) || null,
-    mediaUrl: publicMediaUrl(payload?.mediaUrl) || publicMediaUrl(payload?.url),
+    mediaUrl: isPageLink ? (storedFile ? rawMedia : null) : rawMedia || (kind === "media" ? publicMediaUrl(pageUrl) : null),
     mediaType,
     embedUrl: asString(payload?.embedUrl) || null,
-    url: asString(payload?.url) || asString(payload?.embedUrl) || null,
+    url: pageUrl || asString(payload?.embedUrl) || null,
+    previewImage: publicMediaUrl(payload?.previewImage) || publicMediaUrl(payload?.image) || null,
     text: asString(payload?.text) || null,
     source: "board_assets",
     section,
@@ -171,12 +209,19 @@ export function libraryDropFromBoardDrop(raw: unknown): WorkBoardLibraryDrop | n
       : kind === "media"
         ? "image"
         : null;
-  const mediaUrl =
-    publicMediaUrl(drop.mediaUrl) ||
-    publicMediaUrl(drop.url) ||
-    publicMediaUrl(drop.previewImage);
+  const pageUrl = asString(drop.linkUrl) || asString(drop.url) || asString(drop.paymentLink) || null;
+  const previewImage = publicMediaUrl(drop.previewImage);
+  const rawMedia = publicMediaUrl(drop.mediaUrl);
+  const isPageLink = kind === "link" || kind === "doc";
+  const storedFile =
+    mediaType === "image" || mediaType === "video" || mediaType === "audio";
+  const mediaUrl = isPageLink
+    ? storedFile
+      ? rawMedia
+      : null
+    : rawMedia || publicMediaUrl(drop.url) || previewImage;
   const embedUrl = asString(drop.embedUrl);
-  if (!title && !mediaUrl && !embedUrl) return null;
+  if (!title && !mediaUrl && !embedUrl && !pageUrl && !previewImage) return null;
 
   return {
     id,
@@ -187,7 +232,8 @@ export function libraryDropFromBoardDrop(raw: unknown): WorkBoardLibraryDrop | n
     mediaUrl,
     mediaType,
     embedUrl: embedUrl || null,
-    url: asString(drop.linkUrl) || asString(drop.url) || asString(drop.paymentLink) || null,
+    url: pageUrl,
+    previewImage,
     text: asString(drop.thoughtText) || asString(drop.description) || null,
     source: "board_drops",
     section: "portfolio",
