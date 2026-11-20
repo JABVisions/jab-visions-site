@@ -3,7 +3,12 @@
 import styles from "./workBoardPreview.module.css";
 import BoardFeedVideo from "@/app/components/board/BoardFeedVideo";
 import VoiceDropSoundboard from "@/app/components/board/VoiceDropSoundboard";
-import type { WorkBoardLibraryDrop } from "@/lib/board/brain/workBoardPreview";
+import { LinkDropCard } from "./LinkDropPreview";
+import {
+  looksLikeImageUrl,
+  workBoardLinkUrl,
+  type WorkBoardLibraryDrop,
+} from "@/lib/board/brain/workBoardPreview";
 import { kindLabel } from "@/lib/board/utils";
 
 export default function WorkBoardDropViewer({
@@ -14,6 +19,7 @@ export default function WorkBoardDropViewer({
   onClose: () => void;
 }) {
   const kind = drop.kind === "media" ? "media" : drop.kind;
+  const linkUrl = workBoardLinkUrl(drop);
 
   return (
     <div className={styles.viewer} role="dialog" aria-modal="true" aria-labelledby="work-board-drop-title">
@@ -24,9 +30,16 @@ export default function WorkBoardDropViewer({
             <div className={styles.viewerKicker}>{kindLabel(kind)}</div>
             <h2 id="work-board-drop-title" className={styles.viewerTitle}>{drop.title}</h2>
           </div>
-          <button type="button" className={styles.back} onClick={onClose}>
-            Close
-          </button>
+          <div className={styles.viewerActions}>
+            {linkUrl ? (
+              <a className={styles.dropLink} href={linkUrl} target="_blank" rel="noopener noreferrer">
+                Open link
+              </a>
+            ) : null}
+            <button type="button" className={styles.back} onClick={onClose}>
+              Close
+            </button>
+          </div>
         </div>
         <WorkBoardDropBody drop={drop} expanded />
       </div>
@@ -65,7 +78,11 @@ export function WorkBoardDropBody({
       </div>
     );
   }
-  if (drop.mediaUrl && drop.mediaType !== "file") {
+  const linkUrl = workBoardLinkUrl(drop);
+  if (linkUrl) {
+    return <LinkDropCard drop={drop} href={linkUrl} />;
+  }
+  if (drop.mediaUrl && drop.mediaType !== "file" && (drop.mediaType === "image" || looksLikeImageUrl(drop.mediaUrl))) {
     return (
       <div className={styles.media}>
         {/* eslint-disable-next-line @next/next/no-img-element */}

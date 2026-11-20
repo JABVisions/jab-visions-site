@@ -17,6 +17,7 @@ export type WorkBoardLibraryDrop = {
   mediaType?: "image" | "video" | "audio" | "file" | null;
   embedUrl?: string | null;
   url?: string | null;
+  previewImage?: string | null;
   text?: string | null;
   source: "board_assets" | "board_drops";
   section: WorkBoardSection;
@@ -107,15 +108,95 @@ function libraryKindFromAsset(kind: string): WorkBoardLibraryKind {
   return "media";
 }
 
-function libraryKindFromBoardDrop(type: string, mediaKind: string): WorkBoardLibraryKind {
+function libraryKindFromBoardDrop(
+  type: string,
+  mediaKind: string,
+  paymentHref?: string | null
+): WorkBoardLibraryKind {
   const t = type.toLowerCase();
+  const hasMedia = mediaKind === "audio" || mediaKind === "video" || mediaKind === "image";
   if (t.includes("youtube")) return "youtube";
   if (t.includes("music")) return "music";
-  if (mediaKind === "audio" || mediaKind === "video" || mediaKind === "image") return "media";
   if (t.includes("doc")) return "doc";
   if (t.includes("thought") || t.includes("note")) return "note";
-  if (t.includes("link") || t.includes("news") || t.includes("pay")) return "link";
+  if (t.includes("link") || t.includes("news")) return "link";
+  if (t.includes("pay")) {
+    if (paymentHref) return "link";
+    if (hasMedia) return "media";
+  }
+  if (hasMedia) return "media";
   return "media";
+}
+
+const DIRECT_IMAGE = /\.(?:png|jpe?g|gif|webp|avif|svg)(?:$|[?#])/i;
+
+export function looksLikeImageUrl(value?: string | null) {
+  const raw = asString(value);
+  if (!raw) return false;
+  try {
+    return DIRECT_IMAGE.test(new URL(raw).pathname);
+  } catch {
+    return DIRECT_IMAGE.test(raw);
+  }
+}
+
+function firstHttpUrl(value: unknown) {
+  const raw = asString(value);
+  if (/^https?:\/\//i.test(raw)) return raw;
+  const match = raw.match(/https?:\/\/[^\s<>"')\]]+/i);
+  return match ? match[0] : null;
+}
+
+function firstHttpUrlFrom(values: unknown[]) {
+  for (const value of values) {
+    const found = firstHttpUrl(value);
+    if (found) return found;
+  }
+  return null;
+}
+
+function collectHttpUrls(value: unknown, found: string[], depth = 0) {
+  if (depth > 5 || found.length > 24) return;
+  if (typeof value === "string") {
+    const url = firstHttpUrl(value);
+    if (url && !found.includes(url)) found.push(url);
+    return;
+  }
+  if (!value || typeof value !== "object") return;
+  const entries = Array.isArray(value) ? value : Object.values(value);
+  for (const item of entries) collectHttpUrls(item, found, depth + 1);
+}
+
+function looksLikeMediaFile(url: string) {
+  return /\.(?:mp4|webm|mov|m4v|mp3|wav|m4a|aac|ogg|flac)(?:$|[?#])/i.test(url);
+}
+
+/** Page address for a link or doc, including URLs nested beside the description. */
+function pageAddress(explicit: unknown[], records: unknown[]) {
+  const direct = firstHttpUrlFrom(explicit);
+  if (direct) return direct;
+  const found: string[] = [];
+  for (const record of records) collectHttpUrls(record, found);
+  return found.find((url) => !looksLikeImageUrl(url) && !looksLikeMediaFile(url)) || found[0] || null;
+}
+
+export function workBoardLinkUrl(
+  drop: Pick<WorkBoardLibraryDrop, "kind" | "url" | "description" | "text">
+) {
+  if (drop.kind !== "link" && drop.kind !== "doc") return null;
+  return firstHttpUrlFrom([drop.url, drop.description, drop.text]);
+}
+
+export function storedLinkThumbnail(
+  drop: Pick<WorkBoardLibraryDrop, "url" | "mediaUrl" | "previewImage">
+) {
+  const page = asString(drop.url);
+  const preview = asString(drop.previewImage);
+  if (preview && (preview !== page || looksLikeImageUrl(preview))) return preview;
+  const media = asString(drop.mediaUrl);
+  if (media && looksLikeImageUrl(media)) return media;
+  if (page && looksLikeImageUrl(page)) return page;
+  return null;
 }
 
 export function libraryDropFromAssetRow(row: AssetRow, section: WorkBoardSection): WorkBoardLibraryDrop | null {
@@ -137,6 +218,16 @@ export function libraryDropFromAssetRow(row: AssetRow, section: WorkBoardSection
       : kind === "media"
         ? "image"
         : null;
+  const isPageLink = kind === "link" || kind === "doc";
+  const pageUrl = isPageLink
+    ? pageAddress(
+        [payload?.url, payload?.linkUrl, payload?.href, payload?.link, payload?.embedUrl, row.description, payload?.text],
+        [payload, row.description]
+      )
+    : asString(payload?.url);
+  const rawMedia = publicMediaUrl(payload?.mediaUrl);
+  const storedFile =
+    mediaType === "image" || mediaType === "video" || mediaType === "audio" || mediaType === "file";
 
   return {
     id,
@@ -144,10 +235,11 @@ export function libraryDropFromAssetRow(row: AssetRow, section: WorkBoardSection
     kind,
     createdAt: Date.parse(asString(row.created_at)) || 0,
     description: asString(row.description) || asString(payload?.text) || null,
-    mediaUrl: publicMediaUrl(payload?.mediaUrl) || publicMediaUrl(payload?.url),
+    mediaUrl: isPageLink ? (storedFile ? rawMedia : null) : rawMedia || (kind === "media" ? publicMediaUrl(pageUrl) : null),
     mediaType,
     embedUrl: asString(payload?.embedUrl) || null,
-    url: asString(payload?.url) || asString(payload?.embedUrl) || null,
+    url: pageUrl || asString(payload?.embedUrl) || null,
+    previewImage: publicMediaUrl(payload?.previewImage) || publicMediaUrl(payload?.image) || null,
     text: asString(payload?.text) || null,
     source: "board_assets",
     section,
@@ -164,19 +256,34 @@ export function libraryDropFromBoardDrop(raw: unknown): WorkBoardLibraryDrop | n
 
   const type = asString(drop.type);
   const mediaKind = asString(drop.mediaKind).toLowerCase();
-  const kind = libraryKindFromBoardDrop(type, mediaKind);
+  const paymentHref = asString(drop.linkUrl) || asString(drop.paymentLink) || null;
+  const kind = libraryKindFromBoardDrop(type, mediaKind, paymentHref);
   const mediaType =
     mediaKind === "video" || mediaKind === "audio" || mediaKind === "image"
       ? mediaKind
       : kind === "media"
         ? "image"
         : null;
-  const mediaUrl =
-    publicMediaUrl(drop.mediaUrl) ||
-    publicMediaUrl(drop.url) ||
-    publicMediaUrl(drop.previewImage);
+  const pageUrl =
+    paymentHref ||
+    (kind === "link" || kind === "doc"
+      ? pageAddress(
+          [drop.url, drop.href, drop.link, drop.linkUrl, drop.embedUrl, drop.description, drop.thoughtText, drop.previewDescription],
+          [drop]
+        )
+      : null);
+  const previewImage = publicMediaUrl(drop.previewImage);
+  const rawMedia = publicMediaUrl(drop.mediaUrl);
+  const isPageLink = kind === "link" || kind === "doc";
+  const storedFile =
+    mediaType === "image" || mediaType === "video" || mediaType === "audio";
+  const mediaUrl = isPageLink
+    ? storedFile
+      ? rawMedia
+      : null
+    : rawMedia || publicMediaUrl(drop.url) || previewImage;
   const embedUrl = asString(drop.embedUrl);
-  if (!title && !mediaUrl && !embedUrl) return null;
+  if (!title && !mediaUrl && !embedUrl && !pageUrl && !previewImage) return null;
 
   return {
     id,
@@ -187,7 +294,8 @@ export function libraryDropFromBoardDrop(raw: unknown): WorkBoardLibraryDrop | n
     mediaUrl,
     mediaType,
     embedUrl: embedUrl || null,
-    url: asString(drop.linkUrl) || asString(drop.url) || asString(drop.paymentLink) || null,
+    url: pageUrl,
+    previewImage,
     text: asString(drop.thoughtText) || asString(drop.description) || null,
     source: "board_drops",
     section: "portfolio",
