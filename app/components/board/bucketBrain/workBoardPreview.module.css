@@ -259,6 +259,14 @@
   margin-bottom: 12px;
 }
 
+.viewerActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 .viewerKicker {
   font-size: 9px;
   letter-spacing: 0.24em;

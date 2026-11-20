@@ -19,6 +19,7 @@ export default function WorkBoardDropViewer({
   onClose: () => void;
 }) {
   const kind = drop.kind === "media" ? "media" : drop.kind;
+  const linkUrl = workBoardLinkUrl(drop);
 
   return (
     <div className={styles.viewer} role="dialog" aria-modal="true" aria-labelledby="work-board-drop-title">
@@ -29,9 +30,16 @@ export default function WorkBoardDropViewer({
             <div className={styles.viewerKicker}>{kindLabel(kind)}</div>
             <h2 id="work-board-drop-title" className={styles.viewerTitle}>{drop.title}</h2>
           </div>
-          <button type="button" className={styles.back} onClick={onClose}>
-            Close
-          </button>
+          <div className={styles.viewerActions}>
+            {linkUrl ? (
+              <a className={styles.dropLink} href={linkUrl} target="_blank" rel="noopener noreferrer">
+                Open link
+              </a>
+            ) : null}
+            <button type="button" className={styles.back} onClick={onClose}>
+              Close
+            </button>
+          </div>
         </div>
         <WorkBoardDropBody drop={drop} expanded />
       </div>

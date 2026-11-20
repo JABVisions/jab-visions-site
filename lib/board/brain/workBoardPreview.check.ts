@@ -109,6 +109,44 @@ const payCheckout = libraryDropFromBoardDrop({
 });
 
 assert(payCheckout?.kind === "link", "a Pay Drop with a checkout link stays a link");
-assert(workBoardLinkUrl(payCheckout!) === "https://buy.stripe.com/test", "the Drop link opens the checkout page");
+assert(workBoardLinkUrl(payCheckout!) === "https://buy.stripe.com/test", "the Open link opens the checkout page");
+
+const describedLink = libraryDropFromAssetRow(
+  {
+    id: "described-link",
+    kind: "link",
+    title: "Portfolio",
+    description: "My production portfolio, including shorts. https://example.com/portfolio",
+    payload: {
+      library: { isPortfolio: true },
+      linkUrl: "https://example.com/portfolio",
+    },
+  },
+  "portfolio"
+);
+
+assert(describedLink?.url === "https://example.com/portfolio", "a link stored beside the description is kept");
+assert(
+  workBoardLinkUrl(describedLink!) === "https://example.com/portfolio",
+  "Open link uses the stored page address"
+);
+
+const nestedLink = libraryDropFromAssetRow(
+  {
+    id: "nested-link",
+    kind: "link",
+    title: "Portfolio",
+    description: "My production portfolio, including shorts, branded content, events, and music videos",
+    payload: {
+      library: { isPortfolio: true },
+      text: "My production portfolio, including shorts, branded content, events, and music videos",
+      meta: { href: "https://example.com/portfolio" },
+    },
+  },
+  "portfolio"
+);
+
+assert(nestedLink?.url === "https://example.com/portfolio", "a page address stored beside the description is kept");
+assert(workBoardLinkUrl(nestedLink!) === "https://example.com/portfolio", "Open link finds that page address");
 
 console.log("work board link drop checks passed");

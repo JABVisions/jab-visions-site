@@ -140,11 +140,51 @@ export function looksLikeImageUrl(value?: string | null) {
   }
 }
 
-export function workBoardLinkUrl(drop: Pick<WorkBoardLibraryDrop, "kind" | "url">) {
+function firstHttpUrl(value: unknown) {
+  const raw = asString(value);
+  if (/^https?:\/\//i.test(raw)) return raw;
+  const match = raw.match(/https?:\/\/[^\s<>"')\]]+/i);
+  return match ? match[0] : null;
+}
+
+function firstHttpUrlFrom(values: unknown[]) {
+  for (const value of values) {
+    const found = firstHttpUrl(value);
+    if (found) return found;
+  }
+  return null;
+}
+
+function collectHttpUrls(value: unknown, found: string[], depth = 0) {
+  if (depth > 5 || found.length > 24) return;
+  if (typeof value === "string") {
+    const url = firstHttpUrl(value);
+    if (url && !found.includes(url)) found.push(url);
+    return;
+  }
+  if (!value || typeof value !== "object") return;
+  const entries = Array.isArray(value) ? value : Object.values(value);
+  for (const item of entries) collectHttpUrls(item, found, depth + 1);
+}
+
+function looksLikeMediaFile(url: string) {
+  return /\.(?:mp4|webm|mov|m4v|mp3|wav|m4a|aac|ogg|flac)(?:$|[?#])/i.test(url);
+}
+
+/** Page address for a link or doc, including URLs nested beside the description. */
+function pageAddress(explicit: unknown[], records: unknown[]) {
+  const direct = firstHttpUrlFrom(explicit);
+  if (direct) return direct;
+  const found: string[] = [];
+  for (const record of records) collectHttpUrls(record, found);
+  return found.find((url) => !looksLikeImageUrl(url) && !looksLikeMediaFile(url)) || found[0] || null;
+}
+
+export function workBoardLinkUrl(
+  drop: Pick<WorkBoardLibraryDrop, "kind" | "url" | "description" | "text">
+) {
   if (drop.kind !== "link" && drop.kind !== "doc") return null;
-  const url = asString(drop.url);
-  if (!/^https?:\/\//i.test(url)) return null;
-  return url;
+  return firstHttpUrlFrom([drop.url, drop.description, drop.text]);
 }
 
 export function storedLinkThumbnail(
@@ -178,8 +218,13 @@ export function libraryDropFromAssetRow(row: AssetRow, section: WorkBoardSection
       : kind === "media"
         ? "image"
         : null;
-  const pageUrl = asString(payload?.url);
   const isPageLink = kind === "link" || kind === "doc";
+  const pageUrl = isPageLink
+    ? pageAddress(
+        [payload?.url, payload?.linkUrl, payload?.href, payload?.link, payload?.embedUrl, row.description, payload?.text],
+        [payload, row.description]
+      )
+    : asString(payload?.url);
   const rawMedia = publicMediaUrl(payload?.mediaUrl);
   const storedFile =
     mediaType === "image" || mediaType === "video" || mediaType === "audio" || mediaType === "file";
@@ -219,9 +264,14 @@ export function libraryDropFromBoardDrop(raw: unknown): WorkBoardLibraryDrop | n
       : kind === "media"
         ? "image"
         : null;
-  const attachmentUrl = asString(drop.url);
   const pageUrl =
-    paymentHref || (kind === "link" || kind === "doc" ? attachmentUrl : null) || null;
+    paymentHref ||
+    (kind === "link" || kind === "doc"
+      ? pageAddress(
+          [drop.url, drop.href, drop.link, drop.linkUrl, drop.embedUrl, drop.description, drop.thoughtText, drop.previewDescription],
+          [drop]
+        )
+      : null);
   const previewImage = publicMediaUrl(drop.previewImage);
   const rawMedia = publicMediaUrl(drop.mediaUrl);
   const isPageLink = kind === "link" || kind === "doc";

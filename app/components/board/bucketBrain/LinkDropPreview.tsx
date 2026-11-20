@@ -108,7 +108,7 @@ export function LinkDropCard({
       </a>
       {drop.description ? <p className={styles.linkDesc}>{drop.description}</p> : null}
       <a className={styles.dropLink} href={href} target="_blank" rel="noopener noreferrer">
-        Drop link
+        Open link
         {host ? <span className={styles.dropLinkHost}>{host}</span> : null}
       </a>
     </div>
