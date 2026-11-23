@@ -124,10 +124,10 @@ export default function Home() {
           <div className="hero-grid">
             <div className="hero-copy">
               <Image
-                src="/assets/jab-logo@2x.png"
+                src="/assets/jab-visions-mark.png"
                 alt="JAB Visions"
-                width={460}
-                height={105}
+                width={571}
+                height={418}
                 priority
                 className="hero-logo"
               />
@@ -355,10 +355,10 @@ export default function Home() {
         }
 
         .hero-logo {
-          width: min(440px, 100%);
+          width: min(320px, 100%);
           height: auto;
-          filter: drop-shadow(0 0 22px rgba(195, 255, 0, 0.72));
-          margin-bottom: 22px;
+          filter: drop-shadow(0 0 18px rgba(48, 255, 140, 0.4));
+          margin-bottom: 18px;
         }
 
         .eyebrow,
@@ -768,6 +768,11 @@ export default function Home() {
 
           .terminal-topline {
             font-size: 9px;
+          }
+
+          .hero-logo {
+            width: min(240px, 86%);
+            margin-bottom: 14px;
           }
 
           .hero-actions,
