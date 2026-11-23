@@ -118,7 +118,7 @@ export default function Home() {
         <div className="hero-terminal">
           <div className="terminal-topline">
             <span>JAB VISIONS ECOSYSTEM TERMINAL</span>
-            <span>THOSE RYDERZ ERA</span>
+            <span>Where Imagination Meets Reality</span>
           </div>
 
           <Image
@@ -337,7 +337,9 @@ export default function Home() {
         .terminal-topline {
           display: flex;
           justify-content: space-between;
-          gap: 16px;
+          align-items: baseline;
+          flex-wrap: wrap;
+          gap: 8px 16px;
           padding: 14px 18px;
           border-bottom: 1px solid rgba(74, 255, 164, 0.26);
           color: rgba(176, 255, 211, 0.86);
@@ -345,6 +347,11 @@ export default function Home() {
           font-size: 11px;
           letter-spacing: 0.18em;
           text-transform: uppercase;
+        }
+
+        .terminal-topline span {
+          max-width: 100%;
+          line-height: 1.45;
         }
 
         .hero-grid {
@@ -783,6 +790,7 @@ export default function Home() {
 
           .terminal-topline {
             font-size: 9px;
+            gap: 6px 12px;
           }
 
           .hero-logo {

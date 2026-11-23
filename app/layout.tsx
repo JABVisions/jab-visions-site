@@ -6,8 +6,9 @@ import SiteShell from "./components/SiteShell";
 import AuthFragmentRedirect from "./components/AuthFragmentRedirect";
 
 export const metadata = {
-  title: "JAB Visions™ Official Website",
-  description: "The official website for JAB Visions™.",
+  title: "JAB Visions™ | Where Imagination Meets Reality",
+  description:
+    "Where Imagination Meets Reality. The official website for JAB Visions™.",
 };
 
 export default function RootLayout({
