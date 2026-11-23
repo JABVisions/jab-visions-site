@@ -121,17 +121,18 @@ export default function Home() {
             <span>THOSE RYDERZ ERA</span>
           </div>
 
+          <Image
+            src="/assets/jab-visions-hero.png"
+            alt="JAB Visions"
+            width={542}
+            height={419}
+            sizes="(max-width: 640px) 92vw, 720px"
+            priority
+            className="hero-logo"
+          />
+
           <div className="hero-grid">
             <div className="hero-copy">
-              <Image
-                src="/assets/jab-logo@2x.png"
-                alt="JAB Visions"
-                width={460}
-                height={105}
-                priority
-                className="hero-logo"
-              />
-
               <p className="eyebrow">Entertainment-tech / cinematic IP / creator infrastructure</p>
               <h1>Original stories. Living worlds. Creator-built infrastructure.</h1>
               <p className="subhead">
@@ -310,8 +311,8 @@ export default function Home() {
         .hero-shell {
           min-height: calc(100vh - 80px);
           display: flex;
-          align-items: center;
-          padding: 28px 0;
+          align-items: flex-start;
+          padding: 12px 0 28px;
         }
 
         .hero-terminal,
@@ -350,15 +351,29 @@ export default function Home() {
           display: grid;
           grid-template-columns: minmax(0, 1.14fr) minmax(320px, 0.86fr);
           gap: 32px;
-          padding: clamp(28px, 5vw, 58px);
+          padding: 12px clamp(22px, 4vw, 48px) clamp(28px, 5vw, 48px);
           align-items: center;
         }
 
         .hero-logo {
-          width: min(440px, 100%);
+          display: block;
+          width: min(720px, 92%);
           height: auto;
-          filter: drop-shadow(0 0 22px rgba(195, 255, 0, 0.72));
-          margin-bottom: 22px;
+          margin: 16px auto 0;
+          filter: drop-shadow(0 0 22px rgba(48, 255, 140, 0.42));
+        }
+
+        .hero-copy {
+          text-align: center;
+        }
+
+        .hero-copy h1,
+        .hero-copy .subhead {
+          margin-inline: auto;
+        }
+
+        .hero-copy .hero-actions {
+          justify-content: center;
         }
 
         .eyebrow,
@@ -768,6 +783,12 @@ export default function Home() {
 
           .terminal-topline {
             font-size: 9px;
+          }
+
+          .hero-logo {
+            width: min(92vw, 420px);
+            max-width: calc(100% - 16px);
+            margin-top: 12px;
           }
 
           .hero-actions,
