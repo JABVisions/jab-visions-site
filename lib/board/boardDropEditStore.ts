@@ -6,9 +6,7 @@
 
 import { supabaseBrowser } from "@/lib/supabase/browser";
 import { syncActivitiesForDropEdit } from "@/lib/board/activity";
-import { ensureImageFileMinResolution, isHeicFile } from "@/lib/board/imageQuality";
 import { checkUploadSize, uploadTimeoutMsForBytes } from "@/lib/board/uploadLimits";
-import { uploadBoardMediaFile } from "@/lib/board/boardMediaUpload";
 import { resolveBoardUploadSession } from "@/lib/board/boardUploadSession";
 import type { BoardUploadProgressHandler } from "@/lib/board/uploadProgress";
 import type { DropItem } from "@/lib/board/dropItem";
@@ -67,7 +65,9 @@ export function findLocalDropByAnyId(...ids: Array<string | undefined | null>): 
 }
 
 /** The owner's canonical drop list straight from Supabase (board_style.boardDrops). */
-export async function getOwnerBoardDrops(): Promise<DropItem[]> {
+let ownerBoardDropsInflight: Promise<DropItem[]> | null = null;
+
+async function fetchOwnerBoardDrops(): Promise<DropItem[]> {
   const userId = await getCurrentUserId();
   if (!userId) return [];
   try {
@@ -82,6 +82,17 @@ export async function getOwnerBoardDrops(): Promise<DropItem[]> {
   } catch {
     return [];
   }
+}
+
+export async function getOwnerBoardDrops(): Promise<DropItem[]> {
+  // Feed cards each ask who owns a drop. Share the in-flight read so the
+  // first paint does not fan out into one profile query per card.
+  if (!ownerBoardDropsInflight) {
+    ownerBoardDropsInflight = fetchOwnerBoardDrops().finally(() => {
+      ownerBoardDropsInflight = null;
+    });
+  }
+  return ownerBoardDropsInflight;
 }
 
 /**
@@ -219,6 +230,13 @@ export async function uploadDropMedia(
   dropId: string,
   onProgress?: BoardUploadProgressHandler
 ): Promise<{ bucket: string; storagePath: string } | null> {
+  // tus and the image encoder stay off the feed/read path until a real upload.
+  const [{ ensureImageFileMinResolution, isHeicFile }, { uploadBoardMediaFile }] =
+    await Promise.all([
+      import("@/lib/board/imageQuality"),
+      import("@/lib/board/boardMediaUpload"),
+    ]);
+
   try {
     return await withTimeout(
       (async () => {

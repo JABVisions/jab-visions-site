@@ -4,13 +4,10 @@ import React from "react";
 import { usePathname } from "next/navigation";
 import BoardDock from "@/app/components/board/BoardDock";
 import BoardUtilityHeader from "@/app/components/board/BoardUtilityHeader";
-import BoardDropEditModal from "@/app/components/board/BoardDropEditModal";
+import BoardDeferredChrome from "@/app/components/board/BoardDeferredChrome";
 import BoardClientErrorBoundary from "@/app/components/board/BoardClientErrorBoundary";
 import BucketBrainBridge from "@/app/components/board/BucketBrainBridge";
 import { ActivityProvider } from "@/app/components/board/activity/ActivityProvider";
-import ActivityNavigationHost from "@/app/components/board/activity/ActivityNavigationHost";
-import BoardCloudSync from "@/app/components/board/BoardCloudSync";
-import ProjectNotebookWindow from "@/app/components/board/ProjectNotebookWindow";
 import "@/app/components/board/rooms/forumsLayout.css";
 
 export default function BoardLayout({ children }: { children: React.ReactNode }) {
@@ -52,18 +49,7 @@ export default function BoardLayout({ children }: { children: React.ReactNode })
           <BoardDock />
         </BoardClientErrorBoundary>
       ) : null}
-      {!isAuthRoute ? (
-        <BoardClientErrorBoundary name="board-drop-edit" fallback={null}>
-          <BoardDropEditModal />
-        </BoardClientErrorBoundary>
-      ) : null}
-      {!isAuthRoute ? (
-        <BoardClientErrorBoundary name="board-cloud-sync" fallback={null}>
-          <BoardCloudSync />
-        </BoardClientErrorBoundary>
-      ) : null}
-      {!isAuthRoute ? <ActivityNavigationHost /> : null}
-      {!isAuthRoute ? <ProjectNotebookWindow /> : null}
+      {!isAuthRoute ? <BoardDeferredChrome /> : null}
 
       <style>{`
         .board-root {

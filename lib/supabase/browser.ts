@@ -86,3 +86,24 @@ export function supabaseBrowser(): SupabaseClient {
 
   return browserClient;
 }
+
+let browserUserIdRequest: Promise<string> | null = null;
+
+/** One in-flight auth read shared by the Board shell and every feed card. */
+export function getBrowserUserId(): Promise<string> {
+  if (!browserUserIdRequest) {
+    const request = supabaseBrowser()
+      .auth.getUser()
+      .then(({ data }) => data.user?.id ?? "")
+      .catch(() => {
+        if (browserUserIdRequest === request) browserUserIdRequest = null;
+        return "";
+      });
+    browserUserIdRequest = request;
+  }
+  return browserUserIdRequest;
+}
+
+export function resetBrowserUserIdCache() {
+  browserUserIdRequest = null;
+}

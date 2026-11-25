@@ -4,6 +4,7 @@ import {
   applyAuthCookies,
   isBoardAuthRoute,
   isPublicBoardRoute,
+  requestHasAuthSessionCookie,
   safeBoardNext,
 } from "@/lib/supabase/authCookies";
 import { getSupabasePublicConfig } from "@/lib/supabase/config";
@@ -24,6 +25,22 @@ export async function middleware(request: NextRequest) {
     return response;
   }
 
+  const pathname = request.nextUrl.pathname;
+
+  // Logged-out visits have no session cookie. Skip the Supabase round trip
+  // that otherwise blocks first byte on every Board navigation.
+  if (!requestHasAuthSessionCookie(request)) {
+    if (isPublicBoardRoute(pathname)) return response;
+    const loginUrl = request.nextUrl.clone();
+    loginUrl.pathname = "/board/login";
+    loginUrl.search = "";
+    loginUrl.searchParams.set(
+      "next",
+      safeBoardNext(`${pathname}${request.nextUrl.search}`, "/board/feed")
+    );
+    return NextResponse.redirect(loginUrl);
+  }
+
   const supabase = createServerClient(supabaseUrl, supabaseAnonKey, {
     cookies: {
       getAll() {
@@ -42,8 +59,6 @@ export async function middleware(request: NextRequest) {
   const {
     data: { user },
   } = await supabase.auth.getUser();
-
-  const pathname = request.nextUrl.pathname;
 
   if (user && isBoardAuthRoute(pathname) && !pathname.startsWith("/board/reset-password")) {
     const next = safeBoardNext(request.nextUrl.searchParams.get("next"));

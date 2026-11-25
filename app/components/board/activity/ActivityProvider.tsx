@@ -9,7 +9,7 @@ import React, {
   useRef,
   useState,
 } from "react";
-import { supabaseBrowser } from "@/lib/supabase/browser";
+import { getBrowserUserId, resetBrowserUserIdCache, supabaseBrowser } from "@/lib/supabase/browser";
 import { getLocalActivity } from "@/lib/board/activity";
 import { readBrain } from "@/lib/board/bucketBrain";
 import { readCurrentBoardIdentity } from "@/lib/board/currentProfile";
@@ -318,13 +318,14 @@ export function ActivityProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     let alive = true;
     const supabase = supabaseBrowser();
-    supabase.auth.getUser().then(({ data }) => {
+    void getBrowserUserId().then((userId) => {
       if (!alive) return;
-      setUserId(data.user?.id ?? null);
+      setUserId(userId || null);
     });
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
+    } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === "SIGNED_IN" || event === "SIGNED_OUT") resetBrowserUserIdCache();
       setUserId(session?.user?.id ?? null);
     });
     return () => {

@@ -4,6 +4,7 @@
 import "./activityCard.css";
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { Eye, EyeOff, MessageSquareText, SlidersHorizontal } from "lucide-react";
 import {
@@ -51,7 +52,7 @@ import {
   DROP_COMMENTS_UPDATED_EVENT,
   getDropCommentCount,
 } from "@/lib/board/dropComments";
-import { supabaseBrowser } from "@/lib/supabase/browser";
+import { getBrowserUserId, supabaseBrowser } from "@/lib/supabase/browser";
 import { getCachedSignedMediaUrl, invalidateSignedMediaUrl } from "@/lib/board/signedMediaUrl";
 import {
   activityLooksLikeStoredImage,
@@ -81,19 +82,15 @@ import {
   replacePlaceholderActor,
 } from "@/lib/board/boardAuthor";
 import { projectRoomVideoLoadError } from "@/lib/board/projectRoomDrop";
-import {
-  captureVideoPosterFile,
-  persistGeneratedVideoPoster,
-  uploadVideoPosterStill,
-} from "@/lib/board/videoPoster";
 import DropCommentsDrawer from "./DropCommentsDrawer";
 import BoardFeedVideo from "./BoardFeedVideo";
 import DropStudioOverlay from "./DropStudioOverlay";
 import RemovableDropBadge from "./RemovableDropBadge";
-import DescriptDropScreen from "./DescriptDropScreen";
-import VoiceDropSoundboard from "./VoiceDropSoundboard";
 import NewsDropMagazine from "./NewsDropMagazine";
-import DropbookSlideScreen from "./DropbookSlideScreen";
+
+const DescriptDropScreen = dynamic(() => import("./DescriptDropScreen"));
+const VoiceDropSoundboard = dynamic(() => import("./VoiceDropSoundboard"));
+const DropbookSlideScreen = dynamic(() => import("./DropbookSlideScreen"));
 import { PayOnBoardButton } from "./PayOnBoardButton";
 import { isStreamingEmbedUrl, isYouTubeDropUrl } from "@/lib/board/dropbookLink";
 import { isSoundCloudUrl, toSoundCloudEmbed } from "@/lib/board/soundCloudEmbed";
@@ -927,17 +924,9 @@ function ActivityCard({
 
   useEffect(() => {
     let cancelled = false;
-    async function loadCurrentAuthUser() {
-      try {
-        const sb = supabaseBrowser();
-        const { data } = await sb.auth.getUser();
-        const uid = metaString(data?.user?.id);
-        if (!cancelled && uid) setCurrentAuthUserId(uid);
-      } catch {
-        // Ownership still falls back to the local-identity comparison below.
-      }
-    }
-    void loadCurrentAuthUser();
+    void getBrowserUserId().then((uid) => {
+      if (!cancelled && uid) setCurrentAuthUserId(uid);
+    });
     return () => {
       cancelled = true;
     };
@@ -1074,6 +1063,8 @@ function ActivityCard({
     videoPosterPersistStarted.add(persistKey);
 
     async function makePoster() {
+      const { captureVideoPosterFile, persistGeneratedVideoPoster, uploadVideoPosterStill } =
+        await import("@/lib/board/videoPoster");
       const still = await captureVideoPosterFile(videoSrc);
       if (cancelled || !still) return;
       const objectUrl = URL.createObjectURL(still);
@@ -1614,11 +1605,7 @@ function ActivityCard({
     let authUserId = currentAuthUserId || null;
 
     if (!authUserId) {
-      try {
-        const sb = supabaseBrowser();
-        const { data: auth } = await sb.auth.getUser();
-        authUserId = auth?.user?.id ?? null;
-      } catch {}
+      authUserId = (await getBrowserUserId()) || null;
     }
 
     await removeDropFromBoardStore(dropId, [id], authUserId);

@@ -7,6 +7,8 @@ const baseConfig = {
     // Server Actions only. Route Handler bodies still hit Vercel's ~4.5MB
     // cap; large audition videos skip `/api/board/media` and use tus.
     serverActions: { bodySizeLimit: "50mb" },
+    // Named lucide imports should not pull the full icon barrel into Board.
+    optimizePackageImports: ["lucide-react"],
   },
 }
 

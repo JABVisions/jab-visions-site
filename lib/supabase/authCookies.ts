@@ -30,6 +30,16 @@ function isAuthTokenCookie(name: string) {
   return name.includes("-auth-token");
 }
 
+/** True when a Supabase session cookie is present. Chunked cookies count. */
+export function requestHasAuthSessionCookie(request: NextRequest) {
+  return request.cookies.getAll().some((cookie) => {
+    if (!cookie.value) return false;
+    if (!isAuthTokenCookie(cookie.name)) return false;
+    if (cookie.name.includes("code-verifier")) return false;
+    return true;
+  });
+}
+
 export function collapseAuthCookies(
   cookiesToSet: PendingAuthCookie[],
   options?: { keepSession?: boolean }
