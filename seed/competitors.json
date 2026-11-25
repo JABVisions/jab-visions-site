@@ -1,0 +1,125 @@
+{
+  "created_by": "seed-scout",
+  "generated": "2026-11-16",
+  "low_stars": 2,
+  "weak_point_by": "gap",
+  "theme_labels": {
+    "fees": "fees and pricing",
+    "cancellations": "cancellations and no-shows",
+    "support": "customer support",
+    "bugs": "bugs and app quality",
+    "trust": "trust and safety",
+    "payments": "payments and refunds",
+    "availability": "availability"
+  },
+  "apps": [
+    {
+      "name": "Patreon",
+      "app_name": "Patreon",
+      "app_id": 1044456188,
+      "rating": 4.9,
+      "ratings": 582850,
+      "reviews_read": 150,
+      "low_reviews": 64,
+      "themes": {
+        "fees": 4,
+        "cancellations": 0,
+        "support": 4,
+        "bugs": 18,
+        "trust": 2,
+        "payments": 2,
+        "availability": 0
+      },
+      "top_theme": "bugs",
+      "weak_point": "bugs and app quality",
+      "weak_point_count": 18,
+      "weak_point_share": 28.1,
+      "weak_point_rule": "sets it apart",
+      "gap_points": 1.5,
+      "most_mentioned": "bugs",
+      "weak_point_line": "18 of 64 recent 1-2 star reviews mention bugs and app quality",
+      "examples": [
+        {
+          "title": "unbelievably bad user experience",
+          "date": "2026-11-14",
+          "stars": 1
+        },
+        {
+          "title": "Terrible since update",
+          "date": "2026-11-10",
+          "stars": 1
+        },
+        {
+          "title": "fix the glitches",
+          "date": "2026-11-09",
+          "stars": 1
+        }
+      ],
+      "reviews_from": "2026-09-15",
+      "reviews_to": "2026-11-14",
+      "fetched": "2026-11-16",
+      "source": "https://itunes.apple.com/us/rss/customerreviews/page=1/id=1044456188/sortby=mostrecent/json (pages 1-3)",
+      "pricing": [
+        {
+          "note": "Patreon keeps 10% of the income a creator earns, plus payment processing, currency conversion and payout fees",
+          "source": "https://www.patreon.com/pricing",
+          "read": "2026-11-16"
+        }
+      ]
+    },
+    {
+      "name": "Casting Networks",
+      "app_name": "Casting Networks",
+      "app_id": 1607830864,
+      "rating": 4.6,
+      "ratings": 1591,
+      "reviews_read": 97,
+      "low_reviews": 60,
+      "themes": {
+        "fees": 10,
+        "cancellations": 6,
+        "support": 3,
+        "bugs": 16,
+        "trust": 8,
+        "payments": 2,
+        "availability": 2
+      },
+      "top_theme": "fees",
+      "weak_point": "fees and pricing",
+      "weak_point_count": 10,
+      "weak_point_share": 16.7,
+      "weak_point_rule": "sets it apart",
+      "gap_points": 10.4,
+      "most_mentioned": "bugs",
+      "weak_point_line": "10 of 60 recent 1-2 star reviews mention fees and pricing",
+      "examples": [
+        {
+          "title": "Never works",
+          "date": "2026-11-14",
+          "stars": 1
+        },
+        {
+          "title": "Breakdowns",
+          "date": "2026-03-31",
+          "stars": 2
+        },
+        {
+          "title": "Overall Garbage Platform",
+          "date": "2026-02-23",
+          "stars": 1
+        }
+      ],
+      "reviews_from": "2022-07-01",
+      "reviews_to": "2026-11-14",
+      "fetched": "2026-11-16",
+      "source": "https://itunes.apple.com/us/rss/customerreviews/page=1/id=1607830864/sortby=mostrecent/json (pages 1-2)",
+      "pricing": [
+        {
+          "note": "Talent pay $29.99 a month or $299.90 a year for Premium; the Free tier cannot self-submit to roles",
+          "source": "https://support.castingnetworks.com/en/articles/11229249",
+          "read": "2026-11-16"
+        }
+      ]
+    }
+  ]
+}

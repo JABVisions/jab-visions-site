@@ -1,0 +1,83 @@
+{
+  "_about": "JAB Visions LLC: the 36-month model behind a pre-seed raise. Unit = one Store artifact order. Every number here is an assumption to confirm with the founder: price is the average of the 18 items in the Store catalog (StoreDropMarketplace.tsx); take rate is 100% because the Store sells its own artifacts; product cost and fulfilment, customers, churn, CAC, payroll and opex are founder-side assumptions written out in seed/plan.md. Money in USD; percents as percents.",
+  "company": "JAB Visions",
+  "currency": "USD",
+  "unit": "order",
+  "units": "orders",
+  "start_month": "2027-01",
+  "cash_at_start": 0,
+  "raise": 750000,
+  "raise_month": 1,
+  "price": 26,
+  "take_rate_pct": 100,
+  "cost_per_order": [
+    {
+      "label": "card processing (2.9% + $0.30)",
+      "pct_of_price": 2.9,
+      "fixed": 0.3
+    },
+    {
+      "label": "artifact cost and fulfilment (print-on-demand and small-batch sourcing)",
+      "pct_of_price": 50
+    }
+  ],
+  "customers": {
+    "starting": 150,
+    "new_month_1": 150,
+    "new_growth_pct": [
+      15,
+      8,
+      4
+    ],
+    "churn_monthly_pct": 6,
+    "orders_per_customer_month": 0.2
+  },
+  "cac": 12,
+  "payroll_overhead_pct": 15,
+  "payroll": [
+    {
+      "role": "Founder, CEO / creative director",
+      "monthly": 5000,
+      "start_month": 1
+    },
+    {
+      "role": "Full-stack engineer (Board and Store)",
+      "monthly": 7500,
+      "start_month": 2
+    },
+    {
+      "role": "Community and production lead",
+      "monthly": 4500,
+      "start_month": 7
+    }
+  ],
+  "opex": [
+    {
+      "label": "hosting, Supabase, Stripe, OpenAI and software",
+      "monthly": 900
+    },
+    {
+      "label": "legal, accounting and insurance",
+      "monthly": 900
+    }
+  ],
+  "one_off": [
+    {
+      "label": "THOSE RYDERZ proof-of-concept shoot and post",
+      "month": 4,
+      "cost": 90000
+    },
+    {
+      "label": "first Store artifact run (inventory)",
+      "month": 2,
+      "cost": 30000
+    }
+  ],
+  "use_of_funds": {
+    "Board engineering": 300000,
+    "THOSE RYDERZ proof-of-concept": 150000,
+    "Store artifacts": 120000,
+    "Community, marketing": 120000,
+    "Operations, legal": 60000
+  }
+}

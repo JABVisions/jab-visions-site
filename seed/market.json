@@ -1,0 +1,96 @@
+{
+  "created_by": "seed-market",
+  "generated": "2026-11-16",
+  "method": "top-down TAM, bottom-up SAM, SOM 10% of SAM in 3 years",
+  "tam": 1609684973,
+  "sam": 15600000,
+  "som": 1560000,
+  "currency": "USD",
+  "inputs": [
+    {
+      "name": "US residents aged 18 to 44",
+      "value": 123821921,
+      "unit": "count",
+      "source": "US Census Bureau, Vintage 2025 estimates, Table 1 (census.gov/newsroom/press-releases/2026/vintage-2025-pop-estimates.html)",
+      "kind": "publication",
+      "level": "tam"
+    },
+    {
+      "name": "share who buy entertainment or creator merchandise in a year",
+      "value": 25,
+      "unit": "%",
+      "source": "assumption: Licensing International puts US/Canada licensed merchandise sales at $227.2B in 2025, about $660 a resident, so one in four adults buying fan merchandise is conservative; replace with a survey",
+      "kind": "assumption",
+      "level": "tam"
+    },
+    {
+      "name": "spend a year on fan merchandise",
+      "value": 52,
+      "unit": "USD a year",
+      "source": "assumption: two artifacts a year at the $26 average price of the 18 items in the JAB Visions Store catalog",
+      "kind": "assumption",
+      "level": "tam"
+    },
+    {
+      "name": "fans of independent film, comics and music that Board, THOSE RYDERZ and the founder's New York creator network can reach online",
+      "value": 250000,
+      "unit": "count",
+      "source": "assumption: no audience count exists in the repo yet; 250,000 is the online reach the three-year plan is built to earn, to be replaced with Board sign-ups and social reach once measured",
+      "kind": "assumption",
+      "level": "sam"
+    },
+    {
+      "name": "orders a year per customer",
+      "value": 2.4,
+      "unit": "per year",
+      "source": "assumption: 0.2 orders a customer a month in seed/assumptions.json, 2.4 a year",
+      "kind": "assumption",
+      "level": "sam"
+    },
+    {
+      "name": "price per order",
+      "value": 26,
+      "unit": "USD",
+      "source": "average of the 18 artifact prices in the JAB Visions Store catalog (StoreDropMarketplace.tsx, $8.77 to $59.99)",
+      "kind": "publication",
+      "level": "sam"
+    },
+    {
+      "name": "Global sales of licensed merchandise and services, 2025",
+      "value": 389800000000,
+      "unit": "USD",
+      "source": "Licensing International, 2026 Global Licensing Industry Study (licensinginternational.org/get-survey)",
+      "kind": "publication",
+      "level": "context"
+    },
+    {
+      "name": "Character and entertainment licensed merchandise sales, 2025",
+      "value": 161800000000,
+      "unit": "USD",
+      "source": "Licensing International, 2026 Global Licensing Industry Study (licensinginternational.org/get-survey)",
+      "kind": "publication",
+      "level": "context"
+    },
+    {
+      "name": "US and Canada licensed merchandise sales, 2025",
+      "value": 227200000000,
+      "unit": "USD",
+      "source": "Licensing International, 2026 Global Licensing Industry Study infographic (licensinginternational.org)",
+      "kind": "publication",
+      "level": "context"
+    }
+  ],
+  "notes": [],
+  "methods": {
+    "tam": "top-down",
+    "sam": "bottom-up"
+  },
+  "formulas": {
+    "tam": "123,821,921 US residents aged 18 to 44 x 25% x $52 = $1,609,684,973",
+    "sam": "250,000 fans of independent film, comics and music that Board, THOSE RYDERZ and the founder's New York creator network can reach online x 2.4 orders a year x $26 = $15,600,000",
+    "som": "10% of SAM $15,600,000 = $1,560,000"
+  },
+  "som_share_pct": 10.0,
+  "som_years": 3,
+  "som_reason": "fans who meet THOSE RYDERZ, JAB Lit, Comics and Music on Board buy about two artifacts a year; the model reaches 26,600 paying customers by month 36, won through Board's creator rooms and drops rather than paid ads"
+}
