@@ -1,10 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { supabaseBrowser } from "@/lib/supabase/browser";
+import dynamic from "next/dynamic";
+import { getBrowserUserId, supabaseBrowser } from "@/lib/supabase/browser";
 
-import DropConsole from "@/app/components/board/DropConsole";
-import DropsBucket from "@/app/components/board/DropsBucket";
+import LazyDropConsole from "@/app/components/board/LazyDropConsole";
 import ActivityCard from "@/app/components/board/ActivityCard";
 import BoardWhispers from "@/app/components/board/BoardWhispers";
 import BoardClientErrorBoundary from "@/app/components/board/BoardClientErrorBoundary";
@@ -38,6 +38,10 @@ import { EVENTS, readFeed, seedForumsIfEmpty } from "@/lib/boardStore";
 
 import { installBucketBrainBridge } from "@/lib/board/bucketBrain";
 import { recoverOrphanedDescriptDrops } from "@/lib/board/descriptRecovery";
+
+const DropsBucket = dynamic(() => import("@/app/components/board/DropsBucket"), {
+  loading: () => <div aria-hidden style={{ minHeight: 220 }} />,
+});
 
 function clsx(...parts: Array<string | false | null | undefined>) {
   return parts.filter(Boolean).join(" ");
@@ -267,10 +271,9 @@ export default function HomeBoardFeedPage() {
 
   useEffect(() => {
     let alive = true;
-    void sb.auth
-      .getUser()
-      .then(({ data }) => {
-        if (alive) setViewerUserId(data.user?.id ?? "");
+    void getBrowserUserId()
+      .then((userId) => {
+        if (alive) setViewerUserId(userId);
       })
       .catch(() => {
         if (alive) setViewerUserId("");
@@ -326,12 +329,12 @@ export default function HomeBoardFeedPage() {
       syncFromLocal();
 
       try {
-        const { data: auth } = await sb.auth.getUser();
-        if (auth.user?.id) {
+        const viewerIdFromAuth = await getBrowserUserId();
+        if (viewerIdFromAuth) {
           await Promise.race([
             Promise.allSettled([
-              reconcileLocalActivityToRemote(sb, auth.user.id),
-              recoverOrphanedDescriptDrops(sb, auth.user.id),
+              reconcileLocalActivityToRemote(sb, viewerIdFromAuth),
+              recoverOrphanedDescriptDrops(sb, viewerIdFromAuth),
             ]),
             new Promise((resolve) => window.setTimeout(resolve, 6000)),
           ]);
@@ -347,7 +350,7 @@ export default function HomeBoardFeedPage() {
         if (!alive) return;
 
         const cleaned = Array.isArray(data) ? data : [];
-        const viewerId = auth.user?.id || viewerUserId;
+        const viewerId = viewerIdFromAuth || viewerUserId;
         const withPending = dedupeActivity([
           ...localForumFeedItems(viewerId),
           ...pendingLocalFeedItems(cleaned, viewerId),
@@ -620,7 +623,7 @@ export default function HomeBoardFeedPage() {
           <aside className="rightRail">
             <div className="dropConsoleSlot">
               <BoardClientErrorBoundary name="drop-console">
-                <DropConsole />
+                <LazyDropConsole />
               </BoardClientErrorBoundary>
             </div>
             <div className="bucketSlot">
