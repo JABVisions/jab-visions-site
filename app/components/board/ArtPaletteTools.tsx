@@ -3,7 +3,7 @@
 import type { RefObject } from "react";
 import styles from "./boardArtCanvas.module.css";
 
-export type ArtBrushMode = "paint" | "blend" | "erase";
+export type ArtBrushMode = "paint" | "blend" | "erase" | "glow";
 
 type ArtPaletteToolsProps = {
   wheelRef: RefObject<HTMLDivElement | null>;
@@ -148,12 +148,19 @@ export default function ArtPaletteTools({
                 style={{
                   width: Math.max(6, size),
                   height: Math.max(6, size),
-                  background: brushMode === "erase" ? "transparent" : color,
                   border: brushMode === "erase" ? "2px dashed rgba(255,255,255,0.7)" : undefined,
+                  background:
+                    brushMode === "erase"
+                      ? "transparent"
+                      : brushMode === "glow"
+                        ? `radial-gradient(circle, #fff 0%, ${color} 42%, transparent 74%)`
+                        : color,
                   boxShadow:
                     brushMode === "blend"
                       ? `0 0 14px ${color}, 0 0 6px rgba(255,255,255,0.45)`
-                      : undefined,
+                      : brushMode === "glow"
+                        ? `0 0 12px 4px ${color}`
+                        : undefined,
                 }}
                 aria-hidden
               />
@@ -174,16 +181,28 @@ export default function ArtPaletteTools({
                 aria-label="Brush opacity"
               />
             </div>
-            <button
-              type="button"
-              className={[styles.blendBrushBtn, brushMode === "blend" ? styles.blendBrushBtnOn : ""]
-                .filter(Boolean)
-                .join(" ")}
-              onClick={() => onBrushModeChange("blend")}
-              aria-pressed={brushMode === "blend"}
-            >
-              Blend Brush
-            </button>
+            <div className={styles.brushModeRow}>
+              <button
+                type="button"
+                className={[styles.blendBrushBtn, brushMode === "blend" ? styles.blendBrushBtnOn : ""]
+                  .filter(Boolean)
+                  .join(" ")}
+                onClick={() => onBrushModeChange("blend")}
+                aria-pressed={brushMode === "blend"}
+              >
+                Blend
+              </button>
+              <button
+                type="button"
+                className={[styles.blendBrushBtn, brushMode === "glow" ? styles.glowBrushBtnOn : ""]
+                  .filter(Boolean)
+                  .join(" ")}
+                onClick={() => onBrushModeChange("glow")}
+                aria-pressed={brushMode === "glow"}
+              >
+                Glow
+              </button>
+            </div>
           </div>
         </div>
       </div>
