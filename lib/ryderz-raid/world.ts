@@ -1444,6 +1444,36 @@ export function resolveCircle(pos: THREE.Vector3, radius: number, obstacles: Obs
   }
 }
 
+/**
+ * Move a body by (dx, dz) and keep it out of the walls on the way. One
+ * `resolveCircle` at the end of a long step can leave the body on the far
+ * side of a thin wall: once its centre has crossed the middle, the nearest way
+ * out is through. Taking the move in strides shorter than the body's radius
+ * means the centre never reaches a wall's near face, so that cannot happen.
+ * Returns the number of strides taken; an ordinary run is one.
+ */
+export function sweepCircle(
+  pos: THREE.Vector3,
+  dx: number,
+  dz: number,
+  radius: number,
+  obstacles: Obstacle[],
+  limit = Infinity,
+) {
+  const stride = Math.max(0.05, radius * 0.75);
+  const length = Math.hypot(dx, dz);
+  const steps = length > stride ? Math.min(SWEEP_MAX_STEPS, Math.ceil(length / stride)) : 1;
+  for (let i = 0; i < steps; i += 1) {
+    pos.x = Math.max(-limit, Math.min(limit, pos.x + dx / steps));
+    pos.z = Math.max(-limit, Math.min(limit, pos.z + dz / steps));
+    resolveCircle(pos, radius, obstacles);
+  }
+  return steps;
+}
+
+/** Cap on strides per move. Twelve covers four metres in a frame for a Ryder, far past any dash. */
+const SWEEP_MAX_STEPS = 12;
+
 function separateFromObstacle(pos: THREE.Vector3, radius: number, o: Obstacle) {
   if (o.kind === 'box') {
     closest.set(Math.max(o.minX, Math.min(pos.x, o.maxX)), Math.max(o.minZ, Math.min(pos.z, o.maxZ)));
