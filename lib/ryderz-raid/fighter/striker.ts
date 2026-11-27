@@ -225,18 +225,23 @@ export class FighterStriker {
     return { style: action.style, p: Math.max(0, Math.min(1, p)) };
   }
 
-  queue(kind: StrikeInput) {
+  /** True when the strike was buffered. Startup drops the press so a mash cannot skip ahead. */
+  queue(kind: StrikeInput): boolean {
     if (this.phase === 'hold') {
       this.throwNext = true;
-      return;
+      return true;
     }
     if (this.phase === 'idle') {
       this.buffer = kind;
-      return;
+      return true;
     }
     if (this.phase === 'recovery' || this.phase === 'active') {
-      if (this.kind === 'punch' || this.fork || this.connected) this.buffer = kind;
+      if (this.kind === 'punch' || this.fork || this.connected) {
+        this.buffer = kind;
+        return true;
+      }
     }
+    return false;
   }
 
   /** Buffer the next strike of a punch so a jab can become jab-cross or jab-kick. */

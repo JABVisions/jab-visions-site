@@ -650,20 +650,20 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
                   <div className={styles.chip} title="Signal Points. Spent on the Power Tree and saved with this Ryder.">
                     Signal <strong ref={pointsRef}>0</strong>
                   </div>
-                  <div className={styles.chip}>
+                  <div className={`${styles.chip} ${styles.chipMeta}`}>
                     Difficulty <strong>{difficulty}</strong>
                   </div>
                 </>
               ) : null}
-              <div className={styles.chip}>
+              <div className={`${styles.chip} ${styles.chipMeta}`}>
                 Mode <strong>{partyState.mode}</strong>
               </div>
-              <div className={styles.chip}>
+              <div className={`${styles.chip} ${styles.chipMeta}`}>
                 Arena <strong>{arenaSpec(managerState.arenaId)?.name ?? 'The Block'}</strong>
               </div>
               <button
                 type="button"
-                className={`${styles.chip} ${styles.chipBtn} ${camPanel ? styles.chipOn : ''}`}
+                className={`${styles.chip} ${styles.chipBtn} ${styles.chipMeta} ${camPanel ? styles.chipOn : ''}`}
                 onClick={() => setCamPanel((open) => !open)}
                 title={`Camera tuning · ${cameraState}${lockOn ? ' · locked' : ''}`}
               >
@@ -844,34 +844,33 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
               }}
             />
             <div className={styles.touchBtns}>
-              <button type="button" onPointerDown={() => engineRef.current?.setFireHeld(true)} onPointerUp={() => engineRef.current?.setFireHeld(false)}>
-                FIRE
-              </button>
-              <button type="button" onClick={() => engineRef.current?.queuePunch()}>
-                PUNCH
-              </button>
-              <button type="button" onClick={() => engineRef.current?.queueKick()}>
-                KICK
-              </button>
-              <button type="button" onClick={() => engineRef.current?.queueMelee()}>
-                MELEE
-              </button>
-              <button type="button" className={styles.touchHeavy} onClick={() => engineRef.current?.queueHeavy()}>
-                HEAVY
-              </button>
-              <button type="button" className={styles.touchHeavy} onClick={() => engineRef.current?.queueLauncher()}>
-                LAUNCH
-              </button>
-              <button type="button" onClick={() => engineRef.current?.queueDodge()}>
-                DODGE
-              </button>
-              <button type="button" onClick={() => engineRef.current?.queueJump()}>
+              <button
+                type="button"
+                onPointerDown={(e) => {
+                  e.preventDefault();
+                  engineRef.current?.queueJump();
+                }}
+                onContextMenu={(e) => e.preventDefault()}
+              >
                 JUMP
+              </button>
+              <button
+                type="button"
+                className={styles.touchMelee}
+                aria-label="Melee. Each press continues the string: punch, punch, kick, grab, heavy, launch."
+                onPointerDown={(e) => {
+                  e.preventDefault();
+                  engineRef.current?.queueMeleeChain();
+                }}
+                onContextMenu={(e) => e.preventDefault()}
+              >
+                MELEE
               </button>
               <button
                 type="button"
                 className={styles.touchGuard}
                 onPointerDown={(e) => {
+                  e.preventDefault();
                   e.currentTarget.setPointerCapture(e.pointerId);
                   engineRef.current?.setGuard(true);
                 }}
@@ -880,6 +879,20 @@ export default function RaidGame({ layout = 'embed' }: { layout?: 'embed' | 'pag
                 onContextMenu={(e) => e.preventDefault()}
               >
                 GUARD
+              </button>
+              <button
+                type="button"
+                className={styles.touchSprint}
+                onPointerDown={(e) => {
+                  e.preventDefault();
+                  e.currentTarget.setPointerCapture(e.pointerId);
+                  engineRef.current?.setSprint(true);
+                }}
+                onPointerUp={() => engineRef.current?.setSprint(false)}
+                onPointerCancel={() => engineRef.current?.setSprint(false)}
+                onContextMenu={(e) => e.preventDefault()}
+              >
+                SPRINT
               </button>
               {(reviveName || (beacon?.near && beacon.ready)) && (
                 <button type="button" className={styles.touchUse} onClick={() => engineRef.current?.queueInteract()}>

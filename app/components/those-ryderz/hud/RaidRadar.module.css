@@ -32,12 +32,21 @@
 }
 
 @media (max-width: 720px) {
+  .radar {
+    top: 78px;
+  }
+
   .radar,
   .canvas {
-    width: 96px;
+    width: 72px;
   }
 
   .canvas {
-    height: 96px;
+    height: 72px;
+  }
+
+  .caption {
+    font-size: 0.5rem;
+    letter-spacing: 0.12em;
   }
 }
