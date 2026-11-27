@@ -1832,8 +1832,8 @@ export class RaidEngine {
 
   /**
    * Touch melee. Each accepted press plays the next blow in the string
-   * (jab, jab, kick, grab, heavy, launcher). A press during startup is kept
-   * for the next step instead of skipping a move.
+   * (jab, jab, kick, grab, heavy, launcher). A tap during startup stays
+   * queued until the striker can take it, so a mash does not vanish or skip.
    */
   queueMeleeChain() {
     this.meleeChainQueued = true;
@@ -3145,7 +3145,11 @@ export class RaidEngine {
         this.combatMemory.note('melee', this.simTime);
       }
     }
-    if (chainInput) this.noteMeleeChain(chainUsed);
+    if (chainInput) {
+      this.noteMeleeChain(chainUsed);
+      // Startup rejects the buffer. Keep this one tap until the strike can take it.
+      if (!chainUsed && this.striker.busy) this.meleeChainQueued = true;
+    }
     if (this.dodgeQueued) {
       this.dodgeQueued = false;
       if (canAct) this.tryDodge();
