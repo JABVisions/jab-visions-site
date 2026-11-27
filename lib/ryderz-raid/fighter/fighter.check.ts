@@ -1,7 +1,7 @@
 import { AERIAL, FINISHER, HEAVY, LAUNCHER, comboDamageScale, comboStunScale, heavyVariant, isKnockedDown } from './actions';
 import { ComboManager, COMBO_WINDOW, matchRecipe, meleeWantsGrab, POWER_LINK_WINDOW, SHARED_COMBOS, type ComboRecipe } from './combo';
 import { hostStrikeDamage, nextHostStrike } from './hostStriker';
-import { commandForKey, isMapKey } from './input';
+import { commandForKey, isMapKey, TOUCH_MELEE_CHAIN, touchMeleeIndex } from './input';
 import { CombatMemory } from './memory';
 import { openingPlan } from './planner';
 import { actionFor, combatProfileFor } from './profiles';
@@ -94,6 +94,18 @@ assert(commandForKey('e', 'KeyE', 1) === null, 'E no longer fires a power');
 assert(commandForKey('r', 'KeyR', 1) === null, 'R no longer fires a power');
 assert(commandForKey('u', 'KeyU', 2) === 'punch', 'player 2 punches with U');
 assert(commandForKey('u', 'KeyU', 1) === null, 'U does not punch for player 1');
+assert(touchMeleeIndex(4, 0.2) === 4, 'a melee tap keeps its place in the string');
+assert(touchMeleeIndex(4, COMBO_WINDOW + 0.05) === 0, 'a late melee tap starts the string over');
+assert(TOUCH_MELEE_CHAIN[touchMeleeIndex(0, 0)] === 'punch', 'the string opens with a jab');
+assert(TOUCH_MELEE_CHAIN[touchMeleeIndex(1, 0.3)] === 'punch', 'the second press is the cross');
+assert(TOUCH_MELEE_CHAIN[touchMeleeIndex(2, 0.3)] === 'kick', 'the third press is the kick');
+assert(TOUCH_MELEE_CHAIN[touchMeleeIndex(3, 0.3)] === 'melee', 'the fourth press is the grab');
+assert(TOUCH_MELEE_CHAIN[touchMeleeIndex(5, 0.3)] === 'launcher', 'the string ends on the launcher');
+assert(touchMeleeIndex(6, 0.3) === 0, 'the string wraps');
+const startup = new FighterStriker();
+startup.queue('punch');
+startup.tick(0.01, { time: 0, stunned: false, locked: false, facing: 0, x: 0, z: 0, meleeDamage: 20, targets: [] });
+assert(startup.queue('kick') === false, 'a press during startup does not skip the string');
 
 const memory = new CombatMemory();
 memory.note('punch', 1);

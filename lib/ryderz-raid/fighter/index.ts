@@ -46,6 +46,8 @@ export {
   commandForKey,
   isMapKey,
   risingPadCommands,
+  TOUCH_MELEE_CHAIN,
+  touchMeleeIndex,
   withSprintModifier,
   PAD_BUTTON,
   P1_BINDINGS,

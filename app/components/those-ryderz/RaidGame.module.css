@@ -991,20 +991,20 @@
 .stick,
 .look {
   position: absolute;
-  bottom: 22px;
-  width: 118px;
-  height: 118px;
+  bottom: calc(max(12px, env(safe-area-inset-bottom)) + 62px);
+  width: 96px;
+  height: 96px;
   border: 1px solid rgba(255, 255, 255, 0.18);
   border-radius: 50%;
   background: rgba(0, 0, 0, 0.28);
 }
 
 .stick {
-  left: 18px;
+  left: 10px;
 }
 
 .look {
-  right: 18px;
+  right: 8px;
 }
 
 .nub {
@@ -1018,24 +1018,24 @@
   transform: translate(-50%, -50%);
 }
 
-/* Thumb cluster: three columns beside the look pad. Powers fire from the deck bar. */
+/* Thumb cluster sits above the power deck: jump, melee, guard, sprint. */
 .touchBtns {
   position: absolute;
-  right: 144px;
-  bottom: 22px;
+  right: 114px;
+  bottom: calc(max(12px, env(safe-area-inset-bottom)) + 64px);
   display: grid;
-  grid-template-columns: repeat(3, 52px);
-  gap: 6px;
+  grid-template-columns: repeat(2, 58px);
+  gap: 8px;
 }
 
 .touchBtns button {
-  width: 52px;
-  height: 52px;
+  width: 58px;
+  height: 58px;
   border: 1px solid rgba(49, 255, 150, 0.4);
   border-radius: 50%;
   background: rgba(4, 14, 10, 0.75);
-  font: 800 0.54rem/1 monospace;
-  letter-spacing: 0.06em;
+  font: 800 0.5rem/1 monospace;
+  letter-spacing: 0.02em;
   touch-action: none;
   user-select: none;
   -webkit-user-select: none;
@@ -1045,12 +1045,18 @@
   background: rgba(49, 255, 150, 0.3);
 }
 
-.touchHeavy {
-  border-color: rgba(255, 210, 122, 0.55) !important;
+.touchMelee {
+  border-color: rgba(49, 255, 150, 0.85) !important;
+  background: rgba(49, 255, 150, 0.16) !important;
+  box-shadow: 0 0 16px rgba(49, 255, 150, 0.28);
 }
 
 .touchGuard {
   border-color: rgba(160, 210, 255, 0.6) !important;
+}
+
+.touchSprint {
+  border-color: rgba(255, 214, 120, 0.7) !important;
 }
 
 .touchUse {
@@ -1279,6 +1285,119 @@
 
   .crosshair,
   .lock {
+    display: none;
+  }
+
+  .vitalDock {
+    left: 8px;
+    bottom: calc(max(12px, env(safe-area-inset-bottom)) + 168px);
+    transform: scale(0.7);
+    transform-origin: left bottom;
+  }
+
+  .oxygen {
+    left: 8px;
+    bottom: calc(max(12px, env(safe-area-inset-bottom)) + 250px);
+    width: 128px;
+  }
+}
+
+@media (max-width: 380px) {
+  .stick,
+  .look {
+    width: 84px;
+    height: 84px;
+  }
+
+  .nub {
+    width: 36px;
+    height: 36px;
+  }
+
+  .touchBtns {
+    right: 100px;
+    grid-template-columns: repeat(2, 50px);
+    gap: 6px;
+  }
+
+  .touchBtns button {
+    width: 50px;
+    height: 50px;
+    font-size: 0.46rem;
+  }
+}
+
+@media (pointer: coarse) and (min-width: 700px) {
+  .stick,
+  .look {
+    width: 118px;
+    height: 118px;
+  }
+
+  .touchBtns {
+    right: 148px;
+    grid-template-columns: repeat(2, 64px);
+  }
+
+  .touchBtns button {
+    width: 64px;
+    height: 64px;
+  }
+}
+
+/* Narrow playfield: the status chips were wrapping into a column down the middle. */
+@media (max-width: 720px) {
+  .chips {
+    flex-wrap: nowrap;
+    justify-content: flex-start;
+    gap: 4px;
+    padding: 0 8px;
+    max-width: calc(100% - 84px);
+    overflow: hidden;
+  }
+
+  .chipsBelowParty {
+    margin-top: 74px;
+  }
+
+  .survival {
+    top: 102px;
+    left: 8px;
+    width: auto;
+    max-width: 168px;
+    padding: 6px 8px 5px;
+  }
+
+  .survival strong {
+    font-size: 0.95rem;
+  }
+
+  .survival em {
+    margin-bottom: 0;
+  }
+
+  .survival ul {
+    display: none;
+  }
+
+  .chip {
+    padding: 2px 7px;
+    border-radius: 999px;
+    font-size: 0.46rem;
+    letter-spacing: 0.06em;
+    box-shadow: none;
+    background: rgba(3, 10, 8, 0.42);
+    border-color: rgba(166, 255, 0, 0.16);
+  }
+
+  .chip strong {
+    display: inline;
+    margin-top: 0;
+    margin-left: 4px;
+    font-size: 0.56rem;
+  }
+
+  .chipMeta {
     display: none;
   }
 }

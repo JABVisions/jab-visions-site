@@ -239,9 +239,12 @@
   }
 }
 
-/* Narrow phones: not enough room between the pads, so the dock lifts above the cluster. */
+/* Phones: the dock stays on the bottom edge. Sticks and the four buttons sit above it. */
 @media (pointer: coarse) and (max-width: 720px) {
   .dock {
-    bottom: max(196px, calc(env(safe-area-inset-bottom) + 184px));
+    --size: 38px;
+    gap: 5px;
+    bottom: max(8px, env(safe-area-inset-bottom));
+    max-width: calc(100% - 16px);
   }
 }

@@ -139,6 +139,8 @@ import {
   recipesFor,
   resolvePowerLink,
   risingPadCommands,
+  TOUCH_MELEE_CHAIN,
+  touchMeleeIndex,
   withSprintModifier,
   type CombatCommand,
   type ComboRecipe,
@@ -609,6 +611,13 @@ export class RaidEngine {
   private guardT = 0;
   private guardPad = false;
   private guardTouch = false;
+  /** Touch sprint. Held like Shift, released when the thumb comes up. */
+  private sprintTouch = false;
+  /** One tap of the touch melee button. Resolved on the next combat step. */
+  private meleeChainQueued = false;
+  /** Next index in `TOUCH_MELEE_CHAIN`. Advances only when the strike is accepted. */
+  private meleeChainStep = 0;
+  private meleeChainAt = -10;
   /** The hit being resolved came from a finisher, so the kill pays finisher SP. */
   private pendingFinisher = false;
   private queuedMoves = [false, false, false, false, false, false];
@@ -971,6 +980,10 @@ export class RaidEngine {
     this.combatT = 0;
     this.abilityT = 0;
     this.sprinting = false;
+    this.sprintTouch = false;
+    this.meleeChainQueued = false;
+    this.meleeChainStep = 0;
+    this.meleeChainAt = -10;
     this.paused = false;
     this.mapOpen = false;
     this.phase = 'playing';
@@ -1812,6 +1825,36 @@ export class RaidEngine {
     this.guardTouch = on;
   }
 
+  /** Hold to sprint. Same rule as Shift: it only bites while the Ryder is moving. */
+  setSprint(on: boolean) {
+    this.sprintTouch = on;
+  }
+
+  /**
+   * Touch melee. Each accepted press plays the next blow in the string
+   * (jab, jab, kick, grab, heavy, launcher). A tap during startup stays
+   * queued until the striker can take it, so a mash does not vanish or skip.
+   */
+  queueMeleeChain() {
+    this.meleeChainQueued = true;
+  }
+
+  /** The blow this tap should try, or null when the button was not pressed. */
+  private takeMeleeChain(): StrikeInput | null {
+    if (!this.meleeChainQueued) return null;
+    this.meleeChainQueued = false;
+    const index = touchMeleeIndex(this.meleeChainStep, this.simTime - this.meleeChainAt);
+    return TOUCH_MELEE_CHAIN[index] ?? 'punch';
+  }
+
+  /** Advance the string only after the striker actually took the blow. */
+  private noteMeleeChain(accepted: boolean) {
+    if (!accepted) return;
+    const index = touchMeleeIndex(this.meleeChainStep, this.simTime - this.meleeChainAt);
+    this.meleeChainStep = index + 1;
+    this.meleeChainAt = this.simTime;
+  }
+
   buyUpgrade(id: UpgradeId) {
     const hub = this.phase === 'intermission' && this.pos.length() <= 6.2;
     const between = this.phase === 'report';
@@ -2121,7 +2164,7 @@ export class RaidEngine {
         powersDown: this.powerOut.down,
         ascend: this.keys.has(' '),
         descend: this.keys.has('control'),
-        boost: this.keys.has('shift'),
+        boost: this.keys.has('shift') || this.sprintTouch,
         stunned: this.hitStun > 0.12,
       });
       this.striker.setFork(this.kit.forkArmed ?? false);
@@ -2617,7 +2660,7 @@ export class RaidEngine {
     }
     const len = Math.hypot(x, z);
     const busy = this.kit?.busy ?? false;
-    this.sprinting = this.keys.has('shift') && len > 0.1 && !this.fireHeld && this.meleeT <= 0 && !busy;
+    this.sprinting = (this.keys.has('shift') || this.sprintTouch) && len > 0.1 && !this.fireHeld && this.meleeT <= 0 && !busy;
     let speed =
       this.spec.speed *
       (this.sprinting ? SPRINT_MULTIPLIER : 1) *
@@ -3029,31 +3072,44 @@ export class RaidEngine {
     }
     const canAct = !locked && !busy && this.hitStun < 0.12 && this.dodgeT <= 0 && this.stasis <= 0;
     this.stepGuard(dt, canAct);
+    const chainInput = this.takeMeleeChain();
+    if (chainInput) this.queueCommand(chainInput, 1);
     const anyStrike = this.punchQueued || this.kickQueued || this.meleeQueued || this.heavyQueued || this.launcherQueued;
     // Targeting assist: a strike turns the body toward the closest body in a
     // generous cone, so a crowd fight never whiffs because of two degrees.
     if (anyStrike && canAct) this.faceNearest(3.8);
+    let chainUsed = false;
+    const useChain = (ok: boolean) => {
+      if (chainInput && ok) chainUsed = true;
+    };
     if (this.heldThrow && (this.punchQueued || this.kickQueued || this.heavyQueued || this.launcherQueued)) {
       this.releaseHeldThrow();
       this.punchQueued = false;
       this.kickQueued = false;
       this.heavyQueued = false;
       this.launcherQueued = false;
+      useChain(chainInput !== 'melee');
     }
     if (this.kit?.flying) {
       if (this.punchQueued || this.heavyQueued) {
+        const fromChain = chainInput === 'punch' || chainInput === 'heavy';
         this.punchQueued = false;
         this.heavyQueued = false;
         this.kit.airStrike?.('punch');
+        useChain(fromChain);
       }
       if (this.kickQueued || this.launcherQueued) {
+        const fromChain = chainInput === 'kick' || chainInput === 'launcher';
         this.kickQueued = false;
         this.launcherQueued = false;
         this.kit.airStrike?.('kick');
+        useChain(fromChain);
       }
       if (this.meleeQueued) {
+        const fromChain = chainInput === 'melee';
         this.meleeQueued = false;
         this.kit.airStrike?.('melee');
+        useChain(fromChain);
       }
     }
     const strikeInputs: Array<[boolean, StrikeInput]> = [
@@ -3068,21 +3124,31 @@ export class RaidEngine {
     this.launcherQueued = false;
     for (const [queued, input] of strikeInputs) {
       if (!queued) continue;
-      if (canAct || this.striker.busy) this.striker.queue(input);
+      const accepted = (canAct || this.striker.busy) && this.striker.queue(input);
+      useChain(accepted && input === chainInput);
       this.combatMemory.note(input === 'heavy' ? 'punch' : input === 'launcher' ? 'kick' : input, this.simTime);
     }
     if (this.meleeQueued) {
       this.meleeQueued = false;
-      if (this.striker.busy) this.striker.queue('melee');
+      if (this.striker.busy) useChain(this.striker.queue('melee') && chainInput === 'melee');
       else if (canAct && this.meleeCd <= 0) {
         const near = this.nearestHost(this.pos);
         const dist = near ? Math.hypot(near.pos.x - this.pos.x, near.pos.z - this.pos.z) : 99;
         const sequence = this.striker.combo.snapshot(this.simTime).sequence;
         const finisher = Boolean(near && isKnockedDown(near) && dist < 2.2);
-        if (near && (finisher || meleeWantsGrab(sequence, dist, false, this.striker.combo.activeRecipes))) this.striker.queue('melee');
-        else this.tryMelee();
+        if (near && (finisher || meleeWantsGrab(sequence, dist, false, this.striker.combo.activeRecipes))) {
+          useChain(this.striker.queue('melee') && chainInput === 'melee');
+        } else {
+          this.tryMelee();
+          useChain(chainInput === 'melee');
+        }
         this.combatMemory.note('melee', this.simTime);
       }
+    }
+    if (chainInput) {
+      this.noteMeleeChain(chainUsed);
+      // Startup rejects the buffer. Keep this one tap until the strike can take it.
+      if (!chainUsed && this.striker.busy) this.meleeChainQueued = true;
     }
     if (this.dodgeQueued) {
       this.dodgeQueued = false;

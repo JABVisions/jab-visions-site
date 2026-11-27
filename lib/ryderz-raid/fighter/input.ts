@@ -1,3 +1,6 @@
+import type { StrikeInput } from './actions';
+import { COMBO_WINDOW } from './combo';
+
 /**
  * Combat reads these actions. Keyboard and pad mappings live here so the
  * engine never grows a new `if (key === 'f')` for each move.
@@ -97,6 +100,20 @@ export function commandForKey(key: string, code: string, player: 1 | 2): CombatC
   if (P2_BINDINGS.dodge.includes(lower)) return 'dodge';
   if (P2_BINDINGS.jump.includes(lower)) return 'jump';
   return null;
+}
+
+/**
+ * One thumb button walks the whole melee string: two jabs, the kick that
+ * breaks, the grab, then heavy and the launcher. A gap longer than the combo
+ * window starts the string over. `step` is the index to play next.
+ */
+export const TOUCH_MELEE_CHAIN: readonly StrikeInput[] = ['punch', 'punch', 'kick', 'melee', 'heavy', 'launcher'];
+
+export function touchMeleeIndex(step: number, sinceLast: number): number {
+  if (!(sinceLast <= COMBO_WINDOW)) return 0;
+  const length = TOUCH_MELEE_CHAIN.length;
+  const index = Math.floor(step) % length;
+  return index < 0 ? 0 : index;
 }
 
 export function risingPadCommands(buttons: readonly boolean[], prev: boolean[]): CombatCommand[] {
